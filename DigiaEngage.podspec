@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'DigiaEngage'
-  s.version          = '1.0.0-beta.1'
+  s.version          = '1.0.0'
   s.summary          = 'Dynamic in-app experience SDK for iOS.'
   s.description      = <<-DESC
     Digia Engage is an iOS SDK for rendering Digia-managed experiences inside
@@ -25,5 +25,6 @@ Pod::Spec.new do |s|
   s.dependency 'DigiaExpr', '0.1.0'
   s.dependency 'lottie-ios', '~> 4.5'
   s.dependency 'SDWebImageSwiftUI', '~> 3.1'
-  s.dependency 'SDWebImageSVGCoder', '~> 1.8'
+  # Keep aligned with Expo / expo-image (`~> 1.7.0`) so host apps can resolve pods without conflict.
+  s.dependency 'SDWebImageSVGCoder', '~> 1.7.0'
 end
