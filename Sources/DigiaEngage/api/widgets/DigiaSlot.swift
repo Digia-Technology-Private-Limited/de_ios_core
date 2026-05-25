@@ -19,7 +19,10 @@ public struct DigiaSlot<Placeholder: View>: View {
 
     public var body: some View {
         Group {
-            if let payload = inlineController.getCampaign(placementKey) {
+            if let slotConfig = inlineController.getSlotConfig(placementKey) {
+                carouselView(for: slotConfig)
+                    .onAppear { registerPlaceholderIfNeeded() }
+            } else if let payload = inlineController.getCampaign(placementKey) {
                 slotContent(for: payload)
                     .onAppear {
                         registerPlaceholderIfNeeded()
@@ -39,6 +42,80 @@ public struct DigiaSlot<Placeholder: View>: View {
                 self.placeholderID = nil
             }
         }
+    }
+
+    // MARK: - Native VWCarousel rendering
+
+    @ViewBuilder
+    private func carouselView(for config: InlineCarouselConfig) -> some View {
+        if let widget = buildCarouselWidget(config) {
+            let resources = ResourceProvider(
+                fontFactory: SDKInstance.shared.fontFactory,
+                appConfigStore: SDKInstance.shared.appConfigStore
+            )
+            widget.toWidget(RenderPayload(resources: resources))
+        } else {
+            placeholder
+        }
+    }
+
+    private func buildCarouselWidget(_ config: InlineCarouselConfig) -> VWCarousel? {
+        let ind = config.indicator
+
+        let carouselDict: [String: Any] = [
+            "height": config.height,
+            "autoPlay": config.autoPlay,
+            "autoPlayInterval": config.autoPlayInterval,
+            "animationDuration": config.animationDuration,
+            "infiniteScroll": config.infiniteScroll,
+            "viewportFraction": config.viewportFraction,
+            "padEnds": true,
+            "showIndicator": ind.showIndicator,
+            "dotHeight": ind.dotHeight,
+            "dotWidth": ind.dotWidth,
+            "spacing": ind.spacing,
+            "dotColor": ind.dotColor,
+            "activeDotColor": ind.activeDotColor,
+            "indicatorEffectType": ind.indicatorEffectType,
+            "dataSource": config.items.map { item -> [String: Any] in
+                var d: [String: Any] = ["image_url": item.imageUrl]
+                if let dl = item.deepLink { d["deep_link"] = dl }
+                return d
+            },
+        ]
+
+        let imageDict: [String: Any] = [
+            "imageSrc": ["expr": "currentItem.image_url"],
+            "fit": "cover",
+        ]
+
+        guard
+            let carouselData = try? JSONSerialization.data(withJSONObject: carouselDict),
+            let carouselProps = try? JSONDecoder().decode(CarouselProps.self, from: carouselData),
+            let imageData = try? JSONSerialization.data(withJSONObject: imageDict),
+            let imageProps = try? JSONDecoder().decode(ImageProps.self, from: imageData)
+        else { return nil }
+
+        let imageCommonProps = CommonProps(
+            style: CommonStyle(widthRaw: "100%", heightRaw: "100%")
+        )
+
+        let imageWidget = VWImage(
+            props: imageProps,
+            commonProps: imageCommonProps,
+            parentProps: nil,
+            parent: nil,
+            refName: nil
+        )
+
+        return VWCarousel(
+            props: carouselProps,
+            commonProps: nil,
+            parentProps: nil,
+            childGroups: ["child": [imageWidget]],
+            parent: nil,
+            refName: nil
+        )
     }
 
     // MARK: - SDUI rendering
