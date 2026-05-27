@@ -150,6 +150,52 @@ struct DigiaEngageTests {
         #expect(decoded.args == ["name": .string("Ada")])
     }
 
+    @Test("campaign parser accepts Android templateType survey key")
+    func campaignParserAcceptsAndroidTemplateTypeSurveyKey() throws {
+        let campaign = try #require(CampaignModel.from([
+            "id": "campaign-123",
+            "campaignKey": "welcome_survey",
+            "campaignType": "survey",
+            "templateConfig": minimalSurveyTemplate(),
+        ]))
+
+        let payload = try #require(campaign.makePayload())
+
+        #expect(payload.id == "welcome_survey")
+        #expect(payload.content.args["campaign_key"] == .string("welcome_survey"))
+        #expect(payload.content.args["campaign_id"] == .string("campaign-123"))
+        if case .object(let surveyConfig)? = payload.content.args["survey_config"] {
+            #expect(surveyConfig["templateType"] == .string("survey"))
+        } else {
+            Issue.record("Expected survey_config object")
+        }
+    }
+
+    @Test("campaign key payload routes through fetched survey campaign")
+    func campaignKeyPayloadRoutesThroughFetchedSurveyCampaign() {
+        SDKInstance.shared.resetForTesting()
+        let campaign = try! #require(CampaignModel.from([
+            "id": "campaign-123",
+            "campaignKey": "welcome_survey",
+            "campaignType": "survey",
+            "templateConfig": minimalSurveyTemplate(),
+        ]))
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+
+        let payload = InAppPayload(
+            id: "bridge-event",
+            content: InAppPayloadContent(
+                type: "dialog",
+                args: ["campaign_key": .string("welcome_survey")]
+            )
+        )
+
+        SDKInstance.shared.onCampaignTriggered(payload)
+
+        #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.id == "welcome_survey")
+        #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.content.args["campaign_key"] == .string("welcome_survey"))
+    }
+
     @Test("release local-first config resolver loads the typed app config fixture")
     func releaseLocalFirstConfigResolverLoadsFixture() throws {
         guard let fixtureURL = Bundle.module.url(
@@ -830,6 +876,25 @@ struct DigiaEngageTests {
 
 private func decode<T: Decodable>(_ json: String, as type: T.Type = T.self) throws -> T {
     try JSONDecoder().decode(T.self, from: Data(json.utf8))
+}
+
+private func minimalSurveyTemplate() -> [String: Any] {
+    [
+        "templateType": "survey",
+        "blocks": [
+            [
+                "id": "block-1",
+                "type": "welcome",
+                "title": ["text": "Welcome"],
+            ],
+        ],
+        "nodes": [
+            [
+                "id": "node-1",
+                "blockId": "block-1",
+            ],
+        ],
+    ]
 }
 
 private final class TestPlugin: DigiaCEPPlugin {

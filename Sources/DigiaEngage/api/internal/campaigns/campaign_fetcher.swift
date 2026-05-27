@@ -83,7 +83,7 @@ struct CampaignModel: Equatable {
     let surveyConfig: [String: JSONValue]?
 
     static func from(_ json: [String: Any]) -> CampaignModel? {
-        guard let id = firstNonEmptyString(json["id"], json["_id"]),
+        guard let id = firstNonEmptyString(json["id"]),
             let campaignKey = firstNonEmptyString(json["campaignKey"]),
             let campaignType = firstNonEmptyString(json["campaignType"])
         else {
@@ -108,6 +108,7 @@ struct CampaignModel: Equatable {
                     type: "survey",
                     command: "SHOW_SURVEY",
                     args: [
+                        "campaign_id": .string(id),
                         "campaign_key": .string(campaignKey),
                         "survey_config": .object(surveyConfig),
                     ]
@@ -115,7 +116,6 @@ struct CampaignModel: Equatable {
                 cepContext: [
                     "campaignId": id,
                     "campaignKey": campaignKey,
-                    "source": "manual_trigger",
                 ]
             )
         default:
@@ -129,7 +129,7 @@ struct CampaignModel: Equatable {
         }
 
         if let template = json["templateConfig"] as? [String: Any],
-            firstNonEmptyString(template["template_type"]) == "survey"
+            firstNonEmptyString(template["templateType"]) == "survey"
         {
             return jsonObject(template)
         }
@@ -161,6 +161,18 @@ final class CampaignStore {
         return campaigns.first { campaign in
             campaign.id == trimmed || campaign.campaignKey == trimmed
         }
+    }
+
+    func findByKey(_ campaignKey: String) -> CampaignModel? {
+        let trimmed = campaignKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return campaigns.first { $0.campaignKey == trimmed }
+    }
+
+    func findById(_ campaignId: String) -> CampaignModel? {
+        let trimmed = campaignId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return campaigns.first { $0.id == trimmed }
     }
 
     func clear() {
