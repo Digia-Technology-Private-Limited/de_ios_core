@@ -102,7 +102,7 @@ private struct SurveySession: View {
 
     private func finish(completed: Bool) {
         if completed {
-            SDKInstance.shared.markSurveyCompleted(response: vm.responsePayload())
+            SDKInstance.shared.markSurveyCompleted(response: vm.responsePayload(), answers: vm.answers)
         } else {
             SDKInstance.shared.markSurveyDismissed()
         }

@@ -180,10 +180,20 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         _ = stepId; _ = answer
     }
 
-    func markSurveyCompleted(response: [String: JSONValue]) {
+    func markSurveyCompleted(response: [String: JSONValue], answers: [String: SurveyAnswer] = [:]) {
         guard let state = surveyOrchestrator.state else { return }
         // Internal completion event would record `response` here.
         _ = response
+        if !answers.isEmpty,
+           let config = self.config,
+           let campaignId = state.payload.cepContext["campaignId"] {
+            SurveySubmissionReporter(config: config).report(
+                campaignId: campaignId,
+                survey: state.config,
+                answers: answers,
+                startedAt: state.startedAt
+            )
+        }
         activePlugin?.notifyEvent(.dismissed, payload: state.payload)
         surveyOrchestrator.dismiss()
     }

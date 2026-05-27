@@ -34,9 +34,11 @@ struct CampaignFetcher {
     }
 
     private func normalizedCampaignBaseURL() -> String {
-        let rawBase = config.baseUrl
+        let rawBase =
+            config.baseUrl
             ?? config.developerConfig?.baseURL
-            ?? (config.environment == .sandbox ? DigiaCampaignEndpoints.sandbox : DigiaCampaignEndpoints.production)
+            ?? (config.environment == .sandbox
+                ? DigiaCampaignEndpoints.sandbox : DigiaCampaignEndpoints.production)
         let trimmed = rawBase.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return trimmed.hasSuffix("/api/v1") ? trimmed : trimmed + "/api/v1"
     }
@@ -45,7 +47,7 @@ struct CampaignFetcher {
         let environment = config.environment == .production ? "production" : "sandbox"
         var headers = config.networkConfiguration?.defaultHeaders ?? [:]
         headers["Content-Type"] = "application/json"
-        headers["X-Api-Key"] = config.apiKey
+        // headers["X-Api-Key"] = config.apiKey
         headers["x-digia-project-id"] = config.apiKey
         headers["x-digia-platform"] = "ios"
         headers["x-digia-environment"] = environment
@@ -58,13 +60,15 @@ struct CampaignFetcher {
         }
 
         if let object = json as? [String: Any],
-           let data = object["data"] as? [String: Any],
-           let response = data["response"] as? [[String: Any]] {
+            let data = object["data"] as? [String: Any],
+            let response = data["response"] as? [[String: Any]]
+        {
             return response
         }
 
         if let object = json as? [String: Any],
-           let response = object["response"] as? [[String: Any]] {
+            let response = object["response"] as? [[String: Any]]
+        {
             return response
         }
 
@@ -80,8 +84,9 @@ struct CampaignModel: Equatable {
 
     static func from(_ json: [String: Any]) -> CampaignModel? {
         guard let id = firstNonEmptyString(json["id"], json["_id"]),
-              let campaignKey = firstNonEmptyString(json["campaign_key"]),
-              let campaignType = firstNonEmptyString(json["campaign_type"]) else {
+            let campaignKey = firstNonEmptyString(json["campaignKey"]),
+            let campaignType = firstNonEmptyString(json["campaignType"])
+        else {
             return nil
         }
 
@@ -119,12 +124,13 @@ struct CampaignModel: Equatable {
     }
 
     private static func surveyConfigJSON(from json: [String: Any]) -> [String: JSONValue]? {
-        if let survey = json["survey_config"] as? [String: Any] {
+        if let survey = json["surveyConfig"] as? [String: Any] {
             return jsonObject(survey)
         }
 
-        if let template = json["template_config"] as? [String: Any],
-           firstNonEmptyString(template["template_type"]) == "survey" {
+        if let template = json["templateConfig"] as? [String: Any],
+            firstNonEmptyString(template["template_type"]) == "survey"
+        {
             return jsonObject(template)
         }
 
