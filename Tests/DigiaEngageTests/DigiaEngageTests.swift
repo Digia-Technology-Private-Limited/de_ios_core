@@ -6,19 +6,14 @@ import Testing
 @MainActor
 @Suite("DigiaEngage", .serialized)
 struct DigiaEngageTests {
-    @Test("defaults config to production error logging and debug flavor")
+    @Test("defaults config to production error logging")
     func defaultsConfig() {
         let config = DigiaConfig(apiKey: "prod_123")
 
         #expect(config.apiKey == "prod_123")
         #expect(config.logLevel == .error)
         #expect(config.environment == .production)
-
-        if case .debug(let branchName) = config.flavor {
-            #expect(branchName == nil)
-        } else {
-            Issue.record("Expected debug flavor by default")
-        }
+        #expect(config.baseUrl == nil)
     }
 
     @Test("initialize is idempotent")

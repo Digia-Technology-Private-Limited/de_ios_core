@@ -8,8 +8,7 @@ struct DigiaEngageSampleApp: App {
             try await Digia.initialize(
                 DigiaConfig(
                     apiKey: "69abfbcb79d23afa245a60ee",
-                    logLevel: .verbose,
-                    flavor: .debug()
+                    logLevel: .verbose
                 )
             )
         }

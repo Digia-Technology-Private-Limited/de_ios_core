@@ -11,6 +11,14 @@ public enum Digia {
         SDKInstance.shared.register(plugin)
     }
 
+    /// Triggers a fetched Digia campaign directly by campaign id or campaign key.
+    ///
+    /// This is intended for QA/manual testing and mirrors the Android helper.
+    /// The SDK must be initialized first so campaigns have been fetched.
+    public static func triggerCampaign(_ campaignId: String) {
+        SDKInstance.shared.triggerCampaign(campaignId)
+    }
+
     public static func registerFontFactory(_ factory: DUIFontFactory) {
         SDKInstance.shared.registerFontFactory(factory)
     }

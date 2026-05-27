@@ -15,4 +15,5 @@ Pod::Spec.new do |s|
   s.dependency 'DigiaExpr'
   s.dependency 'lottie-ios', '~> 4.5'
   s.dependency 'SDWebImageSVGCoder', '>= 1.7.0'
+  s.dependency 'SDWebImageSwiftUI', '~> 3.1'
 end

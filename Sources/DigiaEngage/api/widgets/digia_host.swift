@@ -13,6 +13,7 @@ import SwiftUI
 public struct DigiaHost<Content: View>: View {
     private let content: Content
     @ObservedObject private var controller = SDKInstance.shared.controller
+    @ObservedObject private var surveyOrchestrator = SDKInstance.shared.surveyOrchestrator
 
     public init(@ViewBuilder content: () -> Content) {
         self.content = content()
@@ -40,6 +41,9 @@ public struct DigiaHost<Content: View>: View {
                 }
             }
             .animation(.easeInOut(duration: 0.2), value: controller.activeToast != nil)
+
+            // Survey overlay (dialog or bottom sheet, rendered above all app content).
+            SurveyRenderer(orchestrator: surveyOrchestrator)
 
             // Anchored overlay (tooltip / spotlight)
             if let anchored = controller.activeAnchoredOverlay {

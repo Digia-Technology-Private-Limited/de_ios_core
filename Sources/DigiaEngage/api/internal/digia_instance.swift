@@ -13,6 +13,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     private var activePlugin: DigiaCEPPlugin?
     private(set) var fontFactory: DUIFontFactory = DefaultFontFactory()
+    private let campaignStore = CampaignStore()
     private var messageSubscribers: [String: [UUID: @Sendable (JSONValue?) -> Void]] = [:]
     private var appStateStore: AppStateStore?
     private var localStateStores: [String: StateContext] = [:]
@@ -21,6 +22,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     let controller = DigiaOverlayController()
     let inlineController = InlineCampaignController()
     let navigationController = DigiaNavigationController()
+    let surveyOrchestrator = SurveyOrchestrator()
 
     private(set) var appStateStreams: [String: AppStateValueStream] = [:]
     private(set) var lastOpenedURL: URL?
@@ -44,15 +46,21 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         self.config = config
 
         let resolver = DigiaConfigResolver(config: config)
-        let appConfig: DigiaAppConfig
+        let appConfig: DigiaAppConfig?
         if let cached = try? resolver.getConfig() {
             appConfig = cached
         } else {
-            appConfig = try await resolver.getConfigAsync()
+            appConfig = try? await resolver.getConfigAsync()
         }
-        appConfigStore.update(appConfig)
-        navigationController.setInitialRoute(appConfig.initialRoute)
-        try initializeAppState(from: appConfig, namespace: config.apiKey)
+        if let appConfig {
+            appConfigStore.update(appConfig)
+            navigationController.setInitialRoute(appConfig.initialRoute)
+            try initializeAppState(from: appConfig, namespace: config.apiKey)
+        }
+
+        if let campaigns = try? await CampaignFetcher(config: config).fetch() {
+            campaignStore.populate(campaigns)
+        }
 
         sdkState = .ready
     }
@@ -61,6 +69,23 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         activePlugin?.teardown()
         activePlugin = plugin
         plugin.setup(delegate: self)
+    }
+
+    func triggerCampaign(_ campaignId: String) {
+        guard sdkState == .ready else {
+            print("[Digia] triggerCampaign(\(campaignId)) — sdkState=\(sdkState), not ready")
+            return
+        }
+        guard let campaign = campaignStore.find(campaignId) else {
+            print("[Digia] triggerCampaign(\(campaignId)) — campaign not found in store")
+            return
+        }
+        print("[Digia] triggerCampaign(\(campaignId)) — found campaign type=\(campaign.campaignType) key=\(campaign.campaignKey) surveyConfig=\(campaign.surveyConfig?.keys.sorted() ?? [])")
+        guard let payload = campaign.makePayload() else {
+            print("[Digia] triggerCampaign(\(campaignId)) — makePayload returned nil (type must be 'survey' AND surveyConfig non-nil)")
+            return
+        }
+        onCampaignTriggered(payload)
     }
 
     func registerFontFactory(_ factory: DUIFontFactory) {
@@ -94,6 +119,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func onCampaignTriggered(_ payload: InAppPayload) {
         let displayType = payload.content.type.lowercased()
         let placementKey = payload.content.placementKey
+        let command = (payload.content.command ?? "").trimmingCharacters(in: .whitespaces).uppercased()
+
+        // Survey campaigns carry the dashboard-authored schema in
+        // `args["survey_config"]`. Detected either via command == "SHOW_SURVEY"
+        // or type == "survey".
+        if command == "SHOW_SURVEY" || displayType == "survey" {
+            startSurvey(payload: payload)
+            return
+        }
 
         if displayType == "inline", let placementKey {
             inlineController.setCampaign(placementKey, payload: payload)
@@ -106,7 +140,58 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         if controller.activePayload?.id == campaignID {
             controller.dismiss()
         }
+        if surveyOrchestrator.state?.payload.id == campaignID {
+            surveyOrchestrator.dismiss()
+        }
         inlineController.removeCampaign(campaignID)
+    }
+
+    // MARK: - Survey lifecycle
+    //
+    // CEP plugin sees: Impressed (started), Dismissed (closed without finishing).
+    // Internal analytics (TBD) sees: Answered, Completed.
+
+    private func startSurvey(payload: InAppPayload) {
+        guard let surveyJson = payload.content.args["survey_config"] else {
+            print("[Digia] startSurvey — args has no 'survey_config' key. args keys=\(payload.content.args.keys.sorted())")
+            return
+        }
+        guard case .object(let dict) = surveyJson else {
+            print("[Digia] startSurvey — 'survey_config' is not an object")
+            return
+        }
+        print("[Digia] startSurvey — survey_config keys=\(dict.keys.sorted())")
+        guard let config = SurveyConfigModel.from(dict, fallbackId: payload.id) else {
+            print("[Digia] startSurvey — SurveyConfigModel.from(...) returned nil (likely missing/empty 'blocks' or 'nodes' arrays)")
+            return
+        }
+        let started = surveyOrchestrator.start(payload: payload, config: config)
+        print("[Digia] startSurvey — orchestrator.start returned \(started) (false if config has empty nodes/blocks OR another survey is already showing). nodes=\(config.nodes.count) blocks=\(config.blocks.count)")
+    }
+
+    /// Fired once when the survey first becomes visible (treated as an impression).
+    func reportSurveyStarted() {
+        guard let state = surveyOrchestrator.state else { return }
+        activePlugin?.notifyEvent(.impressed, payload: state.payload)
+    }
+
+    func reportSurveyAnswered(stepId: String, answer: [String: JSONValue]) {
+        // Internal-only event; no CEP notification. Hook for future analytics.
+        _ = stepId; _ = answer
+    }
+
+    func markSurveyCompleted(response: [String: JSONValue]) {
+        guard let state = surveyOrchestrator.state else { return }
+        // Internal completion event would record `response` here.
+        _ = response
+        activePlugin?.notifyEvent(.dismissed, payload: state.payload)
+        surveyOrchestrator.dismiss()
+    }
+
+    func markSurveyDismissed() {
+        guard let state = surveyOrchestrator.state else { return }
+        activePlugin?.notifyEvent(.dismissed, payload: state.payload)
+        surveyOrchestrator.dismiss()
     }
 
     /// Sets the stored config directly, simulating a completed initialization, without any
@@ -124,6 +209,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         isHostMounted = false
         isNavigationMounted = false
         fontFactory = DefaultFontFactory()
+        campaignStore.clear()
         appConfigStore.clear()
         controller.dismiss()
         controller.dismissBottomSheet()
@@ -131,6 +217,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         controller.dismissToast()
         controller.clearSlots()
         inlineController.clear()
+        surveyOrchestrator.dismiss()
         navigationController.reset()
         messageSubscribers.removeAll()
         appStateStore = nil

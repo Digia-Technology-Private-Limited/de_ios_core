@@ -6,15 +6,16 @@ struct ActionProcessorContext {
     let localStateStore: StateContext?
     let actionExecutor: ActionExecutor
 
+    @MainActor
     init(
         appConfig: AppConfigStore,
         scopeContext: (any ExprContext)? = nil,
         localStateStore: StateContext? = nil,
-        actionExecutor: ActionExecutor = ActionExecutor()
+        actionExecutor: ActionExecutor? = nil
     ) {
         self.appConfig = appConfig
         self.scopeContext = scopeContext
         self.localStateStore = localStateStore
-        self.actionExecutor = actionExecutor
+        self.actionExecutor = actionExecutor ?? ActionExecutor()
     }
 }

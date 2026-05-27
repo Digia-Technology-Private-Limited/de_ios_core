@@ -2,82 +2,21 @@ import Foundation
 
 enum DigiaConfigStrategyFactory {
     static func createStrategy(for config: DigiaConfig) throws -> DigiaConfigSource {
-        switch config.flavor {
-        case let .debug(branchName):
-            return NetworkConfigSource(
-                baseURL: config.developerConfig?.baseURL ?? "https://app.digia.tech/api/v1",
-                path: "/config/getAppConfig",
-                headers: makeDigiaHeaders(config: config),
-                body: branchName.map { ["branchName": $0] } ?? [:]
-            )
-
-        case .staging:
-            return NetworkConfigSource(
-                baseURL: config.developerConfig?.baseURL ?? "https://app.digia.tech/api/v1",
-                path: "/config/getAppConfigStaging",
-                headers: makeDigiaHeaders(config: config),
-                body: [:]
-            )
-
-        case let .versioned(version):
-            var headers = makeDigiaHeaders(config: config)
-            headers["x-digia-project-version"] = "\(version)"
-            return NetworkConfigSource(
-                baseURL: config.developerConfig?.baseURL ?? "https://app.digia.tech/api/v1",
-                path: "/config/getAppConfigForVersion",
-                headers: headers,
-                body: [:]
-            )
-
-        case let .release(initStrategy, appConfigPath, _):
-            switch initStrategy {
-            case .localFirst:
-                return AssetConfigSource(appConfigPath: appConfigPath)
-            case .cacheFirst:
-                return DelegatedConfigSource(getConfigFn: {
-                    let asset = AssetConfigSource(appConfigPath: appConfigPath)
-                    let cached = CachedConfigSource(cacheFilePath: defaultConfigCachePath())
-                    var configToUse = try asset.getConfig()
-
-                    if let cachedConfig = try? cached.getConfig(),
-                       (cachedConfig.version ?? Int.min) >= (configToUse.version ?? Int.min)
-                    {
-                        configToUse = cachedConfig
-                    }
-
-                    let networkSource = makeReleaseNetworkFileSource(config: config)
-                    Task {
-                        _ = try? await networkSource.getConfigAsync()
-                    }
-
-                    return configToUse
-                })
-            case .networkFirst:
-                return DelegatedConfigSource(
-                    getConfigFn: {
-                        throw DigiaConfigError.unsupportedFeature("networkFirst requires async resolver path")
-                    },
-                    getConfigAsyncFn: {
-                        let asset = AssetConfigSource(appConfigPath: appConfigPath)
-                        let cached = CachedConfigSource(cacheFilePath: defaultConfigCachePath())
-                        var fallbackConfig = try asset.getConfig()
-
-                        if let cachedConfig = try? cached.getConfig(),
-                           (cachedConfig.version ?? Int.min) >= (fallbackConfig.version ?? Int.min)
-                        {
-                            fallbackConfig = cachedConfig
-                        }
-
-                        do {
-                            return try await makeReleaseNetworkFileSource(config: config).getConfigAsync()
-                        } catch {
-                            return fallbackConfig
-                        }
-                    }
-                )
-            }
-        }
+        return NetworkConfigSource(
+            baseURL: resolveConfigBaseURL(config: config),
+            path: "/config/getAppConfig",
+            headers: makeDigiaHeaders(config: config),
+            body: [:]
+        )
     }
+}
+
+private func resolveConfigBaseURL(config: DigiaConfig) -> String {
+    if let override = config.baseUrl?.trimmingCharacters(in: .whitespacesAndNewlines), !override.isEmpty {
+        let trimmed = override.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return trimmed.hasSuffix("/api/v1") ? trimmed : trimmed + "/api/v1"
+    }
+    return config.developerConfig?.baseURL ?? "https://app.digia.tech/api/v1"
 }
 
 private func makeDigiaHeaders(config: DigiaConfig) -> [String: String] {
@@ -98,19 +37,3 @@ private func makeDigiaHeaders(config: DigiaConfig) -> [String: String] {
     ]
 }
 
-private func makeReleaseNetworkFileSource(config: DigiaConfig) -> NetworkFileConfigSource {
-    let headers = makeDigiaHeaders(config: config)
-    let client = InternalNetworkClient(
-        baseURL: config.developerConfig?.baseURL ?? "https://app.digia.tech/api/v1",
-        defaultHeaders: headers,
-        timeout: config.networkConfiguration?.timeout ?? .seconds(30)
-    )
-
-    return NetworkFileConfigSource(
-        client: client,
-        metadataPath: "/config/getAppConfigRelease",
-        headers: [:],
-        body: [:],
-        cacheFilePath: defaultConfigCachePath()
-    )
-}
