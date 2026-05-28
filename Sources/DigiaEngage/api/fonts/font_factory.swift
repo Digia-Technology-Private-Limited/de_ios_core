@@ -78,3 +78,33 @@ public struct DefaultFontFactory: DUIFontFactory {
         getDefaultFont(size: size, weight: weight, italic: italic)
     }
 }
+
+/// Font factory backed by a single global font family name supplied via
+/// `DigiaConfig.fontFamily`. Applies that family to all Digia-rendered text,
+/// regardless of the family requested by the design config.
+struct ConfiguredFontFactory: DUIFontFactory {
+    let fontFamily: String
+
+    func getDefaultFont(size: Double, weight: Font.Weight, italic: Bool) -> Font {
+        var font = Font.custom(fontFamily, size: size).weight(weight)
+        if italic { font = font.italic() }
+        return font
+    }
+
+    func getFont(_ fontFamily: String, size: Double, weight: Font.Weight, italic: Bool) -> Font {
+        getDefaultFont(size: size, weight: weight, italic: italic)
+    }
+
+    func getDefaultUIFont(size: Double, weight: Font.Weight, italic: Bool) -> UIFont {
+        let base = UIFont(name: fontFamily, size: size)
+            ?? UIFont.systemFont(ofSize: size, weight: UIFont.Weight(fontWeight: weight))
+        guard italic, let descriptor = base.fontDescriptor.withSymbolicTraits(.traitItalic) else {
+            return base
+        }
+        return UIFont(descriptor: descriptor, size: size)
+    }
+
+    func getUIFont(_ fontFamily: String, size: Double, weight: Font.Weight, italic: Bool) -> UIFont {
+        getDefaultUIFont(size: size, weight: weight, italic: italic)
+    }
+}

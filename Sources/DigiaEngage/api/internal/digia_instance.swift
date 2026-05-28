@@ -45,6 +45,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         guard self.config == nil else { return }
         self.config = config
 
+        if let family = config.fontFamily?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !family.isEmpty {
+            fontFactory = ConfiguredFontFactory(fontFamily: family)
+        }
+
         do {
             let campaigns = try await CampaignFetcher(config: config).fetch()
             campaignStore.populate(campaigns)
