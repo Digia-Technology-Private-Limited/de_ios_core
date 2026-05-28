@@ -14,7 +14,7 @@ struct CampaignFetcher {
         }
         var request = URLRequest(url: url, timeoutInterval: 10)
         request.httpMethod = "POST"
-        request.setValue(config.apiKey, forHTTPHeaderField: "X-Api-Key")
+        request.setValue(config.apiKey, forHTTPHeaderField: "x-digia-project-id")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = Data("{}".utf8)
 
