@@ -24,7 +24,7 @@ Add the package to your `Package.swift`:
 dependencies: [
     .package(
         url: "https://github.com/Digia-Technology-Private-Limited/digia_engage_ios.git",
-        from: "2.0.0-rc.1"
+        from: "2.0.0"
     ),
 ]
 ```
@@ -53,7 +53,7 @@ pod 'DigiaEngage', :path => '../digia_engage_ios'
 Or pull it directly from Git:
 
 ```ruby
-pod 'DigiaEngage', :git => 'https://github.com/Digia-Technology-Private-Limited/digia_engage_ios.git', :tag => '2.0.0-rc.1'
+pod 'DigiaEngage', :git => 'https://github.com/Digia-Technology-Private-Limited/digia_engage_ios.git', :tag => '2.0.0'
 ```
 
 Then run:
