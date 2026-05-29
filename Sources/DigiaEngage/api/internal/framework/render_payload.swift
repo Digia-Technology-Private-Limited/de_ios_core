@@ -10,7 +10,7 @@ struct RenderPayload {
     init(
         resources: ResourceProvider,
         scopeContext: (any ScopeContext)? = nil,
-        actionExecutor: ActionExecutor = ActionExecutor(),
+        actionExecutor: ActionExecutor? = nil,
         localStateStore: StateContext? = nil
     ) {
         self.resources = resources
@@ -19,7 +19,7 @@ struct RenderPayload {
             streams: SDKInstance.shared.appStateStreams.mapValues { $0 as Any }
         )
         self.scopeContext = rootContext
-        self.actionExecutor = actionExecutor
+        self.actionExecutor = actionExecutor ?? ActionExecutor()
         self.localStateStore = localStateStore
     }
 

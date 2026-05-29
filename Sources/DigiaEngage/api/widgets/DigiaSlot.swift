@@ -45,17 +45,22 @@ public struct DigiaSlot<Placeholder: View>: View {
 
     @ViewBuilder
     private func slotContent(for payload: InAppPayload) -> some View {
-        let viewId = payload.content.viewId ?? payload.content.placementKey
-
-        if let viewId, !viewId.isEmpty {
-            DUIFactory.shared.createComponent(viewId, args: payload.content.args)
+        // Native carousel campaign (campaign_key path) — render via the SDUI carousel widget.
+        if let carouselConfig = inlineController.getCarouselConfig(placementKey) {
+            InlineCarouselRenderer.makeView(carouselConfig)
         } else {
-            // No viewId — collapse and dismiss.
-            Color.clear.frame(height: 0)
-                .onAppear {
-                    inlineController.onEvent?(.dismissed, payload)
-                    inlineController.dismissCampaign(placementKey)
-                }
+            let viewId = payload.content.viewId ?? payload.content.placementKey
+
+            if let viewId, !viewId.isEmpty {
+                DUIFactory.shared.createComponent(viewId, args: payload.content.args)
+            } else {
+                // No viewId — collapse and dismiss.
+                Color.clear.frame(height: 0)
+                    .onAppear {
+                        inlineController.onEvent?(.dismissed, payload)
+                        inlineController.dismissCampaign(placementKey)
+                    }
+            }
         }
     }
 

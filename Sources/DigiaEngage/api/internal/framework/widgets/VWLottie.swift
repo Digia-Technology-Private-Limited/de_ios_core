@@ -41,7 +41,8 @@ final class VWLottie: VirtualLeafStatelessWidget<LottieProps> {
         case "loop":
             return (true, false)
         default:
-            preconditionFailure("Unsupported animationType: \(value)")
+            print("[Digia] Unsupported animationType: \(value), defaulting to loop")
+            return (true, false)
         }
     }
 }
@@ -152,9 +153,9 @@ private struct LottieRepresentable: UIViewRepresentable {
     }
 
     private func loadAnimation(path: String, into host: LottieHostView, completion: @escaping () -> Void) {
-        precondition(path.hasPrefix("http"), "Only network lottiePath is supported: \(path)")
-        guard let url = URL(string: path) else {
-            preconditionFailure("Invalid lottie URL: \(path)")
+        guard path.hasPrefix("http"), let url = URL(string: path) else {
+            print("[Digia] Invalid or non-network lottie URL: \(path)")
+            return
         }
         LottieAnimation.loadedFrom(url: url) { animation in
             Task { @MainActor in

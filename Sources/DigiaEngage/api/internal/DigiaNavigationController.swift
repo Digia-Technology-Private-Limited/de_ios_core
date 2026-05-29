@@ -25,7 +25,7 @@ final class DigiaNavigationController: ObservableObject {
     private var resultContinuations: [UUID: CheckedContinuation<JSONValue?, Never>] = [:]
 
     private static let pushAnimation = Animation.easeInOut(duration: 0.3)
-    private static let popAnimation  = Animation.easeInOut(duration: 0.25)
+    private static let popAnimation = Animation.easeInOut(duration: 0.25)
 
     // MARK: - Setup
 
@@ -95,7 +95,9 @@ final class DigiaNavigationController: ObservableObject {
 
     /// Pushes a page and suspends until it is popped. The result value is whatever
     /// was passed to `pop(result:)` by the navigateBack action, or `nil` on swipe-back.
-    func push(_ pageID: String, args: [String: JSONValue] = [:], waitingForResult: Bool) async -> JSONValue? {
+    func push(_ pageID: String, args: [String: JSONValue] = [:], waitingForResult: Bool) async
+        -> JSONValue?
+    {
         let normalized = NavigationUtil.normalizedRoute(pageID)
         guard !normalized.isEmpty else { return nil }
         if rootRoute == nil {
@@ -119,9 +121,7 @@ final class DigiaNavigationController: ObservableObject {
     func pop(result: JSONValue? = nil) {
         guard !path.isEmpty else { return }
         let entry = path.last!
-        withAnimation(Self.popAnimation) {
-            path.removeLast()
-        }
+        _ = withAnimation(Self.popAnimation) { path.removeLast() }
         entryArgs.removeValue(forKey: entry.id)
         resultContinuations.removeValue(forKey: entry.id)?.resume(returning: result)
     }

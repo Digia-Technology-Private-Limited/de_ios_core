@@ -106,7 +106,8 @@ enum WidgetUtil {
         }
 
         if width.value != nil || height.value != nil {
-            current = AnyView(current.frame(width: width.value, height: height.value, alignment: .topLeading))
+            current = AnyView(
+                current.frame(width: width.value, height: height.value, alignment: .topLeading))
         }
 
         if width.percent != nil || height.percent != nil {
@@ -136,7 +137,8 @@ enum WidgetUtil {
                 return ResolvedDimension(isFill: true)
             }
             if trimmed.hasSuffix("%"),
-               let percent = Double(trimmed.dropLast()) {
+                let percent = Double(trimmed.dropLast())
+            {
                 return ResolvedDimension(percent: percent / 100)
             }
             if let value = payload.eval(expr) ?? Double(trimmed) {
@@ -168,11 +170,92 @@ enum WidgetUtil {
 
     static func shape(for cornerRadius: CornerRadiusProps) -> AnyShape {
         if cornerRadius.isUniform {
-            return AnyShape(RoundedRectangle(cornerRadius: cornerRadius.uniformValue, style: .continuous))
+            return AnyShape(
+                RoundedRectangle(cornerRadius: cornerRadius.uniformValue, style: .continuous))
         }
         return AnyShape(DigiaRoundedRect(cornerRadius: cornerRadius))
     }
 
+    private static func cornerRadius(from rawValue: Any?) -> CornerRadiusProps? {
+        switch rawValue {
+        case let value as Double:
+            return CornerRadiusProps(uniform: value)
+        case let value as Int:
+            return CornerRadiusProps(uniform: Double(value))
+        case let value as NSNumber:
+            return CornerRadiusProps(uniform: value.doubleValue)
+        case let value as String:
+            let parts =
+                value
+                .split(separator: ",")
+                .compactMap { Double($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            switch parts.count {
+            case 1:
+                return CornerRadiusProps(uniform: parts[0])
+            case 4:
+                return CornerRadiusProps(
+                    topLeft: parts[0],
+                    topRight: parts[1],
+                    bottomRight: parts[2],
+                    bottomLeft: parts[3]
+                )
+            default:
+                return nil
+            }
+        case let values as [Any?]:
+            let parts = values.compactMap(doubleValue)
+            switch parts.count {
+            case 1:
+                return CornerRadiusProps(uniform: parts[0])
+            case 4:
+                return CornerRadiusProps(
+                    topLeft: parts[0],
+                    topRight: parts[1],
+                    bottomRight: parts[2],
+                    bottomLeft: parts[3]
+                )
+            default:
+                return nil
+            }
+        case let object as [String: Any?]:
+            return CornerRadiusProps(
+                topLeft: doubleValue(optionalDictValue(object, key: "topLeft")) ?? 0,
+                topRight: doubleValue(optionalDictValue(object, key: "topRight")) ?? 0,
+                bottomRight: doubleValue(optionalDictValue(object, key: "bottomRight")) ?? 0,
+                bottomLeft: doubleValue(optionalDictValue(object, key: "bottomLeft")) ?? 0
+            )
+        default:
+            return nil
+        }
+    }
+
+    /// Flattens `[String: Any?]` subscript `Any??` → `Any?` for typed helpers.
+    private static func optionalDictValue(_ object: [String: Any?], key: String) -> Any? {
+        switch object[key] {
+        case .none:
+            return nil
+        case .some(let value):
+            return value
+        }
+    }
+
+    private static func doubleValue(_ rawValue: Any?) -> Double? {
+        switch rawValue {
+        case let value as Double:
+            return value
+        case let value as Int:
+            return Double(value)
+        case let value as NSNumber:
+            return value.doubleValue
+        case let value as String:
+            return Double(value.trimmingCharacters(in: .whitespacesAndNewlines))
+        default:
+            return nil
+        }
+    }
+
+    /// Creates a `ScopeContext` for a single loop iteration.
+    /// Used by repeating widgets (Flex, Wrap) to scope `currentItem` and `index`.
     static func loopExprContext(_ item: Any?, index: Int, refName: String?) -> any ScopeContext {
         let loopObject: [String: Any?] = [
             "currentItem": item,
@@ -229,7 +312,9 @@ private struct DigiaDecorationView: View {
     let borderRadius: CornerRadiusProps?
 
     var body: some View {
-        let shape = borderRadius.map { WidgetUtil.shape(for: $0) } ?? AnyShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
+        let shape =
+            borderRadius.map { WidgetUtil.shape(for: $0) }
+            ?? AnyShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
         ZStack {
             if let backgroundColor {
                 shape
@@ -237,8 +322,9 @@ private struct DigiaDecorationView: View {
             }
 
             if let border,
-               let borderWidth = border.borderWidth,
-               borderWidth > 0 {
+                let borderWidth = border.borderWidth,
+                borderWidth > 0
+            {
                 let strokeConfiguration = DigiaBorderStrokeConfiguration.resolve(border: border)
                 shape
                     .stroke(

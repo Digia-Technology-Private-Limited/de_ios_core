@@ -1,5 +1,13 @@
 import SwiftUI
 
+struct AnchoredOverlayState: Equatable, Sendable {
+    let payload: InAppPayload
+    let anchorKey: String
+    let anchorRect: CGRect
+    let command: String  // "SHOW_TOOLTIP" or "SHOW_SPOTLIGHT"
+    let cornerRadius: CGFloat  // spotlight cutout corner radius
+}
+
 @MainActor
 final class DigiaOverlayController: ObservableObject {
     @Published private(set) var activePayload: InAppPayload?
@@ -7,6 +15,7 @@ final class DigiaOverlayController: ObservableObject {
     @Published private(set) var activeDialog: DigiaDialogPresentation?
     @Published private(set) var activeToast: DigiaToastPresentation?
     @Published private(set) var slotPayloads: [String: InAppPayload] = [:]
+    @Published private(set) var activeAnchoredOverlay: AnchoredOverlayState?
 
     private var toastToken = UUID()
     var onEvent: ((DigiaExperienceEvent, InAppPayload) -> Void)?
@@ -23,7 +32,8 @@ final class DigiaOverlayController: ObservableObject {
         activePayload = nil
     }
 
-    func showBottomSheet(_ presentation: DigiaBottomSheetPresentation, rendersInHost: Bool = false) {
+    func showBottomSheet(_ presentation: DigiaBottomSheetPresentation, rendersInHost: Bool = false)
+    {
         activeBottomSheet = presentation
         bottomSheetRendersInHost = rendersInHost
     }
@@ -51,7 +61,8 @@ final class DigiaOverlayController: ObservableObject {
         let token = UUID()
         toastToken = token
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: UInt64(max(presentation.durationSeconds, 0) * 1_000_000_000))
+            try? await Task.sleep(
+                nanoseconds: UInt64(max(presentation.durationSeconds, 0) * 1_000_000_000))
             if self.toastToken == token {
                 self.dismissToast()
             }
@@ -76,5 +87,13 @@ final class DigiaOverlayController: ObservableObject {
 
     func clearSlots() {
         slotPayloads.removeAll()
+    }
+
+    func showAnchored(_ state: AnchoredOverlayState) {
+        activeAnchoredOverlay = state
+    }
+
+    func dismissAnchored() {
+        activeAnchoredOverlay = nil
     }
 }

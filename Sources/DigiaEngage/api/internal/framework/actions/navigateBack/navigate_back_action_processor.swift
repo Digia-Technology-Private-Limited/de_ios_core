@@ -51,6 +51,7 @@ struct NavigateBackProcessor {
         if maybe && navController.path.isEmpty { return }
         navController.pop(result: result)
 
+        // Fallback for UIKit-embedded navigation only when a NavigationStack is not mounted.
         if navController.path.isEmpty && !SDKInstance.shared.isNavigationMounted {
             ViewControllerUtil.popNavigation()
         }

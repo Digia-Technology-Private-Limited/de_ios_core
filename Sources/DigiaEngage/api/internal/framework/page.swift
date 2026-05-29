@@ -25,7 +25,8 @@ struct DUIPageView: View {
         self.registry = registry
         self.pageArgs = pageArgs
         let initialState = page.initStateDefs?.mapValues { $0.resolvedValue(in: nil) } ?? [:]
-        _stateStore = StateObject(wrappedValue: StateContext(namespace: page.uid ?? pageID, initialState: initialState))
+        _stateStore = StateObject(
+            wrappedValue: StateContext(namespace: page.uid ?? pageID, initialState: initialState))
     }
 
     var body: some View {
@@ -38,7 +39,8 @@ struct DUIPageView: View {
             )
         )
         let payload = RenderPayload(
-            resources: ResourceProvider(fontFactory: runtime.fontFactory, appConfigStore: runtime.appConfigStore),
+            resources: ResourceProvider(
+                fontFactory: runtime.fontFactory, appConfigStore: runtime.appConfigStore),
             scopeContext: baseContext,
             localStateStore: stateStore
         )
@@ -48,21 +50,12 @@ struct DUIPageView: View {
                 SDKInstance.shared.registerStateContext(self.stateStore)
                 if !self.didRunPageLoad {
                     self.didRunPageLoad = true
-                    payload.executeAction(self.page.actions?.onPageLoadAction, triggerType: "onPageLoad")
+                    payload.executeAction(
+                        self.page.actions?.onPageLoadAction, triggerType: "onPageLoad")
                 }
             }
             .onDisappear {
                 SDKInstance.shared.unregisterStateContext(self.stateStore)
             }
-            .digiaHideBackButton()
     }
 }
-
-private extension View {
-    @ViewBuilder
-    func digiaHideBackButton() -> some View {
-        self
-            .navigationBarBackButtonHidden(true)
-    }
-}
-

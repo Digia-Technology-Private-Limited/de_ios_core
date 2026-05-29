@@ -300,9 +300,9 @@ private struct InternalImageView: View {
             return errorView()
         }
 
-        precondition(source.hasPrefix("http"), "Only network image source is supported: \(source)")
-        guard let url = URL(string: source) else {
-            preconditionFailure("Invalid image URL: \(source)")
+        guard source.hasPrefix("http"), let url = URL(string: source) else {
+            print("[Digia] Invalid or non-network image URL: \(source)")
+            return placeholderView()
         }
         let tintColor = resolvedTintColor(for: source)
         return AnyView(remoteImageView(url: url, source: source, tintColor: tintColor))
@@ -313,24 +313,22 @@ private struct InternalImageView: View {
         if let placeholderType = props.placeholder?.lowercased(), !placeholderType.isEmpty {
             switch placeholderType {
             case "network":
-                if let src = props.placeholderSrc {
-                    let _ = precondition(src.hasPrefix("http"), "Only network placeholderSrc is supported: \(src)")
-                    if let url = URL(string: src) {
-                        DigiaCachedImageView(url: url)
-                    } else {
-                        preconditionFailure("Invalid placeholder URL: \(src)")
-                    }
+                if let src = props.placeholderSrc, src.hasPrefix("http"), let url = URL(string: src) {
+                    DigiaCachedImageView(url: url)
                 } else {
-                    Rectangle().fill(Color.clear)
+                    let src = props.placeholderSrc
+                    Color.clear.onAppear {
+                        if let src { print("[Digia] Invalid or non-network placeholderSrc: \(src)") }
+                    }
                 }
             case "blurhash":
                 Rectangle().fill(Color.gray.opacity(0.2))
             case "lottie":
                 Rectangle().fill(Color.clear)
             case "asset":
-                preconditionFailure("Asset placeholder is not supported")
+                Color.clear.onAppear { print("[Digia] Asset placeholder not supported") }
             default:
-                preconditionFailure("Unsupported placeholder type: \(placeholderType)")
+                Color.clear.onAppear { print("[Digia] Unsupported placeholder type: \(placeholderType)") }
             }
         } else {
             Rectangle().fill(Color.clear)
@@ -344,9 +342,9 @@ private struct InternalImageView: View {
     private func errorView() -> AnyView {
         if let errorSrc = props.errorImage?.errorSrc, !errorSrc.isEmpty {
             let tintColor = resolvedTintColor(for: errorSrc)
-            precondition(errorSrc.hasPrefix("http"), "Only network errorSrc is supported: \(errorSrc)")
-            guard let url = URL(string: errorSrc) else {
-                preconditionFailure("Invalid error image URL: \(errorSrc)")
+            guard errorSrc.hasPrefix("http"), let url = URL(string: errorSrc) else {
+                print("[Digia] Invalid or non-network errorSrc: \(errorSrc)")
+                return AnyView(Color.clear)
             }
             return AnyView(DigiaCachedImageView(url: url, tintColor: tintColor))
         }

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 struct NavigateToPageAction: Sendable {
     let actionType: ActionType = .navigateToPage
@@ -13,20 +14,25 @@ struct NavigateToPageProcessor {
 
     func execute(action: NavigateToPageAction, context: ActionProcessorContext) async throws {
         let pageData = action.data.object("pageData")
-        let pageID = pageData?.string("id") ?? action.data.string("pageId") ?? action.data.string("id")
+        let pageID =
+            pageData?.string("id") ?? action.data.string("pageId") ?? action.data.string("id")
         guard let pageID, context.appConfig.page(pageID) != nil else {
             throw ActionExecutionError.unsupportedContext(processorType)
         }
 
         let rawArgs = action.data["args"]?.objectValue ?? pageData?.object("args") ?? [:]
-        let args = rawArgs.mapValues { ExpressionUtil.evaluateNestedExpressions($0, in: context.scopeContext) }
+        let args = rawArgs.mapValues {
+            ExpressionUtil.evaluateNestedExpressions($0, in: context.scopeContext)
+        }
 
-        let removePrevious = (action.data["shouldRemovePreviousScreensInStack"]?.deepEvaluate(in: context.scopeContext) as? Bool) ?? false
+        let removePrevious =
+            (action.data["shouldRemovePreviousScreensInStack"]?.deepEvaluate(
+                in: context.scopeContext) as? Bool) ?? false
 
-        let waitForResult = (action.data["waitForResult"]?.deepEvaluate(in: context.scopeContext) as? Bool) ?? false
+        let waitForResult =
+            (action.data["waitForResult"]?.deepEvaluate(in: context.scopeContext) as? Bool) ?? false
 
         let onResultFlow = action.data["onResult"]?.asActionFlow()
-
         if !SDKInstance.shared.isNavigationMounted {
             presentPageModally(pageID: pageID, args: args)
             return
@@ -38,7 +44,8 @@ struct NavigateToPageProcessor {
             let result = await SDKInstance.shared.navigationController.push(
                 pageID, args: args, waitingForResult: true
             )
-            let resultContext = BasicExprContext(variables: ["result": result?.anyValue ?? NSNull()])
+            let resultContext = BasicExprContext(variables: ["result": result?.anyValue ?? NSNull()]
+            )
             if let scopeContext = context.scopeContext {
                 resultContext.addContextAtTail(scopeContext)
             }
@@ -55,9 +62,9 @@ struct NavigateToPageProcessor {
     }
 
     private func presentPageModally(pageID: String, args: [String: JSONValue]) {
-        let pageView = DUIFactory.shared.createPage(pageID, pageArgs: args)
-        let hc = UIHostingController(rootView: pageView)
-        hc.modalPresentationStyle = .fullScreen
-        ViewControllerUtil.present(hc)
+        let controller = UIHostingController(
+            rootView: DUIFactory.shared.createPage(pageID, pageArgs: args))
+        controller.modalPresentationStyle = .fullScreen
+        ViewControllerUtil.present(controller)
     }
 }

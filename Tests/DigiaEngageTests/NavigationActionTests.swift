@@ -41,6 +41,7 @@ struct NavigationActionTests {
                 flavor: .release(initStrategy: .localFirst, appConfigPath: configPath, functionsPath: "unused")
             )
         )
+        SDKInstance.shared.onNavigationMounted()
         let ctx = context(appConfig: SDKInstance.shared.appConfigStore)
 
         try await NavigateToPageProcessor().execute(

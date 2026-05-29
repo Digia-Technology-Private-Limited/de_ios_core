@@ -14,6 +14,7 @@ enum NavigationUtil {
         return trimmed
     }
 
+    @MainActor
     static func enableInteractivePopGestureIfNeeded(for navigationController: UINavigationController?) {
         guard let navigationController, navigationController.viewControllers.count > 1 else { return }
         guard let popGesture = navigationController.interactivePopGestureRecognizer else { return }

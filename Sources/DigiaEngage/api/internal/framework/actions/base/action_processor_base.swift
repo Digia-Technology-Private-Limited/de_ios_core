@@ -10,7 +10,7 @@ struct ActionProcessorContext {
         appConfig: AppConfigStore,
         scopeContext: (any ExprContext)? = nil,
         localStateStore: StateContext? = nil,
-        actionExecutor: ActionExecutor = ActionExecutor()
+        actionExecutor: ActionExecutor
     ) {
         self.appConfig = appConfig
         self.scopeContext = scopeContext

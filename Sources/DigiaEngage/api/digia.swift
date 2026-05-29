@@ -26,4 +26,15 @@ public enum Digia {
     public static func removeMessageListener(_ name: String, token: UUID) {
         SDKInstance.shared.removeMessageListener(name: name, token: token)
     }
+
+    /// True when any overlay (toast, dialog, bottom sheet, anchored tooltip/spotlight)
+    /// is currently active. Used by host views to decide whether to forward hit tests
+    /// to the SwiftUI layer or pass them through to content below.
+    public static var hasActiveOverlay: Bool {
+        let ctrl = SDKInstance.shared.controller
+        return ctrl.activeToast != nil
+            || ctrl.activeAnchoredOverlay != nil
+            || ctrl.activeBottomSheet != nil
+            || ctrl.activeDialog != nil
+    }
 }

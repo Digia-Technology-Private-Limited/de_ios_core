@@ -28,13 +28,18 @@ public struct InAppPayloadContent: Sendable, Codable, Equatable {
     /// The SDUI component or page ID to render.
     /// Matches `content['viewId']` in Flutter's equivalent.
     public let viewId: String?
-    /// Optional command override — e.g. "SHOW_DIALOG", "SHOW_BOTTOM_SHEET".
+    /// Optional command override — e.g. "SHOW_DIALOG", "SHOW_BOTTOM_SHEET", "SHOW_TOOLTIP", "SHOW_SPOTLIGHT".
     /// When absent the `type` field is used to determine presentation mode.
     public let command: String?
     /// Args passed into the rendered component/page.
     public let args: [String: JSONValue]
     /// Optional screen targeting for nudges.
     public let screenId: String?
+    /// Anchor key referencing a registered DigiaAnchorView (used for SHOW_TOOLTIP / SHOW_SPOTLIGHT).
+    public let anchorKey: String?
+    /// Campaign key set by native CEP plugins (e.g. CleverTap). When present, the SDK resolves the
+    /// full campaign from the CampaignStore and routes by campaignType, ignoring the typed fields.
+    public let campaignKey: String?
 
     public init(
         type: String,
@@ -44,7 +49,9 @@ public struct InAppPayloadContent: Sendable, Codable, Equatable {
         viewId: String? = nil,
         command: String? = nil,
         args: [String: JSONValue] = [:],
-        screenId: String? = nil
+        screenId: String? = nil,
+        anchorKey: String? = nil,
+        campaignKey: String? = nil
     ) {
         self.type = type
         self.placementKey = placementKey
@@ -54,6 +61,8 @@ public struct InAppPayloadContent: Sendable, Codable, Equatable {
         self.command = command
         self.args = args
         self.screenId = screenId
+        self.anchorKey = anchorKey
+        self.campaignKey = campaignKey
     }
 
     enum CodingKeys: String, CodingKey {
@@ -65,6 +74,8 @@ public struct InAppPayloadContent: Sendable, Codable, Equatable {
         case command
         case args
         case screenId
+        case anchorKey
+        case campaignKey
     }
 
     public init(from decoder: Decoder) throws {
@@ -77,6 +88,8 @@ public struct InAppPayloadContent: Sendable, Codable, Equatable {
         command = try container.decodeIfPresent(String.self, forKey: .command)
         args = try container.decodeIfPresent([String: JSONValue].self, forKey: .args) ?? [:]
         screenId = try container.decodeIfPresent(String.self, forKey: .screenId)
+        anchorKey = try container.decodeIfPresent(String.self, forKey: .anchorKey)
+        campaignKey = try container.decodeIfPresent(String.self, forKey: .campaignKey)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -91,5 +104,7 @@ public struct InAppPayloadContent: Sendable, Codable, Equatable {
             try container.encode(args, forKey: .args)
         }
         try container.encodeIfPresent(screenId, forKey: .screenId)
+        try container.encodeIfPresent(anchorKey, forKey: .anchorKey)
+        try container.encodeIfPresent(campaignKey, forKey: .campaignKey)
     }
 }

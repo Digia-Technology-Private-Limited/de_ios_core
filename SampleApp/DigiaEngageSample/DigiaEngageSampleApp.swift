@@ -3,6 +3,17 @@ import SwiftUI
 
 @main
 struct DigiaEngageSampleApp: App {
+    init() {
+        Task {
+            try await Digia.initialize(
+                DigiaConfig(
+                    apiKey: "69abfbcb79d23afa245a60ee",
+                    logLevel: .verbose
+                )
+            )
+        }
+    }
+
     var body: some Scene {
         WindowGroup {
             DigiaSampleRootView()
@@ -18,7 +29,7 @@ private struct DigiaSampleRootView: View {
             DUIFactory.shared.createInitialPage()
         }
         .overlay(alignment: .top) {
-            if case let .failed(message) = initializationState {
+            if case .failed(let message) = initializationState {
                 Text(message)
                     .font(.caption)
                     .foregroundStyle(.white)
