@@ -45,9 +45,10 @@ public struct DigiaSlot<Placeholder: View>: View {
 
     @ViewBuilder
     private func slotContent(for payload: InAppPayload) -> some View {
-        // Native carousel campaign (campaign_key path) — render via the SDUI carousel widget.
         if let carouselConfig = inlineController.getCarouselConfig(placementKey) {
             InlineCarouselRenderer.makeView(carouselConfig)
+        } else if let storyConfig = inlineController.getStoryConfig(placementKey) {
+            DigiaInlineStoryView(config: storyConfig, payload: payload)
         } else {
             let viewId = payload.content.viewId ?? payload.content.placementKey
 

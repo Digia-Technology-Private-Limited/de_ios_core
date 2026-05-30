@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 @MainActor
 public struct DigiaHost<Content: View>: View {
     private let content: Content
@@ -31,6 +32,12 @@ public struct DigiaHost<Content: View>: View {
 
             DigiaToastOverlay(toast: controller.activeToast)
                 .zIndex(2)
+
+            // Note: the full-screen inline story is intentionally NOT rendered
+            // here. It is presented in its own dedicated UIWindow via
+            // DigiaStoryWindowPresenter (driven from the controller's
+            // show/dismissStoryOverlay) so it sits above all RN content and
+            // owns its touches without Fabric interference.
         }
         .onChange(of: controller.activePayload, initial: false) { _, payload in
             handlePayload(payload)

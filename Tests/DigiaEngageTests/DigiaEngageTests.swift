@@ -83,6 +83,40 @@ struct DigiaEngageTests {
         #expect(SDKInstance.shared.controller.activePayload == nil)
     }
 
+    @Test("campaign-key inline story payloads route into the inline controller")
+    func routesInlineStoryCampaignsIntoInlineController() throws {
+        SDKInstance.shared.resetForTesting()
+
+        let campaign = try #require(CampaignModel.fromJson([
+            "id": "story-campaign-id",
+            "campaignKey": "story-campaign",
+            "campaignType": "inline",
+            "templateConfig": [
+                "templateType": "story",
+                "slotKey": "story_strip",
+                "items": [
+                    [
+                        "type": "image",
+                        "url": "https://example.com/story.png",
+                        "duration": 3000,
+                    ]
+                ],
+            ],
+        ]))
+        SDKInstance.shared.campaignStore.populate([campaign])
+
+        let payload = InAppPayload(
+            id: "story-campaign",
+            content: InAppPayloadContent(type: "inline")
+        )
+
+        SDKInstance.shared.onCampaignTriggered(payload)
+
+        #expect(SDKInstance.shared.inlineController.getCampaign("story_strip")?.id == "story-campaign")
+        #expect(SDKInstance.shared.inlineController.getStoryConfig("story_strip")?.items.count == 1)
+        #expect(SDKInstance.shared.inlineController.getCarouselConfig("story_strip") == nil)
+    }
+
     @Test("onCampaignTriggered routes modal payloads into the overlay controller")
     func routesModalPayloadsIntoOverlayController() {
         SDKInstance.shared.resetForTesting()

@@ -5,7 +5,7 @@ Pod::Spec.new do |s|
   s.homepage         = 'https://github.com/Digia-Technology-Private-Limited/digia_engage_iOS'
   s.license          = { :type => 'MIT' }
   s.authors          = { 'Digia Engineering' => 'engg@digia.tech' }
-  s.source           = { :path => '.' }
+  s.source           = { :git => 'https://github.com/Digia-Technology-Private-Limited/digia_engage_iOS.git', :tag => s.version.to_s }
 
   s.ios.deployment_target = '17.0'
   s.swift_versions   = ['5.9']

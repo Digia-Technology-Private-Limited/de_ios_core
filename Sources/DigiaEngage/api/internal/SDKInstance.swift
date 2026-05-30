@@ -109,9 +109,19 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func onCampaignTriggered(_ payload: InAppPayload) {
+        NSLog("[Digia] onCampaignTriggered id='%@' type='%@' campaignKey='%@' placementKey='%@'", payload.id, payload.content.type, payload.content.campaignKey ?? "nil", payload.content.placementKey ?? "nil")
         // campaign_key path (native CEP plugins, e.g. CleverTap): resolve the full
         // campaign from the store and route by campaignType, mirroring Android.
-        if let campaignKey = payload.content.campaignKey, !campaignKey.isEmpty {
+        // The key may arrive either in content.campaignKey or — as the RN bridge
+        // sends it — as payload.id. Mirror Android's fallback chain
+        // (campaign_key ?? digiaKey ?? payload.id) and route whenever the resolved
+        // key matches a known campaign, so inline/survey/nudge/guide campaigns
+        // delivered without an explicit content.campaignKey still work.
+        let explicitKey = payload.content.campaignKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fallbackKey = payload.id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedKey = (explicitKey?.isEmpty == false ? explicitKey : nil)
+            ?? (fallbackKey.isEmpty ? nil : fallbackKey)
+        if let campaignKey = resolvedKey, campaignStore.find(campaignKey) != nil {
             routeByCampaignKey(campaignKey, payload: payload)
             return
         }
@@ -140,12 +150,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     private func routeByCampaignKey(_ key: String, payload: InAppPayload) {
         guard let campaign = campaignStore.find(key) else {
+            NSLog("[Digia] routeByCampaignKey NO CAMPAIGN in store for key='%@' (storeEmpty=%@)", key, campaignStore.isEmpty ? "YES" : "no")
             logVerbose("campaign_key path: no campaign found for key '\(key)'")
             return
         }
 
+        NSLog("[Digia] routeByCampaignKey key='%@' type='%@'", key, campaign.campaignType)
         switch campaign.config {
         case .inline(let cfg):
+            NSLog("[Digia] routeByCampaignKey INLINE slotKey='%@' items=%d", cfg.slotKey, cfg.items.count)
             let routed = InAppPayload(
                 id: payload.id,
                 content: InAppPayloadContent(
@@ -154,9 +167,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             )
             inlineController.setCarouselConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: routed)
-        case .story:
-            logVerbose(
-                "campaign_key path: story campaigns not supported natively yet (key '\(key)')")
+        case .story(let cfg):
+            let routed = InAppPayload(
+                id: payload.id,
+                content: InAppPayloadContent(
+                    type: "inline", placementKey: cfg.slotKey, campaignKey: key),
+                cepContext: payload.cepContext
+            )
+            inlineController.setStoryConfig(cfg.slotKey, config: cfg)
+            inlineController.setCampaign(cfg.slotKey, payload: routed)
         case .guide:
             guideOrchestrator.start(campaign)
         case .nudge:
@@ -191,6 +210,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         controller.dismissDialog()
         controller.dismissToast()
         controller.clearSlots()
+        controller.dismissStoryOverlay()
         inlineController.clear()
         guideOrchestrator.dismiss()
         navigationController.reset()
