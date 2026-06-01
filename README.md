@@ -10,8 +10,8 @@ Digia Engage is an iOS SDK for rendering server-driven, Digia-managed experience
 
 |       | Minimum |
 | ----- | ------- |
-| iOS   | 16.0    |
-| Swift | 5.10    |
+| iOS   | 17.0    |
+| Swift | 7.0    |
 | Xcode | 16.0    |
 
 ## Installation
@@ -24,7 +24,7 @@ Add the package to your `Package.swift`:
 dependencies: [
     .package(
         url: "https://github.com/Digia-Technology-Private-Limited/digia_engage_ios.git",
-        from: "2.0.0"
+        from: "2.2.0"
     ),
 ]
 ```
@@ -47,13 +47,7 @@ Or add it directly in Xcode via **File → Add Package Dependencies** and enter 
 DigiaEngage is not published to the CocoaPods trunk. To use it with CocoaPods, point your `Podfile` at a local checkout:
 
 ```ruby
-pod 'DigiaEngage', :path => '../digia_engage_ios'
-```
-
-Or pull it directly from Git:
-
-```ruby
-pod 'DigiaEngage', :git => 'https://github.com/Digia-Technology-Private-Limited/digia_engage_ios.git', :tag => '2.0.0'
+pod 'DigiaEngage', '~> 2.2.0'
 ```
 
 Then run:
