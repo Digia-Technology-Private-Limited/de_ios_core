@@ -7,6 +7,7 @@ import Combine
 struct ActiveGuideState: Equatable {
     let campaign: CampaignModel
     let stepIndex: Int
+    let variables: [String: String]?
 
     var steps: [GuideStepModel] { campaign.guideConfig?.steps ?? [] }
     var currentStep: GuideStepModel? { steps.indices.contains(stepIndex) ? steps[stepIndex] : nil }
@@ -17,18 +18,18 @@ struct ActiveGuideState: Equatable {
 final class GuideOrchestrator: ObservableObject {
     @Published private(set) var state: ActiveGuideState?
 
-    func start(_ campaign: CampaignModel) {
+    func start(_ campaign: CampaignModel, variables: [String: String]? = nil) {
         guard campaign.campaignType == "guide",
               let guideConfig = campaign.guideConfig,
               !guideConfig.steps.isEmpty
         else { return }
-        state = ActiveGuideState(campaign: campaign, stepIndex: 0)
+        state = ActiveGuideState(campaign: campaign, stepIndex: 0, variables: variables)
     }
 
     func advance() {
         guard let current = state else { return }
         state = current.hasNext
-            ? ActiveGuideState(campaign: current.campaign, stepIndex: current.stepIndex + 1)
+            ? ActiveGuideState(campaign: current.campaign, stepIndex: current.stepIndex + 1, variables: current.variables)
             : nil
     }
 

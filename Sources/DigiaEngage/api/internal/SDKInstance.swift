@@ -158,7 +158,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             logVerbose(
                 "campaign_key path: story campaigns not supported natively yet (key '\(key)')")
         case .guide:
-            guideOrchestrator.start(campaign)
+            guideOrchestrator.start(campaign, variables: payload.content.variables)
         case .nudge:
             controller.show(payload)
         }
