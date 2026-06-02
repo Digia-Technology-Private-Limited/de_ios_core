@@ -362,7 +362,7 @@ private struct SurveyBody: View {
                     Spacer()
                     Button(action: onClose) {
                         Image(systemName: "xmark")
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(surveyFont(size: 14, weight: .semibold))
                             .foregroundColor(SurveyTokens.textTertiary)
                             .frame(width: 26, height: 26)
                     }
@@ -378,7 +378,7 @@ private struct SurveyBody: View {
             }
             Button { welcomeDone = true } label: {
                 Text(cta.startLabel)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(surveyFont(size: 15, weight: .semibold))
                     .foregroundColor(ctaText(cta))
                     .padding(.horizontal, 18)
                     .padding(.vertical, 10)
@@ -449,7 +449,7 @@ private struct SurveyBody: View {
             }
             if pagination.numberOfPages && !block.type.isContent {
                 Text("\(position)/\(total)")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(surveyFont(size: 11, weight: .semibold))
                     .foregroundColor(SurveyTokens.textTertiary)
             }
             if timerCfg.enabled && timerCfg.timeLimitSeconds > 0 {
@@ -458,7 +458,7 @@ private struct SurveyBody: View {
             if showCloseButton && survey.settings.display.dismissible {
                 Button(action: onClose) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(surveyFont(size: 14, weight: .semibold))
                         .foregroundColor(SurveyTokens.textTertiary)
                         .frame(width: 26, height: 26)
                 }
@@ -542,7 +542,7 @@ private struct SurveyBody: View {
                 vm.advance()
             } label: {
                 Text(cta.startLabel)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(surveyFont(size: 15, weight: .semibold))
                     .foregroundColor(ctaText(cta))
                     .padding(.horizontal, 18)
                     .padding(.vertical, 10)
@@ -553,7 +553,7 @@ private struct SurveyBody: View {
         case .resultPage:
             VStack(alignment: .leading, spacing: 10) {
                 Text("✓ Response recorded. Aggregate results display here for users who completed.")
-                    .font(.system(size: 13))
+                    .font(surveyFont(size: 13))
                     .foregroundColor(SurveyTokens.textSecondary)
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -562,7 +562,7 @@ private struct SurveyBody: View {
                     onCompletedClose()
                 } label: {
                     Text(cta.doneLabel)
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(surveyFont(size: 14, weight: .semibold))
                         .foregroundColor(ctaText(cta))
                         .padding(.horizontal, 18)
                         .padding(.vertical, 10)
@@ -682,7 +682,7 @@ private struct TimerChip: View {
         let minutes = remainingSecs / 60
         let seconds = remainingSecs % 60
         Text(String(format: "%d:%02d", minutes, seconds))
-            .font(.system(size: 11, weight: .semibold))
+            .font(surveyFont(size: 11, weight: .semibold))
             .foregroundColor(tint)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
@@ -699,7 +699,7 @@ private struct CategoryPill: View {
             EmptyView()
         } else if let label = categoryLabel(block.type) {
             Text(label.uppercased())
-                .font(.system(size: 10.5, weight: .bold))
+                .font(surveyFont(size: 10.5, weight: .bold))
                 .foregroundColor(accent)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
@@ -745,7 +745,7 @@ private struct BlockMediaImage: View {
 private struct MediaPlaceholder: View {
     var body: some View {
         Text("— image / video —")
-            .font(.system(size: 12))
+            .font(surveyFont(size: 12))
             .foregroundColor(SurveyTokens.textTertiary)
             .frame(maxWidth: .infinity)
             .frame(height: 96)
@@ -777,7 +777,7 @@ private struct FooterRow: View {
     private func nextButton(fullWidth: Bool) -> some View {
         Button(action: onNext) {
             Text(nextLabel)
-                .font(.system(size: 14, weight: .semibold))
+                .font(surveyFont(size: 14, weight: .semibold))
                 .foregroundColor(ctaText(cta))
                 .padding(.horizontal, 18)
                 .padding(.vertical, 10)
@@ -792,7 +792,7 @@ private struct FooterRow: View {
     private func backButton(fullWidth: Bool) -> some View {
         Button(action: onBack) {
             Text(cta.backLabel)
-                .font(.system(size: 14))
+                .font(surveyFont(size: 14))
                 .foregroundColor(SurveyTokens.textSecondary)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 10)

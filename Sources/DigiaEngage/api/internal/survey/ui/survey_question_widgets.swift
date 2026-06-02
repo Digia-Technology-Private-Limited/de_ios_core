@@ -36,6 +36,21 @@ let TitleDefaults = TextDefaults(sizePt: 20, weight: .bold, color: SurveyTokens.
 let BodyDefaults = TextDefaults(sizePt: 14, weight: .regular, color: SurveyTokens.textSecondary)
 let OptionDefaults = TextDefaults(sizePt: 16, weight: .medium, color: SurveyTokens.textPrimary)
 
+// MARK: - Fonts
+
+/// Resolves a survey font through the SDK-wide font factory so the global
+/// `DigiaConfig.fontFamily` applies to natively-rendered surveys, matching
+/// campaigns and guides. When no global family is configured the factory is
+/// `DefaultFontFactory`, which returns the system font — preserving the prior
+/// appearance. Shape mirrors `Font.system(size:weight:)` so it is a drop-in
+/// replacement at every call site.
+@MainActor
+func surveyFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+    SDKInstance.shared.fontFactory.getDefaultFont(
+        size: Double(size), weight: weight, italic: false
+    )
+}
+
 extension ElementStyle {
     /// Authored pixel size, or the element default when unset (0).
     func resolveFontSize(default def: CGFloat) -> CGFloat {
@@ -72,7 +87,7 @@ struct StyledText: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: style.resolveFontSize(default: defaults.sizePt), weight: style.resolveWeight()))
+            .font(surveyFont(size: style.resolveFontSize(default: defaults.sizePt), weight: style.resolveWeight()))
             .foregroundColor(style.resolveColor(accent: accent, default: defaults.color))
             .multilineTextAlignment(style.resolveAlign())
             .frame(maxWidth: .infinity, alignment: alignment(for: style.resolveAlign()))
@@ -171,7 +186,7 @@ private struct StarRatingQuestion: View {
                     onAnswer(SurveyAnswer(values: ["\(i)"]))
                 } label: {
                     Image(systemName: "star.fill")
-                        .font(.system(size: 22))
+                        .font(surveyFont(size: 22))
                         .foregroundColor(isOn ? accent : SurveyTokens.textTertiary)
                         .frame(width: 40, height: 40)
                         .background(
@@ -243,7 +258,7 @@ private struct NpsQuestion: View {
                                         .stroke(borderColor, lineWidth: borderW)
                                 )
                             Text("\(i)")
-                                .font(.system(size: textSize, weight: textWeight))
+                                .font(surveyFont(size: textSize, weight: textWeight))
                                 .foregroundColor(isOn ? .white : textColor)
                         }
                         .frame(width: tile, height: tile)
@@ -260,9 +275,9 @@ private struct NpsQuestion: View {
                 }
             )
             HStack {
-                Text("Not likely").font(.system(size: 11)).foregroundColor(SurveyTokens.textTertiary)
+                Text("Not likely").font(surveyFont(size: 11)).foregroundColor(SurveyTokens.textTertiary)
                 Spacer()
-                Text("Extremely likely").font(.system(size: 11)).foregroundColor(SurveyTokens.textTertiary)
+                Text("Extremely likely").font(surveyFont(size: 11)).foregroundColor(SurveyTokens.textTertiary)
             }
         }
     }
@@ -302,14 +317,14 @@ private struct NpsFaceQuestion: View {
                 } label: {
                     VStack(spacing: 6) {
                         Text(face.emoji)
-                            .font(.system(size: faceSize))
+                            .font(surveyFont(size: faceSize))
                             .frame(width: 56, height: 56)
                             .background(RoundedRectangle(cornerRadius: radius).fill(fill))
                             .overlay(RoundedRectangle(cornerRadius: radius).stroke(borderColor, lineWidth: borderW))
                             .scaleEffect(isOn ? 1.1 : 1.0)
                         if style.showFaceLabels && !face.label.isEmpty {
                             Text(face.label)
-                                .font(.system(size: labelSize, weight: labelWeight))
+                                .font(surveyFont(size: labelSize, weight: labelWeight))
                                 .foregroundColor(isOn ? accent : labelColor)
                         }
                     }
@@ -338,7 +353,7 @@ private struct ReactionQuestion: View {
                     onAnswer(SurveyAnswer(values: [option.id]))
                 } label: {
                     Text(option.label)
-                        .font(.system(size: 32))
+                        .font(surveyFont(size: 32))
                         .frame(width: 64, height: 64)
                         .background(
                             Circle().fill(isOn ? accent.opacity(0.14) : SurveyTokens.surfaceSunken)
@@ -381,7 +396,7 @@ private struct ThisOrThatQuestion: View {
                     ZStack(alignment: .bottomLeading) {
                         RoundedRectangle(cornerRadius: 14).fill(gradients[index % gradients.count])
                         Text(option.label)
-                            .font(.system(size: 16, weight: .bold))
+                            .font(surveyFont(size: 16, weight: .bold))
                             .foregroundColor(.white)
                             .padding(14)
                     }
@@ -421,7 +436,7 @@ private struct TierListQuestion: View {
             ForEach(Array(tiers.enumerated()), id: \.offset) { _, t in
                 HStack(spacing: 6) {
                     Text(t.label)
-                        .font(.system(size: 18, weight: .heavy))
+                        .font(surveyFont(size: 18, weight: .heavy))
                         .foregroundColor(.white)
                         .frame(width: 40, height: 40)
                         .background(RoundedRectangle(cornerRadius: 6).fill(t.color))
@@ -484,7 +499,7 @@ private struct TierChips: View {
         if items.isEmpty {
             if let placeholder {
                 Text(placeholder)
-                    .font(.system(size: 11))
+                    .font(surveyFont(size: 11))
                     .foregroundColor(SurveyTokens.textTertiary)
             }
         } else {
@@ -494,7 +509,7 @@ private struct TierChips: View {
                         onTap(opt.id)
                     } label: {
                         Text(opt.label)
-                            .font(.system(size: 12))
+                            .font(surveyFont(size: 12))
                             .foregroundColor(SurveyTokens.textPrimary)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
@@ -659,7 +674,7 @@ private struct ChoiceCardRow: View {
                 }
                 if showDescription, let desc = option.description, !desc.isEmpty {
                     Text(desc)
-                        .font(.system(size: 12))
+                        .font(surveyFont(size: 12))
                         .foregroundColor(SurveyTokens.textSecondary)
                         .padding(.leading, 32)
                 }
@@ -767,7 +782,7 @@ struct SurveyTextQuestion: View {
             .frame(maxWidth: maxWidthPt > 0 ? maxWidthPt : .infinity, alignment: .leading)
 
             if let msg = liveError {
-                Text(msg).font(.system(size: 12)).foregroundColor(SurveyTokens.errorRed)
+                Text(msg).font(surveyFont(size: 12)).foregroundColor(SurveyTokens.errorRed)
             }
         }
         .onAppear {
