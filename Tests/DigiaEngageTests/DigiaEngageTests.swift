@@ -6,19 +6,14 @@ import Testing
 @MainActor
 @Suite("DigiaEngage", .serialized)
 struct DigiaEngageTests {
-    @Test("defaults config to production error logging and debug flavor")
+    @Test("defaults config to production error logging")
     func defaultsConfig() {
         let config = DigiaConfig(apiKey: "prod_123")
 
         #expect(config.apiKey == "prod_123")
         #expect(config.logLevel == .error)
         #expect(config.environment == .production)
-
-        if case .debug(let branchName) = config.flavor {
-            #expect(branchName == nil)
-        } else {
-            Issue.record("Expected debug flavor by default")
-        }
+        #expect(config.baseUrl == nil)
     }
 
     @Test("initialize is idempotent")
@@ -187,6 +182,46 @@ struct DigiaEngageTests {
 
         #expect(decoded.placementKey == "hero_banner")
         #expect(decoded.args == ["name": .string("Ada")])
+    }
+
+    @Test("campaign parser accepts Android templateConfig survey key")
+    func campaignParserAcceptsAndroidTemplateTypeSurveyKey() throws {
+        let campaign = try #require(CampaignModel.fromJson([
+            "id": "campaign-123",
+            "campaignKey": "welcome_survey",
+            "campaignType": "survey",
+            "templateConfig": minimalSurveyTemplate(),
+        ]))
+
+        #expect(campaign.campaignType == "survey")
+        let config = try #require(campaign.surveyConfig)
+        #expect(config.nodes.count == 1)
+        #expect(config.blocks.contains { $0.id == "block-1" })
+    }
+
+    @Test("campaign key payload routes through fetched survey campaign")
+    func campaignKeyPayloadRoutesThroughFetchedSurveyCampaign() {
+        SDKInstance.shared.resetForTesting()
+        let campaign = try! #require(CampaignModel.fromJson([
+            "id": "campaign-123",
+            "campaignKey": "welcome_survey",
+            "campaignType": "survey",
+            "templateConfig": minimalSurveyTemplate(),
+        ]))
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+
+        let payload = InAppPayload(
+            id: "bridge-event",
+            content: InAppPayloadContent(
+                type: "dialog",
+                args: ["campaign_key": .string("welcome_survey")]
+            )
+        )
+
+        SDKInstance.shared.onCampaignTriggered(payload)
+
+        #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.id == "welcome_survey")
+        #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.content.args["campaign_key"] == .string("welcome_survey"))
     }
 
     @Test("release local-first config resolver loads the typed app config fixture")
@@ -869,6 +904,31 @@ struct DigiaEngageTests {
 
 private func decode<T: Decodable>(_ json: String, as type: T.Type = T.self) throws -> T {
     try JSONDecoder().decode(T.self, from: Data(json.utf8))
+}
+
+private func minimalSurveyTemplate() -> [String: Any] {
+    // A welcome block is intro chrome (filtered from the node flow), so the
+    // survey also needs at least one real question block + node to be valid.
+    [
+        "templateType": "survey",
+        "blocks": [
+            [
+                "id": "block-1",
+                "type": "single_select",
+                "title": ["text": "How are you?"],
+                "options": [
+                    ["id": "opt_a", "label": "Good"],
+                    ["id": "opt_b", "label": "Bad"],
+                ],
+            ],
+        ],
+        "nodes": [
+            [
+                "id": "node-1",
+                "blockId": "block-1",
+            ],
+        ],
+    ]
 }
 
 private final class TestPlugin: DigiaCEPPlugin {

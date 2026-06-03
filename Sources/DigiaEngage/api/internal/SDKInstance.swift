@@ -23,6 +23,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     let inlineController = InlineCampaignController()
     let guideOrchestrator = GuideOrchestrator()
     let navigationController = DigiaNavigationController()
+    let surveyOrchestrator = SurveyOrchestrator()
 
     private(set) var appStateStreams: [String: AppStateValueStream] = [:]
     private(set) var lastOpenedURL: URL?
@@ -30,6 +31,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private(set) var lastShareRequest: (message: String, subject: String?)?
     private(set) var lastDialogDismissed = false
     private(set) var lastBottomSheetDismissed = false
+    private var completedSurveyToken: Int64?
 
     private init() {
         controller.onEvent = { [weak self] event, payload in
@@ -109,7 +111,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func onCampaignTriggered(_ payload: InAppPayload) {
-        NSLog("[Digia] onCampaignTriggered id='%@' type='%@' campaignKey='%@' placementKey='%@'", payload.id, payload.content.type, payload.content.campaignKey ?? "nil", payload.content.placementKey ?? "nil")
+        NSLog(
+            "[Digia] onCampaignTriggered id='%@' type='%@' campaignKey='%@' placementKey='%@'",
+            payload.id, payload.content.type, payload.content.campaignKey ?? "nil",
+            payload.content.placementKey ?? "nil")
         // campaign_key path (native CEP plugins, e.g. CleverTap): resolve the full
         // campaign from the store and route by campaignType, mirroring Android.
         // The key may arrive either in content.campaignKey or — as the RN bridge
@@ -117,10 +122,22 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         // (campaign_key ?? digiaKey ?? payload.id) and route whenever the resolved
         // key matches a known campaign, so inline/survey/nudge/guide campaigns
         // delivered without an explicit content.campaignKey still work.
-        let explicitKey = payload.content.campaignKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        func argKey(_ key: String) -> String? {
+            if case .string(let value)? = payload.content.args[key] {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            return nil
+        }
+        let explicitKey = payload.content.campaignKey?.trimmingCharacters(
+            in: .whitespacesAndNewlines)
         let fallbackKey = payload.id.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedKey = (explicitKey?.isEmpty == false ? explicitKey : nil)
+        let resolvedKey =
+            (explicitKey?.isEmpty == false ? explicitKey : nil)
+            ?? argKey("campaign_key") ?? argKey("campaignKey")
             ?? (fallbackKey.isEmpty ? nil : fallbackKey)
+
+        NSLog("[Digia] onCampaignTriggered resolvedKey='%@'", resolvedKey ?? "nil")
         if let campaignKey = resolvedKey, campaignStore.find(campaignKey) != nil {
             routeByCampaignKey(campaignKey, payload: payload)
             return
@@ -150,7 +167,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     private func routeByCampaignKey(_ key: String, payload: InAppPayload) {
         guard let campaign = campaignStore.find(key) else {
-            NSLog("[Digia] routeByCampaignKey NO CAMPAIGN in store for key='%@' (storeEmpty=%@)", key, campaignStore.isEmpty ? "YES" : "no")
+            NSLog(
+                "[Digia] routeByCampaignKey NO CAMPAIGN in store for key='%@' (storeEmpty=%@)", key,
+                campaignStore.isEmpty ? "YES" : "no")
             logVerbose("campaign_key path: no campaign found for key '\(key)'")
             return
         }
@@ -158,7 +177,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         NSLog("[Digia] routeByCampaignKey key='%@' type='%@'", key, campaign.campaignType)
         switch campaign.config {
         case .inline(let cfg):
-            NSLog("[Digia] routeByCampaignKey INLINE slotKey='%@' items=%d", cfg.slotKey, cfg.items.count)
+            NSLog(
+                "[Digia] routeByCampaignKey INLINE slotKey='%@' items=%d", cfg.slotKey,
+                cfg.items.count)
             let routed = InAppPayload(
                 id: payload.id,
                 content: InAppPayloadContent(
@@ -180,6 +201,25 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             guideOrchestrator.start(campaign, variables: payload.content.variables)
         case .nudge:
             controller.show(payload)
+        case .survey(let cfg):
+            let routed = InAppPayload(
+                id: campaign.campaignKey,
+                content: InAppPayloadContent(
+                    type: "survey",
+                    command: "SHOW_SURVEY",
+                    args: [
+                        "campaign_key": .string(campaign.campaignKey),
+                        "campaign_id": .string(campaign.id),
+                    ],
+                    campaignKey: campaign.campaignKey
+                ),
+                cepContext: payload.cepContext.isEmpty
+                    ? ["campaignId": campaign.id, "campaignKey": campaign.campaignKey]
+                    : payload.cepContext
+            )
+            if !surveyOrchestrator.start(payload: routed, config: cfg) {
+                logVerbose("survey campaign dropped: another survey is on screen: \(key)")
+            }
         }
     }
 
@@ -187,12 +227,77 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         if controller.activePayload?.id == campaignID {
             controller.dismiss()
         }
+        if surveyOrchestrator.state?.payload.id == campaignID {
+            surveyOrchestrator.dismiss()
+        }
         inlineController.removeCampaign(campaignID)
         guideOrchestrator.dismissIfActive(campaignKey: campaignID)
     }
 
+    // MARK: - Survey lifecycle
+    //
+    // CEP plugin sees: Impressed (started), Dismissed (closed without finishing).
+    // Internal analytics (TBD) sees: Answered, Completed.
+    // Surveys are started from `routeByCampaignKey` once a `survey` campaign is
+    // resolved from the store, so there is no separate `startSurvey` entry point.
+
+    /// Fired once when the survey first becomes visible (treated as an impression).
+    func reportSurveyStarted() {
+        guard let state = surveyOrchestrator.state else { return }
+        activePlugin?.notifyEvent(.impressed, payload: state.payload)
+    }
+
+    func reportSurveyAnswered(stepId: String, answer: [String: JSONValue]) {
+        // Internal-only event; no CEP notification. Hook for future analytics.
+        _ = stepId
+        _ = answer
+    }
+
+    func markSurveyCompleted(response: [String: JSONValue], answers: [String: SurveyAnswer] = [:]) {
+        reportSurveyCompleted(response: response, answers: answers)
+        surveyOrchestrator.dismiss()
+    }
+
+    func reportSurveyCompleted(response: [String: JSONValue], answers: [String: SurveyAnswer] = [:])
+    {
+        guard let state = surveyOrchestrator.state else { return }
+        if completedSurveyToken == state.token { return }
+        completedSurveyToken = state.token
+        // Internal completion event would record `response` here.
+        _ = response
+        if !answers.isEmpty,
+            let config = self.config,
+            let campaignId = state.payload.cepContext["campaignId"]
+        {
+            NSLog(
+                "[Digia] survey submission started: campaignId=\(campaignId), answers=\(answers.count)"
+            )
+            SurveySubmissionReporter(config: config).report(
+                campaignId: campaignId,
+                survey: state.config,
+                answers: answers,
+                startedAt: state.startedAt
+            )
+        }
+    }
+
+    func dismissCompletedSurvey() {
+        surveyOrchestrator.dismiss()
+    }
+
+    func markSurveyDismissed() {
+        guard let state = surveyOrchestrator.state else { return }
+        activePlugin?.notifyEvent(.dismissed, payload: state.payload)
+        surveyOrchestrator.dismiss()
+    }
+
     func markInitializedForTesting(with config: DigiaConfig) {
         self.config = config
+    }
+
+    func setCampaignsForTesting(_ campaigns: [CampaignModel]) {
+        campaignStore.populate(campaigns)
+        sdkState = .ready
     }
 
     func resetForTesting() {
@@ -203,6 +308,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         isHostMounted = false
         isNavigationMounted = false
         fontFactory = DefaultFontFactory()
+        campaignStore.clear()
         appConfigStore.clear()
         campaignStore.clear()
         controller.dismiss()
@@ -212,6 +318,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         controller.clearSlots()
         controller.dismissStoryOverlay()
         inlineController.clear()
+        surveyOrchestrator.dismiss()
         guideOrchestrator.dismiss()
         navigationController.reset()
         messageSubscribers.removeAll()
@@ -297,4 +404,24 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         lastBottomSheetDismissed = true
     }
 
+    private func initializeAppState(from appConfig: DigiaAppConfig, namespace: String) throws {
+        appState.removeAll()
+        appStateStreams.removeAll()
+        let definitions = appConfig.appState ?? []
+        let store = try AppStateStore(definitions: definitions, namespace: namespace)
+        appStateStore = store
+        appState = store.snapshot()
+        for definition in definitions {
+            let stream = AppStateValueStream(currentValue: appState[definition.name]?.anyValue)
+            appStateStreams[definition.streamName] = stream
+        }
+    }
+
+    private func stringArg(_ payload: InAppPayload, _ key: String) -> String? {
+        guard case .string(let value)? = payload.content.args[key] else {
+            return nil
+        }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
 }

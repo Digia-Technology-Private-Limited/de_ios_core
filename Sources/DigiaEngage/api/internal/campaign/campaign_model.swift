@@ -1,14 +1,15 @@
 import Foundation
 
-// Ported from Android `CampaignModel.kt`. Survey campaigns are intentionally
-// not parsed here (no iOS survey model yet) — a "survey" campaignType yields nil
-// and is skipped during fetch.
+// Ported from Android `CampaignModel.kt`. Survey campaigns are delivered as the
+// campaign's `surveyConfig` (or a `templateConfig` with `templateType ==
+// "survey"`) and parsed into a `SurveyConfigModel`, mirroring Android.
 
 enum CampaignConfigModel: Equatable {
     case guide(GuideConfigModel)
     case nudge
     case inline(InlineCarouselConfig)
     case story(InlineStoryConfig)
+    case survey(SurveyConfigModel)
 }
 
 struct CampaignModel: Equatable {
@@ -29,6 +30,11 @@ struct CampaignModel: Equatable {
 
     var storyConfig: InlineStoryConfig? {
         if case let .story(value) = config { return value }
+        return nil
+    }
+
+    var surveyConfig: SurveyConfigModel? {
+        if case let .survey(value) = config { return value }
         return nil
     }
 
@@ -54,12 +60,31 @@ struct CampaignModel: Equatable {
                 guard let carouselConfig = InlineCarouselConfig.fromJson(templateConfig) else { return nil }
                 config = .inline(carouselConfig)
             }
+        case "survey":
+            guard let surveyConfig = parseSurveyConfig(json, fallbackId: id) else { return nil }
+            config = .survey(surveyConfig)
         default:
-            // "survey" and any unknown type are skipped on iOS.
+            // Any unknown type is skipped.
             return nil
         }
 
         return CampaignModel(id: id, campaignKey: campaignKey, campaignType: campaignType, config: config)
+    }
+
+    // ── survey parsing ────────────────────────────────────────────────────────
+
+    private static func parseSurveyConfig(_ json: [String: Any], fallbackId: String) -> SurveyConfigModel? {
+        let raw: [String: Any]?
+        if let survey = json["surveyConfig"] as? [String: Any] {
+            raw = survey
+        } else if let template = json["templateConfig"] as? [String: Any],
+                  (template["templateType"] as? String) == "survey" {
+            raw = template
+        } else {
+            raw = nil
+        }
+        guard let raw, let converted = surveyJSONObject(raw) else { return nil }
+        return SurveyConfigModel.from(converted, fallbackId: fallbackId)
     }
 
     // ── guide parsing ─────────────────────────────────────────────────────────
@@ -133,5 +158,50 @@ struct CampaignModel: Equatable {
             multiStep: multiStep,
             steps: steps.sorted { $0.sequenceOrder < $1.sequenceOrder }
         )
+    }
+}
+
+// MARK: - [String: Any] → JSONValue bridge (survey config)
+
+/// Converts a Foundation JSON object (`[String: Any]` from JSONSerialization)
+/// into the SDK's `JSONValue` tree, which the survey parser consumes.
+private func surveyJSONObject(_ dictionary: [String: Any]) -> [String: JSONValue]? {
+    var result: [String: JSONValue] = [:]
+    for (key, value) in dictionary {
+        guard let mapped = surveyJSONValue(value) else { return nil }
+        result[key] = mapped
+    }
+    return result
+}
+
+private func surveyJSONValue(_ value: Any) -> JSONValue? {
+    switch value {
+    case let string as String:
+        return .string(string)
+    // Bool must be checked before NSNumber/Int: JSONSerialization yields NSNumber
+    // for both, and `as? Int` would also match a boolean.
+    case let bool as Bool where value is Bool || CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID():
+        return .bool(bool)
+    case let int as Int:
+        return .int(int)
+    case let double as Double:
+        return .double(double)
+    case let number as NSNumber:
+        // CFBoolean already handled above; treat the rest numerically.
+        return .double(number.doubleValue)
+    case let array as [Any]:
+        var values: [JSONValue] = []
+        for item in array {
+            guard let mapped = surveyJSONValue(item) else { return nil }
+            values.append(mapped)
+        }
+        return .array(values)
+    case let object as [String: Any]:
+        guard let mapped = surveyJSONObject(object) else { return nil }
+        return .object(mapped)
+    case is NSNull:
+        return .null
+    default:
+        return nil
     }
 }

@@ -21,6 +21,10 @@ final class CampaignStore {
         campaigns.values.first { $0.id == campaignId }
     }
 
+    func findByKey(_ campaignKey: String) -> CampaignModel? {
+        campaigns[campaignKey]
+    }
+
     var isEmpty: Bool {
         campaigns.isEmpty
     }
