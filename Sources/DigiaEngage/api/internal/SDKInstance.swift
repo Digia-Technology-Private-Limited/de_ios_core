@@ -198,7 +198,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             inlineController.setStoryConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: routed)
         case .guide:
-            guideOrchestrator.start(campaign)
+            guideOrchestrator.start(campaign, variables: payload.content.variables)
         case .nudge:
             controller.show(payload)
         case .survey(let cfg):
