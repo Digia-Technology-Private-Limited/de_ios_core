@@ -376,7 +376,10 @@ private struct SurveyBody: View {
             if block.showMedia && block.media.position == .inline {
                 BlockMediaImage(media: block.media)
             }
-            Button { welcomeDone = true } label: {
+            Button {
+                SDKInstance.shared.reportSurveyClicked()
+                welcomeDone = true
+            } label: {
                 Text(cta.startLabel)
                     .font(surveyFont(size: 15, weight: .semibold))
                     .foregroundColor(ctaText(cta))
@@ -538,6 +541,7 @@ private struct SurveyBody: View {
         switch block.type {
         case .welcome:
             Button {
+                SDKInstance.shared.reportSurveyClicked()
                 SDKInstance.shared.reportSurveyAnswered(stepId: node.id, answer: [:])
                 vm.advance()
             } label: {

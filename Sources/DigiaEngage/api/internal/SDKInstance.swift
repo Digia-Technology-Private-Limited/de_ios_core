@@ -256,8 +256,16 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         _ = answer
     }
 
+    func reportSurveyClicked() {
+        guard let state = surveyOrchestrator.state else { return }
+        activePlugin?.notifyEvent(.clicked(), payload: state.payload)
+    }
+
     func markSurveyCompleted(response: [String: JSONValue], answers: [String: SurveyAnswer] = [:]) {
         reportSurveyCompleted(response: response, answers: answers)
+        if let state = surveyOrchestrator.state {
+            activePlugin?.notifyEvent(.dismissed, payload: state.payload)
+        }
         surveyOrchestrator.dismiss()
     }
 
