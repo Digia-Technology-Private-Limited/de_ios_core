@@ -8,8 +8,6 @@ struct APIModel: Decodable, Equatable, Sendable {
     let headers: [String: JSONValue]?
     let body: JSONValue?
     let bodyType: String?
-    let variables: [String: Variable]?
-
     init(
         id: String,
         name: String?,
@@ -17,8 +15,7 @@ struct APIModel: Decodable, Equatable, Sendable {
         method: String,
         headers: [String: JSONValue]?,
         body: JSONValue?,
-        bodyType: String?,
-        variables: [String: Variable]?
+        bodyType: String?
     ) {
         self.id = id
         self.name = name
@@ -27,7 +24,6 @@ struct APIModel: Decodable, Equatable, Sendable {
         self.headers = headers
         self.body = body
         self.bodyType = bodyType
-        self.variables = variables
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -38,6 +34,5 @@ struct APIModel: Decodable, Equatable, Sendable {
         case headers
         case body
         case bodyType
-        case variables
     }
 }

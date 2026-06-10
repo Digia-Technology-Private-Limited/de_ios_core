@@ -17,8 +17,6 @@ struct InlineStoryOverlayState: Equatable {
 @MainActor
 final class DigiaOverlayController: ObservableObject {
     @Published private(set) var activePayload: InAppPayload?
-    @Published private(set) var activeBottomSheet: DigiaBottomSheetPresentation?
-    @Published private(set) var activeDialog: DigiaDialogPresentation?
     @Published private(set) var activeToast: DigiaToastPresentation?
     @Published private(set) var activeNudge: DigiaNudgePresentation?
     @Published private(set) var slotPayloads: [String: InAppPayload] = [:]
@@ -27,10 +25,6 @@ final class DigiaOverlayController: ObservableObject {
 
     private var toastToken = UUID()
     var onEvent: ((DigiaExperienceEvent, InAppPayload) -> Void)?
-    var onDialogDismissed: ((JSONValue?) -> Void)?
-    var onBottomSheetDismissed: ((JSONValue?) -> Void)?
-    var bottomSheetTransition: BottomSheetTransitionModel?
-    private(set) var bottomSheetRendersInHost = false
 
     func show(_ payload: InAppPayload) {
         activePayload = payload
@@ -38,30 +32,6 @@ final class DigiaOverlayController: ObservableObject {
 
     func dismiss() {
         activePayload = nil
-    }
-
-    func showBottomSheet(_ presentation: DigiaBottomSheetPresentation, rendersInHost: Bool = false)
-    {
-        activeBottomSheet = presentation
-        bottomSheetRendersInHost = rendersInHost
-    }
-
-    func dismissBottomSheet(result: JSONValue? = nil) {
-        bottomSheetTransition = nil
-        bottomSheetRendersInHost = false
-        activeBottomSheet = nil
-        onBottomSheetDismissed?(result)
-        onBottomSheetDismissed = nil
-    }
-
-    func showDialog(_ presentation: DigiaDialogPresentation) {
-        activeDialog = presentation
-    }
-
-    func dismissDialog(result: JSONValue? = nil) {
-        activeDialog = nil
-        onDialogDismissed?(result)
-        onDialogDismissed = nil
     }
 
     func showToast(_ presentation: DigiaToastPresentation) {

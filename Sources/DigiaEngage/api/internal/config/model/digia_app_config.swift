@@ -99,73 +99,10 @@ struct AppSettings: Decodable, Equatable {
 struct PageDefinition: Decodable, Equatable {
     let uid: String?
     let slug: String?
-    let inputArgs: [String: Variable]?
-    let initStateDefs: [String: Variable]?
-    let layout: LayoutDefinition?
-    let actions: PageActions?
-
-    enum CodingKeys: String, CodingKey {
-        case uid
-        case slug
-        case inputArgs
-        case pageArgDefs
-        case argDefs
-        case variables
-        case initStateDefs
-        case layout
-        case actions
-    }
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        uid = try container.decodeIfPresent(String.self, forKey: .uid)
-        slug = try container.decodeIfPresent(String.self, forKey: .slug)
-        inputArgs = try container.decodeIfPresent([String: Variable].self, forKey: .inputArgs)
-            ?? container.decodeIfPresent([String: Variable].self, forKey: .pageArgDefs)
-            ?? container.decodeIfPresent([String: Variable].self, forKey: .argDefs)
-        initStateDefs = try container.decodeIfPresent([String: Variable].self, forKey: .variables)
-            ?? container.decodeIfPresent([String: Variable].self, forKey: .initStateDefs)
-        layout = try container.decodeIfPresent(LayoutDefinition.self, forKey: .layout)
-        actions = try container.decodeIfPresent(PageActions.self, forKey: .actions)
-    }
-
-    var renderRoot: VWData? {
-        layout?.renderRoot
-    }
 }
 
 struct ComponentDefinition: Decodable, Equatable {
     let uid: String?
-    let argDefs: [String: Variable]?
-    let initStateDefs: [String: Variable]?
-    let layout: LayoutDefinition?
-
-    enum CodingKeys: String, CodingKey {
-        case uid
-        case argDefs
-        case initStateDefs
-        case layout
-    }
-
-    var renderRoot: VWData? {
-        layout?.renderRoot
-    }
-}
-
-struct PageActions: Decodable, Equatable {
-    let onPageLoadAction: ActionFlow?
-    let onBackPress: ActionFlow?
-}
-
-struct LayoutDefinition: Decodable, Equatable {
-    let root: VWData?
-    let body: LayoutBody?
-
-    var renderRoot: VWData? { root ?? body?.root }
-}
-
-struct LayoutBody: Decodable, Equatable {
-    let root: VWData?
 }
 
 struct RestConfiguration: Decodable, Equatable {
@@ -180,7 +117,6 @@ struct RestConfiguration: Decodable, Equatable {
 
 struct ThemeConfiguration: Decodable, Equatable {
     let colors: ThemeColorConfiguration?
-    let fonts: [String: FontDescriptorProps]?
 }
 
 struct ThemeColorConfiguration: Decodable, Equatable {

@@ -1,10 +1,5 @@
 import SwiftUI
 
-// Native bottom-sheet / dialog nudge renderer, ported from Android's `NudgeRenderer.kt`.
-// Renders the campaign's native DUI widget tree (`config.layout`) through the recursive
-// SDUI renderer, wrapped in a hand-rolled sheet or dialog. The impression event is fired
-// by `DigiaOverlayController.showNudge`; dismiss button actions (Action.hideBottomSheet /
-// Action.dismissDialog) are intercepted by their processors and routed to `dismissNudge`.
 @MainActor
 struct NudgeOverlayView: View {
     @ObservedObject private var controller = SDKInstance.shared.controller
@@ -58,7 +53,7 @@ private struct NudgeContainerView: View {
                     .gesture(dragGesture)
             }
             ScrollView {
-                renderedTree.padding(container.padding)
+                renderedContent.padding(container.padding)
             }
         }
         .frame(maxWidth: .infinity)
@@ -76,7 +71,7 @@ private struct NudgeContainerView: View {
 
     private var dialogPanel: some View {
         ScrollView {
-            renderedTree.padding(container.padding)
+            renderedContent.padding(container.padding)
         }
         .frame(width: container.width ?? (UIScreen.main.bounds.width * 0.85))
         .frame(maxHeight: UIScreen.main.bounds.height * 0.85)
@@ -99,16 +94,9 @@ private struct NudgeContainerView: View {
             }
     }
 
-    // MARK: - SDUI tree
+    // MARK: - Nudge content
 
-    private var renderedTree: AnyView {
-        guard let widget = try? DefaultVirtualWidgetRegistry()
-            .createWidget(presentation.config.layout, parent: nil)
-        else { return AnyView(EmptyView()) }
-        let resources = ResourceProvider(
-            fontFactory: SDKInstance.shared.fontFactory,
-            appConfigStore: SDKInstance.shared.appConfigStore
-        )
-        return widget.toWidget(RenderPayload(resources: resources))
+    private var renderedContent: some View {
+        NudgeColumnContent(column: presentation.config.layout, onDismiss: dismiss)
     }
 }

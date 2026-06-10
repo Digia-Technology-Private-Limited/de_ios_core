@@ -76,7 +76,7 @@ final class DigiaNavigationController: ObservableObject {
     // MARK: - Push (fire-and-forget)
 
     func push(_ pageID: String, args: [String: JSONValue] = [:]) {
-        let normalized = NavigationUtil.normalizedRoute(pageID)
+        let normalized = pageID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return }
         if currentPageID == normalized { return }
         if rootRoute == nil {
@@ -98,7 +98,7 @@ final class DigiaNavigationController: ObservableObject {
     func push(_ pageID: String, args: [String: JSONValue] = [:], waitingForResult: Bool) async
         -> JSONValue?
     {
-        let normalized = NavigationUtil.normalizedRoute(pageID)
+        let normalized = pageID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return nil }
         if rootRoute == nil {
             rootRoute = normalized

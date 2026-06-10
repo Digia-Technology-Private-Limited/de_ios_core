@@ -9,6 +9,6 @@ public struct DigiaScreen: View {
     }
 
     public var body: some View {
-        DUIFactory.shared.createPage(name)
+        EmptyView()
     }
 }

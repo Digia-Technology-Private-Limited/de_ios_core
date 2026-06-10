@@ -35,8 +35,7 @@ public enum Digia {
         return ctrl.activeToast != nil
             || ctrl.activeAnchoredOverlay != nil
             || ctrl.activeStoryOverlay != nil
-            || ctrl.activeBottomSheet != nil
-            || ctrl.activeDialog != nil
+            || ctrl.activeNudge != nil
             || SDKInstance.shared.surveyOrchestrator.state != nil
     }
 }

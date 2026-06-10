@@ -348,8 +348,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         appConfigStore.clear()
         campaignStore.clear()
         controller.dismiss()
-        controller.dismissBottomSheet()
-        controller.dismissDialog()
         controller.dismissToast()
         controller.dismissNudge()
         controller.clearSlots()

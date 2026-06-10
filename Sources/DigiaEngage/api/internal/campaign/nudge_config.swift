@@ -1,9 +1,5 @@
 import Foundation
 
-// Ported from Android `NudgeConfig.kt`. A nudge campaign's `templateConfig.layout`
-// is the exact native DUI `VWData` tree (root `digia/column`); it is decoded straight
-// into the recursive renderer with no translation.
-
 enum NudgeTemplateType: String, Equatable, Sendable {
     case bottomSheet
     case dialog
@@ -27,11 +23,8 @@ struct NudgeContainerConfig: Equatable, Sendable {
     var padding: CGFloat = 16
     var dismissOnOutsideTap: Bool = true
     var scrimColor: String = "#66000000"
-    /// Bottom-sheet only: max height as a fraction of screen height.
     var maxHeightRatio: CGFloat = 0.7
-    /// Bottom-sheet only: show the drag handle + enable drag-to-dismiss.
     var dragHandle: Bool = true
-    /// Dialog only: width in points; nil = a sensible default width.
     var width: CGFloat?
 
     static func fromJson(_ json: [String: Any]?) -> NudgeContainerConfig {
@@ -54,17 +47,13 @@ struct NudgeContainerConfig: Equatable, Sendable {
 struct NudgeConfig: Equatable, Sendable {
     let templateType: NudgeTemplateType
     let container: NudgeContainerConfig
-    let layout: VWData
+    let layout: NudgeColumn
 
     static func fromJson(_ json: [String: Any]) -> NudgeConfig? {
-        guard let layoutDict = json.object("layout") else { return nil }
-        guard
-            let data = try? JSONSerialization.data(withJSONObject: layoutDict),
-            let layout = try? JSONDecoder().decode(VWData.self, from: data)
-        else { return nil }
+        guard let layout = NudgeParser().parse(json) else { return nil }
         return NudgeConfig(
-            templateType: NudgeTemplateType.from(json.string("templateType")),
-            container: NudgeContainerConfig.fromJson(json.object("container")),
+            templateType: NudgeTemplateType.from(json["templateType"] as? String),
+            container: NudgeContainerConfig.fromJson(json["container"] as? [String: Any]),
             layout: layout
         )
     }

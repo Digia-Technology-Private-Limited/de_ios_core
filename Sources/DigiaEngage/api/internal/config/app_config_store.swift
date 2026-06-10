@@ -44,7 +44,4 @@ final class AppConfigStore: ObservableObject {
         appConfig?.theme.colors?.light[token]
     }
 
-    func themeFont(named token: String) -> FontDescriptorProps? {
-        appConfig?.theme.fonts?[token]
-    }
 }

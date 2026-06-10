@@ -5,18 +5,7 @@ struct DigiaPresentationView: View {
     let presentation: DigiaViewPresentation
 
     var body: some View {
-        resolvedContent
-    }
-
-    @ViewBuilder
-    private var resolvedContent: some View {
-        if SDKInstance.shared.appConfigStore.component(presentation.viewID) != nil {
-            DUIFactory.shared.createComponent(presentation.viewID, args: presentation.args)
-        } else if SDKInstance.shared.appConfigStore.page(presentation.viewID) != nil {
-            DUIFactory.shared.createPage(presentation.viewID, pageArgs: presentation.args)
-        } else {
-            fallbackContent
-        }
+        fallbackContent
     }
 
     private var fallbackContent: some View {
