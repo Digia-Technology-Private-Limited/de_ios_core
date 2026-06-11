@@ -1,13 +1,5 @@
 import SwiftUI
 
-struct AnchoredOverlayState: Equatable, Sendable {
-    let payload: InAppPayload
-    let anchorKey: String
-    let anchorRect: CGRect
-    let command: String  // "SHOW_TOOLTIP" or "SHOW_SPOTLIGHT"
-    let cornerRadius: CGFloat  // spotlight cutout corner radius
-}
-
 struct InlineStoryOverlayState: Equatable {
     let config: InlineStoryConfig
     let initialIndex: Int
@@ -17,13 +9,9 @@ struct InlineStoryOverlayState: Equatable {
 @MainActor
 final class DigiaOverlayController: ObservableObject {
     @Published private(set) var activePayload: InAppPayload?
-    @Published private(set) var activeToast: DigiaToastPresentation?
     @Published private(set) var activeNudge: DigiaNudgePresentation?
-    @Published private(set) var slotPayloads: [String: InAppPayload] = [:]
-    @Published private(set) var activeAnchoredOverlay: AnchoredOverlayState?
     @Published private(set) var activeStoryOverlay: InlineStoryOverlayState?
 
-    private var toastToken = UUID()
     var onEvent: ((DigiaExperienceEvent, InAppPayload) -> Void)?
 
     func show(_ payload: InAppPayload) {
@@ -34,56 +22,25 @@ final class DigiaOverlayController: ObservableObject {
         activePayload = nil
     }
 
-    func showToast(_ presentation: DigiaToastPresentation) {
-        activeToast = presentation
-        let token = UUID()
-        toastToken = token
-        Task { @MainActor in
-            try? await Task.sleep(
-                nanoseconds: UInt64(max(presentation.durationSeconds, 0) * 1_000_000_000))
-            if self.toastToken == token {
-                self.dismissToast()
-            }
-        }
-    }
-
-    func dismissToast() {
-        activeToast = nil
-    }
-
-    func addSlot(_ placementKey: String, payload: InAppPayload) {
-        slotPayloads[placementKey] = payload
-    }
-
-    func slotPayload(for placementKey: String) -> InAppPayload? {
-        slotPayloads[placementKey]
-    }
-
-    func removeSlotByID(_ campaignID: String) {
-        slotPayloads = slotPayloads.filter { _, payload in payload.id != campaignID }
-    }
-
-    func clearSlots() {
-        slotPayloads.removeAll()
-    }
-
     func showNudge(_ presentation: DigiaNudgePresentation) {
-        activeNudge = presentation
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+            activeNudge = presentation
+        }
         onEvent?(.impressed, presentation.payload)
     }
 
     func dismissNudge() {
         guard let presentation = activeNudge else { return }
-        activeNudge = nil
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
+            activeNudge = nil
+        }
         onEvent?(.dismissed, presentation.payload)
     }
 
-    func showAnchored(_ state: AnchoredOverlayState) {
-        activeAnchoredOverlay = state
-    }
-
-    func dismissAnchored() {
-        activeAnchoredOverlay = nil
+    /// Clears the active nudge instantly with no animation and no event.
+    /// Used when the JS bundle reloads so a stale overlay doesn't persist.
+    func forceNudgeDismiss() {
+        activeNudge = nil
     }
 
     func showStoryOverlay(config: InlineStoryConfig, initialIndex: Int, payload: InAppPayload) {

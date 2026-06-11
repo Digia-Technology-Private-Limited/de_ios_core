@@ -86,12 +86,12 @@ private struct NudgeImageView: View {
         } else if node.aspectRatio > 0 {
             WebImage(url: URL(string: url))
                 .resizable()
-                .aspectRatio(node.aspectRatio, contentMode: .fit)
+                .aspectRatio(node.aspectRatio, contentMode: node.contentMode)
                 .frame(maxWidth: node.box.fillWidth ? .infinity : nil)
         } else {
             WebImage(url: URL(string: url))
                 .resizable()
-                .scaledToFill()
+                .aspectRatio(contentMode: node.contentMode)
                 .frame(
                     maxWidth: node.box.fillWidth ? .infinity : nil,
                     maxHeight: node.box.fixedHeight
@@ -122,6 +122,7 @@ private struct NudgeButtonView: View {
                 .padding(.vertical, 12)
                 .frame(maxWidth: node.box.fillWidth ? .infinity : nil)
         }
+        .buttonStyle(.plain)
         .frame(maxWidth: node.box.fillWidth ? .infinity : nil)
         .background(filled ? node.background : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: node.radius))
@@ -179,10 +180,18 @@ private struct NudgeLottieView: View {
         if resolved.isEmpty {
             nudgePlaceholder(label: "Lottie", height: node.height)
         } else if let url = URL(string: resolved) {
-            LottieView {
-                await LottieAnimation.loadedFrom(url: url)
+            Group {
+                if node.autoplay {
+                    LottieView {
+                        await LottieAnimation.loadedFrom(url: url)
+                    }
+                    .playing(loopMode: node.loop ? .loop : .playOnce)
+                } else {
+                    LottieView {
+                        await LottieAnimation.loadedFrom(url: url)
+                    }
+                }
             }
-            .playing(loopMode: node.loop ? .loop : .playOnce)
             .frame(maxWidth: .infinity)
             .frame(height: node.height)
         }
@@ -323,7 +332,7 @@ private extension View {
                     AnyView(RoundedRectangle(cornerRadius: box.borderRadius).fill(bg))
                 } ?? AnyView(EmptyView())
             )
-            .clipShape(RoundedRectangle(cornerRadius: max(box.borderRadius, 0)))
+            .clipShapeIfRadius(cornerRadius: box.borderRadius)
             .overlay(
                 (box.borderColor != nil && box.borderWidth > 0)
                     ? AnyView(RoundedRectangle(cornerRadius: box.borderRadius)
@@ -334,6 +343,19 @@ private extension View {
                 top: box.marginTop, leading: box.marginLeft,
                 bottom: box.marginBottom, trailing: box.marginRight
             ))
+    }
+}
+
+// MARK: - Conditional clip helper
+
+private extension View {
+    @ViewBuilder
+    func clipShapeIfRadius(cornerRadius: CGFloat) -> some View {
+        if cornerRadius > 0 {
+            clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        } else {
+            self
+        }
     }
 }
 

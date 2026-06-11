@@ -20,9 +20,6 @@ public struct DigiaHost<Content: View>: View {
             GuideOverlayView()
                 .zIndex(2)
 
-            DigiaToastOverlay(toast: controller.activeToast)
-                .zIndex(3)
-
             NudgeOverlayView()
                 .zIndex(5)
                 .animation(.easeInOut(duration: 0.25), value: controller.activeNudge)
@@ -35,27 +32,5 @@ public struct DigiaHost<Content: View>: View {
             controller.onEvent?(.dismissed, payload)
             controller.dismiss()
         }
-    }
-}
-
-private struct DigiaToastOverlay: View {
-    let toast: DigiaToastPresentation?
-
-    var body: some View {
-        VStack {
-            Spacer()
-            if let toast {
-                Text(toast.message)
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 14)
-                    .background(Color.black)
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .padding(.bottom, 32)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .animation(.easeInOut(duration: 0.2), value: toast != nil)
     }
 }

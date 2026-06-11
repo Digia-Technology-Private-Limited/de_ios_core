@@ -8,6 +8,11 @@ struct NudgeOverlayView: View {
         if let nudge = controller.activeNudge {
             NudgeContainerView(presentation: nudge)
                 .id(nudge.payload.id)
+                .transition(
+                    nudge.config.surface.isBottomSheet
+                        ? .move(edge: .bottom)
+                        : .opacity.combined(with: .scale(scale: 0.95, anchor: .center))
+                )
         }
     }
 }
@@ -39,16 +44,18 @@ private struct NudgeContainerView: View {
     private func dismiss() { SDKInstance.shared.controller.dismissNudge() }
 
     var body: some View {
-        ZStack(alignment: surface.isBottomSheet ? .bottom : .center) {
-            scrimColor
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { if surface.backdropDismissible { dismiss() } }
+        GeometryReader { geo in
+            ZStack(alignment: surface.isBottomSheet ? .bottom : .center) {
+                scrimColor
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture { if surface.backdropDismissible { dismiss() } }
 
-            if surface.isBottomSheet {
-                sheetPanel
-            } else {
-                dialogPanel
+                if surface.isBottomSheet {
+                    sheetPanel(bottomInset: geo.safeAreaInsets.bottom)
+                } else {
+                    dialogPanel
+                }
             }
         }
     }
@@ -57,7 +64,7 @@ private struct NudgeContainerView: View {
 
     /// Mirrors Flutter's `_SheetFrame`: top-rounded surface, optional drag
     /// handle, optional close button, drag-to-dismiss when `draggable`.
-    private var sheetPanel: some View {
+    private func sheetPanel(bottomInset: CGFloat) -> some View {
         ZStack(alignment: .topTrailing) {
             VStack(spacing: 0) {
                 if surface.showHandle {
@@ -94,6 +101,7 @@ private struct NudgeContainerView: View {
                     topTrailingRadius: surface.cornerRadius
                 )
             )
+            .padding(.bottom, bottomInset)
 
             if surface.showCloseButton { closeButton }
         }

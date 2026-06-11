@@ -15,16 +15,11 @@ public enum Digia {
         SDKInstance.shared.registerFontFactory(factory)
     }
 
-    @discardableResult
-    public static func onMessage(
-        _ name: String,
-        listener: @escaping @Sendable (JSONValue?) -> Void
-    ) -> UUID {
-        SDKInstance.shared.addMessageListener(name: name, listener: listener)
-    }
-
-    public static func removeMessageListener(_ name: String, token: UUID) {
-        SDKInstance.shared.removeMessageListener(name: name, token: token)
+    /// Silently dismisses any active nudge overlay without animation.
+    /// Call this when the JS bundle reloads so that a nudge from the previous
+    /// session doesn't remain stuck on screen.
+    public static func dismissActiveNudge() {
+        SDKInstance.shared.controller.forceNudgeDismiss()
     }
 
     /// True when any overlay (toast, dialog, bottom sheet, anchored tooltip/spotlight)
@@ -32,9 +27,7 @@ public enum Digia {
     /// to the SwiftUI layer or pass them through to content below.
     public static var hasActiveOverlay: Bool {
         let ctrl = SDKInstance.shared.controller
-        return ctrl.activeToast != nil
-            || ctrl.activeAnchoredOverlay != nil
-            || ctrl.activeStoryOverlay != nil
+        return ctrl.activeStoryOverlay != nil
             || ctrl.activeNudge != nil
             || SDKInstance.shared.surveyOrchestrator.state != nil
     }

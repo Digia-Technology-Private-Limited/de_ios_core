@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 
 @MainActor
 final class SDKInstance: ObservableObject, DigiaCEPDelegate {
@@ -8,27 +7,16 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     @Published private(set) var config: DigiaConfig?
     @Published private(set) var sdkState: SDKState = .notInitialized
     @Published private(set) var isHostMounted = false
-    @Published private(set) var isNavigationMounted = false
-    @Published private(set) var appState: [String: JSONValue] = [:]
 
     private var activePlugin: DigiaCEPPlugin?
     private(set) var fontFactory: DUIFontFactory = DefaultFontFactory()
-    private var messageSubscribers: [String: [UUID: @Sendable (JSONValue?) -> Void]] = [:]
-    private var appStateStore: AppStateStore?
 
-    let appConfigStore = AppConfigStore()
     let campaignStore = CampaignStore()
     let controller = DigiaOverlayController()
     let inlineController = InlineCampaignController()
     let guideOrchestrator = GuideOrchestrator()
-    let navigationController = DigiaNavigationController()
     let surveyOrchestrator = SurveyOrchestrator()
 
-    private(set) var lastOpenedURL: URL?
-    private(set) var clipboardString: String?
-    private(set) var lastShareRequest: (message: String, subject: String?)?
-    private(set) var lastDialogDismissed = false
-    private(set) var lastBottomSheetDismissed = false
     private var completedSurveyToken: Int64?
 
     private init() {
@@ -98,14 +86,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func onHostUnmounted() {
         isHostMounted = false
-    }
-
-    func onNavigationMounted() {
-        isNavigationMounted = true
-    }
-
-    func onNavigationUnmounted() {
-        isNavigationMounted = false
     }
 
     func onCampaignTriggered(_ payload: InAppPayload) {
@@ -344,96 +324,14 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         config = nil
         sdkState = .notInitialized
         isHostMounted = false
-        isNavigationMounted = false
         fontFactory = DefaultFontFactory()
         campaignStore.clear()
-        appConfigStore.clear()
-        campaignStore.clear()
         controller.dismiss()
-        controller.dismissToast()
         controller.dismissNudge()
-        controller.clearSlots()
         controller.dismissStoryOverlay()
         inlineController.clear()
         surveyOrchestrator.dismiss()
         guideOrchestrator.dismiss()
-        navigationController.reset()
-        messageSubscribers.removeAll()
-        appStateStore = nil
-        appState.removeAll()
-        lastOpenedURL = nil
-        clipboardString = nil
-        lastShareRequest = nil
-        lastDialogDismissed = false
-        lastBottomSheetDismissed = false
     }
 
-    @discardableResult
-    func addMessageListener(name: String, listener: @escaping @Sendable (JSONValue?) -> Void)
-        -> UUID
-    {
-        let token = UUID()
-        var listeners = messageSubscribers[name, default: [:]]
-        listeners[token] = listener
-        messageSubscribers[name] = listeners
-        return token
-    }
-
-    func removeMessageListener(name: String, token: UUID) {
-        guard var listeners = messageSubscribers[name] else { return }
-        listeners.removeValue(forKey: token)
-        messageSubscribers[name] = listeners
-    }
-
-    func publishMessage(name: String, payload: JSONValue?) {
-        messageSubscribers[name]?.values.forEach { listener in
-            listener(payload)
-        }
-    }
-
-    func setAppState(key: String, value: JSONValue) throws {
-        guard let appStateStore else {
-            throw AppStateStoreError.missingKey(key)
-        }
-        try appStateStore.update(key: key, value: value)
-        appState = appStateStore.snapshot()
-    }
-
-    func openURL(_ url: URL) {
-        lastOpenedURL = url
-        UIApplication.shared.open(url)
-    }
-
-    func copyToClipboard(_ text: String) {
-        clipboardString = text
-        UIPasteboard.general.string = text
-    }
-
-    func share(message: String, subject: String?) {
-        lastShareRequest = (message, subject)
-    }
-
-    func didDismissDialog() {
-        lastDialogDismissed = true
-    }
-
-    func didDismissBottomSheet() {
-        lastBottomSheetDismissed = true
-    }
-
-    private func initializeAppState(from appConfig: DigiaAppConfig, namespace: String) throws {
-        appState.removeAll()
-        let definitions = appConfig.appState ?? []
-        let store = try AppStateStore(definitions: definitions, namespace: namespace)
-        appStateStore = store
-        appState = store.snapshot()
-    }
-
-    private func stringArg(_ payload: InAppPayload, _ key: String) -> String? {
-        guard case .string(let value)? = payload.content.args[key] else {
-            return nil
-        }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
 }

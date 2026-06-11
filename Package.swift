@@ -18,7 +18,6 @@ let package = Package(
         .package(url: "https://github.com/SDWebImage/SDWebImageSwiftUI.git", from: "3.1.4"),
         .package(url: "https://github.com/SDWebImage/SDWebImageSVGCoder.git", from: "1.8.0"),
         .package(url: "https://github.com/elai950/AlertToast.git", from: "1.3.9"),
-        .package(url: "https://github.com/nalexn/ViewInspector.git", from: "0.10.3"),
     ],
     targets: [
         .target(
@@ -36,12 +35,8 @@ let package = Package(
             name: "DigiaEngageTests",
             dependencies: [
                 "DigiaEngage",
-                .product(name: "ViewInspector", package: "ViewInspector"),
             ],
-            path: "Tests/DigiaEngageTests",
-            resources: [
-                .process("Fixtures")
-            ]
+            path: "Tests/DigiaEngageTests"
         ),
     ]
 )
