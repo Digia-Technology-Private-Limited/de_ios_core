@@ -213,6 +213,66 @@ struct DigiaEngageTests {
     }
 }
 
+@Suite("NudgeActionParser")
+struct NudgeActionParserTests {
+    private func onClick(_ steps: [[String: Any]]) -> [String: Any] { ["steps": steps] }
+
+    @Test("parses open url and deeplink by launch mode")
+    func parsesUrls() {
+        let actions = NudgeActionParser().parse(onClick([
+            ["type": "Action.openUrl", "data": ["url": "https://x/y", "launchMode": "externalApplication"]],
+            ["type": "Action.openUrl", "data": ["url": "app://path", "launchMode": "platformDefault"]],
+        ]))
+        #expect(actions == [.openUrl("https://x/y"), .openDeeplink("app://path")])
+    }
+
+    @Test("parses copy to clipboard from message")
+    func parsesCopy() {
+        let actions = NudgeActionParser().parse(onClick([
+            ["type": "Action.copyToClipBoard", "data": ["message": "PROMO50"]],
+        ]))
+        #expect(actions == [.copyToClipboard("PROMO50")])
+    }
+
+    @Test("parses share from message")
+    func parsesShare() {
+        let actions = NudgeActionParser().parse(onClick([
+            ["type": "Action.share", "data": ["message": "check this out"]],
+        ]))
+        #expect(actions == [.share("check this out")])
+    }
+
+    @Test("text payload falls back to text then value keys")
+    func textFallbacks() {
+        let fromText = NudgeActionParser().parse(onClick([
+            ["type": "Action.copyToClipBoard", "data": ["text": "A"]],
+        ]))
+        let fromValue = NudgeActionParser().parse(onClick([
+            ["type": "Action.share", "data": ["value": "B"]],
+        ]))
+        #expect(fromText == [.copyToClipboard("A")])
+        #expect(fromValue == [.share("B")])
+    }
+
+    @Test("blank or missing text drops copy and share")
+    func dropsBlank() {
+        let actions = NudgeActionParser().parse(onClick([
+            ["type": "Action.copyToClipBoard", "data": [:]],
+            ["type": "Action.share", "data": ["message": ""]],
+        ]))
+        #expect(actions.isEmpty)
+    }
+
+    @Test("dismiss for hide bottom sheet and dismiss dialog")
+    func parsesDismiss() {
+        let actions = NudgeActionParser().parse(onClick([
+            ["type": "Action.hideBottomSheet"],
+            ["type": "Action.dismissDialog"],
+        ]))
+        #expect(actions == [.dismiss, .dismiss])
+    }
+}
+
 private func minimalSurveyTemplate() -> [String: Any] {
     // A welcome block is intro chrome (filtered from the node flow), so the
     // survey also needs at least one real question block + node to be valid.

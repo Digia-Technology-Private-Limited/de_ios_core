@@ -147,8 +147,29 @@ private struct NudgeButtonView: View {
                 if let u = URL(string: url) {
                     UIApplication.shared.open(u)
                 }
+            case .copyToClipboard(let text):
+                UIPasteboard.general.string = interpolate(text, variables: variables)
+            case .share(let text):
+                presentShareSheet(text: interpolate(text, variables: variables))
             }
         }
+    }
+
+    /// Presents the system share sheet from the top-most view controller, with
+    /// iPad popover anchoring so it doesn't crash on regular-width devices.
+    private func presentShareSheet(text: String) {
+        guard let root = ViewControllerUtil.findWindowScene()?.keyWindow?.rootViewController
+        else { return }
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
+        if let popover = activity.popoverPresentationController {
+            popover.sourceView = top.view
+            popover.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY,
+                                        width: 0, height: 0)
+            popover.permittedArrowDirections = []
+        }
+        top.present(activity, animated: true)
     }
 }
 
