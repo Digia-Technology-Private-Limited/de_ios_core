@@ -43,19 +43,31 @@ private struct NudgeContainerView: View {
 
     private func dismiss() { SDKInstance.shared.controller.dismissNudge() }
 
-    var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: surface.isBottomSheet ? .bottom : .center) {
-                scrimColor
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture { if surface.backdropDismissible { dismiss() } }
+    /// Real device bottom inset (home indicator), read from the active window.
+    /// We deliberately avoid a `GeometryReader`'s `safeAreaInsets` here: nesting
+    /// the overlay in a `GeometryReader` makes `.ignoresSafeArea()` and bottom
+    /// anchoring resolve against the reader's frame instead of the screen, which
+    /// left the sheet floating above the bottom edge (see git history). Mirrors
+    /// the window-sourced inset pattern in `DigiaInlineStoryView`.
+    private var deviceBottomInset: CGFloat {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .map(\.safeAreaInsets)
+            .first(where: { $0.bottom > 0 })?.bottom ?? 0
+    }
 
-                if surface.isBottomSheet {
-                    sheetPanel(bottomInset: geo.safeAreaInsets.bottom)
-                } else {
-                    dialogPanel
-                }
+    var body: some View {
+        ZStack(alignment: surface.isBottomSheet ? .bottom : .center) {
+            scrimColor
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { if surface.backdropDismissible { dismiss() } }
+
+            if surface.isBottomSheet {
+                sheetPanel
+            } else {
+                dialogPanel
             }
         }
     }
@@ -64,7 +76,7 @@ private struct NudgeContainerView: View {
 
     /// Mirrors Flutter's `_SheetFrame`: top-rounded surface, optional drag
     /// handle, optional close button, drag-to-dismiss when `draggable`.
-    private func sheetPanel(bottomInset: CGFloat) -> some View {
+    private var sheetPanel: some View {
         ZStack(alignment: .topTrailing) {
             VStack(spacing: 0) {
                 if surface.showHandle {
@@ -93,6 +105,7 @@ private struct NudgeContainerView: View {
                 }
                 .frame(height: contentHeight > 0 ? min(contentHeight, maxSheetHeight) : maxSheetHeight)
             }
+            .padding(.bottom, deviceBottomInset)
             .frame(maxWidth: .infinity)
             .background(backgroundColor)
             .clipShape(
@@ -101,13 +114,12 @@ private struct NudgeContainerView: View {
                     topTrailingRadius: surface.cornerRadius
                 )
             )
-            .padding(.bottom, bottomInset)
+            .ignoresSafeArea(.container, edges: .bottom)
 
             if surface.showCloseButton { closeButton }
         }
         .onPreferenceChange(SheetContentHeightKey.self) { contentHeight = $0 }
         .offset(y: max(dragOffset, 0))
-        .transition(.move(edge: .bottom))
     }
 
     /// Mirrors Flutter's `_DialogFrame`: centred, width-constrained, fully
@@ -163,8 +175,8 @@ private struct NudgeContainerView: View {
     // MARK: - Drag-to-dismiss (bottom sheet)
 
     private var dragGesture: some Gesture {
-        DragGesture()
-            .onChanged { value in dragOffset = value.translation.height }
+        DragGesture(coordinateSpace: .global)
+            .onChanged { value in dragOffset = max(value.translation.height, 0) }
             .onEnded { value in
                 if value.translation.height > 120 {
                     dismiss()
