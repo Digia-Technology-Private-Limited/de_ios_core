@@ -1,5 +1,4 @@
 import Foundation
-import UIKit
 
 @MainActor
 final class SDKInstance: ObservableObject, DigiaCEPDelegate {
@@ -8,29 +7,16 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     @Published private(set) var config: DigiaConfig?
     @Published private(set) var sdkState: SDKState = .notInitialized
     @Published private(set) var isHostMounted = false
-    @Published private(set) var isNavigationMounted = false
-    @Published private(set) var appState: [String: JSONValue] = [:]
 
     private var activePlugin: DigiaCEPPlugin?
     private(set) var fontFactory: DUIFontFactory = DefaultFontFactory()
-    private var messageSubscribers: [String: [UUID: @Sendable (JSONValue?) -> Void]] = [:]
-    private var appStateStore: AppStateStore?
-    private var localStateStores: [String: StateContext] = [:]
 
-    let appConfigStore = AppConfigStore()
     let campaignStore = CampaignStore()
     let controller = DigiaOverlayController()
     let inlineController = InlineCampaignController()
     let guideOrchestrator = GuideOrchestrator()
-    let navigationController = DigiaNavigationController()
     let surveyOrchestrator = SurveyOrchestrator()
 
-    private(set) var appStateStreams: [String: AppStateValueStream] = [:]
-    private(set) var lastOpenedURL: URL?
-    private(set) var clipboardString: String?
-    private(set) var lastShareRequest: (message: String, subject: String?)?
-    private(set) var lastDialogDismissed = false
-    private(set) var lastBottomSheetDismissed = false
     private var completedSurveyToken: Int64?
 
     private init() {
@@ -102,19 +88,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         isHostMounted = false
     }
 
-    func onNavigationMounted() {
-        isNavigationMounted = true
-    }
-
-    func onNavigationUnmounted() {
-        isNavigationMounted = false
-    }
-
     func onCampaignTriggered(_ payload: InAppPayload) {
-        NSLog(
-            "[Digia] onCampaignTriggered id='%@' type='%@' campaignKey='%@' placementKey='%@'",
-            payload.id, payload.content.type, payload.content.campaignKey ?? "nil",
-            payload.content.placementKey ?? "nil")
+        logVerbose(
+            "onCampaignTriggered id='\(payload.id)' type='\(payload.content.type)' "
+            + "campaignKey='\(payload.content.campaignKey ?? "nil")' "
+            + "placementKey='\(payload.content.placementKey ?? "nil")'")
         // campaign_key path (native CEP plugins, e.g. CleverTap): resolve the full
         // campaign from the store and route by campaignType, mirroring Android.
         // The key may arrive either in content.campaignKey or — as the RN bridge
@@ -137,9 +115,16 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             ?? argKey("campaign_key") ?? argKey("campaignKey")
             ?? (fallbackKey.isEmpty ? nil : fallbackKey)
 
-        NSLog("[Digia] onCampaignTriggered resolvedKey='%@'", resolvedKey ?? "nil")
+        logVerbose("onCampaignTriggered resolvedKey='\(resolvedKey ?? "nil")'")
         if let campaignKey = resolvedKey, campaignStore.find(campaignKey) != nil {
             routeByCampaignKey(campaignKey, payload: payload)
+            return
+        }
+
+        // Fallback: RN-triggered campaigns may omit `campaignKey`. If the payload id
+        // matches a stored campaign, route by it (covers native nudges via the RN bridge).
+        if campaignStore.find(payload.id) != nil {
+            routeByCampaignKey(payload.id, payload: payload)
             return
         }
 
@@ -167,19 +152,14 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     private func routeByCampaignKey(_ key: String, payload: InAppPayload) {
         guard let campaign = campaignStore.find(key) else {
-            NSLog(
-                "[Digia] routeByCampaignKey NO CAMPAIGN in store for key='%@' (storeEmpty=%@)", key,
-                campaignStore.isEmpty ? "YES" : "no")
             logVerbose("campaign_key path: no campaign found for key '\(key)'")
             return
         }
 
-        NSLog("[Digia] routeByCampaignKey key='%@' type='%@'", key, campaign.campaignType)
+        logVerbose("routeByCampaignKey key='\(key)' type='\(campaign.campaignType)'")
         switch campaign.config {
         case .inline(let cfg):
-            NSLog(
-                "[Digia] routeByCampaignKey INLINE slotKey='%@' items=%d", cfg.slotKey,
-                cfg.items.count)
+            logVerbose("routeByCampaignKey INLINE slotKey='\(cfg.slotKey)' items=\(cfg.items.count)")
             let routed = InAppPayload(
                 id: payload.id,
                 content: InAppPayloadContent(
@@ -199,8 +179,30 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             inlineController.setCampaign(cfg.slotKey, payload: routed)
         case .guide:
             guideOrchestrator.start(campaign, variables: payload.content.variables)
-        case .nudge:
-            controller.show(payload)
+        case .nudge(let nudgeConfig):
+            let routed = InAppPayload(
+                id: payload.id,
+                content: InAppPayloadContent(
+                    type: "nudge",
+                    args: payload.content.args.merging([
+                        "campaign_type": .string("nudge"),
+                        "display_style": .string(nudgeConfig.surface.displayType.displayStyle),
+                    ]) { _, new in new },
+                    campaignKey: key
+                ),
+                cepContext: payload.cepContext
+            )
+            // Dashboard-declared defaults first, CEP trigger variables layered
+            // on top (CEP wins) — mirrors Flutter's `digia_host._presentNudge`.
+            var mergedVariables = nudgeConfig.defaultVariables
+            for (key, value) in payload.content.variables ?? [:] {
+                mergedVariables[key] = value
+            }
+            controller.showNudge(DigiaNudgePresentation(
+                config: nudgeConfig,
+                payload: routed,
+                variables: mergedVariables.isEmpty ? nil : mergedVariables
+            ))
         case .survey(let cfg):
             let routed = InAppPayload(
                 id: campaign.campaignKey,
@@ -229,6 +231,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func onCampaignInvalidated(_ campaignID: String) {
         if controller.activePayload?.id == campaignID {
             controller.dismiss()
+        }
+        if controller.activeNudge?.payload.id == campaignID {
+            controller.dismissNudge()
         }
         if surveyOrchestrator.state?.payload.id == campaignID {
             surveyOrchestrator.dismiss()
@@ -264,29 +269,28 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func reportSurveyCompleted(response: [String: JSONValue], answers: [String: SurveyAnswer] = [:])
     {
         guard let state = surveyOrchestrator.state else {
-            NSLog("[Digia] reportSurveyCompleted: skip — no active survey state")
+            logVerbose("reportSurveyCompleted: skip — no active survey state")
             return
         }
         if completedSurveyToken == state.token {
-            NSLog("[Digia] reportSurveyCompleted: skip — already reported for token=\(state.token)")
+            logVerbose("reportSurveyCompleted: skip — already reported for token=\(state.token)")
             return
         }
         completedSurveyToken = state.token
         _ = response
-        NSLog("[Digia] reportSurveyCompleted: answers=\(answers.count) config=\(self.config != nil) cepContext=\(state.payload.cepContext)")
         if answers.isEmpty {
-            NSLog("[Digia] reportSurveyCompleted: skip — answers is empty")
+            logVerbose("reportSurveyCompleted: skip — answers is empty")
             return
         }
         guard let config = self.config else {
-            NSLog("[Digia] reportSurveyCompleted: skip — SDK not initialized (config is nil)")
+            logVerbose("reportSurveyCompleted: skip — SDK not initialized (config is nil)")
             return
         }
         guard let campaignId = state.payload.cepContext["campaignId"] else {
-            NSLog("[Digia] reportSurveyCompleted: skip — campaignId missing from cepContext keys=\(state.payload.cepContext.keys.sorted())")
+            logVerbose("reportSurveyCompleted: skip — campaignId missing from cepContext")
             return
         }
-        NSLog("[Digia] reportSurveyCompleted: submitting campaignId=\(campaignId) answers=\(answers.count)")
+        logVerbose("reportSurveyCompleted: submitting campaignId=\(campaignId) answers=\(answers.count)")
         SurveySubmissionReporter(config: config).report(
             campaignId: campaignId,
             survey: state.config,
@@ -320,122 +324,14 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         config = nil
         sdkState = .notInitialized
         isHostMounted = false
-        isNavigationMounted = false
         fontFactory = DefaultFontFactory()
         campaignStore.clear()
-        appConfigStore.clear()
-        campaignStore.clear()
         controller.dismiss()
-        controller.dismissBottomSheet()
-        controller.dismissDialog()
-        controller.dismissToast()
-        controller.clearSlots()
+        controller.dismissNudge()
         controller.dismissStoryOverlay()
         inlineController.clear()
         surveyOrchestrator.dismiss()
         guideOrchestrator.dismiss()
-        navigationController.reset()
-        messageSubscribers.removeAll()
-        appStateStore = nil
-        appState.removeAll()
-        appStateStreams.removeAll()
-        localStateStores.removeAll()
-        lastOpenedURL = nil
-        clipboardString = nil
-        lastShareRequest = nil
-        lastDialogDismissed = false
-        lastBottomSheetDismissed = false
     }
 
-    @discardableResult
-    func addMessageListener(name: String, listener: @escaping @Sendable (JSONValue?) -> Void)
-        -> UUID
-    {
-        let token = UUID()
-        var listeners = messageSubscribers[name, default: [:]]
-        listeners[token] = listener
-        messageSubscribers[name] = listeners
-        return token
-    }
-
-    func removeMessageListener(name: String, token: UUID) {
-        guard var listeners = messageSubscribers[name] else { return }
-        listeners.removeValue(forKey: token)
-        messageSubscribers[name] = listeners
-    }
-
-    func publishMessage(name: String, payload: JSONValue?) {
-        messageSubscribers[name]?.values.forEach { listener in
-            listener(payload)
-        }
-    }
-
-    func setAppState(key: String, value: JSONValue) throws {
-        guard let appStateStore else {
-            throw AppStateStoreError.missingKey(key)
-        }
-        try appStateStore.update(key: key, value: value)
-        appState = appStateStore.snapshot()
-        appStateStreams[key]?.publish(value.anyValue)
-        if let streamName = appStateStore.streamName(for: key) {
-            appStateStreams[streamName]?.publish(value.anyValue)
-        }
-    }
-
-    func registerStateContext(_ store: StateContext) {
-        guard let namespace = store.namespace, !namespace.isEmpty else { return }
-        localStateStores[namespace] = store
-    }
-
-    func unregisterStateContext(_ store: StateContext) {
-        guard let namespace = store.namespace, localStateStores[namespace] === store else { return }
-        localStateStores.removeValue(forKey: namespace)
-    }
-
-    func localStateStore(named namespace: String) -> StateContext? {
-        localStateStores[namespace]
-    }
-
-    func openURL(_ url: URL) {
-        lastOpenedURL = url
-        UIApplication.shared.open(url)
-    }
-
-    func copyToClipboard(_ text: String) {
-        clipboardString = text
-        UIPasteboard.general.string = text
-    }
-
-    func share(message: String, subject: String?) {
-        lastShareRequest = (message, subject)
-    }
-
-    func didDismissDialog() {
-        lastDialogDismissed = true
-    }
-
-    func didDismissBottomSheet() {
-        lastBottomSheetDismissed = true
-    }
-
-    private func initializeAppState(from appConfig: DigiaAppConfig, namespace: String) throws {
-        appState.removeAll()
-        appStateStreams.removeAll()
-        let definitions = appConfig.appState ?? []
-        let store = try AppStateStore(definitions: definitions, namespace: namespace)
-        appStateStore = store
-        appState = store.snapshot()
-        for definition in definitions {
-            let stream = AppStateValueStream(currentValue: appState[definition.name]?.anyValue)
-            appStateStreams[definition.streamName] = stream
-        }
-    }
-
-    private func stringArg(_ payload: InAppPayload, _ key: String) -> String? {
-        guard case .string(let value)? = payload.content.args[key] else {
-            return nil
-        }
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
-    }
 }

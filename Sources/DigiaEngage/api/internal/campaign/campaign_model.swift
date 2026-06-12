@@ -6,7 +6,7 @@ import Foundation
 
 enum CampaignConfigModel: Equatable {
     case guide(GuideConfigModel)
-    case nudge
+    case nudge(NudgeConfig)
     case inline(InlineCarouselConfig)
     case story(InlineStoryConfig)
     case survey(SurveyConfigModel)
@@ -33,6 +33,11 @@ struct CampaignModel: Equatable {
         return nil
     }
 
+    var nudgeConfig: NudgeConfig? {
+        if case let .nudge(value) = config { return value }
+        return nil
+    }
+
     var surveyConfig: SurveyConfigModel? {
         if case let .survey(value) = config { return value }
         return nil
@@ -49,7 +54,9 @@ struct CampaignModel: Equatable {
             guard let guideConfig = parseGuideConfig(json, fallbackId: id) else { return nil }
             config = .guide(guideConfig)
         case "nudge":
-            config = .nudge
+            guard let templateConfig = json.object("templateConfig"),
+                  let nudgeConfig = NudgeConfig.fromJson(templateConfig) else { return nil }
+            config = .nudge(nudgeConfig)
         case "inline":
             guard let templateConfig = json.object("templateConfig") else { return nil }
             switch templateConfig.string("templateType", default: "carousel") {

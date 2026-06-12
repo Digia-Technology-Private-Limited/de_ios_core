@@ -103,7 +103,7 @@ private struct GuideStepOverlay: View {
                         GeometryReader { g in
                             Color.clear
                                 .onAppear { bubbleHeight = g.size.height }
-                                .onChange(of: g.size.height) { bubbleHeight = $0 }
+                                .onChange(of: g.size.height) { _, newValue in bubbleHeight = newValue }
                         }
                     )
                     .frame(maxWidth: CGFloat(config.bubble.maxWidthDp))
