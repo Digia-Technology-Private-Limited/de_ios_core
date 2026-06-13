@@ -43,20 +43,6 @@ private struct NudgeContainerView: View {
 
     private func dismiss() { SDKInstance.shared.controller.dismissNudge() }
 
-    /// Real device bottom inset (home indicator), read from the active window.
-    /// We deliberately avoid a `GeometryReader`'s `safeAreaInsets` here: nesting
-    /// the overlay in a `GeometryReader` makes `.ignoresSafeArea()` and bottom
-    /// anchoring resolve against the reader's frame instead of the screen, which
-    /// left the sheet floating above the bottom edge (see git history). Mirrors
-    /// the window-sourced inset pattern in `DigiaInlineStoryView`.
-    private var deviceBottomInset: CGFloat {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap(\.windows)
-            .map(\.safeAreaInsets)
-            .first(where: { $0.bottom > 0 })?.bottom ?? 0
-    }
-
     var body: some View {
         ZStack(alignment: surface.isBottomSheet ? .bottom : .center) {
             scrimColor
@@ -93,7 +79,6 @@ private struct NudgeContainerView: View {
                 // `Surface.heightIn(max =)` + scrollable column.
                 ScrollView {
                     renderedContent
-                        .padding(surface.padding)
                         .background(
                             GeometryReader { proxy in
                                 Color.clear.preference(
@@ -105,7 +90,6 @@ private struct NudgeContainerView: View {
                 }
                 .frame(height: contentHeight > 0 ? min(contentHeight, maxSheetHeight) : maxSheetHeight)
             }
-            .padding(.bottom, deviceBottomInset)
             .frame(maxWidth: .infinity)
             .background(backgroundColor)
             .clipShape(
@@ -115,7 +99,6 @@ private struct NudgeContainerView: View {
                 )
             )
             .ignoresSafeArea(.container, edges: .bottom)
-
             if surface.showCloseButton { closeButton }
         }
         .onPreferenceChange(SheetContentHeightKey.self) { contentHeight = $0 }

@@ -244,7 +244,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     // MARK: - Survey lifecycle
     //
-    // CEP plugin sees: Impressed (started), Dismissed (closed without finishing).
+    // CEP plugin sees: Impressed (started), Dismissed (every teardown — closed
+    // without finishing AND completed; all routed through markSurveyDismissed).
     // Internal analytics (TBD) sees: Answered, Completed.
     // Surveys are started from `routeByCampaignKey` once a `survey` campaign is
     // resolved from the store, so there is no separate `startSurvey` entry point.
@@ -263,7 +264,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func markSurveyCompleted(response: [String: JSONValue], answers: [String: SurveyAnswer] = [:]) {
         reportSurveyCompleted(response: response, answers: answers)
-        surveyOrchestrator.dismiss()
+        markSurveyDismissed()
     }
 
     func reportSurveyCompleted(response: [String: JSONValue], answers: [String: SurveyAnswer] = [:])
@@ -300,7 +301,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func dismissCompletedSurvey() {
-        surveyOrchestrator.dismiss()
+        markSurveyDismissed()
     }
 
     func markSurveyDismissed() {
