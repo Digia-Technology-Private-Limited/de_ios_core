@@ -41,45 +41,38 @@ private struct SurveySession: View {
         let display = survey.settings.display
 
         ZStack {
-            Color.clear
-            if visible && !vm.isComplete {
-                ZStack {
-                    switch display.type {
-                    case .bottomSheet:
-                        BottomSheetContainer(
-                            sheet: display.bottomSheet,
-                            background: background,
-                            onDismiss: { finish(completed: false) },
-                            content: {
-                                SurveyBody(
-                                    vm: vm,
-                                    survey: survey,
-                                    accent: accent,
-                                    onClose: { finish(completed: false) },
-                                    onCompletedClose: { SDKInstance.shared.dismissCompletedSurvey() },
-                                    showCloseButton: display.bottomSheet.backdropDismissible
-                                )
-                            }
-                        )
-                    case .dialog:
-                        DialogContainer(
-                            dialog: display.dialog,
-                            background: background,
-                            onDismiss: { finish(completed: false) },
-                            content: {
-                                SurveyBody(
-                                    vm: vm,
-                                    survey: survey,
-                                    accent: accent,
-                                    onClose: { finish(completed: false) },
-                                    onCompletedClose: { SDKInstance.shared.dismissCompletedSurvey() },
-                                    showCloseButton: display.dialog.showCloseButton
-                                )
-                            }
+            // Center dialogs keep the custom overlay; bottom sheets use the
+            // native sheet, which hugs its content (no dead space) and owns the
+            // scrim, drag-to-dismiss and safe-area handling.
+            if visible && !vm.isComplete && display.type == .dialog {
+                DialogContainer(
+                    dialog: display.dialog,
+                    background: background,
+                    onDismiss: { finish(completed: false) },
+                    content: {
+                        SurveyBody(
+                            vm: vm,
+                            survey: survey,
+                            accent: accent,
+                            onClose: { finish(completed: false) },
+                            onCompletedClose: { SDKInstance.shared.dismissCompletedSurvey() },
+                            showCloseButton: display.dialog.showCloseButton
                         )
                     }
-                }
+                )
                 .transition(.opacity)
+            }
+        }
+        .sheet(isPresented: sheetPresented) {
+            SurveySheet(sheet: display.bottomSheet, background: background) {
+                SurveyBody(
+                    vm: vm,
+                    survey: survey,
+                    accent: accent,
+                    onClose: { finish(completed: false) },
+                    onCompletedClose: { SDKInstance.shared.dismissCompletedSurvey() },
+                    showCloseButton: display.bottomSheet.backdropDismissible
+                )
             }
         }
         .task(id: state.token) {
@@ -104,143 +97,53 @@ private struct SurveySession: View {
             SDKInstance.shared.markSurveyDismissed()
         }
     }
+
+    /// Drives the native sheet for bottom-sheet surveys. Clearing it (swipe-down)
+    /// routes through `finish(completed:)` so the dismissal is still reported.
+    private var sheetPresented: Binding<Bool> {
+        Binding(
+            get: {
+                visible && !vm.isComplete
+                    && state.config.settings.display.type == .bottomSheet
+            },
+            set: { presented in if !presented { finish(completed: false) } }
+        )
+    }
 }
 
 // MARK: - Containers
 
-private struct BottomSheetContainer<Content: View>: View {
+/// Maps the survey's `BottomSheetProps` onto the shared `DigiaBottomSheet`. The
+/// survey body manages its own internal scrolling (`ContentSizedScrollView`), so
+/// it renders with `scrollable: false`.
+private struct SurveySheet<Content: View>: View {
     let sheet: BottomSheetProps
     let background: Color
-    let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
 
-    @State private var dragOffset: CGFloat = 0
-    // Dismissal (backdrop tap / drag) is disabled until the sheet has been on
-    // screen long enough for the CTA Buttons' gesture recognisers to attach.
-    // Without this, the very first tap after the sheet appears can land before
-    // the Button is interactive and instead resolves to the always-live
-    // backdrop dismiss gesture — closing the survey on the user's first tap.
-    @State private var armed = false
+    /// `heightMode` becomes the sheet's *cap*, not a fixed height: short content
+    /// hugs (no dead space), taller content scrolls within this ceiling.
+    private var heightCapFraction: CGFloat {
+        switch sheet.heightMode {
+        case .wrap:   return 0.95
+        case .half:   return 0.5
+        case .full:   return 0.98
+        case .custom: return CGFloat(max(10, min(100, sheet.customHeight))) / 100.0
+        }
+    }
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .bottom) {
-                Color.black.opacity(0.4)
-                    .ignoresSafeArea()
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        if armed && sheet.backdropDismissible { onDismiss() }
-                    }
-
-                VStack(spacing: 0) {
-                    if sheet.showHandle {
-                        Capsule()
-                            .fill(SurveyTokens.border)
-                            .frame(width: 40, height: 4)
-                            .padding(.vertical, 8)
-                    }
-                    content()
-                }
-                .frame(maxWidth: .infinity)
-                .frame(maxHeight: sheetMaxHeight(geo: geo), alignment: .top)
-                .modifier(WrapHeightIfNeeded(wrap: sheet.heightMode == .wrap))
-                .background(
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: CGFloat(sheet.cornerRadius),
-                        topTrailingRadius: CGFloat(sheet.cornerRadius)
-                    )
-                    .fill(background)
-                )
-                .clipShape(
-                    UnevenRoundedRectangle(
-                        topLeadingRadius: CGFloat(sheet.cornerRadius),
-                        topTrailingRadius: CGFloat(sheet.cornerRadius)
-                    )
-                )
-                .offset(y: dragOffset)
-                .gesture(
-                    sheet.draggable
-                        ? DragGesture()
-                            .onChanged { value in
-                                dragOffset = max(0, value.translation.height)
-                            }
-                            .onEnded { value in
-                                if armed && value.translation.height > 150 {
-                                    onDismiss()
-                                } else {
-                                    withAnimation(.easeOut) { dragOffset = 0 }
-                                }
-                            }
-                        : nil
-                )
-                .padding(.bottom, geo.safeAreaInsets.bottom)
-            }
-            .task {
-                try? await Task.sleep(nanoseconds: 350_000_000)
-                armed = true
-            }
-        }
-    }
-
-    private func sheetMaxHeight(geo: GeometryProxy) -> CGFloat {
-        let screen = geo.size.height
-        switch sheet.heightMode {
-        case .wrap: return screen // safety cap only; fixedSize makes content drive size
-        case .half: return screen * 0.5
-        case .full: return screen
-        case .custom:
-            let pct = Double(max(10, min(100, sheet.customHeight))) / 100.0
-            return screen * pct
-        }
-    }
-}
-
-private struct WrapHeightIfNeeded: ViewModifier {
-    let wrap: Bool
-    func body(content: Content) -> some View {
-        if wrap {
-            content.fixedSize(horizontal: false, vertical: true)
-        } else {
-            content
-        }
-    }
-}
-
-private struct UnevenRoundedRectangle: Shape {
-    var topLeadingRadius: CGFloat = 0
-    var topTrailingRadius: CGFloat = 0
-    var bottomLeadingRadius: CGFloat = 0
-    var bottomTrailingRadius: CGFloat = 0
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        let tl = topLeadingRadius
-        let tr = topTrailingRadius
-        let bl = bottomLeadingRadius
-        let br = bottomTrailingRadius
-        path.move(to: CGPoint(x: rect.minX + tl, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX - tr, y: rect.minY))
-        if tr > 0 {
-            path.addArc(center: CGPoint(x: rect.maxX - tr, y: rect.minY + tr),
-                        radius: tr, startAngle: .degrees(-90), endAngle: .degrees(0), clockwise: false)
-        }
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - br))
-        if br > 0 {
-            path.addArc(center: CGPoint(x: rect.maxX - br, y: rect.maxY - br),
-                        radius: br, startAngle: .degrees(0), endAngle: .degrees(90), clockwise: false)
-        }
-        path.addLine(to: CGPoint(x: rect.minX + bl, y: rect.maxY))
-        if bl > 0 {
-            path.addArc(center: CGPoint(x: rect.minX + bl, y: rect.maxY - bl),
-                        radius: bl, startAngle: .degrees(90), endAngle: .degrees(180), clockwise: false)
-        }
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + tl))
-        if tl > 0 {
-            path.addArc(center: CGPoint(x: rect.minX + tl, y: rect.minY + tl),
-                        radius: tl, startAngle: .degrees(180), endAngle: .degrees(270), clockwise: false)
-        }
-        path.closeSubpath()
-        return path
+        DigiaBottomSheet(
+            config: DigiaBottomSheetConfig(
+                cornerRadius: CGFloat(sheet.cornerRadius),
+                background: background,
+                showHandle: sheet.showHandle,
+                allowInteractiveDismiss: sheet.draggable || sheet.backdropDismissible,
+                heightCapFraction: heightCapFraction
+            ),
+            scrollable: false,
+            content: content
+        )
     }
 }
 
@@ -250,8 +153,8 @@ private struct DialogContainer<Content: View>: View {
     let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
 
-    // See BottomSheetContainer.armed — blocks the first-frame backdrop tap from
-    // closing the survey before the CTA Buttons are interactive.
+    // Blocks the first-frame backdrop tap from closing the survey before the
+    // CTA Buttons' gesture recognisers are interactive.
     @State private var armed = false
 
     var body: some View {

@@ -141,8 +141,9 @@ struct NudgeConfig: Equatable {
 /// `NudgeOverlayView`. Carries the trigger `variables` so the renderer can
 /// interpolate `{{ placeholder }}` copy (mirrors Flutter's `VariableScope`
 /// threaded into `presentNudge`).
-struct DigiaNudgePresentation: Equatable {
+struct DigiaNudgePresentation: Equatable, Identifiable {
     let config: NudgeConfig
     let payload: InAppPayload
     let variables: [String: String]?
+    var id: String { payload.id }
 }
