@@ -37,14 +37,6 @@ extension Dictionary where Key == String, Value == Any {
         return fallback
     }
 
-    /// Optional numeric: `null` / missing / non-numeric => `nil`.
-    func optionalDouble(_ key: String) -> Double? {
-        guard let raw = self[key], !(raw is NSNull) else { return nil }
-        if let value = raw as? NSNumber { return value.doubleValue }
-        if let value = raw as? String { return Double(value) }
-        return nil
-    }
-
     /// Positive int (`> 0`) or `nil`.
     func positiveInt(_ key: String) -> Int? {
         guard let raw = self[key], !(raw is NSNull) else { return nil }

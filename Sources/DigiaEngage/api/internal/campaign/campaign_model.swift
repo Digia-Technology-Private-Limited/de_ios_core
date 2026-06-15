@@ -23,11 +23,6 @@ struct CampaignModel: Equatable {
         return nil
     }
 
-    var inlineConfig: InlineCarouselConfig? {
-        if case let .inline(value) = config { return value }
-        return nil
-    }
-
     var storyConfig: InlineStoryConfig? {
         if case let .story(value) = config { return value }
         return nil

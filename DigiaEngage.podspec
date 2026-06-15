@@ -12,7 +12,6 @@ Pod::Spec.new do |s|
 
   s.source_files = 'Sources/**/*.swift'
 
-  s.dependency 'DigiaExpr', '~> 0.1.0'
   s.dependency 'lottie-ios', '~> 4.5'
   s.dependency 'SDWebImageSVGCoder', '>= 1.7.0'
   s.dependency 'SDWebImageSwiftUI', '~> 3.1'
