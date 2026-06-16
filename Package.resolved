@@ -1,24 +1,6 @@
 {
-  "originHash" : "0d49e20299276a76a4f0f64522076ca13d3e1f8419bad8f1cea57ffeceecc88b",
+  "originHash" : "c8533cd0278641b6b8a8d591642c25d0237a37223fda8d9799ee9ff789dc6c17",
   "pins" : [
-    {
-      "identity" : "alerttoast",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/elai950/AlertToast.git",
-      "state" : {
-        "revision" : "b39252eacd159904afd7d718bba0afabb87f2f2f",
-        "version" : "1.3.9"
-      }
-    },
-    {
-      "identity" : "digia_expr_swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/Digia-Technology-Private-Limited/digia_expr_swift.git",
-      "state" : {
-        "revision" : "965d4f953f4809e09f3613ac073264af56fb11aa",
-        "version" : "0.1.0"
-      }
-    },
     {
       "identity" : "lottie-spm",
       "kind" : "remoteSourceControl",
