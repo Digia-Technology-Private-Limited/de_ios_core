@@ -1,4 +1,5 @@
 import UIKit
+import Combine
 
 @MainActor
 public final class AnchorRegistry: ObservableObject {

@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 // Native multi-step guide renderer (tooltip / spotlight), ported from Android's
 // `GuideRenderer.kt`. Driven by GuideOrchestrator state and styled entirely from
