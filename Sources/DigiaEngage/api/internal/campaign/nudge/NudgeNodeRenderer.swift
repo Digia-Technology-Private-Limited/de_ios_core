@@ -1,6 +1,6 @@
 import SwiftUI
-import SDWebImageSwiftUI
-import Lottie
+@_implementationOnly import SDWebImageSwiftUI
+@_implementationOnly import Lottie
 import AVKit
 import UIKit
 
