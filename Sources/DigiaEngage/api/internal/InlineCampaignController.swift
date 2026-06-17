@@ -2,12 +2,11 @@ import SwiftUI
 
 @MainActor
 final class InlineCampaignController: ObservableObject {
-    @Published private var campaigns: [String: InAppPayload] = [:]
+    @Published private var campaigns: [String: CEPTriggerPayload] = [:]
     @Published private var carouselConfigs: [String: InlineCarouselConfig] = [:]
     @Published private var storyConfigs: [String: InlineStoryConfig] = [:]
-    var onEvent: ((DigiaExperienceEvent, InAppPayload) -> Void)?
 
-    func getCampaign(_ placementKey: String) -> InAppPayload? {
+    func getCampaign(_ placementKey: String) -> CEPTriggerPayload? {
         campaigns[placementKey]
     }
 
@@ -19,7 +18,7 @@ final class InlineCampaignController: ObservableObject {
         storyConfigs[placementKey]
     }
 
-    func setCampaign(_ placementKey: String, payload: InAppPayload) {
+    func setCampaign(_ placementKey: String, payload: CEPTriggerPayload) {
         var next = campaigns
         next[placementKey] = payload
         campaigns = next
@@ -40,10 +39,10 @@ final class InlineCampaignController: ObservableObject {
     func removeCampaign(_ campaignID: String) {
         let removedKeys =
             campaigns
-            .filter { $0.key == campaignID || $0.value.id == campaignID }
+            .filter { $0.key == campaignID || $0.value.cepCampaignId == campaignID }
             .map(\.key)
         campaigns = campaigns.filter { placementKey, payload in
-            placementKey != campaignID && payload.id != campaignID
+            placementKey != campaignID && payload.cepCampaignId != campaignID
         }
         for key in removedKeys {
             carouselConfigs.removeValue(forKey: key)

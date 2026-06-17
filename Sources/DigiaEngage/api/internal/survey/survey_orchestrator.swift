@@ -4,7 +4,7 @@ import Combine
 /// The survey currently routed for display. `token` is unique per showing so
 /// the renderer can key a fresh in-progress state to it.
 struct ActiveSurveyState: Equatable {
-    let payload: InAppPayload
+    let payload: CEPTriggerPayload
     let config: SurveyConfigModel
     let token: Int64
     let startedAt: Date
@@ -21,7 +21,7 @@ final class SurveyOrchestrator: ObservableObject {
     /// Starts a survey. Returns false if another survey is already showing or
     /// the config is empty.
     @discardableResult
-    func start(payload: InAppPayload, config: SurveyConfigModel) -> Bool {
+    func start(payload: CEPTriggerPayload, config: SurveyConfigModel) -> Bool {
         guard !config.nodes.isEmpty, !config.blocks.isEmpty else { return false }
         if state != nil { return false }
         tokenCounter += 1

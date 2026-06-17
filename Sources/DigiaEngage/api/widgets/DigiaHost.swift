@@ -27,8 +27,9 @@ public struct DigiaHost<Content: View>: View {
                 .zIndex(4)
         }
         .onChange(of: controller.activePayload, initial: false) { _, payload in
-            guard let payload else { return }
-            controller.onEvent?(.dismissed, payload)
+            // The generic typed-overlay path has no resolved campaign context, so
+            // it no longer participates in analytics — just clear it.
+            guard payload != nil else { return }
             controller.dismiss()
         }
     }

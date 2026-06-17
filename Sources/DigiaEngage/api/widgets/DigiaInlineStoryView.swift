@@ -5,7 +5,7 @@ import UIKit
 @MainActor
 struct DigiaInlineStoryView: View {
     let config: InlineStoryConfig
-    let payload: InAppPayload
+    let payload: CEPTriggerPayload
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {

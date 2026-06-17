@@ -143,6 +143,6 @@ struct NudgeConfig: Equatable {
 /// threaded into `presentNudge`).
 struct DigiaNudgePresentation: Equatable {
     let config: NudgeConfig
-    let payload: InAppPayload
+    let payload: CEPTriggerPayload
     let variables: [String: String]?
 }

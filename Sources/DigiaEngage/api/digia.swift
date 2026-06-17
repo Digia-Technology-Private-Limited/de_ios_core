@@ -44,7 +44,9 @@ public enum Digia {
 
     /// Records an analytics event for JS-rendered campaigns (guides / tooltips / spotlights).
     /// Native campaigns (nudge, inline, survey) are tracked automatically by the SDK.
-    public static func captureAnalyticsEvent(_ event: DigiaExperienceEvent, payload: InAppPayload) {
+    /// The campaign is resolved from the store by `payload.campaignKey` and the
+    /// coarse event is mapped onto the matching rich Digia analytics event.
+    public static func captureAnalyticsEvent(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
         SDKInstance.shared.captureAnalyticsEvent(event, payload: payload)
     }
 }

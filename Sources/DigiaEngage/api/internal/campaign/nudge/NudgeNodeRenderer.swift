@@ -136,8 +136,17 @@ private struct NudgeButtonView: View {
     }
 
     private func handleTap() {
-        if node.isPrimary, let payload = SDKInstance.shared.controller.activeNudge?.payload {
-            SDKInstance.shared.controller.onEvent?(.clicked(elementID: nil), payload)
+        // A primary-button click is a Digia-only engagement signal (matches
+        // Android's NudgeNodeRenderer) — it is not forwarded to the CEP plugin.
+        if node.isPrimary {
+            let action = node.actions.first
+            SDKInstance.shared.emitNudgeClick(
+                elementId: "cta_primary",
+                ctaLabel: node.label,
+                actionType: Self.actionType(for: action),
+                actionUrl: Self.actionUrl(for: action),
+                ctaPosition: "primary"
+            )
         }
         for action in node.actions {
             switch action {
@@ -156,6 +165,23 @@ private struct NudgeButtonView: View {
                 )
                 ViewControllerUtil.present(activity)
             }
+        }
+    }
+
+    private static func actionType(for action: NudgeAction?) -> String? {
+        switch action {
+        case .openUrl: return "url"
+        case .openDeeplink: return "deeplink"
+        case .dismiss: return "dismiss"
+        case .copyToClipboard, .share: return "custom"
+        case nil: return nil
+        }
+    }
+
+    private static func actionUrl(for action: NudgeAction?) -> String? {
+        switch action {
+        case .openUrl(let url), .openDeeplink(let url): return url
+        default: return nil
         }
     }
 }

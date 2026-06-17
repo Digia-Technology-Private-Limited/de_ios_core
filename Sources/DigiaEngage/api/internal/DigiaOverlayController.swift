@@ -3,16 +3,17 @@ import SwiftUI
 struct InlineStoryOverlayState: Equatable {
     let config: InlineStoryConfig
     let initialIndex: Int
-    let payload: InAppPayload
+    let payload: CEPTriggerPayload
 }
 
 @MainActor
 final class DigiaOverlayController: ObservableObject {
+    /// Generic typed-overlay path (RN/JS-driven campaigns that arrive without a
+    /// resolvable `campaignKey`). Carries the rich ``InAppPayload`` so the host
+    /// can route by display type; it is not part of the analytics event flow.
     @Published private(set) var activePayload: InAppPayload?
     @Published private(set) var activeNudge: DigiaNudgePresentation?
     @Published private(set) var activeStoryOverlay: InlineStoryOverlayState?
-
-    var onEvent: ((DigiaExperienceEvent, InAppPayload) -> Void)?
 
     func show(_ payload: InAppPayload) {
         activePayload = payload
@@ -22,19 +23,19 @@ final class DigiaOverlayController: ObservableObject {
         activePayload = nil
     }
 
+    /// Sets the nudge state. Impression/dismissal analytics are emitted by
+    /// ``SDKInstance`` (`reportNudgeImpression` / `markNudgeDismissed`), not here.
     func showNudge(_ presentation: DigiaNudgePresentation) {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
             activeNudge = presentation
         }
-        onEvent?(.impressed, presentation.payload)
     }
 
     func dismissNudge() {
-        guard let presentation = activeNudge else { return }
+        guard activeNudge != nil else { return }
         withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
             activeNudge = nil
         }
-        onEvent?(.dismissed, presentation.payload)
     }
 
     /// Clears the active nudge instantly with no animation and no event.
@@ -43,7 +44,7 @@ final class DigiaOverlayController: ObservableObject {
         activeNudge = nil
     }
 
-    func showStoryOverlay(config: InlineStoryConfig, initialIndex: Int, payload: InAppPayload) {
+    func showStoryOverlay(config: InlineStoryConfig, initialIndex: Int, payload: CEPTriggerPayload) {
         let state = InlineStoryOverlayState(
             config: config,
             initialIndex: initialIndex,

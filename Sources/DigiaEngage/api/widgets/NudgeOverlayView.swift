@@ -7,7 +7,8 @@ struct NudgeOverlayView: View {
     var body: some View {
         if let nudge = controller.activeNudge {
             NudgeContainerView(presentation: nudge)
-                .id(nudge.payload.id)
+                .id(nudge.payload.cepCampaignId)
+                .onAppear { SDKInstance.shared.reportNudgeImpression() }
                 .transition(
                     nudge.config.surface.isBottomSheet
                         ? .move(edge: .bottom)
@@ -41,7 +42,7 @@ private struct NudgeContainerView: View {
     /// content scrolls within this, short content hugs its natural height.
     private var maxSheetHeight: CGFloat { UIScreen.main.bounds.height * 0.85 }
 
-    private func dismiss() { SDKInstance.shared.controller.dismissNudge() }
+    private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
 
     var body: some View {
         ZStack(alignment: surface.isBottomSheet ? .bottom : .center) {

@@ -87,25 +87,29 @@ final class AnalyticsService {
 
     // MARK: - Public
 
-    func capture(_ event: DigiaExperienceEvent, payload: InAppPayload) {
+    /// Records a rich, campaign-grouped ``EngageAnalyticsEvent``. The event's
+    /// `columns` are hoisted to the payload's top level (alongside `campaign_id`);
+    /// its `properties` are nested under `properties`. Campaign id/type are
+    /// resolved by the caller (``DigiaAnalyticsSink``) from the campaign store.
+    func capture(
+        _ event: EngageAnalyticsEvent,
+        payload: CEPTriggerPayload,
+        campaignId: String?,
+        campaignType: String?
+    ) {
         guard config.enabled else {
-            print("[DigiaAnalytics] capture: DISABLED — event '\(event.analyticsEventName)' dropped")
+            print("[DigiaAnalytics] capture: DISABLED — event '\(event.eventName)' dropped")
             return
         }
-        let campaignKey = payload.content.campaignKey ?? argString(payload.content.args["campaign_key"])
-        let campaignId = argString(payload.content.args["campaign_id"]) ?? payload.id
-        let campaignType = payload.content.type.isEmpty ? nil : payload.content.type
-        print("[DigiaAnalytics] capture: event='\(event.analyticsEventName)' campaignKey=\(campaignKey ?? "nil") campaignId=\(campaignId)")
-
-        let elementId: String?
-        if case .clicked(let eid) = event { elementId = eid } else { elementId = nil }
+        print("[DigiaAnalytics] capture: event='\(event.eventName)' campaignKey=\(payload.campaignKey) campaignId=\(campaignId ?? "nil")")
 
         enqueue(
-            eventName: event.analyticsEventName,
+            eventName: event.eventName,
             campaignId: campaignId,
-            campaignKey: campaignKey,
+            campaignKey: payload.campaignKey,
             campaignType: campaignType,
-            extraProperties: elementId.map { ["element_id": $0] } ?? [:]
+            columns: event.columns,
+            properties: event.properties
         )
     }
 
@@ -185,13 +189,14 @@ final class AnalyticsService {
         campaignId: String?,
         campaignKey: String?,
         campaignType: String?,
-        extraProperties: [String: Any] = [:]
+        columns: [String: Any] = [:],
+        properties: [String: Any] = [:]
     ) {
         let eventId = UUID().uuidString
         identity.captureEventTime()
 
-        var properties = staticContext
-        for (k, v) in extraProperties { properties[k] = v }
+        var mergedProperties = staticContext
+        for (k, v) in properties { mergedProperties[k] = v }
 
         var payloadMap: [String: Any] = [
             "event_id": eventId,
@@ -199,12 +204,17 @@ final class AnalyticsService {
             "occurred_at": isoNow(),
             "anonymous_id": identity.anonymousId,
             "session_id": identity.sessionId,
-            "properties": properties,
         ]
         if let id = campaignId { payloadMap["campaign_id"] = id }
         if let key = campaignKey { payloadMap["campaign_key"] = key }
         if let type = campaignType { payloadMap["campaign_type"] = type }
         if let uid = identity.userId { payloadMap["user_id"] = uid }
+        // Per-event hoisted columns sit at the top level alongside campaign_id
+        // (reserved keys above always win). Everything else goes in properties.
+        for (key, value) in columns where payloadMap[key] == nil {
+            payloadMap[key] = value
+        }
+        payloadMap["properties"] = mergedProperties
 
         queue.append(
             QueueEntry(eventId: eventId, payload: payloadMap, createdAt: Date().timeIntervalSince1970, attempts: 0),
@@ -319,11 +329,6 @@ final class AnalyticsService {
         return fmt.string(from: Date())
     }
 
-    private func argString(_ value: JSONValue?) -> String? {
-        guard case .string(let s) = value, !s.isEmpty else { return nil }
-        return s
-    }
-
     private static func buildStaticContext() -> [String: Any] {
         var ctx: [String: Any] = [
             "sdk_version": "1.0.0",
@@ -344,17 +349,5 @@ final class AnalyticsService {
         }
         if !machine.isEmpty { ctx["device_model"] = machine }
         return ctx
-    }
-}
-
-// MARK: - Event name mapping
-
-private extension DigiaExperienceEvent {
-    var analyticsEventName: String {
-        switch self {
-        case .impressed: return "Digia Experience Viewed"
-        case .clicked: return "Digia Experience Clicked"
-        case .dismissed: return "Digia Experience Dismissed"
-        }
     }
 }
