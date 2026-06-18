@@ -101,7 +101,9 @@ final class AnalyticsService {
             print("[DigiaAnalytics] capture: DISABLED — event '\(event.eventName)' dropped")
             return
         }
-        print("[DigiaAnalytics] capture: event='\(event.eventName)' campaignKey=\(payload.campaignKey) campaignId=\(campaignId ?? "nil")")
+        print(
+            "[DigiaAnalytics] capture: event='\(event.eventName)' campaignKey=\(payload.campaignKey) campaignId=\(campaignId ?? "nil")"
+        )
 
         enqueue(
             eventName: event.eventName,
@@ -150,10 +152,14 @@ final class AnalyticsService {
     static func create(config: DigiaConfig) -> AnalyticsService? {
         let ac = config.analyticsConfig
         guard ac.enabled else {
-            print("[DigiaAnalytics] create: analytics DISABLED in DigiaConfig — no events will be captured")
+            print(
+                "[DigiaAnalytics] create: analytics DISABLED in DigiaConfig — no events will be captured"
+            )
             return nil
         }
-        print("[DigiaAnalytics] create: analytics enabled, batchSize=\(ac.flushBatchSize) interval=\(ac.flushIntervalMs)ms")
+        print(
+            "[DigiaAnalytics] create: analytics enabled, batchSize=\(ac.flushBatchSize) interval=\(ac.flushIntervalMs)ms"
+        )
         return AnalyticsService(
             config: ac,
             apiKey: config.apiKey,
@@ -179,7 +185,9 @@ final class AnalyticsService {
             body: data,
             headers: ["Content-Type": "application/json", "X-Digia-Project-Id": apiKey]
         )
-        print("[DigiaAnalytics] session reported: HTTP \(status ?? -1) sessionId=\(identity.sessionId) anonymousId=\(identity.anonymousId)")
+        print(
+            "[DigiaAnalytics] session reported: HTTP \(status ?? -1) sessionId=\(identity.sessionId) anonymousId=\(identity.anonymousId)"
+        )
     }
 
     // MARK: - Private
@@ -197,6 +205,7 @@ final class AnalyticsService {
 
         var mergedProperties = staticContext
         for (k, v) in properties { mergedProperties[k] = v }
+        for (k, v) in columns { mergedProperties[k] = v }
 
         var payloadMap: [String: Any] = [
             "event_id": eventId,
@@ -209,18 +218,18 @@ final class AnalyticsService {
         if let key = campaignKey { payloadMap["campaign_key"] = key }
         if let type = campaignType { payloadMap["campaign_type"] = type }
         if let uid = identity.userId { payloadMap["user_id"] = uid }
-        // Per-event hoisted columns sit at the top level alongside campaign_id
-        // (reserved keys above always win). Everything else goes in properties.
-        for (key, value) in columns where payloadMap[key] == nil {
-            payloadMap[key] = value
-        }
+
         payloadMap["properties"] = mergedProperties
 
         queue.append(
-            QueueEntry(eventId: eventId, payload: payloadMap, createdAt: Date().timeIntervalSince1970, attempts: 0),
+            QueueEntry(
+                eventId: eventId, payload: payloadMap, createdAt: Date().timeIntervalSince1970,
+                attempts: 0),
             maxEvents: config.queueMaxEvents
         )
-        print("[DigiaAnalytics] enqueued '\(eventName)' eventId=\(eventId) queueSize=\(queue.size) flushBatchSize=\(config.flushBatchSize)")
+        print(
+            "[DigiaAnalytics] enqueued '\(eventName)' eventId=\(eventId) queueSize=\(queue.size) flushBatchSize=\(config.flushBatchSize)"
+        )
 
         if queue.size >= config.flushBatchSize {
             print("[DigiaAnalytics] batch threshold reached — dispatching immediately")
@@ -248,11 +257,15 @@ final class AnalyticsService {
             return
         }
 
-        print("[DigiaAnalytics] dispatchPending: sending batch of \(batch.count) event(s) to \(DigiaEndpoints.track)")
+        print(
+            "[DigiaAnalytics] dispatchPending: sending batch of \(batch.count) event(s) to \(DigiaEndpoints.track)"
+        )
         queue.incrementAttempt(eventIds: batch.map { $0.eventId })
 
         do {
-            let body = try JSONSerialization.data(withJSONObject: ["events": batch.map { $0.payload }])
+            let body = try JSONSerialization.data(withJSONObject: [
+                "events": batch.map { $0.payload }
+            ])
             let statusCode = try await sender.post(
                 url: DigiaEndpoints.track,
                 body: body,
@@ -268,10 +281,14 @@ final class AnalyticsService {
             case 200, 207:
                 queue.remove(eventIds: batch.map { $0.eventId })
                 retryAttempt = 0
-                print("[DigiaAnalytics] dispatch success — removed \(batch.count) event(s), queueSize=\(queue.size)")
+                print(
+                    "[DigiaAnalytics] dispatch success — removed \(batch.count) event(s), queueSize=\(queue.size)"
+                )
                 if queue.size > 0 { scheduleTimer(minDelayMs: 15_000) }
             case 500...:
-                print("[DigiaAnalytics] dispatch failed (5xx \(statusCode)) — scheduling retry #\(retryAttempt + 1)")
+                print(
+                    "[DigiaAnalytics] dispatch failed (5xx \(statusCode)) — scheduling retry #\(retryAttempt + 1)"
+                )
                 scheduleRetry()
             default:
                 print("[DigiaAnalytics] dispatch failed (\(statusCode)) — dropping batch")

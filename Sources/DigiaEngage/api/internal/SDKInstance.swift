@@ -459,6 +459,50 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
     }
 
+    // MARK: - Inline story lifecycle (full-screen player)
+
+    /// A story was opened (ring/thumbnail tapped) — drives open rate.
+    func reportStoryOpened(_ payload: CEPTriggerPayload) {
+        events.toDigia(StoriesEvent.Opened(), payload: payload)
+    }
+
+    /// A story frame became visible. `itemIndex` is 1-based; `itemTotal` = frames.
+    func reportStoryStepViewed(_ payload: CEPTriggerPayload, itemIndex: Int, itemTotal: Int) {
+        events.toDigia(StoriesEvent.StepViewed(itemIndex: itemIndex, itemTotal: itemTotal), payload: payload)
+    }
+
+    /// A CTA inside a story frame was tapped.
+    func reportStoryStepClicked(
+        _ payload: CEPTriggerPayload,
+        itemIndex: Int,
+        ctaLabel: String?,
+        actionType: String?,
+        actionUrl: String?
+    ) {
+        events.toDigia(
+            StoriesEvent.StepClicked(
+                itemIndex: itemIndex,
+                ctaLabel: ctaLabel,
+                actionType: actionType,
+                actionUrl: actionUrl
+            ),
+            payload: payload
+        )
+    }
+
+    /// Story closed before the last frame. `itemIndex` is the 1-based frame on close.
+    func reportStoryStepDismissed(_ payload: CEPTriggerPayload, itemIndex: Int) {
+        events.toDigia(StoriesEvent.StepDismissed(itemIndex: itemIndex), payload: payload)
+    }
+
+    /// Last story frame viewed. `itemTotal` = frames; `timeToCompleteMs` from open.
+    func reportStoryCompleted(_ payload: CEPTriggerPayload, itemTotal: Int, timeToCompleteMs: Int64?) {
+        events.toDigia(
+            StoriesEvent.Completed(itemTotal: itemTotal, timeToCompleteMs: timeToCompleteMs),
+            payload: payload
+        )
+    }
+
     // MARK: - Guide lifecycle
 
     func dismissGuide() {
