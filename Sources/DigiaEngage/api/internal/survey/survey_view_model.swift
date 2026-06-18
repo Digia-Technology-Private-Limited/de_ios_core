@@ -26,6 +26,18 @@ final class SurveyViewModel: ObservableObject {
     var currentNode: SurveyNode? { survey.nodeById(currentNodeId) }
     var currentBlock: SurveyBlock? { currentNode.flatMap { survey.blockFor($0) } }
 
+    /// 1-based position of the current node among the *question* (non-content)
+    /// nodes on the path traversed so far. Used as `item_index` in survey events.
+    var currentItemIndex: Int {
+        (backStack + [currentNodeId]).reduce(0) { acc, nodeId in
+            guard let node = survey.nodeById(nodeId),
+                  let block = survey.blockFor(node),
+                  !block.type.isContent
+            else { return acc }
+            return acc + 1
+        }
+    }
+
     var canGoBack: Bool { !backStack.isEmpty && survey.settings.pagination.backButton }
 
     /// Coarse progress estimate based on traversal depth, not graph topology.

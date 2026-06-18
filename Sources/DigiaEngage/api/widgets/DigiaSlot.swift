@@ -23,9 +23,12 @@ public struct DigiaSlot<Placeholder: View>: View {
                 slotContent(for: payload)
                     .onAppear {
                         registerPlaceholderIfNeeded()
-                        if impressedPayloadID != payload.id {
-                            impressedPayloadID = payload.id
-                            inlineController.onEvent?(.impressed, payload)
+                        // Digia's impression fires once, the first time the slot
+                        // actually renders (deduped per campaign). CEP was already
+                        // impressed instantly at route time (syncTemplate).
+                        if impressedPayloadID != payload.cepCampaignId {
+                            impressedPayloadID = payload.cepCampaignId
+                            SDKInstance.shared.reportSlotFirstRender(payload)
                         }
                     }
             } else {
@@ -42,17 +45,16 @@ public struct DigiaSlot<Placeholder: View>: View {
     }
 
     @ViewBuilder
-    private func slotContent(for payload: InAppPayload) -> some View {
+    private func slotContent(for payload: CEPTriggerPayload) -> some View {
         if let carouselConfig = inlineController.getCarouselConfig(placementKey) {
-            InlineCarouselRenderer.makeView(carouselConfig)
+            InlineCarouselRenderer.makeView(carouselConfig, payload: payload)
         } else if let storyConfig = inlineController.getStoryConfig(placementKey) {
             DigiaInlineStoryView(config: storyConfig, payload: payload)
         } else {
+            // No renderable config resolved for this slot — clean up. CEP already
+            // saw Impressed + Dismissed at route time (syncTemplate semantics).
             Color.clear.frame(height: 0)
-                .onAppear {
-                    inlineController.onEvent?(.dismissed, payload)
-                    inlineController.dismissCampaign(placementKey)
-                }
+                .onAppear { inlineController.dismissCampaign(placementKey) }
         }
     }
 

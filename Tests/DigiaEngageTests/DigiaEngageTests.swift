@@ -47,23 +47,26 @@ struct DigiaEngageTests {
         #expect(second.teardownCount == 0)
     }
 
-    @Test("onCampaignTriggered routes inline payloads into the inline controller")
-    func routesInlinePayloadsIntoInlineController() {
+    @Test("onCampaignTriggered routes inline carousel campaigns into the inline controller")
+    func routesInlineCarouselCampaignsIntoInlineController() throws {
         SDKInstance.shared.resetForTesting()
+        let campaign = try #require(CampaignModel.fromJson([
+            "id": "carousel-id",
+            "campaignKey": "carousel-campaign",
+            "campaignType": "inline",
+            "templateConfig": [
+                "templateType": "carousel",
+                "slotKey": "hero_banner",
+                "items": [["imageUrl": "https://example.com/a.png"]],
+            ],
+        ]))
+        SDKInstance.shared.campaignStore.populate([campaign])
 
-        let payload = InAppPayload(
-            id: "campaign-inline",
-            content: InAppPayloadContent(
-                type: "inline",
-                placementKey: "hero_banner",
-                title: "Inline title"
-            )
-        )
+        SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(cepCampaignId: "carousel-campaign", campaignKey: "carousel-campaign"))
 
-        SDKInstance.shared.onCampaignTriggered(payload)
-
-        #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") == payload)
-        #expect(SDKInstance.shared.controller.activePayload == nil)
+        #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner")?.cepCampaignId == "carousel-campaign")
+        #expect(SDKInstance.shared.inlineController.getCarouselConfig("hero_banner")?.items.count == 1)
     }
 
     @Test("campaign-key inline story payloads route into the inline controller")
@@ -88,51 +91,35 @@ struct DigiaEngageTests {
         ]))
         SDKInstance.shared.campaignStore.populate([campaign])
 
-        let payload = InAppPayload(
-            id: "story-campaign",
-            content: InAppPayloadContent(type: "inline")
-        )
+        SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(cepCampaignId: "story-campaign", campaignKey: "story-campaign"))
 
-        SDKInstance.shared.onCampaignTriggered(payload)
-
-        #expect(SDKInstance.shared.inlineController.getCampaign("story_strip")?.id == "story-campaign")
+        #expect(SDKInstance.shared.inlineController.getCampaign("story_strip")?.cepCampaignId == "story-campaign")
         #expect(SDKInstance.shared.inlineController.getStoryConfig("story_strip")?.items.count == 1)
         #expect(SDKInstance.shared.inlineController.getCarouselConfig("story_strip") == nil)
     }
 
-    @Test("onCampaignTriggered routes modal payloads into the overlay controller")
-    func routesModalPayloadsIntoOverlayController() {
+    @Test("onCampaignInvalidated clears matching inline payloads")
+    func invalidationClearsMatchingPayloads() throws {
         SDKInstance.shared.resetForTesting()
+        let campaign = try #require(CampaignModel.fromJson([
+            "id": "carousel-id",
+            "campaignKey": "carousel-campaign",
+            "campaignType": "inline",
+            "templateConfig": [
+                "templateType": "carousel",
+                "slotKey": "hero_banner",
+                "items": [["imageUrl": "https://example.com/a.png"]],
+            ],
+        ]))
+        SDKInstance.shared.campaignStore.populate([campaign])
 
-        let payload = InAppPayload(
-            id: "campaign-modal",
-            content: InAppPayloadContent(type: "dialog", title: "Modal title")
-        )
+        SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(cepCampaignId: "carousel-campaign", campaignKey: "carousel-campaign"))
+        #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") != nil)
 
-        SDKInstance.shared.onCampaignTriggered(payload)
+        SDKInstance.shared.onCampaignInvalidated("carousel-campaign")
 
-        #expect(SDKInstance.shared.controller.activePayload == payload)
-    }
-
-    @Test("onCampaignInvalidated clears matching modal and inline payloads")
-    func invalidationClearsMatchingPayloads() {
-        SDKInstance.shared.resetForTesting()
-
-        let modal = InAppPayload(
-            id: "campaign-modal",
-            content: InAppPayloadContent(type: "dialog")
-        )
-        let inline = InAppPayload(
-            id: "campaign-inline",
-            content: InAppPayloadContent(type: "inline", placementKey: "hero_banner")
-        )
-
-        SDKInstance.shared.onCampaignTriggered(modal)
-        SDKInstance.shared.onCampaignTriggered(inline)
-        SDKInstance.shared.onCampaignInvalidated("campaign-modal")
-        SDKInstance.shared.onCampaignInvalidated("campaign-inline")
-
-        #expect(SDKInstance.shared.controller.activePayload == nil)
         #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") == nil)
     }
 
@@ -153,23 +140,6 @@ struct DigiaEngageTests {
 
         SDKInstance.shared.deregisterPlaceholderForSlot(42)
         #expect(plugin.deregisteredPlaceholderIDs == [42])
-    }
-
-    @Test("payload content decodes placementKey directly")
-    func payloadContentDecodesPlacementKey() throws {
-        let data = Data("""
-        {
-          "type": "inline",
-          "placementKey": "hero_banner",
-          "viewId": "hero_component",
-          "args": { "name": "Ada" }
-        }
-        """.utf8)
-
-        let decoded = try JSONDecoder().decode(InAppPayloadContent.self, from: data)
-
-        #expect(decoded.placementKey == "hero_banner")
-        #expect(decoded.args == ["name": .string("Ada")])
     }
 
     @Test("campaign parser accepts Android templateConfig survey key")
@@ -198,18 +168,11 @@ struct DigiaEngageTests {
         ]))
         SDKInstance.shared.setCampaignsForTesting([campaign])
 
-        let payload = InAppPayload(
-            id: "bridge-event",
-            content: InAppPayloadContent(
-                type: "dialog",
-                args: ["campaign_key": .string("welcome_survey")]
-            )
-        )
+        SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(cepCampaignId: "bridge-event", campaignKey: "welcome_survey"))
 
-        SDKInstance.shared.onCampaignTriggered(payload)
-
-        #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.id == "welcome_survey")
-        #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.content.args["campaign_key"] == .string("welcome_survey"))
+        #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.cepCampaignId == "bridge-event")
+        #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.campaignKey == "welcome_survey")
     }
 }
 
@@ -323,7 +286,7 @@ private final class TestPlugin: DigiaCEPPlugin {
         deregisteredPlaceholderIDs.append(id)
     }
 
-    func notifyEvent(_ event: DigiaExperienceEvent, payload: InAppPayload) {}
+    func notifyEvent(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {}
 
     func healthCheck() -> DiagnosticReport {
         DiagnosticReport(isHealthy: true)

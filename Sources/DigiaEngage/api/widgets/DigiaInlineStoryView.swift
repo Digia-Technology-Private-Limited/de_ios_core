@@ -5,7 +5,7 @@ import UIKit
 @MainActor
 struct DigiaInlineStoryView: View {
     let config: InlineStoryConfig
-    let payload: InAppPayload
+    let payload: CEPTriggerPayload
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -13,6 +13,7 @@ struct DigiaInlineStoryView: View {
                 ForEach(Array(config.items.enumerated()), id: \.offset) { index, item in
                     StoryThumbnailCard(item: item, config: config)
                         .onTapGesture {
+                            SDKInstance.shared.reportStoryOpened(payload)
                             SDKInstance.shared.controller.showStoryOverlay(
                                 config: config,
                                 initialIndex: index,
@@ -138,6 +139,10 @@ private struct InlineStoryOverlayContent: View {
 
     @State private var currentIndex: Int
     @State private var elapsed: Double = 0
+    /// Set when the story runs to its last frame, so the teardown reports
+    /// `Completed` rather than `StepDismissed`.
+    @State private var completed = false
+    @State private var openedAt = Date()
 
     init(state: InlineStoryOverlayState) {
         self.state = state
@@ -211,6 +216,22 @@ private struct InlineStoryOverlayContent: View {
         .onReceive(Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()) { _ in
             tick()
         }
+        // Step Viewed fires for each frame that becomes visible (including the
+        // first), mirroring Android's LaunchedEffect(currentStoryIndex).
+        .onChange(of: currentIndex, initial: true) { _, idx in
+            SDKInstance.shared.reportStoryStepViewed(
+                state.payload,
+                itemIndex: idx + 1,
+                itemTotal: state.config.items.count
+            )
+        }
+        // Any teardown before the last frame is a user dismissal (swipe / edge /
+        // ESC). Completion sets `completed` first, so it reports only once there.
+        .onDisappear {
+            if !completed {
+                SDKInstance.shared.reportStoryStepDismissed(state.payload, itemIndex: currentIndex + 1)
+            }
+        }
     }
 
     /// Real device safe-area insets, read from the active window. The
@@ -271,6 +292,12 @@ private struct InlineStoryOverlayContent: View {
         } else if state.config.restartOnCompleted {
             currentIndex = 0
         } else {
+            completed = true
+            SDKInstance.shared.reportStoryCompleted(
+                state.payload,
+                itemTotal: state.config.items.count,
+                timeToCompleteMs: Int64(Date().timeIntervalSince(openedAt) * 1000)
+            )
             SDKInstance.shared.controller.dismissStoryOverlay()
         }
     }
@@ -281,6 +308,13 @@ private struct InlineStoryOverlayContent: View {
     }
 
     private func handleCTA(_ action: StoryCtaAction?) {
+        SDKInstance.shared.reportStoryStepClicked(
+            state.payload,
+            itemIndex: currentIndex + 1,
+            ctaLabel: currentItem?.ctaText,
+            actionType: action?.type,
+            actionUrl: action?.url
+        )
         switch action?.type {
         case "deepLink", "openUrl":
             if let urlString = action?.url, let url = URL(string: urlString) {

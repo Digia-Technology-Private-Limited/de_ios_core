@@ -26,10 +26,5 @@ public struct DigiaHost<Content: View>: View {
             SurveyRenderer(orchestrator: surveyOrchestrator)
                 .zIndex(4)
         }
-        .onChange(of: controller.activePayload, initial: false) { _, payload in
-            guard let payload else { return }
-            controller.onEvent?(.dismissed, payload)
-            controller.dismiss()
-        }
     }
 }

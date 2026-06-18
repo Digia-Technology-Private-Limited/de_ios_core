@@ -7,8 +7,12 @@ import Combine
 struct ActiveGuideState: Equatable {
     let campaign: CampaignModel
     let stepIndex: Int
-    let variables: [String: String]?
+    /// The original trigger payload, retained so lifecycle events reuse the CEP's
+    /// identity/metadata instead of a synthesized one (matches nudge/survey).
+    let payload: CEPTriggerPayload
 
+    /// Trigger-supplied variables for `{{ placeholder }}` interpolation.
+    var variables: [String: String]? { payload.variables }
     var steps: [GuideStepModel] { campaign.guideConfig?.steps ?? [] }
     var currentStep: GuideStepModel? { steps.indices.contains(stepIndex) ? steps[stepIndex] : nil }
     var hasNext: Bool { stepIndex < steps.count - 1 }
@@ -18,18 +22,18 @@ struct ActiveGuideState: Equatable {
 final class GuideOrchestrator: ObservableObject {
     @Published private(set) var state: ActiveGuideState?
 
-    func start(_ campaign: CampaignModel, variables: [String: String]? = nil) {
+    func start(_ campaign: CampaignModel, payload: CEPTriggerPayload) {
         guard campaign.campaignType == "guide",
               let guideConfig = campaign.guideConfig,
               !guideConfig.steps.isEmpty
         else { return }
-        state = ActiveGuideState(campaign: campaign, stepIndex: 0, variables: variables)
+        state = ActiveGuideState(campaign: campaign, stepIndex: 0, payload: payload)
     }
 
     func advance() {
         guard let current = state else { return }
         state = current.hasNext
-            ? ActiveGuideState(campaign: current.campaign, stepIndex: current.stepIndex + 1, variables: current.variables)
+            ? ActiveGuideState(campaign: current.campaign, stepIndex: current.stepIndex + 1, payload: current.payload)
             : nil
     }
 

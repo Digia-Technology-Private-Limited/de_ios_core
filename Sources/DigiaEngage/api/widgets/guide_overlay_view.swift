@@ -21,7 +21,7 @@ struct GuideOverlayView: View {
                 anchorRect: anchorRect,
                 cornerRadius: AnchorRegistry.shared.getCornerRadius(for: step.anchorKey),
                 onAdvance: { orchestrator.advance() },
-                onDismiss: { orchestrator.dismiss() }
+                onDismiss: { SDKInstance.shared.dismissGuide() }
             )
             .environment(\.digiaVariables, state.variables)
             .id(state.stepIndex)

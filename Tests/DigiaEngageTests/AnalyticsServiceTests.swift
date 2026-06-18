@@ -3,6 +3,16 @@ import UIKit
 import Testing
 @testable import DigiaEngage
 
+// Campaign id/type are resolved from the campaign store at event time and passed
+// into capture() by the caller; this helper supplies fixed test values so the
+// existing call sites stay terse.
+@MainActor
+private extension AnalyticsService {
+    func capture(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload) {
+        capture(event, payload: payload, campaignId: "example-campaign", campaignType: "guide")
+    }
+}
+
 // MARK: - Test doubles
 
 /// Fake sender that records calls and returns a configurable status code.
@@ -51,19 +61,8 @@ struct AnalyticsServiceTests {
         )
     }
 
-    private func buildPayload(_ campaignKey: String) -> InAppPayload {
-        InAppPayload(
-            id: campaignKey,
-            content: InAppPayloadContent(
-                type: "guide",
-                args: [
-                    "campaign_id": .string("example-campaign"),
-                    "campaign_key": .string(campaignKey),
-                    "campaign_type": .string("guide"),
-                ],
-                campaignKey: campaignKey
-            )
-        )
+    private func buildPayload(_ campaignKey: String) -> CEPTriggerPayload {
+        CEPTriggerPayload(cepCampaignId: campaignKey, campaignKey: campaignKey)
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
@@ -99,7 +98,7 @@ struct AnalyticsServiceTests {
         )
 
         for i in 0..<5 {
-            service.capture(DigiaExperienceEvent.impressed, payload: buildPayload("event-\(i)"))
+            service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("event-\(i)"))
         }
 
         #expect(service.queue.size == 3)
@@ -113,7 +112,7 @@ struct AnalyticsServiceTests {
     @Test("event payload has correct structure and identity fields")
     func eventPayloadStructure() {
         let service = makeService()
-        service.capture(DigiaExperienceEvent.impressed, payload: buildPayload("payload-1"))
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("payload-1"))
 
         let entries = service.queue.peek(maxCount: 1)
         #expect(!entries.isEmpty)
@@ -140,9 +139,9 @@ struct AnalyticsServiceTests {
         let service = makeService()
         let payload = buildPayload("test")
 
-        service.capture(DigiaExperienceEvent.impressed, payload: payload)
-        service.capture(DigiaExperienceEvent.clicked(elementID: "cta-btn"), payload: payload)
-        service.capture(DigiaExperienceEvent.dismissed, payload: payload)
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: payload)
+        service.capture(NudgeEvent.Clicked(elementId: "cta-btn"), payload: payload)
+        service.capture(NudgeEvent.Dismissed(), payload: payload)
 
         let entries = service.queue.peek(maxCount: 10)
         #expect(entries.count == 3)
@@ -150,11 +149,9 @@ struct AnalyticsServiceTests {
         #expect(entries[1].payload["event_name"] as? String == "Digia Experience Clicked")
         #expect(entries[2].payload["event_name"] as? String == "Digia Experience Dismissed")
 
-        // element_id only present for Clicked
-        let clickProps = entries[1].payload["properties"] as? [String: Any]
-        #expect(clickProps?["element_id"] as? String == "cta-btn")
-        let impressedProps = entries[0].payload["properties"] as? [String: Any]
-        #expect(impressedProps?["element_id"] == nil)
+        // element_id is a hoisted top-level column, present only for Clicked.
+        #expect(entries[1].payload["element_id"] as? String == "cta-btn")
+        #expect(entries[0].payload["element_id"] == nil)
     }
 
     @Test("batch threshold triggers immediate flush")
@@ -165,8 +162,8 @@ struct AnalyticsServiceTests {
             sender: fakeSender
         )
 
-        service.capture(DigiaExperienceEvent.impressed, payload: buildPayload("p1"))
-        service.capture(DigiaExperienceEvent.impressed, payload: buildPayload("p2"))
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p2"))
         // second capture reaches flushBatchSize — dispatch Task is enqueued; release actor to let it run
         try await Task.sleep(for: .milliseconds(50))
 
@@ -182,7 +179,7 @@ struct AnalyticsServiceTests {
             sender: fakeSender
         )
 
-        service.capture(DigiaExperienceEvent.impressed, payload: buildPayload("p1"))
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         // timer scheduled for 50ms — wait well past it
         try await Task.sleep(for: .milliseconds(300))
 
@@ -198,7 +195,7 @@ struct AnalyticsServiceTests {
             sender: fakeSender
         )
 
-        service.capture(DigiaExperienceEvent.impressed, payload: buildPayload("p1"))
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         #expect(service.queue.size == 1)
 
         service.flush()
@@ -217,7 +214,7 @@ struct AnalyticsServiceTests {
         )
         service.retryScheduleMs = [10, 20]  // fast retries for the test
 
-        service.capture(DigiaExperienceEvent.impressed, payload: buildPayload("p1"))
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
         // let flush attempt run and fail (500) but not the retry yet (10ms)
         try await Task.sleep(for: .milliseconds(5))
@@ -239,7 +236,7 @@ struct AnalyticsServiceTests {
             sender: fakeSender
         )
 
-        service.capture(DigiaExperienceEvent.impressed, payload: buildPayload("p1"))
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         #expect(service.queue.size == 1)
 
         NotificationCenter.default.post(
@@ -262,7 +259,7 @@ struct AnalyticsServiceTests {
             config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
             defaults: defaults
         )
-        service1.capture(DigiaExperienceEvent.impressed, payload: buildPayload("persisted"))
+        service1.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("persisted"))
         #expect(service1.queue.size == 1)
         service1.resetForTest()  // cancel timers, keep queue in UserDefaults
 
@@ -289,7 +286,7 @@ struct AnalyticsServiceTests {
             sender: fakeSender
         )
 
-        service.capture(DigiaExperienceEvent.dismissed, payload: buildPayload("p1"))
+        service.capture(NudgeEvent.Dismissed(), payload: buildPayload("p1"))
         // small pause to confirm no background task fires
         try await Task.sleep(for: .milliseconds(20))
 
@@ -305,8 +302,8 @@ struct AnalyticsServiceTests {
             sender: fakeSender
         )
 
-        service.capture(DigiaExperienceEvent.impressed, payload: buildPayload("p1"))
-        service.capture(DigiaExperienceEvent.clicked(elementID: "cta"), payload: buildPayload("p2"))
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
+        service.capture(NudgeEvent.Clicked(elementId: "cta"), payload: buildPayload("p2"))
 
         service.flush()
         try await Task.sleep(for: .milliseconds(50))
