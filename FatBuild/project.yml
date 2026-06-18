@@ -1,0 +1,72 @@
+# xcodegen spec for the "fat" DigiaEngage build.
+#
+# Produces a single DYNAMIC DigiaEngage.framework whose binary statically
+# folds in its SPM dependencies (Lottie, SDWebImage, SDWebImageSVGCoder,
+# SDWebImageSwiftUI). Consumers vendor ONE xcframework and only `import DigiaEngage`.
+#
+# Why source packages (not the prebuilt xcframeworks):
+#   - SPM "library" products without an explicit type link STATICALLY into the
+#     framework that depends on them -> their object code is embedded in
+#     DigiaEngage's Mach-O (exactly what we want for a single fat binary).
+#   - Xcode also copies each dep's resource/privacy bundle into
+#     DigiaEngage.framework automatically (handles SDWebImage's PrivacyInfo, etc.).
+#   - lottie-spm ships Lottie as a PREBUILT DYNAMIC xcframework which would stay a
+#     separate dylib, so we use lottie-ios (source) here instead.
+#
+# Regenerate the project with:  xcodegen generate --spec FatBuild/project.yml
+# (the build script does this for you).
+
+name: DigiaEngageFat
+options:
+  bundleIdPrefix: tech.digia
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+packages:
+  Lottie:
+    url: https://github.com/airbnb/lottie-ios.git
+    from: "4.5.0"
+  SDWebImageSwiftUI:
+    url: https://github.com/SDWebImage/SDWebImageSwiftUI.git
+    from: "3.1.4"
+  SDWebImageSVGCoder:
+    url: https://github.com/SDWebImage/SDWebImageSVGCoder.git
+    from: "1.8.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    # Stable module ABI so the prebuilt binary imports across consumer Swift versions.
+    BUILD_LIBRARY_FOR_DISTRIBUTION: YES
+    # ObjC categories in SDWebImage must survive static linking.
+    OTHER_LDFLAGS: "-ObjC"
+
+targets:
+  DigiaEngage:
+    type: framework
+    platform: iOS
+    sources:
+      - path: ../Sources/DigiaEngage
+    settings:
+      base:
+        PRODUCT_NAME: DigiaEngage
+        PRODUCT_BUNDLE_IDENTIFIER: tech.digia.DigiaEngage
+        DEFINES_MODULE: YES
+        # Auto-generate Info.plist from build settings — required for Xcode to
+        # embed the framework into a host app without the "did not contain an
+        # Info.plist" error.
+        GENERATE_INFOPLIST_FILE: YES
+        # Dynamic framework (its own dylib, isolated from the host binary).
+        MACH_O_TYPE: mh_dylib
+        SKIP_INSTALL: NO
+        CODE_SIGNING_ALLOWED: NO
+    dependencies:
+      - package: Lottie
+        product: Lottie
+      - package: SDWebImageSwiftUI
+        product: SDWebImageSwiftUI
+      - package: SDWebImageSVGCoder
+        product: SDWebImageSVGCoder
+    scheme:
+      testTargets: []

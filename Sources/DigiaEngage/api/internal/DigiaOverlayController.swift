@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 struct InlineStoryOverlayState: Equatable {
     let config: InlineStoryConfig

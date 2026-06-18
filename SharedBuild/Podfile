@@ -1,0 +1,29 @@
+# Podfile for building the SLIM DigiaEngage.xcframework.
+#
+# Pulls the dependencies from their SOURCE pods (same repos the consumer will
+# use), built as DYNAMIC frameworks. DigiaEngage links against them but does not
+# embed them, so the shipped framework is slim and the deps are shared with the
+# host app at integration time.
+#
+# These pod names/versions MUST match the s.dependency lines in DigiaEngage.podspec.
+
+platform :ios, '17.0'
+use_frameworks! :linkage => :dynamic
+install! 'cocoapods', :integrate_targets => true
+
+target 'DigiaEngage' do
+  pod 'lottie-ios', '~> 4.5'           # module: Lottie  (github.com/airbnb/lottie-ios)
+  pod 'SDWebImageSwiftUI', '~> 3.1'    # pulls SDWebImage transitively
+  pod 'SDWebImageSVGCoder', '>= 1.7.0'
+end
+
+# Build the pods for distribution so DigiaEngage's swiftinterface resolves their
+# module ABI, and silence the app-only deployment-target bumps.
+post_install do |installer|
+  installer.pods_project.targets.each do |t|
+    t.build_configurations.each do |config|
+      config.build_settings['BUILD_LIBRARY_FOR_DISTRIBUTION'] = 'YES'
+      config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '17.0'
+    end
+  end
+end

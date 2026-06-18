@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 /// Renders inline campaign content at a specific placement position.
 @MainActor
