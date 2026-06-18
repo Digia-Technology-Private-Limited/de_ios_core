@@ -11,6 +11,9 @@ final class AnalyticsIdentityManager {
     private var _lastEventDate: Date?
     private var _sessionTimeoutMs: Int = 30 * 60 * 1_000
 
+    /// Called whenever the session ID rotates. Wired by AnalyticsService to report the new session.
+    var onSessionRotated: (() -> Void)?
+
     private static let keyAnonymousId = "digia_anonymous_id"
     private static let keyUserId = "digia_user_id"
 
@@ -55,6 +58,7 @@ final class AnalyticsIdentityManager {
 
     private func rotateSession() {
         _sessionId = UUID().uuidString
+        onSessionRotated?()
     }
 
     private func loadOrCreate(key: String) -> String {
