@@ -105,6 +105,12 @@ echo "==> Zipping + checksum"
 ( cd "$OUT" && zip -r -q -y "DigiaEngage.xcframework.zip" "DigiaEngage.xcframework" )
 CHECKSUM="$(swift package compute-checksum "$OUT/DigiaEngage.xcframework.zip")"
 
+# Symlink for local CocoaPods :path => testing.
+# DigiaEngage.podspec declares vendored_frameworks = 'DigiaEngage.xcframework',
+# which CocoaPods resolves relative to the :path directory (iOS/).
+# The symlink makes that path valid without changing the zip structure.
+ln -sfn "dist/DigiaEngage.xcframework" "$ROOT/DigiaEngage.xcframework"
+
 echo
 echo "============================================================"
 echo " Done. Single fat xcframework:"
