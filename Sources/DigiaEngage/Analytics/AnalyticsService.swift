@@ -165,7 +165,10 @@ final class AnalyticsService {
             apiKey: config.apiKey,
             identity: AnalyticsIdentityManager(),
             queue: AnalyticsQueue(),
-            staticContext: buildStaticContext()
+            staticContext: buildStaticContext(
+                wrapperBinding: config.wrapperBinding,
+                wrapperVersion: config.wrapperVersion
+            )
         )
     }
 
@@ -351,11 +354,21 @@ final class AnalyticsService {
         return fmt.string(from: Date())
     }
 
-    private static func buildStaticContext() -> [String: Any] {
+    private static func buildStaticContext(
+        wrapperBinding: String?,
+        wrapperVersion: String?
+    ) -> [String: Any] {
+        let platform = "ios"
+        let binding = wrapperBinding ?? "native"
         var ctx: [String: Any] = [
-            "sdk_version": "1.0.0",
-            "sdk_platform": "ios",
-            "device_platform": "ios",
+            "sdk_version": buildSdkVersion(
+                binding: binding,
+                platform: platform,
+                wrapperVersion: wrapperVersion,
+                core: DigiaSdkVersion.value
+            ),
+            "sdk_platform": binding == "native" ? platform : binding,
+            "device_platform": platform,
             "device_make": "Apple",
             "app_locale": Locale.current.identifier,
         ]
@@ -371,5 +384,21 @@ final class AnalyticsService {
         }
         if !machine.isEmpty { ctx["device_model"] = machine }
         return ctx
+    }
+
+    /// Builds the composite SDK descriptor (schema v1):
+    ///   `s=schema | b=binding | p=platform | [w=wrapper |] c=core`
+    /// The wrapper segment (`w`) is present only when a thin wrapper SDK
+    /// delegates to this engine (e.g. React Native).
+    private static func buildSdkVersion(
+        binding: String,
+        platform: String,
+        wrapperVersion: String?,
+        core: String
+    ) -> String {
+        var parts = ["s=1", "b=\(binding)", "p=\(platform)"]
+        if let w = wrapperVersion, !w.isEmpty { parts.append("w=\(w)") }
+        parts.append("c=\(core)")
+        return parts.joined(separator: "|")
     }
 }

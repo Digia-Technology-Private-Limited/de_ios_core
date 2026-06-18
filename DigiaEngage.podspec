@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'DigiaEngage'
-  s.version          = '2.3.1'
+  s.version          = '2.4.2'
   s.summary          = 'Digia Engage iOS SDK — fat self-contained build (test).'
   s.homepage         = 'https://github.com/Digia-Technology-Private-Limited/digia_engage_iOS'
   s.license          = { :type => 'BUSL-1.1', :file => 'LICENSE' }

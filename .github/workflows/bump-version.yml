@@ -1,0 +1,62 @@
+name: Bump SDK Version
+
+# Bumps the iOS SDK version: bumps both podspecs and regenerates
+# Sources/DigiaEngage/DigiaSdkVersion.swift (the `c`/core segment reported to
+# analytics) via Scripts/sync-version.sh, then commits back to the branch the
+# workflow ran on.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: "Semver part to bump"
+        required: true
+        type: choice
+        default: patch
+        options:
+          - major
+          - minor
+          - patch
+          - beta
+      create_tag:
+        description: "Push a <version> tag (matches the podspec :tag) to mark the release"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: chmod +x Scripts/bump-semver.sh Scripts/sync-version.sh
+
+      - name: Bump version
+        run: |
+          current=$(grep -E "^[[:space:]]*s.version" DigiaEngage.podspec | head -1 | sed -E "s/.*'([^']+)'.*/\1/")
+          new=$(Scripts/bump-semver.sh "$current" "${{ github.event.inputs.version_type }}")
+          # sync-version.sh with an explicit version updates both podspecs and
+          # regenerates DigiaSdkVersion.swift.
+          Scripts/sync-version.sh "$new"
+          echo "NEW_VERSION=$new" >> "$GITHUB_ENV"
+          echo "iOS: $current -> $new"
+
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: bump iOS SDK version to $NEW_VERSION"
+          git push
+
+      - name: Create tag
+        if: ${{ github.event.inputs.create_tag == 'true' }}
+        run: |
+          git tag "$NEW_VERSION"
+          git push origin "$NEW_VERSION"
+          echo "Pushed tag $NEW_VERSION"

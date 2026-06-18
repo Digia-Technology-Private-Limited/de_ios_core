@@ -48,6 +48,8 @@ public struct DigiaConfig: Sendable, Equatable {
     /// registered with the app (e.g. a bundled custom font's PostScript name).
     public let fontFamily: String?
     public let analyticsConfig: AnalyticsConfig
+    public let wrapperBinding: String?
+    public let wrapperVersion: String?
 
     public init(
         apiKey: String,
@@ -56,7 +58,9 @@ public struct DigiaConfig: Sendable, Equatable {
         networkConfiguration: DigiaNetworkConfiguration? = nil,
         developerConfig: DigiaDeveloperConfig? = nil,
         fontFamily: String? = nil,
-        analyticsConfig: AnalyticsConfig = AnalyticsConfig()
+        analyticsConfig: AnalyticsConfig = AnalyticsConfig(),
+        wrapperBinding: String? = nil,
+        wrapperVersion: String? = nil
     ) {
         self.apiKey = apiKey
         self.logLevel = logLevel
@@ -65,5 +69,7 @@ public struct DigiaConfig: Sendable, Equatable {
         self.developerConfig = developerConfig
         self.fontFamily = fontFamily
         self.analyticsConfig = analyticsConfig
+        self.wrapperBinding = wrapperBinding
+        self.wrapperVersion = wrapperVersion
     }
 }
