@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
-import SDWebImageSwiftUI
-import SDWebImageSVGCoder
+@_implementationOnly import SDWebImageSwiftUI
+@_implementationOnly import SDWebImageSVGCoder
 
 enum DigiaImagePipeline {
     private static let configureOnce: Void = {
