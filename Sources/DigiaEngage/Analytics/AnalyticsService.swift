@@ -320,7 +320,12 @@ final class AnalyticsService {
             let idx = max(0, min(attempt - 1, schedule.count - 1))
             return schedule[idx]
         }
-        return min(1_000 * (1 << (attempt - 1)), 16_000)
+        // Exponential backoff capped at 16s (= 1000 × 2⁴). Clamp the exponent so
+        // the shift can't overflow Int when retries pile up against a persistently
+        // failing endpoint — the unclamped `1 << (attempt - 1)` traps once attempt
+        // grows, which crashed the app on a failing analytics endpoint.
+        let exponent = min(max(attempt - 1, 0), 4)
+        return min(1_000 * (1 << exponent), 16_000)
     }
 
     private func isoNow() -> String {

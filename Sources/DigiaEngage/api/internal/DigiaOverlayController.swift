@@ -8,10 +8,6 @@ struct InlineStoryOverlayState: Equatable {
 
 @MainActor
 final class DigiaOverlayController: ObservableObject {
-    /// Generic typed-overlay path (RN/JS-driven campaigns that arrive without a
-    /// resolvable `campaignKey`). Carries the rich ``InAppPayload`` so the host
-    /// can route by display type; it is not part of the analytics event flow.
-    @Published private(set) var activePayload: InAppPayload?
     @Published private(set) var activeNudge: DigiaNudgePresentation?
     @Published private(set) var activeStoryOverlay: InlineStoryOverlayState?
 
@@ -19,14 +15,6 @@ final class DigiaOverlayController: ObservableObject {
     /// plugin. Returns `true` if the plugin handled it (so the renderer skips its
     /// native fallback). Wired by ``SDKInstance`` to the active plugin.
     var onAction: ((_ actionType: String, _ url: String, _ payload: CEPTriggerPayload) -> Bool)?
-
-    func show(_ payload: InAppPayload) {
-        activePayload = payload
-    }
-
-    func dismiss() {
-        activePayload = nil
-    }
 
     /// Sets the nudge state. Impression/dismissal analytics are emitted by
     /// ``SDKInstance`` (`reportNudgeImpression` / `markNudgeDismissed`), not here.

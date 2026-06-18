@@ -282,7 +282,12 @@ private struct SurveyBody: View {
             if block.showMedia && block.media.position == .inline {
                 BlockMediaImage(media: block.media)
             }
-            Button { welcomeDone = true } label: {
+            Button {
+                // The welcome "Start" tap is the survey's start-engagement signal
+                // ("Digia Experience Clicked" / welcome_start).
+                SDKInstance.shared.reportSurveyWelcomeStart()
+                welcomeDone = true
+            } label: {
                 Text(cta.startLabel)
                     .font(surveyFont(size: 15, weight: .semibold))
                     .foregroundColor(ctaText(cta))

@@ -107,137 +107,71 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         isHostMounted = false
     }
 
-    func onCampaignTriggered(_ payload: InAppPayload) {
+    func onCampaignTriggered(_ payload: CEPTriggerPayload) {
         logVerbose(
-            "onCampaignTriggered id='\(payload.id)' type='\(payload.content.type)' "
-                + "campaignKey='\(payload.content.campaignKey ?? "nil")' "
-                + "placementKey='\(payload.content.placementKey ?? "nil")'")
-        // campaign_key path (native CEP plugins, e.g. CleverTap): resolve the full
-        // campaign from the store and route by campaignType, mirroring Android.
-        // The key may arrive either in content.campaignKey or — as the RN bridge
-        // sends it — as payload.id. Mirror Android's fallback chain
-        // (campaign_key ?? digiaKey ?? payload.id) and route whenever the resolved
-        // key matches a known campaign, so inline/survey/nudge/guide campaigns
-        // delivered without an explicit content.campaignKey still work.
-        func argKey(_ key: String) -> String? {
-            if case .string(let value)? = payload.content.args[key] {
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? nil : trimmed
-            }
-            return nil
-        }
-        let explicitKey = payload.content.campaignKey?.trimmingCharacters(
-            in: .whitespacesAndNewlines)
-        let fallbackKey = payload.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            "onCampaignTriggered cepCampaignId='\(payload.cepCampaignId)' "
+                + "campaignKey='\(payload.campaignKey)'")
+        // Route purely by the campaignKey resolved from the store (mirrors
+        // Android) — fall back to cepCampaignId when no campaignKey was supplied.
+        let key = payload.campaignKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedKey =
-            (explicitKey?.isEmpty == false ? explicitKey : nil)
-            ?? argKey("campaign_key") ?? argKey("campaignKey")
-            ?? (fallbackKey.isEmpty ? nil : fallbackKey)
-
-        logVerbose("onCampaignTriggered resolvedKey='\(resolvedKey ?? "nil")'")
-        if let campaignKey = resolvedKey, campaignStore.find(campaignKey) != nil {
-            routeByCampaignKey(campaignKey, payload: payload)
+            key.isEmpty
+            ? payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
+            : key
+        guard !resolvedKey.isEmpty, campaignStore.find(resolvedKey) != nil else {
+            logVerbose("campaign dropped — no campaign for key '\(resolvedKey)'")
             return
         }
-
-        // Fallback: RN-triggered campaigns may omit `campaignKey`. If the payload id
-        // matches a stored campaign, route by it (covers native nudges via the RN bridge).
-        if campaignStore.find(payload.id) != nil {
-            routeByCampaignKey(payload.id, payload: payload)
-            return
-        }
-
-        // Typed path (RN/JS-driven): content already carries display info.
-        let displayType = payload.content.type.lowercased()
-        let placementKey = payload.content.placementKey?.trimmingCharacters(
-            in: .whitespacesAndNewlines)
-        let viewId = payload.content.viewId?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let command = payload.content.command?.uppercased() ?? ""
-
-        let routeInline: Bool = {
-            if displayType == "inline", let pk = placementKey, !pk.isEmpty { return true }
-            if let pk = placementKey, !pk.isEmpty, let vid = viewId, !vid.isEmpty {
-                if command.isEmpty || command == "SHOW_INLINE" { return true }
-            }
-            return false
-        }()
-
-        if routeInline, let pk = placementKey, !pk.isEmpty {
-            inlineController.setCampaign(pk, payload: payload)
-        } else {
-            controller.show(payload)
-        }
+        routeByCampaignKey(resolvedKey, payload: payload)
     }
 
-    private func routeByCampaignKey(_ key: String, payload: InAppPayload) {
+    private func routeByCampaignKey(_ key: String, payload: CEPTriggerPayload) {
         guard let campaign = campaignStore.find(key) else {
-            logVerbose("campaign_key path: no campaign found for key '\(key)'")
+            logVerbose("routeByCampaignKey: no campaign found for key '\(key)'")
             return
         }
 
         logVerbose("routeByCampaignKey key='\(key)' type='\(campaign.campaignType)'")
-        // The lean lifecycle payload carried through the event flow. Identity is
-        // the CEP's id; campaign id/type are resolved from the store at event time.
-        let trigger = CEPTriggerPayload(
-            cepCampaignId: payload.id,
-            campaignKey: key,
-            cepMetadata: payload.cepContext,
-            variables: payload.content.variables
-        )
         switch campaign.config {
         case .inline(let cfg):
             logVerbose(
                 "routeByCampaignKey INLINE slotKey='\(cfg.slotKey)' items=\(cfg.items.count)")
             inlineController.setCarouselConfig(cfg.slotKey, config: cfg)
-            inlineController.setCampaign(cfg.slotKey, payload: trigger)
+            inlineController.setCampaign(cfg.slotKey, payload: payload)
             // syncTemplate semantics: CEP considers an inline slot shown and done
             // the moment it is delivered. Digia's impression fires only when the
             // slot first renders (see reportSlotFirstRender).
-            events.toCep(.impressed, payload: trigger)
-            events.toCep(.dismissed, payload: trigger)
+            events.toCep(.impressed, payload: payload)
+            events.toCep(.dismissed, payload: payload)
         case .story(let cfg):
             inlineController.setStoryConfig(cfg.slotKey, config: cfg)
-            inlineController.setCampaign(cfg.slotKey, payload: trigger)
-            events.toCep(.impressed, payload: trigger)
-            events.toCep(.dismissed, payload: trigger)
+            inlineController.setCampaign(cfg.slotKey, payload: payload)
+            events.toCep(.impressed, payload: payload)
+            events.toCep(.dismissed, payload: payload)
         case .guide:
-            dwellTracker.markViewed(trigger.cepCampaignId)
-            guideOrchestrator.start(campaign, payload: trigger)
+            dwellTracker.markViewed(payload.cepCampaignId)
+            guideOrchestrator.start(campaign, payload: payload)
         case .nudge(let nudgeConfig):
             // Dashboard-declared defaults first, CEP trigger variables layered
             // on top (CEP wins) — mirrors Flutter's `digia_host._presentNudge`.
             var mergedVariables = nudgeConfig.defaultVariables
-            for (key, value) in payload.content.variables ?? [:] {
-                mergedVariables[key] = value
+            for (k, value) in payload.variables ?? [:] {
+                mergedVariables[k] = value
             }
             controller.showNudge(
                 DigiaNudgePresentation(
                     config: nudgeConfig,
-                    payload: trigger,
+                    payload: payload,
                     variables: mergedVariables.isEmpty ? nil : mergedVariables
                 ))
         case .survey(let cfg):
-            // campaignId is read back in reportSurveyCompleted; carry it through
-            // cepMetadata so submission attribution survives.
-            let routed = CEPTriggerPayload(
-                cepCampaignId: campaign.id,
-                campaignKey: campaign.campaignKey,
-                cepMetadata: payload.cepContext.merging([
-                    "campaignId": campaign.id,
-                    "campaignKey": campaign.campaignKey,
-                ]) { _, new in new },
-                variables: payload.content.variables
-            )
-            if !surveyOrchestrator.start(payload: routed, config: cfg) {
+            if !surveyOrchestrator.start(payload: payload, config: cfg) {
                 logVerbose("survey campaign dropped: another survey is on screen: \(key)")
             }
         }
     }
 
     func onCampaignInvalidated(_ campaignID: String) {
-        if controller.activePayload?.id == campaignID {
-            controller.dismiss()
-        }
         if controller.activeNudge?.payload.cepCampaignId == campaignID {
             controller.dismissNudge()
         }
@@ -381,9 +315,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 "reportSurveyCompleted: skip submission — SDK not initialized (config is nil)")
             return
         }
-        guard let campaignId = state.payload.cepMetadata["campaignId"] else {
+        guard let campaignId = campaignStore.find(state.payload.campaignKey)?.id else {
             logVerbose(
-                "reportSurveyCompleted: skip submission — campaignId missing from cepMetadata")
+                "reportSurveyCompleted: skip submission — no campaign for key '\(state.payload.campaignKey)'")
             return
         }
         logVerbose(
@@ -627,7 +561,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         isHostMounted = false
         fontFactory = DefaultFontFactory()
         campaignStore.clear()
-        controller.dismiss()
         controller.dismissNudge()
         controller.dismissStoryOverlay()
         inlineController.clear()

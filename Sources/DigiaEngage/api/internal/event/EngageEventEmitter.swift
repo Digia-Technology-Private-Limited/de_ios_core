@@ -1,6 +1,14 @@
 import Foundation
+import os
 
-/// The SDK's single entry point for emitting events.
+/// Unified-logging channel for event emissions. Visible to Console.app and
+/// `log stream` (unlike `print`, which only reaches stdout). Filter with:
+/// `log stream --predicate 'subsystem == "tech.digia.engage"'` or
+/// `... 'eventMessage CONTAINS "DigiaEvent"'`.
+private let eventLog = os.Logger(subsystem: "tech.digia.engage", category: "DigiaEvent")
+
+/// The SDK's single entry point for emitting events, and the one place every
+/// emission is logged.
 ///
 /// Facade over the two delivery channels, which carry deliberately different
 /// event models: the CEP plugin gets the coarse ``DigiaExperienceEvent`` protocol
@@ -27,11 +35,17 @@ final class EngageEventEmitter {
 
     /// Coarse signal to the CEP plugin only.
     func toCep(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
+        eventLog.info(
+            "[DigiaEvent] Event fired → CEP: \(String(describing: event), privacy: .public) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public)"
+        )
         cep.deliver(event, payload: payload)
     }
 
     /// Rich analytics signal to Digia only.
     func toDigia(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload) {
+        eventLog.info(
+            "[DigiaEvent] Event fired → DIGIA: '\(event.eventName, privacy: .public)' (\(String(describing: type(of: event)), privacy: .public)) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public) columns=\(String(describing: event.columns), privacy: .public) properties=\(String(describing: event.properties), privacy: .public)"
+        )
         digia.deliver(event, payload: payload)
     }
 

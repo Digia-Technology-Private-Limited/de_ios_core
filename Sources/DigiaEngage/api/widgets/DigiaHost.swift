@@ -26,11 +26,5 @@ public struct DigiaHost<Content: View>: View {
             SurveyRenderer(orchestrator: surveyOrchestrator)
                 .zIndex(4)
         }
-        .onChange(of: controller.activePayload, initial: false) { _, payload in
-            // The generic typed-overlay path has no resolved campaign context, so
-            // it no longer participates in analytics — just clear it.
-            guard payload != nil else { return }
-            controller.dismiss()
-        }
     }
 }

@@ -6,11 +6,10 @@ import Foundation
 /// CEP's native campaign callback into this struct; Digia core never imports
 /// CleverTap, MoEngage, or WebEngage types.
 ///
-/// Unlike ``InAppPayload`` — which still describes a *typed* trigger (display
-/// type, viewId, command) for JS/RN-driven campaigns — this is the lean payload
-/// the SDK carries through its lifecycle once a campaign has been resolved from
-/// the store. It is the payload handed to ``DigiaCEPPlugin/notifyEvent(_:payload:)``
-/// and to the analytics pipeline.
+/// It is the single payload the SDK carries end-to-end: the CEP plugin / bridge
+/// builds it at the boundary, the delegate routes it by `campaignKey` through the
+/// campaign store, and it flows into ``DigiaCEPPlugin/notifyEvent(_:payload:)``
+/// and the analytics pipeline.
 public struct CEPTriggerPayload: Sendable, Equatable {
     /// The CEP's own identifier for this campaign instance. Opaque to Digia core.
     public let cepCampaignId: String
