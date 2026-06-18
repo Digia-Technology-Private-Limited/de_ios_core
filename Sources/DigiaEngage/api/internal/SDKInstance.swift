@@ -22,6 +22,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Survey whose start-engagement ("welcome_start") click has already fired
     /// (once per showing).
     private var welcomeStartToken: Int64?
+    /// Per-question viewed-at timestamps, keyed by "<surveyToken>:<nodeId>".
+    /// Used to compute `time_to_answer_ms` on QuestionAnswered.
+    private var questionViewedAt: [String: Date] = [:]
     private var analyticsService: AnalyticsService?
 
     // Event system (mirrors Android): a fan-out emitter over two sinks — the
@@ -231,12 +234,16 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         guard let state = surveyOrchestrator.state else { return }
         guard let block = state.config.blockForNode(nodeId) else { return }
         if block.type.isContent { return }
+        questionViewedAt[Self.questionKey(token: state.token, nodeId: nodeId)] = Date()
+        let typeWire = block.type.rawValue
         events.toDigia(
             SurveyEvent.QuestionViewed(
                 questionId: nodeId,
-                questionType: block.type.rawValue,
+                questionTitle: Self.questionTitle(block),
+                questionType: typeWire,
                 itemIndex: itemIndex,
                 itemTotal: state.config.questionCount,
+                blockType: typeWire,
                 blockId: block.id,
                 isRequired: block.required
             ),
@@ -249,9 +256,14 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         guard let state = surveyOrchestrator.state else { return }
         ensureWelcomeStartIfNoWelcome(state)
         guard let block = state.config.blockForNode(nodeId) else { return }
+        questionViewedAt.removeValue(forKey: Self.questionKey(token: state.token, nodeId: nodeId))
         events.toDigia(
             SurveyEvent.QuestionSkipped(
-                questionId: nodeId, itemIndex: itemIndex, blockId: block.id),
+                questionId: nodeId,
+                questionTitle: Self.questionTitle(block),
+                itemIndex: itemIndex,
+                blockType: block.type.rawValue,
+                blockId: block.id),
             payload: state.payload
         )
     }
@@ -263,14 +275,26 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let block = state.config.blockForNode(stepId)
         let values = Self.stringArray(answer["values"])
         let comment = Self.stringValue(answer["comment"])
+        let viewedKey = Self.questionKey(token: state.token, nodeId: stepId)
+        let timeToAnswerMs: Int64? = questionViewedAt[viewedKey].map {
+            Int64(Date().timeIntervalSince($0) * 1000)
+        }
+        questionViewedAt.removeValue(forKey: viewedKey)
+        let scaleBounds = block.flatMap(Self.scaleBounds)
         events.toDigia(
             SurveyEvent.QuestionAnswered(
                 questionId: stepId,
+                questionTitle: block.flatMap(Self.questionTitle),
                 questionType: block?.type.rawValue,
                 answerValue: values.first,
                 answerText: comment ?? (values.isEmpty ? nil : values.joined(separator: ", ")),
+                blockType: block?.type.rawValue,
                 blockId: block?.id,
+                answerLabel: block.flatMap { Self.answerLabel(block: $0, values: values) },
                 answerOptions: values.count > 1 ? values : nil,
+                scaleMin: scaleBounds?.min,
+                scaleMax: scaleBounds?.max,
+                timeToAnswerMs: timeToAnswerMs,
                 answer: Self.foundation(answer)
             ),
             payload: state.payload
@@ -347,7 +371,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             ),
             payload: state.payload
         )
+        clearQuestionViewedAt(token: state.token)
         surveyOrchestrator.dismiss()
+    }
+
+    private func clearQuestionViewedAt(token: Int64) {
+        let prefix = "\(token):"
+        questionViewedAt = questionViewedAt.filter { !$0.key.hasPrefix(prefix) }
     }
 
     func markInitializedForTesting(with config: DigiaConfig) {
@@ -596,6 +626,41 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         return nil
     }
 
+    /// The block's title text, or nil when empty (blank titles are not worth
+    /// shipping over the wire).
+    private static func questionTitle(_ block: SurveyBlock) -> String? {
+        let title = block.title.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? nil : title
+    }
+
+    /// Comma-joined labels for the selected option ids on a choice block.
+    /// Returns nil when the block has no options or no selection matches —
+    /// (e.g. rating/nps/text inputs whose answer values aren't option ids).
+    private static func answerLabel(block: SurveyBlock, values: [String]) -> String? {
+        guard !values.isEmpty, !block.options.isEmpty else { return nil }
+        let labels = values.compactMap { id in
+            block.options.first { $0.id == id }?.label
+        }
+        guard !labels.isEmpty else { return nil }
+        return labels.joined(separator: ", ")
+    }
+
+    /// Numeric scale bounds for scored blocks (Rating 1–5, NPS 0–10). Other
+    /// block types have no scale.
+    private static func scaleBounds(_ block: SurveyBlock) -> (min: Int, max: Int)? {
+        switch block.type {
+        case .rating: return (1, 5)
+        case .nps, .npsEmoji, .npsSmiley: return (0, 10)
+        default: return nil
+        }
+    }
+
+    /// Stable per-question key for `questionViewedAt`. Scoped by survey token
+    /// so a re-show of the same survey doesn't reuse a stale viewed-at.
+    private static func questionKey(token: Int64, nodeId: String) -> String {
+        "\(token):\(nodeId)"
+    }
+
     func resetForTesting() {
         activePlugin?.teardown()
         activePlugin = nil
@@ -615,6 +680,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         dwellTracker.clear()
         completedSurveyToken = nil
         welcomeStartToken = nil
+        questionViewedAt.removeAll()
     }
 
 }

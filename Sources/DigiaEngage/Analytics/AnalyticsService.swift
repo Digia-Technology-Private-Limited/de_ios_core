@@ -88,9 +88,9 @@ final class AnalyticsService {
     // MARK: - Public
 
     /// Records a rich, campaign-grouped ``EngageAnalyticsEvent``. The event's
-    /// `columns` are hoisted to the payload's top level (alongside `campaign_id`);
-    /// its `properties` are nested under `properties`. Campaign id/type are
-    /// resolved by the caller (``DigiaAnalyticsSink``) from the campaign store.
+    /// `properties` are nested under `properties` on the wire payload. Campaign
+    /// id/type are resolved by the caller (``DigiaAnalyticsSink``) from the
+    /// campaign store.
     func capture(
         _ event: EngageAnalyticsEvent,
         payload: CEPTriggerPayload,
@@ -110,7 +110,6 @@ final class AnalyticsService {
             campaignId: campaignId,
             campaignKey: payload.campaignKey,
             campaignType: campaignType,
-            columns: event.columns,
             properties: event.properties
         )
     }
@@ -200,7 +199,6 @@ final class AnalyticsService {
         campaignId: String?,
         campaignKey: String?,
         campaignType: String?,
-        columns: [String: Any] = [:],
         properties: [String: Any] = [:]
     ) {
         let eventId = UUID().uuidString
@@ -208,7 +206,6 @@ final class AnalyticsService {
 
         var mergedProperties = staticContext
         for (k, v) in properties { mergedProperties[k] = v }
-        for (k, v) in columns { mergedProperties[k] = v }
 
         var payloadMap: [String: Any] = [
             "event_id": eventId,

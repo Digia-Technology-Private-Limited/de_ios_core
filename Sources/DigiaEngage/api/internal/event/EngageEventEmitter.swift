@@ -44,7 +44,7 @@ final class EngageEventEmitter {
     /// Rich analytics signal to Digia only.
     func toDigia(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload) {
         eventLog.info(
-            "[DigiaEvent] Event fired → DIGIA: '\(event.eventName, privacy: .public)' (\(String(describing: type(of: event)), privacy: .public)) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public) columns=\(String(describing: event.columns), privacy: .public) properties=\(String(describing: event.properties), privacy: .public)"
+            "[DigiaEvent] Event fired → DIGIA: '\(event.eventName, privacy: .public)' (\(String(describing: type(of: event)), privacy: .public)) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public) properties=\(String(describing: event.properties), privacy: .public)"
         )
         digia.deliver(event, payload: payload)
     }

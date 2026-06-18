@@ -38,16 +38,14 @@ struct TriggerContext: Equatable {
 /// Events are grouped by campaign type — `NudgeEvent`, `GuideEvent`,
 /// `SurveyEvent`, `CarouselEvent`, `StoriesEvent` — so each subtype exposes
 /// *exactly* the fields its matrix row defines. Each leaf owns its wire
-/// `eventName` and how its typed fields serialize: `columns` hoisted to the
-/// payload's top level, `properties` nested.
+/// `eventName` and its `properties` payload (the analytics service flattens
+/// `properties` under the wire `properties` key).
 protocol EngageAnalyticsEvent {
     var eventName: String { get }
-    var columns: [String: Any] { get }
     var properties: [String: Any] { get }
 }
 
 extension EngageAnalyticsEvent {
-    var columns: [String: Any] { [:] }
     var properties: [String: Any] { [:] }
 }
 
@@ -60,9 +58,11 @@ enum NudgeEvent {
         var screenName: String?
 
         var eventName: String { "Digia Experience Viewed" }
-        var columns: [String: Any] { nonNull([("display_style", displayStyle)]) }
         var properties: [String: Any] {
-            nonNull([("screen_name", screenName)]).merging(trigger.orEmpty()) { current, _ in current }
+            nonNull([
+                ("display_style", displayStyle),
+                ("screen_name", screenName),
+            ]).merging(trigger.orEmpty()) { current, _ in current }
         }
     }
 
@@ -75,16 +75,12 @@ enum NudgeEvent {
         var timeToActionMs: Int64?
 
         var eventName: String { "Digia Experience Clicked" }
-        var columns: [String: Any] {
+        var properties: [String: Any] {
             nonNull([
                 ("element_id", elementId),
                 ("cta_label", ctaLabel),
                 ("action_type", actionType),
                 ("action_url", actionUrl),
-            ])
-        }
-        var properties: [String: Any] {
-            nonNull([
                 ("cta_role", ctaRole),
                 ("time_to_action_ms", timeToActionMs),
             ])
@@ -109,9 +105,12 @@ enum GuideEvent {
         var screenName: String?
 
         var eventName: String { "Digia Experience Viewed" }
-        var columns: [String: Any] { nonNull([("display_style", displayStyle), ("item_total", itemTotal)]) }
         var properties: [String: Any] {
-            nonNull([("screen_name", screenName)]).merging(trigger.orEmpty()) { current, _ in current }
+            nonNull([
+                ("display_style", displayStyle),
+                ("item_total", itemTotal),
+                ("screen_name", screenName),
+            ]).merging(trigger.orEmpty()) { current, _ in current }
         }
     }
 
@@ -122,7 +121,7 @@ enum GuideEvent {
         var displayStyle: String?
 
         var eventName: String { "Digia Step Viewed" }
-        var columns: [String: Any] {
+        var properties: [String: Any] {
             nonNull([
                 ("item_index", itemIndex),
                 ("item_total", itemTotal),
@@ -140,7 +139,7 @@ enum GuideEvent {
         var actionUrl: String?
 
         var eventName: String { "Digia Step Clicked" }
-        var columns: [String: Any] {
+        var properties: [String: Any] {
             nonNull([
                 ("item_index", itemIndex),
                 ("element_id", elementId),
@@ -155,7 +154,7 @@ enum GuideEvent {
         let itemIndex: Int
 
         var eventName: String { "Digia Step Dismissed" }
-        var columns: [String: Any] { nonNull([("item_index", itemIndex)]) }
+        var properties: [String: Any] { nonNull([("item_index", itemIndex)]) }
     }
 
     /// Guide abandoned (rolls up step-level dismiss).
@@ -165,10 +164,13 @@ enum GuideEvent {
         var dwellMs: Int64?
 
         var eventName: String { "Digia Experience Dismissed" }
-        var columns: [String: Any] {
-            nonNull([("abandoned_at_item", abandonedAtItem), ("item_total", itemTotal)])
+        var properties: [String: Any] {
+            nonNull([
+                ("abandoned_at_item", abandonedAtItem),
+                ("item_total", itemTotal),
+                ("dwell_ms", dwellMs),
+            ])
         }
-        var properties: [String: Any] { nonNull([("dwell_ms", dwellMs)]) }
     }
 
     struct Completed: EngageAnalyticsEvent {
@@ -176,8 +178,12 @@ enum GuideEvent {
         var timeToCompleteMs: Int64?
 
         var eventName: String { "Digia Experience Completed" }
-        var columns: [String: Any] { nonNull([("item_total", itemTotal)]) }
-        var properties: [String: Any] { nonNull([("time_to_complete_ms", timeToCompleteMs)]) }
+        var properties: [String: Any] {
+            nonNull([
+                ("item_total", itemTotal),
+                ("time_to_complete_ms", timeToCompleteMs),
+            ])
+        }
     }
 }
 
@@ -193,9 +199,9 @@ enum SurveyEvent {
         var screenName: String?
 
         var eventName: String { "Digia Experience Viewed" }
-        var columns: [String: Any] { nonNull([("item_total", itemTotal)]) }
         var properties: [String: Any] {
             nonNull([
+                ("item_total", itemTotal),
                 ("has_welcome", hasWelcome),
                 ("has_thanks", hasThanks),
                 ("has_branching", hasBranching),
@@ -209,11 +215,12 @@ enum SurveyEvent {
         var elementId: String?
 
         var eventName: String { "Digia Experience Clicked" }
-        var columns: [String: Any] { nonNull([("element_id", elementId)]) }
+        var properties: [String: Any] { nonNull([("element_id", elementId)]) }
     }
 
     struct QuestionViewed: EngageAnalyticsEvent {
         let questionId: String
+        var questionTitle: String?
         var questionType: String?
         var itemIndex: Int?
         var itemTotal: Int?
@@ -222,16 +229,13 @@ enum SurveyEvent {
         var isRequired: Bool?
 
         var eventName: String { "Digia Question Viewed" }
-        var columns: [String: Any] {
+        var properties: [String: Any] {
             nonNull([
                 ("question_id", questionId),
+                ("question_title", questionTitle),
                 ("question_type", questionType),
                 ("item_index", itemIndex),
                 ("item_total", itemTotal),
-            ])
-        }
-        var properties: [String: Any] {
-            nonNull([
                 ("block_type", blockType),
                 ("block_id", blockId),
                 ("is_required", isRequired),
@@ -241,6 +245,7 @@ enum SurveyEvent {
 
     struct QuestionAnswered: EngageAnalyticsEvent {
         let questionId: String
+        var questionTitle: String?
         var questionType: String?
         var answerValue: String?
         var answerText: String?
@@ -254,16 +259,13 @@ enum SurveyEvent {
         var answer: [String: Any] = [:]
 
         var eventName: String { "Digia Question Answered" }
-        var columns: [String: Any] {
+        var properties: [String: Any] {
             nonNull([
                 ("question_id", questionId),
+                ("question_title", questionTitle),
                 ("question_type", questionType),
                 ("answer_value", answerValue),
                 ("answer_text", answerText),
-            ])
-        }
-        var properties: [String: Any] {
-            nonNull([
                 ("block_type", blockType),
                 ("block_id", blockId),
                 ("answer_label", answerLabel),
@@ -278,13 +280,21 @@ enum SurveyEvent {
 
     struct QuestionSkipped: EngageAnalyticsEvent {
         let questionId: String
+        var questionTitle: String?
         var itemIndex: Int?
         var blockType: String?
         var blockId: String?
 
         var eventName: String { "Digia Question Skipped" }
-        var columns: [String: Any] { nonNull([("question_id", questionId), ("item_index", itemIndex)]) }
-        var properties: [String: Any] { nonNull([("block_type", blockType), ("block_id", blockId)]) }
+        var properties: [String: Any] {
+            nonNull([
+                ("question_id", questionId),
+                ("question_title", questionTitle),
+                ("item_index", itemIndex),
+                ("block_type", blockType),
+                ("block_id", blockId),
+            ])
+        }
     }
 
     struct Dismissed: EngageAnalyticsEvent {
@@ -294,11 +304,13 @@ enum SurveyEvent {
         var dwellMs: Int64?
 
         var eventName: String { "Digia Experience Dismissed" }
-        var columns: [String: Any] {
-            nonNull([("abandoned_at_item", abandonedAtItem), ("item_total", itemTotal)])
-        }
         var properties: [String: Any] {
-            nonNull([("answered_count", answeredCount), ("dwell_ms", dwellMs)])
+            nonNull([
+                ("abandoned_at_item", abandonedAtItem),
+                ("item_total", itemTotal),
+                ("answered_count", answeredCount),
+                ("dwell_ms", dwellMs),
+            ])
         }
     }
 
@@ -310,9 +322,9 @@ enum SurveyEvent {
         var response: [String: Any] = [:]
 
         var eventName: String { "Digia Experience Completed" }
-        var columns: [String: Any] { nonNull([("item_total", itemTotal)]) }
         var properties: [String: Any] {
             nonNull([
+                ("item_total", itemTotal),
                 ("answered_count", answeredCount),
                 ("submission_id", submissionId),
                 ("time_to_complete_ms", timeToCompleteMs),
@@ -331,14 +343,14 @@ enum CarouselEvent {
         var screenName: String?
 
         var eventName: String { "Digia Experience Viewed" }
-        var columns: [String: Any] {
+        var properties: [String: Any] {
             nonNull([
                 ("display_style", "carousel"),
                 ("item_total", itemTotal),
                 ("slot_key", slotKey),
+                ("screen_name", screenName),
             ])
         }
-        var properties: [String: Any] { nonNull([("screen_name", screenName)]) }
     }
 
     struct StepViewed: EngageAnalyticsEvent {
@@ -349,8 +361,14 @@ enum CarouselEvent {
         var auto: Bool?
 
         var eventName: String { "Digia Step Viewed" }
-        var columns: [String: Any] { nonNull([("item_index", itemIndex), ("item_total", itemTotal)]) }
-        var properties: [String: Any] { nonNull([("item_id", itemId), ("auto", auto)]) }
+        var properties: [String: Any] {
+            nonNull([
+                ("item_index", itemIndex),
+                ("item_total", itemTotal),
+                ("item_id", itemId),
+                ("auto", auto),
+            ])
+        }
     }
 
     struct StepClicked: EngageAnalyticsEvent {
@@ -362,16 +380,16 @@ enum CarouselEvent {
         var itemId: String?
 
         var eventName: String { "Digia Step Clicked" }
-        var columns: [String: Any] {
+        var properties: [String: Any] {
             nonNull([
                 ("item_index", itemIndex),
                 ("element_id", elementId),
                 ("cta_label", ctaLabel),
                 ("action_type", actionType),
                 ("action_url", actionUrl),
+                ("item_id", itemId),
             ])
         }
-        var properties: [String: Any] { nonNull([("item_id", itemId)]) }
     }
 
     /// Carousel container tapped (non-item region).
@@ -382,7 +400,7 @@ enum CarouselEvent {
         var actionUrl: String?
 
         var eventName: String { "Digia Experience Clicked" }
-        var columns: [String: Any] {
+        var properties: [String: Any] {
             nonNull([
                 ("element_id", elementId),
                 ("cta_label", ctaLabel),
@@ -402,14 +420,14 @@ enum StoriesEvent {
         var screenName: String?
 
         var eventName: String { "Digia Experience Viewed" }
-        var columns: [String: Any] {
+        var properties: [String: Any] {
             nonNull([
                 ("display_style", "stories"),
                 ("item_total", itemTotal),
                 ("slot_key", slotKey),
+                ("screen_name", screenName),
             ])
         }
-        var properties: [String: Any] { nonNull([("screen_name", screenName)]) }
     }
 
     /// A story is opened (ring/thumbnail tapped).
@@ -417,8 +435,12 @@ enum StoriesEvent {
         var storyId: String?
 
         var eventName: String { "Digia Experience Clicked" }
-        var columns: [String: Any] { nonNull([("element_id", "story_open")]) }
-        var properties: [String: Any] { nonNull([("story_id", storyId)]) }
+        var properties: [String: Any] {
+            nonNull([
+                ("element_id", "story_open"),
+                ("story_id", storyId),
+            ])
+        }
     }
 
     struct StepViewed: EngageAnalyticsEvent {
@@ -428,8 +450,14 @@ enum StoriesEvent {
         var frameId: String?
 
         var eventName: String { "Digia Step Viewed" }
-        var columns: [String: Any] { nonNull([("item_index", itemIndex), ("item_total", itemTotal)]) }
-        var properties: [String: Any] { nonNull([("story_id", storyId), ("frame_id", frameId)]) }
+        var properties: [String: Any] {
+            nonNull([
+                ("item_index", itemIndex),
+                ("item_total", itemTotal),
+                ("story_id", storyId),
+                ("frame_id", frameId),
+            ])
+        }
     }
 
     struct StepClicked: EngageAnalyticsEvent {
@@ -440,22 +468,22 @@ enum StoriesEvent {
         var frameId: String?
 
         var eventName: String { "Digia Step Clicked" }
-        var columns: [String: Any] {
+        var properties: [String: Any] {
             nonNull([
                 ("item_index", itemIndex),
                 ("cta_label", ctaLabel),
                 ("action_type", actionType),
                 ("action_url", actionUrl),
+                ("frame_id", frameId),
             ])
         }
-        var properties: [String: Any] { nonNull([("frame_id", frameId)]) }
     }
 
     struct StepDismissed: EngageAnalyticsEvent {
         let itemIndex: Int
 
         var eventName: String { "Digia Step Dismissed" }
-        var columns: [String: Any] { nonNull([("item_index", itemIndex)]) }
+        var properties: [String: Any] { nonNull([("item_index", itemIndex)]) }
     }
 
     struct Completed: EngageAnalyticsEvent {
@@ -463,8 +491,12 @@ enum StoriesEvent {
         var timeToCompleteMs: Int64?
 
         var eventName: String { "Digia Experience Completed" }
-        var columns: [String: Any] { nonNull([("item_total", itemTotal)]) }
-        var properties: [String: Any] { nonNull([("time_to_complete_ms", timeToCompleteMs)]) }
+        var properties: [String: Any] {
+            nonNull([
+                ("item_total", itemTotal),
+                ("time_to_complete_ms", timeToCompleteMs),
+            ])
+        }
     }
 }
 

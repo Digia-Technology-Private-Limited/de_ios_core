@@ -4,10 +4,9 @@ import Foundation
 ///
 /// Resolves the campaign from the store by `campaignKey` for attribution context
 /// (campaign id/type live on the `CampaignModel`, not the trigger payload), then
-/// hands the event to ``AnalyticsService``, which hoists
-/// ``EngageAnalyticsEvent/columns`` to top level and nests
-/// ``EngageAnalyticsEvent/properties``. Ported from Android
-/// `internal/event/DigiaAnalyticsSink.kt`.
+/// hands the event to ``AnalyticsService``, which nests
+/// ``EngageAnalyticsEvent/properties`` under the wire `properties` key.
+/// Ported from Android `internal/event/DigiaAnalyticsSink.kt`.
 @MainActor
 final class DigiaAnalyticsSink {
     private let getAnalyticsService: () -> AnalyticsService?
