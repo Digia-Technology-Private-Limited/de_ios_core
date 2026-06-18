@@ -144,7 +144,10 @@ private struct NudgeButtonView: View {
             case .dismiss:
                 onDismiss()
             case .openUrl(let url), .openDeeplink(let url):
-                if let u = URL(string: url) {
+                if let onAction = SDKInstance.shared.controller.onAction,
+                   let payload = SDKInstance.shared.controller.activeNudge?.payload {
+                    onAction("deep_link", url, payload)
+                } else if let u = URL(string: url) {
                     UIApplication.shared.open(u)
                 }
             case .copyToClipboard(let text):

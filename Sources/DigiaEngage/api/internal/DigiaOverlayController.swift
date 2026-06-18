@@ -15,6 +15,8 @@ final class DigiaOverlayController: ObservableObject {
 
     var onEvent: ((DigiaExperienceEvent, InAppPayload) -> Void)?
 
+    var onAction: ((_ actionType: String, _ url: String, _ payload: InAppPayload) -> Void)?
+
     func show(_ payload: InAppPayload) {
         activePayload = payload
     }

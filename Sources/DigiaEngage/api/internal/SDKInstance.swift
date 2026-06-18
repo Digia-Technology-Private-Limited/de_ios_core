@@ -25,6 +25,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             self?.activePlugin?.notifyEvent(event, payload: payload)
         }
 
+        controller.onAction = { [weak self] actionType, url, payload in
+            self?.activePlugin?.notifyAction(actionType: actionType, url: url, payload: payload)
+        }
+
         inlineController.onEvent = { [weak self] event, payload in
             self?.activePlugin?.notifyEvent(event, payload: payload)
         }
