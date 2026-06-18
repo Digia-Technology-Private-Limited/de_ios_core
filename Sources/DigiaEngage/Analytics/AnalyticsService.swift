@@ -55,6 +55,9 @@ final class AnalyticsService {
         self.sender = sender
 
         identity.initialize(sessionTimeoutMs: config.sessionTimeoutMs)
+        identity.onSessionRotated = { [weak self] in
+            Task { @MainActor [weak self] in await self?.reportSession() }
+        }
 
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
