@@ -46,7 +46,9 @@ private struct StoryThumbnailCard: View {
             }
         }
         .frame(width: width, height: CGFloat(config.card.height))
+        .clipped()
         .clipShape(RoundedRectangle(cornerRadius: CGFloat(config.card.borderRadius), style: .continuous))
+        .contentShape(Rectangle())
     }
 }
 
