@@ -1,88 +1,117 @@
 import SwiftUI
 
-/// Presentation chrome for a Digia bottom sheet, decoupled from any one feature
-/// (nudge, survey, …). Each surface maps its own config onto this.
 struct DigiaBottomSheetConfig {
     var cornerRadius: CGFloat = 18
     var background: Color = .white
-    /// Show the grabber pill at the top of the sheet.
+    var scrimColor: Color = Color.black.opacity(0.4)
     var showHandle: Bool = true
-    /// Allow swipe-down / interactive dismissal.
     var allowInteractiveDismiss: Bool = true
-    /// Sheet-height ceiling as a fraction of the screen height. Content shorter
-    /// than this hugs its natural height (no dead space); taller content scrolls
-    /// within the ceiling.
     var heightCapFraction: CGFloat = 0.85
 }
 
-/// Carries the content's natural height up so the native sheet's detent can size
-/// *to its content* (capped) instead of snapping to `.medium`/`.large` and
-/// leaving a blank band below the content.
-private struct DigiaSheetHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
-/// The single bottom-sheet surface every Digia feature renders through.
-///
-/// It owns the things a "good" sheet needs and that SwiftUI's native sheet gives
-/// us for free — scrim, drag-to-dismiss, safe-area handling, corner radius — and
-/// adds the one piece SwiftUI lacks: a content-fitting detent. It measures the
-/// content and pins the detent to `min(contentHeight + homeIndicatorInset, cap)`,
-/// so the sheet hugs its content and never leaves the empty space below it.
-///
-/// Drive it from a `.sheet(item:)` / `.sheet(isPresented:)` on a view that lives
-/// in the hierarchy. Content that can exceed the cap should set `scrollable:
-/// true` (the default) so this wraps it in a scroll view; content that manages
-/// its own scrolling passes `scrollable: false`.
+/// A bottom sheet whose card attaches flush to the screen edges (the system
+/// `.sheet` reserves an unremovable bottom safe-area strip). Present it from a
+/// `fullScreenCover` with a clear background and disabled cover animation.
 struct DigiaBottomSheet<Content: View>: View {
     let config: DigiaBottomSheetConfig
     var scrollable: Bool = true
+    let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
 
     @State private var contentHeight: CGFloat = 0
+    @State private var shown = false
+    @State private var dragOffset: CGFloat = 0
 
-    /// The detent hugs the content's natural height exactly (capped). No extra
-    /// clearance is added below — callers own their bottom padding, so the sheet
-    /// never leaves a dead band beneath the content.
-    private var detents: Set<PresentationDetent> {
-        let cap = UIScreen.main.bounds.height * config.heightCapFraction
-        guard contentHeight > 0 else { return [.medium] }
-        return [.height(min(contentHeight, cap))]
+    private let animation: Animation = .spring(response: 0.35, dampingFraction: 0.85)
+
+    var body: some View {
+        GeometryReader { geo in
+            let cap = geo.size.height * config.heightCapFraction
+            ZStack(alignment: .bottom) {
+                config.scrimColor
+                    .opacity(shown ? 1 : 0)
+                    .contentShape(Rectangle())
+                    .onTapGesture { if config.allowInteractiveDismiss { close() } }
+
+                card(cap: cap)
+                    .offset(y: shown ? max(dragOffset, 0) : geo.size.height)
+                    .gesture(dragGesture)
+            }
+            .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
+        }
+        .ignoresSafeArea()
+        .onPreferenceChange(SheetHeightKey.self) { contentHeight = $0 }
+        .onAppear { withAnimation(animation) { shown = true } }
+    }
+
+    private func card(cap: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            if config.showHandle {
+                Capsule()
+                    .fill(Color.secondary.opacity(0.35))
+                    .frame(width: 36, height: 5)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+            }
+            sheetBody(cap: cap)
+        }
+        .padding(.bottom, 8)
+        .frame(maxWidth: .infinity)
+        .background(config.background)
+        .clipShape(.rect(topLeadingRadius: config.cornerRadius, topTrailingRadius: config.cornerRadius))
+    }
+
+    @ViewBuilder
+    private func sheetBody(cap: CGFloat) -> some View {
+        let height = min(contentHeight, cap)
+        if scrollable {
+            ScrollView { measuredContent }
+                .scrollBounceBehavior(.basedOnSize)
+                .frame(height: height)
+        } else {
+            measuredContent.frame(height: height, alignment: .top)
+        }
     }
 
     private var measuredContent: some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: DigiaSheetHeightKey.self,
-                        value: proxy.size.height
-                    )
+                GeometryReader { geo in
+                    Color.clear.preference(key: SheetHeightKey.self, value: geo.size.height)
                 }
             )
     }
 
-    var body: some View {
-        Group {
-            if scrollable {
-                ScrollView { measuredContent }
-                    .scrollBounceBehavior(.basedOnSize)
-            } else {
-                // Caller manages its own scrolling; just pin to the top.
-                measuredContent
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxHeight: .infinity, alignment: .top)
+    private var dragGesture: some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard config.allowInteractiveDismiss else { return }
+                dragOffset = value.translation.height > 0
+                    ? value.translation.height
+                    : value.translation.height * 0.2
             }
-        }
-        .onPreferenceChange(DigiaSheetHeightKey.self) { contentHeight = $0 }
-        .presentationDetents(detents)
-        .presentationDragIndicator(config.showHandle ? .visible : .hidden)
-        .presentationCornerRadius(config.cornerRadius)
-        .presentationBackground(config.background)
-        .interactiveDismissDisabled(!config.allowInteractiveDismiss)
+            .onEnded { value in
+                guard config.allowInteractiveDismiss else { return }
+                if value.translation.height > 120 || value.predictedEndTranslation.height > 280 {
+                    close()
+                } else {
+                    withAnimation(animation) { dragOffset = 0 }
+                }
+            }
+    }
+
+    private func close() {
+        withAnimation(animation) {
+            shown = false
+            dragOffset = 0
+        } completion: { onDismiss() }
+    }
+}
+
+private struct SheetHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }

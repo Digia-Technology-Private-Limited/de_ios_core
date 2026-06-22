@@ -6,9 +6,11 @@ struct NudgeOverlayView: View {
     @ObservedObject private var controller = SDKInstance.shared.controller
 
     var body: some View {
-        // Center dialogs render as a custom overlay inside the host ZStack.
-        // Bottom sheets use SwiftUI's native sheet, which owns the scrim,
-        // drag-to-dismiss, safe-area handling and corner radius for us.
+        // Center dialogs and bottom sheets both render as custom overlays. The
+        // bottom sheet uses a full-screen cover with a clear background and
+        // disabled cover animation, so `DigiaBottomSheet` can attach its card
+        // flush to the screen edges (the native `.sheet` reserves a bottom
+        // safe-area strip that can't be removed) and drive its own spring.
         ZStack {
             if let nudge = controller.activeNudge, !nudge.config.surface.isBottomSheet {
                 NudgeDialogContainer(presentation: nudge)
@@ -16,15 +18,17 @@ struct NudgeOverlayView: View {
                     .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .center)))
             }
         }
-        .sheet(item: sheetBinding) { nudge in
+        .fullScreenCover(item: sheetBinding) { nudge in
             NudgeSheetView(presentation: nudge)
+                .presentationBackground(.clear)
         }
+        .transaction { $0.disablesAnimations = true }
     }
 
-    /// Drives the native sheet from the controller's active nudge, but only for
-    /// bottom-sheet nudges. Clearing it (swipe-down or programmatic) routes
-    /// through `markNudgeDismissed()` so the Dismissed event fires and the dwell
-    /// timer is consumed (symmetric with the impression on appear).
+    /// Drives the cover from the controller's active nudge, but only for
+    /// bottom-sheet nudges. Clearing it routes through `markNudgeDismissed()` so
+    /// the Dismissed event fires and the dwell timer is consumed (symmetric with
+    /// the impression on appear).
     private var sheetBinding: Binding<DigiaNudgePresentation?> {
         Binding(
             get: {
@@ -55,23 +59,21 @@ private struct NudgeSheetView: View {
             config: DigiaBottomSheetConfig(
                 cornerRadius: surface.cornerRadius,
                 background: surface.backgroundColor ?? .white,
+                scrimColor: surface.barrierColor ?? Color.black.opacity(0.4),
                 showHandle: surface.showHandle,
-                // A non-draggable, non-backdrop-dismissible nudge must be closed
-                // via an explicit action/close button.
                 allowInteractiveDismiss: surface.draggable || surface.backdropDismissible
-            )
+            ),
+            onDismiss: dismiss
         ) {
-            renderedContent
-                // Uniform surface padding on all sides (matches Flutter/Android):
-                // the content column — including full-width buttons — is inset
-                // equally left/right/top/bottom instead of bleeding to the edges.
-                .padding(surface.padding)
+            ZStack(alignment: .topTrailing) {
+                renderedContent
+                    .padding(surface.padding)
+
+                if surface.showCloseButton { closeButton }
+            }
         }
-        .overlay(alignment: .topTrailing) {
-            if surface.showCloseButton { closeButton }
-        }
-        // The native sheet presents this content once per nudge, so `onAppear`
-        // is the impression signal (Impressed → CEP + Digia "Viewed").
+        // The cover presents this content once per nudge, so `onAppear` is the
+        // impression signal (Impressed → CEP + Digia "Viewed").
         .onAppear { SDKInstance.shared.reportNudgeImpression() }
     }
 

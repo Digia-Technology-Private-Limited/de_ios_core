@@ -42,9 +42,6 @@ private struct SurveySession: View {
         let display = survey.settings.display
 
         ZStack {
-            // Center dialogs keep the custom overlay; bottom sheets use the
-            // native sheet, which hugs its content (no dead space) and owns the
-            // scrim, drag-to-dismiss and safe-area handling.
             if visible && !vm.isComplete && display.type == .dialog {
                 DialogContainer(
                     dialog: display.dialog,
@@ -64,8 +61,12 @@ private struct SurveySession: View {
                 .transition(.opacity)
             }
         }
-        .sheet(isPresented: sheetPresented) {
-            SurveySheet(sheet: display.bottomSheet, background: background) {
+        .fullScreenCover(isPresented: sheetPresented) {
+            SurveySheet(
+                sheet: display.bottomSheet,
+                background: background,
+                onDismiss: { finish(completed: false) }
+            ) {
                 SurveyBody(
                     vm: vm,
                     survey: survey,
@@ -75,7 +76,9 @@ private struct SurveySession: View {
                     showCloseButton: display.bottomSheet.backdropDismissible
                 )
             }
+            .presentationBackground(.clear)
         }
+        .transaction { $0.disablesAnimations = true }
         .task(id: state.token) {
             let delayNs = UInt64(max(0, survey.timeDelayMs + RENDER_DELAY_MS)) * 1_000_000
             try? await Task.sleep(nanoseconds: delayNs)
@@ -102,8 +105,10 @@ private struct SurveySession: View {
         }
     }
 
-    /// Drives the native sheet for bottom-sheet surveys. Clearing it (swipe-down)
-    /// routes through `finish(completed:)` so the dismissal is still reported.
+    /// Drives the full-screen cover for bottom-sheet surveys. The sheet's own
+    /// drag/backdrop dismissal calls `finish(completed:)` directly (via
+    /// `onDismiss`); this binding's setter is a safety net for any programmatic
+    /// clear, also routing through `finish(completed:)`.
     private var sheetPresented: Binding<Bool> {
         Binding(
             get: {
@@ -123,6 +128,7 @@ private struct SurveySession: View {
 private struct SurveySheet<Content: View>: View {
     let sheet: BottomSheetProps
     let background: Color
+    let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
 
     /// `heightMode` becomes the sheet's *cap*, not a fixed height: short content
@@ -146,6 +152,7 @@ private struct SurveySheet<Content: View>: View {
                 heightCapFraction: heightCapFraction
             ),
             scrollable: false,
+            onDismiss: onDismiss,
             content: content
         )
     }
