@@ -80,10 +80,10 @@ struct NudgeSurface: Equatable {
 struct NudgeConfig: Equatable {
     let surface: NudgeSurface
     let layout: NudgeColumn
-    /// Dashboard-declared variable defaults (`templateConfig.variables`). The
-    /// CEP trigger payload's variables are layered on top of these at render
-    /// time (CEP wins). Mirrors Flutter's `CampaignConfig.defaultVariables`.
-    let defaultVariables: [String: String]
+    /// Dashboard-declared variable schemas (`templateConfig.variables`). Carries
+    /// name, type, and fallbackValue for each declared variable; resolved against
+    /// CEP trigger variables at render time via `buildVariableContext()`.
+    let variableSchemas: [VariableSchema]
 
     /// Decodes a nudge `templateConfig` (`{ container, layout, variables }`).
     /// Returns nil when the content tree is missing — such a campaign has
@@ -93,28 +93,34 @@ struct NudgeConfig: Equatable {
         return NudgeConfig(
             surface: NudgeSurface.fromJson(json["container"] as? [String: Any]),
             layout: layout,
-            defaultVariables: declaredVariables(json)
+            variableSchemas: parseVariableSchemas(json)
         )
     }
 
-    /// The dashboard-declared variable defaults on a `templateConfig`, as a
-    /// `name -> value` map (empty when absent). Mirrors Flutter's
-    /// `_declaredVariables`: the backend sends `variables` as a list of
-    /// `{ name, fallbackValue?, sampleValue? }` entries, folded into a map keyed
-    /// by `name` (value = `fallbackValue` ?? `sampleValue`). A plain map is also
-    /// accepted for forward compatibility. Values are stringified for
-    /// `{{ }}` interpolation.
-    private static func declaredVariables(_ templateConfig: [String: Any]) -> [String: String] {
-        var result: [String: String] = [:]
+    /// Parse dashboard-declared variable schemas from `templateConfig.variables`.
+    /// Accepts a list `[{ name, type?, fallbackValue?, sampleValue? }]` (D29: absent
+    /// type → "string", absent fallbackValue falls back to sampleValue).
+    /// A plain string-map is also accepted for forward compatibility (type → "string").
+    static func parseVariableSchemas(_ templateConfig: [String: Any]) -> [VariableSchema] {
+        var result: [VariableSchema] = []
         if let list = templateConfig["variables"] as? [[String: Any]] {
             for entry in list {
                 guard let name = entry["name"] as? String, !name.isEmpty else { continue }
-                let raw = entry.keys.contains("fallbackValue") ? entry["fallbackValue"] : entry["sampleValue"]
-                if let value = stringifyVariable(raw) { result[name] = value }
+                let rawType = entry["type"] as? String
+                let fallback = stringifyVariable(entry.keys.contains("fallbackValue") ? entry["fallbackValue"] : nil)
+                let sample = stringifyVariable(entry["sampleValue"])
+                result.append(normalizeVariable(
+                    name: name,
+                    type: rawType,
+                    fallbackValue: fallback,
+                    sampleValue: sample
+                ))
             }
         } else if let map = templateConfig["variables"] as? [String: Any] {
             for (key, raw) in map {
-                if let value = stringifyVariable(raw) { result[key] = value }
+                if let value = stringifyVariable(raw) {
+                    result.append(VariableSchema(name: key, type: "string", fallbackValue: value))
+                }
             }
         }
         return result
@@ -125,8 +131,6 @@ struct NudgeConfig: Equatable {
         case let string as String:
             return string
         case let number as NSNumber:
-            // Distinguish booleans from numeric NSNumbers so a declared
-            // `flag: true` reads as "true" rather than "1".
             if CFGetTypeID(number) == CFBooleanGetTypeID() {
                 return number.boolValue ? "true" : "false"
             }
@@ -138,12 +142,11 @@ struct NudgeConfig: Equatable {
 }
 
 /// Active nudge state held on the overlay controller and rendered by
-/// `NudgeOverlayView`. Carries the trigger `variables` so the renderer can
-/// interpolate `{{ placeholder }}` copy (mirrors Flutter's `VariableScope`
-/// threaded into `presentNudge`).
+/// `NudgeOverlayView`. Carries the resolved `VariableContext` so the renderer
+/// can interpolate `{{ placeholder }}` copy and arithmetic expressions.
 struct DigiaNudgePresentation: Equatable, Identifiable {
     let config: NudgeConfig
     let payload: CEPTriggerPayload
-    let variables: [String: String]?
+    let variables: VariableContext?
     var id: String { payload.cepCampaignId }
 }
