@@ -24,7 +24,7 @@ struct GuideOverlayView: View {
                 onAdvance: { orchestrator.advance() },
                 onDismiss: { SDKInstance.shared.dismissGuide() }
             )
-            .environment(\.digiaVariables, state.variables)
+            .environment(\.digiaVariables, state.variableContext)
             .id(state.stepIndex)
         }
     }
@@ -129,12 +129,12 @@ private struct GuideStepOverlay: View {
     private var bubble: some View {
         VStack(alignment: .leading, spacing: 4) {
             if let title = config.content.title, !title.text.isEmpty {
-                Text(interpolate(title.text, variables: variables))
+                Text(interpolate(title.text, context: variables))
                     .font(.system(size: CGFloat(title.fontSize), weight: .bold))
                     .foregroundColor(guideColor(title.textColor, fallback: .white))
             }
             if let bodyText = config.content.body, !bodyText.text.isEmpty {
-                Text(interpolate(bodyText.text, variables: variables))
+                Text(interpolate(bodyText.text, context: variables))
                     .font(.system(size: CGFloat(bodyText.fontSize)))
                     .foregroundColor(guideColor(bodyText.textColor, fallback: .white.opacity(0.8)))
             }
@@ -148,7 +148,7 @@ private struct GuideStepOverlay: View {
                     Spacer()
                     ForEach(Array(config.actions.enumerated()), id: \.offset) { _, action in
                         Button(action: { handleAction(action) }) {
-                            Text(interpolate(action.label, variables: variables))
+                            Text(interpolate(action.label, context: variables))
                                 .font(.system(size: 14))
                                 .foregroundColor(guideColor(action.textColor, fallback: bubbleBackground))
                                 .padding(.horizontal, 12)

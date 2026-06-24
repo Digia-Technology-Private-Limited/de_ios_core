@@ -23,6 +23,10 @@ private struct InlineCarouselView: View {
     private var items: [CarouselItem] { config.items.filter { !$0.imageUrl.isEmpty } }
     private var pageCount: Int { config.infiniteScroll ? 9999 : items.count }
 
+    private var variables: VariableContext {
+        buildVariableContext(schemas: config.variableSchemas, cepVars: payload.variables)
+    }
+
     var body: some View {
         if items.isEmpty {
             EmptyView()
@@ -80,12 +84,13 @@ private struct InlineCarouselView: View {
     /// An item was tapped: record the click (1-based index) and open its deep link.
     private func handleTap(_ realIndex: Int) {
         let item = items[realIndex]
+        let link = item.deepLink.map { interpolate($0, context: variables) }
         SDKInstance.shared.reportCarouselStepClicked(
             payload: payload,
             itemIndex: realIndex + 1,
-            actionUrl: item.deepLink
+            actionUrl: link
         )
-        if let link = item.deepLink, let url = URL(string: link) {
+        if let link, let url = URL(string: link) {
             UIApplication.shared.open(url)
         }
     }

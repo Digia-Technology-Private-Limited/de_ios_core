@@ -60,7 +60,7 @@ private struct NudgeTextView: View {
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
-        Text(interpolate(node.text, variables: variables))
+        Text(interpolate(node.text, context: variables))
             .font(SDKInstance.shared.fontFactory.getDefaultFont(
                 size: Double(node.fontSize), weight: node.fontWeight, italic: false
             ))
@@ -78,7 +78,7 @@ private struct NudgeImageView: View {
     let node: NudgeImage
     @Environment(\.digiaVariables) private var variables
 
-    private var url: String { interpolate(node.url, variables: variables) }
+    private var url: String { interpolate(node.url, context: variables) }
 
     var body: some View {
         if url.isEmpty {
@@ -112,7 +112,7 @@ private struct NudgeButtonView: View {
 
     var body: some View {
         Button(action: handleTap) {
-            Text(interpolate(node.label, variables: variables))
+            Text(interpolate(node.label, context: variables))
                 .font(SDKInstance.shared.fontFactory.getDefaultFont(
                     size: Double(node.fontSize), weight: node.fontWeight, italic: false
                 ))
@@ -163,10 +163,10 @@ private struct NudgeButtonView: View {
                     UIApplication.shared.open(u)
                 }
             case .copyToClipboard(let text):
-                UIPasteboard.general.string = interpolate(text, variables: variables)
+                UIPasteboard.general.string = interpolate(text, context: variables)
             case .share(let text):
                 let activity = UIActivityViewController(
-                    activityItems: [interpolate(text, variables: variables)],
+                    activityItems: [interpolate(text, context: variables)],
                     applicationActivities: nil
                 )
                 ViewControllerUtil.present(activity)
@@ -216,7 +216,7 @@ private struct NudgeLottieView: View {
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
-        let resolved = interpolate(node.url, variables: variables)
+        let resolved = interpolate(node.url, context: variables)
         if resolved.isEmpty {
             nudgePlaceholder(label: "Lottie", height: node.height)
         } else if let url = URL(string: resolved) {
@@ -247,7 +247,7 @@ private struct NudgeCarouselView: View {
     @State private var autoPlayTimer: Timer? = nil
 
     private var images: [String] {
-        node.images.map { interpolate($0, variables: variables) }.filter { !$0.isEmpty }
+        node.images.map { interpolate($0, context: variables) }.filter { !$0.isEmpty }
     }
     private var pageCount: Int { node.loop ? 9999 : images.count }
 
@@ -308,7 +308,7 @@ private struct NudgeVideoView: View {
     @Environment(\.digiaVariables) private var variables
     @State private var player: AVPlayer? = nil
 
-    private var url: String { interpolate(node.url, variables: variables) }
+    private var url: String { interpolate(node.url, context: variables) }
 
     var body: some View {
         Group {

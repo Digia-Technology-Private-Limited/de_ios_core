@@ -11,9 +11,15 @@ struct ActiveGuideState: Equatable {
     /// identity/metadata instead of a synthesized one (matches nudge/survey).
     let payload: CEPTriggerPayload
 
-    /// Trigger-supplied variables for `{{ placeholder }}` interpolation.
-    var variables: [String: String]? { payload.variables }
     var steps: [GuideStepModel] { campaign.guideConfig?.steps ?? [] }
+
+    /// Resolved variable context: dashboard schemas merged with CEP trigger
+    /// variables (CEP wins, empty CEP falls through to fallbackValue). Used by
+    /// `GuideOverlayView` to interpolate `{{ placeholder }}` copy and arithmetic.
+    var variableContext: VariableContext {
+        let schemas = campaign.guideConfig?.variableSchemas ?? []
+        return buildVariableContext(schemas: schemas, cepVars: payload.variables)
+    }
     var currentStep: GuideStepModel? { steps.indices.contains(stepIndex) ? steps[stepIndex] : nil }
     var hasNext: Bool { stepIndex < steps.count - 1 }
 }

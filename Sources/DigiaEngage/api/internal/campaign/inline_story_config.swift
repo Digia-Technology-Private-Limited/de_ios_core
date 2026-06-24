@@ -91,6 +91,7 @@ struct InlineStoryConfig: Equatable {
     var card: StoryCardConfig = StoryCardConfig()
     var indicator: StoryIndicatorDisplayConfig = StoryIndicatorDisplayConfig()
     let items: [StoryItemConfig]
+    var variableSchemas: [VariableSchema] = []
 
     static func fromJson(_ json: [String: Any]) -> InlineStoryConfig? {
         guard let slotKey = json.nonBlankString("slotKey") else { return nil }
@@ -102,7 +103,8 @@ struct InlineStoryConfig: Equatable {
             restartOnCompleted: json.bool("restartOnCompleted", default: false),
             card: StoryCardConfig.fromJson(json.object("card")),
             indicator: StoryIndicatorDisplayConfig.fromJson(json.object("indicator")),
-            items: items
+            items: items,
+            variableSchemas: NudgeConfig.parseVariableSchemas(json)
         )
     }
 }

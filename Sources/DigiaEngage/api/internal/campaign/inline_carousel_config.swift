@@ -28,6 +28,10 @@ struct InlineCarouselConfig: Equatable {
     var infiniteScroll: Bool = true
     var viewportFraction: Double = 0.88
     var indicator: CarouselIndicatorConfig = CarouselIndicatorConfig()
+    /// Dashboard-declared variable schemas (name, type, fallback). Combined with
+    /// the CEP trigger's runtime variables at render time via `buildVariableContext()`
+    /// to interpolate `{{ }}` placeholders in image URLs / deep links — same as nudge & guide.
+    var variableSchemas: [VariableSchema] = []
 
     static func fromJson(_ json: [String: Any]) -> InlineCarouselConfig? {
         guard let slotKey = json.nonBlankString("slotKey") else { return nil }
@@ -63,7 +67,8 @@ struct InlineCarouselConfig: Equatable {
             animationDuration: json.int("animationDuration", default: 700),
             infiniteScroll: json.bool("infiniteScroll", default: true),
             viewportFraction: json.double("viewportFraction", default: 0.88),
-            indicator: indicator
+            indicator: indicator,
+            variableSchemas: NudgeConfig.parseVariableSchemas(json)
         )
     }
 }

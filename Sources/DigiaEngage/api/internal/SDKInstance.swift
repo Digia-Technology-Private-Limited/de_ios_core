@@ -156,17 +156,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             dwellTracker.markViewed(payload.cepCampaignId)
             guideOrchestrator.start(campaign, payload: payload)
         case .nudge(let nudgeConfig):
-            // Dashboard-declared defaults first, CEP trigger variables layered
-            // on top (CEP wins) — mirrors Flutter's `digia_host._presentNudge`.
-            var mergedVariables = nudgeConfig.defaultVariables
-            for (k, value) in payload.variables ?? [:] {
-                mergedVariables[k] = value
-            }
+            // Resolve variable context: dashboard schemas define type + fallback;
+            // CEP trigger variables win over fallbacks (D3′).
+            let variableContext = buildVariableContext(
+                schemas: nudgeConfig.variableSchemas,
+                cepVars: payload.variables
+            )
             controller.showNudge(
                 DigiaNudgePresentation(
                     config: nudgeConfig,
                     payload: payload,
-                    variables: mergedVariables.isEmpty ? nil : mergedVariables
+                    variables: variableContext.values.isEmpty && variableContext.types.isEmpty ? nil : variableContext
                 ))
         case .survey(let cfg):
             if !surveyOrchestrator.start(payload: payload, config: cfg) {

@@ -93,18 +93,22 @@ struct CampaignModel: Equatable {
 
     private static func parseGuideConfig(_ json: [String: Any], fallbackId: String) -> GuideConfigModel? {
         if let guideJson = json.object("guideConfig") {
-            return parseGuideSteps(guideJson, fallbackId: fallbackId)
+            // Variables may live on guideConfig or on the sibling templateConfig
+            let templateJson = json.object("templateConfig")
+            let schemas = NudgeConfig.parseVariableSchemas(templateJson ?? guideJson)
+            return parseGuideSteps(guideJson, fallbackId: fallbackId, variableSchemas: schemas)
         }
         if let templateJson = json.object("templateConfig") {
             let templateType = templateJson.string("templateType")
             if templateType == "tooltip" || templateType == "spotlight" {
-                return parseFlatGuideTemplate(templateJson, fallbackId: fallbackId)
+                let schemas = NudgeConfig.parseVariableSchemas(templateJson)
+                return parseFlatGuideTemplate(templateJson, fallbackId: fallbackId, variableSchemas: schemas)
             }
         }
         return nil
     }
 
-    private static func parseGuideSteps(_ guideJson: [String: Any], fallbackId: String) -> GuideConfigModel? {
+    private static func parseGuideSteps(_ guideJson: [String: Any], fallbackId: String, variableSchemas: [VariableSchema]) -> GuideConfigModel? {
         let guideId = guideJson.nonBlankString("id") ?? guideJson.nonBlankString("_id") ?? fallbackId
         guard let stepsArr = guideJson["steps"] as? [Any] else { return nil }
         return buildGuideConfig(
@@ -112,17 +116,19 @@ struct CampaignModel: Equatable {
             multiStep: guideJson.bool("multiStep", default: false),
             stepsArr: stepsArr,
             displayStyle: nil,
+            variableSchemas: variableSchemas,
             widgetJsonForStep: { stepJson in stepJson.object("widgetConfig") }
         )
     }
 
-    private static func parseFlatGuideTemplate(_ templateJson: [String: Any], fallbackId: String) -> GuideConfigModel? {
+    private static func parseFlatGuideTemplate(_ templateJson: [String: Any], fallbackId: String, variableSchemas: [VariableSchema]) -> GuideConfigModel? {
         guard let stepsArr = templateJson["steps"] as? [Any] else { return nil }
         return buildGuideConfig(
             guideId: templateJson.nonBlankString("templateId") ?? fallbackId,
             multiStep: stepsArr.count > 1,
             stepsArr: stepsArr,
             displayStyle: templateJson.string("templateType", default: "tooltip"),
+            variableSchemas: variableSchemas,
             widgetJsonForStep: { stepJson in stepJson }
         )
     }
@@ -132,6 +138,7 @@ struct CampaignModel: Equatable {
         multiStep: Bool,
         stepsArr: [Any],
         displayStyle: String?,
+        variableSchemas: [VariableSchema],
         widgetJsonForStep: ([String: Any]) -> [String: Any]?
     ) -> GuideConfigModel? {
         var steps: [GuideStepModel] = []
@@ -158,7 +165,8 @@ struct CampaignModel: Equatable {
         return GuideConfigModel(
             id: guideId,
             multiStep: multiStep,
-            steps: steps.sorted { $0.sequenceOrder < $1.sequenceOrder }
+            steps: steps.sorted { $0.sequenceOrder < $1.sequenceOrder },
+            variableSchemas: variableSchemas
         )
     }
 }

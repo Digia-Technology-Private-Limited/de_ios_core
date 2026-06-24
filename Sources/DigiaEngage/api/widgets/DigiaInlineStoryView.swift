@@ -151,6 +151,10 @@ private struct InlineStoryOverlayContent: View {
         _currentIndex = State(initialValue: min(max(state.initialIndex, 0), max(state.config.items.count - 1, 0)))
     }
 
+    private var variables: VariableContext {
+        buildVariableContext(schemas: state.config.variableSchemas, cepVars: state.payload.variables)
+    }
+
     var body: some View {
         GeometryReader { proxy in
             ZStack {
@@ -182,7 +186,7 @@ private struct InlineStoryOverlayContent: View {
                         Spacer(minLength: 0)
 
                         if item.ctaEnabled, let text = item.ctaText, !text.isEmpty {
-                            StoryCTAButton(item: item) {
+                            StoryCTAButton(item: item, variables: variables) {
                                 handleCTA(item.ctaAction)
                             }
                             .padding(.horizontal, 24)
@@ -310,16 +314,18 @@ private struct InlineStoryOverlayContent: View {
     }
 
     private func handleCTA(_ action: StoryCtaAction?) {
+        let label = currentItem?.ctaText.map { interpolate($0, context: variables) }
+        let actionUrl = action?.url.map { interpolate($0, context: variables) }
         SDKInstance.shared.reportStoryStepClicked(
             state.payload,
             itemIndex: currentIndex + 1,
-            ctaLabel: currentItem?.ctaText,
+            ctaLabel: label,
             actionType: action?.type,
-            actionUrl: action?.url
+            actionUrl: actionUrl
         )
         switch action?.type {
         case "deepLink", "openUrl":
-            if let urlString = action?.url, let url = URL(string: urlString) {
+            if let urlString = actionUrl, let url = URL(string: urlString) {
                 UIApplication.shared.open(url)
             }
             SDKInstance.shared.controller.dismissStoryOverlay()
@@ -458,11 +464,12 @@ private struct StoryProgressIndicator: View {
 
 private struct StoryCTAButton: View {
     let item: StoryItemConfig
+    let variables: VariableContext
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            Text(item.ctaText ?? "")
+            Text(interpolate(item.ctaText ?? "", context: variables))
                 .font(.system(size: 16, weight: .semibold))
                 .foregroundColor(Color(hex: item.ctaTextColor) ?? .white)
                 .frame(maxWidth: .infinity)
