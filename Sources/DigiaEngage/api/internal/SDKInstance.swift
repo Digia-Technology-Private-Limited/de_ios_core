@@ -26,6 +26,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Used to compute `time_to_answer_ms` on QuestionAnswered.
     private var questionViewedAt: [String: Date] = [:]
     private var analyticsService: AnalyticsService?
+    /// Native frequency capping for all managed campaigns (nudge, survey, and —
+    /// on React Native — guides, whose lifecycle events arrive over the bridge).
+    private var frequencyManager: FrequencyManager?
+
+    /// Set by the RN bridge. When non-nil the SDK is RN-driven: guides render in
+    /// JS, so on a guide trigger native only applies frequency capping and (if
+    /// allowed) invokes this hook to ask JS to render, instead of rendering the
+    /// guide natively. Nil in pure-native apps, where guides render natively.
+    var onGuideRenderRequest: ((CEPTriggerPayload) -> Void)?
 
     // Event system (mirrors Android): a fan-out emitter over two sinks — the
     // coarse CEP channel (`toCep`) and Digia's rich analytics (`toDigia`).
@@ -74,6 +83,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
         sdkState = .ready
         analyticsService = AnalyticsService.create(config: config)
+
+        // Frequency capping pulls the authoritative sessionId from analytics so
+        // `session` windows track the same session the backend sees.
+        frequencyManager = FrequencyManager(
+            sessionIdProvider: { [weak self] in self?.analyticsService?.identity.sessionId }
+        )
 
         if let plugin = activePlugin, !plugin.healthCheck().isHealthy {
             plugin.setup(delegate: self)
@@ -153,9 +168,24 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             events.toCep(.impressed, payload: payload)
             events.toCep(.dismissed, payload: payload)
         case .guide:
+            if let renderViaJs = onGuideRenderRequest {
+                // RN: native owns capping, JS owns rendering. Gate here; the
+                // counter is bumped later on the guide's "Digia Experience
+                // Viewed" event (see captureAnalyticsEvent).
+                if let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
+                    logVerbose("guide dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
+                    return
+                }
+                renderViaJs(payload)
+                return
+            }
             dwellTracker.markViewed(payload.cepCampaignId)
             guideOrchestrator.start(campaign, payload: payload)
         case .nudge(let nudgeConfig):
+            if let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
+                logVerbose("nudge dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
+                return
+            }
             // Resolve variable context: dashboard schemas define type + fallback;
             // CEP trigger variables win over fallbacks (D3′).
             let variableContext = buildVariableContext(
@@ -169,6 +199,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     variables: variableContext.values.isEmpty && variableContext.types.isEmpty ? nil : variableContext
                 ))
         case .survey(let cfg):
+            if let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
+                logVerbose("survey dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
+                return
+            }
             if !surveyOrchestrator.start(payload: payload, config: cfg) {
                 logVerbose("survey campaign dropped: another survey is on screen: \(key)")
             }
@@ -201,6 +235,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         guard let state = surveyOrchestrator.state else { return }
         let config = state.config
         dwellTracker.markViewed(state.payload.cepCampaignId)
+        // Bump frequency on "Digia Experience Viewed" (the moment the survey shows).
+        let campaignKey = state.payload.campaignKey
+        frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
         events.toBoth(
             .impressed,
             SurveyEvent.Viewed(
@@ -318,6 +355,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
         completedSurveyToken = state.token
 
+        // Permanent stop on "Digia Experience Completed" when stopOn is set.
+        let campaignKey = state.payload.campaignKey
+        frequencyManager?.recordCompleted(campaignKey, campaignStore.find(campaignKey)?.frequency)
+
         // Analytics "Completed" fires once per survey showing, regardless of
         // whether a submission is reported to the backend below.
         let answeredCount = answers.isEmpty ? response.count : answers.count
@@ -406,6 +447,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func reportNudgeImpression() {
         guard let nudge = controller.activeNudge else { return }
         dwellTracker.markViewed(nudge.payload.cepCampaignId)
+        // Bump frequency on "Digia Experience Viewed" (the moment the nudge shows).
+        let campaignKey = nudge.payload.campaignKey
+        frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
         events.toBoth(
             .impressed,
             NudgeEvent.Viewed(displayStyle: nudge.config.surface.displayType.displayStyle),
@@ -563,6 +607,16 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
         let campaign = campaignStore.find(campaignKey)
+        // Native frequency capping for RN-rendered guides: bump on Viewed, apply
+        // the permanent stop on Completed (when the policy opts into stopOn).
+        switch eventName {
+        case "Digia Experience Viewed":
+            frequencyManager?.recordShow(campaignKey, campaign?.frequency)
+        case "Digia Experience Completed":
+            frequencyManager?.recordCompleted(campaignKey, campaign?.frequency)
+        default:
+            break
+        }
         let payload = CEPTriggerPayload(
             cepCampaignId: campaign?.id ?? campaignKey, campaignKey: campaignKey)
         events.toDigia(event, payload: payload)
@@ -666,6 +720,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         activePlugin = nil
         analyticsService?.clear()
         analyticsService = nil
+        frequencyManager = nil
         config = nil
         sdkState = .notInitialized
         isHostMounted = false

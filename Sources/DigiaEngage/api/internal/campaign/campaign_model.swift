@@ -17,6 +17,9 @@ struct CampaignModel: Equatable {
     let campaignKey: String
     let campaignType: String
     let config: CampaignConfigModel
+    // Opaque capping policy from the dashboard; nil = "No cap" / inline.
+    // Used natively for nudge + survey only (guides cap in JS on RN).
+    var frequency: FrequencyPolicy? = nil
 
     var guideConfig: GuideConfigModel? {
         if case let .guide(value) = config { return value }
@@ -70,7 +73,13 @@ struct CampaignModel: Equatable {
             return nil
         }
 
-        return CampaignModel(id: id, campaignKey: campaignKey, campaignType: campaignType, config: config)
+        return CampaignModel(
+            id: id,
+            campaignKey: campaignKey,
+            campaignType: campaignType,
+            config: config,
+            frequency: FrequencyPolicy.fromJson(json.object("frequency"))
+        )
     }
 
     // ── survey parsing ────────────────────────────────────────────────────────
