@@ -88,12 +88,7 @@ private struct NudgeImageView: View {
 
     var body: some View {
         content
-            // Round the image at its own bounds. Relying solely on the ancestor
-            // nudgeBox clip is unreliable here: the image's scaledToFill/.clipped
-            // frame can be sized differently from a hugging nudgeBox, so the
-            // rounded clip wouldn't line up with the image's rendered edges.
-            // Use the border's inner radius (box radius minus the border width) so
-            // the image sits flush inside the border — matching Android/Flutter.
+
             .clipShapeIfRadius(cornerRadius: max(0, node.box.borderRadius - node.box.borderWidth))
     }
 
