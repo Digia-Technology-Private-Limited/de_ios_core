@@ -60,15 +60,51 @@ private struct NudgeTextView: View {
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
-        Text(interpolate(node.text, context: variables))
-            .font(SDKInstance.shared.fontFactory.getDefaultFont(
-                size: Double(node.fontSize), weight: node.fontWeight, italic: false
-            ))
-            .fontWeight(node.fontWeight)
-            .foregroundStyle(node.color)
-            .multilineTextAlignment(node.textAlignment)
-            .frame(maxWidth: node.box.fillWidth ? .infinity : nil,
-                   alignment: node.textAlignment.frameAlignment)
+        Group {
+            if node.spans.isEmpty {
+                Text(interpolate(node.text, context: variables))
+                    .font(SDKInstance.shared.fontFactory.getDefaultFont(
+                        size: Double(node.fontSize), weight: node.fontWeight, italic: false
+                    ))
+                    .fontWeight(node.fontWeight)
+                    .foregroundStyle(node.color)
+            } else {
+                // Rich overlay: each run inherits the base style and overrides only
+                // what it sets. SwiftUI has no per-run line height, so the first
+                // run's lineHeight drives the view-level spacing (uniform in practice).
+                Text(attributed)
+                    .lineSpacing(lineSpacing)
+            }
+        }
+        .multilineTextAlignment(node.textAlignment)
+        .frame(maxWidth: node.box.fillWidth ? .infinity : nil,
+               alignment: node.textAlignment.frameAlignment)
+    }
+
+    private var attributed: AttributedString {
+        var result = AttributedString()
+        for span in node.spans {
+            let s = span.style
+            var run = AttributedString(interpolate(span.text, context: variables))
+            run.font = SDKInstance.shared.fontFactory.getDefaultFont(
+                size: Double(s.fontSize ?? node.fontSize),
+                weight: s.fontWeight ?? node.fontWeight,
+                italic: s.italic
+            )
+            run.foregroundColor = s.color ?? node.color
+            if let highlight = s.highlightColor { run.backgroundColor = highlight }
+            if s.underline { run.underlineStyle = .single }
+            if s.strikethrough { run.strikethroughStyle = .single }
+            result.append(run)
+        }
+        return result
+    }
+
+    /// A unitless line-height multiplier → SwiftUI's additive line spacing,
+    /// taken from the first run that sets one (≈ `fontSize * (multiplier − 1)`).
+    private var lineSpacing: CGFloat {
+        guard let multiplier = node.spans.compactMap({ $0.style.lineHeight }).first else { return 0 }
+        return max(0, node.fontSize * (multiplier - 1))
     }
 }
 

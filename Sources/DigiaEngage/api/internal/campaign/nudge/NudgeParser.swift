@@ -61,8 +61,51 @@ struct NudgeParser {
             fontSize: CGFloat((font["size"] as? Double) ?? 16),
             fontWeight: parseFontWeight(font["weight"] as? String ?? "400"),
             color: parseColor(style["textColor"] as? String) ?? Color(hex: "#111111") ?? .primary,
-            textAlignment: parseTextAlignment(props["alignment"] as? String ?? "left")
+            textAlignment: parseTextAlignment(props["alignment"] as? String ?? "left"),
+            spans: parseSpans(props["spans"])
         )
+    }
+
+    /// Decodes the optional rich overlay (`props.spans`). Each entry is
+    /// `{ text, style: { fontWeight, fontSize, textColor, highlightColor,
+    /// lineHeight } }`; every style key is optional and inherits the base when
+    /// absent. Empty/invalid entries are skipped.
+    private func parseSpans(_ raw: Any?) -> [NudgeTextSpan] {
+        guard let arr = raw as? [[String: Any]] else { return [] }
+        return arr.compactMap { item in
+            guard let text = item["text"] as? String, !text.isEmpty else { return nil }
+            let style = (item["style"] as? [String: Any]) ?? [:]
+            let decoration = style["decoration"] as? String
+            return NudgeTextSpan(
+                text: text,
+                style: NudgeSpanStyle(
+                    fontWeight: (style["fontWeight"] as? Double).flatMap { parseFontWeightNumber(Int($0)) },
+                    fontSize: (style["fontSize"] as? Double).map { CGFloat($0) },
+                    color: parseColor(style["textColor"] as? String),
+                    highlightColor: parseColor(style["highlightColor"] as? String),
+                    lineHeight: (style["lineHeight"] as? Double).map { CGFloat($0) },
+                    italic: (style["fontStyle"] as? String) == "italic",
+                    underline: decoration == "underline",
+                    strikethrough: decoration == "lineThrough"
+                )
+            )
+        }
+    }
+
+    /// A span's numeric CSS weight (100…900) → `Font.Weight`; nil for unknown.
+    private func parseFontWeightNumber(_ n: Int) -> Font.Weight? {
+        switch n {
+        case 100: return .thin
+        case 200: return .ultraLight
+        case 300: return .light
+        case 400: return .regular
+        case 500: return .medium
+        case 600: return .semibold
+        case 700: return .bold
+        case 800: return .heavy
+        case 900: return .black
+        default:  return nil
+        }
     }
 
     private func parseImage(_ props: [String: Any], box: NudgeBox) -> NudgeImage {

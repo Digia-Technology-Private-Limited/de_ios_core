@@ -60,6 +60,29 @@ enum NudgeNode: Equatable {
     }
 }
 
+/// One styled run of a Text widget's rich overlay. Every style field is `nil`
+/// when the run inherits the Text widget's base style for it (the dashboard's
+/// `span.style` contract). `highlightColor` paints behind the text; `lineHeight`
+/// is a unitless multiplier.
+/// Per-run style overrides; nil/false fields inherit the Text widget's base.
+struct NudgeSpanStyle: Equatable {
+    let fontWeight: Font.Weight?
+    let fontSize: CGFloat?
+    let color: Color?
+    let highlightColor: Color?
+    let lineHeight: CGFloat?
+    let italic: Bool
+    /// Single decoration (not combinable).
+    let underline: Bool
+    let strikethrough: Bool
+}
+
+/// One styled run: its literal `text` plus a `style` bag (the wire `{ text, style }`).
+struct NudgeTextSpan: Equatable {
+    let text: String
+    let style: NudgeSpanStyle
+}
+
 struct NudgeText: Equatable {
     let box: NudgeBox
     let text: String
@@ -67,6 +90,8 @@ struct NudgeText: Equatable {
     let fontWeight: Font.Weight
     let color: Color
     let textAlignment: TextAlignment
+    /// Optional rich overlay; empty = render plain `text` with the base style.
+    var spans: [NudgeTextSpan] = []
 }
 
 struct NudgeImage: Equatable {
