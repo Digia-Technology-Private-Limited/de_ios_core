@@ -63,15 +63,13 @@ private struct NudgeSheetView: View {
                 showHandle: surface.showHandle,
                 allowInteractiveDismiss: surface.draggable || surface.backdropDismissible
             ),
-            onDismiss: dismiss
-        ) {
-            ZStack(alignment: .topTrailing) {
+            onDismiss: dismiss,
+            content: {
                 renderedContent
                     .padding(surface.padding)
-
-                if surface.showCloseButton { closeButton }
-            }
-        }
+            },
+            cardOverlay: surface.showCloseButton ? AnyView(closeButton) : nil
+        )
         // The cover presents this content once per nudge, so `onAppear` is the
         // impression signal (Impressed → CEP + Digia "Viewed").
         .onAppear { SDKInstance.shared.reportNudgeImpression() }
@@ -80,7 +78,7 @@ private struct NudgeSheetView: View {
     private var closeButton: some View {
         Button(action: dismiss) {
             Image(systemName: "xmark")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Color(hex: "#66667A") ?? .secondary)
                 .frame(width: 26, height: 26)
                 .background(Color.black.opacity(0.08))
@@ -154,7 +152,7 @@ private struct NudgeDialogContainer: View {
     private var closeButton: some View {
         Button(action: dismiss) {
             Image(systemName: "xmark")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.system(size: 14, weight: .semibold))
                 .foregroundStyle(Color(hex: "#66667A") ?? .secondary)
                 .frame(width: 26, height: 26)
                 .background(Color.black.opacity(0.08))
