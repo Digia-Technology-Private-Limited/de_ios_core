@@ -166,14 +166,27 @@ struct NudgeParser {
             marginTop:     parseSide(style["margin"], key: "top"),
             marginRight:   parseSide(style["margin"], key: "right"),
             marginBottom:  parseSide(style["margin"], key: "bottom"),
-            borderRadius:  CGFloat((style["borderRadius"] as? Double) ?? 0),
+            borderRadius:  cgFloat(style["borderRadius"], default: 0),
             borderColor:   border.flatMap { parseColor($0["borderColor"] as? String) },
-            borderWidth:   CGFloat((border?["borderWidth"] as? Double) ?? 0),
+            borderWidth:   cgFloat(border?["borderWidth"], default: 0),
             selfAlign:     parseSelfAlign(cp["align"] as? String ?? "")
         )
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────────
+
+    /// Coerce a JSON value to CGFloat, tolerating strings. The dashboard sends
+    /// several numerics as strings (width/height, and borderRadius/borderWidth),
+    /// so `as? Double` alone silently drops them to the fallback — which is why
+    /// rounded corners and borders never applied on iOS while Flutter (whose
+    /// `optDouble` parses strings) worked.
+    private func cgFloat(_ value: Any?, default fallback: CGFloat) -> CGFloat {
+        if let n = value as? Double { return CGFloat(n) }
+        if let n = value as? Int { return CGFloat(n) }
+        if let n = value as? NSNumber { return CGFloat(truncating: n) }
+        if let s = value as? String, let d = Double(s) { return CGFloat(d) }
+        return fallback
+    }
 
     private func parseSide(_ value: Any?, key: String) -> CGFloat {
         if let n = value as? Double { return CGFloat(n) }
