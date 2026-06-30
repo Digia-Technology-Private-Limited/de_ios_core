@@ -17,6 +17,7 @@ struct DigiaBottomSheet<Content: View>: View {
     var scrollable: Bool = true
     let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
+    var cardOverlay: AnyView? = nil
 
     @State private var contentHeight: CGFloat = 0
     @State private var shown = false
@@ -48,17 +49,20 @@ struct DigiaBottomSheet<Content: View>: View {
         VStack(spacing: 0) {
             if config.showHandle {
                 Capsule()
-                    .fill(Color.secondary.opacity(0.35))
-                    .frame(width: 36, height: 5)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
+                    .fill(Color(hex: "#E0E0E6") ?? Color.secondary.opacity(0.35))
+                    .frame(width: 36, height: 4)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
             }
             sheetBody(cap: cap)
         }
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
         .background(config.background)
-        .clipShape(.rect(topLeadingRadius: config.cornerRadius, topTrailingRadius: config.cornerRadius))
+        .clipShape(
+            .rect(topLeadingRadius: config.cornerRadius, topTrailingRadius: config.cornerRadius)
+        )
+        .overlay(alignment: .topTrailing) { cardOverlay }
     }
 
     @ViewBuilder
@@ -87,7 +91,8 @@ struct DigiaBottomSheet<Content: View>: View {
         DragGesture()
             .onChanged { value in
                 guard config.allowInteractiveDismiss else { return }
-                dragOffset = value.translation.height > 0
+                dragOffset =
+                    value.translation.height > 0
                     ? value.translation.height
                     : value.translation.height * 0.2
             }
@@ -105,7 +110,9 @@ struct DigiaBottomSheet<Content: View>: View {
         withAnimation(animation) {
             shown = false
             dragOffset = 0
-        } completion: { onDismiss() }
+        } completion: {
+            onDismiss()
+        }
     }
 }
 
