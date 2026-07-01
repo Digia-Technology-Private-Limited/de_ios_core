@@ -10,9 +10,9 @@ public struct AnalyticsConfig: Sendable, Equatable {
 
     public init(
         enabled: Bool = true,
-        flushIntervalMs: Int = 5_000,
-        flushBatchSize: Int = 10,
-        maxBatchSize: Int = 100,
+        flushIntervalMs: Int = 30_000,
+        flushBatchSize: Int = 50,
+        maxBatchSize: Int = 200,
         queueMaxEvents: Int = 5_000,
         sessionTimeoutMs: Int = 30 * 60 * 1_000
     ) {
