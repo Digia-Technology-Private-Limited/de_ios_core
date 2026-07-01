@@ -1,3 +1,4 @@
+import AVFoundation
 import AVKit
 @_implementationOnly import Lottie
 @_implementationOnly import SDWebImageSwiftUI
@@ -419,39 +420,127 @@ private struct NudgeCarouselView: View {
 
 // MARK: - Video
 
+private enum VideoLoadState {
+    case loading
+    case ready
+    case failed
+}
+
 private struct NudgeVideoView: View {
     let node: NudgeVideo
     @Environment(\.digiaVariables) private var variables
     @State private var player: AVPlayer? = nil
+    @State private var state: VideoLoadState = .loading
+    @State private var statusObserver: NSKeyValueObservation? = nil
+    @State private var loopObserver: NSObjectProtocol? = nil
 
     private var url: String { interpolate(node.url, context: variables) }
 
     var body: some View {
         Group {
             if url.isEmpty {
-                nudgePlaceholder(label: "Video", height: node.height)
-            } else if let player {
-                VideoPlayer(player: player)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: node.height)
+                EmptyView()
             } else {
-                Color.black
-                    .frame(maxWidth: .infinity)
-                    .frame(height: node.height)
+                ZStack {
+                    Color.black
+
+                    if let player, state != .failed {
+                        if node.showControls {
+                            VideoPlayer(player: player)
+                        } else {
+                            PlayerLayerView(player: player)
+                        }
+                    }
+
+                    switch state {
+                    case .loading:
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .tint(.white)
+                    case .failed:
+                        VStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 28))
+                            Text("Video failed")
+                                .font(.system(size: 13))
+                        }
+                        .foregroundStyle(.white)
+                    case .ready:
+                        EmptyView()
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: node.height)
             }
         }
-        .onAppear {
-            guard !url.isEmpty, let url = URL(string: url) else { return }
-            let p = AVPlayer(url: url)
-            p.isMuted = node.muted
-            if node.autoplay { p.play() }
-            player = p
-        }
-        .onDisappear {
-            player?.pause()
-            player = nil
-        }
+        .onAppear { setupPlayer() }
+        .onDisappear { teardown() }
     }
+
+    private func setupPlayer() {
+        guard player == nil, !url.isEmpty, let parsed = URL(string: url) else { return }
+        let item = AVPlayerItem(url: parsed)
+        let p = AVPlayer(playerItem: item)
+        p.isMuted = node.muted
+
+        statusObserver = item.observe(\.status, options: [.initial, .new]) { item, _ in
+            DispatchQueue.main.async {
+                switch item.status {
+                case .readyToPlay:
+                    state = .ready
+                    if node.autoplay { p.play() }
+                case .failed:
+                    state = .failed
+                default:
+                    state = .loading
+                }
+            }
+        }
+
+        if node.loop {
+            loopObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+            ) { _ in
+                p.seek(to: .zero)
+                p.play()
+            }
+        }
+
+        player = p
+    }
+
+    private func teardown() {
+        player?.pause()
+        statusObserver?.invalidate()
+        statusObserver = nil
+        if let loopObserver { NotificationCenter.default.removeObserver(loopObserver) }
+        loopObserver = nil
+        player = nil
+        state = .loading
+    }
+}
+
+/// Plays an `AVPlayer` without any system controls, honoring `showControls == false`.
+/// SwiftUI's `VideoPlayer` always shows controls, so we drop down to `AVPlayerLayer`.
+private struct PlayerLayerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerContainerView {
+        let view = PlayerContainerView()
+        view.backgroundColor = .black
+        view.playerLayer.player = player
+        view.playerLayer.videoGravity = .resizeAspect
+        return view
+    }
+
+    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
+        uiView.playerLayer.player = player
+    }
+}
+
+private final class PlayerContainerView: UIView {
+    override class var layerClass: AnyClass { AVPlayerLayer.self }
+    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 }
 
 // MARK: - Placeholder
