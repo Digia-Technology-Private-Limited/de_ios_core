@@ -5,6 +5,8 @@ import Foundation
 struct CarouselItem: Equatable {
     let imageUrl: String
     let deepLink: String?
+    /// Loading placeholder shown while `imageUrl` loads; `nil` when none.
+    let placeholder: ImagePlaceholder?
 }
 
 struct CarouselIndicatorConfig: Equatable {
@@ -38,7 +40,11 @@ struct InlineCarouselConfig: Equatable {
 
         let items: [CarouselItem] = json.objectArray("items").compactMap { itemJson in
             guard let imageUrl = itemJson.nonBlankString("imageUrl") else { return nil }
-            return CarouselItem(imageUrl: imageUrl, deepLink: itemJson.nonBlankString("deepLink"))
+            return CarouselItem(
+                imageUrl: imageUrl,
+                deepLink: itemJson.nonBlankString("deepLink"),
+                placeholder: ImagePlaceholder.from(itemJson.object("placeholder"))
+            )
         }
         if items.isEmpty { return nil }
 

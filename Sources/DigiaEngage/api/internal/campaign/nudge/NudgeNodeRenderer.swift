@@ -144,7 +144,13 @@ private struct NudgeImageView: View {
 
     private var url: String { interpolate(node.url, context: variables) }
     private var maxWidth: CGFloat? { node.box.fillWidth ? .infinity : nil }
-    private var image: some View { WebImage(url: URL(string: url)).resizable() }
+    // Placeholder slot shows the payload's blurhash (auto-computed by the
+    // dashboard) while the image downloads; empty when the payload has none.
+    private var image: some View {
+        WebImage(url: URL(string: url)) { $0.resizable() } placeholder: {
+            BlurHashPlaceholderView(placeholder: node.placeholder)
+        }
+    }
 
     var body: some View {
         content

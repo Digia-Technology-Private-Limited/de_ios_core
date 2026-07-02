@@ -124,10 +124,14 @@ struct BlockMedia: Equatable {
     let alt: String
     let position: MediaPosition
     let boxFit: String
+    /// Loading placeholder shown while `url` loads; `nil` when none.
+    let placeholder: ImagePlaceholder?
 
     var hasUrl: Bool { !url.isEmpty }
 
-    static let empty = BlockMedia(url: "", alt: "", position: .top, boxFit: "cover")
+    static let empty = BlockMedia(
+        url: "", alt: "", position: .top, boxFit: "cover", placeholder: nil
+    )
 
     static func from(_ json: [String: JSONValue]?) -> BlockMedia {
         guard let json else { return .empty }
@@ -135,7 +139,8 @@ struct BlockMedia: Equatable {
             url: SurveyParse.string(json["url"]) ?? "",
             alt: SurveyParse.string(json["alt"]) ?? "",
             position: SurveyParse.mediaPosition(SurveyParse.string(json["position"])),
-            boxFit: SurveyParse.string(json["boxFit"]) ?? "cover"
+            boxFit: SurveyParse.string(json["boxFit"]) ?? "cover",
+            placeholder: ImagePlaceholder.from(SurveyParse.object(json["placeholder"]))
         )
     }
 }

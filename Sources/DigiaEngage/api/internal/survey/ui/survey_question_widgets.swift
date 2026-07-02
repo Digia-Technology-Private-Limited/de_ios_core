@@ -709,7 +709,10 @@ private struct ChoiceCardRow: View {
                         AsyncImage(url: URL(string: media.url)) { image in
                             image.resizable().aspectRatio(contentMode: .fill)
                         } placeholder: {
-                            SurveyTokens.surfaceSunken
+                            ZStack {
+                                SurveyTokens.surfaceSunken
+                                BlurHashPlaceholderView(placeholder: media.placeholder)
+                            }
                         }
                         .frame(width: 36, height: 36)
                         .clipShape(RoundedRectangle(cornerRadius: 4))

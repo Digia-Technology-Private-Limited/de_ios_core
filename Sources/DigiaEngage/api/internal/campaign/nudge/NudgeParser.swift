@@ -125,7 +125,8 @@ struct NudgeParser {
             box: aspectRatio > 0 ? box.withoutFixedHeight() : box,
             url: url,
             aspectRatio: aspectRatio,
-            fit: parseFit(props["fit"] as? String ?? "cover")
+            fit: parseFit(props["fit"] as? String ?? "cover"),
+            placeholder: ImagePlaceholder.from(props["placeholder"] as? [String: Any])
         )
     }
 
