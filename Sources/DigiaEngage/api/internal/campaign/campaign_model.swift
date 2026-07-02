@@ -155,13 +155,18 @@ struct CampaignModel: Equatable {
         for (index, element) in stepsArr.enumerated() {
             guard let stepJson = element as? [String: Any] else { continue }
             let stepId = stepJson.nonBlankString("id") ?? stepJson.string("_id")
-            guard let anchorKey = stepJson.nonBlankString("anchorKey") else { continue }
+            let region = (stepJson["target"] as? [String: Any]).flatMap {
+                RegionTarget.fromJson($0, stepJson["highlight"] as? [String: Any])
+            }
+            let anchorKey = stepJson.nonBlankString("anchorKey")
+            guard region != nil || anchorKey != nil else { continue }
             guard let widgetJson = widgetJsonForStep(stepJson) else { continue }
             steps.append(
                 GuideStepModel(
                     id: stepId,
                     sequenceOrder: stepJson.int("sequenceOrder", default: index),
-                    anchorKey: anchorKey,
+                    anchorKey: anchorKey ?? "",
+                    region: region,
                     displayStyle: displayStyle ?? stepJson.string("displayStyle", default: "tooltip"),
                     widgetConfig: GuideStepWidgetConfig.fromJson(widgetJson),
                     advanceTrigger: stepJson.string("advanceTrigger", default: "tap"),

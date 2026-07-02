@@ -6,6 +6,7 @@ struct GuideStepModel: Equatable {
     let id: String
     let sequenceOrder: Int
     let anchorKey: String
+    let region: RegionTarget?
     let displayStyle: String
     let widgetConfig: GuideStepWidgetConfig
     let advanceTrigger: String
