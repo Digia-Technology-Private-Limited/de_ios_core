@@ -11,6 +11,13 @@ public enum Digia {
         SDKInstance.shared.register(plugin)
     }
 
+    /// RN-only: hand native the same getCampaigns response JS already fetched, so
+    /// native doesn't also fetch it. Call once after `initialize` when the config's
+    /// `wrapperBinding` is `"react_native"`.
+    public static func populateCampaigns(_ campaignsJson: String) {
+        SDKInstance.shared.populateCampaigns(campaignsJson)
+    }
+
     public static func registerFontFactory(_ factory: DUIFontFactory) {
         SDKInstance.shared.registerFontFactory(factory)
     }
@@ -56,5 +63,15 @@ public enum Digia {
     /// wire-keyed `props`; the SDK maps it to the matching rich Digia analytics event.
     public static func captureAnalyticsEvent(campaignKey: String, eventName: String, props: [String: Any]) {
         SDKInstance.shared.captureAnalyticsEvent(campaignKey: campaignKey, eventName: eventName, props: props)
+    }
+
+    /// Reports the current screen name for screen-scoped analytics and CEP forwarding.
+    /// Matches Android's `Digia.setCurrentScreen(name:)` and Flutter's `Digia.setCurrentScreen`.
+    ///
+    /// Call this manually from `viewDidAppear` (see the `UIViewController.digiaScreen(_:)`
+    /// extension for a drop-in helper), or add `DigiaNavigatorObserver` to your
+    /// `UINavigationController`'s delegate chain for automatic tracking.
+    public static func setCurrentScreen(name: String) {
+        SDKInstance.shared.setCurrentScreen(name)
     }
 }

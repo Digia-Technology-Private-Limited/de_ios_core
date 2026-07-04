@@ -63,7 +63,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.campaignStore.populate([campaign])
 
         SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(cepCampaignId: "carousel-campaign", campaignKey: "carousel-campaign"))
+            CEPTriggerPayload(cepCampaignId: "carousel-campaign", campaignKey: "carousel-campaign", cepMetadata: [:]))
 
         #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner")?.cepCampaignId == "carousel-campaign")
         #expect(SDKInstance.shared.inlineController.getCarouselConfig("hero_banner")?.items.count == 1)
@@ -92,7 +92,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.campaignStore.populate([campaign])
 
         SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(cepCampaignId: "story-campaign", campaignKey: "story-campaign"))
+            CEPTriggerPayload(cepCampaignId: "story-campaign", campaignKey: "story-campaign", cepMetadata: [:]))
 
         #expect(SDKInstance.shared.inlineController.getCampaign("story_strip")?.cepCampaignId == "story-campaign")
         #expect(SDKInstance.shared.inlineController.getStoryConfig("story_strip")?.items.count == 1)
@@ -115,7 +115,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.campaignStore.populate([campaign])
 
         SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(cepCampaignId: "carousel-campaign", campaignKey: "carousel-campaign"))
+            CEPTriggerPayload(cepCampaignId: "carousel-campaign", campaignKey: "carousel-campaign", cepMetadata: [:]))
         #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") != nil)
 
         SDKInstance.shared.onCampaignInvalidated("carousel-campaign")
@@ -169,7 +169,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
 
         SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(cepCampaignId: "bridge-event", campaignKey: "welcome_survey"))
+            CEPTriggerPayload(cepCampaignId: "bridge-event", campaignKey: "welcome_survey", cepMetadata: [:]))
 
         #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.cepCampaignId == "bridge-event")
         #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.campaignKey == "welcome_survey")
@@ -268,6 +268,7 @@ private final class TestPlugin: DigiaCEPPlugin {
     var placeholderIDToReturn: Int?
     var placeholderRegistrations: [String] = []
     var deregisteredPlaceholderIDs: [Int] = []
+    var forwardedScreens: [String] = []
 
     init(identifier: String) {
         self.identifier = identifier
@@ -275,6 +276,10 @@ private final class TestPlugin: DigiaCEPPlugin {
 
     func setup(delegate: DigiaCEPDelegate) {
         setupCount += 1
+    }
+
+    func forwardScreen(_ name: String) {
+        forwardedScreens.append(name)
     }
 
     func registerPlaceholder(propertyID: String) -> Int? {
