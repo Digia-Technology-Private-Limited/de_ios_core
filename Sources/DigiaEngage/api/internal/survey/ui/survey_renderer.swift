@@ -389,9 +389,7 @@ private struct SurveyBody: View {
 
     @ViewBuilder
     private func scrollSection(node: SurveyNode, block: SurveyBlock) -> some View {
-        let maxHeight = scrollMaxHeight(flexible: block.flexibleHeight)
-
-        ContentSizedScrollView(maxHeight: maxHeight) {
+        ContentSizedScrollView(maxHeight: scrollMaxHeight()) {
             surveyContent(node: node, block: block)
         }
         .frame(maxWidth: .infinity)
@@ -415,12 +413,11 @@ private struct SurveyBody: View {
         .id(node.id)
     }
 
-    private func scrollMaxHeight(flexible: Bool) -> CGFloat {
-        // Cap is the smaller of (fixed limit) and a screen-relative budget so
-        // the surrounding SurveyBody never exceeds the dialog/sheet on small phones.
+    private func scrollMaxHeight() -> CGFloat {
+        // Screen-relative budget so the surrounding SurveyBody never exceeds
+        // the dialog/sheet on small phones.
         let screen = UIScreen.main.bounds.height
-        if flexible { return min(screen * 0.6, screen - 240) }
-        return min(480, screen * 0.5)
+        return min(screen * 0.6, screen - 240)
     }
 
     @ViewBuilder

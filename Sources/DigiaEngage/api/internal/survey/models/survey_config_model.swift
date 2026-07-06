@@ -405,7 +405,6 @@ struct SurveyBlock: Equatable {
     let showAnswerDescriptions: Bool
     let shuffle: Bool
     let allowOther: Bool
-    let flexibleHeight: Bool
     let answerLayout: AnswerLayout
     /// Block surface background; an empty string inherits the survey surface.
     let backgroundColor: String
@@ -440,7 +439,6 @@ struct SurveyBlock: Equatable {
             showAnswerDescriptions: SurveyParse.bool(json["showAnswerDescriptions"]) ?? false,
             shuffle: SurveyParse.bool(json["shuffle"]) ?? false,
             allowOther: SurveyParse.bool(json["allowOther"]) ?? false,
-            flexibleHeight: SurveyParse.bool(json["flexibleHeight"]) ?? false,
             answerLayout: SurveyParse.answerLayout(SurveyParse.string(json["answerLayout"])),
             backgroundColor: SurveyParse.string(json["backgroundColor"]) ?? "",
             numberMin: SurveyParse.double(json["min"]),
