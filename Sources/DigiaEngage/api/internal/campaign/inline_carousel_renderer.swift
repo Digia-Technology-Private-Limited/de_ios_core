@@ -35,8 +35,11 @@ private struct InlineCarouselView: View {
                 TabView(selection: $currentIndex) {
                     ForEach(0 ..< pageCount, id: \.self) { index in
                         let realIndex = index % items.count
-                        WebImage(url: URL(string: items[realIndex].imageUrl))
-                            .resizable()
+                        WebImage(url: URL(string: items[realIndex].imageUrl)) {
+                            $0.resizable()
+                        } placeholder: {
+                            BlurHashPlaceholderView(placeholder: items[realIndex].placeholder)
+                        }
                             .scaledToFill()
                             .frame(maxWidth: .infinity)
                             .frame(height: CGFloat(config.height))

@@ -104,6 +104,8 @@ struct NudgeImage: Equatable {
     let url: String
     let aspectRatio: CGFloat
     let fit: NudgeContentFit
+    /// Loading placeholder shown while `url` loads; `nil` when the payload has none.
+    let placeholder: ImagePlaceholder?
 }
 
 struct NudgeButton: Equatable {

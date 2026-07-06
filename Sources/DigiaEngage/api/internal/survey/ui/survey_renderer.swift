@@ -654,7 +654,10 @@ private struct BlockMediaImage: View {
             AsyncImage(url: url) { image in
                 image.resizable().aspectRatio(contentMode: contentMode)
             } placeholder: {
-                SurveyTokens.surfaceSunken
+                ZStack {
+                    SurveyTokens.surfaceSunken
+                    BlurHashPlaceholderView(placeholder: media.placeholder)
+                }
             }
             .frame(height: 176)
             .frame(maxWidth: .infinity)
