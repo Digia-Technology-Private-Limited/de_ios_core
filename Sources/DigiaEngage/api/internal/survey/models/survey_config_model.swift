@@ -124,10 +124,14 @@ struct BlockMedia: Equatable {
     let alt: String
     let position: MediaPosition
     let boxFit: String
+    /// Loading placeholder shown while `url` loads; `nil` when none.
+    let placeholder: ImagePlaceholder?
 
     var hasUrl: Bool { !url.isEmpty }
 
-    static let empty = BlockMedia(url: "", alt: "", position: .top, boxFit: "cover")
+    static let empty = BlockMedia(
+        url: "", alt: "", position: .top, boxFit: "cover", placeholder: nil
+    )
 
     static func from(_ json: [String: JSONValue]?) -> BlockMedia {
         guard let json else { return .empty }
@@ -135,7 +139,8 @@ struct BlockMedia: Equatable {
             url: SurveyParse.string(json["url"]) ?? "",
             alt: SurveyParse.string(json["alt"]) ?? "",
             position: SurveyParse.mediaPosition(SurveyParse.string(json["position"])),
-            boxFit: SurveyParse.string(json["boxFit"]) ?? "cover"
+            boxFit: SurveyParse.string(json["boxFit"]) ?? "cover",
+            placeholder: ImagePlaceholder.from(SurveyParse.object(json["placeholder"]))
         )
     }
 }
@@ -405,7 +410,6 @@ struct SurveyBlock: Equatable {
     let showAnswerDescriptions: Bool
     let shuffle: Bool
     let allowOther: Bool
-    let flexibleHeight: Bool
     let answerLayout: AnswerLayout
     /// Block surface background; an empty string inherits the survey surface.
     let backgroundColor: String
@@ -440,7 +444,6 @@ struct SurveyBlock: Equatable {
             showAnswerDescriptions: SurveyParse.bool(json["showAnswerDescriptions"]) ?? false,
             shuffle: SurveyParse.bool(json["shuffle"]) ?? false,
             allowOther: SurveyParse.bool(json["allowOther"]) ?? false,
-            flexibleHeight: SurveyParse.bool(json["flexibleHeight"]) ?? false,
             answerLayout: SurveyParse.answerLayout(SurveyParse.string(json["answerLayout"])),
             backgroundColor: SurveyParse.string(json["backgroundColor"]) ?? "",
             numberMin: SurveyParse.double(json["min"]),
