@@ -180,7 +180,9 @@ private struct NudgeImageView: View {
             image.aspectRatio(node.aspectRatio, contentMode: .fit)
                 .frame(maxWidth: maxWidth)
         case .cover:
-            image.aspectRatio(node.aspectRatio, contentMode: .fill)
+            Color.clear
+                .aspectRatio(node.aspectRatio, contentMode: .fit)
+                .overlay(image.scaledToFill())
                 .frame(maxWidth: .infinity)
                 .clipped()
         case .fill:

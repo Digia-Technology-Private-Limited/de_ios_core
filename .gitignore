@@ -30,3 +30,6 @@ xcuserdata/
 
 .derivedData/
 docs/.worktrees/
+FatBuild/.derived/
+FatBuild/.archives
+dist/

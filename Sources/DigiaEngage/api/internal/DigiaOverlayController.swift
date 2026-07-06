@@ -46,16 +46,11 @@ final class DigiaOverlayController: ObservableObject {
             payload: payload
         )
         activeStoryOverlay = state
-        // The full-screen story is presented in its own dedicated UIWindow
-        // (DigiaStoryWindowPresenter), not as an in-host SwiftUI overlay. A
-        // separate key window sits above all React Native content and owns its
-        // touches outright, so taps / swipes / the CTA work without competing
-        // with Fabric's RCTSurfaceTouchHandler.
-        DigiaStoryWindowPresenter.shared.present(state: state)
+        DigiaStoryPresenter.shared.present(state: state)
     }
 
     func dismissStoryOverlay() {
         activeStoryOverlay = nil
-        DigiaStoryWindowPresenter.shared.dismiss()
+        DigiaStoryPresenter.shared.dismiss()
     }
 }
