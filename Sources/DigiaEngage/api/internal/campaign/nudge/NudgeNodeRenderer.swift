@@ -2,6 +2,7 @@ import AVFoundation
 import AVKit
 @_implementationOnly import Lottie
 @_implementationOnly import SDWebImageSwiftUI
+import StoreKit
 import SwiftUI
 import UIKit
 
@@ -179,7 +180,9 @@ private struct NudgeImageView: View {
             image.aspectRatio(node.aspectRatio, contentMode: .fit)
                 .frame(maxWidth: maxWidth)
         case .cover:
-            image.aspectRatio(node.aspectRatio, contentMode: .fill)
+            Color.clear
+                .aspectRatio(node.aspectRatio, contentMode: .fit)
+                .overlay(image.scaledToFill())
                 .frame(maxWidth: .infinity)
                 .clipped()
         case .fill:
@@ -287,8 +290,21 @@ private struct NudgeButtonView: View {
                     applicationActivities: nil
                 )
                 ViewControllerUtil.present(activity)
+            case .requestReview:
+                requestAppStoreReview()
             }
         }
+    }
+
+    /// Requests the App Store review prompt (`AppStore.requestReview`). Fire-and-forget
+    /// by design: the API is quota-limited and never reports whether the prompt was
+    /// shown or how the user rated, so a missing window scene is only logged.
+    private func requestAppStoreReview() {
+        guard let scene = ViewControllerUtil.findWindowScene() else {
+            DigiaLog.warning("[NudgeButtonView] requestReview: no window scene; skipping")
+            return
+        }
+        Task { await AppStore.requestReview(in: scene) }
     }
 
     private static func actionType(for action: NudgeAction?) -> String? {
@@ -297,6 +313,7 @@ private struct NudgeButtonView: View {
         case .openDeeplink: return "deeplink"
         case .dismiss: return "dismiss"
         case .copyToClipboard, .share: return "custom"
+        case .requestReview: return "request_review"
         case nil: return nil
         }
     }

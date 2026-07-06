@@ -31,11 +31,18 @@ struct CampaignFetcher {
             throw DigiaConfigError.network("getCampaigns failed: HTTP \(statusCode)")
         }
 
+        return try Self.parse(data)
+    }
+
+    /// Parses a getCampaigns response body into campaign models without any network
+    /// call. Used both by `fetch()` and by callers (e.g. the React Native bridge)
+    /// that already fetched the same payload themselves and just need it parsed.
+    static func parse(_ data: Data) throws -> [CampaignModel] {
         let array = try extractCampaignArray(data)
         return array.compactMap { CampaignModel.fromJson($0) }
     }
 
-    private func extractCampaignArray(_ data: Data) throws -> [[String: Any]] {
+    private static func extractCampaignArray(_ data: Data) throws -> [[String: Any]] {
         let root = try JSONSerialization.jsonObject(with: data)
 
         if let array = root as? [Any] {
@@ -57,7 +64,6 @@ struct CampaignFetcher {
     }
 
     private func log(_ message: String) {
-        guard config.logLevel == .verbose else { return }
-        print("Digia \(message)")
+        DigiaLog.verbose(message)
     }
 }

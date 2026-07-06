@@ -101,11 +101,12 @@ final class AnalyticsService {
         campaignType: String?
     ) {
         guard config.enabled else {
-            print("[DigiaAnalytics] capture: DISABLED — event '\(event.eventName)' dropped")
+            DigiaLog.log("capture: DISABLED — event '\(event.eventName)' dropped", tag: "DigiaAnalytics")
             return
         }
-        print(
-            "[DigiaAnalytics] capture: event='\(event.eventName)' campaignKey=\(payload.campaignKey) campaignId=\(campaignId ?? "nil")"
+        DigiaLog.log(
+            "capture: event='\(event.eventName)' campaignKey=\(payload.campaignKey) campaignId=\(campaignId ?? "nil")",
+            tag: "DigiaAnalytics"
         )
 
         enqueue(
@@ -154,13 +155,15 @@ final class AnalyticsService {
     static func create(config: DigiaConfig) -> AnalyticsService? {
         let ac = config.analyticsConfig
         guard ac.enabled else {
-            print(
-                "[DigiaAnalytics] create: analytics DISABLED in DigiaConfig — no events will be captured"
+            DigiaLog.log(
+                "create: analytics DISABLED in DigiaConfig — no events will be captured",
+                tag: "DigiaAnalytics"
             )
             return nil
         }
-        print(
-            "[DigiaAnalytics] create: analytics enabled, batchSize=\(ac.flushBatchSize) interval=\(ac.flushIntervalMs)ms"
+        DigiaLog.log(
+            "create: analytics enabled, batchSize=\(ac.flushBatchSize) interval=\(ac.flushIntervalMs)ms",
+            tag: "DigiaAnalytics"
         )
         return AnalyticsService(
             config: ac,
@@ -190,8 +193,9 @@ final class AnalyticsService {
             body: data,
             headers: ["Content-Type": "application/json", "X-Digia-Project-Id": apiKey]
         )
-        print(
-            "[DigiaAnalytics] session reported: HTTP \(status ?? -1) sessionId=\(identity.sessionId) anonymousId=\(identity.anonymousId)"
+        DigiaLog.log(
+            "session reported: HTTP \(status ?? -1) sessionId=\(identity.sessionId) anonymousId=\(identity.anonymousId)",
+            tag: "DigiaAnalytics"
         )
     }
 
@@ -230,23 +234,24 @@ final class AnalyticsService {
                 attempts: 0),
             maxEvents: config.queueMaxEvents
         )
-        print(
-            "[DigiaAnalytics] enqueued '\(eventName)' eventId=\(eventId) queueSize=\(queue.size) flushBatchSize=\(config.flushBatchSize)"
+        DigiaLog.log(
+            "enqueued '\(eventName)' eventId=\(eventId) queueSize=\(queue.size) flushBatchSize=\(config.flushBatchSize)",
+            tag: "DigiaAnalytics"
         )
 
         if queue.size >= config.flushBatchSize {
-            print("[DigiaAnalytics] batch threshold reached — dispatching immediately")
+            DigiaLog.log("batch threshold reached — dispatching immediately", tag: "DigiaAnalytics")
             cancelTimer()
             Task { await dispatchPending() }
         } else {
-            print("[DigiaAnalytics] scheduling flush timer (interval=\(config.flushIntervalMs)ms)")
+            DigiaLog.log("scheduling flush timer (interval=\(config.flushIntervalMs)ms)", tag: "DigiaAnalytics")
             scheduleTimer()
         }
     }
 
     private func dispatchPending() async {
         guard !isDispatching else {
-            print("[DigiaAnalytics] dispatchPending: already dispatching — skipped")
+            DigiaLog.log("dispatchPending: already dispatching — skipped", tag: "DigiaAnalytics")
             return
         }
         cancelTimer()
@@ -255,13 +260,14 @@ final class AnalyticsService {
 
         let batch = queue.peek(maxCount: config.maxBatchSize)
         guard !batch.isEmpty else {
-            print("[DigiaAnalytics] dispatchPending: queue empty — nothing to send")
+            DigiaLog.log("dispatchPending: queue empty — nothing to send", tag: "DigiaAnalytics")
             retryAttempt = 0
             return
         }
 
-        print(
-            "[DigiaAnalytics] dispatchPending: sending batch of \(batch.count) event(s) to \(DigiaEndpoints.track)"
+        DigiaLog.log(
+            "dispatchPending: sending batch of \(batch.count) event(s) to \(DigiaEndpoints.track)",
+            tag: "DigiaAnalytics"
         )
         queue.incrementAttempt(eventIds: batch.map { $0.eventId })
 
@@ -278,29 +284,31 @@ final class AnalyticsService {
                     "X-Digia-Device-Id": identity.anonymousId,
                 ]
             )
-            print("[DigiaAnalytics] dispatchPending: HTTP \(statusCode)")
+            DigiaLog.log("dispatchPending: HTTP \(statusCode)", tag: "DigiaAnalytics")
 
             switch statusCode {
             case 200, 207:
                 queue.remove(eventIds: batch.map { $0.eventId })
                 retryAttempt = 0
-                print(
-                    "[DigiaAnalytics] dispatch success — removed \(batch.count) event(s), queueSize=\(queue.size)"
+                DigiaLog.log(
+                    "dispatch success — removed \(batch.count) event(s), queueSize=\(queue.size)",
+                    tag: "DigiaAnalytics"
                 )
                 if queue.size > 0 { scheduleTimer(minDelayMs: 15_000) }
             case 500...:
-                print(
-                    "[DigiaAnalytics] dispatch failed (5xx \(statusCode)) — scheduling retry #\(retryAttempt + 1)"
+                DigiaLog.warning(
+                    "dispatch failed (5xx \(statusCode)) — scheduling retry #\(retryAttempt + 1)",
+                    tag: "DigiaAnalytics"
                 )
                 scheduleRetry()
             default:
-                print("[DigiaAnalytics] dispatch failed (\(statusCode)) — dropping batch")
+                DigiaLog.warning("dispatch failed (\(statusCode)) — dropping batch", tag: "DigiaAnalytics")
                 queue.remove(eventIds: batch.map { $0.eventId })
                 retryAttempt = 0
                 if queue.size > 0 { scheduleTimer(minDelayMs: 15_000) }
             }
         } catch {
-            print("[DigiaAnalytics] dispatchPending: exception — \(error.localizedDescription)")
+            DigiaLog.error("dispatchPending: exception", tag: "DigiaAnalytics", error: error.localizedDescription)
             scheduleRetry()
         }
     }

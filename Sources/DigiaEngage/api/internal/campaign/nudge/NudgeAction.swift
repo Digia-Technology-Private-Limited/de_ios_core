@@ -6,6 +6,7 @@ enum NudgeAction: Equatable {
     case copyToClipboard(String)
     case share(String)
     case dismiss
+    case requestReview
 }
 
 struct NudgeActionParser {
@@ -28,6 +29,8 @@ struct NudgeActionParser {
             return text(from: data).map { .share($0) }
         case "Action.hideBottomSheet", "Action.dismissDialog":
             return .dismiss
+        case "Action.requestReview":
+            return .requestReview
         default:
             return nil
         }

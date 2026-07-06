@@ -11,6 +11,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     private var activePlugin: DigiaCEPPlugin?
     private(set) var fontFactory: DUIFontFactory = DefaultFontFactory()
+    /// Mirrors Android's `ScreenTracker`: the last screen name reported via
+    /// `Digia.setCurrentScreen`, forwarded to the active plugin and read into
+    /// analytics events (`screenName`).
+    private var _currentScreen: String?
 
     let campaignStore = CampaignStore()
     let controller = DigiaOverlayController()
@@ -29,6 +33,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Native frequency capping for all managed campaigns (nudge, survey, and —
     /// on React Native — guides, whose lifecycle events arrive over the bridge).
     private var frequencyManager: FrequencyManager?
+    /// Reports an unhealthy CEP plugin as a gated warning. Mirrors Android's
+    /// `DiagnosticsReporter` wired into `PluginRegistry`.
+    private let diagnostics = DiagnosticsReporter(logger: { DigiaLog.warning($0) })
 
     /// Set by the RN bridge. When non-nil the SDK is RN-driven: guides render in
     /// JS, so on a guide trigger native only applies frequency capping and (if
@@ -62,6 +69,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func initialize(_ config: DigiaConfig) async throws {
         guard self.config == nil else { return }
         self.config = config
+        DigiaLog.configure(config.logLevel)
         DigiaEndpoints.configure(config)
 
         if let family = config.fontFamily?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -70,40 +78,88 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             fontFactory = ConfiguredFontFactory(fontFamily: family)
         }
 
+        if config.wrapperBinding == "react_native" {
+            // RN fetches campaigns itself (it needs the same response to render
+            // JS-side campaigns) and hands them to us via populateCampaigns() —
+            // fetching here too would duplicate the network call. sdkState stays
+            // .notInitialized until that call arrives.
+            logVerbose("Skipping native campaign fetch — awaiting populateCampaigns() from RN")
+            return
+        }
+
+        var campaigns: [CampaignModel] = []
         do {
-            let campaigns = try await CampaignFetcher(config: config).fetch()
-            campaignStore.populate(campaigns)
-            if campaignStore.isEmpty {
-                logVerbose("No campaigns fetched — CampaignStore is empty")
-            }
+            campaigns = try await CampaignFetcher(config: config).fetch()
         } catch {
             // Campaign fetch failure must not block SDK readiness.
             logVerbose("CampaignFetcher failed: \(error)")
         }
+        completeInitialization(campaigns)
+    }
+
+    private func completeInitialization(_ campaigns: [CampaignModel]) {
+        campaignStore.populate(campaigns)
+        if campaignStore.isEmpty {
+            logVerbose("No campaigns fetched — CampaignStore is empty")
+        }
 
         sdkState = .ready
-        analyticsService = AnalyticsService.create(config: config)
+        if analyticsService == nil, let config {
+            analyticsService = AnalyticsService.create(config: config)
+        }
 
         // Frequency capping pulls the authoritative sessionId from analytics so
         // `session` windows track the same session the backend sees.
-        frequencyManager = FrequencyManager(
-            sessionIdProvider: { [weak self] in self?.analyticsService?.identity.sessionId }
-        )
+        if frequencyManager == nil {
+            frequencyManager = FrequencyManager(
+                sessionIdProvider: { [weak self] in self?.analyticsService?.identity.sessionId }
+            )
+        }
 
-        if let plugin = activePlugin, !plugin.healthCheck().isHealthy {
-            plugin.setup(delegate: self)
+        if let plugin = activePlugin {
+            let report = plugin.healthCheck()
+            if !report.isHealthy {
+                diagnostics.report(report, source: plugin.identifier)
+                plugin.setup(delegate: self)
+            }
         }
     }
 
+    /// RN-only entrypoint: JS already fetched campaigns for its own rendering needs,
+    /// so it hands the raw getCampaigns response here instead of native re-fetching.
+    /// Called once after `initialize` when `wrapperBinding == "react_native"`.
+    func populateCampaigns(_ campaignsJson: String) {
+        var campaigns: [CampaignModel] = []
+        do {
+            campaigns = try CampaignFetcher.parse(Data(campaignsJson.utf8))
+        } catch {
+            logVerbose("populateCampaigns: failed to parse campaigns JSON: \(error)")
+        }
+        completeInitialization(campaigns)
+    }
+
     private func logVerbose(_ message: String) {
-        guard config?.logLevel == .verbose else { return }
-        print("Digia [SDKInstance] \(message)")
+        DigiaLog.verbose("[SDKInstance] \(message)")
+    }
+
+    private func logError(_ message: String) {
+        DigiaLog.error("[SDKInstance] ERROR: \(message)")
     }
 
     func register(_ plugin: DigiaCEPPlugin) {
         activePlugin?.teardown()
         activePlugin = plugin
         plugin.setup(delegate: self)
+        diagnostics.report(plugin.healthCheck(), source: plugin.identifier)
+        if let screen = _currentScreen {
+            plugin.forwardScreen(screen)
+        }
+    }
+
+    func setCurrentScreen(_ name: String) {
+        logVerbose("Screen: \(name)")
+        _currentScreen = name
+        activePlugin?.forwardScreen(name)
     }
 
     func registerFontFactory(_ factory: DUIFontFactory) {
@@ -126,7 +182,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         isHostMounted = false
     }
 
-    func onCampaignTriggered(_ payload: CEPTriggerPayload) {
+    func onCampaignTriggered(_ payload: CEPTriggerPayload) -> Bool {
         logVerbose(
             "onCampaignTriggered cepCampaignId='\(payload.cepCampaignId)' "
                 + "campaignKey='\(payload.campaignKey)'")
@@ -138,16 +194,16 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             ? payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
             : key
         guard !resolvedKey.isEmpty, campaignStore.find(resolvedKey) != nil else {
-            logVerbose("campaign dropped — no campaign for key '\(resolvedKey)'")
-            return
+            logError("campaign dropped — no campaign for key '\(resolvedKey)'")
+            return false
         }
-        routeByCampaignKey(resolvedKey, payload: payload)
+        return routeByCampaignKey(resolvedKey, payload: payload)
     }
 
-    private func routeByCampaignKey(_ key: String, payload: CEPTriggerPayload) {
+    private func routeByCampaignKey(_ key: String, payload: CEPTriggerPayload) -> Bool {
         guard let campaign = campaignStore.find(key) else {
-            logVerbose("routeByCampaignKey: no campaign found for key '\(key)'")
-            return
+            logError("routeByCampaignKey: no campaign found for key '\(key)'")
+            return false
         }
 
         logVerbose("routeByCampaignKey key='\(key)' type='\(campaign.campaignType)'")
@@ -162,11 +218,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             // slot first renders (see reportSlotFirstRender).
             events.toCep(.impressed, payload: payload)
             events.toCep(.dismissed, payload: payload)
+            return true
         case .story(let cfg):
             inlineController.setStoryConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             events.toCep(.impressed, payload: payload)
             events.toCep(.dismissed, payload: payload)
+            return true
         case .guide:
             if let renderViaJs = onGuideRenderRequest {
                 // RN: native owns capping, JS owns rendering. Gate here; the
@@ -174,17 +232,18 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 // Viewed" event (see captureAnalyticsEvent).
                 if let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
                     logVerbose("guide dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
-                    return
+                    return false
                 }
                 renderViaJs(payload)
-                return
+                return true
             }
             dwellTracker.markViewed(payload.cepCampaignId)
             guideOrchestrator.start(campaign, payload: payload)
+            return true
         case .nudge(let nudgeConfig):
             if let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
                 logVerbose("nudge dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
-                return
+                return false
             }
             // Resolve variable context: dashboard schemas define type + fallback;
             // CEP trigger variables win over fallbacks (D3′).
@@ -198,14 +257,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     payload: payload,
                     variables: variableContext.values.isEmpty && variableContext.types.isEmpty ? nil : variableContext
                 ))
+            return true
         case .survey(let cfg):
             if let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
                 logVerbose("survey dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
-                return
+                return false
             }
-            if !surveyOrchestrator.start(payload: payload, config: cfg) {
+            let started = surveyOrchestrator.start(payload: payload, config: cfg)
+            if !started {
                 logVerbose("survey campaign dropped: another survey is on screen: \(key)")
             }
+            return started
         }
     }
 
@@ -244,7 +306,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 itemTotal: config.questionCount,
                 hasWelcome: config.hasWelcome,
                 hasThanks: config.hasThanks,
-                hasBranching: config.hasBranching
+                hasBranching: config.hasBranching,
+                screenName: _currentScreen
             ),
             payload: state.payload
         )
@@ -452,7 +515,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
         events.toBoth(
             .impressed,
-            NudgeEvent.Viewed(displayStyle: nudge.config.surface.displayType.displayStyle),
+            NudgeEvent.Viewed(
+                displayStyle: nudge.config.surface.displayType.displayStyle,
+                screenName: _currentScreen
+            ),
             payload: nudge.payload
         )
     }
@@ -500,9 +566,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let viewed: EngageAnalyticsEvent
         switch campaign.config {
         case .inline(let cfg):
-            viewed = CarouselEvent.Viewed(itemTotal: cfg.items.count, slotKey: cfg.slotKey)
+            viewed = CarouselEvent.Viewed(
+                itemTotal: cfg.items.count, slotKey: cfg.slotKey, screenName: _currentScreen)
         case .story(let cfg):
-            viewed = StoriesEvent.Viewed(slotKey: cfg.slotKey)
+            viewed = StoriesEvent.Viewed(slotKey: cfg.slotKey, screenName: _currentScreen)
         default:
             return
         }
@@ -618,7 +685,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             break
         }
         let payload = CEPTriggerPayload(
-            cepCampaignId: campaign?.id ?? campaignKey, campaignKey: campaignKey)
+            cepCampaignId: campaign?.id ?? campaignKey, campaignKey: campaignKey, cepMetadata: [:])
         events.toDigia(event, payload: payload)
     }
 
@@ -630,7 +697,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         switch eventName {
         case "Digia Experience Viewed":
             return GuideEvent.Viewed(
-                displayStyle: str("display_style") ?? "", itemTotal: int("step_total") ?? 0)
+                displayStyle: str("display_style") ?? "",
+                itemTotal: int("step_total") ?? 0,
+                screenName: _currentScreen)
         case "Digia Step Viewed":
             return GuideEvent.StepViewed(
                 itemIndex: int("step_index") ?? 0,
@@ -718,6 +787,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func resetForTesting() {
         activePlugin?.teardown()
         activePlugin = nil
+        _currentScreen = nil
         analyticsService?.clear()
         analyticsService = nil
         frequencyManager = nil

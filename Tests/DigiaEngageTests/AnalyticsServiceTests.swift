@@ -62,7 +62,7 @@ struct AnalyticsServiceTests {
     }
 
     private func buildPayload(_ campaignKey: String) -> CEPTriggerPayload {
-        CEPTriggerPayload(cepCampaignId: campaignKey, campaignKey: campaignKey)
+        CEPTriggerPayload(cepCampaignId: campaignKey, campaignKey: campaignKey, cepMetadata: [:])
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────

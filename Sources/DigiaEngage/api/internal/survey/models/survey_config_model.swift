@@ -32,7 +32,7 @@ enum SurveyBlockType: String {
     case resultPage = "result_page"
 
     var isContent: Bool { self == .welcome || self == .textMedia || self == .resultPage }
-    var isMultiSelect: Bool { self == .multiSelect || self == .tierList || self == .upvote }
+    var isMultiSelect: Bool { self == .multiSelect || self == .tierList }
     /// Any of the NPS skins (numeric grid + face scales).
     var isNps: Bool { self == .nps || self == .npsEmoji || self == .npsSmiley }
     var isChoice: Bool {

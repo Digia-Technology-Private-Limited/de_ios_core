@@ -52,56 +52,55 @@ private struct StoryThumbnailCard: View {
     }
 }
 
-// MARK: - Dedicated story window presenter
+// MARK: - Dedicated story presenter
 
-/// Presents the full-screen inline story in its own `UIWindow`, layered above
-/// all application (and React Native) content. Using a separate key window —
-/// rather than an in-host SwiftUI overlay — means the story owns its touches
-/// outright (tap zones, swipe-to-dismiss, CTA) without competing with React
-/// Native's Fabric `RCTSurfaceTouchHandler`. Mirrors the isolation Android gets
-/// from presenting the story as a `Dialog`.
+/// Presents the full-screen inline story as a modal `.overFullScreen`
+/// `UIHostingController` on the app's top-most view controller.
+///
+/// We deliberately do NOT spin up a separate `UIWindow` here. A raw secondary
+/// window works in a UIKit / React-Native host, but in a SwiftUI
+/// `App`/`WindowGroup` host it renders its first frame and then stays inert:
+/// SwiftUI never drives its update loop (frozen progress bar) and it never
+/// joins the active responder chain (dead tap zones, swipe-dismiss and CTA).
+/// A modal presentation is live and interactive in BOTH lifecycles. Being a
+/// UIKit modal layered above any React-Native Fabric surface, it still owns
+/// its touches outright — without competing with Fabric's
+/// `RCTSurfaceTouchHandler` — mirroring the isolation Android gets from
+/// presenting the story as a `Dialog`.
 @MainActor
-final class DigiaStoryWindowPresenter {
-    static let shared = DigiaStoryWindowPresenter()
+final class DigiaStoryPresenter {
+    static let shared = DigiaStoryPresenter()
 
-    private var window: UIWindow?
-    /// The app's key window at present time, restored on dismiss so the host
-    /// app's navigation / back gestures keep working after the story closes.
-    private weak var previousKeyWindow: UIWindow?
+    /// The currently-presented story controller. Weak because UIKit retains a
+    /// presented controller for us; we only need it to drive dismissal.
+    private weak var presented: UIViewController?
 
     private init() {}
 
     func present(state: InlineStoryOverlayState) {
-        // Replace any window already showing (e.g. tapping another story).
-        dismiss()
+        // Replace any story already showing (e.g. tapping another story).
+        // Tear the old one down without animation so it doesn't collide with
+        // the incoming present.
+        if let presented {
+            self.presented = nil
+            presented.presentingViewController?.dismiss(animated: false)
+        }
 
-        guard let scene = ViewControllerUtil.findWindowScene() else { return }
-
-        previousKeyWindow = scene.windows.first(where: { $0.isKeyWindow })
+        guard let presenter = ViewControllerUtil.topViewController() else { return }
 
         let host = DigiaStoryHostingController(rootView: InlineStoryOverlayContent(state: state))
-        host.view.backgroundColor = .clear
-
-        let window = UIWindow(windowScene: scene)
-        window.rootViewController = host
-        window.backgroundColor = .clear
-        // Above normal + alert windows so it covers everything, including any
-        // RN-presented content, while still below system UI. Make it key while
-        // the story is open so keyboard/back-style commands are routed to the
-        // modal story window, then restore the app window on dismiss.
-        window.windowLevel = .alert + 1
-        self.window = window
-        window.makeKeyAndVisible()
+        // Opaque black so the full-bleed media has no seam during the fade.
+        host.view.backgroundColor = .black
+        host.modalPresentationStyle = .overFullScreen
+        host.modalTransitionStyle = .crossDissolve
+        presented = host
+        presenter.present(host, animated: true)
     }
 
     func dismiss() {
-        window?.isHidden = true
-        window?.rootViewController = nil
-        window = nil
-        // Restore the app's key window so its first-responder-driven gestures
-        // (e.g. the interactive pop / back swipe) resume working.
-        previousKeyWindow?.makeKey()
-        previousKeyWindow = nil
+        guard let presented else { return }
+        self.presented = nil
+        presented.presentingViewController?.dismiss(animated: true)
     }
 }
 
@@ -213,7 +212,10 @@ private struct InlineStoryOverlayContent: View {
             // would starve). Two "back" affordances:
             //   • swipe DOWN  — standard full-screen-cover dismissal
             //   • swipe RIGHT from the left edge — iOS interactive "back"
-            .gesture(
+            // `simultaneousGesture` (not `gesture`) so this doesn't claim exclusive
+            // recognition over the left/right `tapZones` beneath it — a plain
+            // `.gesture()` here was swallowing taps meant for story navigation.
+            .simultaneousGesture(
                 DragGesture(minimumDistance: 10)
                     .onEnded { value in
                         let dy = value.translation.height

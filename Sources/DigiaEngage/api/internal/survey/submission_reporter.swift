@@ -38,10 +38,10 @@ struct SurveySubmissionReporter {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                print("[Digia] recordSubmission HTTP \(http.statusCode)")
+                DigiaLog.warning("recordSubmission HTTP \(http.statusCode)")
             }
         } catch {
-            print("[Digia] recordSubmission failed: \(error)")
+            DigiaLog.warning("recordSubmission failed: \(error)")
         }
     }
 

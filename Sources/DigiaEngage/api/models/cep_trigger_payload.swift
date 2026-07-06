@@ -30,7 +30,7 @@ public struct CEPTriggerPayload: Sendable, Equatable {
     public init(
         cepCampaignId: String,
         campaignKey: String,
-        cepMetadata: [String: String] = [:],
+        cepMetadata: [String: String],
         variables: [String: String]? = nil
     ) {
         self.cepCampaignId = cepCampaignId
