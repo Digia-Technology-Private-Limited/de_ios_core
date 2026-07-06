@@ -141,6 +141,13 @@ private struct InlineStoryOverlayContent: View {
 
     @State private var currentIndex: Int
     @State private var elapsed: Double = 0
+    @State private var videoProgress: Double = 0
+    @State private var videoStalled: Double = 0
+    @State private var lastVideoProgress: Double = 0
+    /// True while the current video is buffering (waiting to play). The stall
+    /// watchdog pauses while this is set so a slow network isn't mistaken for a
+    /// dead video and skipped.
+    @State private var videoBuffering = false
     /// Set when the story runs to its last frame, so the teardown reports
     /// `Completed` rather than `StepDismissed`.
     @State private var completed = false
@@ -162,7 +169,12 @@ private struct InlineStoryOverlayContent: View {
                     .ignoresSafeArea()
 
                 if let item = currentItem {
-                    FullScreenStoryItem(item: item)
+                    FullScreenStoryItem(
+                        item: item,
+                        onVideoProgress: { videoProgress = $0 },
+                        onVideoEnded: { next() },
+                        onVideoBuffering: { videoBuffering = $0 }
+                    )
                         .id(currentIndex)
                         .frame(width: proxy.size.width, height: proxy.size.height)
                         .clipped()
@@ -262,7 +274,10 @@ private struct InlineStoryOverlayContent: View {
     }
 
     private var progress: Double {
-        min(max(elapsed / currentDuration, 0), 1)
+        if currentItem?.type == "video" {
+            return min(max(videoProgress, 0), 1)
+        }
+        return min(max(elapsed / currentDuration, 0), 1)
     }
 
     private var tapZones: some View {
@@ -284,15 +299,36 @@ private struct InlineStoryOverlayContent: View {
     }
 
     private func tick() {
-        guard currentItem != nil else { return }
+        guard let item = currentItem else { return }
+        if item.type == "video" {
+            // Buffering is legitimate loading, not a stall — pause the watchdog
+            // so a slow network doesn't skip the video before it starts.
+            if videoBuffering { return }
+            if videoProgress > lastVideoProgress + 0.0001 {
+                lastVideoProgress = videoProgress
+                videoStalled = 0
+            } else {
+                videoStalled += 0.05
+                if videoStalled >= 10 { next() }
+            }
+            return
+        }
         elapsed += 0.05
         if elapsed >= currentDuration {
             next()
         }
     }
 
-    private func next() {
+    private func resetTiming() {
         elapsed = 0
+        videoProgress = 0
+        lastVideoProgress = 0
+        videoStalled = 0
+        videoBuffering = false
+    }
+
+    private func next() {
+        resetTiming()
         if currentIndex < state.config.items.count - 1 {
             currentIndex += 1
         } else if state.config.restartOnCompleted {
@@ -309,7 +345,7 @@ private struct InlineStoryOverlayContent: View {
     }
 
     private func previous() {
-        elapsed = 0
+        resetTiming()
         currentIndex = max(currentIndex - 1, 0)
     }
 
@@ -338,14 +374,26 @@ private struct InlineStoryOverlayContent: View {
 @MainActor
 private struct FullScreenStoryItem: View {
     let item: StoryItemConfig
+    let onVideoProgress: (Double) -> Void
+    let onVideoEnded: () -> Void
+    let onVideoBuffering: (Bool) -> Void
 
     var body: some View {
         ZStack {
             Color.black
             if item.type == "video" {
-                InlineStoryVideoView(urlString: item.url, looping: false, muted: false)
+                InlineStoryVideoView(
+                    urlString: item.url,
+                    looping: false,
+                    muted: false,
+                    gravity: .resizeAspect,
+                    onProgress: onVideoProgress,
+                    onEnded: onVideoEnded,
+                    onBuffering: onVideoBuffering
+                )
             } else {
-                StoryRemoteImage(urlString: item.url)
+                // Letterbox (never crop): show the whole image, bars where aspect differs.
+                StoryRemoteImage(urlString: item.url, contentMode: .fit)
             }
         }
     }
@@ -354,6 +402,8 @@ private struct FullScreenStoryItem: View {
 @MainActor
 private struct StoryRemoteImage: View {
     let urlString: String
+    /// `.fill` crops to fill (story thumbnails); `.fit` letterboxes (full-screen).
+    var contentMode: ContentMode = .fill
 
     var body: some View {
         if let url = URL(string: urlString) {
@@ -361,7 +411,7 @@ private struct StoryRemoteImage: View {
                 url: url,
                 placeholder: AnyView(Color(red: 0.10, green: 0.10, blue: 0.10))
             )
-            .scaledToFill()
+            .aspectRatio(contentMode: contentMode)
         } else {
             Color(red: 0.16, green: 0.16, blue: 0.16)
         }
@@ -373,14 +423,25 @@ private struct InlineStoryVideoView: View {
     let urlString: String
     let looping: Bool
     let muted: Bool
+    /// Aspect-fill for thumbnails (crop to fill), aspect-fit for full-screen.
+    var gravity: AVLayerVideoGravity = .resizeAspectFill
+    /// Full-screen playback hooks; thumbnails leave these nil and skip the
+    /// observers entirely.
+    var onProgress: ((Double) -> Void)?
+    var onEnded: (() -> Void)?
+    var onBuffering: ((Bool) -> Void)?
 
     @State private var bundle: DigiaVideoPlaybackBundle?
+    @State private var timeObserver: Any?
+    @State private var endObserver: NSObjectProtocol?
+    @State private var failObserver: NSObjectProtocol?
+    @State private var bufferingObserver: NSKeyValueObservation?
 
     var body: some View {
         ZStack {
             Color.black
             if let player = bundle?.player {
-                InlineStoryPlayerLayer(player: player)
+                InlineStoryPlayerLayer(player: player, gravity: gravity)
             }
         }
         .task(id: "\(urlString)-\(looping)-\(muted)") {
@@ -391,10 +452,59 @@ private struct InlineStoryVideoView: View {
             // matching Android's ExoPlayer. See DigiaVideoStreaming.
             let nextBundle = DigiaVideoPlaybackBundle.make(url: url, looping: looping)
             nextBundle.player.isMuted = muted
+
+            if let onProgress {
+                let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
+                timeObserver = nextBundle.player.addPeriodicTimeObserver(
+                    forInterval: interval,
+                    queue: .main
+                ) { time in
+                    guard let item = nextBundle.player.currentItem else { return }
+                    let duration = item.duration.seconds
+                    guard duration.isFinite, duration > 0 else { return }
+                    onProgress(min(max(time.seconds / duration, 0), 1))
+                }
+            }
+            if let onEnded {
+                // Advance on natural completion or on an unplayable item, so a
+                // broken URL doesn't leave the story stuck on a black frame.
+                endObserver = NotificationCenter.default.addObserver(
+                    forName: .AVPlayerItemDidPlayToEndTime,
+                    object: nextBundle.player.currentItem,
+                    queue: .main
+                ) { _ in onEnded() }
+                failObserver = NotificationCenter.default.addObserver(
+                    forName: .AVPlayerItemFailedToPlayToEndTime,
+                    object: nextBundle.player.currentItem,
+                    queue: .main
+                ) { _ in onEnded() }
+            }
+            if let onBuffering {
+                // Report waiting-to-play so the story's stall watchdog can tell
+                // a buffering video from a dead one.
+                bufferingObserver = nextBundle.player.observe(
+                    \.timeControlStatus,
+                    options: [.initial, .new]
+                ) { player, _ in
+                    let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                    Task { @MainActor in onBuffering(waiting) }
+                }
+            }
+
             bundle = nextBundle
             nextBundle.player.play()
         }
         .onDisappear {
+            if let timeObserver {
+                bundle?.player.removeTimeObserver(timeObserver)
+            }
+            if let endObserver {
+                NotificationCenter.default.removeObserver(endObserver)
+            }
+            if let failObserver {
+                NotificationCenter.default.removeObserver(failObserver)
+            }
+            bufferingObserver?.invalidate()
             bundle?.player.pause()
         }
     }
@@ -402,15 +512,17 @@ private struct InlineStoryVideoView: View {
 
 private struct InlineStoryPlayerLayer: UIViewRepresentable {
     let player: AVPlayer
+    var gravity: AVLayerVideoGravity = .resizeAspectFill
 
     func makeUIView(context _: Context) -> InlineStoryPlayerContainer {
         let view = InlineStoryPlayerContainer()
-        view.playerLayer.videoGravity = .resizeAspectFill
+        view.playerLayer.videoGravity = gravity
         return view
     }
 
     func updateUIView(_ uiView: InlineStoryPlayerContainer, context _: Context) {
         uiView.playerLayer.player = player
+        uiView.playerLayer.videoGravity = gravity
         player.play()
     }
 }
