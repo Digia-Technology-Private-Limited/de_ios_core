@@ -381,7 +381,7 @@ final class AnalyticsService {
             "app_locale": Locale.current.identifier,
         ]
         let os = ProcessInfo.processInfo.operatingSystemVersion
-        ctx["os_version"] = "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
+        ctx["os_version"] = "iOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
         if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
             ctx["app_version"] = version
         }
