@@ -563,7 +563,7 @@ private struct StoryProgressIndicator: View {
     }
 
     private func fillAmount(for index: Int) -> Double {
-        if index < currentIndex { return 1 }
+        if index < currentIndex { return 0 }
         if index == currentIndex { return min(max(progress, 0), 1) }
         return 0
     }
