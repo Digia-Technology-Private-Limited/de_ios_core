@@ -121,8 +121,14 @@ struct NudgeParser {
     private func parseImage(_ props: [String: Any], box: NudgeBox) -> NudgeImage {
         let aspectRatio = CGFloat(parseDouble(props["aspectRatio"]) ?? 0)
         let url = (props["src"] as? [String: Any])?["imageSrc"] as? String ?? ""
+        var resolvedBox = box
+        if aspectRatio > 0 {
+            resolvedBox = box.withoutFixedHeight()
+        } else if box.fixedHeight == nil {
+            resolvedBox.fixedHeight = 200
+        }
         return NudgeImage(
-            box: aspectRatio > 0 ? box.withoutFixedHeight() : box,
+            box: resolvedBox,
             url: url,
             aspectRatio: aspectRatio,
             fit: parseFit(props["fit"] as? String ?? "cover"),
