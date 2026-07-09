@@ -12,7 +12,8 @@ enum InlineCarouselRenderer {
 private struct InlineCarouselView: View {
     let config: InlineCarouselConfig
     let payload: CEPTriggerPayload
-    @State private var currentIndex = 0
+    /// Index of the currently-settled page. `nil` only before the first layout pass.
+    @State private var scrollPosition: Int?
     @State private var autoPlayTimer: Timer? = nil
     /// Set just before the autoplay timer advances, so the resulting index change
     /// is attributed to autoplay (`auto = true`) rather than a manual swipe.
@@ -21,7 +22,26 @@ private struct InlineCarouselView: View {
     /// Items with a usable image, so `items[i]` (image + deepLink) stays aligned
     /// with the page index used for rendering and analytics.
     private var items: [CarouselItem] { config.items.filter { !$0.imageUrl.isEmpty } }
-    private var pageCount: Int { config.infiniteScroll ? 9999 : items.count }
+    /// ACarousel-style boundary clone: displayed slides are `[last] + items + [first]`
+    /// (N+2 total), so "infinite" scroll needs only two extra slides instead of a
+    /// multi-lap window. Landing on a clone silently re-centers onto its real
+    /// counterpart (see `onChange` below) — imperceptible since the clone is
+    /// pixel-identical to the item it stands in for.
+    private var loopEnabled: Bool { config.infiniteScroll && items.count > 1 }
+    private var pageCount: Int { loopEnabled ? items.count + 2 : items.count }
+    /// Maps a display index (over `pageCount`) to a real index into `items`. Also
+    /// correctly resolves the two boundary clones themselves — display index `0`
+    /// (clone of the last item) and `pageCount - 1` (clone of the first item) fall
+    /// out of the same modulo formula as their real counterparts.
+    private func realIndex(_ displayIndex: Int) -> Int {
+        guard loopEnabled else { return displayIndex }
+        let n = items.count
+        return (((displayIndex - 1) % n) + n) % n
+    }
+    private var currentIndex: Int { realIndex(scrollPosition ?? 0) }
+    /// Set just before a silent (non-animated) recenter jump, so the resulting
+    /// `onChange` doesn't re-fire a duplicate Step Viewed event for the same item.
+    @State private var isRecentering = false
 
     private var variables: VariableContext {
         buildVariableContext(schemas: config.variableSchemas, cepVars: payload.variables)
@@ -32,42 +52,96 @@ private struct InlineCarouselView: View {
             EmptyView()
         } else {
             VStack(spacing: 0) {
-                TabView(selection: $currentIndex) {
-                    ForEach(0 ..< pageCount, id: \.self) { index in
-                        let realIndex = index % items.count
-                        WebImage(url: URL(string: items[realIndex].imageUrl)) {
-                            $0.resizable()
-                        } placeholder: {
-                            BlurHashPlaceholderView(placeholder: items[realIndex].placeholder)
+                // SwiftUI's paged `TabView` can only show one full-width page at a time, so
+                // `viewportFraction` (peeking neighbor slides, matching Flutter's
+                // carousel_slider) is implemented with a view-aligned `ScrollView` instead —
+                // each slide is sized to a fraction of the available width, and side content
+                // padding centers the current slide (mirrors the Android HorizontalPager fix).
+                GeometryReader { geo in
+                    let fraction = CGFloat(min(max(config.viewportFraction, 0.1), 1))
+                    let itemWidth = geo.size.width * fraction
+                    let sidePadding = max(0, (geo.size.width - itemWidth) / 2)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        // A plain `HStack` (not `LazyHStack`) — with only N+2 slides now
+                        // instead of a multi-lap window, eager layout is cheap, and it avoids
+                        // LazyHStack's tendency to skip/garble transitions on off-screen
+                        // neighbors during id-driven `scrollPosition` jumps (autoplay).
+                        HStack(spacing: CGFloat(config.itemSpacing)) {
+                            ForEach(0 ..< pageCount, id: \.self) { index in
+                                let idx = realIndex(index)
+                                WebImage(url: URL(string: items[idx].imageUrl)) {
+                                    $0.resizable()
+                                } placeholder: {
+                                    BlurHashPlaceholderView(placeholder: items[idx].placeholder)
+                                }
+                                    .scaledToFill()
+                                    .frame(width: itemWidth, height: CGFloat(config.height))
+                                    .clipShape(RoundedRectangle(cornerRadius: CGFloat(config.cornerRadius)))
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { handleTap(idx) }
+                                    .id(index)
+                            }
                         }
-                            .scaledToFill()
-                            .frame(maxWidth: .infinity)
-                            .frame(height: CGFloat(config.height))
-                            .clipped()
-                            .contentShape(Rectangle())
-                            .onTapGesture { handleTap(realIndex) }
-                            .tag(index)
+                        .scrollTargetLayout()
                     }
+                    // `.safeAreaPadding` (not content `.padding`) is the pattern
+                    // `.scrollTargetBehavior(.viewAligned)` expects for peeking neighbors —
+                    // content padding throws off the offset math for id-driven `scrollPosition`
+                    // jumps (autoplay), leaving the view under-scrolled by ~one padding's worth
+                    // until a manual drag re-settles it.
+                    .safeAreaPadding(.horizontal, sidePadding)
+                    .scrollPosition(id: $scrollPosition)
+                    .scrollTargetBehavior(.viewAligned)
                 }
-                .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(maxWidth: .infinity)
                 .frame(height: CGFloat(config.height))
-                .onAppear { startAutoPlay() }
+                .onAppear {
+                    if scrollPosition == nil {
+                        scrollPosition = loopEnabled ? 1 : 0
+                    }
+                    startAutoPlay()
+                }
                 .onDisappear { stopAutoPlay() }
-                .onChange(of: currentIndex) { _, idx in
+                .onChange(of: scrollPosition) { _, newValue in
+                    guard let idx = newValue else { return }
+
+                    if isRecentering {
+                        isRecentering = false
+                        return
+                    }
+
                     let auto = autoAdvanced
                     autoAdvanced = false
                     // 1-based item position, matching Android's reportCarouselStepViewed.
                     SDKInstance.shared.reportCarouselStepViewed(
                         payload: payload,
-                        itemIndex: (idx % items.count) + 1,
+                        itemIndex: realIndex(idx) + 1,
                         itemTotal: items.count,
                         auto: auto
                     )
+
+                    // Landed on a boundary clone: silently jump to its real counterpart
+                    // (no animation, no analytics) one runloop tick later — mutating
+                    // `scrollPosition` synchronously within the same `onChange` that
+                    // triggered it can race the in-flight scroll-view-aligned settle
+                    // animation, which is what caused the old "stuck after autoplay"
+                    // symptom.
+                    if loopEnabled, idx == 0 || idx == pageCount - 1 {
+                        let target = idx == 0 ? pageCount - 2 : 1
+                        isRecentering = true
+                        DispatchQueue.main.async {
+                            var transaction = Transaction()
+                            transaction.disablesAnimations = true
+                            withTransaction(transaction) {
+                                scrollPosition = target
+                            }
+                        }
+                    }
                 }
 
                 let ind = config.indicator
                 if ind.showIndicator && items.count > 1 {
-                    HStack(spacing: CGFloat(ind.spacing / 2)) {
+                    HStack(spacing: CGFloat(ind.spacing)) {
                         ForEach(0 ..< items.count, id: \.self) { i in
                             let isActive = (currentIndex % items.count) == i
                             Circle()
@@ -101,9 +175,13 @@ private struct InlineCarouselView: View {
     private func startAutoPlay() {
         guard config.autoPlay, items.count > 1 else { return }
         let interval = TimeInterval(config.autoPlayInterval) / 1000
+        let transitionDuration = TimeInterval(config.animationDuration) / 1000
         autoPlayTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             autoAdvanced = true
-            withAnimation { currentIndex += 1 }
+            let next = (scrollPosition ?? 0) + 1
+            withAnimation(.easeInOut(duration: transitionDuration)) {
+                scrollPosition = loopEnabled ? next : min(next, pageCount - 1)
+            }
         }
     }
 
