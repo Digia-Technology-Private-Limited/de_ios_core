@@ -2,5 +2,5 @@
 // Kept in sync with the podspec version by scripts/sync-version.sh
 // (run by the release workflow before tagging/publishing).
 enum DigiaSdkVersion {
-    static let value = "3.2.0"
+    static let value = "3.3.0"
 }
