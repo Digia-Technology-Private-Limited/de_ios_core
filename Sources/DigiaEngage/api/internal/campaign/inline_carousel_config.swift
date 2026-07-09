@@ -23,12 +23,13 @@ struct InlineCarouselConfig: Equatable {
     let slotKey: String
     let items: [CarouselItem]
     var height: Int = 180
-    var width: Int?
     var autoPlay: Bool = true
     var autoPlayInterval: Int64 = 3000
     var animationDuration: Int = 700
     var infiniteScroll: Bool = true
     var viewportFraction: Double = 0.88
+    var itemSpacing: Double = 12
+    var cornerRadius: Double = 12
     var indicator: CarouselIndicatorConfig = CarouselIndicatorConfig()
     /// Dashboard-declared variable schemas (name, type, fallback). Combined with
     /// the CEP trigger's runtime variables at render time via `buildVariableContext()`
@@ -67,12 +68,13 @@ struct InlineCarouselConfig: Equatable {
             slotKey: slotKey,
             items: items,
             height: json.int("height", default: 180),
-            width: json.positiveInt("width"),
             autoPlay: json.bool("autoPlay", default: true),
             autoPlayInterval: json.long("autoPlayInterval", default: 3000),
             animationDuration: json.int("animationDuration", default: 700),
             infiniteScroll: json.bool("infiniteScroll", default: true),
             viewportFraction: json.double("viewportFraction", default: 0.88),
+            itemSpacing: json.double("itemSpacing", default: 12),
+            cornerRadius: json.double("cornerRadius", default: 12),
             indicator: indicator,
             variableSchemas: NudgeConfig.parseVariableSchemas(json)
         )
