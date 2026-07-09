@@ -378,7 +378,7 @@ private struct FullScreenStoryItem: View {
     let item: StoryItemConfig
     let onVideoProgress: (Double) -> Void
     let onVideoEnded: () -> Void
-    let onVideoBuffering: (Bool) -> Void
+    let onVideoBuffering: @Sendable (Bool) -> Void
 
     var body: some View {
         ZStack {
@@ -431,7 +431,7 @@ private struct InlineStoryVideoView: View {
     /// observers entirely.
     var onProgress: ((Double) -> Void)?
     var onEnded: (() -> Void)?
-    var onBuffering: ((Bool) -> Void)?
+    var onBuffering: (@Sendable (Bool) -> Void)?
 
     @State private var bundle: DigiaVideoPlaybackBundle?
     @State private var timeObserver: Any?
