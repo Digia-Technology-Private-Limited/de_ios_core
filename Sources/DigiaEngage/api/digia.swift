@@ -49,6 +49,25 @@ public enum Digia {
         SDKInstance.shared.clearUserId()
     }
 
+    /// Clears inline content (carousels/stories) for the given `placementKeys`. Once
+    /// loaded, inline content is retained indefinitely — hosts should call this on
+    /// logout so a stale user's content doesn't linger across the account switch.
+    /// No-op if `placementKeys` is empty.
+    public static func clearInlineContent(_ placementKeys: String...) {
+        clearInlineContent(placementKeys)
+    }
+
+    /// Array-taking overload of `clearInlineContent(_:)`, for callers (e.g. the RN
+    /// bridge) that already have a `[String]` rather than individual arguments.
+    public static func clearInlineContent(_ placementKeys: [String]) {
+        SDKInstance.shared.clearInlineContent(placementKeys)
+    }
+
+    /// Clears all inline content (carousels/stories) across every placement.
+    public static func clearAllInlineContent() {
+        SDKInstance.shared.clearAllInlineContent()
+    }
+
     /// Registers the RN render hook. When set, guides are treated as JS-rendered:
     /// on a guide trigger the SDK applies frequency capping and, if allowed, invokes
     /// this callback (with the trigger payload) to ask JS to render — it does not
