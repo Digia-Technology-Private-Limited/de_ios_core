@@ -2,28 +2,6 @@ import Foundation
 
 // Ported from Android `InlineStoryConfig.kt`.
 
-struct StoryCtaAction: Equatable {
-    let type: String
-    let url: String?
-
-    static func fromJson(_ json: [String: Any]) -> StoryCtaAction {
-        StoryCtaAction(
-            type: json.string("type", default: "dismiss"),
-            url: json.nonBlankString("url")
-        )
-    }
-}
-
-extension StoryCtaAction {
-    var engageActions: [EngageAction] {
-        switch type {
-        case "deepLink": [url.map(EngageAction.openDeeplink), .dismiss].compactMap { $0 }
-        case "openUrl": [url.map(EngageAction.openUrl), .dismiss].compactMap { $0 }
-        default: [.dismiss]
-        }
-    }
-}
-
 struct StoryItemConfig: Equatable {
     let type: String
     let url: String
@@ -33,11 +11,12 @@ struct StoryItemConfig: Equatable {
     var ctaTextColor: String = "#FFFFFF"
     var ctaBackgroundColor: String = "#4945FF"
     var ctaCornerRadius: Int = 8
-    var ctaAction: StoryCtaAction?
     var actions: [EngageAction] = []
 
     static func fromJson(_ json: [String: Any]) -> StoryItemConfig? {
         guard let url = json.nonBlankString("url") else { return nil }
+        let actions = json.object("onClick").map { EngageActionParser().parse($0) }
+            ?? parseLegacyStoryActions(json.object("ctaAction"))
         return StoryItemConfig(
             type: json.string("type", default: "image"),
             url: url,
@@ -47,9 +26,20 @@ struct StoryItemConfig: Equatable {
             ctaTextColor: json.nonBlankString("ctaTextColor") ?? "#FFFFFF",
             ctaBackgroundColor: json.nonBlankString("ctaBackgroundColor") ?? "#4945FF",
             ctaCornerRadius: json.int("ctaCornerRadius", default: 8),
-            ctaAction: json.object("ctaAction").map { StoryCtaAction.fromJson($0) },
-            actions: EngageActionParser().parse(json.object("onClick"))
+            actions: actions
         )
+    }
+
+    private static func parseLegacyStoryActions(
+        _ ctaAction: [String: Any]?
+    ) -> [EngageAction] {
+        let type = ctaAction?.string("type", default: "dismiss") ?? "dismiss"
+        let url = ctaAction?.nonBlankString("url")
+        return switch type {
+        case "deepLink": [url.map(EngageAction.openDeeplink), .dismiss].compactMap { $0 }
+        case "openUrl": [url.map(EngageAction.openUrl), .dismiss].compactMap { $0 }
+        default: [.dismiss]
+        }
     }
 }
 

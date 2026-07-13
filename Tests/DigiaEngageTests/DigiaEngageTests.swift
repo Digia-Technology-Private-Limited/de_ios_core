@@ -291,6 +291,56 @@ struct NudgeActionParserTests {
             .customKV(["legacyRoot": "yes"]),
         ])
     }
+
+    @Test("Story parses legacy CTA directly into Engage actions")
+    func storyParsesLegacyActions() throws {
+        let item = try #require(StoryItemConfig.fromJson([
+            "type": "image",
+            "url": "https://example.com/story.png",
+            "ctaAction": ["type": "deepLink", "url": "app://legacy"],
+        ]))
+
+        #expect(item.actions == [.openDeeplink("app://legacy"), .dismiss])
+    }
+
+    @Test("Story explicit empty flow does not fall back to legacy CTA")
+    func storyEmptyCanonicalFlowWins() throws {
+        let item = try #require(StoryItemConfig.fromJson([
+            "type": "image",
+            "url": "https://example.com/story.png",
+            "ctaAction": ["type": "deepLink", "url": "app://legacy"],
+            "onClick": ["steps": []],
+        ]))
+
+        #expect(item.actions.isEmpty)
+    }
+
+    @Test("Carousel legacy deep link is parsed into Engage actions")
+    func carouselParsesLegacyActions() throws {
+        let config = try #require(InlineCarouselConfig.fromJson([
+            "slotKey": "home",
+            "items": [[
+                "imageUrl": "https://example.com/card.png",
+                "deepLink": "app://legacy",
+            ]],
+        ]))
+
+        #expect(config.items.first?.actions == [.openDeeplink("app://legacy")])
+    }
+
+    @Test("Guide explicit empty flow does not fall back to legacy action")
+    func guideEmptyCanonicalFlowWins() throws {
+        let config = GuideStepWidgetConfig.fromJson([
+            "actions": [[
+                "id": "continue",
+                "type": "NEXT",
+                "label": "Continue",
+                "onClick": ["steps": []],
+            ]],
+        ])
+
+        #expect(config.actions.first?.actions.isEmpty == true)
+    }
 }
 
 private func minimalSurveyTemplate() -> [String: Any] {

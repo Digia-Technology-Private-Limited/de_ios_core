@@ -1,6 +1,6 @@
 import Foundation
 
-public enum HostAction: Sendable, Equatable {
+public enum DigiaHostAction: Sendable, Equatable {
     case openURL(String)
     case deepLink(String)
     case customKV([String: String])
@@ -9,9 +9,7 @@ public enum HostAction: Sendable, Equatable {
 public enum EngageSurface: String, Sendable, Equatable {
     case nudge
     case guide
-    case inlineCarousel
-    case inlineStory
-    case reward
+    case inline
 }
 
 public struct HostActionContext: Sendable, Equatable {
@@ -27,4 +25,4 @@ public struct HostActionContext: Sendable, Equatable {
 }
 
 public typealias HostActionHandler =
-    @MainActor @Sendable (_ action: HostAction, _ context: HostActionContext) async -> Bool?
+    @MainActor @Sendable (_ action: DigiaHostAction, _ context: HostActionContext) async -> Bool?

@@ -39,7 +39,7 @@ enum EngageAction: Equatable {
         }
     }
 
-    var hostAction: HostAction? {
+    var hostAction: DigiaHostAction? {
         switch self {
         case .openUrl(let url): .openURL(url)
         case .openDeeplink(let url): .deepLink(url)

@@ -186,7 +186,7 @@ struct GuideStepWidgetConfig: Equatable {
             // Support both "action_type" (new schema) and "type" (legacy).
             let typeStr = obj.nonBlankString("action_type") ?? obj.string("type", default: "dismiss")
             let actionType = GuideActionType.parse(typeStr)
-            let canonicalActions = EngageActionParser().parse(obj.object("onClick"))
+            let onClick = obj.object("onClick")
             let legacyAction: EngageAction = switch typeStr.lowercased() {
             case "next": .next
             case "prev", "back", "previous": .previous
@@ -203,7 +203,7 @@ struct GuideStepWidgetConfig: Equatable {
                     backgroundColor: color(obj.string("background_color"), default: defaultButtonBackground),
                     textColor: color(obj.string("text_color"), default: defaultButtonText),
                     cornerRadius: obj.double("corner_radius", default: 8),
-                    actions: canonicalActions.isEmpty ? [legacyAction] : canonicalActions
+                    actions: onClick.map { EngageActionParser().parse($0) } ?? [legacyAction]
                 )
             )
         }

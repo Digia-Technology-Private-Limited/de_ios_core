@@ -10,6 +10,18 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     @Published private(set) var isHostMounted = false
 
     private var activePlugin: DigiaCEPPlugin?
+    private lazy var actionExecutor = EngageActionExecutor(
+        invokeHostAction: { [weak self] action, context in
+            await self?.config?.onAction?(action, context) == true
+        },
+        invokeLegacyPluginAction: { [weak self] actionType, url, payload in
+            self?.activePlugin?.notifyAction(
+                actionType: actionType,
+                url: url,
+                payload: payload
+            ) == true
+        }
+    )
     private(set) var fontFactory: DUIFontFactory = DefaultFontFactory()
     /// Mirrors Android's `ScreenTracker`: the last screen name reported via
     /// `Digia.setCurrentScreen`, forwarded to the active plugin and read into
@@ -97,42 +109,36 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         completeInitialization(campaigns)
     }
 
-    /// Runs an authored action flow in order, awaiting host callbacks without a timeout.
-    func performActions(
+    func executeActionFlow(
         _ actions: [EngageAction],
         payload: CEPTriggerPayload,
         surface: EngageSurface,
         variables: VariableContext?,
-        onDismiss: @escaping () -> Void = {},
-        onNext: @escaping () -> Void = {},
-        onPrevious: @escaping () -> Void = {},
-        onUnhandledHostAction: @escaping (EngageAction) -> Void = { _ in },
-        onSDKAction: @escaping (EngageAction) -> Void = { _ in }
-    ) {
-        Task { @MainActor in
-            for authoredAction in actions {
-                let action = authoredAction.resolved(with: variables)
-                switch action {
-                case .dismiss: onDismiss()
-                case .next: onNext()
-                case .previous: onPrevious()
-                default:
-                    guard let hostAction = action.hostAction else {
-                        onSDKAction(action)
-                        continue
-                    }
-                    let context = HostActionContext(
-                        campaignId: payload.cepCampaignId,
-                        campaignKey: payload.campaignKey,
-                        surface: surface
-                    )
-                    let handledByHost = await config?.onAction?(hostAction, context) == true
-                    let handled = handledByHost
-                        || (activePlugin?.notifyAction(hostAction, context: context, payload: payload) == true)
-                    if !handled { onUnhandledHostAction(action) }
-                }
-            }
-        }
+        scope: ActionExecutionScope
+    ) async {
+        await actionExecutor.executeActionFlow(
+            actions,
+            payload: payload,
+            surface: surface,
+            variables: variables,
+            scope: scope
+        )
+    }
+
+    func executeAction(
+        _ action: EngageAction,
+        payload: CEPTriggerPayload,
+        surface: EngageSurface,
+        variables: VariableContext?,
+        scope: ActionExecutionScope
+    ) async {
+        await actionExecutor.executeAction(
+            action,
+            payload: payload,
+            surface: surface,
+            variables: variables,
+            scope: scope
+        )
     }
 
     private func completeInitialization(_ campaigns: [CampaignModel]) {

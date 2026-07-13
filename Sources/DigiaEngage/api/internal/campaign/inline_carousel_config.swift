@@ -4,7 +4,6 @@ import Foundation
 
 struct CarouselItem: Equatable {
     let imageUrl: String
-    let deepLink: String?
     /// Loading placeholder shown while `imageUrl` loads; `nil` when none.
     let placeholder: ImagePlaceholder?
     let actions: [EngageAction]
@@ -42,11 +41,13 @@ struct InlineCarouselConfig: Equatable {
 
         let items: [CarouselItem] = json.objectArray("items").compactMap { itemJson in
             guard let imageUrl = itemJson.nonBlankString("imageUrl") else { return nil }
+            let deepLink = itemJson.nonBlankString("deepLink")
+            let actions = itemJson.object("onClick").map { EngageActionParser().parse($0) }
+                ?? deepLink.map { [.openDeeplink($0)] } ?? []
             return CarouselItem(
                 imageUrl: imageUrl,
-                deepLink: itemJson.nonBlankString("deepLink"),
                 placeholder: ImagePlaceholder.from(itemJson.object("placeholder")),
-                actions: EngageActionParser().parse(itemJson.object("onClick"))
+                actions: actions
             )
         }
         if items.isEmpty { return nil }

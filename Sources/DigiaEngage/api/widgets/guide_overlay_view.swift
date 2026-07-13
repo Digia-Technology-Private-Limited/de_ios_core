@@ -174,24 +174,19 @@ private struct GuideStepOverlay: View {
             actionType: action.actions.first?.analyticsType,
             ctaLabel: interpolate(action.label, context: variables)
         )
-        SDKInstance.shared.performActions(
-            action.actions,
-            payload: state.payload,
-            surface: .guide,
-            variables: variables,
-            onDismiss: onDismiss,
-            onNext: onAdvance,
-            onPrevious: { SDKInstance.shared.previousGuide() },
-            onUnhandledHostAction: { hostAction in
-                let rawURL: String? = switch hostAction {
-                case .openUrl(let url), .openDeeplink(let url): url
-                default: nil
-                }
-                if let rawURL, let url = URL(string: rawURL) {
-                    UIApplication.shared.open(url)
-                }
-            }
-        )
+        Task {
+            await SDKInstance.shared.executeActionFlow(
+                action.actions,
+                payload: state.payload,
+                surface: .guide,
+                variables: variables,
+                scope: ActionExecutionScope(
+                    dismiss: onDismiss,
+                    next: onAdvance,
+                    previous: { SDKInstance.shared.previousGuide() }
+                )
+            )
+        }
     }
 }
 

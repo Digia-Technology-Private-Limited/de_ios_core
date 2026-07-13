@@ -2,7 +2,6 @@ import AVFoundation
 import AVKit
 @_implementationOnly import Lottie
 @_implementationOnly import SDWebImageSwiftUI
-import StoreKit
 import SwiftUI
 import UIKit
 
@@ -263,48 +262,15 @@ private struct NudgeButtonView: View {
             ctaRole: node.isPrimary ? "primary" : "secondary"
         )
         guard let payload = SDKInstance.shared.controller.activeNudge?.payload else { return }
-        SDKInstance.shared.performActions(
-            node.actions,
-            payload: payload,
-            surface: .nudge,
-            variables: variables,
-            onDismiss: onDismiss,
-            onUnhandledHostAction: { action in
-                let rawURL: String? = switch action {
-                case .openUrl(let url), .openDeeplink(let url): url
-                default: nil
-                }
-                if let rawURL, let url = URL(string: rawURL) {
-                    UIApplication.shared.open(url)
-                }
-            },
-            onSDKAction: { action in
-                switch action {
-                case .copyToClipboard(let text):
-                    UIPasteboard.general.string = text
-                case .share(let text):
-                let activity = UIActivityViewController(
-                    activityItems: [text],
-                    applicationActivities: nil
-                )
-                ViewControllerUtil.present(activity)
-                case .requestReview:
-                    requestAppStoreReview()
-                default: break
-                }
-            }
-        )
-    }
-
-    /// Requests the App Store review prompt (`AppStore.requestReview`). Fire-and-forget
-    /// by design: the API is quota-limited and never reports whether the prompt was
-    /// shown or how the user rated, so a missing window scene is only logged.
-    private func requestAppStoreReview() {
-        guard let scene = ViewControllerUtil.findWindowScene() else {
-            DigiaLog.warning("[NudgeButtonView] requestReview: no window scene; skipping")
-            return
+        Task {
+            await SDKInstance.shared.executeActionFlow(
+                node.actions,
+                payload: payload,
+                surface: .nudge,
+                variables: variables,
+                scope: ActionExecutionScope(dismiss: onDismiss)
+            )
         }
-        Task { await AppStore.requestReview(in: scene) }
     }
 
 }
