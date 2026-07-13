@@ -268,7 +268,6 @@ private struct NudgeButtonView: View {
                 Button(interpolate(node.confirmDialog.confirmLabel, context: variables), role: .destructive) {
                     performActions()
                 }
-                .keyboardShortcut(.defaultAction)
             },
             message: {
                 if let message = node.confirmDialog.message, !message.isEmpty {
