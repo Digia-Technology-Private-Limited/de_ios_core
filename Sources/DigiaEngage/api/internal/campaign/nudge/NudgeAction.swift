@@ -32,7 +32,9 @@ enum EngageAction: Equatable {
         case .copyToClipboard(let value): .copyToClipboard(interpolate(value, context: context))
         case .share(let value): .share(interpolate(value, context: context))
         case .customKV(let payload):
-            .customKV(payload.mapValues { interpolate($0, context: context) })
+            .customKV(payload.reduce(into: [String: String]()) { result, entry in
+                result[interpolate(entry.key, context: context)] = interpolate(entry.value, context: context)
+            })
         default: self
         }
     }
@@ -57,17 +59,32 @@ struct EngageActionParser {
         let data = step["data"] as? [String: Any] ?? [:]
         switch step["type"] as? String ?? "" {
         case "Action.openUrl":
-            guard let url = data["url"] as? String, !url.isEmpty else { return nil }
-            return ["externalApplication", "inAppBrowser"].contains(data["launchMode"] as? String ?? "")
+            guard let url = string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]) else { return nil }
+            let launchMode = string(in: data, keys: ["launchMode", "launch_mode"])
+                ?? string(in: step, keys: ["launchMode", "launch_mode"])
+                ?? ""
+            return ["externalApplication", "inAppBrowser"].contains(launchMode)
                 ? .openUrl(url) : .openDeeplink(url)
-        case "Action.copyToClipBoard": return text(from: data).map(EngageAction.copyToClipboard)
-        case "Action.share": return text(from: data).map(EngageAction.share)
-        case "Action.hideBottomSheet", "Action.dismissDialog", "Action.dismiss": return .dismiss
-        case "Action.next": return .next
-        case "Action.previous": return .previous
-        case "Action.requestReview": return .requestReview
-        case "Action.customKV":
-            guard let raw = data["payload"] as? [String: Any] else { return nil }
+        case "open_url":
+            return (string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]))
+                .map(EngageAction.openUrl)
+        case "deep_link":
+            return (string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]))
+                .map(EngageAction.openDeeplink)
+        case "Action.copyToClipBoard", "copy":
+            return (text(from: data) ?? text(from: step)).map(EngageAction.copyToClipboard)
+        case "Action.share", "share":
+            return (text(from: data) ?? text(from: step)).map(EngageAction.share)
+        case "Action.hideBottomSheet", "Action.dismissDialog", "Action.dismiss", "dismiss", "hide": return .dismiss
+        case "Action.next", "next": return .next
+        case "Action.previous", "previous", "back", "prev": return .previous
+        case "Action.requestReview", "requestReview", "request_review": return .requestReview
+        case "Action.customKV", "customKV", "custom_kv":
+            guard let raw = data["payload"] as? [String: Any]
+                ?? data["value"] as? [String: Any]
+                ?? step["payload"] as? [String: Any]
+                ?? step["value"] as? [String: Any]
+            else { return nil }
             let payload = raw.reduce(into: [String: String]()) { result, entry in
                 if let value = entry.value as? String { result[entry.key] = value }
             }
@@ -77,10 +94,11 @@ struct EngageActionParser {
     }
 
     private func text(from data: [String: Any]) -> String? {
-        for key in ["message", "text", "value"] {
-            if let value = data[key] as? String, !value.isEmpty { return value }
-        }
-        return nil
+        string(in: data, keys: ["message", "text", "value"])
+    }
+
+    private func string(in object: [String: Any], keys: [String]) -> String? {
+        keys.lazy.compactMap { object[$0] as? String }.first { !$0.isEmpty }
     }
 }
 

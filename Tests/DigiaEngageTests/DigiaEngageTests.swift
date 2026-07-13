@@ -241,13 +241,14 @@ struct NudgeActionParserTests {
         #expect(NudgeAction.copyToClipboard("message").analyticsType == "copy")
     }
 
-    @Test("Custom KV keeps only strings and resolves variables in every value")
+    @Test("Custom KV keeps only strings and resolves variables in keys and values")
     func customKVResolvesVariables() throws {
         let parsed = EngageActionParser().parse([
             "steps": [[
                 "type": "Action.customKV",
                 "data": ["payload": [
                     "redirectionType": "{{ destination_type }}",
+                    "{{ dynamic_key }}": "dynamic value",
                     "redirectionParams": "{\"redirectionUrl\":\"{{ route }}\"}",
                     "empty": "",
                     "ignoredNumber": 42,
@@ -257,17 +258,38 @@ struct NudgeActionParserTests {
         let action = try #require(parsed.first)
         #expect(action == .customKV([
             "redirectionType": "{{ destination_type }}",
+            "{{ dynamic_key }}": "dynamic value",
             "redirectionParams": "{\"redirectionUrl\":\"{{ route }}\"}",
             "empty": "",
         ]))
         #expect(action.resolved(with: VariableContext(
-            values: ["destination_type": "SCREEN", "route": "brands"],
+            values: [
+                "destination_type": "SCREEN",
+                "dynamic_key": "resolvedKey",
+                "route": "brands",
+            ],
             types: [:]
         )) == .customKV([
             "redirectionType": "SCREEN",
+            "resolvedKey": "dynamic value",
             "redirectionParams": "{\"redirectionUrl\":\"brands\"}",
             "empty": "",
         ]))
+    }
+
+    @Test("parses canonical and legacy Custom KV structures")
+    func parsesCustomKVCompatibilityForms() {
+        let actions = EngageActionParser().parse(onClick([
+            ["type": "Action.customKV", "data": ["payload": ["canonical": "yes"]]],
+            ["type": "customKV", "data": ["value": ["legacyData": "yes"]]],
+            ["type": "custom_kv", "payload": ["legacyRoot": "yes", "ignored": 42]],
+        ]))
+
+        #expect(actions == [
+            .customKV(["canonical": "yes"]),
+            .customKV(["legacyData": "yes"]),
+            .customKV(["legacyRoot": "yes"]),
+        ])
     }
 }
 
