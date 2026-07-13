@@ -97,6 +97,44 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         completeInitialization(campaigns)
     }
 
+    /// Runs an authored action flow in order, awaiting host callbacks without a timeout.
+    func performActions(
+        _ actions: [EngageAction],
+        payload: CEPTriggerPayload,
+        surface: EngageSurface,
+        variables: VariableContext?,
+        onDismiss: @escaping () -> Void = {},
+        onNext: @escaping () -> Void = {},
+        onPrevious: @escaping () -> Void = {},
+        onUnhandledHostAction: @escaping (EngageAction) -> Void = { _ in },
+        onSDKAction: @escaping (EngageAction) -> Void = { _ in }
+    ) {
+        Task { @MainActor in
+            for authoredAction in actions {
+                let action = authoredAction.resolved(with: variables)
+                switch action {
+                case .dismiss: onDismiss()
+                case .next: onNext()
+                case .previous: onPrevious()
+                default:
+                    guard let hostAction = action.hostAction else {
+                        onSDKAction(action)
+                        continue
+                    }
+                    let context = HostActionContext(
+                        campaignId: payload.cepCampaignId,
+                        campaignKey: payload.campaignKey,
+                        surface: surface
+                    )
+                    let handledByHost = await config?.onAction?(hostAction, context) == true
+                    let handled = handledByHost
+                        || (activePlugin?.notifyAction(hostAction, context: context, payload: payload) == true)
+                    if !handled { onUnhandledHostAction(action) }
+                }
+            }
+        }
+    }
+
     private func completeInitialization(_ campaigns: [CampaignModel]) {
         campaignStore.populate(campaigns)
         if campaignStore.isEmpty {
@@ -504,7 +542,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     // MARK: - Nudge lifecycle
     //
     // Impression and Dismissed go to both CEP and Digia analytics (toBoth); a
-    // primary-button Click is a Digia-only engagement signal (toDigia), matching
+    // CTA Click is a Digia-only engagement signal (toDigia), matching
     // Android's NudgeNodeRenderer.
 
     func reportNudgeImpression() {
@@ -585,7 +623,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     /// A carousel item (or its CTA) was tapped.
-    func reportCarouselStepClicked(payload: CEPTriggerPayload, itemIndex: Int, actionType: String?) {
+    func reportCarouselStepClicked(payload: CEPTriggerPayload, itemIndex: Int, action: EngageAction?) {
+        let actionType = action?.analyticsType
         // The first item tap also counts as an experience-level engagement click (once).
         events.digiaExperienceClickedOnce(
             payload: payload,
@@ -653,6 +692,23 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId)
             ),
             payload: payload
+        )
+    }
+
+    func previousGuide() {
+        guideOrchestrator.previous()
+    }
+
+    func reportGuideStepClicked(actionType: String?, ctaLabel: String?) {
+        guard let state = guideOrchestrator.state, let step = state.currentStep else { return }
+        events.toDigia(
+            GuideEvent.StepClicked(
+                itemIndex: state.stepIndex + 1,
+                elementId: step.anchorKey,
+                ctaLabel: ctaLabel,
+                actionType: actionType
+            ),
+            payload: state.payload
         )
     }
 

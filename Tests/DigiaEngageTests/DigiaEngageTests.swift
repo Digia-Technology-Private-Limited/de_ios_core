@@ -240,6 +240,35 @@ struct NudgeActionParserTests {
         #expect(NudgeAction.share("message").analyticsType == "share")
         #expect(NudgeAction.copyToClipboard("message").analyticsType == "copy")
     }
+
+    @Test("Custom KV keeps only strings and resolves variables in every value")
+    func customKVResolvesVariables() throws {
+        let parsed = EngageActionParser().parse([
+            "steps": [[
+                "type": "Action.customKV",
+                "data": ["payload": [
+                    "redirectionType": "{{ destination_type }}",
+                    "redirectionParams": "{\"redirectionUrl\":\"{{ route }}\"}",
+                    "empty": "",
+                    "ignoredNumber": 42,
+                ]],
+            ]],
+        ])
+        let action = try #require(parsed.first)
+        #expect(action == .customKV([
+            "redirectionType": "{{ destination_type }}",
+            "redirectionParams": "{\"redirectionUrl\":\"{{ route }}\"}",
+            "empty": "",
+        ]))
+        #expect(action.resolved(with: VariableContext(
+            values: ["destination_type": "SCREEN", "route": "brands"],
+            types: [:]
+        )) == .customKV([
+            "redirectionType": "SCREEN",
+            "redirectionParams": "{\"redirectionUrl\":\"brands\"}",
+            "empty": "",
+        ]))
+    }
 }
 
 private func minimalSurveyTemplate() -> [String: Any] {

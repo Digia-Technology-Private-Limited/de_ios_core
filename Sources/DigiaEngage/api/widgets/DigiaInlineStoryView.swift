@@ -198,7 +198,7 @@ private struct InlineStoryOverlayContent: View {
 
                         if item.ctaEnabled, let text = item.ctaText, !text.isEmpty {
                             StoryCTAButton(item: item, variables: variables) {
-                                handleCTA(item.ctaAction)
+                                handleCTA(item)
                             }
                             .padding(.horizontal, 24)
                             .padding(.bottom, safeAreaInsets.bottom + 20)
@@ -351,24 +351,33 @@ private struct InlineStoryOverlayContent: View {
         currentIndex = max(currentIndex - 1, 0)
     }
 
-    private func handleCTA(_ action: StoryCtaAction?) {
-        let label = currentItem?.ctaText.map { interpolate($0, context: variables) }
-        let actionUrl = action?.url.map { interpolate($0, context: variables) }
+    private func handleCTA(_ item: StoryItemConfig) {
+        let actions = item.actions.isEmpty
+            ? item.ctaAction?.engageActions ?? [.dismiss]
+            : item.actions
+        let label = item.ctaText.map { interpolate($0, context: variables) }
         SDKInstance.shared.reportStoryStepClicked(
             state.payload,
             itemIndex: currentIndex + 1,
             ctaLabel: label,
-            actionType: action?.type
+            actionType: actions.first?.analyticsType
         )
-        switch action?.type {
-        case "deepLink", "openUrl":
-            if let urlString = actionUrl, let url = URL(string: urlString) {
-                UIApplication.shared.open(url)
+        SDKInstance.shared.performActions(
+            actions,
+            payload: state.payload,
+            surface: .inlineStory,
+            variables: variables,
+            onDismiss: { SDKInstance.shared.controller.dismissStoryOverlay() },
+            onUnhandledHostAction: { action in
+                let rawURL: String? = switch action {
+                case .openUrl(let url), .openDeeplink(let url): url
+                default: nil
+                }
+                if let rawURL, let url = URL(string: rawURL) {
+                    UIApplication.shared.open(url)
+                }
             }
-            SDKInstance.shared.controller.dismissStoryOverlay()
-        default:
-            SDKInstance.shared.controller.dismissStoryOverlay()
-        }
+        )
     }
 }
 

@@ -262,33 +262,38 @@ private struct NudgeButtonView: View {
             actionType: action?.analyticsType,
             ctaRole: node.isPrimary ? "primary" : "secondary"
         )
-        for action in node.actions {
-            switch action {
-            case .dismiss:
-                onDismiss()
-            case .openUrl(let url), .openDeeplink(let url):
-                // Consult the CEP plugin first; only fall back to a native open
-                // when no plugin handled the action (mirrors Android).
-                let payload = SDKInstance.shared.controller.activeNudge?.payload
-                let handled =
-                    payload.flatMap {
-                        SDKInstance.shared.controller.onAction?("deep_link", url, $0)
-                    } ?? false
-                if !handled, let u = URL(string: url) {
-                    UIApplication.shared.open(u)
+        guard let payload = SDKInstance.shared.controller.activeNudge?.payload else { return }
+        SDKInstance.shared.performActions(
+            node.actions,
+            payload: payload,
+            surface: .nudge,
+            variables: variables,
+            onDismiss: onDismiss,
+            onUnhandledHostAction: { action in
+                let rawURL: String? = switch action {
+                case .openUrl(let url), .openDeeplink(let url): url
+                default: nil
                 }
-            case .copyToClipboard(let text):
-                UIPasteboard.general.string = interpolate(text, context: variables)
-            case .share(let text):
+                if let rawURL, let url = URL(string: rawURL) {
+                    UIApplication.shared.open(url)
+                }
+            },
+            onSDKAction: { action in
+                switch action {
+                case .copyToClipboard(let text):
+                    UIPasteboard.general.string = text
+                case .share(let text):
                 let activity = UIActivityViewController(
-                    activityItems: [interpolate(text, context: variables)],
+                    activityItems: [text],
                     applicationActivities: nil
                 )
                 ViewControllerUtil.present(activity)
-            case .requestReview:
-                requestAppStoreReview()
+                case .requestReview:
+                    requestAppStoreReview()
+                default: break
+                }
             }
-        }
+        )
     }
 
     /// Requests the App Store review prompt (`AppStore.requestReview`). Fire-and-forget

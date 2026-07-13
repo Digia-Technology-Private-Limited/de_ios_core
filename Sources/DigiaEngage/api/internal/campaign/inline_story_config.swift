@@ -14,6 +14,16 @@ struct StoryCtaAction: Equatable {
     }
 }
 
+extension StoryCtaAction {
+    var engageActions: [EngageAction] {
+        switch type {
+        case "deepLink": [url.map(EngageAction.openDeeplink), .dismiss].compactMap { $0 }
+        case "openUrl": [url.map(EngageAction.openUrl), .dismiss].compactMap { $0 }
+        default: [.dismiss]
+        }
+    }
+}
+
 struct StoryItemConfig: Equatable {
     let type: String
     let url: String
@@ -24,6 +34,7 @@ struct StoryItemConfig: Equatable {
     var ctaBackgroundColor: String = "#4945FF"
     var ctaCornerRadius: Int = 8
     var ctaAction: StoryCtaAction?
+    var actions: [EngageAction] = []
 
     static func fromJson(_ json: [String: Any]) -> StoryItemConfig? {
         guard let url = json.nonBlankString("url") else { return nil }
@@ -36,7 +47,8 @@ struct StoryItemConfig: Equatable {
             ctaTextColor: json.nonBlankString("ctaTextColor") ?? "#FFFFFF",
             ctaBackgroundColor: json.nonBlankString("ctaBackgroundColor") ?? "#4945FF",
             ctaCornerRadius: json.int("ctaCornerRadius", default: 8),
-            ctaAction: json.object("ctaAction").map { StoryCtaAction.fromJson($0) }
+            ctaAction: json.object("ctaAction").map { StoryCtaAction.fromJson($0) },
+            actions: EngageActionParser().parse(json.object("onClick"))
         )
     }
 }

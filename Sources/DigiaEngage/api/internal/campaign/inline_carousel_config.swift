@@ -7,6 +7,7 @@ struct CarouselItem: Equatable {
     let deepLink: String?
     /// Loading placeholder shown while `imageUrl` loads; `nil` when none.
     let placeholder: ImagePlaceholder?
+    let actions: [EngageAction]
 }
 
 struct CarouselIndicatorConfig: Equatable {
@@ -44,7 +45,8 @@ struct InlineCarouselConfig: Equatable {
             return CarouselItem(
                 imageUrl: imageUrl,
                 deepLink: itemJson.nonBlankString("deepLink"),
-                placeholder: ImagePlaceholder.from(itemJson.object("placeholder"))
+                placeholder: ImagePlaceholder.from(itemJson.object("placeholder")),
+                actions: EngageActionParser().parse(itemJson.object("onClick"))
             )
         }
         if items.isEmpty { return nil }

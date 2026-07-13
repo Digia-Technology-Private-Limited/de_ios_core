@@ -22,6 +22,7 @@ struct ActiveGuideState: Equatable {
     }
     var currentStep: GuideStepModel? { steps.indices.contains(stepIndex) ? steps[stepIndex] : nil }
     var hasNext: Bool { stepIndex < steps.count - 1 }
+    var hasPrevious: Bool { stepIndex > 0 }
 }
 
 @MainActor
@@ -41,6 +42,15 @@ final class GuideOrchestrator: ObservableObject {
         state = current.hasNext
             ? ActiveGuideState(campaign: current.campaign, stepIndex: current.stepIndex + 1, payload: current.payload)
             : nil
+    }
+
+    func previous() {
+        guard let current = state, current.hasPrevious else { return }
+        state = ActiveGuideState(
+            campaign: current.campaign,
+            stepIndex: current.stepIndex - 1,
+            payload: current.payload
+        )
     }
 
     func dismiss() {
