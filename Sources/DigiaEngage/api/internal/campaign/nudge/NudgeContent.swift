@@ -108,6 +108,18 @@ struct NudgeImage: Equatable {
     let placeholder: ImagePlaceholder?
 }
 
+/// Content of a destructive button's confirmation dialog (the wire's nested `confirmDialog`
+/// object). Kept separate from `NudgeButton`'s flat behaviour/styling fields (`isDestructive`,
+/// `applyDestructiveStyling`) since those gate the dialog rather than describe its copy.
+struct ConfirmDialogConfig: Equatable {
+    /// Dialog title; nil/empty renders no title.
+    var title: String? = nil
+    /// Dialog body copy; nil/empty renders no content.
+    var message: String? = nil
+    var confirmLabel: String = "Yes"
+    var cancelLabel: String = "Cancel"
+}
+
 struct NudgeButton: Equatable {
     let box: NudgeBox
     let label: String
@@ -119,6 +131,12 @@ struct NudgeButton: Equatable {
     let radius: CGFloat
     let actions: [NudgeAction]
     let isPrimary: Bool
+    /// When true, tapping this button must show a confirmation dialog before `actions` run.
+    var isDestructive: Bool = false
+    /// When `isDestructive` and this is true, the button's rendered background and text colour
+    /// are overridden to a fixed danger colour regardless of `background`/`textColor`.
+    var applyDestructiveStyling: Bool = true
+    var confirmDialog: ConfirmDialogConfig = ConfirmDialogConfig()
 }
 
 struct NudgeGap: Equatable {

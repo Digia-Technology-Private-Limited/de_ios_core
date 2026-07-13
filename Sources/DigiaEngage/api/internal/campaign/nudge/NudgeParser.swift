@@ -153,8 +153,34 @@ struct NudgeParser {
             textColor: parseColor(textStyle["textColor"] as? String) ?? .white,
             radius: CGFloat(parseDouble(shape["borderRadius"]) ?? 8),
             actions: NudgeActionParser().parse(props["onClick"] as? [String: Any]),
-            isPrimary: (props["isPrimary"] as? Bool) ?? false
+            isPrimary: (props["isPrimary"] as? Bool) ?? false,
+            isDestructive: (props["isDestructive"] as? Bool) ?? false,
+            applyDestructiveStyling: (props["applyDestructiveStyling"] as? Bool) ?? true,
+            confirmDialog: parseConfirmDialog(props["confirmDialog"] as? [String: Any])
         )
+    }
+
+    /// Decodes the nested `confirmDialog` object (possibly nil/missing, e.g. for
+    /// non-destructive buttons or older payloads).
+    private func parseConfirmDialog(_ json: [String: Any]?) -> ConfirmDialogConfig {
+        let map = json ?? [:]
+        return ConfirmDialogConfig(
+            title: stringValue(map["title"]),
+            message: stringValue(map["message"]),
+            confirmLabel: stringValue(map["confirmLabel"]) ?? "Yes",
+            cancelLabel: stringValue(map["cancelLabel"]) ?? "Cancel"
+        )
+    }
+
+    /// Coerces a raw JSON scalar to `String`, matching Android's `JSONObject.optString`
+    /// (which stringifies non-string values) — `as? String` alone silently drops a
+    /// non-string `title`/`message` to nil instead.
+    private func stringValue(_ raw: Any?) -> String? {
+        switch raw {
+        case let s as String: return s
+        case let n as NSNumber: return n.stringValue
+        default: return nil
+        }
     }
 
     private func parseDivider(_ props: [String: Any], box: NudgeBox) -> NudgeDivider {
