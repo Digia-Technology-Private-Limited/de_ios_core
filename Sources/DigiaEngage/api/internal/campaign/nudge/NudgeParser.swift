@@ -43,6 +43,7 @@ struct NudgeParser {
             let h = CGFloat(parseDouble(props["height"]) ?? 8)
             return .gap(NudgeGap(box: box, height: h))
         case "digia/styledHorizontalDivider": return .divider(parseDivider(props, box: box))
+        case "digia/linearProgressBar": return .progressBar(parseProgressBar(props, box: box))
         case "digia/lottie": return .lottie(parseLottie(props, box: box))
         case "digia/carousel": return .carousel(parseCarousel(props, box: box))
         case "digia/videoPlayer": return .video(parseVideo(props, box: box))
@@ -168,6 +169,25 @@ struct NudgeParser {
         )
     }
 
+    private func parseProgressBar(_ props: [String: Any], box: NudgeBox) -> NudgeProgressBar {
+        let indicatorColorType = (props["indicatorColorType"] as? [String: Any]) ?? [:]
+        let trackColorType = (props["trackColorType"] as? [String: Any]) ?? [:]
+        return NudgeProgressBar(
+            box: box,
+            valueMode: (props["valueMode"] as? String ?? "percent") == "range" ? .range : .percent,
+            percent: optString(props["percent"], "0"),
+            rangeStart: optString(props["rangeStart"], "0"),
+            rangeCurrent: optString(props["rangeCurrent"], "0"),
+            rangeEnd: optString(props["rangeEnd"], "100"),
+            indicatorColor: parseColor(indicatorColorType["color"] as? String)
+                ?? Color(hex: "#4945FF") ?? .blue,
+            trackColor: parseColor(trackColorType["color"] as? String)
+                ?? Color(hex: "#E0E0E0") ?? .gray,
+            thickness: CGFloat(min(max(parseDouble(props["thickness"]) ?? 8, 1), 100)),
+            borderRadius: CGFloat(min(max(parseDouble(props["borderRadius"]) ?? 4, 0), 50))
+        )
+    }
+
     private func parseLottie(_ props: [String: Any], box: NudgeBox) -> NudgeLottie {
         let src = (props["src"] as? [String: Any]) ?? [:]
         let aspectRatio = CGFloat(parseDouble(props["aspectRatio"]) ?? 0)
@@ -247,6 +267,18 @@ struct NudgeParser {
         case let i as Int: return Double(i)
         case let s as String: return Double(s.trimmingCharacters(in: .whitespaces))
         default: return nil
+        }
+    }
+
+    /// Coerces a JSON value to a string, mirroring Flutter's `optString`/Android's
+    /// `JSONObject.optString` — the backend may send a numeric field (e.g. `percent`)
+    /// as a JSON number rather than a string.
+    private func optString(_ value: Any?, _ fallback: String) -> String {
+        switch value {
+        case let s as String: return s
+        case let n as NSNumber: return n.stringValue
+        case nil: return fallback
+        default: return "\(value!)"
         }
     }
 

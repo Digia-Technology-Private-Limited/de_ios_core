@@ -30,6 +30,8 @@ struct NudgeBox: Equatable {
 enum NudgeSelfAlign          { case start, center, end }
 enum NudgeButtonVariant      { case fill, outline, text, elevated }
 
+enum ProgressValueMode { case percent, range }
+
 enum NudgeContentFit { case cover, contain, fill }
 enum NudgeCrossAxisAlignment { case start, center, end }
 enum NudgeMainAxisAlignment  { case start, center, end, spaceBetween, spaceAround, spaceEvenly }
@@ -42,6 +44,7 @@ enum NudgeNode: Equatable {
     case button(NudgeButton)
     case gap(NudgeGap)
     case divider(NudgeDivider)
+    case progressBar(NudgeProgressBar)
     case lottie(NudgeLottie)
     case carousel(NudgeCarousel)
     case video(NudgeVideo)
@@ -53,6 +56,7 @@ enum NudgeNode: Equatable {
         case .button(let n):  return n.box
         case .gap(let n):     return n.box
         case .divider(let n): return n.box
+        case .progressBar(let n): return n.box
         case .lottie(let n):  return n.box
         case .carousel(let n): return n.box
         case .video(let n):   return n.box
@@ -132,6 +136,23 @@ struct NudgeDivider: Equatable {
     let indent: CGFloat
     let endIndent: CGFloat
     let color: Color
+}
+
+/// A determinate horizontal progress bar (e.g. "spent 700 of 1000"). Every value field
+/// (`percent`, `rangeStart`, `rangeCurrent`, `rangeEnd`) is kept raw (not pre-resolved) because
+/// it may carry a `{{ }}` binding — resolution + parsing to a number happens at render time,
+/// mirroring how `NudgeText.text` carries raw copy for `.digiaVariables` to resolve.
+struct NudgeProgressBar: Equatable {
+    let box: NudgeBox
+    let valueMode: ProgressValueMode
+    let percent: String
+    let rangeStart: String
+    let rangeCurrent: String
+    let rangeEnd: String
+    let indicatorColor: Color
+    let trackColor: Color
+    let thickness: CGFloat
+    let borderRadius: CGFloat
 }
 
 struct NudgeLottie: Equatable {
