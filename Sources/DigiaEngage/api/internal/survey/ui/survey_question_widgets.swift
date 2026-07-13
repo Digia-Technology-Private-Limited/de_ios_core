@@ -203,7 +203,7 @@ private struct StarRatingQuestion: View {
 
     var body: some View {
         let selected = Int(answer?.values.first ?? "") ?? 0
-        FlowLayout(spacing: 10) {
+        flowLayout(spacing: 10) {
             ForEach(1...range, id: \.self) { i in
                 let isOn = i <= selected
                 Button {
@@ -292,9 +292,18 @@ private struct NpsQuestion: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
+                // The two-param `onChange(of:initial:_:)` needs iOS 17; below that,
+                // `.onAppear` plus the older single-value `onChange` gives the same
+                // "report width now and on every subsequent change" behavior.
                 GeometryReader { geo in
-                    Color.clear.onChange(of: geo.size.width, initial: true) { _, w in
-                        rowWidth = w
+                    if #available(iOS 17, *) {
+                        Color.clear.onChange(of: geo.size.width, initial: true) { _, w in
+                            rowWidth = w
+                        }
+                    } else {
+                        Color.clear
+                            .onAppear { rowWidth = geo.size.width }
+                            .onChange(of: geo.size.width) { w in rowWidth = w }
                     }
                 }
             )
@@ -375,7 +384,7 @@ private struct ReactionQuestion: View {
 
     var body: some View {
         let selectedId = answer?.values.first
-        FlowLayout(spacing: 10) {
+        flowLayout(spacing: 10) {
             ForEach(block.options) { option in
                 let isOn = selectedId == option.id
                 Button {
@@ -540,7 +549,7 @@ private struct TierChips: View {
                     .foregroundColor(SurveyTokens.textTertiary)
             }
         } else {
-            FlowLayout(spacing: 6) {
+            flowLayout(spacing: 6) {
                 ForEach(items) { opt in
                     Button {
                         onTap(opt.id)
@@ -780,9 +789,16 @@ struct OutlinedTextField: View {
                             .padding(.vertical, 14)
                             .allowsHitTesting(false)
                     }
-                    TextEditor(text: $text)
+                    // `.scrollContentBackground(.hidden)` needs iOS 16; below that,
+                    // the `TextEditor`'s default (opaque) background is used as-is.
+                    Group {
+                        if #available(iOS 16, *) {
+                            TextEditor(text: $text).scrollContentBackground(.hidden)
+                        } else {
+                            TextEditor(text: $text)
+                        }
+                    }
                         .focused($focused)
-                        .scrollContentBackground(.hidden)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                 }
@@ -921,6 +937,7 @@ private func validateDate(_ input: String) -> InputValidation {
 // MARK: - FlowLayout
 
 /// Minimal flow layout that wraps children onto new lines when out of width.
+@available(iOS 16, *)
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 
@@ -966,5 +983,18 @@ struct FlowLayout: Layout {
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
         }
+    }
+}
+
+/// `FlowLayout` needs iOS 16 (the `Layout` protocol); below that, a plain
+/// non-wrapping `HStack` is the closest built-in equivalent.
+@ViewBuilder
+private func flowLayout<Content: View>(
+    spacing: CGFloat, @ViewBuilder content: () -> Content
+) -> some View {
+    if #available(iOS 16, *) {
+        FlowLayout(spacing: spacing) { content() }
+    } else {
+        HStack(spacing: spacing) { content() }
     }
 }

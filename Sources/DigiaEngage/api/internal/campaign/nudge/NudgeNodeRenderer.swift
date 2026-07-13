@@ -304,7 +304,13 @@ private struct NudgeButtonView: View {
             DigiaLog.warning("[NudgeButtonView] requestReview: no window scene; skipping")
             return
         }
-        Task { await AppStore.requestReview(in: scene) }
+        // `AppStore.requestReview(in:)` needs iOS 16; below that, the older
+        // `SKStoreReviewController` entry point is the built-in equivalent.
+        if #available(iOS 16, *) {
+            Task { await AppStore.requestReview(in: scene) }
+        } else {
+            SKStoreReviewController.requestReview(in: scene)
+        }
     }
 
     private static func actionType(for action: NudgeAction?) -> String? {

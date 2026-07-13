@@ -134,6 +134,24 @@ private final class DigiaStoryHostingController<Content: View>: UIHostingControl
     }
 }
 
+/// The two-param `onChange(of:initial:_:)` needs iOS 17; below that, `.onAppear`
+/// plus the older single-value `onChange` reports the same "fire now and on every
+/// subsequent change" sequence.
+private struct StoryStepViewedReporter: ViewModifier {
+    let currentIndex: Int
+    let report: (Int) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 17, *) {
+            content.onChange(of: currentIndex, initial: true) { _, idx in report(idx) }
+        } else {
+            content
+                .onAppear { report(currentIndex) }
+                .onChange(of: currentIndex) { idx in report(idx) }
+        }
+    }
+}
+
 @MainActor
 private struct InlineStoryOverlayContent: View {
     let state: InlineStoryOverlayState
@@ -238,13 +256,17 @@ private struct InlineStoryOverlayContent: View {
         }
         // Step Viewed fires for each frame that becomes visible (including the
         // first), mirroring Android's LaunchedEffect(currentStoryIndex).
-        .onChange(of: currentIndex, initial: true) { _, idx in
+        //
+        // The two-param `onChange(of:initial:_:)` needs iOS 17; below that,
+        // `.onAppear` plus the older single-value `onChange` reports the same
+        // "fire now and on every subsequent change" sequence.
+        .modifier(StoryStepViewedReporter(currentIndex: currentIndex) { idx in
             SDKInstance.shared.reportStoryStepViewed(
                 state.payload,
                 itemIndex: idx + 1,
                 itemTotal: state.config.items.count
             )
-        }
+        })
         // Any teardown before the last frame is a user dismissal (swipe / edge /
         // ESC). Completion sets `completed` first, so it reports only once there.
         .onDisappear {

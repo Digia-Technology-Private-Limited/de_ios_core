@@ -23,7 +23,8 @@ struct DigiaBottomSheet<Content: View>: View {
     @State private var shown = false
     @State private var dragOffset: CGFloat = 0
 
-    private let animation: Animation = .spring(response: 0.35, dampingFraction: 0.85)
+    private let animationResponse: TimeInterval = 0.35
+    private var animation: Animation { .spring(response: animationResponse, dampingFraction: 0.85) }
 
     var body: some View {
         GeometryReader { geo in
@@ -46,7 +47,7 @@ struct DigiaBottomSheet<Content: View>: View {
     }
 
     private func card(cap: CGFloat) -> some View {
-        VStack(spacing: 0) {
+        let base = VStack(spacing: 0) {
             if config.showHandle {
                 Capsule()
                     .fill(Color(hex: "#E0E0E6") ?? Color.secondary.opacity(0.35))
@@ -59,9 +60,18 @@ struct DigiaBottomSheet<Content: View>: View {
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
         .background(config.background)
-        .clipShape(
-            .rect(topLeadingRadius: config.cornerRadius, topTrailingRadius: config.cornerRadius)
-        )
+
+        // `UnevenRoundedRectangle`'s `.rect(topLeadingRadius:topTrailingRadius:)` needs
+        // iOS 16; below that, round all four corners as the closest built-in equivalent.
+        return Group {
+            if #available(iOS 16, *) {
+                base.clipShape(
+                    .rect(topLeadingRadius: config.cornerRadius, topTrailingRadius: config.cornerRadius)
+                )
+            } else {
+                base.clipShape(RoundedRectangle(cornerRadius: config.cornerRadius))
+            }
+        }
         .overlay(alignment: .topTrailing) { cardOverlay }
     }
 
@@ -69,9 +79,16 @@ struct DigiaBottomSheet<Content: View>: View {
     private func sheetBody(cap: CGFloat) -> some View {
         let height = min(contentHeight, cap)
         if scrollable {
-            ScrollView { measuredContent }
-                .scrollBounceBehavior(.basedOnSize)
-                .frame(height: height)
+            // `.scrollBounceBehavior(.basedOnSize)` needs iOS 16.4; below that, just
+            // allow the default (always-bounces) scroll behavior.
+            if #available(iOS 16.4, *) {
+                ScrollView { measuredContent }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .frame(height: height)
+            } else {
+                ScrollView { measuredContent }
+                    .frame(height: height)
+            }
         } else {
             measuredContent.frame(height: height, alignment: .top)
         }
@@ -107,11 +124,23 @@ struct DigiaBottomSheet<Content: View>: View {
     }
 
     private func close() {
-        withAnimation(animation) {
-            shown = false
-            dragOffset = 0
-        } completion: {
-            onDismiss()
+        // The completion-closure overload of `withAnimation` needs iOS 17; below that,
+        // fire `onDismiss()` after the spring's response time instead.
+        if #available(iOS 17, *) {
+            withAnimation(animation) {
+                shown = false
+                dragOffset = 0
+            } completion: {
+                onDismiss()
+            }
+        } else {
+            withAnimation(animation) {
+                shown = false
+                dragOffset = 0
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + animationResponse) {
+                onDismiss()
+            }
         }
     }
 }

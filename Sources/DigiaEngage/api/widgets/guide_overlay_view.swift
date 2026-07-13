@@ -104,7 +104,9 @@ private struct GuideStepOverlay: View {
                         GeometryReader { g in
                             Color.clear
                                 .onAppear { bubbleHeight = g.size.height }
-                                .onChange(of: g.size.height) { _, newValue in bubbleHeight = newValue }
+                                // Old-value param is unused, so the single-value overload
+                                // (available since iOS 14, unlike the two-param one) works as-is.
+                                .onChange(of: g.size.height) { newValue in bubbleHeight = newValue }
                         }
                     )
                     .frame(maxWidth: CGFloat(config.bubble.maxWidthDp))

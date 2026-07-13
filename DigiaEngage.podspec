@@ -23,7 +23,7 @@ Pod::Spec.new do |s|
     :http => "https://github.com/Digia-Technology-Private-Limited/digia_engage_iOS/releases/download/#{s.version}/DigiaEngage.xcframework.zip"
   }
 
-  s.ios.deployment_target = '17.0'
+  s.ios.deployment_target = '15.0'
 
   # Fat binary — Lottie + SDWebImage + SDWebImageSVGCoder are baked in.
   # No s.dependency lines: deps are already inside the binary.
