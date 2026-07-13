@@ -234,6 +234,12 @@ struct NudgeActionParserTests {
         ]))
         #expect(actions == [.dismiss, .dismiss])
     }
+
+    @Test("analytics classifies share and copy explicitly")
+    func analyticsTypes() {
+        #expect(NudgeAction.share("message").analyticsType == "share")
+        #expect(NudgeAction.copyToClipboard("message").analyticsType == "copy")
+    }
 }
 
 private func minimalSurveyTemplate() -> [String: Any] {

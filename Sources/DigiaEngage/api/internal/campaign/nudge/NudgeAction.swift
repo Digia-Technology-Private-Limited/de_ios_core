@@ -7,6 +7,17 @@ enum NudgeAction: Equatable {
     case share(String)
     case dismiss
     case requestReview
+
+    var analyticsType: String {
+        switch self {
+        case .openUrl: "url"
+        case .openDeeplink: "deeplink"
+        case .copyToClipboard: "copy"
+        case .share: "share"
+        case .dismiss: "dismiss"
+        case .requestReview: "request_review"
+        }
+    }
 }
 
 struct NudgeActionParser {

@@ -358,8 +358,7 @@ private struct InlineStoryOverlayContent: View {
             state.payload,
             itemIndex: currentIndex + 1,
             ctaLabel: label,
-            actionType: action?.type,
-            actionUrl: actionUrl
+            actionType: action?.type
         )
         switch action?.type {
         case "deepLink", "openUrl":

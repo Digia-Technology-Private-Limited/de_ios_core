@@ -154,6 +154,37 @@ struct AnalyticsServiceTests {
         #expect(entries[0].payload["element_id"] == nil)
     }
 
+    @Test("click analytics never serialize action URL")
+    func clickAnalyticsOmitActionURL() {
+        let service = makeService()
+        let payload = buildPayload("test")
+
+        service.capture(
+            NudgeEvent.Clicked(actionType: "url"),
+            payload: payload)
+        service.capture(
+            GuideEvent.StepClicked(
+                itemIndex: 1, actionType: "url"),
+            payload: payload)
+        service.capture(
+            CarouselEvent.StepClicked(
+                itemIndex: 1, actionType: "deeplink"),
+            payload: payload)
+        service.capture(
+            CarouselEvent.Clicked(actionType: "deeplink"),
+            payload: payload)
+        service.capture(
+            StoriesEvent.StepClicked(
+                itemIndex: 1, actionType: "url"),
+            payload: payload)
+
+        for entry in service.queue.peek(maxCount: 10) {
+            let properties = entry.payload["properties"] as? [String: Any]
+            #expect(properties?["action_type"] != nil)
+            #expect(properties?["action_url"] == nil)
+        }
+    }
+
     @Test("batch threshold triggers immediate flush")
     func batchThresholdTriggersFlush() async throws {
         let fakeSender = FakeAnalyticsSender()

@@ -527,7 +527,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         elementId: String? = nil,
         ctaLabel: String? = nil,
         actionType: String? = nil,
-        actionUrl: String? = nil,
         ctaRole: String? = nil
     ) {
         guard let payload = controller.activeNudge?.payload else { return }
@@ -536,7 +535,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 elementId: elementId,
                 ctaLabel: ctaLabel,
                 actionType: actionType,
-                actionUrl: actionUrl,
                 ctaRole: ctaRole,
                 // ms since the nudge was viewed (peek — the nudge is still open).
                 timeToActionMs: dwellTracker.elapsedMs(payload.cepCampaignId)
@@ -587,16 +585,14 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     /// A carousel item (or its CTA) was tapped.
-    func reportCarouselStepClicked(payload: CEPTriggerPayload, itemIndex: Int, actionUrl: String?) {
-        let actionType = actionUrl.map { _ in "deeplink" }
+    func reportCarouselStepClicked(payload: CEPTriggerPayload, itemIndex: Int, actionType: String?) {
         // The first item tap also counts as an experience-level engagement click (once).
         events.digiaExperienceClickedOnce(
             payload: payload,
-            event: CarouselEvent.Clicked(actionType: actionType, actionUrl: actionUrl)
+            event: CarouselEvent.Clicked(actionType: actionType)
         )
         events.toDigia(
-            CarouselEvent.StepClicked(
-                itemIndex: itemIndex, actionType: actionType, actionUrl: actionUrl),
+            CarouselEvent.StepClicked(itemIndex: itemIndex, actionType: actionType),
             payload: payload
         )
     }
@@ -618,15 +614,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         _ payload: CEPTriggerPayload,
         itemIndex: Int,
         ctaLabel: String?,
-        actionType: String?,
-        actionUrl: String?
+        actionType: String?
     ) {
         events.toDigia(
             StoriesEvent.StepClicked(
                 itemIndex: itemIndex,
                 ctaLabel: ctaLabel,
-                actionType: actionType,
-                actionUrl: actionUrl
+                actionType: actionType
             ),
             payload: payload
         )
@@ -713,8 +707,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 itemIndex: int("step_index") ?? 0,
                 elementId: str("element_id"),
                 ctaLabel: str("cta_label"),
-                actionType: str("action_type"),
-                actionUrl: str("action_url")
+                actionType: str("action_type")
             )
         case "Digia Step Dismissed":
             return GuideEvent.StepDismissed(itemIndex: int("step_index") ?? 0)

@@ -70,7 +70,6 @@ enum NudgeEvent {
         var elementId: String?
         var ctaLabel: String?
         var actionType: String?
-        var actionUrl: String?
         var ctaRole: String?
         var timeToActionMs: Int64?
 
@@ -80,7 +79,6 @@ enum NudgeEvent {
                 ("element_id", elementId),
                 ("cta_label", ctaLabel),
                 ("action_type", actionType),
-                ("action_url", actionUrl),
                 ("cta_role", ctaRole),
                 ("time_to_action_ms", timeToActionMs),
             ])
@@ -136,7 +134,6 @@ enum GuideEvent {
         var elementId: String?
         var ctaLabel: String?
         var actionType: String?
-        var actionUrl: String?
 
         var eventName: String { "Digia Step Clicked" }
         var properties: [String: Any] {
@@ -145,7 +142,6 @@ enum GuideEvent {
                 ("element_id", elementId),
                 ("cta_label", ctaLabel),
                 ("action_type", actionType),
-                ("action_url", actionUrl),
             ])
         }
     }
@@ -376,7 +372,6 @@ enum CarouselEvent {
         var elementId: String?
         var ctaLabel: String?
         var actionType: String?
-        var actionUrl: String?
         var itemId: String?
 
         var eventName: String { "Digia Step Clicked" }
@@ -386,7 +381,6 @@ enum CarouselEvent {
                 ("element_id", elementId),
                 ("cta_label", ctaLabel),
                 ("action_type", actionType),
-                ("action_url", actionUrl),
                 ("item_id", itemId),
             ])
         }
@@ -397,7 +391,6 @@ enum CarouselEvent {
         var elementId: String?
         var ctaLabel: String?
         var actionType: String?
-        var actionUrl: String?
 
         var eventName: String { "Digia Experience Clicked" }
         var properties: [String: Any] {
@@ -405,7 +398,6 @@ enum CarouselEvent {
                 ("element_id", elementId),
                 ("cta_label", ctaLabel),
                 ("action_type", actionType),
-                ("action_url", actionUrl),
             ])
         }
     }
@@ -464,7 +456,6 @@ enum StoriesEvent {
         let itemIndex: Int
         var ctaLabel: String?
         var actionType: String?
-        var actionUrl: String?
         var frameId: String?
 
         var eventName: String { "Digia Step Clicked" }
@@ -473,7 +464,6 @@ enum StoriesEvent {
                 ("item_index", itemIndex),
                 ("cta_label", ctaLabel),
                 ("action_type", actionType),
-                ("action_url", actionUrl),
                 ("frame_id", frameId),
             ])
         }

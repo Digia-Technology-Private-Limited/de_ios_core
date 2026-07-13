@@ -165,7 +165,7 @@ private struct InlineCarouselView: View {
         SDKInstance.shared.reportCarouselStepClicked(
             payload: payload,
             itemIndex: realIndex + 1,
-            actionUrl: link
+            actionType: link.map { _ in "deeplink" }
         )
         if let link, let url = URL(string: link) {
             UIApplication.shared.open(url)
