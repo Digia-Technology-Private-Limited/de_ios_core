@@ -1,25 +1,13 @@
 import Foundation
 
-/// Which failure category a dispatch attempt fell into — drives both the retry
-/// cap and the backoff schedule independently (see `AnalyticsService`).
-enum AnalyticsFailureKind {
-    /// The server actually responded with a status code (4xx or 5xx) — a
-    /// definitive answer, so we give up on it quickly.
-    case definitive
-    /// No usable HTTP status at all (thrown error: no connectivity, timeout,
-    /// DNS failure, etc.) — genuinely ambiguous, so we're more patient.
-    case ambiguous
-}
-
 struct QueueEntry: @unchecked Sendable {
     let eventId: String
     let payload: [String: Any]
     let createdAt: TimeInterval
-    /// Persisted so a definitive-error retry cap survives app restarts —
-    /// otherwise a user force-quitting/reopening during a flaky connection
-    /// would give every stuck event a fresh set of retries each time.
-    var definitiveAttempts: Int
-    var ambiguousAttempts: Int
+    /// Persisted so the retry cap survives app restarts — otherwise a user
+    /// force-quitting/reopening during a flaky connection would give every
+    /// stuck event a fresh set of retries each time.
+    var attempts: Int
 }
 
 final class AnalyticsQueue {
@@ -50,20 +38,17 @@ final class AnalyticsQueue {
         save(load().filter { !ids.contains($0.eventId) })
     }
 
-    /// Increments the `kind` counter on the matching entries and returns their
+    /// Increments the attempt counter on the matching entries and returns their
     /// post-increment state, so the caller can decide whether any of them have
-    /// now exceeded their retry cap.
+    /// now exceeded the retry cap.
     @discardableResult
-    func incrementAttempt(eventIds: [String], kind: AnalyticsFailureKind) -> [QueueEntry] {
+    func incrementAttempt(eventIds: [String]) -> [QueueEntry] {
         let ids = Set(eventIds)
         var updated: [QueueEntry] = []
         let entries = load().map { entry -> QueueEntry in
             guard ids.contains(entry.eventId) else { return entry }
             var e = entry
-            switch kind {
-            case .definitive: e.definitiveAttempts += 1
-            case .ambiguous: e.ambiguousAttempts += 1
-            }
+            e.attempts += 1
             updated.append(e)
             return e
         }
@@ -93,18 +78,14 @@ final class AnalyticsQueue {
                 eventId: eventId,
                 payload: payload,
                 createdAt: createdAt,
-                definitiveAttempts: dict["definitive_attempts"] as? Int ?? 0,
-                ambiguousAttempts: dict["ambiguous_attempts"] as? Int ?? 0
+                attempts: dict["attempts"] as? Int ?? 0
             )
         }
     }
 
     private func save(_ entries: [QueueEntry]) {
         let arr: [[String: Any]] = entries.map { e in
-            [
-                "event_id": e.eventId, "payload": e.payload, "created_at": e.createdAt,
-                "definitive_attempts": e.definitiveAttempts, "ambiguous_attempts": e.ambiguousAttempts,
-            ]
+            ["event_id": e.eventId, "payload": e.payload, "created_at": e.createdAt, "attempts": e.attempts]
         }
         if let data = try? JSONSerialization.data(withJSONObject: arr) {
             defaults.set(data, forKey: Self.key)

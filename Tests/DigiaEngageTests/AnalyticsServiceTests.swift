@@ -249,27 +249,55 @@ struct AnalyticsServiceTests {
         #expect(fakeSender.callCount == 2)
     }
 
-    @Test("4xx/5xx responses retry up to the definitive cap (3) then drop the event")
-    func definitiveErrorRetriesThenDrops() async throws {
+    @Test("new events don't jump ahead of a pending retry")
+    func newEventsDeferToPendingRetry() async throws {
+        let fakeSender = FakeAnalyticsSender { callNum in callNum == 1 ? 500 : 200 }
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 2),
+            sender: fakeSender
+        )
+        service.retryScheduleMs = [50]  // long enough to add a second event before it fires
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
+        service.flush()
+        // let the flush attempt run and fail (500); retry is now pending
+        try await Task.sleep(for: .milliseconds(5))
+        #expect(fakeSender.callCount == 1)
+
+        // This second capture reaches flushBatchSize (2) — without the guard this
+        // would dispatch immediately and resend the still-queued failed event early.
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p2"))
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(fakeSender.callCount == 1)  // no early dispatch — still just the one attempt
+        #expect(service.queue.size == 2)
+
+        // let the originally scheduled retry fire — picks up both events together
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(service.queue.size == 0)
+        #expect(fakeSender.callCount == 2)
+    }
+
+    @Test("4xx/5xx responses retry up to the cap (10) then drop the event")
+    func httpErrorRetriesThenDrops() async throws {
         let fakeSender = FakeAnalyticsSender { _ in 400 }
         let service = makeService(
             config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
             sender: fakeSender
         )
-        service.retryScheduleMs = [5]  // fast, fixed retries for the test
+        service.retryScheduleMs = [2]  // fast, fixed retries for the test
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
 
-        // 3 total attempts (1 initial + 2 retries), ~5ms apart — wait past all of them
-        try await Task.sleep(for: .milliseconds(200))
+        // 10 total attempts, ~2ms apart — wait past all of them
+        try await Task.sleep(for: .milliseconds(300))
 
         #expect(service.queue.size == 0)
-        #expect(fakeSender.callCount == 3)
+        #expect(fakeSender.callCount == 10)
     }
 
-    @Test("transport failures (no status code) retry up to the ambiguous cap (10) then drop the event")
-    func ambiguousErrorRetriesThenDrops() async throws {
+    @Test("transport failures (no status code) retry up to the cap (10) then drop the event")
+    func transportFailureRetriesThenDrops() async throws {
         let throwingSender = ThrowingAnalyticsSender()
         let service = makeService(
             config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),

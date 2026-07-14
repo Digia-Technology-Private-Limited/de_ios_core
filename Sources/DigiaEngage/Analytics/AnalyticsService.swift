@@ -31,11 +31,16 @@ final class AnalyticsService {
     private let sender: any AnalyticsSender
 
     private var flushTimer: Timer?
+    /// Non-nil for the whole lifetime of a scheduled backoff wait (including
+    /// while the resulting `dispatchPending()` call is actually running) — so
+    /// `enqueue` can tell "a retry will happen" and defer to it instead of
+    /// jumping ahead with an early flush.
+    private var retryTask: Task<Void, Never>?
     private var isDispatching = false
-    /// Attempt number of the most recently scheduled retry (whichever kind),
-    /// reset to 0 on success. Diagnostic mirror only — the real retry-cap
-    /// enforcement reads the persisted per-event counters in `AnalyticsQueue`,
-    /// not this value, so it survives app restarts correctly.
+    /// Attempt number of the most recently scheduled retry, reset to 0 on
+    /// success. Diagnostic mirror only — the real retry-cap enforcement reads
+    /// the persisted per-event counter in `AnalyticsQueue`, not this value, so
+    /// it survives app restarts correctly.
     private(set) var retryAttempt = 0
     private var backgroundObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
@@ -43,17 +48,15 @@ final class AnalyticsService {
     /// Override retry delays (ms) for testing. Index is attempt-1.
     var retryScheduleMs: [Int]?
 
-    /// A batch gets a real HTTP status back (4xx/5xx) — the server has spoken
-    /// definitively, so we give up after few attempts rather than hammering it.
-    private static let maxDefiniteAttempts = 3
-    /// A batch fails with no usable status at all (no connectivity, timeout,
-    /// DNS failure) — genuinely ambiguous, so we're more patient before giving up.
-    private static let maxAmbiguousAttempts = 10
-    private static let definiteBackoffCeilingMs = 16_000
-    /// Higher ceiling than the definitive track: 10 attempts at a 16s cap would
-    /// mostly sit at the floor after a few seconds, which isn't a meaningful
-    /// amount of patience for a real connectivity gap (e.g. a subway commute).
-    private static let ambiguousBackoffCeilingMs = 120_000
+    /// Any failed API call (4xx, 5xx, or a thrown error — no connectivity,
+    /// timeout, DNS failure) is retried up to this many times. An event the
+    /// server explicitly rejected (named in a 200/207 response's error list)
+    /// is dropped immediately instead — that's not an API-call failure.
+    private static let maxAttempts = 10
+    /// 10 attempts at a low, fixed cap would mostly sit at the floor after a
+    /// few seconds, which isn't a meaningful amount of patience for a real
+    /// connectivity gap (e.g. a subway commute) — so the ceiling is high.
+    private static let backoffCeilingMs = 120_000
     /// ± this fraction of jitter applied to every backoff delay, so many
     /// clients recovering from the same outage don't retry in lockstep.
     private static let jitterFraction = 0.2
@@ -250,13 +253,22 @@ final class AnalyticsService {
         queue.append(
             QueueEntry(
                 eventId: eventId, payload: payloadMap, createdAt: Date().timeIntervalSince1970,
-                definitiveAttempts: 0, ambiguousAttempts: 0),
+                attempts: 0),
             maxEvents: config.queueMaxEvents
         )
         DigiaLog.log(
             "enqueued '\(eventName)' eventId=\(eventId) queueSize=\(queue.size) flushBatchSize=\(config.flushBatchSize)",
             tag: "DigiaAnalytics"
         )
+
+        guard retryTask == nil else {
+            // A backoff-scheduled retry is already pending — it will pick up
+            // this event (and everything else queued) when it fires. Don't
+            // jump the queue and flush early just because new events pushed
+            // us past the threshold.
+            DigiaLog.log("retry pending — deferring to scheduled retry", tag: "DigiaAnalytics")
+            return
+        }
 
         if queue.size >= config.flushBatchSize {
             DigiaLog.log("batch threshold reached — dispatching immediately", tag: "DigiaAnalytics")
@@ -306,6 +318,9 @@ final class AnalyticsService {
 
             switch statusCode {
             case 200, 207:
+                // Any per-event rejections named in the response body were never
+                // retried in the first place — see `logRejected`/response parsing;
+                // the whole batch (accepted + rejected) is simply removed here.
                 queue.remove(eventIds: batch.map { $0.eventId })
                 retryAttempt = 0
                 DigiaLog.log(
@@ -313,36 +328,34 @@ final class AnalyticsService {
                     tag: "DigiaAnalytics"
                 )
                 if queue.size > 0 { scheduleTimer(minDelayMs: 15_000) }
-            case 400...599:
-                // The server actually answered (4xx or 5xx) — definitive, capped retry.
-                handleFailure(batch: batch, kind: .definitive, statusLabel: "HTTP \(statusCode)")
             default:
-                // statusCode 0 (no castable HTTPURLResponse) or anything else
-                // unexpected — no real status was returned, so treat it like a
-                // transport-level failure rather than a definitive server answer.
-                handleFailure(batch: batch, kind: .ambiguous, statusLabel: "HTTP \(statusCode) (no status)")
+                // Any other outcome is just "the API call failed" — 4xx, 5xx, or
+                // no real status at all — retried uniformly, capped.
+                handleFailure(batch: batch, statusLabel: "HTTP \(statusCode)")
             }
         } catch {
-            DigiaLog.error("dispatchPending: exception", tag: "DigiaAnalytics", error: error.localizedDescription)
-            handleFailure(batch: batch, kind: .ambiguous, statusLabel: "exception: \(error.localizedDescription)")
+            // Verbose only — a single thrown exception is just one attempt in a
+            // retry sequence, not yet a final outcome. Only the eventual drop
+            // (after exhausting the cap) is warning-level.
+            DigiaLog.log("dispatchPending: exception — \(error.localizedDescription)", tag: "DigiaAnalytics")
+            handleFailure(batch: batch, statusLabel: "exception: \(error.localizedDescription)")
         }
     }
 
-    /// Increments the `kind` counter for the failed batch, drops whichever
-    /// events have now exhausted their cap for that kind, and schedules a
-    /// backoff retry for the rest (if any remain).
-    private func handleFailure(batch: [QueueEntry], kind: AnalyticsFailureKind, statusLabel: String) {
-        let updated = queue.incrementAttempt(eventIds: batch.map { $0.eventId }, kind: kind)
-        let maxAttempts = kind == .definitive ? Self.maxDefiniteAttempts : Self.maxAmbiguousAttempts
+    /// Increments the attempt counter for the failed batch, drops whichever
+    /// events have now exhausted the retry cap, and schedules a backoff retry
+    /// for the rest (if any remain).
+    private func handleFailure(batch: [QueueEntry], statusLabel: String) {
+        let updated = queue.incrementAttempt(eventIds: batch.map { $0.eventId })
 
-        let toDrop = updated.filter { attemptCount($0, kind: kind) >= maxAttempts }
-        let toRetry = updated.filter { attemptCount($0, kind: kind) < maxAttempts }
+        let toDrop = updated.filter { $0.attempts >= Self.maxAttempts }
+        let toRetry = updated.filter { $0.attempts < Self.maxAttempts }
 
         if !toDrop.isEmpty {
             queue.remove(eventIds: toDrop.map { $0.eventId })
             DigiaLog.warning(
-                "dispatch failed (\(statusLabel), \(kind)) — dropped \(toDrop.count) event(s) "
-                    + "after exhausting \(maxAttempts) attempts",
+                "dispatch failed (\(statusLabel)) — dropped \(toDrop.count) event(s) "
+                    + "after exhausting \(Self.maxAttempts) attempts",
                 tag: "DigiaAnalytics"
             )
         }
@@ -353,16 +366,14 @@ final class AnalyticsService {
             return
         }
 
-        let attempt = toRetry.map { attemptCount($0, kind: kind) }.max() ?? 1
-        DigiaLog.warning(
-            "dispatch failed (\(statusLabel), \(kind)) — scheduling retry #\(attempt) for \(toRetry.count) event(s)",
+        let attempt = toRetry.map { $0.attempts }.max() ?? 1
+        // Verbose only — an in-progress retry isn't yet a problem; only the
+        // eventual drop above (cap exhausted) is warning-level.
+        DigiaLog.log(
+            "dispatch failed (\(statusLabel)) — scheduling retry #\(attempt) for \(toRetry.count) event(s)",
             tag: "DigiaAnalytics"
         )
-        scheduleRetry(kind: kind, attempt: attempt)
-    }
-
-    private func attemptCount(_ entry: QueueEntry, kind: AnalyticsFailureKind) -> Int {
-        kind == .definitive ? entry.definitiveAttempts : entry.ambiguousAttempts
+        scheduleRetry(attempt: attempt)
     }
 
     private func scheduleTimer(minDelayMs: Int = 0) {
@@ -385,29 +396,29 @@ final class AnalyticsService {
         flushTimer = nil
     }
 
-    private func scheduleRetry(kind: AnalyticsFailureKind, attempt: Int) {
+    private func scheduleRetry(attempt: Int) {
         retryAttempt = attempt
-        let delayMs = retryDelayMs(attempt, kind: kind)
+        let delayMs = retryDelayMs(attempt)
         let delayNs = UInt64(delayMs) * 1_000_000
-        Task { @MainActor [weak self] in
+        retryTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: delayNs)
             guard let self else { return }
+            self.retryTask = nil
             await self.dispatchPending()
         }
     }
 
-    private func retryDelayMs(_ attempt: Int, kind: AnalyticsFailureKind) -> Int {
+    private func retryDelayMs(_ attempt: Int) -> Int {
         // The test override is meant to give exact, deterministic timing, so it
         // deliberately bypasses jitter.
         if let schedule = retryScheduleMs {
             let idx = max(0, min(attempt - 1, schedule.count - 1))
             return schedule[idx]
         }
-        // Exponential backoff, capped per kind. Both caps (3, 10) keep `attempt`
-        // small enough that `1 << (attempt - 1)` can't overflow Int.
-        let ceiling = kind == .definitive ? Self.definiteBackoffCeilingMs : Self.ambiguousBackoffCeilingMs
+        // Exponential backoff, capped. The cap (10) keeps `attempt` small enough
+        // that `1 << (attempt - 1)` can't overflow Int.
         let exponent = max(attempt - 1, 0)
-        let base = min(1_000 * (1 << exponent), ceiling)
+        let base = min(1_000 * (1 << exponent), Self.backoffCeilingMs)
         return applyJitter(base)
     }
 
