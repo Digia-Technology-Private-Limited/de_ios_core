@@ -307,7 +307,7 @@ private struct NudgeButtonView: View {
         // `AppStore.requestReview(in:)` needs iOS 16; below that, the older
         // `SKStoreReviewController` entry point is the built-in equivalent.
         if #available(iOS 16, *) {
-            Task { await AppStore.requestReview(in: scene) }
+            AppStore.requestReview(in: scene)
         } else {
             SKStoreReviewController.requestReview(in: scene)
         }
@@ -417,7 +417,7 @@ private struct NudgeCarouselView: View {
                     let interval = TimeInterval(node.autoPlayIntervalMs) / 1000
                     autoPlayTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true)
                     { _ in
-                        DispatchQueue.main.async {
+                        Task { @MainActor in
                             withAnimation { currentIndex += 1 }
                         }
                     }
@@ -455,6 +455,7 @@ private enum VideoLoadState {
     case failed
 }
 
+@MainActor
 private struct NudgeVideoView: View {
     let node: NudgeVideo
     @Environment(\.digiaVariables) private var variables
@@ -511,13 +512,15 @@ private struct NudgeVideoView: View {
         let item = AVPlayerItem(url: parsed)
         let p = AVPlayer(playerItem: item)
         p.isMuted = node.muted
+        let autoplay = node.autoplay
 
         statusObserver = item.observe(\.status, options: [.initial, .new]) { item, _ in
-            DispatchQueue.main.async {
-                switch item.status {
+            let status = item.status
+            Task { @MainActor in
+                switch status {
                 case .readyToPlay:
                     state = .ready
-                    if node.autoplay { p.play() }
+                    if autoplay { p.play() }
                 case .failed:
                     state = .failed
                 default:
@@ -530,8 +533,10 @@ private struct NudgeVideoView: View {
             loopObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
             ) { _ in
-                p.seek(to: .zero)
-                p.play()
+                Task { @MainActor in
+                    p.seek(to: .zero)
+                    p.play()
+                }
             }
         }
 

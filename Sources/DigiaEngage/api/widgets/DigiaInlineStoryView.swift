@@ -398,9 +398,9 @@ private struct InlineStoryOverlayContent: View {
 @MainActor
 private struct FullScreenStoryItem: View {
     let item: StoryItemConfig
-    let onVideoProgress: (Double) -> Void
-    let onVideoEnded: () -> Void
-    let onVideoBuffering: @Sendable (Bool) -> Void
+    let onVideoProgress: @MainActor @Sendable (Double) -> Void
+    let onVideoEnded: @MainActor @Sendable () -> Void
+    let onVideoBuffering: @MainActor @Sendable (Bool) -> Void
 
     var body: some View {
         ZStack {
@@ -451,9 +451,9 @@ private struct InlineStoryVideoView: View {
     var gravity: AVLayerVideoGravity = .resizeAspectFill
     /// Full-screen playback hooks; thumbnails leave these nil and skip the
     /// observers entirely.
-    var onProgress: ((Double) -> Void)?
-    var onEnded: (() -> Void)?
-    var onBuffering: (@Sendable (Bool) -> Void)?
+    var onProgress: (@MainActor @Sendable (Double) -> Void)?
+    var onEnded: (@MainActor @Sendable () -> Void)?
+    var onBuffering: (@MainActor @Sendable (Bool) -> Void)?
 
     @State private var bundle: DigiaVideoPlaybackBundle?
     @State private var timeObserver: Any?
@@ -486,7 +486,8 @@ private struct InlineStoryVideoView: View {
                     guard let item = nextBundle.player.currentItem else { return }
                     let duration = item.duration.seconds
                     guard duration.isFinite, duration > 0 else { return }
-                    onProgress(min(max(time.seconds / duration, 0), 1))
+                    let progress = min(max(time.seconds / duration, 0), 1)
+                    Task { @MainActor in onProgress(progress) }
                 }
             }
             if let onEnded {
@@ -496,12 +497,16 @@ private struct InlineStoryVideoView: View {
                     forName: .AVPlayerItemDidPlayToEndTime,
                     object: nextBundle.player.currentItem,
                     queue: .main
-                ) { _ in onEnded() }
+                ) { _ in
+                    Task { @MainActor in onEnded() }
+                }
                 failObserver = NotificationCenter.default.addObserver(
                     forName: .AVPlayerItemFailedToPlayToEndTime,
                     object: nextBundle.player.currentItem,
                     queue: .main
-                ) { _ in onEnded() }
+                ) { _ in
+                    Task { @MainActor in onEnded() }
+                }
             }
             if let onBuffering {
                 // Report waiting-to-play so the story's stall watchdog can tell
