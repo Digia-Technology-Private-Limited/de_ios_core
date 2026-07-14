@@ -218,14 +218,22 @@ private struct NudgeImageView: View {
     }
 }
 
+private let nudgeDangerColor = Color(hex: "#D92D20") ?? .red
+
 // MARK: - Button
 
 private struct NudgeButtonView: View {
     let node: NudgeButton
     let onDismiss: () -> Void
     @Environment(\.digiaVariables) private var variables
+    @State private var showConfirmDialog = false
 
     private var filled: Bool { node.variant == .fill || node.variant == .elevated }
+    private var destructiveStyled: Bool { node.isDestructive && node.applyDestructiveStyling }
+    private var nodeBackground: Color { destructiveStyled ? nudgeDangerColor : node.background }
+    private var nodeTextColor: Color {
+        destructiveStyled ? (filled ? .white : nudgeDangerColor) : node.textColor
+    }
 
     var body: some View {
         Button(action: handleTap) {
@@ -236,25 +244,48 @@ private struct NudgeButtonView: View {
                     )
                 )
                 .fontWeight(node.fontWeight)
-                .foregroundStyle(filled ? node.textColor : node.background)
+                .foregroundStyle(filled ? nodeTextColor : nodeBackground)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .frame(maxWidth: node.box.fillWidth ? .infinity : nil)
         }
         .buttonStyle(.plain)
         .frame(maxWidth: node.box.fillWidth ? .infinity : nil)
-        .background(filled ? node.background : Color.clear)
+        .background(filled ? nodeBackground : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: node.radius))
         .shadow(radius: node.variant == .elevated ? 3 : 0)
         .overlay(
             node.variant == .outline
                 ? RoundedRectangle(cornerRadius: node.radius)
-                    .stroke(node.background, lineWidth: 1.5)
+                    .stroke(nodeBackground, lineWidth: 1.5)
                 : nil
+        )
+        .alert(
+            node.confirmDialog.title.map { interpolate($0, context: variables) } ?? "",
+            isPresented: $showConfirmDialog,
+            actions: {
+                Button(interpolate(node.confirmDialog.cancelLabel, context: variables), role: .cancel) {}
+                Button(interpolate(node.confirmDialog.confirmLabel, context: variables), role: .destructive) {
+                    performActions()
+                }
+            },
+            message: {
+                if let message = node.confirmDialog.message, !message.isEmpty {
+                    Text(interpolate(message, context: variables))
+                }
+            }
         )
     }
 
     private func handleTap() {
+        if node.isDestructive {
+            showConfirmDialog = true
+        } else {
+            performActions()
+        }
+    }
+
+    private func performActions() {
         // A primary-button click is a Digia-only engagement signal (matches
         // Android's NudgeNodeRenderer) — it is not forwarded to the CEP plugin.
         if node.isPrimary {
