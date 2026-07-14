@@ -135,7 +135,7 @@ private struct InlineCarouselView: View {
                     if loopEnabled, idx == 0 || idx == pageCount - 1 {
                         let target = idx == 0 ? pageCount - 2 : 1
                         isRecentering = true
-                        DispatchQueue.main.async {
+                        Task { @MainActor in
                             var transaction = Transaction()
                             transaction.disablesAnimations = true
                             withTransaction(transaction) {
@@ -185,10 +185,12 @@ private struct InlineCarouselView: View {
         let interval = TimeInterval(config.autoPlayInterval) / 1000
         let transitionDuration = TimeInterval(config.animationDuration) / 1000
         autoPlayTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-            autoAdvanced = true
-            let next = (scrollPosition ?? 0) + 1
-            withAnimation(.easeInOut(duration: transitionDuration)) {
-                scrollPosition = loopEnabled ? next : min(next, pageCount - 1)
+            Task { @MainActor in
+                autoAdvanced = true
+                let next = (scrollPosition ?? 0) + 1
+                withAnimation(.easeInOut(duration: transitionDuration)) {
+                    scrollPosition = loopEnabled ? next : min(next, pageCount - 1)
+                }
             }
         }
     }

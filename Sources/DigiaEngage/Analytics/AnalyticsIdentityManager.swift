@@ -3,6 +3,7 @@ import Foundation
 import UIKit
 #endif
 
+@MainActor
 final class AnalyticsIdentityManager {
     private let defaults: UserDefaults
     private var _anonymousId: String = ""
