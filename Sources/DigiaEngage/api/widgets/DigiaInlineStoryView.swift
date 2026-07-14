@@ -592,7 +592,7 @@ private struct StoryProgressIndicator: View {
 
     private func backgroundColor(for index: Int) -> Color {
         if index < currentIndex {
-            return Color(hex: config.completedColor) ?? Color.white.opacity(0.67)
+            return Color(hex: config.activeColor) ?? Color.white.opacity(0.67)
         }
         return Color(hex: config.disabledColor) ?? Color.white.opacity(0.34)
     }
