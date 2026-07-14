@@ -12,11 +12,6 @@ final class DigiaOverlayController: ObservableObject {
     @Published private(set) var activeNudge: DigiaNudgePresentation?
     @Published private(set) var activeStoryOverlay: InlineStoryOverlayState?
 
-    /// Lets a renderer forward a CTA action (actionType, url) to the active CEP
-    /// plugin. Returns `true` if the plugin handled it (so the renderer skips its
-    /// native fallback). Wired by ``SDKInstance`` to the active plugin.
-    var onAction: ((_ actionType: String, _ url: String, _ payload: CEPTriggerPayload) -> Bool)?
-
     /// Sets the nudge state. Impression/dismissal analytics are emitted by
     /// ``SDKInstance`` (`reportNudgeImpression` / `markNudgeDismissed`), not here.
     func showNudge(_ presentation: DigiaNudgePresentation) {

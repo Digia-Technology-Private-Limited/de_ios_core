@@ -117,7 +117,7 @@ struct NudgeButton: Equatable {
     let background: Color
     let textColor: Color
     let radius: CGFloat
-    let actions: [NudgeAction]
+    let actions: [EngageAction]
     let isPrimary: Bool
 }
 

@@ -11,6 +11,21 @@ public enum Digia {
         SDKInstance.shared.register(plugin)
     }
 
+    /// Replaces the Custom KV handler. Pass `nil` to restore the SDK no-op.
+    public static func setCustomKVHandler(_ handler: CustomKVHandler?) {
+        SDKInstance.shared.setCustomKVHandler(handler)
+    }
+
+    /// Replaces the deep-link handler. Pass `nil` to restore SDK handling.
+    public static func setDeepLinkHandler(_ handler: DeepLinkHandler?) {
+        SDKInstance.shared.setDeepLinkHandler(handler)
+    }
+
+    /// Replaces the external URL handler. Pass `nil` to restore SDK handling.
+    public static func setOpenURLHandler(_ handler: OpenURLHandler?) {
+        SDKInstance.shared.setOpenURLHandler(handler)
+    }
+
     /// RN-only: hand native the same getCampaigns response JS already fetched, so
     /// native doesn't also fetch it. Call once after `initialize` when the config's
     /// `wrapperBinding` is `"react_native"`.

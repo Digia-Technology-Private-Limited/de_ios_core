@@ -265,10 +265,8 @@ private struct NudgeButtonView: View {
         Task {
             await SDKInstance.shared.executeActionFlow(
                 node.actions,
-                payload: payload,
-                surface: .nudge,
                 variables: variables,
-                scope: ActionExecutionScope(dismiss: onDismiss)
+                localActionExecutor: LocalActionExecutor(dismiss: onDismiss)
             )
         }
     }

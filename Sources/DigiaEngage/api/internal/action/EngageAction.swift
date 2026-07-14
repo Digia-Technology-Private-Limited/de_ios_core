@@ -39,14 +39,6 @@ enum EngageAction: Equatable {
         }
     }
 
-    var hostAction: DigiaHostAction? {
-        switch self {
-        case .openUrl(let url): .openURL(url)
-        case .openDeeplink(let url): .deepLink(url)
-        case .customKV(let payload): .customKV(payload)
-        default: nil
-        }
-    }
 }
 
 struct EngageActionParser {
@@ -57,6 +49,8 @@ struct EngageActionParser {
 
     private func parseStep(_ step: [String: Any]) -> EngageAction? {
         let data = step["data"] as? [String: Any] ?? [:]
+        // `Action.*` is the dashboard wire format; unprefixed names keep previously stored
+        // guide and nudge action payloads readable while campaigns migrate to canonical steps.
         switch step["type"] as? String ?? "" {
         case "Action.openUrl":
             guard let url = string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]) else { return nil }
@@ -101,6 +95,3 @@ struct EngageActionParser {
         keys.lazy.compactMap { object[$0] as? String }.first { !$0.isEmpty }
     }
 }
-
-typealias NudgeAction = EngageAction
-typealias NudgeActionParser = EngageActionParser

@@ -177,10 +177,8 @@ private struct GuideStepOverlay: View {
         Task {
             await SDKInstance.shared.executeActionFlow(
                 action.actions,
-                payload: state.payload,
-                surface: .guide,
                 variables: variables,
-                scope: ActionExecutionScope(
+                localActionExecutor: LocalActionExecutor(
                     dismiss: onDismiss,
                     next: onAdvance,
                     previous: { SDKInstance.shared.previousGuide() }

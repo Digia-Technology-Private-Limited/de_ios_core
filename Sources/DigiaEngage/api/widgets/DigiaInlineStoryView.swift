@@ -363,10 +363,8 @@ private struct InlineStoryOverlayContent: View {
         Task {
             await SDKInstance.shared.executeActionFlow(
                 actions,
-                payload: state.payload,
-                surface: .inline,
                 variables: variables,
-                scope: ActionExecutionScope(
+                localActionExecutor: LocalActionExecutor(
                     dismiss: { SDKInstance.shared.controller.dismissStoryOverlay() }
                 )
             )

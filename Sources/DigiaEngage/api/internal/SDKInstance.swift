@@ -10,17 +10,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     @Published private(set) var isHostMounted = false
 
     private var activePlugin: DigiaCEPPlugin?
+    private let hostActionExecutor = HostActionExecutor()
     private lazy var actionExecutor = EngageActionExecutor(
-        invokeHostAction: { [weak self] action, context in
-            await self?.config?.onAction?(action, context) == true
-        },
-        invokeLegacyPluginAction: { [weak self] actionType, url, payload in
-            self?.activePlugin?.notifyAction(
-                actionType: actionType,
-                url: url,
-                payload: payload
-            ) == true
-        }
+        hostActionExecutor: hostActionExecutor
     )
     private(set) var fontFactory: DUIFontFactory = DefaultFontFactory()
     /// Mirrors Android's `ScreenTracker`: the last screen name reported via
@@ -71,14 +63,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 getCampaign: { [weak self] key in self?.campaignStore.find(key) }
             )
         )
-        // Forward overlay CTA actions to the active CEP plugin (native open is the
-        // renderer's fallback when no plugin handles it). Mirrors Android's wiring.
-        controller.onAction = { [weak self] actionType, url, payload in
-            self?.activePlugin?.notifyAction(actionType: actionType, url: url, payload: payload) ?? false
-        }
     }
 
     func initialize(_ config: DigiaConfig) async throws {
+        hostActionExecutor.configure(config.actionHandlers)
         guard self.config == nil else { return }
         self.config = config
         DigiaLog.configure(config.logLevel)
@@ -111,34 +99,38 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func executeActionFlow(
         _ actions: [EngageAction],
-        payload: CEPTriggerPayload,
-        surface: EngageSurface,
         variables: VariableContext?,
-        scope: ActionExecutionScope
+        localActionExecutor: LocalActionExecutor
     ) async {
         await actionExecutor.executeActionFlow(
             actions,
-            payload: payload,
-            surface: surface,
             variables: variables,
-            scope: scope
+            localActionExecutor: localActionExecutor
         )
     }
 
     func executeAction(
         _ action: EngageAction,
-        payload: CEPTriggerPayload,
-        surface: EngageSurface,
         variables: VariableContext?,
-        scope: ActionExecutionScope
+        localActionExecutor: LocalActionExecutor
     ) async {
         await actionExecutor.executeAction(
             action,
-            payload: payload,
-            surface: surface,
             variables: variables,
-            scope: scope
+            localActionExecutor: localActionExecutor
         )
+    }
+
+    func setCustomKVHandler(_ handler: CustomKVHandler?) {
+        hostActionExecutor.setCustomKVHandler(handler)
+    }
+
+    func setDeepLinkHandler(_ handler: DeepLinkHandler?) {
+        hostActionExecutor.setDeepLinkHandler(handler)
+    }
+
+    func setOpenURLHandler(_ handler: OpenURLHandler?) {
+        hostActionExecutor.setOpenURLHandler(handler)
     }
 
     private func completeInitialization(_ campaigns: [CampaignModel]) {
@@ -530,6 +522,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func markInitializedForTesting(with config: DigiaConfig) {
         self.config = config
+        hostActionExecutor.configure(config.actionHandlers)
     }
 
     func setCampaignsForTesting(_ campaigns: [CampaignModel]) {
@@ -847,6 +840,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         analyticsService = nil
         frequencyManager = nil
         config = nil
+        hostActionExecutor.configure(DigiaActionHandlers())
         sdkState = .notInitialized
         isHostMounted = false
         fontFactory = DefaultFontFactory()

@@ -176,13 +176,13 @@ struct DigiaEngageTests {
     }
 }
 
-@Suite("NudgeActionParser")
-struct NudgeActionParserTests {
+@Suite("EngageActionParser")
+struct EngageActionParserTests {
     private func onClick(_ steps: [[String: Any]]) -> [String: Any] { ["steps": steps] }
 
     @Test("parses open url and deeplink by launch mode")
     func parsesUrls() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.openUrl", "data": ["url": "https://x/y", "launchMode": "externalApplication"]],
             ["type": "Action.openUrl", "data": ["url": "app://path", "launchMode": "platformDefault"]],
         ]))
@@ -191,7 +191,7 @@ struct NudgeActionParserTests {
 
     @Test("parses copy to clipboard from message")
     func parsesCopy() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.copyToClipBoard", "data": ["message": "PROMO50"]],
         ]))
         #expect(actions == [.copyToClipboard("PROMO50")])
@@ -199,7 +199,7 @@ struct NudgeActionParserTests {
 
     @Test("parses share from message")
     func parsesShare() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.share", "data": ["message": "check this out"]],
         ]))
         #expect(actions == [.share("check this out")])
@@ -207,10 +207,10 @@ struct NudgeActionParserTests {
 
     @Test("text payload falls back to text then value keys")
     func textFallbacks() {
-        let fromText = NudgeActionParser().parse(onClick([
+        let fromText = EngageActionParser().parse(onClick([
             ["type": "Action.copyToClipBoard", "data": ["text": "A"]],
         ]))
-        let fromValue = NudgeActionParser().parse(onClick([
+        let fromValue = EngageActionParser().parse(onClick([
             ["type": "Action.share", "data": ["value": "B"]],
         ]))
         #expect(fromText == [.copyToClipboard("A")])
@@ -219,7 +219,7 @@ struct NudgeActionParserTests {
 
     @Test("blank or missing text drops copy and share")
     func dropsBlank() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.copyToClipBoard", "data": [:]],
             ["type": "Action.share", "data": ["message": ""]],
         ]))
@@ -228,7 +228,7 @@ struct NudgeActionParserTests {
 
     @Test("dismiss for hide bottom sheet and dismiss dialog")
     func parsesDismiss() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.hideBottomSheet"],
             ["type": "Action.dismissDialog"],
         ]))
@@ -237,8 +237,8 @@ struct NudgeActionParserTests {
 
     @Test("analytics classifies share and copy explicitly")
     func analyticsTypes() {
-        #expect(NudgeAction.share("message").analyticsType == "share")
-        #expect(NudgeAction.copyToClipboard("message").analyticsType == "copy")
+        #expect(EngageAction.share("message").analyticsType == "share")
+        #expect(EngageAction.copyToClipboard("message").analyticsType == "copy")
     }
 
     @Test("Custom KV keeps only strings and resolves variables in keys and values")
@@ -278,17 +278,17 @@ struct NudgeActionParserTests {
     }
 
     @Test("parses canonical and legacy Custom KV structures")
-    func parsesCustomKVCompatibilityForms() {
+    func parsesCustomKVStructures() {
         let actions = EngageActionParser().parse(onClick([
             ["type": "Action.customKV", "data": ["payload": ["canonical": "yes"]]],
-            ["type": "customKV", "data": ["value": ["legacyData": "yes"]]],
-            ["type": "custom_kv", "payload": ["legacyRoot": "yes", "ignored": 42]],
+            ["type": "customKV", "data": ["value": ["legacy": "type"]]],
+            ["type": "Action.customKV", "data": ["value": ["legacy": "location"]]],
         ]))
 
         #expect(actions == [
             .customKV(["canonical": "yes"]),
-            .customKV(["legacyData": "yes"]),
-            .customKV(["legacyRoot": "yes"]),
+            .customKV(["legacy": "type"]),
+            .customKV(["legacy": "location"]),
         ])
     }
 

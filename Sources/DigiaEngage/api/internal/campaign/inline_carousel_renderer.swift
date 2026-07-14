@@ -170,10 +170,8 @@ private struct InlineCarouselView: View {
         Task {
             await SDKInstance.shared.executeActionFlow(
                 actions,
-                payload: payload,
-                surface: .inline,
                 variables: variables,
-                scope: ActionExecutionScope()
+                localActionExecutor: LocalActionExecutor()
             )
         }
     }

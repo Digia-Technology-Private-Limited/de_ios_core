@@ -68,6 +68,32 @@ try await Digia.initialize(
 )
 ```
 
+### Handle host actions
+
+Register only the actions your app owns. When a handler is present, Digia Engage does not run its
+default behavior for that action.
+
+```swift
+try await Digia.initialize(
+    DigiaConfig(
+        apiKey: "YOUR_API_KEY",
+        actionHandlers: DigiaActionHandlers(
+            customKV: { payload in handleCustomAction(payload) },
+            deepLink: { url in navigate(to: url) },
+            openURL: { url in openInAppBrowser(url) }
+        )
+    )
+)
+```
+
+Handlers can be replaced after initialization. Passing `nil` clears the override, so deep links
+and URLs return to SDK handling while Custom KV returns to a no-op.
+
+```swift
+Digia.setCustomKVHandler { payload in handleCustomAction(payload) }
+Digia.setCustomKVHandler(nil) // for example, when leaving the owning screen
+```
+
 ### Render an experience
 
 ```swift

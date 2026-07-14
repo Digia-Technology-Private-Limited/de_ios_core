@@ -50,7 +50,7 @@ public struct DigiaConfig: Sendable {
     public let analyticsConfig: AnalyticsConfig
     public let wrapperBinding: String?
     public let wrapperVersion: String?
-    public let onAction: HostActionHandler?
+    public let actionHandlers: DigiaActionHandlers
 
     public init(
         apiKey: String,
@@ -62,7 +62,7 @@ public struct DigiaConfig: Sendable {
         analyticsConfig: AnalyticsConfig = AnalyticsConfig(),
         wrapperBinding: String? = nil,
         wrapperVersion: String? = nil,
-        onAction: HostActionHandler? = nil
+        actionHandlers: DigiaActionHandlers = DigiaActionHandlers()
     ) {
         self.apiKey = apiKey
         self.logLevel = logLevel
@@ -73,7 +73,7 @@ public struct DigiaConfig: Sendable {
         self.analyticsConfig = analyticsConfig
         self.wrapperBinding = wrapperBinding
         self.wrapperVersion = wrapperVersion
-        self.onAction = onAction
+        self.actionHandlers = actionHandlers
     }
 }
 

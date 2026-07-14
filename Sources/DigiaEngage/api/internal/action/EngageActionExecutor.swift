@@ -1,122 +1,169 @@
 import StoreKit
 import UIKit
 
-struct ActionExecutionScope {
-    let dismiss: () -> Void
-    let next: () -> Void
-    let previous: () -> Void
+/// Actions a rendered campaign can perform within its own UI.
+@MainActor
+struct LocalActionExecutor {
+    private let dismiss: (() -> Void)?
+    private let next: (() -> Void)?
+    private let previous: (() -> Void)?
 
     init(
-        dismiss: @escaping () -> Void = {},
-        next: @escaping () -> Void = {},
-        previous: @escaping () -> Void = {}
+        dismiss: (() -> Void)? = nil,
+        next: (() -> Void)? = nil,
+        previous: (() -> Void)? = nil
     ) {
         self.dismiss = dismiss
         self.next = next
         self.previous = previous
     }
+
+    func execute(_ action: EngageAction) -> Bool {
+        switch action {
+        case .dismiss: execute("dismiss", callback: dismiss)
+        case .next: execute("next", callback: next)
+        case .previous: execute("previous", callback: previous)
+        default: false
+        }
+    }
+
+    private func execute(_ name: String, callback: (() -> Void)?) -> Bool {
+        if let callback {
+            callback()
+        } else {
+            DigiaLog.warning("Local action '\(name)' is not supported by this campaign surface")
+        }
+        return true
+    }
 }
 
+/// SDK-owned actions shared by every campaign surface.
 @MainActor
-final class EngageActionExecutor {
-    private let invokeHostAction: (DigiaHostAction, HostActionContext) async -> Bool
-    private let invokeLegacyPluginAction: (String, String, CEPTriggerPayload) -> Bool
+final class GlobalActionExecutor {
+    private let copy: (String) -> Void
+    private let share: (String) -> Void
+    private let requestReview: () -> Void
 
     init(
-        invokeHostAction: @escaping (DigiaHostAction, HostActionContext) async -> Bool,
-        invokeLegacyPluginAction: @escaping (String, String, CEPTriggerPayload) -> Bool
+        copy: @escaping (String) -> Void = { UIPasteboard.general.string = $0 },
+        share: @escaping (String) -> Void = {
+            ViewControllerUtil.present(
+                UIActivityViewController(activityItems: [$0], applicationActivities: nil)
+            )
+        },
+        requestReview: @escaping () -> Void = {
+            guard let scene = ViewControllerUtil.findWindowScene() else {
+                DigiaLog.warning("requestReview: no window scene; skipping")
+                return
+            }
+            AppStore.requestReview(in: scene)
+        }
     ) {
-        self.invokeHostAction = invokeHostAction
-        self.invokeLegacyPluginAction = invokeLegacyPluginAction
+        self.copy = copy
+        self.share = share
+        self.requestReview = requestReview
+    }
+
+    func execute(_ action: EngageAction) -> Bool {
+        switch action {
+        case .copyToClipboard(let text): copy(text)
+        case .share(let text): share(text)
+        case .requestReview: requestReview()
+        default: return false
+        }
+        return true
+    }
+}
+
+/// Host overrides and SDK fallbacks for host-owned actions.
+@MainActor
+final class HostActionExecutor {
+    private var customKVHandler: CustomKVHandler?
+    private var deepLinkHandler: DeepLinkHandler?
+    private var openURLHandler: OpenURLHandler?
+    private let openURL: (String) -> Void
+
+    init(openURL: @escaping (String) -> Void = {
+        guard let url = URL(string: $0) else { return }
+        UIApplication.shared.open(url)
+    }) {
+        self.openURL = openURL
+    }
+
+    func configure(_ handlers: DigiaActionHandlers) {
+        customKVHandler = handlers.customKV
+        deepLinkHandler = handlers.deepLink
+        openURLHandler = handlers.openURL
+    }
+
+    func setCustomKVHandler(_ handler: CustomKVHandler?) {
+        customKVHandler = handler
+    }
+
+    func setDeepLinkHandler(_ handler: DeepLinkHandler?) {
+        deepLinkHandler = handler
+    }
+
+    func setOpenURLHandler(_ handler: OpenURLHandler?) {
+        openURLHandler = handler
+    }
+
+    @discardableResult
+    func execute(_ action: EngageAction) throws -> Bool {
+        switch action {
+        case .customKV(let payload):
+            try customKVHandler?(payload)
+        case .openDeeplink(let url):
+            if let deepLinkHandler { try deepLinkHandler(url) } else { openURL(url) }
+        case .openUrl(let url):
+            if let openURLHandler { try openURLHandler(url) } else { openURL(url) }
+        default:
+            return false
+        }
+        return true
+    }
+}
+
+/// Resolves and executes an authored action flow in order on the main actor.
+@MainActor
+final class EngageActionExecutor {
+    private let globalActionExecutor: GlobalActionExecutor
+    private let hostActionExecutor: HostActionExecutor
+
+    init(
+        globalActionExecutor: GlobalActionExecutor = GlobalActionExecutor(),
+        hostActionExecutor: HostActionExecutor
+    ) {
+        self.globalActionExecutor = globalActionExecutor
+        self.hostActionExecutor = hostActionExecutor
     }
 
     func executeActionFlow(
         _ actions: [EngageAction],
-        payload: CEPTriggerPayload,
-        surface: EngageSurface,
         variables: VariableContext?,
-        scope: ActionExecutionScope
+        localActionExecutor: LocalActionExecutor
     ) async {
         for action in actions {
             await executeAction(
                 action,
-                payload: payload,
-                surface: surface,
                 variables: variables,
-                scope: scope
+                localActionExecutor: localActionExecutor
             )
         }
     }
 
     func executeAction(
         _ action: EngageAction,
-        payload: CEPTriggerPayload,
-        surface: EngageSurface,
         variables: VariableContext?,
-        scope: ActionExecutionScope
+        localActionExecutor: LocalActionExecutor
     ) async {
-        let action = action.resolved(with: variables)
-        switch action {
-        case .dismiss:
-            scope.dismiss()
-        case .next:
-            scope.next()
-        case .previous:
-            scope.previous()
-        case .copyToClipboard(let text):
-            UIPasteboard.general.string = text
-        case .share(let text):
-            ViewControllerUtil.present(
-                UIActivityViewController(activityItems: [text], applicationActivities: nil)
-            )
-        case .requestReview:
-            await requestReview()
-        case .openUrl, .openDeeplink, .customKV:
-            await executeHostAction(action, payload: payload, surface: surface)
+        do {
+            let action = action.resolved(with: variables)
+            if localActionExecutor.execute(action) { return }
+            if globalActionExecutor.execute(action) { return }
+            try hostActionExecutor.execute(action)
+        } catch {
+            DigiaLog.error("Action step failed: \(error.localizedDescription)")
         }
-    }
-
-    private func executeHostAction(
-        _ action: EngageAction,
-        payload: CEPTriggerPayload,
-        surface: EngageSurface
-    ) async {
-        guard let hostAction = action.hostAction else { return }
-        let context = HostActionContext(
-            campaignId: payload.cepCampaignId,
-            campaignKey: payload.campaignKey,
-            surface: surface
-        )
-        if await invokeHostAction(hostAction, context) { return }
-
-        let handledByPlugin: Bool
-        switch hostAction {
-        case .openURL(let url):
-            handledByPlugin = invokeLegacyPluginAction("open_url", url, payload)
-        case .deepLink(let url):
-            handledByPlugin = invokeLegacyPluginAction("deep_link", url, payload)
-        case .customKV:
-            handledByPlugin = false
-        }
-        if !handledByPlugin { executeDefaultHostAction(hostAction) }
-    }
-
-    private func executeDefaultHostAction(_ action: DigiaHostAction) {
-        let rawURL: String
-        switch action {
-        case .openURL(let url), .deepLink(let url):
-            rawURL = url
-        case .customKV:
-            return
-        }
-        if let url = URL(string: rawURL) { UIApplication.shared.open(url) }
-    }
-
-    private func requestReview() async {
-        guard let scene = ViewControllerUtil.findWindowScene() else {
-            DigiaLog.warning("requestReview: no window scene; skipping")
-            return
-        }
-        AppStore.requestReview(in: scene)
     }
 }

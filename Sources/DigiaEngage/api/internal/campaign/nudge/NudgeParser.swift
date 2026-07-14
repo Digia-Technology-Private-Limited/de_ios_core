@@ -152,7 +152,7 @@ struct NudgeParser {
                 hex: "#4945FF") ?? .blue,
             textColor: parseColor(textStyle["textColor"] as? String) ?? .white,
             radius: CGFloat(parseDouble(shape["borderRadius"]) ?? 8),
-            actions: NudgeActionParser().parse(props["onClick"] as? [String: Any]),
+            actions: EngageActionParser().parse(props["onClick"] as? [String: Any]),
             isPrimary: (props["isPrimary"] as? Bool) ?? false
         )
     }
