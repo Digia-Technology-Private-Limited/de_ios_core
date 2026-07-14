@@ -261,7 +261,6 @@ private struct NudgeButtonView: View {
             actionType: action?.analyticsType,
             ctaRole: node.isPrimary ? "primary" : "secondary"
         )
-        guard let payload = SDKInstance.shared.controller.activeNudge?.payload else { return }
         Task {
             await SDKInstance.shared.executeActionFlow(
                 node.actions,
@@ -270,7 +269,6 @@ private struct NudgeButtonView: View {
             )
         }
     }
-
 }
 
 // MARK: - Divider

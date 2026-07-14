@@ -16,6 +16,12 @@ private extension AnalyticsService {
 // MARK: - Test doubles
 
 /// Fake sender that records calls and returns a configurable status code.
+///
+/// Only the track-dispatch endpoint is counted/varied — `AnalyticsService.init`
+/// also fires a session-report POST that these tests aren't measuring, and
+/// letting it share this counter made `callCount` (and therefore
+/// `responseFactory`'s call-numbered branching) racy depending on whether the
+/// session call happened to fire before the dispatch under test.
 final class FakeAnalyticsSender: AnalyticsSender, @unchecked Sendable {
     private var _callCount = 0
     var callCount: Int { _callCount }
@@ -26,8 +32,23 @@ final class FakeAnalyticsSender: AnalyticsSender, @unchecked Sendable {
     }
 
     func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
+        guard url == DigiaEndpoints.track else { return 200 }
         _callCount += 1
         return responseFactory(_callCount)
+    }
+}
+
+/// Fake sender that always throws, to exercise the "ambiguous" (no status code
+/// at all — no connectivity, timeout, DNS failure) retry path. Only counts the
+/// track-dispatch endpoint, for the same reason as `FakeAnalyticsSender` above.
+final class ThrowingAnalyticsSender: AnalyticsSender, @unchecked Sendable {
+    private var _callCount = 0
+    var callCount: Int { _callCount }
+
+    func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
+        guard url == DigiaEndpoints.track else { return 200 }
+        _callCount += 1
+        throw URLError(.notConnectedToInternet)
     }
 }
 
@@ -47,7 +68,7 @@ struct AnalyticsServiceTests {
 
     private func makeService(
         config: AnalyticsConfig = AnalyticsConfig(flushIntervalMs: 10_000),
-        sender: FakeAnalyticsSender = FakeAnalyticsSender(),
+        sender: any AnalyticsSender = FakeAnalyticsSender(),
         defaults: UserDefaults? = nil
     ) -> AnalyticsService {
         let store = defaults ?? UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
@@ -257,6 +278,72 @@ struct AnalyticsServiceTests {
         #expect(service.queue.size == 0)
         #expect(service.retryAttempt == 0)
         #expect(fakeSender.callCount == 2)
+    }
+
+    @Test("new events don't jump ahead of a pending retry")
+    func newEventsDeferToPendingRetry() async throws {
+        let fakeSender = FakeAnalyticsSender { callNum in callNum == 1 ? 500 : 200 }
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 2),
+            sender: fakeSender
+        )
+        service.retryScheduleMs = [50]  // long enough to add a second event before it fires
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
+        service.flush()
+        // let the flush attempt run and fail (500); retry is now pending
+        try await Task.sleep(for: .milliseconds(5))
+        #expect(fakeSender.callCount == 1)
+
+        // This second capture reaches flushBatchSize (2) — without the guard this
+        // would dispatch immediately and resend the still-queued failed event early.
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p2"))
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(fakeSender.callCount == 1)  // no early dispatch — still just the one attempt
+        #expect(service.queue.size == 2)
+
+        // let the originally scheduled retry fire — picks up both events together
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(service.queue.size == 0)
+        #expect(fakeSender.callCount == 2)
+    }
+
+    @Test("4xx/5xx responses retry up to the cap (10) then drop the event")
+    func httpErrorRetriesThenDrops() async throws {
+        let fakeSender = FakeAnalyticsSender { _ in 400 }
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
+            sender: fakeSender
+        )
+        service.retryScheduleMs = [2]  // fast, fixed retries for the test
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
+        service.flush()
+
+        // 10 total attempts, ~2ms apart — wait past all of them
+        try await Task.sleep(for: .milliseconds(300))
+
+        #expect(service.queue.size == 0)
+        #expect(fakeSender.callCount == 10)
+    }
+
+    @Test("transport failures (no status code) retry up to the cap (10) then drop the event")
+    func transportFailureRetriesThenDrops() async throws {
+        let throwingSender = ThrowingAnalyticsSender()
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
+            sender: throwingSender
+        )
+        service.retryScheduleMs = [2]  // fast, fixed retries for the test
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
+        service.flush()
+
+        // 10 total attempts, ~2ms apart — wait past all of them
+        try await Task.sleep(for: .milliseconds(300))
+
+        #expect(service.queue.size == 0)
+        #expect(throwingSender.callCount == 10)
     }
 
     @Test("background notification flushes pending events")

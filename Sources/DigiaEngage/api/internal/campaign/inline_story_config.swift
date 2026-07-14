@@ -63,7 +63,6 @@ struct StoryCardConfig: Equatable {
 
 struct StoryIndicatorDisplayConfig: Equatable {
     var activeColor: String = "#FFFFFF"
-    var completedColor: String = "#AAAAAA"
     var disabledColor: String = "#555555"
     var height: Double = 3.5
     var borderRadius: Double = 4
@@ -75,7 +74,6 @@ struct StoryIndicatorDisplayConfig: Equatable {
         guard let json else { return StoryIndicatorDisplayConfig() }
         return StoryIndicatorDisplayConfig(
             activeColor: json.nonBlankString("activeColor") ?? "#FFFFFF",
-            completedColor: json.nonBlankString("completedColor") ?? "#AAAAAA",
             disabledColor: json.nonBlankString("disabledColor") ?? "#555555",
             height: json.double("height", default: 3.5),
             borderRadius: json.double("borderRadius", default: 4),

@@ -538,6 +538,18 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         analyticsService?.clearUserId()
     }
 
+    /// Removes inline content (carousel/story/payload) for each key in `placementKeys`.
+    func clearInlineContent(_ placementKeys: [String]) {
+        for key in placementKeys {
+            inlineController.dismissCampaign(key)
+        }
+    }
+
+    /// Clears inline content (carousel/story/payload) across every placement.
+    func clearAllInlineContent() {
+        inlineController.clear()
+    }
+
     // MARK: - Nudge lifecycle
     //
     // Impression and Dismissed go to both CEP and Digia analytics (toBoth); a

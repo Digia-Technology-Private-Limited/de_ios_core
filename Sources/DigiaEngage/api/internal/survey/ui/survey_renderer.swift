@@ -62,7 +62,7 @@ private struct SurveySession: View {
             }
         }
         .fullScreenCover(isPresented: sheetPresented) {
-            SurveySheet(
+            let sheetContent = SurveySheet(
                 sheet: display.bottomSheet,
                 background: background,
                 onDismiss: { finish(completed: false) }
@@ -76,7 +76,13 @@ private struct SurveySession: View {
                     showCloseButton: display.bottomSheet.backdropDismissible
                 )
             }
-            .presentationBackground(.clear)
+            // `.presentationBackground` needs iOS 16.4; below that, the cover's
+            // (opaque) default background is used as-is.
+            if #available(iOS 16.4, *) {
+                sheetContent.presentationBackground(.clear)
+            } else {
+                sheetContent
+            }
         }
         .transaction { $0.disablesAnimations = true }
         .task(id: state.token) {
@@ -200,6 +206,7 @@ private struct DialogContainer<Content: View>: View {
     }
 }
 
+@available(iOS 16, *)
 private struct HeightCappedLayout: Layout {
     let maxHeight: CGFloat
 
@@ -227,10 +234,19 @@ private struct ContentSizedScrollView<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        HeightCappedLayout(maxHeight: maxHeight) {
+        // `HeightCappedLayout` needs iOS 16 (the `Layout` protocol); below that,
+        // `.frame(maxHeight:)` on the scroll view is the closest built-in equivalent.
+        if #available(iOS 16, *) {
+            HeightCappedLayout(maxHeight: maxHeight) {
+                ScrollView(.vertical, showsIndicators: false) {
+                    content()
+                }
+            }
+        } else {
             ScrollView(.vertical, showsIndicators: false) {
                 content()
             }
+            .frame(maxHeight: maxHeight)
         }
     }
 }

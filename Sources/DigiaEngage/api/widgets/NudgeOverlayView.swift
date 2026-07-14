@@ -19,8 +19,13 @@ struct NudgeOverlayView: View {
             }
         }
         .fullScreenCover(item: sheetBinding) { nudge in
-            NudgeSheetView(presentation: nudge)
-                .presentationBackground(.clear)
+            // `.presentationBackground` needs iOS 16.4; below that, the cover's
+            // (opaque) default background is used as-is.
+            if #available(iOS 16.4, *) {
+                NudgeSheetView(presentation: nudge).presentationBackground(.clear)
+            } else {
+                NudgeSheetView(presentation: nudge)
+            }
         }
         .transaction { $0.disablesAnimations = true }
     }

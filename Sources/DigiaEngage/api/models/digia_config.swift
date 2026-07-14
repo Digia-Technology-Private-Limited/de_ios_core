@@ -13,11 +13,14 @@ public enum DigiaEnvironment: Sendable, Equatable {
 
 public struct DigiaNetworkConfiguration: Sendable, Equatable {
     public let defaultHeaders: [String: String]
-    public let timeout: Duration
+    /// Seconds. `Duration` (iOS 16+) would raise this type's floor for every
+    /// consumer of `DigiaConfig`; `TimeInterval` keeps it representable down to
+    /// the SDK's iOS 15 minimum.
+    public let timeout: TimeInterval
 
     public init(
         defaultHeaders: [String: String] = [:],
-        timeout: Duration = .seconds(30)
+        timeout: TimeInterval = 30
     ) {
         self.defaultHeaders = defaultHeaders
         self.timeout = timeout
