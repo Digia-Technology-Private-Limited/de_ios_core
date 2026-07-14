@@ -137,6 +137,9 @@ struct NudgeRichText: UIViewRepresentable {
         textView.invalidateIntrinsicContentSize()
     }
 
+    // This `UIViewRepresentable` sizing hook needs iOS 16; below that, SwiftUI falls
+    // back to the view's intrinsic content size (set via `setContentHuggingPriority` above).
+    @available(iOS 16, *)
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         let width = proposal.width ?? UIView.layoutFittingExpandedSize.width
         let fit = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))

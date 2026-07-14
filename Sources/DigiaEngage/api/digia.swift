@@ -2,19 +2,28 @@ import Foundation
 
 @MainActor
 public enum Digia {
-    /// Initializes the Digia SDK.
+    /// Initializes the Digia SDK. No-ops below iOS 17 — the SDUI rendering layer
+    /// requires APIs (`Layout`, newer `SwiftUI` scroll/animation modifiers) that
+    /// only exist from iOS 17 onward.
     public static func initialize(_ config: DigiaConfig) async throws {
+        guard #available(iOS 17, *) else { return }
         try await SDKInstance.shared.initialize(config)
     }
 
+    /// No-ops below iOS 17 (see `initialize`).
     public static func register(_ plugin: DigiaCEPPlugin) {
+        guard #available(iOS 17, *) else { return }
         SDKInstance.shared.register(plugin)
     }
 
     /// RN-only: hand native the same getCampaigns response JS already fetched, so
     /// native doesn't also fetch it. Call once after `initialize` when the config's
     /// `wrapperBinding` is `"react_native"`.
+    ///
+    /// No-ops below iOS 17 (see `initialize`) — this bypasses `initialize`'s own
+    /// state guard, so it needs the same OS check independently.
     public static func populateCampaigns(_ campaignsJson: String) {
+        guard #available(iOS 17, *) else { return }
         SDKInstance.shared.populateCampaigns(campaignsJson)
     }
 

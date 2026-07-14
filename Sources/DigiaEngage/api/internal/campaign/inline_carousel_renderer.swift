@@ -48,9 +48,15 @@ private struct InlineCarouselView: View {
     }
 
     var body: some View {
+        // The peek-scroll/infinite-loop/autoplay mechanic below is built entirely on
+        // iOS 17 view-aligned scrolling APIs (`scrollTargetLayout`, `scrollPosition`,
+        // `scrollTargetBehavior(.viewAligned)`, `safeAreaPadding`); there's no small
+        // native substitute, so below iOS 17 this renders nothing (unreachable in
+        // practice — `Digia.initialize`/`populateCampaigns` no-op below iOS 17, so
+        // no campaign trigger ever reaches this view on those OS versions).
         if items.isEmpty {
             EmptyView()
-        } else {
+        } else if #available(iOS 17, *) {
             VStack(spacing: 0) {
                 // SwiftUI's paged `TabView` can only show one full-width page at a time, so
                 // `viewportFraction` (peeking neighbor slides, matching Flutter's
@@ -155,6 +161,8 @@ private struct InlineCarouselView: View {
                     .padding(.top, 8)
                 }
             }
+        } else {
+            EmptyView()
         }
     }
 
