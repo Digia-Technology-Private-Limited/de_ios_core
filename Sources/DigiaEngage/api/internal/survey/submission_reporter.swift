@@ -8,6 +8,7 @@ import UIKit
 struct SurveySubmissionReporter {
     let config: DigiaConfig
 
+    @MainActor
     func report(
         campaignId: String,
         survey: SurveyConfigModel,
@@ -21,7 +22,8 @@ struct SurveySubmissionReporter {
             startedAt: startedAt,
             now: Date()
         )
-        Task.detached { await Self.post(config: config, deviceId: Self.deviceId(), body: body) }
+        let deviceId = Self.deviceId()
+        Task.detached { await Self.post(config: config, deviceId: deviceId, body: body) }
     }
 
     // MARK: - Networking
@@ -49,6 +51,7 @@ struct SurveySubmissionReporter {
         URL(string: DigiaEndpoints.submission)
     }
 
+    @MainActor
     private static func deviceId() -> String {
         let key = "digia_engage_device_id"
         if let saved = UserDefaults.standard.string(forKey: key), !saved.isEmpty {
