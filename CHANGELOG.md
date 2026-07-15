@@ -2,6 +2,14 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.5.0] - 2026-07-15
+
+### New Features
+- Added host action handlers: hosts can now intercept the actions authored in Digia Engage — custom key-value actions, deep links, and external URL opens — and run their own code instead of the SDK's default. Register them up front via `DigiaConfig(actionHandlers:)`, or swap them at runtime with `Digia.setCustomKVHandler(_:)`, `setDeepLinkHandler(_:)`, and `setOpenURLHandler(_:)`; passing `nil` restores the SDK default (deep links and URLs open natively, custom key-value is a no-op). This also introduces custom key-value as a new action type campaigns can trigger.
+
+### Bug Fixes
+- Fixed the configured font family not being applied to all campaign text: guide overlays, story CTA buttons, survey text, and nudge placeholder/error text previously rendered in the system font, and now use the SDK's configured font — including UIKit-rendered rich nudge title and subtitle text.
+
 ## [3.4.0] - 2026-07-15
 
 ### New Features

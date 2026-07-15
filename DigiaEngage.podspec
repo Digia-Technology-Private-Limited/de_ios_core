@@ -13,7 +13,7 @@
 
 Pod::Spec.new do |s|
   s.name             = 'DigiaEngage'
-  s.version          = '3.4.0'
+  s.version          = '3.5.0'
   s.summary          = 'Digia Engage iOS SDK — SDUI native rendering layer.'
   s.homepage         = 'https://github.com/Digia-Technology-Private-Limited/digia_engage_iOS'
   s.license          = { :type => 'BUSL-1.1', :file => 'LICENSE' }
