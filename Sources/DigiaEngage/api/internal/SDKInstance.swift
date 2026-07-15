@@ -66,6 +66,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         controller.onAction = { [weak self] actionType, url, payload in
             self?.activePlugin?.notifyAction(actionType: actionType, url: url, payload: payload) ?? false
         }
+        hostActionExecutor.setLegacyActionHandler { [weak self] actionType, url in
+            guard let self, let payload = controller.activeNudge?.payload else { return false }
+            return controller.onAction?(actionType, url, payload) ?? false
+        }
     }
 
     func initialize(_ config: DigiaConfig) async throws {

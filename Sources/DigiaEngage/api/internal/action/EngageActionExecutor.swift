@@ -85,6 +85,7 @@ final class HostActionExecutor {
     private var customKVHandler: CustomKVHandler?
     private var deepLinkHandler: DeepLinkHandler?
     private var openURLHandler: OpenURLHandler?
+    private var legacyActionHandler: (String, String) -> Bool = { _, _ in false }
     private let openURL: (String) -> Void
 
     init(openURL: @escaping (String) -> Void = {
@@ -116,15 +117,27 @@ final class HostActionExecutor {
         openURLHandler = handler
     }
 
+    func setLegacyActionHandler(_ handler: @escaping (String, String) -> Bool) {
+        legacyActionHandler = handler
+    }
+
     @discardableResult
     func execute(_ action: EngageAction) throws -> Bool {
         switch action {
         case .customKV(let payload):
             try customKVHandler?(payload)
         case .openDeeplink(let url):
-            if let deepLinkHandler { try deepLinkHandler(url) } else { openURL(url) }
+            if let deepLinkHandler {
+                try deepLinkHandler(url)
+            } else if !legacyActionHandler("deep_link", url) {
+                openURL(url)
+            }
         case .openUrl(let url):
-            if let openURLHandler { try openURLHandler(url) } else { openURL(url) }
+            if let openURLHandler {
+                try openURLHandler(url)
+            } else if !legacyActionHandler("open_url", url) {
+                openURL(url)
+            }
         default:
             return false
         }

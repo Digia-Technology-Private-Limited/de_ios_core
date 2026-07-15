@@ -277,18 +277,15 @@ struct EngageActionParserTests {
         ]))
     }
 
-    @Test("parses canonical and legacy Custom KV structures")
+    @Test("parses only canonical Custom KV structures")
     func parsesCustomKVStructures() {
         let actions = EngageActionParser().parse(onClick([
             ["type": "Action.customKV", "data": ["payload": ["canonical": "yes"]]],
-            ["type": "customKV", "data": ["value": ["legacy": "type"]]],
-            ["type": "Action.customKV", "data": ["value": ["legacy": "location"]]],
+            ["type": "customKV", "data": ["payload": ["ignored": "yes"]]],
         ]))
 
         #expect(actions == [
             .customKV(["canonical": "yes"]),
-            .customKV(["legacy": "type"]),
-            .customKV(["legacy": "location"]),
         ])
     }
 

@@ -17,7 +17,7 @@ enum EngageAction: Equatable {
         case .openDeeplink: "deeplink"
         case .copyToClipboard: "copy"
         case .share: "share"
-        case .customKV: "custom_kv"
+        case .customKV: "customKV"
         case .dismiss: "dismiss"
         case .next: "next"
         case .previous: "previous"
@@ -80,18 +80,18 @@ struct EngageActionParser {
         case "Action.next", "next": return .next
         case "Action.previous", "previous", "back", "prev": return .previous
         case "Action.requestReview", "requestReview", "request_review": return .requestReview
-        case "Action.customKV", "customKV", "custom_kv":
-            guard let raw = data["payload"] as? [String: Any]
-                ?? data["value"] as? [String: Any]
-                ?? step["payload"] as? [String: Any]
-                ?? step["value"] as? [String: Any]
-            else { return nil }
-            let payload = raw.reduce(into: [String: String]()) { result, entry in
-                if let value = entry.value as? String { result[entry.key] = value }
-            }
-            return payload.isEmpty ? nil : .customKV(payload)
+        case "Action.customKV":
+            guard let raw = data["payload"] as? [String: Any] else { return nil }
+            return customKV(from: raw)
         default: return nil
         }
+    }
+
+    private func customKV(from raw: [String: Any]) -> EngageAction? {
+        let payload = raw.reduce(into: [String: String]()) { result, entry in
+            if let value = entry.value as? String { result[entry.key] = value }
+        }
+        return payload.isEmpty ? nil : .customKV(payload)
     }
 
     private func text(from data: [String: Any]) -> String? {

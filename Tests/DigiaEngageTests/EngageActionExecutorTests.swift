@@ -18,6 +18,39 @@ struct EngageActionExecutorTests {
         #expect(fallbacks.isEmpty)
     }
 
+    @Test("legacy handler runs before URL fallback")
+    func legacyHandlerRunsBeforeFallback() throws {
+        var legacy: [String] = []
+        var fallbacks: [String] = []
+        let executor = HostActionExecutor(openURL: { fallbacks.append($0) })
+        executor.setLegacyActionHandler { type, url in
+            legacy.append("\(type):\(url)")
+            return true
+        }
+
+        try executor.execute(.openUrl("https://digia.tech"))
+
+        #expect(legacy == ["open_url:https://digia.tech"])
+        #expect(fallbacks.isEmpty)
+    }
+
+    @Test("typed handler takes precedence over legacy handler")
+    func typedHandlerPrecedesLegacyHandler() throws {
+        var legacyCalls = 0
+        var handled: [String] = []
+        let executor = HostActionExecutor()
+        executor.setLegacyActionHandler { _, _ in
+            legacyCalls += 1
+            return true
+        }
+        executor.configure(DigiaActionHandlers(deepLink: { handled.append($0) }))
+
+        try executor.execute(.openDeeplink("medihubrn://cart"))
+
+        #expect(handled == ["medihubrn://cart"])
+        #expect(legacyCalls == 0)
+    }
+
     @Test("clearing host handler restores URL fallback for future actions")
     func clearingHandlerRestoresFallback() throws {
         var handled: [String] = []
