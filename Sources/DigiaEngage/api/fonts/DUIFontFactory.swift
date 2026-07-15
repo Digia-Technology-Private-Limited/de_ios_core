@@ -24,6 +24,16 @@ public protocol DUIFontFactory {
 
     /// Returns a SwiftUI font for the given family, size, weight and style.
     func getFont(_ fontFamily: String, size: Double, weight: Font.Weight, italic: Bool) -> Font
+
+    /// Returns a UIKit font for the given size, weight and style.
+    ///
+    /// UIKit-backed renderers (including rich nudge title and subtitle text) call
+    /// this requirement through the font-factory existential. The default
+    /// implementation below keeps existing custom factories source-compatible.
+    func getDefaultUIFont(size: Double, weight: Font.Weight, italic: Bool) -> UIFont
+
+    /// Returns a UIKit font for the requested family, size, weight and style.
+    func getUIFont(_ fontFamily: String, size: Double, weight: Font.Weight, italic: Bool) -> UIFont
 }
 
 public extension DUIFontFactory {
