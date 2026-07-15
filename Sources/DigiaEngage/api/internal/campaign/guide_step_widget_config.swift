@@ -24,6 +24,7 @@ struct GuideAction: Equatable {
     let backgroundColor: String
     let textColor: String
     let cornerRadius: Double
+    let actions: [EngageAction]
 }
 
 struct ArrowConfig: Equatable {
@@ -184,15 +185,25 @@ struct GuideStepWidgetConfig: Equatable {
             guard let obj = element as? [String: Any] else { continue }
             // Support both "action_type" (new schema) and "type" (legacy).
             let typeStr = obj.nonBlankString("action_type") ?? obj.string("type", default: "dismiss")
+            let actionType = GuideActionType.parse(typeStr)
+            let onClick = obj.object("onClick")
+            let legacyAction: EngageAction = switch typeStr.lowercased() {
+            case "next": .next
+            case "prev", "back", "previous": .previous
+            case "open_url": obj.nonBlankString("url").map(EngageAction.openUrl) ?? .dismiss
+            case "deep_link", "deeplink": obj.nonBlankString("url").map(EngageAction.openDeeplink) ?? .dismiss
+            default: .dismiss
+            }
             actions.append(
                 GuideAction(
                     id: obj.string("id", default: "btn_\(index)"),
                     label: obj.string("label"),
                     style: obj.string("style", default: "filled"),
-                    actionType: GuideActionType.parse(typeStr),
+                    actionType: actionType,
                     backgroundColor: color(obj.string("background_color"), default: defaultButtonBackground),
                     textColor: color(obj.string("text_color"), default: defaultButtonText),
-                    cornerRadius: obj.double("corner_radius", default: 8)
+                    cornerRadius: obj.double("corner_radius", default: 8),
+                    actions: onClick.map { EngageActionParser().parse($0) } ?? [legacyAction]
                 )
             )
         }

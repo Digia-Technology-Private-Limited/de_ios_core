@@ -176,13 +176,13 @@ struct DigiaEngageTests {
     }
 }
 
-@Suite("NudgeActionParser")
-struct NudgeActionParserTests {
+@Suite("EngageActionParser")
+struct EngageActionParserTests {
     private func onClick(_ steps: [[String: Any]]) -> [String: Any] { ["steps": steps] }
 
     @Test("parses open url and deeplink by launch mode")
     func parsesUrls() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.openUrl", "data": ["url": "https://x/y", "launchMode": "externalApplication"]],
             ["type": "Action.openUrl", "data": ["url": "app://path", "launchMode": "platformDefault"]],
         ]))
@@ -191,7 +191,7 @@ struct NudgeActionParserTests {
 
     @Test("parses copy to clipboard from message")
     func parsesCopy() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.copyToClipBoard", "data": ["message": "PROMO50"]],
         ]))
         #expect(actions == [.copyToClipboard("PROMO50")])
@@ -199,7 +199,7 @@ struct NudgeActionParserTests {
 
     @Test("parses share from message")
     func parsesShare() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.share", "data": ["message": "check this out"]],
         ]))
         #expect(actions == [.share("check this out")])
@@ -207,10 +207,10 @@ struct NudgeActionParserTests {
 
     @Test("text payload falls back to text then value keys")
     func textFallbacks() {
-        let fromText = NudgeActionParser().parse(onClick([
+        let fromText = EngageActionParser().parse(onClick([
             ["type": "Action.copyToClipBoard", "data": ["text": "A"]],
         ]))
-        let fromValue = NudgeActionParser().parse(onClick([
+        let fromValue = EngageActionParser().parse(onClick([
             ["type": "Action.share", "data": ["value": "B"]],
         ]))
         #expect(fromText == [.copyToClipboard("A")])
@@ -219,7 +219,7 @@ struct NudgeActionParserTests {
 
     @Test("blank or missing text drops copy and share")
     func dropsBlank() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.copyToClipBoard", "data": [:]],
             ["type": "Action.share", "data": ["message": ""]],
         ]))
@@ -228,11 +228,118 @@ struct NudgeActionParserTests {
 
     @Test("dismiss for hide bottom sheet and dismiss dialog")
     func parsesDismiss() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.hideBottomSheet"],
             ["type": "Action.dismissDialog"],
         ]))
         #expect(actions == [.dismiss, .dismiss])
+    }
+
+    @Test("analytics classifies share and copy explicitly")
+    func analyticsTypes() {
+        #expect(EngageAction.share("message").analyticsType == "share")
+        #expect(EngageAction.copyToClipboard("message").analyticsType == "copy")
+    }
+
+    @Test("Custom KV keeps only strings and resolves variables in keys and values")
+    func customKVResolvesVariables() throws {
+        let parsed = EngageActionParser().parse([
+            "steps": [[
+                "type": "Action.customKV",
+                "data": ["payload": [
+                    "redirectionType": "{{ destination_type }}",
+                    "{{ dynamic_key }}": "dynamic value",
+                    "redirectionParams": "{\"redirectionUrl\":\"{{ route }}\"}",
+                    "empty": "",
+                    "ignoredNumber": 42,
+                ]],
+            ]],
+        ])
+        let action = try #require(parsed.first)
+        #expect(action == .customKV([
+            "redirectionType": "{{ destination_type }}",
+            "{{ dynamic_key }}": "dynamic value",
+            "redirectionParams": "{\"redirectionUrl\":\"{{ route }}\"}",
+            "empty": "",
+        ]))
+        #expect(action.resolved(with: VariableContext(
+            values: [
+                "destination_type": "SCREEN",
+                "dynamic_key": "resolvedKey",
+                "route": "brands",
+            ],
+            types: [:]
+        )) == .customKV([
+            "redirectionType": "SCREEN",
+            "resolvedKey": "dynamic value",
+            "redirectionParams": "{\"redirectionUrl\":\"brands\"}",
+            "empty": "",
+        ]))
+    }
+
+    @Test("parses only canonical Custom KV structures")
+    func parsesCustomKVStructures() {
+        let actions = EngageActionParser().parse(onClick([
+            ["type": "Action.customKV", "data": ["payload": ["canonical": "yes"]]],
+            ["type": "customKV", "data": ["payload": ["ignored": "yes"]]],
+        ]))
+
+        #expect(actions == [
+            .customKV(["canonical": "yes"]),
+        ])
+    }
+
+    @Test("Story parses legacy CTA directly into Engage actions")
+    func storyParsesLegacyActions() throws {
+        let item = try #require(StoryItemConfig.fromJson([
+            "type": "image",
+            "url": "https://example.com/story.png",
+            "ctaAction": ["type": "deepLink", "url": "app://legacy"],
+        ]))
+
+        #expect(item.actions == [.openDeeplink("app://legacy"), .dismiss])
+    }
+
+    @Test("Story explicit empty flow does not fall back to legacy CTA")
+    func storyEmptyCanonicalFlowWins() throws {
+        let item = try #require(StoryItemConfig.fromJson([
+            "type": "image",
+            "url": "https://example.com/story.png",
+            "ctaAction": [
+                "type": "deepLink",
+                "url": "app://legacy",
+                "steps": [],
+            ],
+        ]))
+
+        #expect(item.actions.isEmpty)
+    }
+
+    @Test("Carousel legacy deep link is parsed into Engage actions")
+    func carouselParsesLegacyActions() throws {
+        let config = try #require(InlineCarouselConfig.fromJson([
+            "slotKey": "home",
+            "items": [[
+                "imageUrl": "https://example.com/card.png",
+                "deepLink": "app://legacy",
+            ]],
+        ]))
+
+        #expect(config.items.first?.actions == [.openDeeplink("app://legacy")])
+    }
+
+    @Test("Guide explicit empty flow does not fall back to legacy action")
+    func guideEmptyCanonicalFlowWins() throws {
+        let config = GuideStepWidgetConfig.fromJson([
+            "actions": [[
+                "id": "continue",
+                "type": "NEXT",
+                "label": "Continue",
+                "onClick": ["steps": []],
+            ]],
+        ])
+
+        #expect(config.actions.first?.actions.isEmpty == true)
     }
 }
 

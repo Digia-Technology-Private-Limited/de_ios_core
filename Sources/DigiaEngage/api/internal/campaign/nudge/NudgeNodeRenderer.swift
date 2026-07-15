@@ -2,7 +2,6 @@ import AVFoundation
 import AVKit
 @_implementationOnly import Lottie
 @_implementationOnly import SDWebImageSwiftUI
-import StoreKit
 import SwiftUI
 import UIKit
 
@@ -255,79 +254,22 @@ private struct NudgeButtonView: View {
     }
 
     private func handleTap() {
-        // A primary-button click is a Digia-only engagement signal (matches
-        // Android's NudgeNodeRenderer) — it is not forwarded to the CEP plugin.
         if node.isPrimary {
-            let action = node.actions.first
+            let action = node.actions.first?.resolved(with: variables)
             SDKInstance.shared.emitNudgeClick(
                 elementId: "cta_primary",
                 ctaLabel: node.label,
-                actionType: Self.actionType(for: action),
-                actionUrl: Self.actionUrl(for: action),
+                actionType: action?.analyticsType,
+                actionUrl: action?.analyticsURL,
                 ctaRole: "primary"
             )
         }
-        for action in node.actions {
-            switch action {
-            case .dismiss:
-                onDismiss()
-            case .openUrl(let url), .openDeeplink(let url):
-                // Consult the CEP plugin first; only fall back to a native open
-                // when no plugin handled the action (mirrors Android).
-                let payload = SDKInstance.shared.controller.activeNudge?.payload
-                let handled =
-                    payload.flatMap {
-                        SDKInstance.shared.controller.onAction?("deep_link", url, $0)
-                    } ?? false
-                if !handled, let u = URL(string: url) {
-                    UIApplication.shared.open(u)
-                }
-            case .copyToClipboard(let text):
-                UIPasteboard.general.string = interpolate(text, context: variables)
-            case .share(let text):
-                let activity = UIActivityViewController(
-                    activityItems: [interpolate(text, context: variables)],
-                    applicationActivities: nil
-                )
-                ViewControllerUtil.present(activity)
-            case .requestReview:
-                requestAppStoreReview()
-            }
-        }
-    }
-
-    /// Requests the App Store review prompt (`AppStore.requestReview`). Fire-and-forget
-    /// by design: the API is quota-limited and never reports whether the prompt was
-    /// shown or how the user rated, so a missing window scene is only logged.
-    private func requestAppStoreReview() {
-        guard let scene = ViewControllerUtil.findWindowScene() else {
-            DigiaLog.warning("[NudgeButtonView] requestReview: no window scene; skipping")
-            return
-        }
-        // `AppStore.requestReview(in:)` needs iOS 16; below that, the older
-        // `SKStoreReviewController` entry point is the built-in equivalent.
-        if #available(iOS 16, *) {
-            Task { await AppStore.requestReview(in: scene) }
-        } else {
-            SKStoreReviewController.requestReview(in: scene)
-        }
-    }
-
-    private static func actionType(for action: NudgeAction?) -> String? {
-        switch action {
-        case .openUrl: return "url"
-        case .openDeeplink: return "deeplink"
-        case .dismiss: return "dismiss"
-        case .copyToClipboard, .share: return "custom"
-        case .requestReview: return "request_review"
-        case nil: return nil
-        }
-    }
-
-    private static func actionUrl(for action: NudgeAction?) -> String? {
-        switch action {
-        case .openUrl(let url), .openDeeplink(let url): return url
-        default: return nil
+        Task {
+            await SDKInstance.shared.executeActionFlow(
+                node.actions,
+                variables: variables,
+                localActionExecutor: LocalActionExecutor(dismiss: onDismiss)
+            )
         }
     }
 }

@@ -24,9 +24,15 @@ struct StoryItemConfig: Equatable {
     var ctaBackgroundColor: String = "#4945FF"
     var ctaCornerRadius: Int = 8
     var ctaAction: StoryCtaAction?
+    var actions: [EngageAction] = []
 
     static func fromJson(_ json: [String: Any]) -> StoryItemConfig? {
         guard let url = json.nonBlankString("url") else { return nil }
+        let ctaActionJson = json.object("ctaAction")
+        let actions = ctaActionJson?["steps"] != nil
+            ? EngageActionParser().parse(ctaActionJson)
+            : parseLegacyStoryActions(ctaActionJson)
+        let ctaAction = ctaActionJson.map(StoryCtaAction.fromJson)
         return StoryItemConfig(
             type: json.string("type", default: "image"),
             url: url,
@@ -36,8 +42,21 @@ struct StoryItemConfig: Equatable {
             ctaTextColor: json.nonBlankString("ctaTextColor") ?? "#FFFFFF",
             ctaBackgroundColor: json.nonBlankString("ctaBackgroundColor") ?? "#4945FF",
             ctaCornerRadius: json.int("ctaCornerRadius", default: 8),
-            ctaAction: json.object("ctaAction").map { StoryCtaAction.fromJson($0) }
+            ctaAction: ctaAction,
+            actions: actions
         )
+    }
+
+    private static func parseLegacyStoryActions(
+        _ ctaAction: [String: Any]?
+    ) -> [EngageAction] {
+        let type = ctaAction?.string("type", default: "dismiss") ?? "dismiss"
+        let url = ctaAction?.nonBlankString("url")
+        return switch type {
+        case "deepLink": [url.map(EngageAction.openDeeplink), .dismiss].compactMap { $0 }
+        case "openUrl": [url.map(EngageAction.openUrl), .dismiss].compactMap { $0 }
+        default: [.dismiss]
+        }
     }
 }
 

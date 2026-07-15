@@ -175,6 +175,44 @@ struct AnalyticsServiceTests {
         #expect(entries[0].payload["element_id"] == nil)
     }
 
+    @Test("click analytics preserve action URL")
+    func clickAnalyticsPreserveActionURL() {
+        let service = makeService()
+        let payload = buildPayload("test")
+        let urls = [
+            "https://digia.tech/nudge",
+            "https://digia.tech/guide",
+            "medihubrn://carousel-step",
+            "medihubrn://carousel",
+            "https://digia.tech/story",
+        ]
+
+        service.capture(
+            NudgeEvent.Clicked(actionType: "url", actionUrl: urls[0]),
+            payload: payload)
+        service.capture(
+            GuideEvent.StepClicked(
+                itemIndex: 1, actionType: "url", actionUrl: urls[1]),
+            payload: payload)
+        service.capture(
+            CarouselEvent.StepClicked(
+                itemIndex: 1, actionType: "deeplink", actionUrl: urls[2]),
+            payload: payload)
+        service.capture(
+            CarouselEvent.Clicked(actionType: "deeplink", actionUrl: urls[3]),
+            payload: payload)
+        service.capture(
+            StoriesEvent.StepClicked(
+                itemIndex: 1, actionType: "url", actionUrl: urls[4]),
+            payload: payload)
+
+        for (index, entry) in service.queue.peek(maxCount: 10).enumerated() {
+            let properties = entry.payload["properties"] as? [String: Any]
+            #expect(properties?["action_type"] != nil)
+            #expect(properties?["action_url"] as? String == urls[index])
+        }
+    }
+
     @Test("batch threshold triggers immediate flush")
     func batchThresholdTriggersFlush() async throws {
         let fakeSender = FakeAnalyticsSender()

@@ -169,14 +169,19 @@ private struct InlineCarouselView: View {
     /// An item was tapped: record the click (1-based index) and open its deep link.
     private func handleTap(_ realIndex: Int) {
         let item = items[realIndex]
-        let link = item.deepLink.map { interpolate($0, context: variables) }
+        let actions = item.actions
+        let reportedAction = actions.first?.resolved(with: variables)
         SDKInstance.shared.reportCarouselStepClicked(
             payload: payload,
             itemIndex: realIndex + 1,
-            actionUrl: link
+            action: reportedAction
         )
-        if let link, let url = URL(string: link) {
-            UIApplication.shared.open(url)
+        Task {
+            await SDKInstance.shared.executeActionFlow(
+                actions,
+                variables: variables,
+                localActionExecutor: LocalActionExecutor()
+            )
         }
     }
 

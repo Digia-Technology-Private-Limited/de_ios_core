@@ -171,9 +171,23 @@ private struct GuideStepOverlay: View {
     }
 
     private func handleAction(_ action: GuideAction) {
-        switch action.actionType {
-        case .dismiss, .next: onAdvance()
-        case .prev: break
+        guard let state = SDKInstance.shared.guideOrchestrator.state else { return }
+        let reportedAction = action.actions.first?.resolved(with: variables)
+        SDKInstance.shared.reportGuideStepClicked(
+            actionType: reportedAction?.analyticsType,
+            actionUrl: reportedAction?.analyticsURL,
+            ctaLabel: interpolate(action.label, context: variables)
+        )
+        Task {
+            await SDKInstance.shared.executeActionFlow(
+                action.actions,
+                variables: variables,
+                localActionExecutor: LocalActionExecutor(
+                    dismiss: onDismiss,
+                    next: onAdvance,
+                    previous: { SDKInstance.shared.previousGuide() }
+                )
+            )
         }
     }
 }
