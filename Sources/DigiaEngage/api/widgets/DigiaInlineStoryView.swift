@@ -375,12 +375,14 @@ private struct InlineStoryOverlayContent: View {
 
     private func handleCTA(_ item: StoryItemConfig) {
         let actions = item.actions
+        let reportedAction = actions.first?.resolved(with: variables)
         let label = item.ctaText.map { interpolate($0, context: variables) }
         SDKInstance.shared.reportStoryStepClicked(
             state.payload,
             itemIndex: currentIndex + 1,
             ctaLabel: label,
-            actionType: actions.first?.analyticsType
+            actionType: reportedAction?.analyticsType,
+            actionUrl: reportedAction?.analyticsURL
         )
         Task {
             await SDKInstance.shared.executeActionFlow(

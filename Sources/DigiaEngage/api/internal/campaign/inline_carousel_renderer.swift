@@ -170,10 +170,11 @@ private struct InlineCarouselView: View {
     private func handleTap(_ realIndex: Int) {
         let item = items[realIndex]
         let actions = item.actions
+        let reportedAction = actions.first?.resolved(with: variables)
         SDKInstance.shared.reportCarouselStepClicked(
             payload: payload,
             itemIndex: realIndex + 1,
-            action: actions.first
+            action: reportedAction
         )
         Task {
             await SDKInstance.shared.executeActionFlow(

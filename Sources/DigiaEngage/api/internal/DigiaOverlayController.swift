@@ -12,6 +12,8 @@ final class DigiaOverlayController: ObservableObject {
     @Published private(set) var activeNudge: DigiaNudgePresentation?
     @Published private(set) var activeStoryOverlay: InlineStoryOverlayState?
 
+    var onAction: ((_ actionType: String, _ url: String, _ payload: CEPTriggerPayload) -> Bool)?
+
     /// Sets the nudge state. Impression/dismissal analytics are emitted by
     /// ``SDKInstance`` (`reportNudgeImpression` / `markNudgeDismissed`), not here.
     func showNudge(_ presentation: DigiaNudgePresentation) {

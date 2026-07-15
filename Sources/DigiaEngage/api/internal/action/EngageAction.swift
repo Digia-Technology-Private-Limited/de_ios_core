@@ -25,6 +25,13 @@ enum EngageAction: Equatable {
         }
     }
 
+    var analyticsURL: String? {
+        switch self {
+        case .openUrl(let url), .openDeeplink(let url): url
+        default: nil
+        }
+    }
+
     func resolved(with context: VariableContext?) -> EngageAction {
         switch self {
         case .openUrl(let value): .openUrl(interpolate(value, context: context))

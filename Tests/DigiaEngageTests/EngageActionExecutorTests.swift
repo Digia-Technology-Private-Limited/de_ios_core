@@ -43,6 +43,64 @@ struct EngageActionExecutorTests {
         #expect(fallbacks.isEmpty)
     }
 
+    @Test("clearing all handlers restores URL fallbacks and Custom KV no-op")
+    func clearingAllHandlersRestoresDefaults() throws {
+        var handled: [String] = []
+        var fallbacks: [String] = []
+        let executor = HostActionExecutor(openURL: { fallbacks.append($0) })
+        executor.configure(DigiaActionHandlers(
+            customKV: { handled.append(String(describing: $0)) },
+            deepLink: { handled.append($0) },
+            openURL: { handled.append($0) }
+        ))
+
+        executor.clearHandlers()
+        try executor.execute(.customKV(["screen": "cart"]))
+        try executor.execute(.openDeeplink("medihubrn://cart"))
+        try executor.execute(.openUrl("https://digia.tech"))
+
+        #expect(handled.isEmpty)
+        #expect(fallbacks == ["medihubrn://cart", "https://digia.tech"])
+    }
+
+    @Test("legacy inline fields remain available beside canonical actions")
+    func legacyInlineFieldsRemainAvailable() throws {
+        let story = try #require(StoryItemConfig.fromJson([
+            "type": "image",
+            "url": "https://example.com/story.png",
+            "ctaAction": ["type": "deepLink", "url": "medihubrn://cart"],
+        ]))
+        let carousel = try #require(InlineCarouselConfig.fromJson([
+            "slotKey": "home",
+            "items": [[
+                "imageUrl": "https://example.com/card.png",
+                "deepLink": "medihubrn://cart",
+            ]],
+        ]))
+
+        #expect(story.ctaAction == StoryCtaAction(type: "deepLink", url: "medihubrn://cart"))
+        #expect(story.actions == [.openDeeplink("medihubrn://cart"), .dismiss])
+        #expect(carousel.items.first?.deepLink == "medihubrn://cart")
+        #expect(carousel.items.first?.actions == [.openDeeplink("medihubrn://cart")])
+    }
+
+    @Test("Inline Story canonical steps stay under ctaAction")
+    func inlineStoryCanonicalStepsUseCtaAction() throws {
+        let story = try #require(StoryItemConfig.fromJson([
+            "type": "image",
+            "url": "https://example.com/story.png",
+            "ctaAction": [
+                "type": "dismiss",
+                "steps": [[
+                    "type": "Action.customKV",
+                    "data": ["payload": ["screen": "cart"]],
+                ]],
+            ],
+        ]))
+
+        #expect(story.actions == [.customKV(["screen": "cart"])])
+    }
+
     @Test("local executor runs the capabilities supplied by a guide")
     func localExecutorRunsGuideCapabilities() {
         var executed: [String] = []

@@ -63,6 +63,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 getCampaign: { [weak self] key in self?.campaignStore.find(key) }
             )
         )
+        controller.onAction = { [weak self] actionType, url, payload in
+            self?.activePlugin?.notifyAction(actionType: actionType, url: url, payload: payload) ?? false
+        }
     }
 
     func initialize(_ config: DigiaConfig) async throws {
@@ -576,6 +579,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         elementId: String? = nil,
         ctaLabel: String? = nil,
         actionType: String? = nil,
+        actionUrl: String? = nil,
         ctaRole: String? = nil
     ) {
         guard let payload = controller.activeNudge?.payload else { return }
@@ -584,6 +588,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 elementId: elementId,
                 ctaLabel: ctaLabel,
                 actionType: actionType,
+                actionUrl: actionUrl,
                 ctaRole: ctaRole,
                 // ms since the nudge was viewed (peek — the nudge is still open).
                 timeToActionMs: dwellTracker.elapsedMs(payload.cepCampaignId)
@@ -636,13 +641,18 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// A carousel item (or its CTA) was tapped.
     func reportCarouselStepClicked(payload: CEPTriggerPayload, itemIndex: Int, action: EngageAction?) {
         let actionType = action?.analyticsType
+        let actionUrl = action?.analyticsURL
         // The first item tap also counts as an experience-level engagement click (once).
         events.digiaExperienceClickedOnce(
             payload: payload,
-            event: CarouselEvent.Clicked(actionType: actionType)
+            event: CarouselEvent.Clicked(actionType: actionType, actionUrl: actionUrl)
         )
         events.toDigia(
-            CarouselEvent.StepClicked(itemIndex: itemIndex, actionType: actionType),
+            CarouselEvent.StepClicked(
+                itemIndex: itemIndex,
+                actionType: actionType,
+                actionUrl: actionUrl
+            ),
             payload: payload
         )
     }
@@ -664,13 +674,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         _ payload: CEPTriggerPayload,
         itemIndex: Int,
         ctaLabel: String?,
-        actionType: String?
+        actionType: String?,
+        actionUrl: String?
     ) {
         events.toDigia(
             StoriesEvent.StepClicked(
                 itemIndex: itemIndex,
                 ctaLabel: ctaLabel,
-                actionType: actionType
+                actionType: actionType,
+                actionUrl: actionUrl
             ),
             payload: payload
         )
@@ -710,14 +722,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         guideOrchestrator.previous()
     }
 
-    func reportGuideStepClicked(actionType: String?, ctaLabel: String?) {
+    func reportGuideStepClicked(actionType: String?, actionUrl: String?, ctaLabel: String?) {
         guard let state = guideOrchestrator.state, let step = state.currentStep else { return }
         events.toDigia(
             GuideEvent.StepClicked(
                 itemIndex: state.stepIndex + 1,
                 elementId: step.anchorKey,
                 ctaLabel: ctaLabel,
-                actionType: actionType
+                actionType: actionType,
+                actionUrl: actionUrl
             ),
             payload: state.payload
         )
@@ -774,7 +787,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 itemIndex: int("step_index") ?? 0,
                 elementId: str("element_id"),
                 ctaLabel: str("cta_label"),
-                actionType: str("action_type")
+                actionType: str("action_type"),
+                actionUrl: str("action_url")
             )
         case "Digia Step Dismissed":
             return GuideEvent.StepDismissed(itemIndex: int("step_index") ?? 0)
@@ -852,7 +866,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         analyticsService = nil
         frequencyManager = nil
         config = nil
-        hostActionExecutor.configure(DigiaActionHandlers())
+        hostActionExecutor.clearHandlers()
         sdkState = .notInitialized
         isHostMounted = false
         fontFactory = DefaultFontFactory()

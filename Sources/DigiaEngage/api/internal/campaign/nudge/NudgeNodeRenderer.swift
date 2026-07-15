@@ -254,13 +254,16 @@ private struct NudgeButtonView: View {
     }
 
     private func handleTap() {
-        let action = node.actions.first
-        SDKInstance.shared.emitNudgeClick(
-            elementId: node.isPrimary ? "cta_primary" : "cta_secondary",
-            ctaLabel: node.label,
-            actionType: action?.analyticsType,
-            ctaRole: node.isPrimary ? "primary" : "secondary"
-        )
+        if node.isPrimary {
+            let action = node.actions.first?.resolved(with: variables)
+            SDKInstance.shared.emitNudgeClick(
+                elementId: "cta_primary",
+                ctaLabel: node.label,
+                actionType: action?.analyticsType,
+                actionUrl: action?.analyticsURL,
+                ctaRole: "primary"
+            )
+        }
         Task {
             await SDKInstance.shared.executeActionFlow(
                 node.actions,

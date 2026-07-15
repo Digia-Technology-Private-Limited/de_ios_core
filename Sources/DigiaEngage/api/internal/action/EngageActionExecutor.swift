@@ -56,7 +56,11 @@ final class GlobalActionExecutor {
                 DigiaLog.warning("requestReview: no window scene; skipping")
                 return
             }
-            AppStore.requestReview(in: scene)
+            if #available(iOS 16, *) {
+                AppStore.requestReview(in: scene)
+            } else {
+                SKStoreReviewController.requestReview(in: scene)
+            }
         }
     ) {
         self.copy = copy
@@ -94,6 +98,10 @@ final class HostActionExecutor {
         customKVHandler = handlers.customKV
         deepLinkHandler = handlers.deepLink
         openURLHandler = handlers.openURL
+    }
+
+    func clearHandlers() {
+        configure(DigiaActionHandlers())
     }
 
     func setCustomKVHandler(_ handler: CustomKVHandler?) {

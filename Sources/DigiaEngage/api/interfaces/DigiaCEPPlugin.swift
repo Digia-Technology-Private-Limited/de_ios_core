@@ -18,6 +18,7 @@ public protocol DigiaCEPPlugin: AnyObject {
     /// Releases a placeholder previously reserved by `registerPlaceholder`. Defaults to a no-op.
     func deregisterPlaceholder(_ id: Int)
     func notifyEvent(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload)
+    func notifyAction(actionType: String, url: String, payload: CEPTriggerPayload) -> Bool
     func healthCheck() -> DiagnosticReport
     func teardown()
 }
@@ -25,4 +26,5 @@ public protocol DigiaCEPPlugin: AnyObject {
 extension DigiaCEPPlugin {
     public func registerPlaceholder(propertyID: String) -> Int? { nil }
     public func deregisterPlaceholder(_ id: Int) {}
+    public func notifyAction(actionType: String, url: String, payload: CEPTriggerPayload) -> Bool { false }
 }

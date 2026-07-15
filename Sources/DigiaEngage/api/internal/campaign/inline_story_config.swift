@@ -2,6 +2,18 @@ import Foundation
 
 // Ported from Android `InlineStoryConfig.kt`.
 
+struct StoryCtaAction: Equatable {
+    let type: String
+    let url: String?
+
+    static func fromJson(_ json: [String: Any]) -> StoryCtaAction {
+        StoryCtaAction(
+            type: json.string("type", default: "dismiss"),
+            url: json.nonBlankString("url")
+        )
+    }
+}
+
 struct StoryItemConfig: Equatable {
     let type: String
     let url: String
@@ -11,12 +23,16 @@ struct StoryItemConfig: Equatable {
     var ctaTextColor: String = "#FFFFFF"
     var ctaBackgroundColor: String = "#4945FF"
     var ctaCornerRadius: Int = 8
+    var ctaAction: StoryCtaAction?
     var actions: [EngageAction] = []
 
     static func fromJson(_ json: [String: Any]) -> StoryItemConfig? {
         guard let url = json.nonBlankString("url") else { return nil }
-        let actions = json.object("onClick").map { EngageActionParser().parse($0) }
-            ?? parseLegacyStoryActions(json.object("ctaAction"))
+        let ctaActionJson = json.object("ctaAction")
+        let actions = ctaActionJson?["steps"] != nil
+            ? EngageActionParser().parse(ctaActionJson)
+            : parseLegacyStoryActions(ctaActionJson)
+        let ctaAction = ctaActionJson.map(StoryCtaAction.fromJson)
         return StoryItemConfig(
             type: json.string("type", default: "image"),
             url: url,
@@ -26,6 +42,7 @@ struct StoryItemConfig: Equatable {
             ctaTextColor: json.nonBlankString("ctaTextColor") ?? "#FFFFFF",
             ctaBackgroundColor: json.nonBlankString("ctaBackgroundColor") ?? "#4945FF",
             ctaCornerRadius: json.int("ctaCornerRadius", default: 8),
+            ctaAction: ctaAction,
             actions: actions
         )
     }

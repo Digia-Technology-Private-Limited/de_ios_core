@@ -172,8 +172,10 @@ private struct GuideStepOverlay: View {
 
     private func handleAction(_ action: GuideAction) {
         guard let state = SDKInstance.shared.guideOrchestrator.state else { return }
+        let reportedAction = action.actions.first?.resolved(with: variables)
         SDKInstance.shared.reportGuideStepClicked(
-            actionType: action.actions.first?.analyticsType,
+            actionType: reportedAction?.analyticsType,
+            actionUrl: reportedAction?.analyticsURL,
             ctaLabel: interpolate(action.label, context: variables)
         )
         Task {

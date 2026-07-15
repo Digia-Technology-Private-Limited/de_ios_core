@@ -308,8 +308,11 @@ struct EngageActionParserTests {
         let item = try #require(StoryItemConfig.fromJson([
             "type": "image",
             "url": "https://example.com/story.png",
-            "ctaAction": ["type": "deepLink", "url": "app://legacy"],
-            "onClick": ["steps": []],
+            "ctaAction": [
+                "type": "deepLink",
+                "url": "app://legacy",
+                "steps": [],
+            ],
         ]))
 
         #expect(item.actions.isEmpty)

@@ -4,6 +4,7 @@ import Foundation
 
 struct CarouselItem: Equatable {
     let imageUrl: String
+    let deepLink: String?
     /// Loading placeholder shown while `imageUrl` loads; `nil` when none.
     let placeholder: ImagePlaceholder?
     let actions: [EngageAction]
@@ -46,6 +47,7 @@ struct InlineCarouselConfig: Equatable {
                 ?? deepLink.map { [.openDeeplink($0)] } ?? []
             return CarouselItem(
                 imageUrl: imageUrl,
+                deepLink: deepLink,
                 placeholder: ImagePlaceholder.from(itemJson.object("placeholder")),
                 actions: actions
             )
