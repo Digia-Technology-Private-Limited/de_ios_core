@@ -132,17 +132,29 @@ private struct GuideStepOverlay: View {
         VStack(alignment: .leading, spacing: 4) {
             if let title = config.content.title, !title.text.isEmpty {
                 Text(interpolate(title.text, context: variables))
-                    .font(.system(size: CGFloat(title.fontSize), weight: .bold))
+                    .font(
+                        SDKInstance.shared.fontFactory.getDefaultFont(
+                            size: Double(title.fontSize), weight: .bold, italic: false
+                        )
+                    )
                     .foregroundColor(guideColor(title.textColor, fallback: .white))
             }
             if let bodyText = config.content.body, !bodyText.text.isEmpty {
                 Text(interpolate(bodyText.text, context: variables))
-                    .font(.system(size: CGFloat(bodyText.fontSize)))
+                    .font(
+                        SDKInstance.shared.fontFactory.getDefaultFont(
+                            size: Double(bodyText.fontSize), weight: .regular, italic: false
+                        )
+                    )
                     .foregroundColor(guideColor(bodyText.textColor, fallback: .white.opacity(0.8)))
             }
             if config.content.stepIndicator.visible, totalSteps > 1 {
                 Text("\(stepIndex + 1) / \(totalSteps)")
-                    .font(.system(size: 12))
+                    .font(
+                        SDKInstance.shared.fontFactory.getDefaultFont(
+                            size: 12, weight: .regular, italic: false
+                        )
+                    )
                     .foregroundColor(guideColor(config.content.stepIndicator.color, fallback: .white.opacity(0.67)))
             }
             if !config.actions.isEmpty {
@@ -151,7 +163,11 @@ private struct GuideStepOverlay: View {
                     ForEach(Array(config.actions.enumerated()), id: \.offset) { _, action in
                         Button(action: { handleAction(action) }) {
                             Text(interpolate(action.label, context: variables))
-                                .font(.system(size: 14))
+                                .font(
+                                    SDKInstance.shared.fontFactory.getDefaultFont(
+                                        size: 14, weight: .regular, italic: false
+                                    )
+                                )
                                 .foregroundColor(guideColor(action.textColor, fallback: bubbleBackground))
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)

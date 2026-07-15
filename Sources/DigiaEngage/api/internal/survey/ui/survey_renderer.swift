@@ -19,6 +19,9 @@ struct SurveyRenderer: View {
                     .id(state.token)
             }
         }
+        // Default every raw Text/TextField/TextEditor to the SDK-wide family.
+        // Elements with authored sizes still override this through surveyFont(...).
+        .font(surveyFont(size: 14))
     }
 }
 
