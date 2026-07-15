@@ -102,7 +102,9 @@ final class HostActionExecutor {
     }
 
     func clearHandlers() {
-        configure(DigiaActionHandlers())
+        customKVHandler = nil
+        deepLinkHandler = nil
+        openURLHandler = nil
     }
 
     func setCustomKVHandler(_ handler: CustomKVHandler?) {
