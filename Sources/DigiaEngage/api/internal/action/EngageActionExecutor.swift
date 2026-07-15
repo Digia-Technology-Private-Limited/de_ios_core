@@ -1,7 +1,6 @@
 import StoreKit
 import UIKit
 
-/// Actions a rendered campaign can perform within its own UI.
 @MainActor
 struct LocalActionExecutor {
     private let dismiss: (() -> Void)?
@@ -37,7 +36,6 @@ struct LocalActionExecutor {
     }
 }
 
-/// SDK-owned actions shared by every campaign surface.
 @MainActor
 final class GlobalActionExecutor {
     private let copy: (String) -> Void
@@ -79,7 +77,6 @@ final class GlobalActionExecutor {
     }
 }
 
-/// Host overrides and SDK fallbacks for host-owned actions.
 @MainActor
 final class HostActionExecutor {
     private var customKVHandler: CustomKVHandler?
@@ -147,7 +144,6 @@ final class HostActionExecutor {
     }
 }
 
-/// Resolves and executes an authored action flow in order on the main actor.
 @MainActor
 final class EngageActionExecutor {
     private let globalActionExecutor: GlobalActionExecutor

@@ -116,18 +116,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
     }
 
-    func executeAction(
-        _ action: EngageAction,
-        variables: VariableContext?,
-        localActionExecutor: LocalActionExecutor
-    ) async {
-        await actionExecutor.executeAction(
-            action,
-            variables: variables,
-            localActionExecutor: localActionExecutor
-        )
-    }
-
     func setCustomKVHandler(_ handler: CustomKVHandler?) {
         hostActionExecutor.setCustomKVHandler(handler)
     }
