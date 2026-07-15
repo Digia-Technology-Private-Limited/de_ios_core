@@ -82,7 +82,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         if let family = config.fontFamily?.trimmingCharacters(in: .whitespacesAndNewlines),
             !family.isEmpty
         {
-            fontFactory = ConfiguredFontFactory(fontFamily: family)
+            fontFactory = ConfiguredFontFactory(
+                fontFamily: family,
+                fontFamilyAliases: config.fontFamilyAliases
+            )
         }
 
         if config.wrapperBinding == "react_native" {

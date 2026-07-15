@@ -151,9 +151,14 @@ struct GuideStepWidgetConfig: Equatable {
             return GuideTextContent(
                 text: text,
                 fontFamily: font.string("fontFamily"),
-                fontWeight: font.string("weight", default: "bold"),
-                fontSize: font.double("size", default: 16),
-                textColor: color(style.string("textColor"), default: defaultTitleColor)
+                fontWeight: font.nonBlankString("weight") ?? json.string("titleWeight", default: "700"),
+                fontSize: font["size"] == nil
+                    ? json.double("titleSize", default: 16)
+                    : font.double("size", default: 16),
+                textColor: color(
+                    style.nonBlankString("textColor") ?? json.string("titleColor"),
+                    default: defaultTitleColor
+                )
             )
         }
 
@@ -164,8 +169,13 @@ struct GuideStepWidgetConfig: Equatable {
                 text: text,
                 fontFamily: font.string("fontFamily"),
                 fontWeight: font.string("weight", default: "regular"),
-                fontSize: font.double("size", default: 14),
-                textColor: color(style.string("textColor"), default: defaultBodyColor)
+                fontSize: font["size"] == nil
+                    ? json.double("bodySize", default: 14)
+                    : font.double("size", default: 14),
+                textColor: color(
+                    style.nonBlankString("textColor") ?? json.string("bodyColor"),
+                    default: defaultBodyColor
+                )
             )
         }
 

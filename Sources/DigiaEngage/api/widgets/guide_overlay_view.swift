@@ -134,7 +134,9 @@ private struct GuideStepOverlay: View {
                 Text(interpolate(title.text, context: variables))
                     .font(
                         SDKInstance.shared.fontFactory.getDefaultFont(
-                            size: Double(title.fontSize), weight: .bold, italic: false
+                            size: Double(title.fontSize),
+                            weight: DigiaFontWeight.normalized(title.fontWeight, default: .bold),
+                            italic: false
                         )
                     )
                     .foregroundColor(guideColor(title.textColor, fallback: .white))
@@ -143,7 +145,9 @@ private struct GuideStepOverlay: View {
                 Text(interpolate(bodyText.text, context: variables))
                     .font(
                         SDKInstance.shared.fontFactory.getDefaultFont(
-                            size: Double(bodyText.fontSize), weight: .regular, italic: false
+                            size: Double(bodyText.fontSize),
+                            weight: DigiaFontWeight.normalized(bodyText.fontWeight, default: .regular),
+                            italic: false
                         )
                     )
                     .foregroundColor(guideColor(bodyText.textColor, fallback: .white.opacity(0.8)))
@@ -165,7 +169,7 @@ private struct GuideStepOverlay: View {
                             Text(interpolate(action.label, context: variables))
                                 .font(
                                     SDKInstance.shared.fontFactory.getDefaultFont(
-                                        size: 14, weight: .regular, italic: false
+                                        size: 14, weight: .semibold, italic: false
                                     )
                                 )
                                 .foregroundColor(guideColor(action.textColor, fallback: bubbleBackground))

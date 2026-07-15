@@ -50,6 +50,9 @@ public struct DigiaConfig: Sendable {
     /// Resolved via `Font.custom` / `UIFont(name:)`, so it must match a font
     /// registered with the app (e.g. a bundled custom font's PostScript name).
     public let fontFamily: String?
+    /// Optional exact face names keyed by numeric weight. Primarily used by wrappers
+    /// that own a runtime font registry; native callers can continue using `fontFamily`.
+    public let fontFamilyAliases: [Int: String]
     public let analyticsConfig: AnalyticsConfig
     public let wrapperBinding: String?
     public let wrapperVersion: String?
@@ -62,6 +65,7 @@ public struct DigiaConfig: Sendable {
         networkConfiguration: DigiaNetworkConfiguration? = nil,
         developerConfig: DigiaDeveloperConfig? = nil,
         fontFamily: String? = nil,
+        fontFamilyAliases: [Int: String] = [:],
         analyticsConfig: AnalyticsConfig = AnalyticsConfig(),
         wrapperBinding: String? = nil,
         wrapperVersion: String? = nil,
@@ -73,6 +77,7 @@ public struct DigiaConfig: Sendable {
         self.networkConfiguration = networkConfiguration
         self.developerConfig = developerConfig
         self.fontFamily = fontFamily
+        self.fontFamilyAliases = fontFamilyAliases
         self.analyticsConfig = analyticsConfig
         self.wrapperBinding = wrapperBinding
         self.wrapperVersion = wrapperVersion
@@ -88,6 +93,7 @@ extension DigiaConfig: Equatable {
             && lhs.networkConfiguration == rhs.networkConfiguration
             && lhs.developerConfig == rhs.developerConfig
             && lhs.fontFamily == rhs.fontFamily
+            && lhs.fontFamilyAliases == rhs.fontFamilyAliases
             && lhs.analyticsConfig == rhs.analyticsConfig
             && lhs.wrapperBinding == rhs.wrapperBinding
             && lhs.wrapperVersion == rhs.wrapperVersion

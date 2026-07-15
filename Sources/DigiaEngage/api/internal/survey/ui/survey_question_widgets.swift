@@ -479,7 +479,7 @@ private struct TierListQuestion: View {
             ForEach(Array(tiers.enumerated()), id: \.offset) { _, t in
                 HStack(spacing: 6) {
                     Text(t.label)
-                        .font(surveyFont(size: 18, weight: .heavy))
+                        .font(surveyFont(size: 18, weight: .bold))
                         .foregroundColor(.white)
                         .frame(width: 40, height: 40)
                         .background(RoundedRectangle(cornerRadius: 6).fill(t.color))

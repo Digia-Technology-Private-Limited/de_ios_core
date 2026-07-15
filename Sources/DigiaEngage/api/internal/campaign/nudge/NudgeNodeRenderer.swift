@@ -234,7 +234,6 @@ private struct NudgeButtonView: View {
                         size: Double(node.fontSize), weight: node.fontWeight, italic: false
                     )
                 )
-                .fontWeight(node.fontWeight)
                 .foregroundStyle(filled ? node.textColor : node.background)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)

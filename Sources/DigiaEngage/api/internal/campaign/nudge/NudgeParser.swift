@@ -102,20 +102,10 @@ struct NudgeParser {
         }
     }
 
-    /// A span's numeric CSS weight (100…900) → `Font.Weight`; nil for unknown.
+    /// A span's numeric CSS weight → the nearest supported Digia Engage weight.
     private func parseFontWeightNumber(_ n: Int) -> Font.Weight? {
-        switch n {
-        case 100: return .thin
-        case 200: return .ultraLight
-        case 300: return .light
-        case 400: return .regular
-        case 500: return .medium
-        case 600: return .semibold
-        case 700: return .bold
-        case 800: return .heavy
-        case 900: return .black
-        default: return nil
-        }
+        guard n > 0 else { return nil }
+        return DigiaFontWeight.normalized(String(n), default: .regular)
     }
 
     private func parseImage(_ props: [String: Any], box: NudgeBox) -> NudgeImage {
@@ -298,12 +288,7 @@ struct NudgeParser {
     }
 
     private func parseFontWeight(_ v: String) -> Font.Weight {
-        switch v {
-        case "500": return .medium
-        case "600": return .semibold
-        case "700": return .bold
-        default: return .regular
-        }
+        DigiaFontWeight.normalized(v, default: .regular)
     }
 
     private func parseButtonVariant(_ v: String) -> NudgeButtonVariant {

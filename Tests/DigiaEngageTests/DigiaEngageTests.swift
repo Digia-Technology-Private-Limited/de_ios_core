@@ -341,6 +341,25 @@ struct EngageActionParserTests {
 
         #expect(config.actions.first?.actions.isEmpty == true)
     }
+
+    @Test("Guide parses flat dashboard typography including medium weight")
+    func guideParsesFlatTypography() throws {
+        let config = GuideStepWidgetConfig.fromJson([
+            "title": "Welcome",
+            "titleWeight": "500",
+            "titleSize": 18,
+            "titleColor": "#112233",
+            "body": "Start here",
+            "bodySize": 15,
+            "bodyColor": "#445566",
+        ])
+
+        #expect(config.content.title?.fontWeight == "500")
+        #expect(config.content.title?.fontSize == 18)
+        #expect(config.content.title?.textColor == "#112233")
+        #expect(config.content.body?.fontSize == 15)
+        #expect(config.content.body?.textColor == "#445566")
+    }
 }
 
 private func minimalSurveyTemplate() -> [String: Any] {

@@ -40,7 +40,7 @@ public extension DUIFontFactory {
     /// Returns a UIKit font for the given size, weight and style.
     /// Override to supply a custom UIFont (e.g. a bundled font registered with the system).
     func getDefaultUIFont(size: Double, weight: Font.Weight, italic: Bool) -> UIFont {
-        let uiWeight = UIFont.Weight(fontWeight: weight)
+        let uiWeight = UIFont.Weight(fontWeight: DigiaFontWeight.normalized(weight))
         let base = UIFont.systemFont(ofSize: size, weight: uiWeight)
         guard italic else { return base }
         if let descriptor = base.fontDescriptor.withSymbolicTraits(.traitItalic) {
@@ -79,7 +79,7 @@ public struct DefaultFontFactory: DUIFontFactory {
     public init() {}
 
     public func getDefaultFont(size: Double, weight: Font.Weight, italic: Bool) -> Font {
-        var font = Font.system(size: size, weight: weight)
+        var font = Font.system(size: size, weight: DigiaFontWeight.normalized(weight))
         if italic { font = font.italic() }
         return font
     }
@@ -94,9 +94,23 @@ public struct DefaultFontFactory: DUIFontFactory {
 /// regardless of the family requested by the design config.
 struct ConfiguredFontFactory: DUIFontFactory {
     let fontFamily: String
+    private let resolvedAliases: [Int: String]
+
+    init(fontFamily: String, fontFamilyAliases: [Int: String] = [:]) {
+        self.fontFamily = fontFamily
+        resolvedAliases = fontFamilyAliases
+            .filter { DigiaFontWeight.supportedValues.contains($0.key) }
+            .compactMapValues(Self.registeredFontName)
+    }
 
     func getDefaultFont(size: Double, weight: Font.Weight, italic: Bool) -> Font {
-        var font = Font.custom(fontFamily, size: size).weight(weight)
+        let normalizedWeight = DigiaFontWeight.normalized(weight)
+        let resolvedAlias = alias(for: normalizedWeight)
+        var font = if let resolvedAlias {
+            Font.custom(resolvedAlias, size: size)
+        } else {
+            Font.custom(fontFamily, size: size).weight(normalizedWeight)
+        }
         if italic { font = font.italic() }
         return font
     }
@@ -106,8 +120,24 @@ struct ConfiguredFontFactory: DUIFontFactory {
     }
 
     func getDefaultUIFont(size: Double, weight: Font.Weight, italic: Bool) -> UIFont {
-        let base = UIFont(name: fontFamily, size: size)
-            ?? UIFont.systemFont(ofSize: size, weight: UIFont.Weight(fontWeight: weight))
+        let normalizedWeight = DigiaFontWeight.normalized(weight)
+        let uiWeight = UIFont.Weight(fontWeight: normalizedWeight)
+        let base: UIFont
+        if let resolvedAlias = alias(for: normalizedWeight),
+            let exactFace = UIFont(name: resolvedAlias, size: size)
+        {
+            base = exactFace
+        } else if !UIFont.fontNames(forFamilyName: fontFamily).isEmpty {
+            let descriptor = UIFontDescriptor(fontAttributes: [
+                .family: fontFamily,
+                .traits: [UIFontDescriptor.TraitKey.weight: uiWeight],
+            ])
+            base = UIFont(descriptor: descriptor, size: size)
+        } else if let exactFace = UIFont(name: fontFamily, size: size) {
+            base = exactFace
+        } else {
+            base = UIFont.systemFont(ofSize: size, weight: uiWeight)
+        }
         guard italic, let descriptor = base.fontDescriptor.withSymbolicTraits(.traitItalic) else {
             return base
         }
@@ -116,5 +146,23 @@ struct ConfiguredFontFactory: DUIFontFactory {
 
     func getUIFont(_ fontFamily: String, size: Double, weight: Font.Weight, italic: Bool) -> UIFont {
         getDefaultUIFont(size: size, weight: weight, italic: italic)
+    }
+
+    private func alias(for weight: Font.Weight) -> String? {
+        guard !resolvedAliases.isEmpty else { return nil }
+        let requested = DigiaFontWeight.normalized(weight).numericValue
+        let selected = resolvedAliases.keys.min {
+            let lhsDistance = abs($0 - requested)
+            let rhsDistance = abs($1 - requested)
+            return lhsDistance == rhsDistance ? $0 > $1 : lhsDistance < rhsDistance
+        }
+        return selected.flatMap { resolvedAliases[$0] }
+    }
+
+    private static func registeredFontName(_ name: String) -> String? {
+        if let registeredName = UIFont.fontNames(forFamilyName: name).first {
+            return registeredName
+        }
+        return UIFont(name: name, size: 12) == nil ? nil : name
     }
 }
