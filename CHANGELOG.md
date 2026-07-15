@@ -2,6 +2,18 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.4.0] - 2026-07-15
+
+### New Features
+- The SDK can now be integrated into apps with a deployment target as low as iOS 15. SDK functionality still requires iOS 17 — on iOS 15 and 16 every entry point no-ops — so hosts that support older OS versions can link a single build without a conditional dependency. As part of this, `DigiaNetworkConfiguration.timeout` is now a `TimeInterval` in seconds instead of a `Duration`; hosts passing an explicit timeout need to update the call site.
+- Added `clearInlineContent(_:)` and `clearAllInlineContent()` to clear loaded inline carousel and story content for specific placements or for all of them. Inline content was previously retained indefinitely once loaded, with no way to drop it — call these on logout so one user's content doesn't linger across an account switch.
+
+### Improvements
+- Completed story segments now use the active indicator color, and the separate completed-segment color is no longer configurable.
+
+### Bug Fixes
+- Fixed analytics events being discarded when a track request failed with a client error or came back without a usable HTTP status — those failures are now retried instead of dropping the batch.
+
 ## [3.3.0] - 2026-07-10
 
 ### New Features
