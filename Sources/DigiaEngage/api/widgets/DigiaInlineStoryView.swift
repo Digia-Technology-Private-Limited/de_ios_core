@@ -607,7 +607,11 @@ private struct StoryCTAButton: View {
     var body: some View {
         Button(action: action) {
             Text(interpolate(item.ctaText ?? "", context: variables))
-                .font(.system(size: 16, weight: .semibold))
+                .font(
+                    SDKInstance.shared.fontFactory.getDefaultFont(
+                        size: 16, weight: .semibold, italic: false
+                    )
+                )
                 .foregroundColor(Color(hex: item.ctaTextColor) ?? .white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)

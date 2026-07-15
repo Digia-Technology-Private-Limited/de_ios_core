@@ -433,7 +433,11 @@ private struct NudgeVideoView: View {
                             Image(systemName: "exclamationmark.triangle")
                                 .font(.system(size: 28))
                             Text("Video failed")
-                                .font(.system(size: 13))
+                                .font(
+                                    SDKInstance.shared.fontFactory.getDefaultFont(
+                                        size: 13, weight: .regular, italic: false
+                                    )
+                                )
                         }
                         .foregroundStyle(.white)
                     case .ready:
@@ -516,12 +520,17 @@ private final class PlayerContainerView: UIView {
 
 // MARK: - Placeholder
 
+@MainActor
 private func nudgePlaceholder(label: String, height: CGFloat) -> some View {
     ZStack {
         RoundedRectangle(cornerRadius: 8)
             .fill(Color(hex: "#F1F1F5") ?? Color(.systemGray6))
         Text(label)
-            .font(.system(size: 11))
+            .font(
+                SDKInstance.shared.fontFactory.getDefaultFont(
+                    size: 11, weight: .regular, italic: false
+                )
+            )
             .foregroundStyle(Color(hex: "#9A9AAD") ?? .secondary)
     }
     .frame(maxWidth: .infinity)
