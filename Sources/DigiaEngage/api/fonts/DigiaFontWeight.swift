@@ -9,11 +9,15 @@ enum DigiaFontWeight {
     }
 
     static func normalized(_ value: Int) -> Int {
-        supportedValues.min { lhs, rhs in
-            let lhsDistance = abs(lhs - value)
-            let rhsDistance = abs(rhs - value)
+        nearestValue(to: value, among: supportedValues) ?? 400
+    }
+
+    static func nearestValue(to requested: Int, among available: some Sequence<Int>) -> Int? {
+        available.min { lhs, rhs in
+            let lhsDistance = abs(lhs - requested)
+            let rhsDistance = abs(rhs - requested)
             return lhsDistance == rhsDistance ? lhs > rhs : lhsDistance < rhsDistance
-        } ?? 400
+        }
     }
 
     static func normalized(_ value: String, default fallback: Font.Weight) -> Font.Weight {

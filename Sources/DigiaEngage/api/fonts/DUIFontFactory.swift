@@ -151,11 +151,7 @@ struct ConfiguredFontFactory: DUIFontFactory {
     private func alias(for weight: Font.Weight) -> String? {
         guard !resolvedAliases.isEmpty else { return nil }
         let requested = DigiaFontWeight.normalized(weight).numericValue
-        let selected = resolvedAliases.keys.min {
-            let lhsDistance = abs($0 - requested)
-            let rhsDistance = abs($1 - requested)
-            return lhsDistance == rhsDistance ? $0 > $1 : lhsDistance < rhsDistance
-        }
+        let selected = DigiaFontWeight.nearestValue(to: requested, among: resolvedAliases.keys)
         return selected.flatMap { resolvedAliases[$0] }
     }
 
