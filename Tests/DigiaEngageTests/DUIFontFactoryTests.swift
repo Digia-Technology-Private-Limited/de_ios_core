@@ -3,75 +3,46 @@ import UIKit
 @testable import DigiaEngage
 import Testing
 
-@Suite("DUIFontFactory")
-struct DUIFontFactoryTests {
-    @Test("configured UIKit font dispatches through the protocol")
-    func configuredUIKitFontDispatchesThroughProtocol() {
-        let factory: any DUIFontFactory = ConfiguredFontFactory(fontFamily: "Chalkduster")
+@Suite("DigiaFont")
+struct DigiaFontTests {
+    @Test("an exact registered face can be configured by name")
+    func configuredExactFace() {
+        let fontProvider = DigiaFont(fontFamily: "Chalkduster")
 
-        let font = factory.getDefaultUIFont(size: 18, weight: .bold, italic: false)
+        let font = fontProvider.uiKit(size: 18, weight: .bold, italic: false)
 
         #expect(font.fontName == "Chalkduster")
     }
 
-    @Test("configured aliases select the exact requested UIKit face")
-    func configuredAliasesSelectExactFace() {
-        let factory: any DUIFontFactory = ConfiguredFontFactory(
-            fontFamily: "Avenir Next",
-            fontFamilyAliases: [
-                400: "AvenirNext-Regular",
-                500: "AvenirNext-Medium",
-                600: "AvenirNext-DemiBold",
-                700: "AvenirNext-Bold",
-            ]
-        )
-
-        #expect(factory.getDefaultUIFont(size: 18, weight: .regular, italic: false).fontName == "AvenirNext-Regular")
-        #expect(factory.getDefaultUIFont(size: 18, weight: .medium, italic: false).fontName == "AvenirNext-Medium")
-        #expect(factory.getDefaultUIFont(size: 18, weight: .semibold, italic: false).fontName == "AvenirNext-DemiBold")
-        #expect(factory.getDefaultUIFont(size: 18, weight: .bold, italic: false).fontName == "AvenirNext-Bold")
-    }
-
-    @Test("missing weights use the nearest configured face and prefer the heavier tie")
-    func configuredAliasesUseNearestFace() {
-        let factory: any DUIFontFactory = ConfiguredFontFactory(
-            fontFamily: "Avenir Next",
-            fontFamilyAliases: [
-                400: "AvenirNext-Regular",
-                600: "AvenirNext-DemiBold",
-                700: "AvenirNext-Bold",
-            ]
-        )
-
-        #expect(factory.getDefaultUIFont(size: 18, weight: .medium, italic: false).fontName == "AvenirNext-DemiBold")
-        #expect(factory.getDefaultUIFont(size: 18, weight: .black, italic: false).fontName == "AvenirNext-Bold")
-    }
-
-    @Test("a registered family without aliases still selects the requested weight")
+    @Test("a registered family selects the requested weight")
     func configuredFamilyPreservesRequestedWeight() {
-        let factory: any DUIFontFactory = ConfiguredFontFactory(fontFamily: "Avenir Next")
+        let fontProvider = DigiaFont(fontFamily: "Avenir Next")
 
-        let regular = factory.getDefaultUIFont(size: 18, weight: .regular, italic: false)
-        let bold = factory.getDefaultUIFont(size: 18, weight: .bold, italic: false)
+        let regular = fontProvider.uiKit(size: 18, weight: .regular, italic: false)
+        let bold = fontProvider.uiKit(size: 18, weight: .bold, italic: false)
 
         #expect(regular.fontName == "AvenirNext-Regular")
         #expect(bold.fontName == "AvenirNext-Bold")
     }
 
-    @Test("unexpected weights normalize to the nearest supported weight")
-    func unexpectedWeightsNormalizeToSupportedWeight() {
-        #expect(DigiaFontWeight.normalized(.light) == .regular)
-        #expect(DigiaFontWeight.normalized(.heavy) == .bold)
-        #expect(DigiaFontWeight.normalized(450) == 500)
+    @Test("dashboard weights support the full numeric range")
+    func dashboardWeightsSupportFullRange() {
+        #expect(DigiaFontWeight.parse("100") == .ultraLight)
+        #expect(DigiaFontWeight.parse("300") == .light)
+        #expect(DigiaFontWeight.parse("800") == .heavy)
+        #expect(DigiaFontWeight.parse("900") == .black)
+        #expect(DigiaFontWeight.value("350") == 350)
+        #expect(DigiaFontWeight.optional("extra_bold") == .heavy)
+        #expect(DigiaFontWeight.parse("invalid") == .regular)
     }
 
     @Test("an unknown family falls back to a system font with the requested weight")
     func unknownFamilyFallsBackToWeightedSystemFont() {
-        let factory: any DUIFontFactory = ConfiguredFontFactory(
+        let fontProvider = DigiaFont(
             fontFamily: "DefinitelyNotARegisteredFont"
         )
 
-        let font = factory.getDefaultUIFont(size: 18, weight: .bold, italic: false)
+        let font = fontProvider.uiKit(size: 18, weight: .bold, italic: false)
 
         #expect(font.fontDescriptor.symbolicTraits.contains(.traitBold))
     }

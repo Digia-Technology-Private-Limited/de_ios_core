@@ -41,12 +41,12 @@ let OptionDefaults = TextDefaults(sizePt: 16, weight: .medium, color: SurveyToke
 /// Resolves a survey font through the SDK-wide font factory so the global
 /// `DigiaConfig.fontFamily` applies to natively-rendered surveys, matching
 /// campaigns and guides. When no global family is configured the factory is
-/// `DefaultFontFactory`, which returns the system font — preserving the prior
+/// `DigiaFont`, which returns the system font — preserving the prior
 /// appearance. Shape mirrors `Font.system(size:weight:)` so it is a drop-in
 /// replacement at every call site.
 @MainActor
 func surveyFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-    SDKInstance.shared.fontFactory.getDefaultFont(
+    SDKInstance.shared.font.swiftUI(
         size: Double(size), weight: weight, italic: false
     )
 }
@@ -58,12 +58,7 @@ extension ElementStyle {
     }
 
     func resolveWeight() -> Font.Weight {
-        switch weight {
-        case .regular: return .regular
-        case .medium: return .medium
-        case .semibold: return .semibold
-        case .bold: return .bold
-        }
+        DigiaFontWeight.parse(weight)
     }
 
     func resolveAlign() -> TextAlignment {

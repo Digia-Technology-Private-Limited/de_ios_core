@@ -23,6 +23,7 @@ struct GuideAction: Equatable {
     let actionType: GuideActionType
     let backgroundColor: String
     let textColor: String
+    let fontWeight: Int
     let cornerRadius: Double
     let actions: [EngageAction]
 }
@@ -63,7 +64,7 @@ struct OverlayConfig: Equatable {
 struct GuideTextContent: Equatable {
     let text: String
     let fontFamily: String
-    let fontWeight: String
+    let fontWeight: Int
     let fontSize: Double
     let textColor: String
 }
@@ -71,6 +72,7 @@ struct GuideTextContent: Equatable {
 struct StepIndicatorConfig: Equatable {
     let visible: Bool
     let color: String
+    let fontWeight: Int
 }
 
 struct GuideContentConfig: Equatable {
@@ -151,7 +153,7 @@ struct GuideStepWidgetConfig: Equatable {
             return GuideTextContent(
                 text: text,
                 fontFamily: font.string("fontFamily"),
-                fontWeight: font.nonBlankString("weight") ?? json.string("titleWeight", default: "700"),
+                fontWeight: DigiaFontWeight.value(font["weight"] ?? json["titleWeight"], default: 700),
                 fontSize: font["size"] == nil
                     ? json.double("titleSize", default: 16)
                     : font.double("size", default: 16),
@@ -168,7 +170,7 @@ struct GuideStepWidgetConfig: Equatable {
             return GuideTextContent(
                 text: text,
                 fontFamily: font.string("fontFamily"),
-                fontWeight: font.string("weight", default: "regular"),
+                fontWeight: DigiaFontWeight.value(font["weight"], default: 400),
                 fontSize: font["size"] == nil
                     ? json.double("bodySize", default: 14)
                     : font.double("size", default: 14),
@@ -185,7 +187,8 @@ struct GuideStepWidgetConfig: Equatable {
             mediaUrl: mediaObj?.nonBlankString("url"),
             stepIndicator: StepIndicatorConfig(
                 visible: stepIndObj.bool("visible", default: false),
-                color: color(stepIndObj.string("color"), default: defaultStepColor)
+                color: color(stepIndObj.string("color"), default: defaultStepColor),
+                fontWeight: DigiaFontWeight.value(stepIndObj["fontWeight"], default: 400)
             )
         )
 
@@ -212,6 +215,7 @@ struct GuideStepWidgetConfig: Equatable {
                     actionType: actionType,
                     backgroundColor: color(obj.string("background_color"), default: defaultButtonBackground),
                     textColor: color(obj.string("text_color"), default: defaultButtonText),
+                    fontWeight: DigiaFontWeight.value(obj["fontWeight"], default: 600),
                     cornerRadius: obj.double("corner_radius", default: 8),
                     actions: onClick.map { EngageActionParser().parse($0) } ?? [legacyAction]
                 )

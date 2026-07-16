@@ -316,7 +316,7 @@ private struct SurveyBody: View {
                 welcomeDone = true
             } label: {
                 Text(cta.startLabel)
-                    .font(surveyFont(size: 15, weight: .semibold))
+                    .font(surveyFont(size: 15, weight: DigiaFontWeight.parse(cta.fontWeight, default: .semibold)))
                     .foregroundColor(ctaText(cta))
                     .padding(.horizontal, 18)
                     .padding(.vertical, 10)
@@ -479,7 +479,7 @@ private struct SurveyBody: View {
                 vm.advance()
             } label: {
                 Text(cta.startLabel)
-                    .font(surveyFont(size: 15, weight: .semibold))
+                    .font(surveyFont(size: 15, weight: DigiaFontWeight.parse(cta.fontWeight, default: .semibold)))
                     .foregroundColor(ctaText(cta))
                     .padding(.horizontal, 18)
                     .padding(.vertical, 10)
@@ -493,7 +493,7 @@ private struct SurveyBody: View {
                     onCompletedClose()
                 } label: {
                     Text(cta.doneLabel)
-                        .font(surveyFont(size: 14, weight: .semibold))
+                        .font(surveyFont(size: 14, weight: DigiaFontWeight.parse(cta.fontWeight, default: .semibold)))
                         .foregroundColor(ctaText(cta))
                         .padding(.horizontal, 18)
                         .padding(.vertical, 10)
@@ -721,7 +721,7 @@ private struct FooterRow: View {
     private func nextButton(fullWidth: Bool) -> some View {
         Button(action: onNext) {
             Text(nextLabel)
-                .font(surveyFont(size: 14, weight: .semibold))
+                .font(surveyFont(size: 14, weight: DigiaFontWeight.parse(cta.fontWeight, default: .semibold)))
                 .foregroundColor(ctaText(cta))
                 .padding(.horizontal, 18)
                 .padding(.vertical, 10)
@@ -736,7 +736,7 @@ private struct FooterRow: View {
     private func backButton(fullWidth: Bool) -> some View {
         Button(action: onBack) {
             Text(cta.backLabel)
-                .font(surveyFont(size: 14))
+                .font(surveyFont(size: 14, weight: DigiaFontWeight.parse(cta.fontWeight, default: .semibold)))
                 .foregroundColor(SurveyTokens.textSecondary)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 10)

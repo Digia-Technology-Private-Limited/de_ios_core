@@ -133,9 +133,9 @@ private struct GuideStepOverlay: View {
             if let title = config.content.title, !title.text.isEmpty {
                 Text(interpolate(title.text, context: variables))
                     .font(
-                        SDKInstance.shared.fontFactory.getDefaultFont(
+                        SDKInstance.shared.font.swiftUI(
                             size: Double(title.fontSize),
-                            weight: DigiaFontWeight.normalized(title.fontWeight, default: .bold),
+                            weight: DigiaFontWeight.parse(title.fontWeight, default: .bold),
                             italic: false
                         )
                     )
@@ -144,9 +144,9 @@ private struct GuideStepOverlay: View {
             if let bodyText = config.content.body, !bodyText.text.isEmpty {
                 Text(interpolate(bodyText.text, context: variables))
                     .font(
-                        SDKInstance.shared.fontFactory.getDefaultFont(
+                        SDKInstance.shared.font.swiftUI(
                             size: Double(bodyText.fontSize),
-                            weight: DigiaFontWeight.normalized(bodyText.fontWeight, default: .regular),
+                            weight: DigiaFontWeight.parse(bodyText.fontWeight),
                             italic: false
                         )
                     )
@@ -155,8 +155,10 @@ private struct GuideStepOverlay: View {
             if config.content.stepIndicator.visible, totalSteps > 1 {
                 Text("\(stepIndex + 1) / \(totalSteps)")
                     .font(
-                        SDKInstance.shared.fontFactory.getDefaultFont(
-                            size: 12, weight: .regular, italic: false
+                        SDKInstance.shared.font.swiftUI(
+                            size: 12,
+                            weight: DigiaFontWeight.parse(config.content.stepIndicator.fontWeight),
+                            italic: false
                         )
                     )
                     .foregroundColor(guideColor(config.content.stepIndicator.color, fallback: .white.opacity(0.67)))
@@ -168,8 +170,10 @@ private struct GuideStepOverlay: View {
                         Button(action: { handleAction(action) }) {
                             Text(interpolate(action.label, context: variables))
                                 .font(
-                                    SDKInstance.shared.fontFactory.getDefaultFont(
-                                        size: 14, weight: .semibold, italic: false
+                                    SDKInstance.shared.font.swiftUI(
+                                        size: 14,
+                                        weight: DigiaFontWeight.parse(action.fontWeight, default: .semibold),
+                                        italic: false
                                     )
                                 )
                                 .foregroundColor(guideColor(action.textColor, fallback: bubbleBackground))

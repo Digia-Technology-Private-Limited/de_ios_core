@@ -1,61 +1,65 @@
 import SwiftUI
 
-/// The font-weight contract shared by every Digia Engage renderer.
+/// Converts dashboard font-weight data at the SwiftUI rendering boundary.
 enum DigiaFontWeight {
-    static let supportedValues = [400, 500, 600, 700]
-
-    static func normalized(_ weight: Font.Weight) -> Font.Weight {
-        fromNumeric(normalized(weight.numericValue))
+    static func value(_ value: Any?, default fallback: Int = 400) -> Int {
+        numericValue(value) ?? fallback
     }
 
-    static func normalized(_ value: Int) -> Int {
-        nearestValue(to: value, among: supportedValues) ?? 400
+    static func parse(_ value: String?, default fallback: Font.Weight = .regular) -> Font.Weight {
+        optional(value) ?? fallback
     }
 
-    static func nearestValue(to requested: Int, among available: some Sequence<Int>) -> Int? {
-        available.min { lhs, rhs in
-            let lhsDistance = abs(lhs - requested)
-            let rhsDistance = abs(rhs - requested)
-            return lhsDistance == rhsDistance ? lhs > rhs : lhsDistance < rhsDistance
+    static func parse(_ value: Int?, default fallback: Font.Weight = .regular) -> Font.Weight {
+        guard let value, (100...900).contains(value) else { return fallback }
+        return switch value {
+        case ..<150: .ultraLight
+        case ..<250: .thin
+        case ..<350: .light
+        case ..<450: .regular
+        case ..<550: .medium
+        case ..<650: .semibold
+        case ..<750: .bold
+        case ..<850: .heavy
+        default: .black
         }
     }
 
-    static func normalized(_ value: String, default fallback: Font.Weight) -> Font.Weight {
-        if let numeric = Int(value) {
-            return fromNumeric(normalized(numeric))
-        }
-        switch value.lowercased() {
-        case "regular": return .regular
-        case "medium": return .medium
-        case "semibold", "semi_bold": return .semibold
-        case "bold": return .bold
-        default: return normalized(fallback)
-        }
+    static func optional(_ value: Any?) -> Font.Weight? {
+        numericValue(value).map { parse($0) }
     }
 
-    private static func fromNumeric(_ value: Int) -> Font.Weight {
-        switch value {
-        case 500: return .medium
-        case 600: return .semibold
-        case 700: return .bold
-        default: return .regular
+    private static func numericValue(_ raw: Any?) -> Int? {
+        let value: String?
+        if let raw = raw as? String {
+            value = raw
+        } else if let raw = raw as? NSNumber {
+            value = raw.stringValue
+        } else {
+            value = nil
         }
-    }
-}
+        guard let normalized = value?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        else { return nil }
 
-extension Font.Weight {
-    var numericValue: Int {
-        switch self {
-        case .ultraLight: 100
-        case .thin: 200
-        case .light: 300
-        case .regular: 400
-        case .medium: 500
-        case .semibold: 600
-        case .bold: 700
-        case .heavy: 800
-        case .black: 900
-        default: 400
+        let numeric: Int?
+        if let parsed = Int(normalized) {
+            numeric = parsed
+        } else {
+            numeric = switch normalized {
+            case "thin": 100
+            case "extralight", "extra_light": 200
+            case "light": 300
+            case "normal", "regular": 400
+            case "medium": 500
+            case "semibold", "semi_bold": 600
+            case "bold": 700
+            case "extrabold", "extra_bold": 800
+            case "heavy", "black": 900
+            default: nil
+            }
         }
+        return numeric.flatMap { (100...900).contains($0) ? $0 : nil }
     }
 }
