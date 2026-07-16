@@ -200,6 +200,15 @@ struct GuideStepWidgetConfig: Equatable {
             // Support both "action_type" (new schema) and "type" (legacy).
             let typeStr = obj.nonBlankString("action_type") ?? obj.string("type", default: "dismiss")
             let actionType = GuideActionType.parse(typeStr)
+            let style = obj.string("style", default: "filled")
+            let isPrimary = style == "filled" || style == "primary"
+            let defaultBackground = isPrimary
+                ? color(json.string("buttonPrimaryBackgroundColor"), default: defaultButtonBackground)
+                : "#00000000"
+            let defaultText = color(
+                json.string(isPrimary ? "buttonPrimaryTextColor" : "buttonGhostTextColor"),
+                default: defaultButtonText
+            )
             let onClick = obj.object("onClick")
             let legacyAction: EngageAction = switch typeStr.lowercased() {
             case "next": .next
@@ -212,10 +221,10 @@ struct GuideStepWidgetConfig: Equatable {
                 GuideAction(
                     id: obj.string("id", default: "btn_\(index)"),
                     label: obj.string("label"),
-                    style: obj.string("style", default: "filled"),
+                    style: style,
                     actionType: actionType,
-                    backgroundColor: color(obj.string("background_color"), default: defaultButtonBackground),
-                    textColor: color(obj.string("text_color"), default: defaultButtonText),
+                    backgroundColor: color(obj.string("background_color"), default: defaultBackground),
+                    textColor: color(obj.string("text_color"), default: defaultText),
                     fontSize: max(1, obj.double("fontSize", default: 14)),
                     fontWeight: DigiaFontWeight.value(obj["fontWeight"], default: 600),
                     cornerRadius: obj.double("corner_radius", default: 8),

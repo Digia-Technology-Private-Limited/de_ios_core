@@ -353,6 +353,8 @@ struct EngageActionParserTests {
             "bodyWeight": "500",
             "bodySize": 15,
             "bodyColor": "#445566",
+            "buttonPrimaryBackgroundColor": "#123456",
+            "buttonPrimaryTextColor": "#FEDCBA",
             "actions": [[
                 "id": "continue",
                 "type": "NEXT",
@@ -370,6 +372,8 @@ struct EngageActionParserTests {
         #expect(config.content.body?.textColor == "#445566")
         #expect(config.actions.first?.fontSize == 16)
         #expect(config.actions.first?.fontWeight == 700)
+        #expect(config.actions.first?.backgroundColor == "#123456")
+        #expect(config.actions.first?.textColor == "#FEDCBA")
     }
 }
 
