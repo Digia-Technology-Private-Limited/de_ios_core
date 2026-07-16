@@ -350,15 +350,26 @@ struct EngageActionParserTests {
             "titleSize": 18,
             "titleColor": "#112233",
             "body": "Start here",
+            "bodyWeight": "500",
             "bodySize": 15,
             "bodyColor": "#445566",
+            "actions": [[
+                "id": "continue",
+                "type": "NEXT",
+                "label": "Continue",
+                "fontSize": 16,
+                "fontWeight": "700",
+            ]],
         ])
 
-        #expect(config.content.title?.fontWeight == "500")
+        #expect(config.content.title?.fontWeight == 500)
         #expect(config.content.title?.fontSize == 18)
         #expect(config.content.title?.textColor == "#112233")
         #expect(config.content.body?.fontSize == 15)
+        #expect(config.content.body?.fontWeight == 500)
         #expect(config.content.body?.textColor == "#445566")
+        #expect(config.actions.first?.fontSize == 16)
+        #expect(config.actions.first?.fontWeight == 700)
     }
 }
 

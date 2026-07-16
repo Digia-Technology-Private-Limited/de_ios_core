@@ -23,6 +23,7 @@ struct GuideAction: Equatable {
     let actionType: GuideActionType
     let backgroundColor: String
     let textColor: String
+    let fontSize: Double
     let fontWeight: Int
     let cornerRadius: Double
     let actions: [EngageAction]
@@ -170,7 +171,7 @@ struct GuideStepWidgetConfig: Equatable {
             return GuideTextContent(
                 text: text,
                 fontFamily: font.string("fontFamily"),
-                fontWeight: DigiaFontWeight.value(font["weight"], default: 400),
+                fontWeight: DigiaFontWeight.value(font["weight"] ?? json["bodyWeight"], default: 400),
                 fontSize: font["size"] == nil
                     ? json.double("bodySize", default: 14)
                     : font.double("size", default: 14),
@@ -215,6 +216,7 @@ struct GuideStepWidgetConfig: Equatable {
                     actionType: actionType,
                     backgroundColor: color(obj.string("background_color"), default: defaultButtonBackground),
                     textColor: color(obj.string("text_color"), default: defaultButtonText),
+                    fontSize: max(1, obj.double("fontSize", default: 14)),
                     fontWeight: DigiaFontWeight.value(obj["fontWeight"], default: 600),
                     cornerRadius: obj.double("corner_radius", default: 8),
                     actions: onClick.map { EngageActionParser().parse($0) } ?? [legacyAction]

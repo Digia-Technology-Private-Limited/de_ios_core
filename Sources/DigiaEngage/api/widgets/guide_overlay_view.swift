@@ -171,7 +171,7 @@ private struct GuideStepOverlay: View {
                             Text(interpolate(action.label, context: variables))
                                 .font(
                                     SDKInstance.shared.font.swiftUI(
-                                        size: 14,
+                                        size: action.fontSize,
                                         weight: DigiaFontWeight.parse(action.fontWeight, default: .semibold),
                                         italic: false
                                     )
