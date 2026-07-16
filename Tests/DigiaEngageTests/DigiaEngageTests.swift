@@ -399,6 +399,37 @@ struct EngageActionParserTests {
         #expect(config.actions.first?.backgroundColor == "#123456")
         #expect(config.actions.first?.textColor == "#FEDCBA")
     }
+
+    @Test("Guide keeps the legacy nested schema isolated from flat keys")
+    func guideParsesLegacyNestedTypography() throws {
+        let config = GuideStepWidgetConfig.fromJson([
+            "titleColor": "#FF0000",
+            "content": [
+                "title": [
+                    "text": "Legacy title",
+                    "textStyle": [
+                        "textColor": "#112233",
+                        "fontToken": ["font": ["weight": "medium", "size": 18]],
+                    ],
+                ],
+                "actions": [[
+                    "id": "legacy-next",
+                    "label": "Continue",
+                    "action_type": "NEXT",
+                    "background_color": "#334455",
+                    "text_color": "#FFFFFF",
+                    "corner_radius": 12,
+                ]],
+            ],
+        ])
+
+        #expect(config.content.title?.text == "Legacy title")
+        #expect(config.content.title?.fontWeight == 500)
+        #expect(config.content.title?.textColor == "#112233")
+        #expect(config.actions.first?.actionType == .next)
+        #expect(config.actions.first?.backgroundColor == "#334455")
+        #expect(config.actions.first?.cornerRadius == 12)
+    }
 }
 
 private func minimalSurveyTemplate() -> [String: Any] {

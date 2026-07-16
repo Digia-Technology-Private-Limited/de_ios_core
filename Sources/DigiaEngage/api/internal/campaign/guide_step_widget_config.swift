@@ -138,28 +138,19 @@ struct GuideStepWidgetConfig: Equatable {
             cutout: cutout
         )
 
+        let titleObj = contentObj.object("title")
+        let bodyObj = contentObj.object("body")
         let mediaObj = contentObj.object("media")
         let stepIndObj = contentObj.object("step_indicator") ?? [:]
 
-        // Dashboard-authored guides use the flat step keys below. Keep each
-        // property bound to its own wire key; do not infer it from another schema.
-        let title = json.nonBlankString("title").map { text -> GuideTextContent in
-            return GuideTextContent(
-                text: text,
-                fontWeight: DigiaFontWeight.value(json["titleWeight"], default: 700),
-                fontSize: json.double("titleSize", default: 16),
-                textColor: color(json.string("titleColor"), default: defaultTitleColor)
-            )
-        }
-
-        let body = json.nonBlankString("body").map { text -> GuideTextContent in
-            return GuideTextContent(
-                text: text,
-                fontWeight: DigiaFontWeight.value(json["bodyWeight"], default: 400),
-                fontSize: json.double("bodySize", default: 14),
-                textColor: color(json.string("bodyColor"), default: defaultBodyColor)
-            )
-        }
+        let title = nestedText(titleObj, defaultWeight: 700, defaultSize: 16,
+                               defaultColor: defaultTitleColor)
+            ?? flatText(json, key: "title", defaultWeight: 700, defaultSize: 16,
+                        defaultColor: defaultTitleColor)
+        let body = nestedText(bodyObj, defaultWeight: 400, defaultSize: 14,
+                              defaultColor: defaultBodyColor)
+            ?? flatText(json, key: "body", defaultWeight: 400, defaultSize: 14,
+                        defaultColor: defaultBodyColor)
 
         let content = GuideContentConfig(
             title: title,
@@ -172,11 +163,14 @@ struct GuideStepWidgetConfig: Equatable {
             )
         )
 
-        let actionsArr = (json["actions"] as? [Any]) ?? []
+        let actionsArr = (json["actions"] as? [Any])
+            ?? (contentObj["actions"] as? [Any])
+            ?? []
         var actions: [GuideAction] = []
         for (index, element) in actionsArr.enumerated() {
             guard let obj = element as? [String: Any] else { continue }
-            let typeStr = obj.string("type", default: "dismiss")
+            let typeStr = obj.nonBlankString("action_type")
+                ?? obj.string("type", default: "dismiss")
             let actionType = GuideActionType.parse(typeStr)
             let style = obj.string("style", default: "filled")
             let isPrimary = style == "filled" || style == "primary"
@@ -201,11 +195,17 @@ struct GuideStepWidgetConfig: Equatable {
                     label: obj.string("label"),
                     style: style,
                     actionType: actionType,
-                    backgroundColor: defaultBackground,
-                    textColor: defaultText,
+                    backgroundColor: obj.nonBlankString("background_color")
+                        .map { color($0, default: defaultButtonBackground) }
+                        ?? defaultBackground,
+                    textColor: obj.nonBlankString("text_color")
+                        .map { color($0, default: defaultButtonText) }
+                        ?? defaultText,
                     fontSize: max(1, obj.double("fontSize", default: 14)),
                     fontWeight: DigiaFontWeight.value(obj["fontWeight"], default: 600),
-                    cornerRadius: 8,
+                    cornerRadius: obj["corner_radius"] == nil
+                        ? 8
+                        : obj.double("corner_radius", default: 8),
                     actions: onClick.map { EngageActionParser().parse($0) } ?? [legacyAction]
                 )
             )
@@ -217,5 +217,38 @@ struct GuideStepWidgetConfig: Equatable {
     private static func color(_ value: String?, default fallback: String) -> String {
         guard let value, !value.isEmpty else { return fallback }
         return value
+    }
+
+    private static func nestedText(
+        _ json: [String: Any]?,
+        defaultWeight: Int,
+        defaultSize: Double,
+        defaultColor: String
+    ) -> GuideTextContent? {
+        guard let json, let text = json.nonBlankString("text") else { return nil }
+        let style = json.object("textStyle") ?? [:]
+        let font = style.object("fontToken")?.object("font") ?? [:]
+        return GuideTextContent(
+            text: text,
+            fontWeight: DigiaFontWeight.value(font["weight"], default: defaultWeight),
+            fontSize: font.double("size", default: defaultSize),
+            textColor: color(style.string("textColor"), default: defaultColor)
+        )
+    }
+
+    private static func flatText(
+        _ json: [String: Any],
+        key: String,
+        defaultWeight: Int,
+        defaultSize: Double,
+        defaultColor: String
+    ) -> GuideTextContent? {
+        guard let text = json.nonBlankString(key) else { return nil }
+        return GuideTextContent(
+            text: text,
+            fontWeight: DigiaFontWeight.value(json["\(key)Weight"], default: defaultWeight),
+            fontSize: json.double("\(key)Size", default: defaultSize),
+            textColor: color(json.string("\(key)Color"), default: defaultColor)
+        )
     }
 }
