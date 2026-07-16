@@ -2,6 +2,17 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.6.0] - 2026-07-16
+
+### New Features
+- Campaigns can now be targeted to specific screens: a campaign is shown only when the app's current screen — reported through the screen-tracking API — matches the target screens configured for it. Campaigns with no screen targeting continue to show everywhere.
+
+### Improvements
+- Reworked font handling so all campaign text resolves the dashboard-specified font weight (numeric `100`–`900` or a named weight like `bold`) against the app-configured font family, for consistent weight and italic rendering across nudges, guides, surveys, and stories.
+
+### Bug Fixes
+- Guide step buttons, the guide step indicator, and survey options now honor the font size and weight configured for them in the dashboard, instead of rendering at fixed sizes.
+
 ## [3.5.0] - 2026-07-15
 
 ### New Features

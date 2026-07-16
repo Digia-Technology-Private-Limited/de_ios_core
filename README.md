@@ -26,7 +26,7 @@ Add the package to your `Package.swift`:
 dependencies: [
     .package(
         url: "https://github.com/Digia-Technology-Private-Limited/digia_engage_ios.git",
-        from: "3.5.0"
+        from: "3.6.0"
     ),
 ]
 ```
@@ -49,7 +49,7 @@ Or add it directly in Xcode via **File → Add Package Dependencies** and enter 
 DigiaEngage is not published to the CocoaPods trunk. To use it with CocoaPods, point your `Podfile` at a local checkout:
 
 ```ruby
-pod 'DigiaEngage', '~> 3.5.0'
+pod 'DigiaEngage', '~> 3.6.0'
 ```
 
 Then run:
