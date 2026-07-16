@@ -386,7 +386,12 @@ private struct ReactionQuestion: View {
                     onAnswer(SurveyAnswer(values: [option.id]))
                 } label: {
                     Text(option.label)
-                        .font(surveyFont(size: 32))
+                        .font(
+                            surveyFont(
+                                size: block.optionStyle?.resolveFontSize(default: 32) ?? 32,
+                                weight: block.optionStyle?.resolveWeight() ?? .regular
+                            )
+                        )
                         .frame(width: 64, height: 64)
                         .background(
                             Circle().fill(isOn ? accent.opacity(0.14) : SurveyTokens.surfaceSunken)
@@ -434,7 +439,12 @@ private struct ThisOrThatQuestion: View {
                     ZStack(alignment: .bottomLeading) {
                         RoundedRectangle(cornerRadius: 14).fill(gradients[index % gradients.count])
                         Text(option.label)
-                            .font(surveyFont(size: 16, weight: .bold))
+                            .font(
+                                surveyFont(
+                                    size: block.optionStyle?.resolveFontSize(default: 16) ?? 16,
+                                    weight: block.optionStyle?.resolveWeight() ?? .bold
+                                )
+                            )
                             .foregroundColor(.white)
                             .padding(14)
                     }
@@ -479,7 +489,10 @@ private struct TierListQuestion: View {
                         .frame(width: 40, height: 40)
                         .background(RoundedRectangle(cornerRadius: 6).fill(t.color))
                     TierChips(
-                        items: block.options.filter { placements[$0.id] == t.label }, onTap: cycle
+                        items: block.options.filter { placements[$0.id] == t.label },
+                        optionStyle: block.optionStyle,
+                        accent: accent,
+                        onTap: cycle
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(minHeight: 44)
@@ -494,6 +507,8 @@ private struct TierListQuestion: View {
             }
             TierChips(
                 items: block.options.filter { (placements[$0.id] ?? "-") == "-" },
+                optionStyle: block.optionStyle,
+                accent: accent,
                 onTap: cycle,
                 placeholder: "Tap a chip to assign a tier"
             )
@@ -533,6 +548,8 @@ private struct TierListQuestion: View {
 
 private struct TierChips: View {
     let items: [SurveyOption]
+    let optionStyle: ElementStyle?
+    let accent: Color
     let onTap: (String) -> Void
     var placeholder: String? = nil
 
@@ -550,8 +567,18 @@ private struct TierChips: View {
                         onTap(opt.id)
                     } label: {
                         Text(opt.label)
-                            .font(surveyFont(size: 12))
-                            .foregroundColor(SurveyTokens.textPrimary)
+                            .font(
+                                surveyFont(
+                                    size: optionStyle?.resolveFontSize(default: 12) ?? 12,
+                                    weight: optionStyle?.resolveWeight() ?? .regular
+                                )
+                            )
+                            .foregroundColor(
+                                optionStyle?.resolveColor(
+                                    accent: accent,
+                                    default: SurveyTokens.textPrimary
+                                ) ?? SurveyTokens.textPrimary
+                            )
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
                             .background(
@@ -731,7 +758,12 @@ private struct ChoiceCardRow: View {
                 }
                 if showDescription, let desc = option.description, !desc.isEmpty {
                     Text(desc)
-                        .font(surveyFont(size: 12))
+                        .font(
+                            surveyFont(
+                                size: optionStyle?.resolveFontSize(default: 12) ?? 12,
+                                weight: optionStyle?.resolveWeight() ?? .regular
+                            )
+                        )
                         .foregroundColor(SurveyTokens.textSecondary)
                         .padding(.leading, 32)
                 }
