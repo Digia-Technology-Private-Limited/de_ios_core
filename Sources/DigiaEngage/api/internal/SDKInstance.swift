@@ -184,9 +184,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func setCurrentScreen(_ name: String) {
-        logVerbose("Screen: \(name)")
-        _currentScreen = name
-        activePlugin?.forwardScreen(name)
+        let screenName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        _currentScreen = screenName.isEmpty ? nil : screenName
+        DigiaLog.warning("[SDKInstance] Current screen set: \(_currentScreen ?? "<unset>")")
+        activePlugin?.forwardScreen(screenName)
     }
 
     func registerPlaceholderForSlot(propertyID: String) -> Int? {
@@ -226,6 +227,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private func routeByCampaignKey(_ key: String, payload: CEPTriggerPayload) -> Bool {
         guard let campaign = campaignStore.find(key) else {
             logError("routeByCampaignKey: no campaign found for key '\(key)'")
+            return false
+        }
+
+        if !campaign.targetScreenNames.isEmpty
+            && !campaign.targetScreenNames.contains(_currentScreen ?? "")
+        {
+            DigiaLog.warning(
+                "[SDKInstance] Campaign dropped — screen not targeted: "
+                    + "campaignKey=\(key) currentScreen=\(_currentScreen ?? "<unset>") "
+                    + "targetScreenNames=\(campaign.targetScreenNames)"
+            )
             return false
         }
 

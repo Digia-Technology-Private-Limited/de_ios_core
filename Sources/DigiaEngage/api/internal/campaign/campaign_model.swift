@@ -17,6 +17,7 @@ struct CampaignModel: Equatable {
     let campaignKey: String
     let campaignType: String
     let config: CampaignConfigModel
+    let targetScreenNames: [String]
     // Opaque capping policy from the dashboard; nil = "No cap" / inline.
     // Used natively for nudge + survey only (guides cap in JS on RN).
     var frequency: FrequencyPolicy? = nil
@@ -45,6 +46,7 @@ struct CampaignModel: Equatable {
         guard let id = json.nonBlankString("id") ?? json.nonBlankString("_id") else { return nil }
         guard let campaignKey = json.nonBlankString("campaignKey") else { return nil }
         guard let campaignType = json.nonBlankString("campaignType") else { return nil }
+        let targetScreenNames = json.object("targetScreenNames")?.stringArray("names") ?? []
 
         let config: CampaignConfigModel
         switch campaignType {
@@ -78,6 +80,7 @@ struct CampaignModel: Equatable {
             campaignKey: campaignKey,
             campaignType: campaignType,
             config: config,
+            targetScreenNames: targetScreenNames,
             frequency: FrequencyPolicy.fromJson(json.object("frequency"))
         )
     }

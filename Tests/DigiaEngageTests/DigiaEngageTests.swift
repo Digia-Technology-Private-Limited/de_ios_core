@@ -69,6 +69,79 @@ struct DigiaEngageTests {
         #expect(SDKInstance.shared.inlineController.getCarouselConfig("hero_banner")?.items.count == 1)
     }
 
+    @Test("campaign target screens are parsed")
+    func parsesCampaignTargetScreens() throws {
+        let campaign = try #require(CampaignModel.fromJson([
+            "id": "targeted-id",
+            "campaignKey": "help-inline",
+            "campaignType": "inline",
+            "targetScreenNames": ["names": ["Help", "Home"]],
+            "templateConfig": [
+                "templateType": "carousel",
+                "slotKey": "hero_banner",
+                "items": [["imageUrl": "https://example.com/a.png"]],
+            ],
+        ]))
+
+        #expect(campaign.targetScreenNames == ["Help", "Home"])
+    }
+
+    @Test("campaign screen matching is case sensitive")
+    func rejectsCampaignOnNonTargetedScreen() throws {
+        SDKInstance.shared.resetForTesting()
+        let campaign = try #require(CampaignModel.fromJson([
+            "id": "targeted-id",
+            "campaignKey": "help-inline",
+            "campaignType": "inline",
+            "targetScreenNames": ["names": ["Help"]],
+            "templateConfig": [
+                "templateType": "carousel",
+                "slotKey": "hero_banner",
+                "items": [["imageUrl": "https://example.com/a.png"]],
+            ],
+        ]))
+        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCurrentScreen("help")
+
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:]))
+
+        #expect(!accepted)
+        #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") == nil)
+    }
+
+    @Test("targeted campaign is rejected when current screen is unset")
+    func rejectsTargetedCampaignWhenScreenIsUnset() throws {
+        SDKInstance.shared.resetForTesting()
+        let campaign = try #require(targetedInlineCampaign())
+        SDKInstance.shared.campaignStore.populate([campaign])
+
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:]))
+
+        #expect(!accepted)
+        #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") == nil)
+    }
+
+    @Test("latest trimmed screen name wins and navigation does not dismiss accepted content")
+    func usesLatestScreenWithoutDismissingAcceptedContent() throws {
+        SDKInstance.shared.resetForTesting()
+        let campaign = try #require(targetedInlineCampaign())
+        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCurrentScreen("Home")
+        SDKInstance.shared.setCurrentScreen(" Help ")
+
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:]))
+        SDKInstance.shared.setCurrentScreen("Home")
+
+        #expect(accepted)
+        #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner")?.cepCampaignId == "ct-1")
+    }
+
     @Test("campaign-key inline story payloads route into the inline controller")
     func routesInlineStoryCampaignsIntoInlineController() throws {
         SDKInstance.shared.resetForTesting()
@@ -430,6 +503,20 @@ struct EngageActionParserTests {
         #expect(config.actions.first?.backgroundColor == "#334455")
         #expect(config.actions.first?.cornerRadius == 12)
     }
+}
+
+private func targetedInlineCampaign() -> CampaignModel? {
+    CampaignModel.fromJson([
+        "id": "targeted-id",
+        "campaignKey": "help-inline",
+        "campaignType": "inline",
+        "targetScreenNames": ["names": ["Help"]],
+        "templateConfig": [
+            "templateType": "carousel",
+            "slotKey": "hero_banner",
+            "items": [["imageUrl": "https://example.com/a.png"]],
+        ],
+    ])
 }
 
 private func minimalSurveyTemplate() -> [String: Any] {
