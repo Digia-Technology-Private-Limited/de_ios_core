@@ -59,7 +59,7 @@ struct NudgeParser {
             box: box,
             text: props["text"] as? String ?? "",
             fontSize: CGFloat(parseDouble(font["size"]) ?? 16),
-            fontWeight: parseFontWeight(font["weight"] as? String ?? "400"),
+            fontWeight: DigiaFontWeight.value(font["weight"], default: 400),
             color: parseColor(style["textColor"] as? String) ?? Color(hex: "#111111") ?? .primary,
             textAlignment: parseTextAlignment(props["alignment"] as? String ?? "left"),
             lineHeight: (props["lineHeight"] as? Double).map { CGFloat($0) },
@@ -82,9 +82,7 @@ struct NudgeParser {
             return NudgeTextSpan(
                 text: text,
                 style: NudgeSpanStyle(
-                    fontWeight: (style["fontWeight"] as? Double).flatMap {
-                        parseFontWeightNumber(Int($0))
-                    },
+                    fontWeight: DigiaFontWeight.optional(style["fontWeight"]),
                     fontSize: (style["fontSize"] as? Double).map { CGFloat($0) },
                     color: parseColor(style["textColor"] as? String),
                     highlightColor: parseColor(style["highlightColor"] as? String),
@@ -99,22 +97,6 @@ struct NudgeParser {
                     decorationThickness: nil
                 )
             )
-        }
-    }
-
-    /// A span's numeric CSS weight (100…900) → `Font.Weight`; nil for unknown.
-    private func parseFontWeightNumber(_ n: Int) -> Font.Weight? {
-        switch n {
-        case 100: return .thin
-        case 200: return .ultraLight
-        case 300: return .light
-        case 400: return .regular
-        case 500: return .medium
-        case 600: return .semibold
-        case 700: return .bold
-        case 800: return .heavy
-        case 900: return .black
-        default: return nil
         }
     }
 
@@ -147,7 +129,7 @@ struct NudgeParser {
             label: text["text"] as? String ?? "Button",
             variant: parseButtonVariant(props["variant"] as? String ?? "fill"),
             fontSize: CGFloat(parseDouble(font["size"]) ?? 16),
-            fontWeight: parseFontWeight(font["weight"] as? String ?? "600"),
+            fontWeight: DigiaFontWeight.value(font["weight"], default: 600),
             background: parseColor(defaultStyle["backgroundColor"] as? String) ?? Color(
                 hex: "#4945FF") ?? .blue,
             textColor: parseColor(textStyle["textColor"] as? String) ?? .white,
@@ -294,15 +276,6 @@ struct NudgeParser {
         case "contain": return .contain
         case "fill": return .fill
         default: return .cover
-        }
-    }
-
-    private func parseFontWeight(_ v: String) -> Font.Weight {
-        switch v {
-        case "500": return .medium
-        case "600": return .semibold
-        case "700": return .bold
-        default: return .regular
         }
     }
 

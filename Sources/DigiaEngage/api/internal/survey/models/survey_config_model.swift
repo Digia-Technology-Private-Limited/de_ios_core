@@ -70,7 +70,7 @@ enum BranchingType { case linear, byCondition, byParent }
 enum BranchTargetKind { case next, node, url, end }
 enum MediaPosition { case top, inline, background }
 enum AnswerLayout { case row, column, grid }
-enum SurveyFontWeight { case regular, medium, semibold, bold }
+typealias SurveyFontWeight = Int
 enum SurveyTextAlign { case left, center, right }
 enum SurveyDisplayType { case dialog, bottomSheet }
 enum DialogWidthPreset { case small, medium, large, custom }
@@ -85,7 +85,7 @@ enum CtaArrangement { case spaceBetween, spaceEvenly, center, start, end }
 struct ElementStyle: Equatable {
     /// Font size in pixels; 0 means "inherit the element default".
     var size: Double = 0
-    var weight: SurveyFontWeight = .regular
+    var weight: SurveyFontWeight = 400
     var align: SurveyTextAlign = .left
     /// Empty colorHex inherits theme default.
     var colorHex: String = ""
@@ -255,7 +255,7 @@ struct NpsStyle: Equatable {
         shape: "square", borderRadius: 8, borderWidth: 1,
         borderColor: "#E4E6EB", backgroundColor: "#F4F5F8",
         selectedTile: .default,
-        textStyle: ElementStyle(size: 13, weight: .semibold, align: .center, colorHex: "#1A1D24"),
+        textStyle: ElementStyle(size: 13, weight: 600, align: .center, colorHex: "#1A1D24"),
         scaleColors: defaultScaleColors, tierEmojis: defaultTierEmojis,
         selectedBgColor: "#FFFFFF", faces: [], showFaceLabels: true
     )
@@ -630,12 +630,13 @@ struct CtaSettings: Equatable {
     let startLabel: String
     let bgColorHex: String
     let textColorHex: String
+    let fontWeight: Int
     let cornerRadius: Int
 
     static let `default` = CtaSettings(
         layout: .stacked, arrangement: .spaceBetween,
         nextLabel: "Next", backLabel: "Back", doneLabel: "Done", startLabel: "Start",
-        bgColorHex: "", textColorHex: "", cornerRadius: 8
+        bgColorHex: "", textColorHex: "", fontWeight: 600, cornerRadius: 8
     )
 
     static func from(_ json: [String: JSONValue]?) -> CtaSettings {
@@ -652,6 +653,7 @@ struct CtaSettings: Equatable {
             startLabel: label("startLabel", "Start"),
             bgColorHex: SurveyParse.string(json["bgColor"]) ?? "",
             textColorHex: SurveyParse.string(json["textColor"]) ?? "",
+            fontWeight: DigiaFontWeight.value(SurveyParse.string(json["fontWeight"]), default: 600),
             cornerRadius: max(0, min(48, SurveyParse.int(json["cornerRadius"]) ?? 8))
         )
     }
@@ -952,12 +954,7 @@ enum SurveyParse {
     }
 
     static func fontWeight(_ value: String?) -> SurveyFontWeight {
-        switch value?.trimmingCharacters(in: .whitespaces).lowercased() {
-        case "medium": return .medium
-        case "semibold", "semi_bold": return .semibold
-        case "bold": return .bold
-        default: return .regular
-        }
+        DigiaFontWeight.value(value)
     }
 
     static func textAlign(_ value: String?) -> SurveyTextAlign {

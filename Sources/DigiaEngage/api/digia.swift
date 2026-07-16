@@ -42,10 +42,6 @@ public enum Digia {
         SDKInstance.shared.populateCampaigns(campaignsJson)
     }
 
-    public static func registerFontFactory(_ factory: DUIFontFactory) {
-        SDKInstance.shared.registerFontFactory(factory)
-    }
-
     /// Silently dismisses any active nudge overlay without animation.
     /// Call this when the JS bundle reloads so that a nudge from the previous
     /// session doesn't remain stuck on screen.

@@ -20,6 +20,7 @@ struct StoryItemConfig: Equatable {
     let duration: Int?
     var ctaEnabled: Bool = false
     var ctaText: String?
+    var ctaFontWeight: Int = 600
     var ctaTextColor: String = "#FFFFFF"
     var ctaBackgroundColor: String = "#4945FF"
     var ctaCornerRadius: Int = 8
@@ -39,6 +40,7 @@ struct StoryItemConfig: Equatable {
             duration: json.positiveInt("duration"),
             ctaEnabled: json.bool("ctaEnabled", default: false),
             ctaText: json.nonBlankString("ctaText"),
+            ctaFontWeight: DigiaFontWeight.value(json["ctaFontWeight"], default: 600),
             ctaTextColor: json.nonBlankString("ctaTextColor") ?? "#FFFFFF",
             ctaBackgroundColor: json.nonBlankString("ctaBackgroundColor") ?? "#4945FF",
             ctaCornerRadius: json.int("ctaCornerRadius", default: 8),

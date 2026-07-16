@@ -23,6 +23,8 @@ struct GuideAction: Equatable {
     let actionType: GuideActionType
     let backgroundColor: String
     let textColor: String
+    let fontSize: Double
+    let fontWeight: Int
     let cornerRadius: Double
     let actions: [EngageAction]
 }
@@ -62,8 +64,7 @@ struct OverlayConfig: Equatable {
 
 struct GuideTextContent: Equatable {
     let text: String
-    let fontFamily: String
-    let fontWeight: String
+    let fontWeight: Int
     let fontSize: Double
     let textColor: String
 }
@@ -71,6 +72,7 @@ struct GuideTextContent: Equatable {
 struct StepIndicatorConfig: Equatable {
     let visible: Bool
     let color: String
+    let fontWeight: Int
 }
 
 struct GuideContentConfig: Equatable {
@@ -141,33 +143,14 @@ struct GuideStepWidgetConfig: Equatable {
         let mediaObj = contentObj.object("media")
         let stepIndObj = contentObj.object("step_indicator") ?? [:]
 
-        // Support legacy flat schema: "title"/"body" as top-level strings.
-        let titleText = titleObj?.nonBlankString("text") ?? json.nonBlankString("title")
-        let bodyText = bodyObj?.nonBlankString("text") ?? json.nonBlankString("body")
-
-        let title = titleText.map { text -> GuideTextContent in
-            let style = titleObj?.object("textStyle") ?? [:]
-            let font = (style.object("fontToken")?.object("font")) ?? [:]
-            return GuideTextContent(
-                text: text,
-                fontFamily: font.string("fontFamily"),
-                fontWeight: font.string("weight", default: "bold"),
-                fontSize: font.double("size", default: 16),
-                textColor: color(style.string("textColor"), default: defaultTitleColor)
-            )
-        }
-
-        let body = bodyText.map { text -> GuideTextContent in
-            let style = bodyObj?.object("textStyle") ?? [:]
-            let font = (style.object("fontToken")?.object("font")) ?? [:]
-            return GuideTextContent(
-                text: text,
-                fontFamily: font.string("fontFamily"),
-                fontWeight: font.string("weight", default: "regular"),
-                fontSize: font.double("size", default: 14),
-                textColor: color(style.string("textColor"), default: defaultBodyColor)
-            )
-        }
+        let title = nestedText(titleObj, defaultWeight: 700, defaultSize: 16,
+                               defaultColor: defaultTitleColor)
+            ?? flatText(json, key: "title", defaultWeight: 700, defaultSize: 16,
+                        defaultColor: defaultTitleColor)
+        let body = nestedText(bodyObj, defaultWeight: 400, defaultSize: 14,
+                              defaultColor: defaultBodyColor)
+            ?? flatText(json, key: "body", defaultWeight: 400, defaultSize: 14,
+                        defaultColor: defaultBodyColor)
 
         let content = GuideContentConfig(
             title: title,
@@ -175,17 +158,29 @@ struct GuideStepWidgetConfig: Equatable {
             mediaUrl: mediaObj?.nonBlankString("url"),
             stepIndicator: StepIndicatorConfig(
                 visible: stepIndObj.bool("visible", default: false),
-                color: color(stepIndObj.string("color"), default: defaultStepColor)
+                color: color(stepIndObj.string("color"), default: defaultStepColor),
+                fontWeight: DigiaFontWeight.value(stepIndObj["fontWeight"], default: 400)
             )
         )
 
-        let actionsArr = (json["actions"] as? [Any]) ?? (contentObj["actions"] as? [Any]) ?? []
+        let actionsArr = (json["actions"] as? [Any])
+            ?? (contentObj["actions"] as? [Any])
+            ?? []
         var actions: [GuideAction] = []
         for (index, element) in actionsArr.enumerated() {
             guard let obj = element as? [String: Any] else { continue }
-            // Support both "action_type" (new schema) and "type" (legacy).
-            let typeStr = obj.nonBlankString("action_type") ?? obj.string("type", default: "dismiss")
+            let typeStr = obj.nonBlankString("action_type")
+                ?? obj.string("type", default: "dismiss")
             let actionType = GuideActionType.parse(typeStr)
+            let style = obj.string("style", default: "filled")
+            let isPrimary = style == "filled" || style == "primary"
+            let defaultBackground = isPrimary
+                ? color(json.string("buttonPrimaryBackgroundColor"), default: defaultButtonBackground)
+                : "#00000000"
+            let defaultText = color(
+                json.string(isPrimary ? "buttonPrimaryTextColor" : "buttonGhostTextColor"),
+                default: defaultButtonText
+            )
             let onClick = obj.object("onClick")
             let legacyAction: EngageAction = switch typeStr.lowercased() {
             case "next": .next
@@ -198,11 +193,19 @@ struct GuideStepWidgetConfig: Equatable {
                 GuideAction(
                     id: obj.string("id", default: "btn_\(index)"),
                     label: obj.string("label"),
-                    style: obj.string("style", default: "filled"),
+                    style: style,
                     actionType: actionType,
-                    backgroundColor: color(obj.string("background_color"), default: defaultButtonBackground),
-                    textColor: color(obj.string("text_color"), default: defaultButtonText),
-                    cornerRadius: obj.double("corner_radius", default: 8),
+                    backgroundColor: obj.nonBlankString("background_color")
+                        .map { color($0, default: defaultButtonBackground) }
+                        ?? defaultBackground,
+                    textColor: obj.nonBlankString("text_color")
+                        .map { color($0, default: defaultButtonText) }
+                        ?? defaultText,
+                    fontSize: max(1, obj.double("fontSize", default: 14)),
+                    fontWeight: DigiaFontWeight.value(obj["fontWeight"], default: 600),
+                    cornerRadius: obj["corner_radius"] == nil
+                        ? 8
+                        : obj.double("corner_radius", default: 8),
                     actions: onClick.map { EngageActionParser().parse($0) } ?? [legacyAction]
                 )
             )
@@ -214,5 +217,38 @@ struct GuideStepWidgetConfig: Equatable {
     private static func color(_ value: String?, default fallback: String) -> String {
         guard let value, !value.isEmpty else { return fallback }
         return value
+    }
+
+    private static func nestedText(
+        _ json: [String: Any]?,
+        defaultWeight: Int,
+        defaultSize: Double,
+        defaultColor: String
+    ) -> GuideTextContent? {
+        guard let json, let text = json.nonBlankString("text") else { return nil }
+        let style = json.object("textStyle") ?? [:]
+        let font = style.object("fontToken")?.object("font") ?? [:]
+        return GuideTextContent(
+            text: text,
+            fontWeight: DigiaFontWeight.value(font["weight"], default: defaultWeight),
+            fontSize: font.double("size", default: defaultSize),
+            textColor: color(style.string("textColor"), default: defaultColor)
+        )
+    }
+
+    private static func flatText(
+        _ json: [String: Any],
+        key: String,
+        defaultWeight: Int,
+        defaultSize: Double,
+        defaultColor: String
+    ) -> GuideTextContent? {
+        guard let text = json.nonBlankString(key) else { return nil }
+        return GuideTextContent(
+            text: text,
+            fontWeight: DigiaFontWeight.value(json["\(key)Weight"], default: defaultWeight),
+            fontSize: json.double("\(key)Size", default: defaultSize),
+            textColor: color(json.string("\(key)Color"), default: defaultColor)
+        )
     }
 }

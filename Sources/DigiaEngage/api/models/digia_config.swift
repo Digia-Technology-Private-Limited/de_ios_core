@@ -47,8 +47,7 @@ public struct DigiaConfig: Sendable {
     public let networkConfiguration: DigiaNetworkConfiguration?
     public let developerConfig: DigiaDeveloperConfig?
     /// Optional global font family applied to all Digia-rendered text.
-    /// Resolved via `Font.custom` / `UIFont(name:)`, so it must match a font
-    /// registered with the app (e.g. a bundled custom font's PostScript name).
+    /// Must match a font family registered by the host app.
     public let fontFamily: String?
     public let analyticsConfig: AnalyticsConfig
     public let wrapperBinding: String?

@@ -315,6 +315,24 @@ struct EngageActionParserTests {
         #expect(item.actions.isEmpty)
     }
 
+    @Test("Story CTA accepts a numeric dashboard font weight")
+    func storyCtaAcceptsNumericFontWeight() throws {
+        let item = try #require(StoryItemConfig.fromJson([
+            "type": "image",
+            "url": "https://example.com/story.png",
+            "ctaFontWeight": 700,
+        ]))
+
+        #expect(item.ctaFontWeight == 700)
+    }
+
+    @Test("Survey CTA accepts a numeric dashboard font weight")
+    func surveyCtaAcceptsNumericFontWeight() {
+        let cta = CtaSettings.from(["fontWeight": .int(500)])
+
+        #expect(cta.fontWeight == 500)
+    }
+
     @Test("Carousel legacy deep link is parsed into Engage actions")
     func carouselParsesLegacyActions() throws {
         let config = try #require(InlineCarouselConfig.fromJson([
@@ -340,6 +358,77 @@ struct EngageActionParserTests {
         ])
 
         #expect(config.actions.first?.actions.isEmpty == true)
+    }
+
+    @Test("Guide parses flat dashboard typography including medium weight")
+    func guideParsesFlatTypography() throws {
+        let config = GuideStepWidgetConfig.fromJson([
+            "title": "Welcome",
+            "titleWeight": "500",
+            "titleSize": 18,
+            "titleColor": "#112233",
+            "body": "Start here",
+            "bodyWeight": 500,
+            "bodySize": 15,
+            "bodyColor": "#445566",
+            "content": [
+                "title": ["textStyle": ["textColor": "#FF0000"]],
+                "body": ["textStyle": ["textColor": "#00FF00"]],
+            ],
+            "buttonPrimaryBackgroundColor": "#123456",
+            "buttonPrimaryTextColor": "#FEDCBA",
+            "actions": [[
+                "id": "continue",
+                "type": "NEXT",
+                "label": "Continue",
+                "fontSize": 16,
+                "fontWeight": 700,
+            ]],
+        ])
+
+        #expect(config.content.title?.fontWeight == 500)
+        #expect(config.content.title?.text == "Welcome")
+        #expect(config.content.title?.fontSize == 18)
+        #expect(config.content.title?.textColor == "#112233")
+        #expect(config.content.body?.fontSize == 15)
+        #expect(config.content.body?.fontWeight == 500)
+        #expect(config.content.body?.text == "Start here")
+        #expect(config.content.body?.textColor == "#445566")
+        #expect(config.actions.first?.fontSize == 16)
+        #expect(config.actions.first?.fontWeight == 700)
+        #expect(config.actions.first?.backgroundColor == "#123456")
+        #expect(config.actions.first?.textColor == "#FEDCBA")
+    }
+
+    @Test("Guide keeps the legacy nested schema isolated from flat keys")
+    func guideParsesLegacyNestedTypography() throws {
+        let config = GuideStepWidgetConfig.fromJson([
+            "titleColor": "#FF0000",
+            "content": [
+                "title": [
+                    "text": "Legacy title",
+                    "textStyle": [
+                        "textColor": "#112233",
+                        "fontToken": ["font": ["weight": "medium", "size": 18]],
+                    ],
+                ],
+                "actions": [[
+                    "id": "legacy-next",
+                    "label": "Continue",
+                    "action_type": "NEXT",
+                    "background_color": "#334455",
+                    "text_color": "#FFFFFF",
+                    "corner_radius": 12,
+                ]],
+            ],
+        ])
+
+        #expect(config.content.title?.text == "Legacy title")
+        #expect(config.content.title?.fontWeight == 500)
+        #expect(config.content.title?.textColor == "#112233")
+        #expect(config.actions.first?.actionType == .next)
+        #expect(config.actions.first?.backgroundColor == "#334455")
+        #expect(config.actions.first?.cornerRadius == 12)
     }
 }
 

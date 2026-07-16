@@ -99,7 +99,7 @@ private struct NudgeTextView: View {
     }
 
     private func runAttributes(_ style: NudgeSpanStyle?) -> [NSAttributedString.Key: Any] {
-        let font = SDKInstance.shared.fontFactory.getDefaultUIFont(
+        let font = SDKInstance.shared.font.resolve(
             size: Double(style?.fontSize ?? node.fontSize),
             weight: style?.fontWeight ?? node.fontWeight,
             italic: style?.italic ?? false
@@ -230,11 +230,10 @@ private struct NudgeButtonView: View {
         Button(action: handleTap) {
             Text(interpolate(node.label, context: variables))
                 .font(
-                    SDKInstance.shared.fontFactory.getDefaultFont(
+                    Font(SDKInstance.shared.font.resolve(
                         size: Double(node.fontSize), weight: node.fontWeight, italic: false
-                    )
+                    ))
                 )
-                .fontWeight(node.fontWeight)
                 .foregroundStyle(filled ? node.textColor : node.background)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -434,9 +433,9 @@ private struct NudgeVideoView: View {
                                 .font(.system(size: 28))
                             Text("Video failed")
                                 .font(
-                                    SDKInstance.shared.fontFactory.getDefaultFont(
-                                        size: 13, weight: .regular, italic: false
-                                    )
+                                    Font(SDKInstance.shared.font.resolve(
+                                        size: 13, weight: 400, italic: false
+                                    ))
                                 )
                         }
                         .foregroundStyle(.white)
@@ -527,9 +526,9 @@ private func nudgePlaceholder(label: String, height: CGFloat) -> some View {
             .fill(Color(hex: "#F1F1F5") ?? Color(.systemGray6))
         Text(label)
             .font(
-                SDKInstance.shared.fontFactory.getDefaultFont(
-                    size: 11, weight: .regular, italic: false
-                )
+                Font(SDKInstance.shared.font.resolve(
+                    size: 11, weight: 400, italic: false
+                ))
             )
             .foregroundStyle(Color(hex: "#9A9AAD") ?? .secondary)
     }

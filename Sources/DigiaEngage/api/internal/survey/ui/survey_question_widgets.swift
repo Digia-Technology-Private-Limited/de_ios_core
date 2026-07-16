@@ -20,11 +20,11 @@ enum SurveyTokens {
 
 struct TextDefaults {
     let sizePt: CGFloat
-    let weight: Font.Weight
+    let weight: Int
     let color: Color
     let align: TextAlignment
 
-    init(sizePt: CGFloat, weight: Font.Weight, color: Color, align: TextAlignment = .leading) {
+    init(sizePt: CGFloat, weight: Int, color: Color, align: TextAlignment = .leading) {
         self.sizePt = sizePt
         self.weight = weight
         self.color = color
@@ -32,23 +32,23 @@ struct TextDefaults {
     }
 }
 
-let TitleDefaults = TextDefaults(sizePt: 20, weight: .bold, color: SurveyTokens.textPrimary)
-let BodyDefaults = TextDefaults(sizePt: 14, weight: .regular, color: SurveyTokens.textSecondary)
-let OptionDefaults = TextDefaults(sizePt: 16, weight: .medium, color: SurveyTokens.textPrimary)
+let TitleDefaults = TextDefaults(sizePt: 20, weight: 700, color: SurveyTokens.textPrimary)
+let BodyDefaults = TextDefaults(sizePt: 14, weight: 400, color: SurveyTokens.textSecondary)
+let OptionDefaults = TextDefaults(sizePt: 16, weight: 500, color: SurveyTokens.textPrimary)
 
 // MARK: - Fonts
 
 /// Resolves a survey font through the SDK-wide font factory so the global
 /// `DigiaConfig.fontFamily` applies to natively-rendered surveys, matching
 /// campaigns and guides. When no global family is configured the factory is
-/// `DefaultFontFactory`, which returns the system font — preserving the prior
+/// `DigiaFont`, which returns the system font — preserving the prior
 /// appearance. Shape mirrors `Font.system(size:weight:)` so it is a drop-in
 /// replacement at every call site.
 @MainActor
-func surveyFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-    SDKInstance.shared.fontFactory.getDefaultFont(
+func surveyFont(size: CGFloat, weight: Int = 400) -> Font {
+    Font(SDKInstance.shared.font.resolve(
         size: Double(size), weight: weight, italic: false
-    )
+    ))
 }
 
 extension ElementStyle {
@@ -57,14 +57,7 @@ extension ElementStyle {
         size > 0 ? CGFloat(size) : def
     }
 
-    func resolveWeight() -> Font.Weight {
-        switch weight {
-        case .regular: return .regular
-        case .medium: return .medium
-        case .semibold: return .semibold
-        case .bold: return .bold
-        }
-    }
+    func resolveWeight() -> Int { weight }
 
     func resolveAlign() -> TextAlignment {
         switch align {
@@ -391,7 +384,12 @@ private struct ReactionQuestion: View {
                     onAnswer(SurveyAnswer(values: [option.id]))
                 } label: {
                     Text(option.label)
-                        .font(surveyFont(size: 32))
+                        .font(
+                            surveyFont(
+                                size: block.optionStyle?.resolveFontSize(default: 32) ?? 32,
+                                weight: block.optionStyle?.resolveWeight() ?? 400
+                            )
+                        )
                         .frame(width: 64, height: 64)
                         .background(
                             Circle().fill(isOn ? accent.opacity(0.14) : SurveyTokens.surfaceSunken)
@@ -439,7 +437,12 @@ private struct ThisOrThatQuestion: View {
                     ZStack(alignment: .bottomLeading) {
                         RoundedRectangle(cornerRadius: 14).fill(gradients[index % gradients.count])
                         Text(option.label)
-                            .font(surveyFont(size: 16, weight: .bold))
+                            .font(
+                                surveyFont(
+                                    size: block.optionStyle?.resolveFontSize(default: 16) ?? 16,
+                                    weight: block.optionStyle?.resolveWeight() ?? 700
+                                )
+                            )
                             .foregroundColor(.white)
                             .padding(14)
                     }
@@ -479,12 +482,15 @@ private struct TierListQuestion: View {
             ForEach(Array(tiers.enumerated()), id: \.offset) { _, t in
                 HStack(spacing: 6) {
                     Text(t.label)
-                        .font(surveyFont(size: 18, weight: .heavy))
+                        .font(surveyFont(size: 18, weight: 700))
                         .foregroundColor(.white)
                         .frame(width: 40, height: 40)
                         .background(RoundedRectangle(cornerRadius: 6).fill(t.color))
                     TierChips(
-                        items: block.options.filter { placements[$0.id] == t.label }, onTap: cycle
+                        items: block.options.filter { placements[$0.id] == t.label },
+                        optionStyle: block.optionStyle,
+                        accent: accent,
+                        onTap: cycle
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(minHeight: 44)
@@ -499,6 +505,8 @@ private struct TierListQuestion: View {
             }
             TierChips(
                 items: block.options.filter { (placements[$0.id] ?? "-") == "-" },
+                optionStyle: block.optionStyle,
+                accent: accent,
                 onTap: cycle,
                 placeholder: "Tap a chip to assign a tier"
             )
@@ -538,6 +546,8 @@ private struct TierListQuestion: View {
 
 private struct TierChips: View {
     let items: [SurveyOption]
+    let optionStyle: ElementStyle?
+    let accent: Color
     let onTap: (String) -> Void
     var placeholder: String? = nil
 
@@ -555,8 +565,18 @@ private struct TierChips: View {
                         onTap(opt.id)
                     } label: {
                         Text(opt.label)
-                            .font(surveyFont(size: 12))
-                            .foregroundColor(SurveyTokens.textPrimary)
+                            .font(
+                                surveyFont(
+                                    size: optionStyle?.resolveFontSize(default: 12) ?? 12,
+                                    weight: optionStyle?.resolveWeight() ?? 400
+                                )
+                            )
+                            .foregroundColor(
+                                optionStyle?.resolveColor(
+                                    accent: accent,
+                                    default: SurveyTokens.textPrimary
+                                ) ?? SurveyTokens.textPrimary
+                            )
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
                             .background(
@@ -736,7 +756,12 @@ private struct ChoiceCardRow: View {
                 }
                 if showDescription, let desc = option.description, !desc.isEmpty {
                     Text(desc)
-                        .font(surveyFont(size: 12))
+                        .font(
+                            surveyFont(
+                                size: optionStyle?.resolveFontSize(default: 12) ?? 12,
+                                weight: optionStyle?.resolveWeight() ?? 400
+                            )
+                        )
                         .foregroundColor(SurveyTokens.textSecondary)
                         .padding(.leading, 32)
                 }

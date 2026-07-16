@@ -14,7 +14,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private lazy var actionExecutor = EngageActionExecutor(
         hostActionExecutor: hostActionExecutor
     )
-    private(set) var fontFactory: DUIFontFactory = DefaultFontFactory()
+    private(set) var font = DigiaFont()
     /// Mirrors Android's `ScreenTracker`: the last screen name reported via
     /// `Digia.setCurrentScreen`, forwarded to the active plugin and read into
     /// analytics events (`screenName`).
@@ -79,11 +79,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         DigiaLog.configure(config.logLevel)
         DigiaEndpoints.configure(config)
 
-        if let family = config.fontFamily?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !family.isEmpty
-        {
-            fontFactory = ConfiguredFontFactory(fontFamily: family)
-        }
+        font = DigiaFont(fontFamily: config.fontFamily)
 
         if config.wrapperBinding == "react_native" {
             // RN fetches campaigns itself (it needs the same response to render
@@ -191,10 +187,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         logVerbose("Screen: \(name)")
         _currentScreen = name
         activePlugin?.forwardScreen(name)
-    }
-
-    func registerFontFactory(_ factory: DUIFontFactory) {
-        fontFactory = factory
     }
 
     func registerPlaceholderForSlot(propertyID: String) -> Int? {
@@ -861,7 +853,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         hostActionExecutor.clearHandlers()
         sdkState = .notInitialized
         isHostMounted = false
-        fontFactory = DefaultFontFactory()
+        font = DigiaFont()
         campaignStore.clear()
         controller.dismissNudge()
         controller.dismissStoryOverlay()

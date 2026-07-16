@@ -295,7 +295,7 @@ private struct SurveyBody: View {
                     Spacer()
                     Button(action: onClose) {
                         Image(systemName: "xmark")
-                            .font(surveyFont(size: 14, weight: .semibold))
+                            .font(surveyFont(size: 14, weight: 600))
                             .foregroundColor(SurveyTokens.textTertiary)
                             .frame(width: 26, height: 26)
                     }
@@ -316,7 +316,7 @@ private struct SurveyBody: View {
                 welcomeDone = true
             } label: {
                 Text(cta.startLabel)
-                    .font(surveyFont(size: 15, weight: .semibold))
+                    .font(surveyFont(size: 15, weight: cta.fontWeight))
                     .foregroundColor(ctaText(cta))
                     .padding(.horizontal, 18)
                     .padding(.vertical, 10)
@@ -387,7 +387,7 @@ private struct SurveyBody: View {
             }
             if pagination.numberOfPages && !block.type.isContent {
                 Text("\(position)/\(total)")
-                    .font(surveyFont(size: 11, weight: .semibold))
+                    .font(surveyFont(size: 11, weight: 600))
                     .foregroundColor(SurveyTokens.textTertiary)
             }
             if timerCfg.enabled && timerCfg.timeLimitSeconds > 0 {
@@ -396,7 +396,7 @@ private struct SurveyBody: View {
             if showCloseButton && survey.settings.display.dismissible {
                 Button(action: onClose) {
                     Image(systemName: "xmark")
-                        .font(surveyFont(size: 14, weight: .semibold))
+                        .font(surveyFont(size: 14, weight: 600))
                         .foregroundColor(SurveyTokens.textTertiary)
                         .frame(width: 26, height: 26)
                 }
@@ -479,7 +479,7 @@ private struct SurveyBody: View {
                 vm.advance()
             } label: {
                 Text(cta.startLabel)
-                    .font(surveyFont(size: 15, weight: .semibold))
+                    .font(surveyFont(size: 15, weight: cta.fontWeight))
                     .foregroundColor(ctaText(cta))
                     .padding(.horizontal, 18)
                     .padding(.vertical, 10)
@@ -493,7 +493,7 @@ private struct SurveyBody: View {
                     onCompletedClose()
                 } label: {
                     Text(cta.doneLabel)
-                        .font(surveyFont(size: 14, weight: .semibold))
+                        .font(surveyFont(size: 14, weight: cta.fontWeight))
                         .foregroundColor(ctaText(cta))
                         .padding(.horizontal, 18)
                         .padding(.vertical, 10)
@@ -616,7 +616,7 @@ private struct TimerChip: View {
         let minutes = remainingSecs / 60
         let seconds = remainingSecs % 60
         Text(String(format: "%d:%02d", minutes, seconds))
-            .font(surveyFont(size: 11, weight: .semibold))
+            .font(surveyFont(size: 11, weight: 600))
             .foregroundColor(tint)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
@@ -633,7 +633,7 @@ private struct CategoryPill: View {
             EmptyView()
         } else if let label = categoryLabel(block.type) {
             Text(label.uppercased())
-                .font(surveyFont(size: 10.5, weight: .bold))
+                .font(surveyFont(size: 10.5, weight: 700))
                 .foregroundColor(accent)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
@@ -721,7 +721,7 @@ private struct FooterRow: View {
     private func nextButton(fullWidth: Bool) -> some View {
         Button(action: onNext) {
             Text(nextLabel)
-                .font(surveyFont(size: 14, weight: .semibold))
+                .font(surveyFont(size: 14, weight: cta.fontWeight))
                 .foregroundColor(ctaText(cta))
                 .padding(.horizontal, 18)
                 .padding(.vertical, 10)
@@ -736,7 +736,7 @@ private struct FooterRow: View {
     private func backButton(fullWidth: Bool) -> some View {
         Button(action: onBack) {
             Text(cta.backLabel)
-                .font(surveyFont(size: 14))
+                .font(surveyFont(size: 14, weight: cta.fontWeight))
                 .foregroundColor(SurveyTokens.textSecondary)
                 .padding(.horizontal, 18)
                 .padding(.vertical, 10)
