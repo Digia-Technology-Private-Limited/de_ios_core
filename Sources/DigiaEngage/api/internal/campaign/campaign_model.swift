@@ -46,9 +46,7 @@ struct CampaignModel: Equatable {
         guard let id = json.nonBlankString("id") ?? json.nonBlankString("_id") else { return nil }
         guard let campaignKey = json.nonBlankString("campaignKey") else { return nil }
         guard let campaignType = json.nonBlankString("campaignType") else { return nil }
-        guard let targetScreenNames = parseTargetScreenNames(json, campaignKey: campaignKey) else {
-            return nil
-        }
+        let targetScreenNames = json.object("targetScreenNames")?.stringArray("names") ?? []
 
         let config: CampaignConfigModel
         switch campaignType {
@@ -85,37 +83,6 @@ struct CampaignModel: Equatable {
             targetScreenNames: targetScreenNames,
             frequency: FrequencyPolicy.fromJson(json.object("frequency"))
         )
-    }
-
-    private static func parseTargetScreenNames(
-        _ json: [String: Any], campaignKey: String
-    ) -> [String]? {
-        guard let raw = json["targetScreenNames"] else { return [] }
-        guard let values = raw as? [Any] else {
-            DigiaLog.warning(
-                "Skipping campaign '\(campaignKey)': targetScreenNames must be an array of non-empty strings"
-            )
-            return nil
-        }
-        var result: [String] = []
-        var seen = Set<String>()
-        for value in values {
-            guard let name = value as? String else {
-                DigiaLog.warning(
-                    "Skipping campaign '\(campaignKey)': targetScreenNames must be an array of non-empty strings"
-                )
-                return nil
-            }
-            let screenName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !screenName.isEmpty else {
-                DigiaLog.warning(
-                    "Skipping campaign '\(campaignKey)': targetScreenNames must be an array of non-empty strings"
-                )
-                return nil
-            }
-            if seen.insert(screenName).inserted { result.append(screenName) }
-        }
-        return result
     }
 
     // ── survey parsing ────────────────────────────────────────────────────────

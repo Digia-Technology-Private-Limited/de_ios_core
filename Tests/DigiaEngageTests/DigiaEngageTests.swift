@@ -69,13 +69,13 @@ struct DigiaEngageTests {
         #expect(SDKInstance.shared.inlineController.getCarouselConfig("hero_banner")?.items.count == 1)
     }
 
-    @Test("campaign target screens are trimmed and deduplicated")
+    @Test("campaign target screens are parsed")
     func parsesCampaignTargetScreens() throws {
         let campaign = try #require(CampaignModel.fromJson([
             "id": "targeted-id",
             "campaignKey": "help-inline",
             "campaignType": "inline",
-            "targetScreenNames": [" Help ", "Home", "Help"],
+            "targetScreenNames": ["names": ["Help", "Home"]],
             "templateConfig": [
                 "templateType": "carousel",
                 "slotKey": "hero_banner",
@@ -86,23 +86,6 @@ struct DigiaEngageTests {
         #expect(campaign.targetScreenNames == ["Help", "Home"])
     }
 
-    @Test("campaign with malformed target screens is rejected")
-    func rejectsMalformedCampaignTargetScreens() {
-        let campaign = CampaignModel.fromJson([
-            "id": "targeted-id",
-            "campaignKey": "help-inline",
-            "campaignType": "inline",
-            "targetScreenNames": ["Help", 42],
-            "templateConfig": [
-                "templateType": "carousel",
-                "slotKey": "hero_banner",
-                "items": [["imageUrl": "https://example.com/a.png"]],
-            ],
-        ])
-
-        #expect(campaign == nil)
-    }
-
     @Test("campaign screen matching is case sensitive")
     func rejectsCampaignOnNonTargetedScreen() throws {
         SDKInstance.shared.resetForTesting()
@@ -110,7 +93,7 @@ struct DigiaEngageTests {
             "id": "targeted-id",
             "campaignKey": "help-inline",
             "campaignType": "inline",
-            "targetScreenNames": ["Help"],
+            "targetScreenNames": ["names": ["Help"]],
             "templateConfig": [
                 "templateType": "carousel",
                 "slotKey": "hero_banner",
@@ -438,7 +421,7 @@ private func targetedInlineCampaign() -> CampaignModel? {
         "id": "targeted-id",
         "campaignKey": "help-inline",
         "campaignType": "inline",
-        "targetScreenNames": ["Help"],
+        "targetScreenNames": ["names": ["Help"]],
         "templateConfig": [
             "templateType": "carousel",
             "slotKey": "hero_banner",

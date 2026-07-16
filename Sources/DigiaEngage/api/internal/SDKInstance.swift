@@ -189,8 +189,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func setCurrentScreen(_ name: String) {
         let screenName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        logVerbose("Screen: \(screenName)")
         _currentScreen = screenName.isEmpty ? nil : screenName
+        DigiaLog.warning("[SDKInstance] Current screen set: \(_currentScreen ?? "<unset>")")
         activePlugin?.forwardScreen(screenName)
     }
 
@@ -241,8 +241,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         if !campaign.targetScreenNames.isEmpty
             && !campaign.targetScreenNames.contains(_currentScreen ?? "")
         {
-            print(
-                "Digia [SDKInstance] Campaign dropped — screen not targeted: "
+            DigiaLog.warning(
+                "[SDKInstance] Campaign dropped — screen not targeted: "
                     + "campaignKey=\(key) currentScreen=\(_currentScreen ?? "<unset>") "
                     + "targetScreenNames=\(campaign.targetScreenNames)"
             )
