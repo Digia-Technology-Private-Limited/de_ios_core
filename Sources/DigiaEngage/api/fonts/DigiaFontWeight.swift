@@ -1,33 +1,12 @@
-import SwiftUI
+import Foundation
 
-/// Converts dashboard font-weight data at the SwiftUI rendering boundary.
+/// Decodes dashboard font weights into the SDK's numeric domain representation.
 enum DigiaFontWeight {
     static func value(_ value: Any?, default fallback: Int = 400) -> Int {
         numericValue(value) ?? fallback
     }
 
-    static func parse(_ value: String?, default fallback: Font.Weight = .regular) -> Font.Weight {
-        optional(value) ?? fallback
-    }
-
-    static func parse(_ value: Int?, default fallback: Font.Weight = .regular) -> Font.Weight {
-        guard let value, (100...900).contains(value) else { return fallback }
-        return switch value {
-        case ..<150: .ultraLight
-        case ..<250: .thin
-        case ..<350: .light
-        case ..<450: .regular
-        case ..<550: .medium
-        case ..<650: .semibold
-        case ..<750: .bold
-        case ..<850: .heavy
-        default: .black
-        }
-    }
-
-    static func optional(_ value: Any?) -> Font.Weight? {
-        numericValue(value).map { parse($0) }
-    }
+    static func optional(_ value: Any?) -> Int? { numericValue(value) }
 
     private static func numericValue(_ raw: Any?) -> Int? {
         let value: String?

@@ -20,11 +20,11 @@ enum SurveyTokens {
 
 struct TextDefaults {
     let sizePt: CGFloat
-    let weight: Font.Weight
+    let weight: Int
     let color: Color
     let align: TextAlignment
 
-    init(sizePt: CGFloat, weight: Font.Weight, color: Color, align: TextAlignment = .leading) {
+    init(sizePt: CGFloat, weight: Int, color: Color, align: TextAlignment = .leading) {
         self.sizePt = sizePt
         self.weight = weight
         self.color = color
@@ -32,9 +32,9 @@ struct TextDefaults {
     }
 }
 
-let TitleDefaults = TextDefaults(sizePt: 20, weight: .bold, color: SurveyTokens.textPrimary)
-let BodyDefaults = TextDefaults(sizePt: 14, weight: .regular, color: SurveyTokens.textSecondary)
-let OptionDefaults = TextDefaults(sizePt: 16, weight: .medium, color: SurveyTokens.textPrimary)
+let TitleDefaults = TextDefaults(sizePt: 20, weight: 700, color: SurveyTokens.textPrimary)
+let BodyDefaults = TextDefaults(sizePt: 14, weight: 400, color: SurveyTokens.textSecondary)
+let OptionDefaults = TextDefaults(sizePt: 16, weight: 500, color: SurveyTokens.textPrimary)
 
 // MARK: - Fonts
 
@@ -45,10 +45,10 @@ let OptionDefaults = TextDefaults(sizePt: 16, weight: .medium, color: SurveyToke
 /// appearance. Shape mirrors `Font.system(size:weight:)` so it is a drop-in
 /// replacement at every call site.
 @MainActor
-func surveyFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-    SDKInstance.shared.font.swiftUI(
+func surveyFont(size: CGFloat, weight: Int = 400) -> Font {
+    Font(SDKInstance.shared.font.resolve(
         size: Double(size), weight: weight, italic: false
-    )
+    ))
 }
 
 extension ElementStyle {
@@ -57,9 +57,7 @@ extension ElementStyle {
         size > 0 ? CGFloat(size) : def
     }
 
-    func resolveWeight() -> Font.Weight {
-        DigiaFontWeight.parse(weight)
-    }
+    func resolveWeight() -> Int { weight }
 
     func resolveAlign() -> TextAlignment {
         switch align {
@@ -389,7 +387,7 @@ private struct ReactionQuestion: View {
                         .font(
                             surveyFont(
                                 size: block.optionStyle?.resolveFontSize(default: 32) ?? 32,
-                                weight: block.optionStyle?.resolveWeight() ?? .regular
+                                weight: block.optionStyle?.resolveWeight() ?? 400
                             )
                         )
                         .frame(width: 64, height: 64)
@@ -442,7 +440,7 @@ private struct ThisOrThatQuestion: View {
                             .font(
                                 surveyFont(
                                     size: block.optionStyle?.resolveFontSize(default: 16) ?? 16,
-                                    weight: block.optionStyle?.resolveWeight() ?? .bold
+                                    weight: block.optionStyle?.resolveWeight() ?? 700
                                 )
                             )
                             .foregroundColor(.white)
@@ -484,7 +482,7 @@ private struct TierListQuestion: View {
             ForEach(Array(tiers.enumerated()), id: \.offset) { _, t in
                 HStack(spacing: 6) {
                     Text(t.label)
-                        .font(surveyFont(size: 18, weight: .bold))
+                        .font(surveyFont(size: 18, weight: 700))
                         .foregroundColor(.white)
                         .frame(width: 40, height: 40)
                         .background(RoundedRectangle(cornerRadius: 6).fill(t.color))
@@ -570,7 +568,7 @@ private struct TierChips: View {
                             .font(
                                 surveyFont(
                                     size: optionStyle?.resolveFontSize(default: 12) ?? 12,
-                                    weight: optionStyle?.resolveWeight() ?? .regular
+                                    weight: optionStyle?.resolveWeight() ?? 400
                                 )
                             )
                             .foregroundColor(
@@ -761,7 +759,7 @@ private struct ChoiceCardRow: View {
                         .font(
                             surveyFont(
                                 size: optionStyle?.resolveFontSize(default: 12) ?? 12,
-                                weight: optionStyle?.resolveWeight() ?? .regular
+                                weight: optionStyle?.resolveWeight() ?? 400
                             )
                         )
                         .foregroundColor(SurveyTokens.textSecondary)

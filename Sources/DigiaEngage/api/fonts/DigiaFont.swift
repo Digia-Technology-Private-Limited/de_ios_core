@@ -1,4 +1,3 @@
-import SwiftUI
 import UIKit
 
 /// Creates all Digia Engage fonts from the host-configured family.
@@ -10,12 +9,9 @@ struct DigiaFont {
         family = trimmed?.isEmpty == false ? trimmed : nil
     }
 
-    func swiftUI(size: Double, weight: Font.Weight, italic: Bool) -> Font {
-        Font(uiKit(size: size, weight: weight, italic: italic))
-    }
-
-    func uiKit(size: Double, weight: Font.Weight, italic: Bool) -> UIFont {
-        let uiWeight = UIFont.Weight(weight)
+    /// Resolves the one canonical UIKit font used by both UIKit and SwiftUI renderers.
+    func resolve(size: Double, weight: Int, italic: Bool) -> UIFont {
+        let uiWeight = UIFont.Weight(campaignWeight: weight)
         let base: UIFont
         if let family, !UIFont.fontNames(forFamilyName: family).isEmpty {
             let descriptor = UIFontDescriptor(fontAttributes: [
@@ -35,19 +31,25 @@ struct DigiaFont {
     }
 }
 
-private extension UIFont.Weight {
-    init(_ weight: Font.Weight) {
-        switch weight {
-        case .ultraLight: self = .ultraLight
-        case .thin: self = .thin
-        case .light: self = .light
-        case .regular: self = .regular
-        case .medium: self = .medium
-        case .semibold: self = .semibold
-        case .bold: self = .bold
-        case .heavy: self = .heavy
-        case .black: self = .black
-        default: self = .regular
+extension UIFont.Weight {
+    init(campaignWeight: Int) {
+        let nearestHundred = ((campaignWeight.clamped(to: 100...900) + 50) / 100) * 100
+        switch nearestHundred {
+        case 100: self = .ultraLight
+        case 200: self = .thin
+        case 300: self = .light
+        case 400: self = .regular
+        case 500: self = .medium
+        case 600: self = .semibold
+        case 700: self = .bold
+        case 800: self = .heavy
+        default: self = .black
         }
+    }
+}
+
+private extension Comparable {
+    func clamped(to range: ClosedRange<Self>) -> Self {
+        min(max(self, range.lowerBound), range.upperBound)
     }
 }

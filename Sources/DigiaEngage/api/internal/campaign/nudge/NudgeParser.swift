@@ -59,7 +59,7 @@ struct NudgeParser {
             box: box,
             text: props["text"] as? String ?? "",
             fontSize: CGFloat(parseDouble(font["size"]) ?? 16),
-            fontWeight: DigiaFontWeight.optional(font["weight"]) ?? .regular,
+            fontWeight: DigiaFontWeight.value(font["weight"], default: 400),
             color: parseColor(style["textColor"] as? String) ?? Color(hex: "#111111") ?? .primary,
             textAlignment: parseTextAlignment(props["alignment"] as? String ?? "left"),
             lineHeight: (props["lineHeight"] as? Double).map { CGFloat($0) },
@@ -129,7 +129,7 @@ struct NudgeParser {
             label: text["text"] as? String ?? "Button",
             variant: parseButtonVariant(props["variant"] as? String ?? "fill"),
             fontSize: CGFloat(parseDouble(font["size"]) ?? 16),
-            fontWeight: DigiaFontWeight.optional(font["weight"]) ?? .semibold,
+            fontWeight: DigiaFontWeight.value(font["weight"], default: 600),
             background: parseColor(defaultStyle["backgroundColor"] as? String) ?? Color(
                 hex: "#4945FF") ?? .blue,
             textColor: parseColor(textStyle["textColor"] as? String) ?? .white,

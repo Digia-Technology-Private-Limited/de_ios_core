@@ -608,11 +608,11 @@ private struct StoryCTAButton: View {
         Button(action: action) {
             Text(interpolate(item.ctaText ?? "", context: variables))
                 .font(
-                    SDKInstance.shared.font.swiftUI(
+                    Font(SDKInstance.shared.font.resolve(
                         size: 16,
-                        weight: DigiaFontWeight.parse(item.ctaFontWeight, default: .semibold),
+                        weight: item.ctaFontWeight,
                         italic: false
-                    )
+                    ))
                 )
                 .foregroundColor(Color(hex: item.ctaTextColor) ?? .white)
                 .frame(maxWidth: .infinity)

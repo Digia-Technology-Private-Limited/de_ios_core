@@ -64,7 +64,6 @@ struct OverlayConfig: Equatable {
 
 struct GuideTextContent: Equatable {
     let text: String
-    let fontFamily: String
     let fontWeight: Int
     let fontSize: Double
     let textColor: String
@@ -139,46 +138,26 @@ struct GuideStepWidgetConfig: Equatable {
             cutout: cutout
         )
 
-        let titleObj = contentObj.object("title")
-        let bodyObj = contentObj.object("body")
         let mediaObj = contentObj.object("media")
         let stepIndObj = contentObj.object("step_indicator") ?? [:]
 
-        // Support legacy flat schema: "title"/"body" as top-level strings.
-        let titleText = titleObj?.nonBlankString("text") ?? json.nonBlankString("title")
-        let bodyText = bodyObj?.nonBlankString("text") ?? json.nonBlankString("body")
-
-        let title = titleText.map { text -> GuideTextContent in
-            let style = titleObj?.object("textStyle") ?? [:]
-            let font = (style.object("fontToken")?.object("font")) ?? [:]
+        // Dashboard-authored guides use the flat step keys below. Keep each
+        // property bound to its own wire key; do not infer it from another schema.
+        let title = json.nonBlankString("title").map { text -> GuideTextContent in
             return GuideTextContent(
                 text: text,
-                fontFamily: font.string("fontFamily"),
-                fontWeight: DigiaFontWeight.value(font["weight"] ?? json["titleWeight"], default: 700),
-                fontSize: font["size"] == nil
-                    ? json.double("titleSize", default: 16)
-                    : font.double("size", default: 16),
-                textColor: color(
-                    style.nonBlankString("textColor") ?? json.string("titleColor"),
-                    default: defaultTitleColor
-                )
+                fontWeight: DigiaFontWeight.value(json["titleWeight"], default: 700),
+                fontSize: json.double("titleSize", default: 16),
+                textColor: color(json.string("titleColor"), default: defaultTitleColor)
             )
         }
 
-        let body = bodyText.map { text -> GuideTextContent in
-            let style = bodyObj?.object("textStyle") ?? [:]
-            let font = (style.object("fontToken")?.object("font")) ?? [:]
+        let body = json.nonBlankString("body").map { text -> GuideTextContent in
             return GuideTextContent(
                 text: text,
-                fontFamily: font.string("fontFamily"),
-                fontWeight: DigiaFontWeight.value(font["weight"] ?? json["bodyWeight"], default: 400),
-                fontSize: font["size"] == nil
-                    ? json.double("bodySize", default: 14)
-                    : font.double("size", default: 14),
-                textColor: color(
-                    style.nonBlankString("textColor") ?? json.string("bodyColor"),
-                    default: defaultBodyColor
-                )
+                fontWeight: DigiaFontWeight.value(json["bodyWeight"], default: 400),
+                fontSize: json.double("bodySize", default: 14),
+                textColor: color(json.string("bodyColor"), default: defaultBodyColor)
             )
         }
 
@@ -193,12 +172,11 @@ struct GuideStepWidgetConfig: Equatable {
             )
         )
 
-        let actionsArr = (json["actions"] as? [Any]) ?? (contentObj["actions"] as? [Any]) ?? []
+        let actionsArr = (json["actions"] as? [Any]) ?? []
         var actions: [GuideAction] = []
         for (index, element) in actionsArr.enumerated() {
             guard let obj = element as? [String: Any] else { continue }
-            // Support both "action_type" (new schema) and "type" (legacy).
-            let typeStr = obj.nonBlankString("action_type") ?? obj.string("type", default: "dismiss")
+            let typeStr = obj.string("type", default: "dismiss")
             let actionType = GuideActionType.parse(typeStr)
             let style = obj.string("style", default: "filled")
             let isPrimary = style == "filled" || style == "primary"
@@ -223,11 +201,11 @@ struct GuideStepWidgetConfig: Equatable {
                     label: obj.string("label"),
                     style: style,
                     actionType: actionType,
-                    backgroundColor: color(obj.string("background_color"), default: defaultBackground),
-                    textColor: color(obj.string("text_color"), default: defaultText),
+                    backgroundColor: defaultBackground,
+                    textColor: defaultText,
                     fontSize: max(1, obj.double("fontSize", default: 14)),
                     fontWeight: DigiaFontWeight.value(obj["fontWeight"], default: 600),
-                    cornerRadius: obj.double("corner_radius", default: 8),
+                    cornerRadius: 8,
                     actions: onClick.map { EngageActionParser().parse($0) } ?? [legacyAction]
                 )
             )

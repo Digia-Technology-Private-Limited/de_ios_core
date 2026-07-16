@@ -315,6 +315,24 @@ struct EngageActionParserTests {
         #expect(item.actions.isEmpty)
     }
 
+    @Test("Story CTA accepts a numeric dashboard font weight")
+    func storyCtaAcceptsNumericFontWeight() throws {
+        let item = try #require(StoryItemConfig.fromJson([
+            "type": "image",
+            "url": "https://example.com/story.png",
+            "ctaFontWeight": 700,
+        ]))
+
+        #expect(item.ctaFontWeight == 700)
+    }
+
+    @Test("Survey CTA accepts a numeric dashboard font weight")
+    func surveyCtaAcceptsNumericFontWeight() {
+        let cta = CtaSettings.from(["fontWeight": .int(500)])
+
+        #expect(cta.fontWeight == 500)
+    }
+
     @Test("Carousel legacy deep link is parsed into Engage actions")
     func carouselParsesLegacyActions() throws {
         let config = try #require(InlineCarouselConfig.fromJson([
@@ -350,9 +368,13 @@ struct EngageActionParserTests {
             "titleSize": 18,
             "titleColor": "#112233",
             "body": "Start here",
-            "bodyWeight": "500",
+            "bodyWeight": 500,
             "bodySize": 15,
             "bodyColor": "#445566",
+            "content": [
+                "title": ["textStyle": ["textColor": "#FF0000"]],
+                "body": ["textStyle": ["textColor": "#00FF00"]],
+            ],
             "buttonPrimaryBackgroundColor": "#123456",
             "buttonPrimaryTextColor": "#FEDCBA",
             "actions": [[
@@ -360,15 +382,17 @@ struct EngageActionParserTests {
                 "type": "NEXT",
                 "label": "Continue",
                 "fontSize": 16,
-                "fontWeight": "700",
+                "fontWeight": 700,
             ]],
         ])
 
         #expect(config.content.title?.fontWeight == 500)
+        #expect(config.content.title?.text == "Welcome")
         #expect(config.content.title?.fontSize == 18)
         #expect(config.content.title?.textColor == "#112233")
         #expect(config.content.body?.fontSize == 15)
         #expect(config.content.body?.fontWeight == 500)
+        #expect(config.content.body?.text == "Start here")
         #expect(config.content.body?.textColor == "#445566")
         #expect(config.actions.first?.fontSize == 16)
         #expect(config.actions.first?.fontWeight == 700)
