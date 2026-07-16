@@ -188,9 +188,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func setCurrentScreen(_ name: String) {
-        logVerbose("Screen: \(name)")
-        _currentScreen = name
-        activePlugin?.forwardScreen(name)
+        let screenName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        logVerbose("Screen: \(screenName)")
+        _currentScreen = screenName.isEmpty ? nil : screenName
+        activePlugin?.forwardScreen(screenName)
     }
 
     func registerFontFactory(_ factory: DUIFontFactory) {
@@ -234,6 +235,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private func routeByCampaignKey(_ key: String, payload: CEPTriggerPayload) -> Bool {
         guard let campaign = campaignStore.find(key) else {
             logError("routeByCampaignKey: no campaign found for key '\(key)'")
+            return false
+        }
+
+        if !campaign.targetScreenNames.isEmpty
+            && !campaign.targetScreenNames.contains(_currentScreen ?? "")
+        {
+            print(
+                "Digia [SDKInstance] Campaign dropped — screen not targeted: "
+                    + "campaignKey=\(key) currentScreen=\(_currentScreen ?? "<unset>") "
+                    + "targetScreenNames=\(campaign.targetScreenNames)"
+            )
             return false
         }
 
