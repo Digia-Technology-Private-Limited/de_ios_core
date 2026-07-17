@@ -9,7 +9,11 @@ struct DigiaInlineStoryView: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: CGFloat(config.card.spacing)) {
+            // Match Android's LazyRow: an eager HStack creates an AVPlayerLooper
+            // for every video in the campaign, including cards far off-screen.
+            // That can exhaust the simulator/device media pipeline before the
+            // user has interacted with a single story.
+            LazyHStack(spacing: CGFloat(config.card.spacing)) {
                 ForEach(Array(config.items.enumerated()), id: \.offset) { index, item in
                     StoryThumbnailCard(item: item, config: config)
                         .onTapGesture {
@@ -471,10 +475,11 @@ private struct InlineStoryVideoView: View {
         }
         .task(id: "\(urlString)-\(looping)-\(muted)") {
             guard let url = URL(string: urlString) else { return }
-            // DigiaVideoPlaybackBundle.make streams via a resource-loader that
-            // forces the content type, so videos served with a non-video
-            // Content-Type (e.g. raw.githubusercontent.com) still play —
-            // matching Android's ExoPlayer. See DigiaVideoStreaming.
+            tearDownPlayback()
+
+            // DigiaVideoPlaybackBundle overrides an incorrect server MIME type
+            // while leaving HTTP transport/range handling to AVFoundation on
+            // supported OS versions. See DigiaVideoStreaming.
             let nextBundle = DigiaVideoPlaybackBundle.make(url: url, looping: looping)
             nextBundle.player.isMuted = muted
 
@@ -483,8 +488,8 @@ private struct InlineStoryVideoView: View {
                 timeObserver = nextBundle.player.addPeriodicTimeObserver(
                     forInterval: interval,
                     queue: .main
-                ) { time in
-                    guard let item = nextBundle.player.currentItem else { return }
+                ) { [weak player = nextBundle.player] time in
+                    guard let item = player?.currentItem else { return }
                     let duration = item.duration.seconds
                     guard duration.isFinite, duration > 0 else { return }
                     onProgress(min(max(time.seconds / duration, 0), 1))
@@ -520,18 +525,37 @@ private struct InlineStoryVideoView: View {
             nextBundle.player.play()
         }
         .onDisappear {
-            if let timeObserver {
-                bundle?.player.removeTimeObserver(timeObserver)
-            }
-            if let endObserver {
-                NotificationCenter.default.removeObserver(endObserver)
-            }
-            if let failObserver {
-                NotificationCenter.default.removeObserver(failObserver)
-            }
-            bufferingObserver?.invalidate()
-            bundle?.player.pause()
+            tearDownPlayback()
         }
+    }
+
+    private func tearDownPlayback() {
+        guard let bundle else { return }
+
+        if let timeObserver {
+            bundle.player.removeTimeObserver(timeObserver)
+        }
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+        }
+        if let failObserver {
+            NotificationCenter.default.removeObserver(failObserver)
+        }
+        bufferingObserver?.invalidate()
+
+        bundle.looper?.disableLooping()
+        bundle.player.pause()
+        if let queuePlayer = bundle.player as? AVQueuePlayer {
+            queuePlayer.removeAllItems()
+        } else {
+            bundle.player.replaceCurrentItem(with: nil)
+        }
+
+        timeObserver = nil
+        endObserver = nil
+        failObserver = nil
+        bufferingObserver = nil
+        self.bundle = nil
     }
 }
 
@@ -548,7 +572,10 @@ private struct InlineStoryPlayerLayer: UIViewRepresentable {
     func updateUIView(_ uiView: InlineStoryPlayerContainer, context _: Context) {
         uiView.playerLayer.player = player
         uiView.playerLayer.videoGravity = gravity
-        player.play()
+    }
+
+    static func dismantleUIView(_ uiView: InlineStoryPlayerContainer, coordinator _: Void) {
+        uiView.playerLayer.player = nil
     }
 }
 
