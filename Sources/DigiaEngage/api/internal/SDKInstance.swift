@@ -490,7 +490,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             campaignId: campaignId,
             survey: state.config,
             answers: answers,
-            startedAt: state.startedAt
+            startedAt: state.startedAt,
+            userId: analyticsService?.userId
         )
     }
 
