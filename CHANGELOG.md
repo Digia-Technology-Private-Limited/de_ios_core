@@ -2,6 +2,11 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## Unreleased
+
+### New Features
+- Inline story overlays can now show dashboard-configured close and video-only mute controls, including visibility, icon color, background color, and overall size. Each video can also start muted or audible; once the viewer changes the audio state, that choice persists for the rest of the story session.
+
 ## [3.6.0] - 2026-07-16
 
 ### New Features

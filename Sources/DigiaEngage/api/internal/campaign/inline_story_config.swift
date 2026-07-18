@@ -18,6 +18,7 @@ struct StoryItemConfig: Equatable {
     let type: String
     let url: String
     let duration: Int?
+    var startMuted: Bool = false
     var ctaEnabled: Bool = false
     var ctaText: String?
     var ctaFontWeight: Int = 600
@@ -38,6 +39,7 @@ struct StoryItemConfig: Equatable {
             type: json.string("type", default: "image"),
             url: url,
             duration: json.positiveInt("duration"),
+            startMuted: json.bool("startMuted", default: false),
             ctaEnabled: json.bool("ctaEnabled", default: false),
             ctaText: json.nonBlankString("ctaText"),
             ctaFontWeight: DigiaFontWeight.value(json["ctaFontWeight"], default: 600),
@@ -103,12 +105,32 @@ struct StoryIndicatorDisplayConfig: Equatable {
     }
 }
 
+struct StoryOverlayButtonConfig: Equatable {
+    var visible: Bool = false
+    var iconColor: String = "#FFFFFF"
+    var backgroundColor: String = "#000000"
+    var size: Double = 36
+
+    static func fromJson(_ json: [String: Any]?) -> StoryOverlayButtonConfig {
+        guard let json else { return StoryOverlayButtonConfig() }
+        let size = json.double("size", default: 36)
+        return StoryOverlayButtonConfig(
+            visible: json.bool("visible", default: false),
+            iconColor: json.nonBlankString("iconColor") ?? "#FFFFFF",
+            backgroundColor: json.nonBlankString("backgroundColor") ?? "#000000",
+            size: size.isFinite && size > 0 ? size : 36
+        )
+    }
+}
+
 struct InlineStoryConfig: Equatable {
     let slotKey: String
     var defaultDuration: Int = 5000
     var restartOnCompleted: Bool = false
     var card: StoryCardConfig = StoryCardConfig()
     var indicator: StoryIndicatorDisplayConfig = StoryIndicatorDisplayConfig()
+    var closeButton: StoryOverlayButtonConfig = StoryOverlayButtonConfig()
+    var muteButton: StoryOverlayButtonConfig = StoryOverlayButtonConfig()
     let items: [StoryItemConfig]
     var variableSchemas: [VariableSchema] = []
 
@@ -122,6 +144,8 @@ struct InlineStoryConfig: Equatable {
             restartOnCompleted: json.bool("restartOnCompleted", default: false),
             card: StoryCardConfig.fromJson(json.object("card")),
             indicator: StoryIndicatorDisplayConfig.fromJson(json.object("indicator")),
+            closeButton: StoryOverlayButtonConfig.fromJson(json.object("closeButton")),
+            muteButton: StoryOverlayButtonConfig.fromJson(json.object("muteButton")),
             items: items,
             variableSchemas: NudgeConfig.parseVariableSchemas(json)
         )
