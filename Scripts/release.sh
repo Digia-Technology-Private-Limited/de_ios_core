@@ -1,6 +1,16 @@
 #!/bin/bash
 set -Eeuo pipefail
 
+# Releases are fully scripted. Prevent Git, GitHub CLI, and subprocesses from
+# opening a pager or editor and pausing until terminal input is provided.
+export PAGER=cat
+export GIT_PAGER=cat
+export GH_PAGER=cat
+export EDITOR=true
+export VISUAL=true
+export GIT_EDITOR=true
+export GH_EDITOR=true
+
 # End-to-end Digia Engage iOS release workflow.
 #
 # Usage: ./Scripts/release.sh [--dry-run] <new_version>
@@ -472,8 +482,8 @@ validate_preflight() {
   local command path remote_head remote_tag top_version current_pod current_sdk
   local base_pod base_sdk base_changelog origin_url repo_hint pod_info remote_tags
   local -a required_commands=(
-    awk cp curl dirname env find gh git grep head ln mkdir mktemp nm pod rm ruby
-    sed shasum swift tail unzip xcodebuild xcodegen zip
+    awk cat cp curl dirname env find gh git grep head ln mkdir mktemp nm pod rm
+    ruby sed shasum swift tail true unzip xcodebuild xcodegen zip
   )
 
   for command in "${required_commands[@]}"; do
