@@ -169,8 +169,8 @@ private struct InlineStoryOverlayContent: View {
     /// `Completed` rather than `StepDismissed`.
     @State private var completed = false
     @State private var openedAt = Date()
-    /// Nil until the viewer changes the audio state. Before that, each video
-    /// uses its authored `startMuted`; afterwards the viewer's choice persists.
+    /// Nil until the viewer changes the audio state. Before that, the story's
+    /// authored `startMuted` applies; afterwards the viewer's choice persists.
     @State private var muteOverride: Bool?
 
     init(state: InlineStoryOverlayState) {
@@ -189,7 +189,7 @@ private struct InlineStoryOverlayContent: View {
                     .ignoresSafeArea()
 
                 if let item = currentItem {
-                    let muted = muteOverride ?? item.startMuted
+                    let muted = muteOverride ?? state.config.startMuted
                     FullScreenStoryItem(
                         item: item,
                         muted: muted,

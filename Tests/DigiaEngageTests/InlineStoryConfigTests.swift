@@ -46,20 +46,16 @@ struct InlineStoryConfigTests {
         #expect(malformed.muteButton.size == 36)
     }
 
-    @Test("parses the per-item starting audio state")
+    @Test("parses the story-level starting audio state")
     func parsesStartMuted() throws {
         var mutedJson = baseStory()
-        mutedJson["items"] = [[
-            "type": "video",
-            "url": "https://example.com/story.mp4",
-            "startMuted": true,
-        ]]
+        mutedJson["startMuted"] = true
 
         let muted = try #require(InlineStoryConfig.fromJson(mutedJson))
         let legacy = try #require(InlineStoryConfig.fromJson(baseStory()))
 
-        #expect(muted.items.first?.startMuted == true)
-        #expect(legacy.items.first?.startMuted == false)
+        #expect(muted.startMuted)
+        #expect(!legacy.startMuted)
     }
 
     private func baseStory() -> [String: Any] {

@@ -18,7 +18,6 @@ struct StoryItemConfig: Equatable {
     let type: String
     let url: String
     let duration: Int?
-    var startMuted: Bool = false
     var ctaEnabled: Bool = false
     var ctaText: String?
     var ctaFontWeight: Int = 600
@@ -39,7 +38,6 @@ struct StoryItemConfig: Equatable {
             type: json.string("type", default: "image"),
             url: url,
             duration: json.positiveInt("duration"),
-            startMuted: json.bool("startMuted", default: false),
             ctaEnabled: json.bool("ctaEnabled", default: false),
             ctaText: json.nonBlankString("ctaText"),
             ctaFontWeight: DigiaFontWeight.value(json["ctaFontWeight"], default: 600),
@@ -127,6 +125,7 @@ struct InlineStoryConfig: Equatable {
     let slotKey: String
     var defaultDuration: Int = 5000
     var restartOnCompleted: Bool = false
+    var startMuted: Bool = false
     var card: StoryCardConfig = StoryCardConfig()
     var indicator: StoryIndicatorDisplayConfig = StoryIndicatorDisplayConfig()
     var closeButton: StoryOverlayButtonConfig = StoryOverlayButtonConfig()
@@ -142,6 +141,7 @@ struct InlineStoryConfig: Equatable {
             slotKey: slotKey,
             defaultDuration: json.positiveInt("defaultDuration") ?? 5000,
             restartOnCompleted: json.bool("restartOnCompleted", default: false),
+            startMuted: json.bool("startMuted", default: false),
             card: StoryCardConfig.fromJson(json.object("card")),
             indicator: StoryIndicatorDisplayConfig.fromJson(json.object("indicator")),
             closeButton: StoryOverlayButtonConfig.fromJson(json.object("closeButton")),
