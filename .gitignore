@@ -32,4 +32,6 @@ xcuserdata/
 docs/.worktrees/
 FatBuild/.derived/
 FatBuild/.archives
+FatBuild/DigiaEngageFat.xcodeproj/
+DigiaEngage.xcframework
 dist/
