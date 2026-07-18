@@ -2,6 +2,12 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.6.1] - 2026-07-18
+
+### Bug Fixes
+- Fixed the guide step indicator and body text default colors rendering at the wrong opacity, caused by the built-in default color values using the wrong hex byte order.
+- Fixed inline story strips containing multiple videos exhausting the device's media pipeline: video players are now created only for on-screen cards and fully released when a card scrolls away or the story closes, so videos play reliably instead of failing once several are present.
+
 ## [3.6.0] - 2026-07-16
 
 ### New Features
