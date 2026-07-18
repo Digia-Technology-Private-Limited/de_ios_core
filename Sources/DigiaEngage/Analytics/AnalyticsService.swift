@@ -148,6 +148,8 @@ final class AnalyticsService {
         identity.clearUserId()
     }
 
+    var userId: String? { identity.userId }
+
     func flush() {
         cancelTimer()
         Task { await dispatchPending() }
