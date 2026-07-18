@@ -295,6 +295,20 @@ greatest_semver_tag() {
   printf '%s\n' "$latest"
 }
 
+validate_pre_bump_version() {
+  local label=$1
+  local value=$2
+
+  case "$value" in
+    "$BASE_VERSION"|"$VERSION")
+      return 0
+      ;;
+    *)
+      fail "$label version is $value; expected the current released version $BASE_VERSION or requested version $VERSION so the release bump can update it safely."
+      ;;
+  esac
+}
+
 extract_podspec_version() {
   sed -nE "s/^[[:space:]]*s[.]version[[:space:]]*=[[:space:]]*'([^']+)'[[:space:]]*$/\1/p" "$1"
 }
@@ -504,14 +518,13 @@ validate_preflight() {
   current_sdk=$(extract_sdk_version "$SDK_VERSION_FILE")
   top_version=$(extract_top_changelog_version "$CHANGELOG")
   [ -n "$current_pod" ] && [ -n "$current_sdk" ] && [ -n "$top_version" ] || fail "Could not read all three working-tree versions."
-  [ "$current_pod" = "$current_sdk" ] || fail "Working versions differ before release: podspec=$current_pod, SDK=$current_sdk."
+  validate_pre_bump_version "Working podspec" "$current_pod"
+  validate_pre_bump_version "Working SDK" "$current_sdk"
 
   case "$top_version" in
     Unreleased)
-      [ "$current_pod" = "$BASE_VERSION" ] || fail "With a top [Unreleased] section, podspec and SDK must still be $BASE_VERSION; found $current_pod."
       ;;
     "$VERSION")
-      [ "$current_pod" = "$VERSION" ] || fail "Top changelog is $VERSION but podspec and SDK are $current_pod."
       ;;
     *)
       fail "Top changelog section is [$top_version]; expected [Unreleased] or [$VERSION]."
