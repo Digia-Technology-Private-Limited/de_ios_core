@@ -472,8 +472,8 @@ validate_preflight() {
   local command path remote_head remote_tag top_version current_pod current_sdk
   local base_pod base_sdk base_changelog origin_url repo_hint pod_info remote_tags
   local -a required_commands=(
-    awk cp curl dirname find gh git grep head ln mkdir mktemp nm pod rm ruby sed
-    shasum swift unzip xcodebuild xcodegen zip
+    awk cp curl dirname env find gh git grep head ln mkdir mktemp nm pod rm ruby
+    sed shasum swift tail unzip xcodebuild xcodegen zip
   )
 
   for command in "${required_commands[@]}"; do
@@ -772,14 +772,30 @@ validate_artifacts() {
   assert_exact_release_changes
 }
 
+run_fat_build_quietly() {
+  local log_file=$1
+  local status=0
+  shift
+
+  "$@" > "$log_file" 2>&1 || status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "" >&2
+    echo "Fat-framework build failed. Final build diagnostics:" >&2
+    tail -n 30 "$log_file" >&2
+    fail "The fat-framework build command exited with status $status."
+  fi
+}
+
 build_and_validate_framework() {
-  "$BUILD_SCRIPT"
+  run_fat_build_quietly "$RUN_DIR/fat-build.log" "$BUILD_SCRIPT"
   validate_artifacts
 }
 
 build_and_validate_framework_dry() {
   mkdir -p "$RUN_DIR/home" "$RUN_DIR/tmp"
-  HOME="$RUN_DIR/home" TMPDIR="$RUN_DIR/tmp" "$BUILD_SCRIPT"
+  run_fat_build_quietly \
+    "$RUN_DIR/fat-build.log" \
+    env HOME="$RUN_DIR/home" TMPDIR="$RUN_DIR/tmp" "$BUILD_SCRIPT"
   validate_artifacts
 }
 
