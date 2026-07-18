@@ -92,10 +92,10 @@ struct GuideStepWidgetConfig: Equatable {
     private static let defaultBubbleBackground = "#1E40AF"
     private static let defaultArrowColor = "#1E40AF"
     private static let defaultOverlayColor = "#000000"
-    private static let defaultStepColor = "#FFFFFFAA"
+    private static let defaultStepColor = "#AAFFFFFF"
     private static let defaultButtonBackground = "#FFFFFF"
     private static let defaultButtonText = "#1E40AF"
-    private static let defaultBodyColor = "#FFFFFFCC"
+    private static let defaultBodyColor = "#CCFFFFFF"
     private static let defaultTitleColor = "#FFFFFF"
 
     static func fromJson(_ json: [String: Any]) -> GuideStepWidgetConfig {
