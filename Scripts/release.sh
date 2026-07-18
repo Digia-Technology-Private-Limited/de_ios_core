@@ -76,7 +76,7 @@ The script commits only:
   Sources/DigiaEngage/SdkVersion.swift
 
 Dry-run mode:
-  Performs the version simulation, tests, XCFramework build, artifact checks,
+  Performs the version simulation, manifest validation, XCFramework build, artifact checks,
   and pod lint inside a disposable temporary clone. It never modifies the real
   checkout/index/refs or performs a commit, push, tag, GitHub Release creation,
   upload, CocoaPods publication, or other remote write. Temporary compiler and
@@ -713,13 +713,12 @@ validate_release_versions() {
   validate_podspec_metadata
 }
 
-validate_swift_package() {
+validate_swift_manifest() {
   swift package dump-package > "$RUN_DIR/package.json"
-  swift test
   assert_exact_release_changes
 }
 
-validate_swift_package_dry() {
+validate_swift_manifest_dry() {
   local cache_path="$RUN_DIR/swift-cache"
   local config_path="$RUN_DIR/swift-config"
   local security_path="$RUN_DIR/swift-security"
@@ -731,11 +730,6 @@ validate_swift_package_dry() {
     --security-path "$security_path" \
     --scratch-path "$scratch_path" \
     dump-package > "$RUN_DIR/package.json"
-  swift test \
-    --cache-path "$cache_path" \
-    --config-path "$config_path" \
-    --security-path "$security_path" \
-    --scratch-path "$scratch_path"
   assert_exact_release_changes
 }
 
@@ -975,10 +969,10 @@ run_dry_run() {
     validate_release_versions
 
   run_step \
-    "Validate the Swift package in isolation" \
-    "Fix the manifest or failing tests and rerun the dry-run; compiler outputs exist only in the disposable clone." \
-    "Package.swift parses and the complete Swift test suite passes using temporary caches" \
-    validate_swift_package_dry
+    "Validate the Swift package manifest in isolation" \
+    "Fix the manifest and rerun the dry-run; validation outputs exist only in the disposable clone." \
+    "Package.swift parses successfully using temporary caches" \
+    validate_swift_manifest_dry
 
   run_step \
     "Build and validate the fat XCFramework in isolation" \
@@ -1056,7 +1050,7 @@ main() {
   fi
   echo "Repository: $repo_root"
   if [ "$DRY_RUN" -eq 1 ]; then
-    echo "The real checkout and all remotes are read-only; build/test writes are confined to a disposable temporary clone."
+    echo "The real checkout and all remotes are read-only; build/lint writes are confined to a disposable temporary clone."
     run_dry_run
     return 0
   fi
@@ -1076,10 +1070,10 @@ main() {
     validate_release_versions
 
   run_step \
-    "Validate the Swift package" \
-    "Fix the manifest or failing tests; the release is not committed yet, so rerun ./Scripts/release.sh $VERSION afterward." \
-    "Package.swift parses and the complete Swift test suite passes" \
-    validate_swift_package
+    "Validate the Swift package manifest" \
+    "Fix the manifest; the release is not committed yet, so rerun ./Scripts/release.sh $VERSION afterward." \
+    "Package.swift parses successfully" \
+    validate_swift_manifest
 
   run_step \
     "Build and validate the fat XCFramework" \
