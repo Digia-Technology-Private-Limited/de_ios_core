@@ -46,6 +46,7 @@ private struct NudgeNodeView: View {
             case .button(let n): NudgeButtonView(node: n, onDismiss: onDismiss)
             case .gap(let n): Spacer().frame(height: n.height)
             case .divider(let n): NudgeDividerView(node: n)
+            case .progressBar(let n): NudgeProgressBarView(node: n)
             case .lottie(let n): NudgeLottieView(node: n)
             case .carousel(let n): NudgeCarouselView(node: n)
             case .video(let n): NudgeVideoView(node: n)
@@ -287,6 +288,47 @@ private struct NudgeDividerView: View {
             if node.endIndent > 0 { Spacer().frame(width: node.endIndent) }
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - Progress bar
+
+private struct NudgeProgressBarView: View {
+    let node: NudgeProgressBar
+    @Environment(\.digiaVariables) private var variables
+
+    private var percent: Double {
+        let raw: Double
+        switch node.valueMode {
+        case .percent:
+            raw = Double(interpolate(node.percent, context: variables)) ?? 0
+        case .range:
+            raw = rangePercent()
+        }
+        return min(max(raw, 0), 100)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: node.borderRadius)
+                    .fill(node.trackColor)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                RoundedRectangle(cornerRadius: node.borderRadius)
+                    .fill(node.indicatorColor)
+                    .frame(width: geo.size.width * CGFloat(percent / 100), height: geo.size.height)
+            }
+        }
+        .frame(height: node.thickness)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func rangePercent() -> Double {
+        let start = Double(interpolate(node.rangeStart, context: variables)) ?? 0
+        let current = Double(interpolate(node.rangeCurrent, context: variables)) ?? 0
+        let end = Double(interpolate(node.rangeEnd, context: variables)) ?? 0
+        let span = end - start
+        return span == 0 ? 0 : (current - start) / span * 100
     }
 }
 
