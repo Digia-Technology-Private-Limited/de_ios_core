@@ -254,6 +254,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             events.toCep(.impressed, payload: payload)
             events.toCep(.dismissed, payload: payload)
             return true
+        case .banner(let cfg):
+            inlineController.setBannerConfig(cfg.slotKey, config: cfg)
+            inlineController.setCampaign(cfg.slotKey, payload: payload)
+            events.toCep(.impressed, payload: payload)
+            events.toCep(.dismissed, payload: payload)
+            return true
         case .story(let cfg):
             inlineController.setStoryConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
@@ -617,6 +623,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         case .inline(let cfg):
             viewed = CarouselEvent.Viewed(
                 itemTotal: cfg.items.count, slotKey: cfg.slotKey, screenName: _currentScreen)
+        case .banner(let cfg):
+            viewed = BannerEvent.Viewed(slotKey: cfg.slotKey, screenName: _currentScreen)
         case .story(let cfg):
             viewed = StoriesEvent.Viewed(slotKey: cfg.slotKey, screenName: _currentScreen)
         default:
@@ -649,6 +657,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 itemIndex: itemIndex,
                 actionType: actionType,
                 actionUrl: actionUrl
+            ),
+            payload: payload
+        )
+    }
+
+    func reportBannerClicked(payload: CEPTriggerPayload, action: EngageAction?) {
+        events.toBoth(
+            .clicked(elementID: "banner"),
+            BannerEvent.Clicked(
+                actionType: action?.analyticsType,
+                actionUrl: action?.analyticsURL
             ),
             payload: payload
         )

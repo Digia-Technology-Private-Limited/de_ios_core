@@ -411,6 +411,38 @@ enum CarouselEvent {
     }
 }
 
+// ── Inline: banner ──────────────────────────────────────────────────────────
+
+enum BannerEvent {
+    struct Viewed: EngageAnalyticsEvent {
+        var slotKey: String?
+        var screenName: String?
+
+        var eventName: String { "Digia Experience Viewed" }
+        var properties: [String: Any] {
+            nonNull([
+                ("display_style", "banner"),
+                ("slot_key", slotKey),
+                ("screen_name", screenName),
+            ])
+        }
+    }
+
+    struct Clicked: EngageAnalyticsEvent {
+        var actionType: String?
+        var actionUrl: String?
+
+        var eventName: String { "Digia Experience Clicked" }
+        var properties: [String: Any] {
+            nonNull([
+                ("element_id", "banner"),
+                ("action_type", actionType),
+                ("action_url", actionUrl),
+            ])
+        }
+    }
+}
+
 // ── Inline: stories ─────────────────────────────────────────────────────────
 
 enum StoriesEvent {

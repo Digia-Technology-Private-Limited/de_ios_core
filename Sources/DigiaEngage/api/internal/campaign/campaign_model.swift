@@ -8,6 +8,7 @@ enum CampaignConfigModel: Equatable {
     case guide(GuideConfigModel)
     case nudge(NudgeConfig)
     case inline(InlineCarouselConfig)
+    case banner(InlineBannerConfig)
     case story(InlineStoryConfig)
     case survey(SurveyConfigModel)
 }
@@ -29,6 +30,11 @@ struct CampaignModel: Equatable {
 
     var storyConfig: InlineStoryConfig? {
         if case let .story(value) = config { return value }
+        return nil
+    }
+
+    var bannerConfig: InlineBannerConfig? {
+        if case let .banner(value) = config { return value }
         return nil
     }
 
@@ -60,6 +66,9 @@ struct CampaignModel: Equatable {
         case "inline":
             guard let templateConfig = json.object("templateConfig") else { return nil }
             switch templateConfig.string("templateType", default: "carousel") {
+            case "banner":
+                guard let bannerConfig = InlineBannerConfig.fromJson(templateConfig) else { return nil }
+                config = .banner(bannerConfig)
             case "story":
                 guard let storyConfig = InlineStoryConfig.fromJson(templateConfig) else { return nil }
                 config = .story(storyConfig)
