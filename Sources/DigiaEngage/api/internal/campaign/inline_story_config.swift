@@ -36,13 +36,14 @@ struct StoryItemConfig: Equatable {
             : parseLegacyStoryActions(ctaActionJson)
         let ctaAction = ctaActionJson.map(StoryCtaAction.fromJson)
         let type = json.string("type", default: "image")
+        let mediaType = StoryMediaType.fromWireValue(type)
         return StoryItemConfig(
             type: type,
             url: url,
             duration: json.positiveInt("duration"),
             boxFit: StoryMediaFit.fromWireValue(
                 json.string("boxFit", default: "cover"),
-                allowFill: type != "video"
+                mediaType: mediaType
             ),
             ctaEnabled: json.bool("ctaEnabled", default: false),
             ctaText: json.nonBlankString("ctaText"),
@@ -73,12 +74,21 @@ enum StoryMediaFit: Equatable {
     case contain
     case fill
 
-    static func fromWireValue(_ value: String, allowFill: Bool) -> StoryMediaFit {
+    static func fromWireValue(_ value: String, mediaType: StoryMediaType) -> StoryMediaFit {
         switch value {
         case "contain": .contain
-        case "fill" where allowFill: .fill
+        case "fill" where mediaType == .image: .fill
         default: .cover
         }
+    }
+}
+
+enum StoryMediaType {
+    case image
+    case video
+
+    static func fromWireValue(_ value: String) -> StoryMediaType {
+        value == "video" ? .video : .image
     }
 }
 
