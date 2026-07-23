@@ -178,9 +178,12 @@ struct NudgeParser {
     }
 
     private func parseVideo(_ props: [String: Any], box: NudgeBox) -> NudgeVideo {
-        NudgeVideo(
-            box: box,
+        let rawAspectRatio = CGFloat(parseDouble(props["aspectRatio"]) ?? 0)
+        let aspectRatio = rawAspectRatio.isFinite && rawAspectRatio > 0 ? rawAspectRatio : 0
+        return NudgeVideo(
+            box: aspectRatio > 0 ? box.withoutFixedHeight() : box,
             url: props["url"] as? String ?? "",
+            aspectRatio: aspectRatio,
             height: CGFloat(parseDouble(props["height"]) ?? 200),
             autoplay: (props["autoPlay"] as? Bool) ?? false,
             loop: (props["looping"] as? Bool) ?? false,

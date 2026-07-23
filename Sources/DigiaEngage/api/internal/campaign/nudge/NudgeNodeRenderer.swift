@@ -443,8 +443,7 @@ private struct NudgeVideoView: View {
                         EmptyView()
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: node.height)
+                .nudgeMediaFrame(aspectRatio: node.aspectRatio, height: node.height)
             }
         }
         .onAppear { setupPlayer() }
