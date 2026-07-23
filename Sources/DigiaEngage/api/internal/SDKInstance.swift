@@ -34,6 +34,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Used to compute `time_to_answer_ms` on QuestionAnswered.
     private var questionViewedAt: [String: Date] = [:]
     private var analyticsService: AnalyticsService?
+    /// Batches pages/anchors/slots seen at runtime to the Engage Component
+    /// Registry, when the debug-only "recording mode" toggle is on. See
+    /// `ComponentRegistryService`.
+    private let componentRegistry = ComponentRegistryService()
+    /// Whether the host app is a debug build, resolved once at `initialize`.
+    /// Gates the component registry and `DigiaDebugSettingsView`.
+    private(set) var isDebugBuild = false
     /// Native frequency capping for all managed campaigns (nudge, survey, and —
     /// on React Native — guides, whose lifecycle events arrive over the bridge).
     private var frequencyManager: FrequencyManager?
@@ -78,6 +85,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         self.config = config
         DigiaLog.configure(config.logLevel)
         DigiaEndpoints.configure(config)
+        isDebugBuild = DigiaDebugDetection.isDebugBuild()
 
         font = DigiaFont(fontFamily: config.fontFamily)
 
@@ -134,6 +142,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         if analyticsService == nil, let config {
             analyticsService = AnalyticsService.create(config: config)
         }
+        if let config, let analyticsService {
+            componentRegistry.configure(
+                config: config,
+                deviceId: analyticsService.identity.anonymousId,
+                isDebugBuild: isDebugBuild
+            )
+        }
 
         // Frequency capping pulls the authoritative sessionId from analytics so
         // `session` windows track the same session the backend sees.
@@ -187,7 +202,23 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let screenName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         _currentScreen = screenName.isEmpty ? nil : screenName
         DigiaLog.warning("[SDKInstance] Current screen set: \(_currentScreen ?? "<unset>")")
+        componentRegistry.recordPage(screenName)
         activePlugin?.forwardScreen(screenName)
+    }
+
+    /// Called the first time an anchor key registers (`AnchorRegistry.register`).
+    func recordAnchorSeen(_ anchorKey: String) {
+        componentRegistry.recordAnchor(anchorKey, screenName: _currentScreen)
+    }
+
+    /// Called the first time a placement key appears (`DigiaSlot`).
+    func recordSlotSeen(_ placementKey: String) {
+        componentRegistry.recordSlot(placementKey, screenName: _currentScreen)
+    }
+
+    /// Exposes the recording toggle + control surface to `DigiaDebugSettingsView`.
+    func componentRegistrySnapshot() -> ComponentRegistryService {
+        componentRegistry
     }
 
     func registerPlaceholderForSlot(propertyID: String) -> Int? {

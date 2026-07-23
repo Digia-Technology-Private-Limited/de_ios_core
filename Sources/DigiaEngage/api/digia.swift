@@ -1,7 +1,47 @@
 import Foundation
+import UIKit
+import SwiftUI
 
 @MainActor
 public enum Digia {
+    /// Path suffix used to recognize the SDK's debug-settings deeplink. Digia
+    /// doesn't own the host app's URL scheme, so this is a path convention the
+    /// host routes on from its own deep-linking/`onOpenURL` handling — see
+    /// `isDebugSettingsDeepLink`.
+    public static let debugSettingsDeepLinkPath = "_digia/debug-settings"
+
+    /// Whether `url` is the SDK's debug-settings deeplink.
+    public static func isDebugSettingsDeepLink(_ url: URL) -> Bool {
+        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return path == debugSettingsDeepLinkPath
+    }
+
+    /// Presents the SDK's debug-only settings screen — currently the
+    /// recording-mode toggle for the Engage Component Registry, with more
+    /// debug-only testing controls to follow. Trigger this from the host app's
+    /// own debug menu, or route to it from a deeplink (see
+    /// `isDebugSettingsDeepLink` / `handleDeepLink`).
+    ///
+    /// A no-op outside a debug build — this can never surface in a real
+    /// production release, regardless of how or when it's called.
+    public static func presentDebugSettings(from presenter: UIViewController) {
+        guard SDKInstance.shared.isDebugBuild else {
+            DigiaLog.warning("[Digia] presentDebugSettings() ignored — not a debug build.")
+            return
+        }
+        let host = UIHostingController(rootView: DigiaDebugSettingsView())
+        presenter.present(host, animated: true)
+    }
+
+    /// Convenience for the host's own deeplink handling: if `url` is the SDK's
+    /// debug-settings deeplink, presents the screen and returns `true`;
+    /// otherwise returns `false` so the host can continue its own routing.
+    @discardableResult
+    public static func handleDeepLink(_ url: URL, from presenter: UIViewController) -> Bool {
+        guard isDebugSettingsDeepLink(url) else { return false }
+        presentDebugSettings(from: presenter)
+        return true
+    }
     /// Initializes the Digia SDK. No-ops below iOS 17 — the SDUI rendering layer
     /// requires APIs (`Layout`, newer `SwiftUI` scroll/animation modifiers) that
     /// only exist from iOS 17 onward.

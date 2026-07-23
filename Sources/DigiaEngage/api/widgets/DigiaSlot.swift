@@ -64,6 +64,7 @@ public struct DigiaSlot<Placeholder: View>: View {
     private func registerPlaceholderIfNeeded() {
         guard placeholderID == nil else { return }
         placeholderID = SDKInstance.shared.registerPlaceholderForSlot(propertyID: placementKey)
+        SDKInstance.shared.recordSlotSeen(placementKey)
     }
 }
 
