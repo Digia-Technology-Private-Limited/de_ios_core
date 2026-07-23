@@ -45,9 +45,16 @@ final class ComponentRegistryService: ObservableObject {
     /// recycled list cell) could refire the same key many times a second.
     private var seen = Set<String>()
 
-    init(defaults: UserDefaults = .standard, sender: any AnalyticsSender = URLSessionAnalyticsSender()) {
+    private let debugOverlay: DigiaDebugOverlayController?
+
+    init(
+        defaults: UserDefaults = .standard,
+        sender: any AnalyticsSender = URLSessionAnalyticsSender(),
+        debugOverlay: DigiaDebugOverlayController? = nil
+    ) {
         self.defaults = defaults
         self.sender = sender
+        self.debugOverlay = debugOverlay
     }
 
     /// Called once from `SDKInstance.completeInitialization` after the device id
@@ -60,10 +67,19 @@ final class ComponentRegistryService: ObservableObject {
     }
 
     /// Flips the persisted recording-mode toggle. Called from
-    /// `DigiaDebugSettingsView`.
+    /// `DigiaDebugSettingsView` and `DigiaRecordedSessionScreen`.
+    ///
+    /// Turning recording on also shows the debug bubble (`RecordingBadgeView`) if it's
+    /// currently hidden — a developer who just turned recording on almost certainly wants
+    /// the visual reminder that it's active, without a separate manual step. Turning
+    /// recording off does not hide the bubble back — bubble visibility is otherwise its
+    /// own independent setting.
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
         defaults.set(enabled, forKey: Self.keyEnabled)
+        if enabled, let debugOverlay, !debugOverlay.isVisible {
+            debugOverlay.setVisible(true)
+        }
     }
 
     func recordPage(_ key: String) {

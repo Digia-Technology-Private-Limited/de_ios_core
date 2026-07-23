@@ -1,45 +1,112 @@
 import SwiftUI
 
-/// Small always-on-top indicator shown by `DigiaHost` whenever Engage
-/// Component Registry recording mode is on, so a developer walking the app
-/// doesn't forget it's active. Tapping it presents the debug settings screen.
+/// Small always-on-top floating "Digia" bubble shown by `DigiaHost` — a general
+/// debug-tools launcher, not specific to any one feature. Tapping it presents the debug
+/// settings screen; dragging it repositions it, snapping to whichever horizontal edge
+/// it's closer to on release (vertical position is unconstrained).
 ///
-/// Gated on `DigiaDebugDetection.isDebugBuild()` in addition to the
-/// registry's own `isEnabled` — same defense-in-depth reasoning as
-/// `ComponentRegistryService` itself, in case a persisted `true` toggle
-/// somehow survives into a non-debug install.
+/// Shown whenever `DigiaDebugOverlayController.isVisible` is true — its own independent,
+/// persisted setting. Turning on Engage Component Registry recording mode flips that to
+/// true automatically (see `ComponentRegistryService.setEnabled`), but the bubble can
+/// also be shown on its own for future debug controls unrelated to recording. The
+/// pulsing red dot inside it specifically reflects recording being active — the bubble
+/// itself can be visible with no dot if recording is off.
+///
+/// Gated on `DigiaDebugDetection.isDebugBuild()` in addition to the overlay controller's
+/// own visible flag — same defense-in-depth reasoning as elsewhere in this feature.
 @MainActor
 struct RecordingBadgeView: View {
-    @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()
+    @ObservedObject private var overlay = SDKInstance.shared.debugOverlayControllerSnapshot()
 
     var body: some View {
-        if registry.isEnabled && DigiaDebugDetection.isDebugBuild() {
-            VStack {
-                HStack {
-                    Button(action: presentDebugSettings) {
-                        HStack(spacing: 6) {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 10, height: 10)
-                            Text("Recording")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.white)
-                        }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.black.opacity(0.87))
-                        .clipShape(RoundedRectangle(cornerRadius: 16))
+        if overlay.isVisible && DigiaDebugDetection.isDebugBuild() {
+            DraggableBadge()
+        }
+    }
+}
+
+@MainActor
+private struct DraggableBadge: View {
+    private static let margin: CGFloat = 8
+
+    @State private var offset: CGSize?
+    @State private var dragStartOffset: CGSize?
+    @State private var badgeSize: CGSize = .zero
+
+    var body: some View {
+        GeometryReader { proxy in
+            let current = offset ?? CGSize(width: Self.margin, height: proxy.safeAreaInsets.top + Self.margin)
+
+            BadgeContent()
+                .background(
+                    GeometryReader { inner -> Color in
+                        DispatchQueue.main.async { badgeSize = inner.size }
+                        return Color.clear
                     }
-                    Spacer()
+                )
+                .offset(x: current.width, y: current.height)
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            let start = dragStartOffset ?? current
+                            dragStartOffset = start
+                            let maxX = max(0, proxy.size.width - badgeSize.width)
+                            let minY = proxy.safeAreaInsets.top
+                            let maxY = max(minY, proxy.size.height - proxy.safeAreaInsets.bottom - badgeSize.height)
+                            offset = CGSize(
+                                width: min(max(0, start.width + value.translation.width), maxX),
+                                height: min(max(minY, start.height + value.translation.height), maxY)
+                            )
+                        }
+                        .onEnded { _ in
+                            dragStartOffset = nil
+                            let latest = offset ?? current
+                            let center = proxy.size.width / 2
+                            let snappedX: CGFloat = (latest.width + badgeSize.width / 2) < center
+                                ? Self.margin
+                                : proxy.size.width - badgeSize.width - Self.margin
+                            withAnimation(.easeOut(duration: 0.22)) {
+                                offset = CGSize(width: snappedX, height: latest.height)
+                            }
+                        }
+                )
+                .onTapGesture {
+                    presentDebugSettings()
                 }
-                Spacer()
-            }
-            .padding(8)
         }
     }
 
     private func presentDebugSettings() {
         guard let presenter = ViewControllerUtil.topViewController() else { return }
         Digia.presentDebugSettings(from: presenter)
+    }
+}
+
+@MainActor
+private struct BadgeContent: View {
+    @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()
+    @State private var pulse = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if registry.isEnabled {
+                Circle()
+                    .fill(Color.red)
+                    .frame(width: 8, height: 8)
+                    .opacity(pulse ? 1 : 0.35)
+                    .onAppear {
+                        withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                            pulse = true
+                        }
+                    }
+            }
+            Text("Digia")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.87))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }

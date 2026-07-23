@@ -34,10 +34,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Used to compute `time_to_answer_ms` on QuestionAnswered.
     private var questionViewedAt: [String: Date] = [:]
     private var analyticsService: AnalyticsService?
+    /// Whether the floating "Digia" debug bubble is shown. See
+    /// `DigiaDebugOverlayController`.
+    private let debugOverlayController = DigiaDebugOverlayController()
     /// Batches pages/anchors/slots seen at runtime to the Engage Component
     /// Registry, when the debug-only "recording mode" toggle is on. See
     /// `ComponentRegistryService`.
-    private let componentRegistry = ComponentRegistryService()
+    private let componentRegistry: ComponentRegistryService
     /// Whether the host app is a debug build, resolved once at `initialize`.
     /// Gates the component registry and `DigiaDebugSettingsView`.
     private(set) var isDebugBuild = false
@@ -61,6 +64,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private var events: EngageEventEmitter!
 
     private init() {
+        componentRegistry = ComponentRegistryService(debugOverlay: debugOverlayController)
         events = EngageEventEmitter(
             cep: CepPluginSink { [weak self] event, payload in
                 self?.activePlugin?.notifyEvent(event, payload: payload)
@@ -219,6 +223,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Exposes the recording toggle + control surface to `DigiaDebugSettingsView`.
     func componentRegistrySnapshot() -> ComponentRegistryService {
         componentRegistry
+    }
+
+    /// Exposes bubble visibility to `RecordingBadgeView` and `DigiaDebugSettingsView`.
+    func debugOverlayControllerSnapshot() -> DigiaDebugOverlayController {
+        debugOverlayController
     }
 
     func registerPlaceholderForSlot(propertyID: String) -> Int? {

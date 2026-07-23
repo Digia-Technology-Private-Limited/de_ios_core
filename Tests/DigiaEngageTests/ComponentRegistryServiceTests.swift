@@ -31,9 +31,14 @@ struct ComponentRegistryServiceTests {
     private func makeService(
         sender: FakeComponentSender = FakeComponentSender(),
         isDebugBuild: Bool = true,
-        defaults: UserDefaults? = nil
+        defaults: UserDefaults? = nil,
+        debugOverlay: DigiaDebugOverlayController? = nil
     ) -> (ComponentRegistryService, FakeComponentSender) {
-        let service = ComponentRegistryService(defaults: defaults ?? makeDefaults(), sender: sender)
+        let service = ComponentRegistryService(
+            defaults: defaults ?? makeDefaults(),
+            sender: sender,
+            debugOverlay: debugOverlay
+        )
         service.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1", isDebugBuild: isDebugBuild)
         return (service, sender)
     }
@@ -115,6 +120,28 @@ struct ComponentRegistryServiceTests {
         #expect(entries[1].type == "anchor")
         #expect(entries[1].key == "checkout_cta")
         #expect(entries[1].screenName == "checkout")
+    }
+
+    @Test("turning recording on shows the debug bubble automatically")
+    func enablingRecordingShowsBubble() async throws {
+        let overlay = DigiaDebugOverlayController(defaults: makeDefaults())
+        let (service, _) = makeService(debugOverlay: overlay)
+        #expect(!overlay.isVisible)
+
+        service.setEnabled(true)
+
+        #expect(overlay.isVisible)
+    }
+
+    @Test("turning recording off does not hide the debug bubble")
+    func disablingRecordingDoesNotHideBubble() async throws {
+        let overlay = DigiaDebugOverlayController(defaults: makeDefaults())
+        let (service, _) = makeService(debugOverlay: overlay)
+        service.setEnabled(true)
+
+        service.setEnabled(false)
+
+        #expect(overlay.isVisible)
     }
 
     @Test("drops an anchor with no current screen name")

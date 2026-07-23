@@ -6,15 +6,17 @@ import SwiftUI
 /// — both gate on `SDKInstance.isDebugBuild` (see `DigiaDebugDetection`), so this
 /// can never surface in a real production release.
 ///
-/// Currently hosts the "recording mode" toggle for the Engage Component Registry
-/// (auto-reports pages/anchors/slots seen at runtime so a PM can curate them on
-/// the dashboard instead of typing keys by hand). Future debug-only testing
-/// controls belong here too — kept as a simple list so adding another one is
-/// just another row.
+/// Currently hosts the "Sync" toggle for the Engage Component Registry
+/// (auto-reports pages/anchors/slots seen at runtime so a PM can curate them on the
+/// dashboard instead of typing keys by hand) and the "Digia bubble" visibility
+/// toggle. Future debug-only testing controls belong here too — kept as a simple
+/// list so adding another one is just another row.
 @MainActor
 public struct DigiaDebugSettingsView: View {
     @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()
+    @ObservedObject private var overlay = SDKInstance.shared.debugOverlayControllerSnapshot()
     @State private var showRestartHint = false
+    @State private var showSession = false
 
     public init() {}
 
@@ -22,30 +24,28 @@ public struct DigiaDebugSettingsView: View {
         NavigationView {
             List {
                 Section {
-                    // NavigationLink wraps only the title/subtitle text, not the
-                    // Toggle — a sibling, not a descendant — so it keeps its own
-                    // tap target and doesn't trigger navigation.
-                    HStack {
-                        NavigationLink(destination: DigiaRecordedSessionScreen()) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Recording mode")
-                                Text(
-                                    "Reports pages, anchors, and slots seen in this app to the "
-                                        + "Engage dashboard as they render, for the PM to curate as "
-                                        + "usable/archived. Tap to see everything recorded so far."
-                                )
-                                .font(.footnote)
-                                .foregroundColor(.secondary)
-                            }
-                        }
-                        Spacer()
-                        Toggle("", isOn: Binding(
+                    SettingsToggleRow(
+                        title: "Sync",
+                        subtitle: "Syncs the SDK with the Dashboard.",
+                        onTap: { showSession = true },
+                        isOn: Binding(
                             get: { registry.isEnabled },
-                            set: { onToggle($0) }
-                        ))
-                        .labelsHidden()
-                    }
+                            set: { onToggleSync($0) }
+                        )
+                    )
+                    SettingsToggleRow(
+                        title: "Digia bubble",
+                        isOn: Binding(
+                            get: { overlay.isVisible },
+                            set: { overlay.setVisible($0) }
+                        )
+                    )
                 }
+                NavigationLink(
+                    destination: DigiaRecordedSessionScreen(),
+                    isActive: $showSession
+                ) { EmptyView() }
+                .hidden()
             }
             .navigationTitle("Digia Debug Settings")
         }
@@ -59,7 +59,7 @@ public struct DigiaDebugSettingsView: View {
         }
     }
 
-    private func onToggle(_ value: Bool) {
+    private func onToggleSync(_ value: Bool) {
         let wasEnabled = registry.isEnabled
         registry.setEnabled(value)
         // Recording only fires the first time a page/anchor/slot loads (dedupe

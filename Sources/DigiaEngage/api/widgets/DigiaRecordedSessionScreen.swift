@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// Lists every distinct page/anchor/slot key recorded so far this process —
-/// pushed from `DigiaDebugSettingsView` by tapping the "Recording mode" row's
-/// title. In-memory only, same lifetime as `ComponentRegistryService`'s
-/// dedupe set — it's cleared on a fresh app process, not persisted.
+/// pushed from `DigiaDebugSettingsView` by tapping the "Sync" row's title.
+/// In-memory only, same lifetime as `ComponentRegistryService`'s dedupe set —
+/// it's cleared on a fresh app process, not persisted.
 @MainActor
 struct DigiaRecordedSessionScreen: View {
     @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()
@@ -11,10 +11,13 @@ struct DigiaRecordedSessionScreen: View {
     var body: some View {
         List {
             Section {
-                Toggle("Recording mode", isOn: Binding(
-                    get: { registry.isEnabled },
-                    set: { registry.setEnabled($0) }
-                ))
+                SettingsToggleRow(
+                    title: "Sync",
+                    isOn: Binding(
+                        get: { registry.isEnabled },
+                        set: { registry.setEnabled($0) }
+                    )
+                )
             }
             Section {
                 if registry.recordedThisSession.isEmpty {
