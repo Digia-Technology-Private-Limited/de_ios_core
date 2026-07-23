@@ -516,6 +516,28 @@ struct EngageActionParserTests {
         ))
     }
 
+    @Test("Changing story thumbnail playback creates a retryable player identity")
+    func storyThumbnailPlayerIdentityTracksPlaybackConfiguration() throws {
+        let original = try #require(StoryItemConfig.fromJson([
+            "type": "video",
+            "url": "https://example.com/story.mp4",
+            "thumbnailPlayback": [
+                "durationMode": "fixed",
+                "durationMs": 5_000,
+            ],
+        ]))
+        let changed = try #require(StoryItemConfig.fromJson([
+            "type": "video",
+            "url": "https://example.com/story.mp4",
+            "thumbnailPlayback": [
+                "durationMode": "fixed",
+                "durationMs": 6_000,
+            ],
+        ]))
+
+        #expect(thumbnailPlayerIdentity(original) != thumbnailPlayerIdentity(changed))
+    }
+
     @Test("Survey CTA accepts a numeric dashboard font weight")
     func surveyCtaAcceptsNumericFontWeight() {
         let cta = CtaSettings.from(["fontWeight": .int(500)])

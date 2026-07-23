@@ -11,17 +11,19 @@ struct DigiaInlineStoryView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @State private var eligibleIndices: Set<Int> = []
-    @State private var failedIndices: Set<Int> = []
+    @State private var failedPlayerIdentities: [Int: String] = [:]
     @State private var sequentialActiveIndex: Int?
+    @State private var slotVisible = false
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: CGFloat(config.card.spacing)) {
                 ForEach(Array(config.items.enumerated()), id: \.offset) { index, item in
+                    let playerIdentity = thumbnailPlayerIdentity(item)
                     StoryThumbnailCard(
                         item: item,
                         config: config,
-                        failed: failedIndices.contains(index),
+                        failed: failedPlayerIdentities[index] == playerIdentity,
                         playbackState: ThumbnailPlaybackViewState(
                             eligible: playableIndices.contains(index),
                             shouldPlay:
@@ -36,7 +38,7 @@ struct DigiaInlineStoryView: View {
                             playableIndices: playableIndices
                         ),
                         onWindowCompleted: { advanceSequential(from: index) },
-                        onFailed: { markFailed(index) }
+                        onFailed: { markFailed(index, playerIdentity: playerIdentity) }
                     )
                         .background {
                             GeometryReader { proxy in
@@ -75,18 +77,26 @@ struct DigiaInlineStoryView: View {
     }
 
     private var playableIndices: Set<Int> {
-        eligibleIndices.subtracting(failedIndices)
+        Set(eligibleIndices.filter { index in
+            guard config.items.indices.contains(index) else { return false }
+            return failedPlayerIdentities[index] != thumbnailPlayerIdentity(config.items[index])
+        })
     }
 
     private var playbackAllowed: Bool {
         scenePhase == .active
             && overlayController.activeStoryOverlay == nil
             && !reduceMotion
+            && slotVisible
     }
 
     private func updateEligibility(_ geometry: StoryRailGeometry) {
         guard let rail = geometry.rail, !rail.isNull, !rail.isEmpty else { return }
         let screen = UIScreen.main.bounds
+        let visibleRail = rail.intersection(screen)
+        let isSlotVisible = !visibleRail.isNull && !visibleRail.isEmpty
+        slotVisible = isSlotVisible
+        guard isSlotVisible else { return }
         var fractions: [Int: Double] = [:]
         for (index, card) in geometry.cards where !card.isNull && !card.isEmpty {
             let visible = card.intersection(rail).intersection(screen)
@@ -100,7 +110,7 @@ struct DigiaInlineStoryView: View {
             items: config.items
         )
         eligibleIndices = next
-        reconcileSequentialActive(playable: next.subtracting(failedIndices))
+        reconcileSequentialActive(playable: playableIndices)
     }
 
     private func reconcileSequentialActive(playable: Set<Int>) {
@@ -129,8 +139,8 @@ struct DigiaInlineStoryView: View {
         )
     }
 
-    private func markFailed(_ index: Int) {
-        failedIndices.insert(index)
+    private func markFailed(_ index: Int, playerIdentity: String) {
+        failedPlayerIdentities[index] = playerIdentity
         reconcileSequentialActive(playable: playableIndices)
     }
 }
@@ -158,11 +168,7 @@ private struct StoryThumbnailCard: View {
                     onWindowCompleted: onWindowCompleted,
                     onFailed: onFailed
                 )
-                .id(
-                    "\(item.url)|\(item.thumbnailPlayback.startTimeMs)|"
-                        + "\(item.thumbnailPlayback.durationMode.rawValue)|"
-                        + "\(item.thumbnailPlayback.durationMs ?? 0)"
-                )
+                .id(thumbnailPlayerIdentity(item))
             } else {
                 if item.type == "video" {
                     Color(red: 0.10, green: 0.10, blue: 0.10)

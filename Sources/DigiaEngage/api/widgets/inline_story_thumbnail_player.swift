@@ -27,6 +27,12 @@ struct ThumbnailPlaybackViewState: Equatable {
     let playableIndices: Set<Int>
 }
 
+func thumbnailPlayerIdentity(_ item: StoryItemConfig) -> String {
+    "\(item.type)|\(item.url)|\(item.thumbnailPlayback.startTimeMs)|"
+        + "\(item.thumbnailPlayback.durationMode.rawValue)|"
+        + "\(item.thumbnailPlayback.durationMode == .fixed ? item.thumbnailPlayback.durationMs ?? 0 : 0)"
+}
+
 @MainActor
 struct StoryThumbnailVideoView: View {
     let item: StoryItemConfig
@@ -97,6 +103,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     private var failObserver: NSObjectProtocol?
     private var statusObserver: NSKeyValueObservation?
     private var watchdogTask: Task<Void, Never>?
+    private var watchdogGeneration: UInt = 0
     private var onWindowCompleted: () -> Void = {}
     private var onFailed: () -> Void = {}
 
@@ -264,6 +271,8 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
 
     private func startWatchdog() {
         guard watchdogTask == nil else { return }
+        watchdogGeneration &+= 1
+        let generation = watchdogGeneration
         watchdogTask = Task { [weak self] in
             var lastPosition = self?.player?.currentTime().seconds ?? 0
             var stalled = 0.0
@@ -283,11 +292,13 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
                     }
                 }
             }
-            self?.watchdogTask = nil
+            guard let self, self.watchdogGeneration == generation else { return }
+            self.watchdogTask = nil
         }
     }
 
     private func stopWatchdog() {
+        watchdogGeneration &+= 1
         watchdogTask?.cancel()
         watchdogTask = nil
     }
