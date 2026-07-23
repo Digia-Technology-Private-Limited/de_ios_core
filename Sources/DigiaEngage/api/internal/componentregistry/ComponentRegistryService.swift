@@ -20,10 +20,6 @@ import Foundation
 final class ComponentRegistryService {
     private static let keyEnabled = "digia_component_registry_recording_enabled"
 
-    /// Server does not validate `componentKey` itself — enforced here per the
-    /// SDK-team note.
-    private static let keyPattern = try! NSRegularExpression(pattern: "^[a-z][a-z0-9_]{0,63}$")
-
     private let defaults: UserDefaults
     private let sender: any AnalyticsSender
 
@@ -87,13 +83,6 @@ final class ComponentRegistryService {
     private func record(key: String, type: String, screenName: String?) {
         guard isEnabled, isDebugBuildFlag, let config, let deviceId else { return }
 
-        guard Self.isValidKey(key) else {
-            DigiaLog.warning(
-                "[ComponentRegistry] Dropping invalid componentKey \"\(key)\" — must match ^[a-z][a-z0-9_]{0,63}$."
-            )
-            return
-        }
-
         let dedupeKey = "\(type):\(key):\(screenName ?? "")"
         guard seen.insert(dedupeKey).inserted else { return }
 
@@ -121,10 +110,5 @@ final class ComponentRegistryService {
                 DigiaLog.warning("[ComponentRegistry] recordComponents post failed: \(error)")
             }
         }
-    }
-
-    private static func isValidKey(_ key: String) -> Bool {
-        let range = NSRange(key.startIndex..<key.endIndex, in: key)
-        return keyPattern.firstMatch(in: key, range: range) != nil
     }
 }

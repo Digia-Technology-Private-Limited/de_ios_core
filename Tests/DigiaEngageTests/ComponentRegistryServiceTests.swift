@@ -109,20 +109,6 @@ struct ComponentRegistryServiceTests {
         #expect(sender.callCount == 0)
     }
 
-    @Test("drops an invalid componentKey")
-    func dropsInvalidKey() async throws {
-        let (service, sender) = makeService()
-        service.setEnabled(true)
-
-        service.recordPage("Not_Valid_Key")
-        service.recordPage("valid_key")
-        try await settle()
-
-        #expect(sender.callCount == 1)
-        let components = sender.bodies.first?["components"] as? [[String: Any]]
-        #expect(components?.first?["componentKey"] as? String == "valid_key")
-    }
-
     @Test("persists the toggle across configure calls")
     func persistsToggle() async throws {
         let defaults = makeDefaults()
