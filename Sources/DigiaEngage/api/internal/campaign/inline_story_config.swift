@@ -79,9 +79,15 @@ struct StoryThumbnailPlaybackConfig: Equatable {
     static func fromJson(_ json: [String: Any]?) -> StoryThumbnailPlaybackConfig {
         guard let json else { return StoryThumbnailPlaybackConfig() }
         let rawStart = json.double("startTimeMs", default: 0)
-        let start = rawStart.isFinite && rawStart >= 0 ? Int64(rawStart) : 0
+        let start =
+            rawStart.isFinite && rawStart >= 0 && rawStart < Double(Int64.max)
+                ? Int64(rawStart)
+                : 0
         let rawDuration = json.double("durationMs", default: 0)
-        let fixedDuration = rawDuration.isFinite && rawDuration > 0 ? Int64(rawDuration) : nil
+        let fixedDuration =
+            rawDuration.isFinite && rawDuration > 0 && rawDuration < Double(Int64.max)
+                ? Int64(rawDuration)
+                : nil
         let mode: StoryThumbnailDurationMode =
             json.string("durationMode", default: "full") == "fixed" && fixedDuration != nil
                 ? .fixed

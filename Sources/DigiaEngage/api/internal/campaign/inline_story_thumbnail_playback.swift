@@ -41,6 +41,13 @@ func nextThumbnailPlaybackIndex(
     return ordered.first(where: { $0 > afterIndex }) ?? first
 }
 
+func shouldRepeatThumbnailPlaybackWindow(
+    mode: ThumbnailVideoPlaybackMode,
+    eligibleVideoCount: Int
+) -> Bool {
+    mode == .simultaneous || eligibleVideoCount == 1
+}
+
 func effectiveThumbnailStartMs(
     item: StoryItemConfig,
     naturalDurationMs: Int64

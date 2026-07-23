@@ -505,6 +505,9 @@ struct EngageActionParserTests {
 
         #expect(nextThumbnailPlaybackIndex(eligible: [1, 3], afterIndex: 1) == 3)
         #expect(nextThumbnailPlaybackIndex(eligible: [1, 3], afterIndex: 3) == 1)
+        #expect(shouldRepeatThumbnailPlaybackWindow(mode: .simultaneous, eligibleVideoCount: 3))
+        #expect(shouldRepeatThumbnailPlaybackWindow(mode: .sequential, eligibleVideoCount: 1))
+        #expect(!shouldRepeatThumbnailPlaybackWindow(mode: .sequential, eligibleVideoCount: 2))
         #expect(effectiveThumbnailStartMs(item: item, naturalDurationMs: 40_000) == 0)
         #expect(thumbnailPlaybackWindowEnded(
             item: item,
