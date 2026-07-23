@@ -18,6 +18,7 @@ struct StoryItemConfig: Equatable {
     let type: String
     let url: String
     let duration: Int?
+    var thumbnailPlayback: StoryThumbnailPlaybackConfig = StoryThumbnailPlaybackConfig()
     var ctaEnabled: Bool = false
     var ctaText: String?
     var ctaFontWeight: Int = 600
@@ -38,6 +39,9 @@ struct StoryItemConfig: Equatable {
             type: json.string("type", default: "image"),
             url: url,
             duration: json.positiveInt("duration"),
+            thumbnailPlayback: StoryThumbnailPlaybackConfig.fromJson(
+                json.object("thumbnailPlayback")
+            ),
             ctaEnabled: json.bool("ctaEnabled", default: false),
             ctaText: json.nonBlankString("ctaText"),
             ctaFontWeight: DigiaFontWeight.value(json["ctaFontWeight"], default: 600),
@@ -60,6 +64,45 @@ struct StoryItemConfig: Equatable {
         default: [.dismiss]
         }
     }
+}
+
+enum StoryThumbnailDurationMode: String, Equatable {
+    case full
+    case fixed
+}
+
+struct StoryThumbnailPlaybackConfig: Equatable {
+    var startTimeMs: Int64 = 0
+    var durationMode: StoryThumbnailDurationMode = .full
+    var durationMs: Int64?
+
+    static func fromJson(_ json: [String: Any]?) -> StoryThumbnailPlaybackConfig {
+        guard let json else { return StoryThumbnailPlaybackConfig() }
+        let rawStart = json.double("startTimeMs", default: 0)
+        let start =
+            rawStart.isFinite && rawStart >= 0 && rawStart < Double(Int64.max)
+                ? Int64(rawStart)
+                : 0
+        let rawDuration = json.double("durationMs", default: 0)
+        let fixedDuration =
+            rawDuration.isFinite && rawDuration > 0 && rawDuration < Double(Int64.max)
+                ? Int64(rawDuration)
+                : nil
+        let mode: StoryThumbnailDurationMode =
+            json.string("durationMode", default: "full") == "fixed" && fixedDuration != nil
+                ? .fixed
+                : .full
+        return StoryThumbnailPlaybackConfig(
+            startTimeMs: start,
+            durationMode: mode,
+            durationMs: fixedDuration
+        )
+    }
+}
+
+enum ThumbnailVideoPlaybackMode: String, Equatable {
+    case simultaneous
+    case sequential
 }
 
 struct StoryCardConfig: Equatable {
@@ -105,6 +148,7 @@ struct StoryIndicatorDisplayConfig: Equatable {
 
 struct InlineStoryConfig: Equatable {
     let slotKey: String
+    var thumbnailVideoPlayback: ThumbnailVideoPlaybackMode = .simultaneous
     var defaultDuration: Int = 5000
     var restartOnCompleted: Bool = false
     var card: StoryCardConfig = StoryCardConfig()
@@ -118,6 +162,10 @@ struct InlineStoryConfig: Equatable {
         if items.isEmpty { return nil }
         return InlineStoryConfig(
             slotKey: slotKey,
+            thumbnailVideoPlayback:
+                json.string("thumbnailVideoPlayback", default: "simultaneous") == "sequential"
+                    ? .sequential
+                    : .simultaneous,
             defaultDuration: json.positiveInt("defaultDuration") ?? 5000,
             restartOnCompleted: json.bool("restartOnCompleted", default: false),
             card: StoryCardConfig.fromJson(json.object("card")),

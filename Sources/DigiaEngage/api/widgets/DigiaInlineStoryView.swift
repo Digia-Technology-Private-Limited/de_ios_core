@@ -7,15 +7,49 @@ struct DigiaInlineStoryView: View {
     let config: InlineStoryConfig
     let payload: CEPTriggerPayload
 
+    @ObservedObject private var overlayController = SDKInstance.shared.controller
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var eligibleIndices: Set<Int> = []
+    @State private var failedPlayerIdentities: [Int: String] = [:]
+    @State private var sequentialActiveIndex: Int?
+    @State private var slotVisible = false
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            // Match Android's LazyRow: an eager HStack creates an AVPlayerLooper
-            // for every video in the campaign, including cards far off-screen.
-            // That can exhaust the simulator/device media pipeline before the
-            // user has interacted with a single story.
             LazyHStack(spacing: CGFloat(config.card.spacing)) {
                 ForEach(Array(config.items.enumerated()), id: \.offset) { index, item in
-                    StoryThumbnailCard(item: item, config: config)
+                    let playerIdentity = thumbnailPlayerIdentity(item)
+                    StoryThumbnailCard(
+                        item: item,
+                        config: config,
+                        failed: failedPlayerIdentities[index] == playerIdentity,
+                        playbackState: ThumbnailPlaybackViewState(
+                            eligible: playableIndices.contains(index),
+                            shouldPlay:
+                                playbackAllowed
+                                && playableIndices.contains(index)
+                                && (
+                                    config.thumbnailVideoPlayback == .simultaneous
+                                    || sequentialActiveIndex == index
+                                ),
+                            reduceMotion: reduceMotion,
+                            mode: config.thumbnailVideoPlayback,
+                            playableIndices: playableIndices
+                        ),
+                        onWindowCompleted: { advanceSequential(from: index) },
+                        onFailed: { markFailed(index, playerIdentity: playerIdentity) }
+                    )
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: StoryRailGeometryPreference.self,
+                                    value: StoryRailGeometry(
+                                        cards: [index: proxy.frame(in: .global)]
+                                    )
+                                )
+                            }
+                        }
                         .onTapGesture {
                             SDKInstance.shared.reportStoryOpened(payload)
                             SDKInstance.shared.controller.showStoryOverlay(
@@ -28,6 +62,86 @@ struct DigiaInlineStoryView: View {
             }
             .padding(.horizontal, CGFloat(config.card.spacing))
         }
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: StoryRailGeometryPreference.self,
+                    value: StoryRailGeometry(rail: proxy.frame(in: .global))
+                )
+            }
+        }
+        .onPreferenceChange(StoryRailGeometryPreference.self) { geometry in
+            updateEligibility(geometry)
+        }
+        .frame(height: CGFloat(config.card.height))
+    }
+
+    private var playableIndices: Set<Int> {
+        Set(eligibleIndices.filter { index in
+            guard config.items.indices.contains(index) else { return false }
+            return failedPlayerIdentities[index] != thumbnailPlayerIdentity(config.items[index])
+        })
+    }
+
+    private var playbackAllowed: Bool {
+        scenePhase == .active
+            && overlayController.activeStoryOverlay == nil
+            && !reduceMotion
+            && slotVisible
+    }
+
+    private func updateEligibility(_ geometry: StoryRailGeometry) {
+        guard let rail = geometry.rail, !rail.isNull, !rail.isEmpty else { return }
+        let screen = UIScreen.main.bounds
+        let visibleRail = rail.intersection(screen)
+        let isSlotVisible = !visibleRail.isNull && !visibleRail.isEmpty
+        slotVisible = isSlotVisible
+        guard isSlotVisible else { return }
+        var fractions: [Int: Double] = [:]
+        for (index, card) in geometry.cards where !card.isNull && !card.isEmpty {
+            let visible = card.intersection(rail).intersection(screen)
+            let totalArea = card.width * card.height
+            let visibleArea = visible.isNull || visible.isEmpty ? 0 : visible.width * visible.height
+            fractions[index] = totalArea > 0 ? Double(visibleArea / totalArea) : 0
+        }
+        let next = updateThumbnailPlaybackEligibility(
+            current: eligibleIndices,
+            visibleFractions: fractions,
+            items: config.items
+        )
+        eligibleIndices = next
+        reconcileSequentialActive(playable: playableIndices)
+    }
+
+    private func reconcileSequentialActive(playable: Set<Int>) {
+        guard config.thumbnailVideoPlayback == .sequential else {
+            sequentialActiveIndex = nil
+            return
+        }
+        if let current = sequentialActiveIndex, playable.contains(current) {
+            return
+        }
+        sequentialActiveIndex = nextThumbnailPlaybackIndex(
+            eligible: playable,
+            afterIndex: sequentialActiveIndex
+        )
+    }
+
+    private func advanceSequential(from index: Int) {
+        guard config.thumbnailVideoPlayback == .sequential,
+              sequentialActiveIndex == index
+        else {
+            return
+        }
+        sequentialActiveIndex = nextThumbnailPlaybackIndex(
+            eligible: playableIndices,
+            afterIndex: index
+        )
+    }
+
+    private func markFailed(_ index: Int, playerIdentity: String) {
+        failedPlayerIdentities[index] = playerIdentity
+        reconcileSequentialActive(playable: playableIndices)
     }
 }
 
@@ -35,6 +149,10 @@ struct DigiaInlineStoryView: View {
 private struct StoryThumbnailCard: View {
     let item: StoryItemConfig
     let config: InlineStoryConfig
+    let failed: Bool
+    let playbackState: ThumbnailPlaybackViewState
+    let onWindowCompleted: () -> Void
+    let onFailed: () -> Void
 
     private var width: CGFloat {
         CGFloat(config.card.height) * CGFloat(config.card.aspectRatio)
@@ -43,10 +161,20 @@ private struct StoryThumbnailCard: View {
     var body: some View {
         ZStack {
             Color(red: 0.10, green: 0.10, blue: 0.10)
-            if item.type == "video" {
-                InlineStoryVideoView(urlString: item.url, looping: true, muted: true)
+            if item.type == "video", !failed {
+                StoryThumbnailVideoView(
+                    item: item,
+                    state: playbackState,
+                    onWindowCompleted: onWindowCompleted,
+                    onFailed: onFailed
+                )
+                .id(thumbnailPlayerIdentity(item))
             } else {
-                StoryRemoteImage(urlString: item.url)
+                if item.type == "video" {
+                    Color(red: 0.10, green: 0.10, blue: 0.10)
+                } else {
+                    StoryRemoteImage(urlString: item.url)
+                }
             }
         }
         .frame(width: width, height: CGFloat(config.card.height))
@@ -559,7 +687,7 @@ private struct InlineStoryVideoView: View {
     }
 }
 
-private struct InlineStoryPlayerLayer: UIViewRepresentable {
+struct InlineStoryPlayerLayer: UIViewRepresentable {
     let player: AVPlayer
     var gravity: AVLayerVideoGravity = .resizeAspectFill
 
@@ -579,7 +707,7 @@ private struct InlineStoryPlayerLayer: UIViewRepresentable {
     }
 }
 
-private final class InlineStoryPlayerContainer: UIView {
+final class InlineStoryPlayerContainer: UIView {
     override class var layerClass: AnyClass {
         AVPlayerLayer.self
     }
