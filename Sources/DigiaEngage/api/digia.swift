@@ -11,9 +11,24 @@ public enum Digia {
     public static let debugSettingsDeepLinkPath = "_digia/debug-settings"
 
     /// Whether `url` is the SDK's debug-settings deeplink.
+    ///
+    /// Deliberately matches against the raw URL string instead of `URL.path`:
+    /// for a custom-scheme link like `myapp://_digia/debug-settings`, standard
+    /// URL parsing treats `_digia` as the *host*, not part of the path — so a
+    /// path-only check would silently never match. Stripping the scheme and
+    /// matching the remainder (exactly, or as a path suffix, so a universal
+    /// link like `https://example.com/_digia/debug-settings` matches too)
+    /// works for both shapes without relying on host/path parsing quirks.
     public static func isDebugSettingsDeepLink(_ url: URL) -> Bool {
-        let path = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return path == debugSettingsDeepLinkPath
+        let raw = url.absoluteString
+        let afterScheme: Substring
+        if let range = raw.range(of: "://") {
+            afterScheme = raw[range.upperBound...]
+        } else {
+            afterScheme = raw[...]
+        }
+        let trimmed = afterScheme.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return trimmed == debugSettingsDeepLinkPath || trimmed.hasSuffix("/\(debugSettingsDeepLinkPath)")
     }
 
     /// Presents the SDK's debug-only settings screen — currently the
