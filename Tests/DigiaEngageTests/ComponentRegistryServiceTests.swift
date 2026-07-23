@@ -8,12 +8,14 @@ import Testing
 final class FakeComponentSender: AnalyticsSender, @unchecked Sendable {
     private var _callCount = 0
     var callCount: Int { _callCount }
-    private(set) var lastBody: [String: Any]?
+    private(set) var bodies: [[String: Any]] = []
 
     func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
         guard url == DigiaEndpoints.recordComponents else { return 200 }
         _callCount += 1
-        lastBody = try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+        if let parsed = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+            bodies.append(parsed)
+        }
         return 200
     }
 }
@@ -36,12 +38,18 @@ struct ComponentRegistryServiceTests {
         return (service, sender)
     }
 
+    /// Fire-and-forget sends run on an unstructured Task, so tests give it a
+    /// short beat to complete rather than awaiting it directly.
+    private func settle() async throws {
+        try await Task.sleep(nanoseconds: 150_000_000)
+    }
+
     @Test("does nothing when recording mode is disabled")
     func disabledIsNoOp() async throws {
         let (service, sender) = makeService()
 
         service.recordPage("home")
-        try await Task.sleep(nanoseconds: 900_000_000)
+        try await settle()
 
         #expect(sender.callCount == 0)
     }
@@ -52,29 +60,29 @@ struct ComponentRegistryServiceTests {
         service.setEnabled(true)
 
         service.recordPage("home")
-        try await Task.sleep(nanoseconds: 900_000_000)
+        try await settle()
 
         #expect(sender.callCount == 0)
     }
 
-    @Test("batches page anchor slot seen within the debounce window into one call")
-    func batchesIntoOneCall() async throws {
+    @Test("fires one request immediately per newly-seen key")
+    func firesOneRequestPerKey() async throws {
         let (service, sender) = makeService()
         service.setEnabled(true)
 
         service.recordPage("checkout")
         service.recordAnchor("checkout_cta", screenName: "checkout")
         service.recordSlot("home_banner", screenName: "checkout")
+        try await settle()
 
-        // Not yet flushed — still inside the debounce window.
-        #expect(sender.callCount == 0)
-
-        try await Task.sleep(nanoseconds: 900_000_000)
-
-        #expect(sender.callCount == 1)
-        let components = sender.lastBody?["components"] as? [[String: Any]]
-        #expect(components?.count == 3)
-        let types = Set((components ?? []).compactMap { $0["componentType"] as? String })
+        #expect(sender.callCount == 3)
+        for body in sender.bodies {
+            let components = body["components"] as? [[String: Any]]
+            #expect(components?.count == 1)
+        }
+        let types = Set(sender.bodies.compactMap {
+            ($0["components"] as? [[String: Any]])?.first?["componentType"] as? String
+        })
         #expect(types == ["page", "anchor", "slot"])
     }
 
@@ -84,9 +92,8 @@ struct ComponentRegistryServiceTests {
         service.setEnabled(true)
 
         service.recordPage("home")
-        try await Task.sleep(nanoseconds: 900_000_000)
-        service.recordPage("home") // remount
-        try await Task.sleep(nanoseconds: 900_000_000)
+        service.recordPage("home") // remount, same key
+        try await settle()
 
         #expect(sender.callCount == 1)
     }
@@ -97,7 +104,7 @@ struct ComponentRegistryServiceTests {
         service.setEnabled(true)
 
         service.recordAnchor("checkout_cta", screenName: nil)
-        try await Task.sleep(nanoseconds: 900_000_000)
+        try await settle()
 
         #expect(sender.callCount == 0)
     }
@@ -109,24 +116,11 @@ struct ComponentRegistryServiceTests {
 
         service.recordPage("Not_Valid_Key")
         service.recordPage("valid_key")
-        try await Task.sleep(nanoseconds: 900_000_000)
+        try await settle()
 
         #expect(sender.callCount == 1)
-        let components = sender.lastBody?["components"] as? [[String: Any]]
-        #expect(components?.count == 1)
+        let components = sender.bodies.first?["components"] as? [[String: Any]]
         #expect(components?.first?["componentKey"] as? String == "valid_key")
-    }
-
-    @Test("turning recording mode off cancels a pending flush")
-    func disablingCancelsPendingFlush() async throws {
-        let (service, sender) = makeService()
-        service.setEnabled(true)
-
-        service.recordPage("home")
-        service.setEnabled(false)
-        try await Task.sleep(nanoseconds: 900_000_000)
-
-        #expect(sender.callCount == 0)
     }
 
     @Test("persists the toggle across configure calls")
@@ -139,16 +133,5 @@ struct ComponentRegistryServiceTests {
         reconfigured.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1", isDebugBuild: true)
 
         #expect(reconfigured.isEnabled)
-    }
-
-    @Test("flush is a safety net for a still-pending debounce timer")
-    func flushIsSafetyNet() async throws {
-        let (service, sender) = makeService()
-        service.setEnabled(true)
-
-        service.recordPage("home")
-        await service.flush() // e.g. called from the didEnterBackground observer
-
-        #expect(sender.callCount == 1)
     }
 }
