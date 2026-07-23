@@ -18,6 +18,7 @@ struct StoryItemConfig: Equatable {
     let type: String
     let url: String
     let duration: Int?
+    var boxFit: StoryMediaFit = .cover
     var ctaEnabled: Bool = false
     var ctaText: String?
     var ctaFontWeight: Int = 600
@@ -34,10 +35,16 @@ struct StoryItemConfig: Equatable {
             ? EngageActionParser().parse(ctaActionJson)
             : parseLegacyStoryActions(ctaActionJson)
         let ctaAction = ctaActionJson.map(StoryCtaAction.fromJson)
+        let type = json.string("type", default: "image")
+        let mediaType = StoryMediaType.fromWireValue(type)
         return StoryItemConfig(
-            type: json.string("type", default: "image"),
+            type: type,
             url: url,
             duration: json.positiveInt("duration"),
+            boxFit: StoryMediaFit.fromWireValue(
+                json.string("boxFit", default: "cover"),
+                mediaType: mediaType
+            ),
             ctaEnabled: json.bool("ctaEnabled", default: false),
             ctaText: json.nonBlankString("ctaText"),
             ctaFontWeight: DigiaFontWeight.value(json["ctaFontWeight"], default: 600),
@@ -62,18 +69,44 @@ struct StoryItemConfig: Equatable {
     }
 }
 
+enum StoryMediaFit: Equatable {
+    case cover
+    case contain
+    case fill
+
+    static func fromWireValue(_ value: String, mediaType: StoryMediaType) -> StoryMediaFit {
+        switch value {
+        case "contain": .contain
+        case "fill" where mediaType == .image: .fill
+        default: .cover
+        }
+    }
+}
+
+enum StoryMediaType {
+    case image
+    case video
+
+    static func fromWireValue(_ value: String) -> StoryMediaType {
+        value == "video" ? .video : .image
+    }
+}
+
 struct StoryCardConfig: Equatable {
     var height: Int = 220
     var aspectRatio: Double = 0.6
     var borderRadius: Double = 12
     var spacing: Int = 8
+    var width: Double { Double(height) * aspectRatio }
 
     static func fromJson(_ json: [String: Any]?) -> StoryCardConfig {
         guard let json else { return StoryCardConfig() }
-        let aspectRatio = json.double("aspectRatio", default: 0.6)
+        let aspectRatio = json["aspectRatio"] is Bool
+            ? 0.6
+            : json.double("aspectRatio", default: 0.6)
         return StoryCardConfig(
             height: json.positiveInt("height") ?? 220,
-            aspectRatio: aspectRatio > 0 ? aspectRatio : 0.6,
+            aspectRatio: aspectRatio.isFinite && aspectRatio > 0 ? aspectRatio : 0.6,
             borderRadius: json.double("borderRadius", default: 12),
             spacing: json.int("spacing", default: 8)
         )
