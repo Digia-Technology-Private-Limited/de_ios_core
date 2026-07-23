@@ -23,6 +23,7 @@ struct InlineStoryMediaSizingTests {
             "Infinity",
             Double.nan,
             Double.infinity,
+            true,
             0,
             -1,
         ]
@@ -39,25 +40,28 @@ struct InlineStoryMediaSizingTests {
         #expect(try item(type: "video", fit: "contain").boxFit == .contain)
         #expect(try item(type: "video", fit: "fill").boxFit == .cover)
         #expect(try item(type: "video", fit: "future").boxFit == .cover)
+        #expect(try item(type: "image", fit: "future").boxFit == .cover)
+        #expect(try item(type: "image", fit: nil).boxFit == .cover)
     }
 
     @Test("maps image and video rendering modes")
     func mapsRenderingModes() {
         #expect(StoryMediaFit.cover.imageContentMode == .fill)
         #expect(StoryMediaFit.contain.imageContentMode == .fit)
-        #expect(StoryMediaFit.fill.imageContentMode == nil)
+        #expect(StoryMediaFit.fill.stretchesImage)
         #expect(StoryMediaFit.cover.videoGravity == .resizeAspectFill)
         #expect(StoryMediaFit.contain.videoGravity == .resizeAspect)
         #expect(StoryMediaFit.fill.videoGravity == .resizeAspectFill)
     }
 
-    private func item(type: String, fit: String) throws -> StoryItemConfig {
-        try #require(
-            StoryItemConfig.fromJson([
-                "type": type,
-                "url": "https://cdn.example.com/story",
-                "boxFit": fit,
-            ])
-        )
+    private func item(type: String, fit: String?) throws -> StoryItemConfig {
+        var json: [String: Any] = [
+            "type": type,
+            "url": "https://cdn.example.com/story",
+        ]
+        if let fit {
+            json["boxFit"] = fit
+        }
+        return try #require(StoryItemConfig.fromJson(json))
     }
 }

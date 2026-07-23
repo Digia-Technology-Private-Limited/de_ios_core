@@ -91,7 +91,9 @@ struct StoryCardConfig: Equatable {
 
     static func fromJson(_ json: [String: Any]?) -> StoryCardConfig {
         guard let json else { return StoryCardConfig() }
-        let aspectRatio = json.double("aspectRatio", default: 0.6)
+        let aspectRatio = json["aspectRatio"] is Bool
+            ? 0.6
+            : json.double("aspectRatio", default: 0.6)
         return StoryCardConfig(
             height: json.positiveInt("height") ?? 220,
             aspectRatio: aspectRatio.isFinite && aspectRatio > 0 ? aspectRatio : 0.6,

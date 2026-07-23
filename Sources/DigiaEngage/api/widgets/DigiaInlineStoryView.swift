@@ -444,10 +444,10 @@ private struct StoryRemoteImage: View {
                 url: url,
                 placeholder: AnyView(Color(red: 0.10, green: 0.10, blue: 0.10))
             )
-            if let contentMode = fit.imageContentMode {
-                image.aspectRatio(contentMode: contentMode)
-            } else {
+            if fit.stretchesImage {
                 image.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                image.aspectRatio(contentMode: fit.imageContentMode)
             }
         } else {
             Color(red: 0.16, green: 0.16, blue: 0.16)
@@ -460,7 +460,7 @@ private struct InlineStoryVideoView: View {
     let urlString: String
     let looping: Bool
     let muted: Bool
-    /// Aspect-fill for thumbnails (crop to fill), aspect-fit for full-screen.
+    /// Configurable cover/contain scaling shared by thumbnails and full-screen playback.
     var gravity: AVLayerVideoGravity = .resizeAspectFill
     /// Full-screen playback hooks; thumbnails leave these nil and skip the
     /// observers entirely.
@@ -568,13 +568,9 @@ private struct InlineStoryVideoView: View {
 }
 
 extension StoryMediaFit {
-    var imageContentMode: ContentMode? {
-        switch self {
-        case .cover: .fill
-        case .contain: .fit
-        case .fill: nil
-        }
-    }
+    var stretchesImage: Bool { self == .fill }
+
+    var imageContentMode: ContentMode { self == .contain ? .fit : .fill }
 
     var videoGravity: AVLayerVideoGravity {
         self == .contain ? .resizeAspect : .resizeAspectFill
