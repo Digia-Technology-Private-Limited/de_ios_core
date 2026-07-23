@@ -98,6 +98,25 @@ struct ComponentRegistryServiceTests {
         #expect(sender.callCount == 1)
     }
 
+    @Test("recordedThisSession lists each newly-seen key once, in order")
+    func recordedThisSessionListsDistinctKeys() async throws {
+        let (service, _) = makeService()
+        service.setEnabled(true)
+
+        service.recordPage("checkout")
+        service.recordAnchor("checkout_cta", screenName: "checkout")
+        service.recordPage("checkout") // remount, same key — must not duplicate
+        try await settle()
+
+        let entries = service.recordedThisSession
+        #expect(entries.count == 2)
+        #expect(entries[0].type == "page")
+        #expect(entries[0].key == "checkout")
+        #expect(entries[1].type == "anchor")
+        #expect(entries[1].key == "checkout_cta")
+        #expect(entries[1].screenName == "checkout")
+    }
+
     @Test("drops an anchor with no current screen name")
     func dropsAnchorWithoutScreen() async throws {
         let (service, sender) = makeService()

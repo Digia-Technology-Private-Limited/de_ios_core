@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 
 /// Reports pages/anchors/slots seen at runtime to the Engage Component
 /// Registry (`POST {baseUrl}/api/v1/engage/sdk/recordComponents`), so a PM
@@ -17,7 +18,7 @@ import Foundation
 /// and is manually walking the app, so request volume is inherently low — a
 /// debounce/batch buffer would be complexity this doesn't need.
 @MainActor
-final class ComponentRegistryService {
+final class ComponentRegistryService: ObservableObject {
     private static let keyEnabled = "digia_component_registry_recording_enabled"
 
     private let defaults: UserDefaults
@@ -27,7 +28,14 @@ final class ComponentRegistryService {
     private var deviceId: String?
     private var isDebugBuildFlag = false
 
-    private(set) var isEnabled = false
+    /// `@Published` so `RecordingBadgeView` and the debug-settings/session
+    /// screens all stay in sync no matter which of them flips it.
+    @Published private(set) var isEnabled = false
+
+    /// Every distinct key recorded so far this process, in first-seen order —
+    /// what `DigiaRecordedSessionScreen` lists. `@Published` for the same
+    /// reason as `isEnabled`. Not persisted, same rationale as `seen` below.
+    @Published private(set) var recordedThisSession: [RecordedComponentEntry] = []
 
     /// `"<type>:<key>:<screenName>"` → already sent this process lifetime. Not
     /// persisted: the backend call is an idempotent upsert, so re-sending known
@@ -85,6 +93,8 @@ final class ComponentRegistryService {
 
         let dedupeKey = "\(type):\(key):\(screenName ?? "")"
         guard seen.insert(dedupeKey).inserted else { return }
+
+        recordedThisSession.append(RecordedComponentEntry(type: type, key: key, screenName: screenName))
 
         var entry: [String: Any] = ["componentKey": key, "componentType": type, "platform": "ios"]
         if let screenName, !screenName.isEmpty { entry["screenName"] = screenName }
