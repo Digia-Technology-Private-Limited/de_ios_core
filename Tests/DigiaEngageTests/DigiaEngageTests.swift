@@ -399,6 +399,120 @@ struct EngageActionParserTests {
         #expect(item.ctaFontWeight == 700)
     }
 
+    @Test("Story thumbnail playback defaults preserve legacy simultaneous behavior")
+    func storyThumbnailPlaybackDefaults() throws {
+        let config = try #require(InlineStoryConfig.fromJson([
+            "slotKey": "home",
+            "items": [[
+                "type": "video",
+                "url": "https://example.com/story.mp4",
+            ]],
+        ]))
+
+        #expect(config.thumbnailVideoPlayback == .simultaneous)
+        #expect(config.items[0].thumbnailPlayback.startTimeMs == 0)
+        #expect(config.items[0].thumbnailPlayback.durationMode == .full)
+        #expect(config.items[0].thumbnailPlayback.durationMs == nil)
+    }
+
+    @Test("Story thumbnail playback parses sequential fixed windows")
+    func storyThumbnailPlaybackParsesSequentialFixedWindow() throws {
+        let config = try #require(InlineStoryConfig.fromJson([
+            "slotKey": "home",
+            "thumbnailVideoPlayback": "sequential",
+            "items": [[
+                "type": "video",
+                "url": "https://example.com/story.mp4",
+                "thumbnailPlayback": [
+                    "startTimeMs": 42_000,
+                    "durationMode": "fixed",
+                    "durationMs": 5_000,
+                ],
+            ]],
+        ]))
+
+        #expect(config.thumbnailVideoPlayback == .sequential)
+        #expect(config.items[0].thumbnailPlayback.startTimeMs == 42_000)
+        #expect(config.items[0].thumbnailPlayback.durationMode == .fixed)
+        #expect(config.items[0].thumbnailPlayback.durationMs == 5_000)
+    }
+
+    @Test("Invalid story thumbnail values fall back safely")
+    func storyThumbnailPlaybackRejectsInvalidValues() throws {
+        let config = try #require(InlineStoryConfig.fromJson([
+            "slotKey": "home",
+            "thumbnailVideoPlayback": "future-mode",
+            "items": [[
+                "type": "video",
+                "url": "https://example.com/story.mp4",
+                "thumbnailPlayback": [
+                    "startTimeMs": -1,
+                    "durationMode": "fixed",
+                    "durationMs": 0,
+                ],
+            ]],
+        ]))
+
+        #expect(config.thumbnailVideoPlayback == .simultaneous)
+        #expect(config.items[0].thumbnailPlayback.startTimeMs == 0)
+        #expect(config.items[0].thumbnailPlayback.durationMode == .full)
+        #expect(config.items[0].thumbnailPlayback.durationMs == nil)
+    }
+
+    @Test("Story thumbnail eligibility uses 75/25 hysteresis")
+    func storyThumbnailEligibilityUsesHysteresis() throws {
+        let video = try #require(StoryItemConfig.fromJson([
+            "type": "video",
+            "url": "https://example.com/story.mp4",
+        ]))
+        let image = try #require(StoryItemConfig.fromJson([
+            "type": "image",
+            "url": "https://example.com/story.png",
+        ]))
+
+        let entered = updateThumbnailPlaybackEligibility(
+            current: [],
+            visibleFractions: [0: 0.75, 1: 1],
+            items: [video, image]
+        )
+        let retained = updateThumbnailPlaybackEligibility(
+            current: entered,
+            visibleFractions: [0: 0.50],
+            items: [video, image]
+        )
+        let exited = updateThumbnailPlaybackEligibility(
+            current: retained,
+            visibleFractions: [0: 0.249],
+            items: [video, image]
+        )
+
+        #expect(entered == [0])
+        #expect(retained == [0])
+        #expect(exited.isEmpty)
+    }
+
+    @Test("Story thumbnail helpers wrap and bound configured windows")
+    func storyThumbnailPlaybackHelpers() throws {
+        let item = try #require(StoryItemConfig.fromJson([
+            "type": "video",
+            "url": "https://example.com/story.mp4",
+            "thumbnailPlayback": [
+                "startTimeMs": 42_000,
+                "durationMode": "fixed",
+                "durationMs": 5_000,
+            ],
+        ]))
+
+        #expect(nextThumbnailPlaybackIndex(eligible: [1, 3], afterIndex: 1) == 3)
+        #expect(nextThumbnailPlaybackIndex(eligible: [1, 3], afterIndex: 3) == 1)
+        #expect(effectiveThumbnailStartMs(item: item, naturalDurationMs: 40_000) == 0)
+        #expect(thumbnailPlaybackWindowEnded(
+            item: item,
+            currentPositionMs: 47_000,
+            effectiveStartMs: 42_000
+        ))
+    }
+
     @Test("Survey CTA accepts a numeric dashboard font weight")
     func surveyCtaAcceptsNumericFontWeight() {
         let cta = CtaSettings.from(["fontWeight": .int(500)])
