@@ -2,9 +2,20 @@ import Foundation
 
 // Ported from Android `InlineCarouselConfig.kt`.
 
+enum CarouselItemFit: String, Equatable {
+    case cover
+    case contain
+    case fill
+
+    static func fromJson(_ value: String) -> CarouselItemFit {
+        CarouselItemFit(rawValue: value.lowercased()) ?? .cover
+    }
+}
+
 struct CarouselItem: Equatable {
     let imageUrl: String
     let deepLink: String?
+    let fit: CarouselItemFit
     /// Loading placeholder shown while `imageUrl` loads; `nil` when none.
     let placeholder: ImagePlaceholder?
     let actions: [EngageAction]
@@ -24,6 +35,7 @@ struct InlineCarouselConfig: Equatable {
     let slotKey: String
     let items: [CarouselItem]
     var height: Int = 180
+    var aspectRatio: Double = 0
     var autoPlay: Bool = true
     var autoPlayInterval: Int64 = 3000
     var animationDuration: Int = 700
@@ -48,6 +60,7 @@ struct InlineCarouselConfig: Equatable {
             return CarouselItem(
                 imageUrl: imageUrl,
                 deepLink: deepLink,
+                fit: CarouselItemFit.fromJson(itemJson.string("fit", default: "cover")),
                 placeholder: ImagePlaceholder.from(itemJson.object("placeholder")),
                 actions: actions
             )
@@ -69,10 +82,14 @@ struct InlineCarouselConfig: Equatable {
             indicator = CarouselIndicatorConfig()
         }
 
+        let rawHeight = json.int("height", default: 180)
+        let rawAspectRatio = json.double("aspectRatio", default: 0)
+
         return InlineCarouselConfig(
             slotKey: slotKey,
             items: items,
-            height: json.int("height", default: 180),
+            height: rawHeight > 0 ? rawHeight : 180,
+            aspectRatio: rawAspectRatio.isFinite && rawAspectRatio > 0 ? rawAspectRatio : 0,
             autoPlay: json.bool("autoPlay", default: true),
             autoPlayInterval: json.long("autoPlayInterval", default: 3000),
             animationDuration: json.int("animationDuration", default: 700),

@@ -63,44 +63,48 @@ private struct InlineCarouselView: View {
                 // carousel_slider) is implemented with a view-aligned `ScrollView` instead —
                 // each slide is sized to a fraction of the available width, and side content
                 // padding centers the current slide (mirrors the Android HorizontalPager fix).
-                GeometryReader { geo in
-                    let fraction = CGFloat(min(max(config.viewportFraction, 0.1), 1))
-                    let itemWidth = geo.size.width * fraction
-                    let sidePadding = max(0, (geo.size.width - itemWidth) / 2)
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        // A plain `HStack` (not `LazyHStack`) — with only N+2 slides now
-                        // instead of a multi-lap window, eager layout is cheap, and it avoids
-                        // LazyHStack's tendency to skip/garble transitions on off-screen
-                        // neighbors during id-driven `scrollPosition` jumps (autoplay).
-                        HStack(spacing: CGFloat(config.itemSpacing)) {
-                            ForEach(0 ..< pageCount, id: \.self) { index in
-                                let idx = realIndex(index)
-                                WebImage(url: URL(string: items[idx].imageUrl)) {
-                                    $0.resizable()
-                                } placeholder: {
-                                    BlurHashPlaceholderView(placeholder: items[idx].placeholder)
-                                }
-                                    .scaledToFill()
-                                    .frame(width: itemWidth, height: CGFloat(config.height))
-                                    .clipShape(RoundedRectangle(cornerRadius: CGFloat(config.cornerRadius)))
+                InlineCarouselImageLayout(config: config) {
+                    GeometryReader { geo in
+                        let geometry = resolveInlineCarouselImageGeometry(
+                            availableWidth: geo.size.width,
+                            viewportFraction: config.viewportFraction,
+                            itemSpacing: config.itemSpacing,
+                            aspectRatio: config.aspectRatio,
+                            fixedHeight: config.height
+                        )
+                        let sidePadding = max(0, (geo.size.width - geometry.itemWidth) / 2)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            // A plain `HStack` (not `LazyHStack`) — with only N+2 slides now
+                            // instead of a multi-lap window, eager layout is cheap, and it avoids
+                            // LazyHStack's tendency to skip/garble transitions on off-screen
+                            // neighbors during id-driven `scrollPosition` jumps (autoplay).
+                            HStack(spacing: CGFloat(config.itemSpacing)) {
+                                ForEach(0 ..< pageCount, id: \.self) { index in
+                                    let idx = realIndex(index)
+                                    InlineCarouselItemImage(
+                                        item: items[idx],
+                                        width: geometry.itemWidth,
+                                        height: geometry.height,
+                                        cornerRadius: CGFloat(config.cornerRadius)
+                                    )
                                     .contentShape(Rectangle())
                                     .onTapGesture { handleTap(idx) }
                                     .id(index)
+                                }
                             }
+                            .scrollTargetLayout()
                         }
-                        .scrollTargetLayout()
+                        // `.safeAreaPadding` (not content `.padding`) is the pattern
+                        // `.scrollTargetBehavior(.viewAligned)` expects for peeking neighbors —
+                        // content padding throws off the offset math for id-driven `scrollPosition`
+                        // jumps (autoplay), leaving the view under-scrolled by ~one padding's worth
+                        // until a manual drag re-settles it.
+                        .safeAreaPadding(.horizontal, sidePadding)
+                        .scrollPosition(id: $scrollPosition)
+                        .scrollTargetBehavior(.viewAligned)
                     }
-                    // `.safeAreaPadding` (not content `.padding`) is the pattern
-                    // `.scrollTargetBehavior(.viewAligned)` expects for peeking neighbors —
-                    // content padding throws off the offset math for id-driven `scrollPosition`
-                    // jumps (autoplay), leaving the view under-scrolled by ~one padding's worth
-                    // until a manual drag re-settles it.
-                    .safeAreaPadding(.horizontal, sidePadding)
-                    .scrollPosition(id: $scrollPosition)
-                    .scrollTargetBehavior(.viewAligned)
                 }
                 .frame(maxWidth: .infinity)
-                .frame(height: CGFloat(config.height))
                 .onAppear {
                     if scrollPosition == nil {
                         scrollPosition = loopEnabled ? 1 : 0
@@ -202,4 +206,106 @@ private struct InlineCarouselView: View {
         autoPlayTimer?.invalidate()
         autoPlayTimer = nil
     }
+}
+
+private struct InlineCarouselItemImage: View {
+    let item: CarouselItem
+    let width: CGFloat
+    let height: CGFloat
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        fittedImage
+            .frame(width: width, height: height)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+    }
+
+    @ViewBuilder
+    private var fittedImage: some View {
+        switch item.fit {
+        case .cover:
+            webImage(placeholderContentMode: .fill)
+                .scaledToFill()
+        case .contain:
+            webImage(placeholderContentMode: .fit)
+                .scaledToFit()
+        case .fill:
+            webImage(placeholderContentMode: nil)
+        }
+    }
+
+    private func webImage(placeholderContentMode: ContentMode?) -> some View {
+        WebImage(url: URL(string: item.imageUrl)) {
+            $0.resizable()
+        } placeholder: {
+            BlurHashPlaceholderView(
+                placeholder: item.placeholder,
+                contentMode: placeholderContentMode
+            )
+        }
+    }
+}
+
+@available(iOS 16, *)
+private struct InlineCarouselImageLayout: Layout {
+    let config: InlineCarouselConfig
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let width = proposal.width ?? 0
+        let geometry = resolveInlineCarouselImageGeometry(
+            availableWidth: width,
+            viewportFraction: config.viewportFraction,
+            itemSpacing: config.itemSpacing,
+            aspectRatio: config.aspectRatio,
+            fixedHeight: config.height
+        )
+        return CGSize(width: width, height: geometry.height)
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        subviews.first?.place(
+            at: bounds.origin,
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: bounds.height)
+        )
+    }
+}
+
+struct InlineCarouselImageGeometry: Equatable {
+    let itemWidth: CGFloat
+    let height: CGFloat
+}
+
+func resolveInlineCarouselImageGeometry(
+    availableWidth: CGFloat,
+    viewportFraction: Double,
+    itemSpacing: Double,
+    aspectRatio: Double,
+    fixedHeight: Int
+) -> InlineCarouselImageGeometry {
+    let fraction = CGFloat(min(max(viewportFraction, 0.1), 1))
+    let legacyItemWidth = availableWidth * fraction
+
+    guard aspectRatio.isFinite, aspectRatio > 0 else {
+        return InlineCarouselImageGeometry(
+            itemWidth: legacyItemWidth,
+            height: CGFloat(fixedHeight > 0 ? fixedHeight : 180)
+        )
+    }
+
+    let spacing = itemSpacing.isFinite ? CGFloat(itemSpacing) : 12
+    let visibleItemWidth = max(0, legacyItemWidth - spacing)
+    return InlineCarouselImageGeometry(
+        itemWidth: visibleItemWidth,
+        height: visibleItemWidth / CGFloat(aspectRatio)
+    )
 }
