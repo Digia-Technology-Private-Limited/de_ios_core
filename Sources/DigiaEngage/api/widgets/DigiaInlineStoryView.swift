@@ -37,16 +37,21 @@ private struct StoryThumbnailCard: View {
     let config: InlineStoryConfig
 
     private var width: CGFloat {
-        CGFloat(config.card.height) * CGFloat(config.card.aspectRatio)
+        CGFloat(config.card.width)
     }
 
     var body: some View {
         ZStack {
             Color(red: 0.10, green: 0.10, blue: 0.10)
             if item.type == "video" {
-                InlineStoryVideoView(urlString: item.url, looping: true, muted: true)
+                InlineStoryVideoView(
+                    urlString: item.url,
+                    looping: true,
+                    muted: true,
+                    gravity: item.boxFit.videoGravity
+                )
             } else {
-                StoryRemoteImage(urlString: item.url)
+                StoryRemoteImage(urlString: item.url, fit: item.boxFit)
             }
         }
         .frame(width: width, height: CGFloat(config.card.height))
@@ -415,14 +420,13 @@ private struct FullScreenStoryItem: View {
                     urlString: item.url,
                     looping: false,
                     muted: false,
-                    gravity: .resizeAspect,
+                    gravity: item.boxFit.videoGravity,
                     onProgress: onVideoProgress,
                     onEnded: onVideoEnded,
                     onBuffering: onVideoBuffering
                 )
             } else {
-                // Letterbox (never crop): show the whole image, bars where aspect differs.
-                StoryRemoteImage(urlString: item.url, contentMode: .fit)
+                StoryRemoteImage(urlString: item.url, fit: item.boxFit)
             }
         }
     }
@@ -431,16 +435,20 @@ private struct FullScreenStoryItem: View {
 @MainActor
 private struct StoryRemoteImage: View {
     let urlString: String
-    /// `.fill` crops to fill (story thumbnails); `.fit` letterboxes (full-screen).
-    var contentMode: ContentMode = .fill
+    let fit: StoryMediaFit
 
+    @ViewBuilder
     var body: some View {
         if let url = URL(string: urlString) {
-            DigiaCachedImageView(
+            let image = DigiaCachedImageView(
                 url: url,
                 placeholder: AnyView(Color(red: 0.10, green: 0.10, blue: 0.10))
             )
-            .aspectRatio(contentMode: contentMode)
+            if let contentMode = fit.imageContentMode {
+                image.aspectRatio(contentMode: contentMode)
+            } else {
+                image.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         } else {
             Color(red: 0.16, green: 0.16, blue: 0.16)
         }
@@ -556,6 +564,20 @@ private struct InlineStoryVideoView: View {
         failObserver = nil
         bufferingObserver = nil
         self.bundle = nil
+    }
+}
+
+extension StoryMediaFit {
+    var imageContentMode: ContentMode? {
+        switch self {
+        case .cover: .fill
+        case .contain: .fit
+        case .fill: nil
+        }
+    }
+
+    var videoGravity: AVLayerVideoGravity {
+        self == .contain ? .resizeAspect : .resizeAspectFill
     }
 }
 
