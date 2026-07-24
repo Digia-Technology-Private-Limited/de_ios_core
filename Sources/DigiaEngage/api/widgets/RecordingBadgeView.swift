@@ -29,6 +29,11 @@ struct RecordingBadgeView: View {
 @MainActor
 private struct DraggableBadge: View {
     private static let margin: CGFloat = 8
+    // TEMPORARY (diagnostic): default spawn point cleared well below a
+    // typical navigation bar (safe-area-top + ~44pt), not just the status
+    // bar — testing whether that's what's swallowing touches before hitTest
+    // ever sees them. 100 clears even a large-title nav bar.
+    private static let defaultTopClearance: CGFloat = 100
 
     @State private var offset: CGSize?
     @State private var dragStartOffset: CGSize?
@@ -36,7 +41,7 @@ private struct DraggableBadge: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let current = offset ?? CGSize(width: Self.margin, height: proxy.safeAreaInsets.top + Self.margin)
+            let current = offset ?? CGSize(width: Self.margin, height: proxy.safeAreaInsets.top + Self.defaultTopClearance)
             let frame = CGRect(x: current.width, y: current.height, width: badgeSize.width, height: badgeSize.height)
 
             BadgeContent()
