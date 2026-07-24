@@ -459,6 +459,47 @@ struct EngageActionParserTests {
         #expect(config.items[0].thumbnailPlayback.durationMs == nil)
     }
 
+    @Test("Story image thumbnail reuses nudge image and BlurHash fields")
+    func storyImageThumbnailParses() throws {
+        let item = try #require(StoryItemConfig.fromJson([
+            "type": "video",
+            "url": "https://example.com/story.mp4",
+            "thumbnail": [
+                "type": "image",
+                "src": ["imageSrc": "https://example.com/poster.jpg"],
+                "fit": "contain",
+                "placeholder": [
+                    "type": "blurhash",
+                    "blurHash": "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
+                ],
+            ],
+        ]))
+
+        #expect(item.thumbnail?.type == .image)
+        #expect(item.thumbnail?.imageSrc == "https://example.com/poster.jpg")
+        #expect(item.thumbnail?.fit == .contain)
+        #expect(item.thumbnail?.placeholder?.type == .blurhash)
+        #expect(item.thumbnail?.placeholder?.blurHash == "LEHV6nWB2yk8pyo0adR*.7kCMdnj")
+    }
+
+    @Test("Story color thumbnail parses and malformed thumbnails keep legacy fallback")
+    func storyColorAndMalformedThumbnailParsing() throws {
+        let color = try #require(StoryItemConfig.fromJson([
+            "type": "video",
+            "url": "https://example.com/story.mp4",
+            "thumbnail": ["type": "color", "color": "#1A1A1A"],
+        ]))
+        let malformed = try #require(StoryItemConfig.fromJson([
+            "type": "video",
+            "url": "https://example.com/story.mp4",
+            "thumbnail": ["type": "image", "src": [:]],
+        ]))
+
+        #expect(color.thumbnail?.type == .color)
+        #expect(color.thumbnail?.color == "#1A1A1A")
+        #expect(malformed.thumbnail == nil)
+    }
+
     @Test("Story thumbnail eligibility uses 75/25 hysteresis")
     func storyThumbnailEligibilityUsesHysteresis() throws {
         let video = try #require(StoryItemConfig.fromJson([
@@ -536,6 +577,25 @@ struct EngageActionParserTests {
         ]))
 
         #expect(thumbnailPlayerIdentity(original) != thumbnailPlayerIdentity(changed))
+    }
+
+    @Test("Changing explicit story thumbnail creates a new player identity")
+    func storyThumbnailPlayerIdentityTracksPlaceholderConfiguration() throws {
+        let image = try #require(StoryItemConfig.fromJson([
+            "type": "video",
+            "url": "https://example.com/story.mp4",
+            "thumbnail": [
+                "type": "image",
+                "src": ["imageSrc": "https://example.com/poster.jpg"],
+            ],
+        ]))
+        let color = try #require(StoryItemConfig.fromJson([
+            "type": "video",
+            "url": "https://example.com/story.mp4",
+            "thumbnail": ["type": "color", "color": "#1A1A1A"],
+        ]))
+
+        #expect(thumbnailPlayerIdentity(image) != thumbnailPlayerIdentity(color))
     }
 
     @Test("Survey CTA accepts a numeric dashboard font weight")

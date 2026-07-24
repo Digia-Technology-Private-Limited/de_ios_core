@@ -32,7 +32,57 @@ struct ThumbnailPlaybackViewState: Equatable {
 func thumbnailPlayerIdentity(_ item: StoryItemConfig) -> String {
     "\(item.type)|\(item.url)|\(item.thumbnailPlayback.startTimeMs)|"
         + "\(item.thumbnailPlayback.durationMode.rawValue)|"
-        + "\(item.thumbnailPlayback.durationMode == .fixed ? item.thumbnailPlayback.durationMs ?? 0 : 0)"
+        + "\(item.thumbnailPlayback.durationMode == .fixed ? item.thumbnailPlayback.durationMs ?? 0 : 0)|"
+        + "\(item.thumbnail?.type.rawValue ?? "")|\(item.thumbnail?.imageSrc ?? "")|"
+        + "\(item.thumbnail?.fit.rawValue ?? "")|\(item.thumbnail?.placeholder?.blurHash ?? "")|"
+        + "\(item.thumbnail?.color ?? "")"
+}
+
+struct StoryThumbnailPlaceholderView: View {
+    let thumbnail: StoryThumbnailConfig?
+
+    var body: some View {
+        ZStack {
+            Color(red: 0.10, green: 0.10, blue: 0.10)
+            switch thumbnail?.type {
+            case .color:
+                Color(hex: thumbnail?.color ?? "") ?? Color(red: 0.10, green: 0.10, blue: 0.10)
+            case .image:
+                if let thumbnail,
+                   let imageSrc = thumbnail.imageSrc,
+                   let url = URL(string: imageSrc)
+                {
+                    fitted(
+                        DigiaCachedImageView(
+                            url: url,
+                            placeholder: AnyView(
+                                BlurHashPlaceholderView(placeholder: thumbnail.placeholder)
+                            )
+                        ),
+                        fit: thumbnail.fit
+                    )
+                }
+            case nil:
+                EmptyView()
+            }
+        }
+        .clipped()
+    }
+
+    @ViewBuilder
+    private func fitted<Content: View>(
+        _ content: Content,
+        fit: StoryThumbnailImageFit
+    ) -> some View {
+        switch fit {
+        case .cover:
+            content.aspectRatio(contentMode: .fill)
+        case .contain:
+            content.aspectRatio(contentMode: .fit)
+        case .fill:
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
 }
 
 @MainActor
@@ -60,7 +110,8 @@ struct StoryThumbnailVideoView: View {
     var body: some View {
         ZStack {
             Color.black
-            if let poster = model.poster {
+            StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
+            if item.thumbnail == nil, let poster = model.poster {
                 Image(uiImage: poster)
                     .resizable()
                     .scaledToFill()
@@ -111,20 +162,27 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var failObserver: NSObjectProtocol?
+    private var accessLogObserver: NSObjectProtocol?
     private var statusObserver: NSKeyValueObservation?
+    private var timeControlStatusObserver: NSKeyValueObservation?
     private var watchdogTask: Task<Void, Never>?
     private var watchdogGeneration: UInt = 0
     private var terminalFailurePending = false
     private var terminalFailureReported = false
-    private var terminalFailureTask: Task<Void, Never>?
+    private var seekFallbackTask: Task<Void, Never>?
+    private var seekGeneration: UInt = 0
     private var imageGenerator: AVAssetImageGenerator?
     private var imageGenerationID: UUID?
     private var onWindowCompleted: () -> Void = {}
     private var onFailed: () -> Void = {}
+    private let playerCreatedAt = CACurrentMediaTime()
+    private var firstProgressReported = false
+    private var lastDroppedVideoFrames = 0
 
     init(item: StoryItemConfig) {
         self.item = item
         poster = StoryThumbnailPosterCache.image(for: thumbnailPlayerIdentity(item))
+        diagnosticLog("player_init posterHit=\(poster != nil)")
     }
 
     func update(
@@ -134,25 +192,31 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     ) {
         let wasPlaying = self.state.shouldPlay
         let restartRequested = self.state.restartGeneration != state.restartGeneration
+        diagnosticLog(
+            "update eligible=\(state.eligible) shouldPlay=\(state.shouldPlay) "
+                + "wasPlaying=\(wasPlaying) restart=\(restartRequested) "
+                + "prepared=\(startPrepared) terminal=\(terminalFailurePending) "
+                + "mode=\(state.mode.rawValue) pool=\(state.playableIndices.sorted())"
+        )
         self.state = state
         self.onWindowCompleted = onWindowCompleted
         self.onFailed = onFailed
         prepareIfNeeded()
 
-        if terminalFailurePending {
-            synchronizeTerminalFailure()
-            return
+        if terminalFailureReported { return }
+        if state.shouldPlay {
+            startWatchdog()
+        } else {
+            stopWatchdog()
         }
         guard let player else { return }
         if restartRequested {
             completionHandled = false
             player.pause()
-            stopWatchdog()
             guard startPrepared else { return }
             seekToStart(retryAtZero: true) {
                 guard self.state.shouldPlay else { return }
                 player.play()
-                self.startWatchdog()
             }
             return
         }
@@ -161,12 +225,8 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
                 completionHandled = false
                 player.play()
             }
-            if startPrepared {
-                startWatchdog()
-            }
         } else {
             player.pause()
-            stopWatchdog()
             if !state.eligible || state.reduceMotion {
                 resetToStart()
             }
@@ -180,8 +240,10 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             return
         }
         let cacheKey = thumbnailPlayerIdentity(item)
+        let wasWarm = StoryThumbnailWarmPlayerCache.contains(cacheKey)
         let next = StoryThumbnailWarmPlayerCache.take(cacheKey)
             ?? DigiaVideoPlaybackBundle.make(url: url, looping: false)
+        diagnosticLog("player_create source=\(wasWarm ? "warm" : "new")")
         next.player.isMuted = true
         bundle = next
         player = next.player
@@ -194,6 +256,10 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             ) { [weak self] observed, _ in
                 Task { @MainActor in
                     guard let self else { return }
+                    self.diagnosticLog(
+                        "item_status=\(observed.status.rawValue) elapsedMs="
+                            + "\(Int((CACurrentMediaTime() - self.playerCreatedAt) * 1_000))"
+                    )
                     switch observed.status {
                     case .readyToPlay:
                         self.prepareStart()
@@ -202,6 +268,17 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
                     default:
                         break
                     }
+                }
+            }
+            timeControlStatusObserver = next.player.observe(
+                \.timeControlStatus,
+                options: [.initial, .new]
+            ) { [weak self] observed, _ in
+                Task { @MainActor in
+                    self?.diagnosticLog(
+                        "timeControl=\(observed.timeControlStatus.rawValue) "
+                            + "rate=\(observed.rate) t=\(observed.currentTime().seconds)"
+                    )
                 }
             }
             endObserver = NotificationCenter.default.addObserver(
@@ -218,6 +295,25 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             ) { [weak self] _ in
                 Task { @MainActor in self?.handleTerminalFailure() }
             }
+            accessLogObserver = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemNewAccessLogEntry,
+                object: currentItem,
+                queue: .main
+            ) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self,
+                          let dropped = currentItem.accessLog()?.events.last?
+                              .numberOfDroppedVideoFrames
+                    else {
+                        return
+                    }
+                    let delta = dropped - self.lastDroppedVideoFrames
+                    self.lastDroppedVideoFrames = dropped
+                    if delta > 0 {
+                        self.diagnosticLog("dropped_frames count=\(delta) total=\(dropped)")
+                    }
+                }
+            }
         }
 
         let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
@@ -228,6 +324,19 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             Task { @MainActor in
                 guard let self, self.state.shouldPlay else { return }
                 let positionMs = Int64(max(time.seconds, 0) * 1000)
+                if positionMs > self.effectiveStartMs + 10 {
+                    // A successful seek does not guarantee AVPlayerLayer has
+                    // decoded the target frame. Keep the poster visible until
+                    // media time advances at the authored start.
+                    self.showPlayerLayer = true
+                    if !self.firstProgressReported {
+                        self.firstProgressReported = true
+                        self.diagnosticLog(
+                            "first_progress elapsedMs="
+                                + "\(Int((CACurrentMediaTime() - self.playerCreatedAt) * 1_000))"
+                        )
+                    }
+                }
                 if thumbnailPlaybackWindowEnded(
                     item: self.item,
                     currentPositionMs: positionMs,
@@ -249,10 +358,11 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             naturalDurationMs: naturalDurationMs
         )
         startPrepared = true
+        diagnosticLog("prepare_start effectiveMs=\(effectiveStartMs) duration=\(seconds)")
         seekToStart(retryAtZero: true) {
+            self.diagnosticLog("prepare_start_resolved shouldPlay=\(self.state.shouldPlay)")
             if self.state.shouldPlay {
                 player.play()
-                self.startWatchdog()
             }
         }
     }
@@ -312,22 +422,32 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
 
     private func completeWindow() {
         guard !completionHandled, let player else { return }
+        diagnosticLog("window_complete position=\(player.currentTime().seconds)")
         completionHandled = true
         player.pause()
         stopWatchdog()
-        seekToStart(retryAtZero: true) {
-            if self.state.shouldPlay &&
-                shouldRepeatThumbnailPlaybackWindow(
-                    mode: self.state.mode,
-                    eligibleVideoCount: self.state.playableIndices.count
-                )
-            {
+
+        if state.shouldPlay,
+           shouldRepeatThumbnailPlaybackWindow(
+               mode: state.mode,
+               eligibleVideoCount: state.playableIndices.count
+           )
+        {
+            seekToStart(retryAtZero: true) {
+                self.diagnosticLog("window_reset_resolved shouldPlay=\(self.state.shouldPlay)")
+                guard self.state.shouldPlay else { return }
                 self.completionHandled = false
                 player.play()
-                self.startWatchdog()
-            } else {
-                self.onWindowCompleted()
             }
+            startWatchdog()
+        } else {
+            // The outgoing player's reset is best-effort background cleanup.
+            // Coordinator advancement must not depend on AVPlayer invoking a
+            // remote seek callback; some assets move currentTime successfully
+            // without ever calling that completion handler.
+            diagnosticLog("handoff_before_reset")
+            onWindowCompleted()
+            seekToStart(retryAtZero: true)
         }
     }
 
@@ -340,68 +460,88 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         completion: (@MainActor @Sendable () -> Void)? = nil
     ) {
         showPlayerLayer = false
+        seekGeneration &+= 1
+        let generation = seekGeneration
+        seekFallbackTask?.cancel()
+        seekFallbackTask = nil
         guard let player else {
             completion?()
             return
         }
         let expectedPlayer = player
         let time = CMTime(value: effectiveStartMs, timescale: 1_000)
+        diagnosticLog("seek_begin targetMs=\(effectiveStartMs) retry=\(retryAtZero)")
         player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] succeeded in
             Task { @MainActor in
-                guard let self, self.player === expectedPlayer else { return }
-                if succeeded {
-                    self.showPlayerLayer = true
-                    completion?()
-                } else if retryAtZero, self.effectiveStartMs != 0 {
-                    self.effectiveStartMs = 0
-                    self.seekToStart(completion: completion)
-                } else {
-                    self.handleTerminalFailure()
-                }
+                self?.finishSeek(
+                    generation: generation,
+                    expectedPlayer: expectedPlayer,
+                    succeeded: succeeded,
+                    retryAtZero: retryAtZero,
+                    completion: completion
+                )
             }
+        }
+        seekFallbackTask = Task { [weak self, weak expectedPlayer] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled, let self, let expectedPlayer else { return }
+            guard self.seekGeneration == generation, self.player === expectedPlayer else { return }
+            let target = Double(self.effectiveStartMs) / 1_000
+            let position = expectedPlayer.currentTime().seconds
+            let reachedTarget = position.isFinite && abs(position - target) <= 0.25
+            self.diagnosticLog(
+                "seek fallback position=\(position) target=\(target) reached=\(reachedTarget)"
+            )
+            self.finishSeek(
+                generation: generation,
+                expectedPlayer: expectedPlayer,
+                succeeded: reachedTarget,
+                retryAtZero: retryAtZero,
+                completion: completion
+            )
+        }
+    }
+
+    private func finishSeek(
+        generation: UInt,
+        expectedPlayer: AVPlayer,
+        succeeded: Bool,
+        retryAtZero: Bool,
+        completion: (@MainActor @Sendable () -> Void)?
+    ) {
+        guard seekGeneration == generation, player === expectedPlayer else { return }
+        seekGeneration &+= 1
+        seekFallbackTask?.cancel()
+        seekFallbackTask = nil
+        diagnosticLog("seek_resolved success=\(succeeded) targetMs=\(effectiveStartMs)")
+        if succeeded {
+            completion?()
+        } else if retryAtZero, effectiveStartMs != 0 {
+            effectiveStartMs = 0
+            seekToStart(completion: completion)
+        } else {
+            handleTerminalFailure()
         }
     }
 
     private func handleTerminalFailure() {
         guard !terminalFailurePending, !terminalFailureReported else { return }
+        diagnosticLog("terminal_failure")
         terminalFailurePending = true
         player?.pause()
         showPlayerLayer = false
-        stopWatchdog()
-        synchronizeTerminalFailure()
-    }
-
-    private func synchronizeTerminalFailure() {
         imageGenerator?.cancelAllCGImageGeneration()
         imageGenerator = nil
         imageGenerationID = nil
-        guard terminalFailurePending, !terminalFailureReported else { return }
-        guard state.mode == .sequential else {
-            reportTerminalFailure()
-            return
-        }
-        guard state.shouldPlay else {
-            terminalFailureTask?.cancel()
-            terminalFailureTask = nil
-            return
-        }
-        guard terminalFailureTask == nil else { return }
-        terminalFailureTask = Task { [weak self] in
-            try? await Task.sleep(
-                nanoseconds: UInt64(thumbnailPlaybackStallSeconds * 1_000_000_000)
-            )
-            guard !Task.isCancelled, let self else { return }
-            guard self.terminalFailurePending, self.state.shouldPlay else { return }
-            self.reportTerminalFailure()
-        }
+        reportTerminalFailure()
     }
 
     private func reportTerminalFailure() {
         guard !terminalFailureReported else { return }
+        diagnosticLog("failure_excluded")
         terminalFailureReported = true
         terminalFailurePending = false
-        terminalFailureTask?.cancel()
-        terminalFailureTask = nil
+        stopWatchdog()
         onFailed()
     }
 
@@ -440,13 +580,16 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     }
 
     func tearDown() {
+        diagnosticLog("player_release")
         stopWatchdog()
-        terminalFailureTask?.cancel()
-        terminalFailureTask = nil
+        seekGeneration &+= 1
+        seekFallbackTask?.cancel()
+        seekFallbackTask = nil
         imageGenerator?.cancelAllCGImageGeneration()
         imageGenerator = nil
         imageGenerationID = nil
         statusObserver?.invalidate()
+        timeControlStatusObserver?.invalidate()
         if let timeObserver, let player {
             player.removeTimeObserver(timeObserver)
         }
@@ -456,10 +599,15 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         if let failObserver {
             NotificationCenter.default.removeObserver(failObserver)
         }
+        if let accessLogObserver {
+            NotificationCenter.default.removeObserver(accessLogObserver)
+        }
         statusObserver = nil
+        timeControlStatusObserver = nil
         timeObserver = nil
         endObserver = nil
         failObserver = nil
+        accessLogObserver = nil
         player?.pause()
         if let bundle {
             if terminalFailurePending || terminalFailureReported {
@@ -476,6 +624,13 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         startPrepared = false
         showPlayerLayer = false
     }
+
+    private func diagnosticLog(_ message: String) {
+        let identity = UInt(bitPattern: thumbnailPlayerIdentity(item).hashValue)
+        StoryThumbnailPlaybackDiagnostics.log(
+            "thumbnail id=\(String(identity, radix: 16)) \(message)"
+        )
+    }
 }
 
 @MainActor
@@ -487,6 +642,10 @@ private enum StoryThumbnailWarmPlayerCache {
     static func take(_ key: String) -> DigiaVideoPlaybackBundle? {
         recency.removeAll { $0 == key }
         return entries.removeValue(forKey: key)
+    }
+
+    static func contains(_ key: String) -> Bool {
+        entries[key] != nil
     }
 
     static func store(_ bundle: DigiaVideoPlaybackBundle, for key: String) {

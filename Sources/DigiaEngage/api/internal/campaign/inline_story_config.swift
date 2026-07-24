@@ -19,6 +19,7 @@ struct StoryItemConfig: Equatable {
     let url: String
     let duration: Int?
     var thumbnailPlayback: StoryThumbnailPlaybackConfig = StoryThumbnailPlaybackConfig()
+    var thumbnail: StoryThumbnailConfig?
     var ctaEnabled: Bool = false
     var ctaText: String?
     var ctaFontWeight: Int = 600
@@ -42,6 +43,7 @@ struct StoryItemConfig: Equatable {
             thumbnailPlayback: StoryThumbnailPlaybackConfig.fromJson(
                 json.object("thumbnailPlayback")
             ),
+            thumbnail: StoryThumbnailConfig.fromJson(json.object("thumbnail")),
             ctaEnabled: json.bool("ctaEnabled", default: false),
             ctaText: json.nonBlankString("ctaText"),
             ctaFontWeight: DigiaFontWeight.value(json["ctaFontWeight"], default: 600),
@@ -62,6 +64,55 @@ struct StoryItemConfig: Equatable {
         case "deepLink": [url.map(EngageAction.openDeeplink), .dismiss].compactMap { $0 }
         case "openUrl": [url.map(EngageAction.openUrl), .dismiss].compactMap { $0 }
         default: [.dismiss]
+        }
+    }
+}
+
+enum StoryThumbnailType: String, Equatable {
+    case image
+    case color
+}
+
+enum StoryThumbnailImageFit: String, Equatable {
+    case cover
+    case contain
+    case fill
+}
+
+struct StoryThumbnailConfig: Equatable {
+    let type: StoryThumbnailType
+    let imageSrc: String?
+    let fit: StoryThumbnailImageFit
+    let placeholder: ImagePlaceholder?
+    let color: String?
+
+    static func fromJson(_ json: [String: Any]?) -> StoryThumbnailConfig? {
+        guard let json,
+              let type = StoryThumbnailType(rawValue: json.string("type", default: ""))
+        else { return nil }
+        switch type {
+        case .image:
+            guard let imageSrc = json.object("src")?.nonBlankString("imageSrc") else {
+                return nil
+            }
+            return StoryThumbnailConfig(
+                type: .image,
+                imageSrc: imageSrc,
+                fit: StoryThumbnailImageFit(
+                    rawValue: json.string("fit", default: "cover")
+                ) ?? .cover,
+                placeholder: ImagePlaceholder.from(json.object("placeholder")),
+                color: nil
+            )
+        case .color:
+            guard let color = json.nonBlankString("color") else { return nil }
+            return StoryThumbnailConfig(
+                type: .color,
+                imageSrc: nil,
+                fit: .cover,
+                placeholder: nil,
+                color: color
+            )
         }
     }
 }

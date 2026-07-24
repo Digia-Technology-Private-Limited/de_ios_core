@@ -88,6 +88,10 @@ struct DigiaInlineStoryView: View {
         )) { _ in
             applicationActive = false
         }
+        .overlay {
+            StoryThumbnailJankMonitor(slotKey: config.slotKey)
+                .allowsHitTesting(false)
+        }
         .frame(height: CGFloat(config.card.height))
     }
 
@@ -186,7 +190,10 @@ private struct StoryThumbnailCard: View {
     var body: some View {
         ZStack {
             Color(red: 0.10, green: 0.10, blue: 0.10)
-            if item.type == "video", !failed {
+            if item.type == "video",
+               !failed,
+               item.thumbnail == nil || playbackState.shouldPlay
+            {
                 StoryThumbnailVideoView(
                     item: item,
                     state: playbackState,
@@ -196,7 +203,7 @@ private struct StoryThumbnailCard: View {
                 .id(thumbnailPlayerIdentity(item))
             } else {
                 if item.type == "video" {
-                    Color(red: 0.10, green: 0.10, blue: 0.10)
+                    StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
                 } else {
                     StoryRemoteImage(urlString: item.url)
                 }
@@ -564,6 +571,7 @@ private struct FullScreenStoryItem: View {
         ZStack {
             Color.black
             if item.type == "video" {
+                StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
                 InlineStoryVideoView(
                     urlString: item.url,
                     looping: false,
@@ -618,17 +626,32 @@ private struct InlineStoryVideoView: View {
     @State private var endObserver: NSObjectProtocol?
     @State private var failObserver: NSObjectProtocol?
     @State private var bufferingObserver: NSKeyValueObservation?
+    @State private var firstFrameReady = false
 
     var body: some View {
         ZStack {
-            Color.black
             if let player = bundle?.player {
-                InlineStoryPlayerLayer(player: player, gravity: gravity)
+                InlineStoryPlayerLayer(
+                    player: player,
+                    gravity: gravity,
+                    onReadyForDisplay: {
+                        guard !firstFrameReady else { return }
+                        firstFrameReady = true
+                        StoryThumbnailPlaybackDiagnostics.log(
+                            "overlay_first_frame id=\(urlString.hashValue)"
+                        )
+                        onBuffering?(false)
+                    }
+                )
             }
         }
         .task(id: "\(urlString)-\(looping)-\(muted)") {
             guard let url = URL(string: urlString) else { return }
             tearDownPlayback()
+            firstFrameReady = false
+            StoryThumbnailPlaybackDiagnostics.log(
+                "overlay_player_create id=\(urlString.hashValue)"
+            )
 
             // DigiaVideoPlaybackBundle overrides an incorrect server MIME type
             // while leaving HTTP transport/range handling to AVFoundation on
@@ -643,6 +666,7 @@ private struct InlineStoryVideoView: View {
                     queue: .main
                 ) { [weak player = nextBundle.player] time in
                     guard let item = player?.currentItem else { return }
+                    guard firstFrameReady else { return }
                     let duration = item.duration.seconds
                     guard duration.isFinite, duration > 0 else { return }
                     onProgress(min(max(time.seconds / duration, 0), 1))
@@ -708,6 +732,10 @@ private struct InlineStoryVideoView: View {
         endObserver = nil
         failObserver = nil
         bufferingObserver = nil
+        firstFrameReady = false
+        StoryThumbnailPlaybackDiagnostics.log(
+            "overlay_player_release id=\(urlString.hashValue)"
+        )
         self.bundle = nil
     }
 }
@@ -715,30 +743,85 @@ private struct InlineStoryVideoView: View {
 struct InlineStoryPlayerLayer: UIViewRepresentable {
     let player: AVPlayer
     var gravity: AVLayerVideoGravity = .resizeAspectFill
+    var onReadyForDisplay: (() -> Void)?
 
     func makeUIView(context _: Context) -> InlineStoryPlayerContainer {
         let view = InlineStoryPlayerContainer()
-        view.playerLayer.videoGravity = gravity
+        view.configure(
+            player: player,
+            gravity: gravity,
+            onReadyForDisplay: onReadyForDisplay
+        )
         return view
     }
 
     func updateUIView(_ uiView: InlineStoryPlayerContainer, context _: Context) {
-        uiView.playerLayer.player = player
-        uiView.playerLayer.videoGravity = gravity
+        uiView.configure(
+            player: player,
+            gravity: gravity,
+            onReadyForDisplay: onReadyForDisplay
+        )
     }
 
     static func dismantleUIView(_ uiView: InlineStoryPlayerContainer, coordinator _: Void) {
-        uiView.playerLayer.player = nil
+        uiView.tearDown()
     }
 }
 
 final class InlineStoryPlayerContainer: UIView {
+    private var readyObservation: NSKeyValueObservation?
+    private var observedPlayer: AVPlayer?
+    private var didReportReady = false
+    private var onReadyForDisplay: (() -> Void)?
+
     override class var layerClass: AnyClass {
         AVPlayerLayer.self
     }
 
     var playerLayer: AVPlayerLayer {
         layer as! AVPlayerLayer
+    }
+
+    func configure(
+        player: AVPlayer,
+        gravity: AVLayerVideoGravity,
+        onReadyForDisplay: (() -> Void)?
+    ) {
+        self.onReadyForDisplay = onReadyForDisplay
+        playerLayer.videoGravity = gravity
+        guard observedPlayer !== player else {
+            revealIfReady()
+            return
+        }
+        readyObservation?.invalidate()
+        observedPlayer = player
+        didReportReady = false
+        playerLayer.opacity = 0
+        playerLayer.player = player
+        readyObservation = playerLayer.observe(
+            \.isReadyForDisplay,
+            options: [.initial, .new]
+        ) { [weak self] _, _ in
+            Task { @MainActor in self?.revealIfReady() }
+        }
+    }
+
+    func tearDown() {
+        readyObservation?.invalidate()
+        readyObservation = nil
+        observedPlayer = nil
+        onReadyForDisplay = nil
+        didReportReady = false
+        playerLayer.opacity = 0
+        playerLayer.player = nil
+    }
+
+    private func revealIfReady() {
+        guard playerLayer.isReadyForDisplay else { return }
+        playerLayer.opacity = 1
+        guard !didReportReady else { return }
+        didReportReady = true
+        onReadyForDisplay?()
     }
 }
 
