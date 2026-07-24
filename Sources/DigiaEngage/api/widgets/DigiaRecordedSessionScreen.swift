@@ -38,6 +38,12 @@ struct DigiaRecordedSessionScreen: View {
                         }
                     }
                 }
+            } header: {
+                Text(
+                    registry.recordedThisSession.isEmpty
+                        ? "Recorded Keys"
+                        : "Recorded Keys (\(registry.recordedThisSession.count))"
+                )
             }
         }
         .navigationTitle("Recorded This Session")
