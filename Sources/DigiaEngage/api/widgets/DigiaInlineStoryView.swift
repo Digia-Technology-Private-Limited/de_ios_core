@@ -10,11 +10,12 @@ struct DigiaInlineStoryView: View {
     @ObservedObject private var overlayController = SDKInstance.shared.controller
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var eligibleIndices: Set<Int> = []
-    @State private var failedPlayerIdentities: [Int: String] = [:]
+    @State private var failedPlayerIdentities: [Int: StoryThumbnailPlayerIdentity] = [:]
     @State private var sequentialActiveIndex: Int?
     @State private var slotVisible = false
     @State private var applicationActive = false
     @State private var playbackRestartGeneration = 0
+    @State private var previousPlayerIdentities: [StoryThumbnailPlayerIdentity] = []
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -77,6 +78,15 @@ struct DigiaInlineStoryView: View {
         }
         .onAppear {
             applicationActive = UIApplication.shared.applicationState == .active
+            previousPlayerIdentities = currentPlayerIdentities
+        }
+        .onChange(of: currentPlayerIdentities) { nextIdentities in
+            let retained = Set(nextIdentities)
+            for previousIdentity in previousPlayerIdentities
+            where !retained.contains(previousIdentity) {
+                invalidateStoryThumbnailWarmPlayer(previousIdentity)
+            }
+            previousPlayerIdentities = nextIdentities
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.didBecomeActiveNotification
@@ -89,8 +99,10 @@ struct DigiaInlineStoryView: View {
             applicationActive = false
         }
         .overlay {
-            StoryThumbnailJankMonitor(slotKey: config.slotKey)
-                .allowsHitTesting(false)
+            if StoryThumbnailPlaybackDiagnostics.isEnabled {
+                StoryThumbnailJankMonitor(slotKey: config.slotKey)
+                    .allowsHitTesting(false)
+            }
         }
         .frame(height: CGFloat(config.card.height))
     }
@@ -100,6 +112,10 @@ struct DigiaInlineStoryView: View {
             guard config.items.indices.contains(index) else { return false }
             return failedPlayerIdentities[index] != thumbnailPlayerIdentity(config.items[index])
         })
+    }
+
+    private var currentPlayerIdentities: [StoryThumbnailPlayerIdentity] {
+        config.items.map(thumbnailPlayerIdentity)
     }
 
     private var playbackAllowed: Bool {
@@ -168,7 +184,7 @@ struct DigiaInlineStoryView: View {
         )
     }
 
-    private func markFailed(_ index: Int, playerIdentity: String) {
+    private func markFailed(_ index: Int, playerIdentity: StoryThumbnailPlayerIdentity) {
         failedPlayerIdentities[index] = playerIdentity
         reconcileSequentialActive(playable: playableIndices)
     }

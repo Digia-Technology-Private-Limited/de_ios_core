@@ -3,6 +3,10 @@ import SwiftUI
 import UIKit
 
 enum StoryThumbnailPlaybackDiagnostics {
+    static var isEnabled: Bool {
+        DigiaLog.level == .verbose
+    }
+
     static func log(_ message: String) {
         DigiaLog.log(message, tag: "DigiaStoryPerf")
     }

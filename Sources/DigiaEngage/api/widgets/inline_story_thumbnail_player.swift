@@ -29,13 +29,52 @@ struct ThumbnailPlaybackViewState: Equatable {
     let restartGeneration: Int
 }
 
-func thumbnailPlayerIdentity(_ item: StoryItemConfig) -> String {
-    "\(item.type)|\(item.url)|\(item.thumbnailPlayback.startTimeMs)|"
-        + "\(item.thumbnailPlayback.durationMode.rawValue)|"
-        + "\(item.thumbnailPlayback.durationMode == .fixed ? item.thumbnailPlayback.durationMs ?? 0 : 0)|"
-        + "\(item.thumbnail?.type.rawValue ?? "")|\(item.thumbnail?.imageSrc ?? "")|"
-        + "\(item.thumbnail?.fit.rawValue ?? "")|\(item.thumbnail?.placeholder?.blurHash ?? "")|"
-        + "\(item.thumbnail?.color ?? "")"
+struct StoryThumbnailPlayerIdentity: Hashable {
+    let itemType: String
+    let url: String
+    let startTimeMs: Int64
+    let durationMode: String
+    let durationMs: Int64
+    let thumbnailType: String
+    let imageSrc: String
+    let imageFit: String
+    let blurHash: String
+    let color: String
+
+    var cacheKey: String {
+        [
+            itemType,
+            url,
+            String(startTimeMs),
+            durationMode,
+            String(durationMs),
+            thumbnailType,
+            imageSrc,
+            imageFit,
+            blurHash,
+            color,
+        ]
+        .map { "\($0.utf8.count):\($0)" }
+        .joined()
+    }
+}
+
+func thumbnailPlayerIdentity(_ item: StoryItemConfig) -> StoryThumbnailPlayerIdentity {
+    StoryThumbnailPlayerIdentity(
+        itemType: item.type,
+        url: item.url,
+        startTimeMs: item.thumbnailPlayback.startTimeMs,
+        durationMode: item.thumbnailPlayback.durationMode.rawValue,
+        durationMs:
+            item.thumbnailPlayback.durationMode == .fixed
+                ? item.thumbnailPlayback.durationMs ?? 0
+                : 0,
+        thumbnailType: item.thumbnail?.type.rawValue ?? "",
+        imageSrc: item.thumbnail?.imageSrc ?? "",
+        imageFit: item.thumbnail?.fit.rawValue ?? "",
+        blurHash: item.thumbnail?.placeholder?.blurHash ?? "",
+        color: item.thumbnail?.color ?? ""
+    )
 }
 
 struct StoryThumbnailPlaceholderView: View {
@@ -201,6 +240,12 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         self.state = state
         self.onWindowCompleted = onWindowCompleted
         self.onFailed = onFailed
+        if item.thumbnail != nil, !state.shouldPlay {
+            if bundle != nil {
+                tearDown()
+            }
+            return
+        }
         prepareIfNeeded()
 
         if terminalFailureReported { return }
@@ -388,7 +433,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     private func generatePoster(
         with generator: AVAssetImageGenerator,
         atMilliseconds milliseconds: Int64,
-        cacheKey: String,
+        cacheKey: StoryThumbnailPlayerIdentity,
         retryAtZero: Bool,
         generationID: UUID
     ) {
@@ -610,7 +655,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         accessLogObserver = nil
         player?.pause()
         if let bundle {
-            if terminalFailurePending || terminalFailureReported {
+            if terminalFailurePending || terminalFailureReported || item.thumbnail != nil {
                 StoryThumbnailWarmPlayerCache.release(bundle)
             } else {
                 StoryThumbnailWarmPlayerCache.store(
@@ -636,20 +681,28 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
 @MainActor
 private enum StoryThumbnailWarmPlayerCache {
     private static let countLimit = 4
-    private static var entries: [String: DigiaVideoPlaybackBundle] = [:]
-    private static var recency: [String] = []
+    private static var entries: [StoryThumbnailPlayerIdentity: DigiaVideoPlaybackBundle] = [:]
+    private static var recency: [StoryThumbnailPlayerIdentity] = []
+    private static var invalidated: Set<StoryThumbnailPlayerIdentity> = []
 
-    static func take(_ key: String) -> DigiaVideoPlaybackBundle? {
+    static func take(_ key: StoryThumbnailPlayerIdentity) -> DigiaVideoPlaybackBundle? {
         recency.removeAll { $0 == key }
         return entries.removeValue(forKey: key)
     }
 
-    static func contains(_ key: String) -> Bool {
+    static func contains(_ key: StoryThumbnailPlayerIdentity) -> Bool {
         entries[key] != nil
     }
 
-    static func store(_ bundle: DigiaVideoPlaybackBundle, for key: String) {
+    static func store(
+        _ bundle: DigiaVideoPlaybackBundle,
+        for key: StoryThumbnailPlayerIdentity
+    ) {
         bundle.player.pause()
+        if invalidated.remove(key) != nil {
+            release(bundle)
+            return
+        }
         if let replaced = entries.updateValue(bundle, forKey: key) {
             release(replaced)
         }
@@ -664,6 +717,17 @@ private enum StoryThumbnailWarmPlayerCache {
         }
     }
 
+    static func invalidate(_ key: StoryThumbnailPlayerIdentity) {
+        invalidated.insert(key)
+        recency.removeAll { $0 == key }
+        if let bundle = entries.removeValue(forKey: key) {
+            release(bundle)
+        }
+        DispatchQueue.main.async {
+            invalidated.remove(key)
+        }
+    }
+
     static func release(_ bundle: DigiaVideoPlaybackBundle) {
         bundle.looper?.disableLooping()
         bundle.player.pause()
@@ -675,6 +739,11 @@ private enum StoryThumbnailWarmPlayerCache {
     }
 }
 
+@MainActor
+func invalidateStoryThumbnailWarmPlayer(_ identity: StoryThumbnailPlayerIdentity) {
+    StoryThumbnailWarmPlayerCache.invalidate(identity)
+}
+
 private enum StoryThumbnailPosterCache {
     nonisolated(unsafe) private static let cache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
@@ -683,12 +752,12 @@ private enum StoryThumbnailPosterCache {
         return cache
     }()
 
-    static func image(for key: String) -> UIImage? {
-        cache.object(forKey: key as NSString)
+    static func image(for key: StoryThumbnailPlayerIdentity) -> UIImage? {
+        cache.object(forKey: key.cacheKey as NSString)
     }
 
-    static func store(_ image: UIImage, for key: String) {
+    static func store(_ image: UIImage, for key: StoryThumbnailPlayerIdentity) {
         let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
-        cache.setObject(image, forKey: key as NSString, cost: cost)
+        cache.setObject(image, forKey: key.cacheKey as NSString, cost: cost)
     }
 }
