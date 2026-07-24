@@ -21,6 +21,16 @@ public struct DigiaDebugSettingsView: View {
     public init() {}
 
     public var body: some View {
+        // Defense in depth: Digia.presentDebugSettings(from:) already gates on
+        // this before ever constructing this view — but it's a public struct
+        // with a public init(), so nothing stops a host from constructing and
+        // presenting it directly. Render nothing rather than trust the caller.
+        if DigiaDebugDetection.isDebugBuild() {
+            content
+        }
+    }
+
+    private var content: some View {
         NavigationView {
             List {
                 Section {
