@@ -1,4 +1,5 @@
 import SwiftUI
+import Foundation
 
 /// Small always-on-top floating "Digia" bubble shown by `DigiaHost` — a general
 /// debug-tools launcher, not specific to any one feature. Tapping it presents the debug
@@ -49,7 +50,7 @@ private struct DraggableBadge: View {
                 .gesture(
                     DragGesture()
                         .onChanged { value in
-                            print("[DigiaBadgeDebug] DragGesture.onChanged fired, translation=\(value.translation)")
+                            NSLog("%@", "[DigiaBadgeDebug] DragGesture.onChanged fired, translation=\(value.translation)")
                             let start = dragStartOffset ?? current
                             dragStartOffset = start
                             let maxX = max(0, proxy.size.width - badgeSize.width)
@@ -73,7 +74,7 @@ private struct DraggableBadge: View {
                         }
                 )
                 .onTapGesture {
-                    print("[DigiaBadgeDebug] onTapGesture fired")
+                    NSLog("%@", "[DigiaBadgeDebug] onTapGesture fired")
                     presentDebugSettings()
                 }
                 // Keeps DigiaDebugOverlayController.badgeFrame in sync so a host's hit
@@ -81,15 +82,15 @@ private struct DraggableBadge: View {
                 // on the bubble" apart from "this touch landed on empty SwiftUI space" —
                 // see the doc comment on badgeFrame for why that distinction needs help.
                 .onChange(of: frame) { newValue in
-                    print("[DigiaBadgeDebug] badgeFrame changed to \(newValue)")
+                    NSLog("%@", "[DigiaBadgeDebug] badgeFrame changed to \(newValue)")
                     SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = newValue
                 }
                 .onAppear {
-                    print("[DigiaBadgeDebug] onAppear, publishing badgeFrame=\(frame)")
+                    NSLog("%@", "[DigiaBadgeDebug] onAppear, publishing badgeFrame=\(frame)")
                     SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = frame
                 }
                 .onDisappear {
-                    print("[DigiaBadgeDebug] onDisappear, clearing badgeFrame")
+                    NSLog("%@", "[DigiaBadgeDebug] onDisappear, clearing badgeFrame")
                     SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = nil
                 }
         }
