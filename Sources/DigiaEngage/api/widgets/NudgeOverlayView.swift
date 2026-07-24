@@ -73,24 +73,13 @@ private struct NudgeSheetView: View {
                 renderedContent
                     .padding(surface.padding)
             },
-            cardOverlay: surface.showCloseButton ? AnyView(closeButton) : nil
+            cardOverlay: surface.showCloseButton
+                ? AnyView(NudgeCloseButton(config: surface.closeButton, action: dismiss))
+                : nil
         )
         // The cover presents this content once per nudge, so `onAppear` is the
         // impression signal (Impressed → CEP + Digia "Viewed").
         .onAppear { SDKInstance.shared.reportNudgeImpression() }
-    }
-
-    private var closeButton: some View {
-        Button(action: dismiss) {
-            Image(systemName: "xmark")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color(hex: "#66667A") ?? .secondary)
-                .frame(width: 26, height: 26)
-                .background(Color.black.opacity(0.08))
-                .clipShape(Circle())
-        }
-        .padding(.top, 12)
-        .padding(.trailing, 12)
     }
 
     /// The typed content column, rendered with the trigger variables in scope so
@@ -139,7 +128,9 @@ private struct NudgeDialogContainer: View {
                 .background(backgroundColor)
                 .clipShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
 
-            if surface.showCloseButton { closeButton }
+            if surface.showCloseButton {
+                NudgeCloseButton(config: surface.closeButton, action: dismiss)
+            }
         }
         // Cap very tall dialogs to the screen; short content hugs naturally.
         .frame(maxHeight: UIScreen.main.bounds.height * 0.9)
@@ -154,21 +145,39 @@ private struct NudgeDialogContainer: View {
         return min(screen * surface.widthFraction, screen - 48)
     }
 
-    private var closeButton: some View {
-        Button(action: dismiss) {
-            Image(systemName: "xmark")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(Color(hex: "#66667A") ?? .secondary)
-                .frame(width: 26, height: 26)
-                .background(Color.black.opacity(0.08))
-                .clipShape(Circle())
-        }
-        .padding(.top, 12)
-        .padding(.trailing, 12)
-    }
-
     private var renderedContent: some View {
         NudgeColumnContent(column: presentation.config.layout, onDismiss: dismiss)
             .environment(\.digiaVariables, presentation.variables)
+    }
+}
+
+/// Fixed cross visual with an inward-expanding, platform-minimum hit target.
+private struct NudgeCloseButton: View {
+    let config: NudgeCloseButtonConfig
+    let action: () -> Void
+
+    private var touchSize: CGFloat { max(config.diameter, 44) }
+
+    var body: some View {
+        Button(action: action) {
+            ZStack(alignment: .topTrailing) {
+                Color.clear
+                ZStack {
+                    Circle().fill(config.backgroundColor)
+                    if config.iconSize > 0 {
+                        Image(systemName: "xmark")
+                            .font(.system(size: config.iconSize, weight: .semibold))
+                            .foregroundStyle(config.iconColor)
+                    }
+                }
+                .frame(width: config.diameter, height: config.diameter)
+            }
+            .frame(width: touchSize, height: touchSize, alignment: .topTrailing)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Close")
+        .padding(.top, config.marginTop)
+        .padding(.trailing, config.marginRight)
     }
 }

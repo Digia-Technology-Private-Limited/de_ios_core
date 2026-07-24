@@ -11,7 +11,6 @@ struct NudgeParser {
         return NudgeColumn(
             crossAxisAlignment: crossAxis(props["crossAxisAlignment"] as? String ?? "start"),
             mainAxisAlignment: mainAxis(props["mainAxisAlignment"] as? String ?? "start"),
-            spacing: CGFloat(parseDouble(props["spacing"]) ?? 0),
             children: extractChildren(json).compactMap { parseNode($0) }
         )
     }
