@@ -16,6 +16,16 @@ public struct DigiaSlot<Placeholder: View>: View {
     ) {
         self.placementKey = placementKey
         self.placeholder = placeholder()
+        // Recorded here rather than only from registerPlaceholderIfNeeded()'s
+        // .onAppear: when a slot has no active campaign, the placeholder branch
+        // renders EmptyView(), and SwiftUI's .onAppear is unreliable for a
+        // zero-intrinsic-size view — especially embedded the way the React
+        // Native slot bridge does it (a UIHostingController manually added as
+        // a child view controller, not through a normal navigation/presentation
+        // flow). init() fires reliably regardless of content size or embedding
+        // context; recordSlot's own dedupe makes calling it on every body
+        // re-evaluation harmless.
+        SDKInstance.shared.recordSlotSeen(placementKey)
     }
 
     public var body: some View {
@@ -64,7 +74,6 @@ public struct DigiaSlot<Placeholder: View>: View {
     private func registerPlaceholderIfNeeded() {
         guard placeholderID == nil else { return }
         placeholderID = SDKInstance.shared.registerPlaceholderForSlot(propertyID: placementKey)
-        SDKInstance.shared.recordSlotSeen(placementKey)
     }
 }
 
