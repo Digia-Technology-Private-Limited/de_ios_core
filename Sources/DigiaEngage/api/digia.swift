@@ -114,6 +114,15 @@ public enum Digia {
             || SDKInstance.shared.surveyOrchestrator.state != nil
     }
 
+    /// The debug bubble's current on-screen frame (in the root overlay's coordinate
+    /// space), or `nil` when it isn't shown. Used by host views the same way as
+    /// `hasActiveOverlay` — the bubble is a small floating region, not a full-screen
+    /// overlay, so unlike `hasActiveOverlay` a host needs the actual frame to tell a
+    /// touch on the bubble apart from a touch on empty SwiftUI space elsewhere.
+    public static var debugBadgeFrame: CGRect? {
+        SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame
+    }
+
     /// Sets the authenticated user ID for analytics identity stitching.
     public static func setUserId(_ userId: String) {
         SDKInstance.shared.setUserId(userId)

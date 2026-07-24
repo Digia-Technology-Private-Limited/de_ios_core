@@ -19,6 +19,15 @@ final class DigiaDebugOverlayController: ObservableObject {
 
     @Published private(set) var isVisible: Bool
 
+    /// The bubble's current on-screen frame, in the root overlay's coordinate space —
+    /// kept in sync by `RecordingBadgeView` on every layout/drag update. Exposed via
+    /// `Digia.debugBadgeFrame` so a host's own hit-testing (see `DigiaRootOverlayView`
+    /// in rn/core) can tell "touch landed on the bubble" apart from "touch landed on
+    /// empty SwiftUI space" — UIKit's `hitTest` can't distinguish the two on its own,
+    /// since SwiftUI content is backed by a single hosting `UIView`, not one child view
+    /// per element.
+    @Published var badgeFrame: CGRect?
+
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         self.isVisible = defaults.bool(forKey: Self.keyVisible)

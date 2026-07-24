@@ -36,6 +36,7 @@ private struct DraggableBadge: View {
     var body: some View {
         GeometryReader { proxy in
             let current = offset ?? CGSize(width: Self.margin, height: proxy.safeAreaInsets.top + Self.margin)
+            let frame = CGRect(x: current.width, y: current.height, width: badgeSize.width, height: badgeSize.height)
 
             BadgeContent()
                 .background(
@@ -72,6 +73,19 @@ private struct DraggableBadge: View {
                 )
                 .onTapGesture {
                     presentDebugSettings()
+                }
+                // Keeps DigiaDebugOverlayController.badgeFrame in sync so a host's hit
+                // testing (DigiaRootOverlayView in rn/core) can tell "this touch landed
+                // on the bubble" apart from "this touch landed on empty SwiftUI space" —
+                // see the doc comment on badgeFrame for why that distinction needs help.
+                .onChange(of: frame) { newValue in
+                    SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = newValue
+                }
+                .onAppear {
+                    SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = frame
+                }
+                .onDisappear {
+                    SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = nil
                 }
         }
     }
