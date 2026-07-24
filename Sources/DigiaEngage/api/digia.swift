@@ -12,13 +12,9 @@ public enum Digia {
 
     /// Whether `url` is the SDK's debug-settings deeplink.
     ///
-    /// Deliberately matches against the raw URL string instead of `URL.path`:
-    /// for a custom-scheme link like `myapp://_digia/debug-settings`, standard
-    /// URL parsing treats `_digia` as the *host*, not part of the path — so a
-    /// path-only check would silently never match. Stripping the scheme and
-    /// matching the remainder (exactly, or as a path suffix, so a universal
-    /// link like `https://example.com/_digia/debug-settings` matches too)
-    /// works for both shapes without relying on host/path parsing quirks.
+    /// Matches the raw string, not `URL.path`: for `myapp://_digia/debug-settings`,
+    /// URL parsing treats `_digia` as the host, not the path, so a path-only
+    /// check would never match a custom scheme.
     public static func isDebugSettingsDeepLink(_ url: URL) -> Bool {
         let raw = url.absoluteString
         let afterScheme: Substring
@@ -31,14 +27,10 @@ public enum Digia {
         return trimmed == debugSettingsDeepLinkPath || trimmed.hasSuffix("/\(debugSettingsDeepLinkPath)")
     }
 
-    /// Presents the SDK's debug-only settings screen — currently the
-    /// recording-mode toggle for the Engage Component Registry, with more
-    /// debug-only testing controls to follow. Trigger this from the host app's
-    /// own debug menu, or route to it from a deeplink (see
-    /// `isDebugSettingsDeepLink` / `handleDeepLink`).
+    /// Presents the SDK's debug-only settings screen. Trigger from the host's
+    /// own debug menu, or via a deeplink (see `isDebugSettingsDeepLink`).
     ///
-    /// A no-op outside a debug build — this can never surface in a real
-    /// production release, regardless of how or when it's called.
+    /// No-op outside a debug build.
     public static func presentDebugSettings(from presenter: UIViewController) {
         guard SDKInstance.shared.isDebugBuild else {
             DigiaLog.warning("[Digia] presentDebugSettings() ignored — not a debug build.")
@@ -48,9 +40,8 @@ public enum Digia {
         presenter.present(host, animated: true)
     }
 
-    /// Convenience for the host's own deeplink handling: if `url` is the SDK's
-    /// debug-settings deeplink, presents the screen and returns `true`;
-    /// otherwise returns `false` so the host can continue its own routing.
+    /// If `url` is the SDK's debug-settings deeplink, presents it and returns
+    /// `true`; otherwise returns `false` so the host can continue its own routing.
     @discardableResult
     public static func handleDeepLink(_ url: URL, from presenter: UIViewController) -> Bool {
         guard isDebugSettingsDeepLink(url) else { return false }
@@ -114,11 +105,10 @@ public enum Digia {
             || SDKInstance.shared.surveyOrchestrator.state != nil
     }
 
-    /// The debug bubble's current on-screen frame (in the root overlay's coordinate
-    /// space), or `nil` when it isn't shown. Used by host views the same way as
-    /// `hasActiveOverlay` — the bubble is a small floating region, not a full-screen
-    /// overlay, so unlike `hasActiveOverlay` a host needs the actual frame to tell a
-    /// touch on the bubble apart from a touch on empty SwiftUI space elsewhere.
+    /// The debug bubble's current on-screen frame (root overlay's coordinate
+    /// space), or `nil` when hidden. Unlike `hasActiveOverlay`, a host needs the
+    /// actual frame here to tell a touch on the bubble apart from empty SwiftUI
+    /// space elsewhere.
     public static var debugBadgeFrame: CGRect? {
         SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame
     }

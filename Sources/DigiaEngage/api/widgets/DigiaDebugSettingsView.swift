@@ -1,16 +1,11 @@
 import SwiftUI
 
-/// Debug-only settings screen for the Digia Engage SDK.
+/// Debug-only settings screen. Reachable via `Digia.presentDebugSettings(from:)`
+/// or a deeplink — both gate on `DigiaDebugDetection`, so this never surfaces
+/// in production.
 ///
-/// Reachable only via `Digia.presentDebugSettings(from:)` or `Digia.handleDeepLink`
-/// — both gate on `SDKInstance.isDebugBuild` (see `DigiaDebugDetection`), so this
-/// can never surface in a real production release.
-///
-/// Currently hosts the "Sync" toggle for the Engage Component Registry
-/// (auto-reports pages/anchors/slots seen at runtime so a PM can curate them on the
-/// dashboard instead of typing keys by hand) and the "Digia bubble" visibility
-/// toggle. Future debug-only testing controls belong here too — kept as a simple
-/// list so adding another one is just another row.
+/// Hosts the Engage Component Registry's "Sync" toggle and the "Digia bubble"
+/// visibility toggle; more debug controls can be added as rows here.
 @MainActor
 public struct DigiaDebugSettingsView: View {
     @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()
@@ -21,10 +16,8 @@ public struct DigiaDebugSettingsView: View {
     public init() {}
 
     public var body: some View {
-        // Defense in depth: Digia.presentDebugSettings(from:) already gates on
-        // this before ever constructing this view — but it's a public struct
-        // with a public init(), so nothing stops a host from constructing and
-        // presenting it directly. Render nothing rather than trust the caller.
+        // Defense in depth: presentDebugSettings(from:) already gates this, but
+        // this is a public struct a host could construct directly, bypassing it.
         if DigiaDebugDetection.isDebugBuild() {
             content
         }
@@ -44,11 +37,8 @@ public struct DigiaDebugSettingsView: View {
                         )
                     )
                     .background(
-                        // Hidden programmatic trigger for showSession — attached as a
-                        // background rather than a sibling row so it takes up no
-                        // layout space of its own (a bare row, even an empty/hidden
-                        // one, still gets List's standard row background and padding,
-                        // showing up as a stray empty box).
+                        // .background(), not a sibling row: even a hidden row still
+                        // gets List's row background/padding, showing as a stray box.
                         NavigationLink(
                             destination: DigiaRecordedSessionScreen(),
                             isActive: $showSession
@@ -79,9 +69,8 @@ public struct DigiaDebugSettingsView: View {
     private func onToggleSync(_ value: Bool) {
         let wasEnabled = registry.isEnabled
         registry.setEnabled(value)
-        // Recording only fires the first time a page/anchor/slot loads (dedupe
-        // set) — anything already on screen when this flips on won't
-        // retroactively record without a reload.
+        // Dedupe means anything already on screen won't retroactively record
+        // without a reload.
         if value && !wasEnabled {
             showRestartHint = true
         }

@@ -1,16 +1,13 @@
 import Foundation
 import Combine
 
-/// Whether the floating "Digia" debug bubble (`RecordingBadgeView`) is shown at all —
-/// independent of `ComponentRegistryService.isEnabled` (recording mode). The bubble is a
-/// general debug-tools launcher (more controls beyond recording will live behind it
-/// eventually), so its visibility is its own persisted setting rather than being tied
-/// one-to-one to any single feature.
+/// Whether the floating "Digia" debug bubble (`RecordingBadgeView`) is shown at
+/// all — independent of `ComponentRegistryService.isEnabled` (recording mode),
+/// since the bubble is a general debug-tools launcher, not tied to one feature.
 ///
-/// Turning recording mode on flips this to `true` automatically (see
-/// `ComponentRegistryService.setEnabled`) so a developer doesn't have to separately
-/// remember to show the bubble — but the reverse doesn't hold: hiding the bubble doesn't
-/// stop recording, and turning recording off doesn't hide the bubble.
+/// Turning recording mode on flips this to `true` automatically, but the
+/// reverse doesn't hold: hiding the bubble or turning recording off doesn't
+/// affect the other.
 @MainActor
 final class DigiaDebugOverlayController: ObservableObject {
     private static let keyVisible = "digia_debug_overlay_bubble_visible"
@@ -19,13 +16,11 @@ final class DigiaDebugOverlayController: ObservableObject {
 
     @Published private(set) var isVisible: Bool
 
-    /// The bubble's current on-screen frame, in the root overlay's coordinate space —
-    /// kept in sync by `RecordingBadgeView` on every layout/drag update. Exposed via
-    /// `Digia.debugBadgeFrame` so a host's own hit-testing (see `DigiaRootOverlayView`
-    /// in rn/core) can tell "touch landed on the bubble" apart from "touch landed on
-    /// empty SwiftUI space" — UIKit's `hitTest` can't distinguish the two on its own,
-    /// since SwiftUI content is backed by a single hosting `UIView`, not one child view
-    /// per element.
+    /// The bubble's current on-screen frame, kept in sync by `RecordingBadgeView`.
+    /// Exposed via `Digia.debugBadgeFrame` so a host's hit-testing (see
+    /// `DigiaRootOverlayView` in rn/core) can tell a touch on the bubble apart
+    /// from empty SwiftUI space — UIKit's `hitTest` can't distinguish the two on
+    /// its own, since SwiftUI is backed by a single hosting `UIView`.
     @Published var badgeFrame: CGRect?
 
     init(defaults: UserDefaults = .standard) {

@@ -1,14 +1,9 @@
 import SwiftUI
 
-/// A settings row matching the platform-native "label | divider | switch" style (e.g.
-/// iOS/Android system settings — Wi-Fi Calling, Bluetooth, …), used only when there's a
-/// second tap target to disambiguate from the switch: tapping the label (`title`/
-/// `subtitle`) triggers `onTap` (e.g. opens an L2 screen), while the `Toggle` is a
-/// separate tap target with its own binding — the divider signals that split.
-///
-/// Pass `onTap` as `nil` for a row with no drill-down (just a plain toggle, e.g. "Digia
-/// bubble") — there's only one tap target then, so it drops the divider and makes the
-/// whole row tap to toggle, matching how a plain switch row behaves everywhere else.
+/// Settings row matching the platform-native "label | divider | switch" style.
+/// With `onTap` set, the label opens an L2 screen and the switch is a separate
+/// tap target (divider marks the split). With `onTap` nil, there's only one
+/// tap target — no divider, whole row toggles.
 @MainActor
 struct SettingsToggleRow: View {
     let title: String

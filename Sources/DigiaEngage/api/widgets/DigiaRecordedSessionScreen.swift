@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// Lists every distinct page/anchor/slot key recorded so far this process —
-/// pushed from `DigiaDebugSettingsView` by tapping the "Sync" row's title.
-/// In-memory only, same lifetime as `ComponentRegistryService`'s dedupe set —
-/// it's cleared on a fresh app process, not persisted.
+/// Lists every distinct page/anchor/slot key recorded this process — pushed
+/// from `DigiaDebugSettingsView`'s "Sync" row. In-memory only, cleared on a
+/// fresh process.
 @MainActor
 struct DigiaRecordedSessionScreen: View {
     @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()

@@ -2,21 +2,17 @@ import Foundation
 import Combine
 
 /// Reports pages/anchors/slots seen at runtime to the Engage Component
-/// Registry (`POST {baseUrl}/api/v1/engage/sdk/recordComponents`), so a PM
-/// can curate them on the dashboard instead of typing keys by hand.
+/// Registry (`POST .../recordComponents`), so a PM can curate them on the
+/// dashboard instead of typing keys by hand.
 ///
-/// Only active when `isEnabled` — the debug-only "recording mode" toggle a
-/// developer flips from `DigiaDebugSettingsView` — and only ever on a debug
-/// build (`isDebugBuild`, passed once at `configure` time), defense in depth in
-/// case a persisted `true` toggle somehow survives into a non-debug install.
+/// Only active when `isEnabled` (the debug-only "recording mode" toggle) and
+/// on a debug build — re-checked here as defense in depth even though every
+/// caller already gates on it.
 ///
-/// Fire-and-forget, one request per newly-seen key, mirrors
-/// `SurveySubmissionReporter`'s network pattern rather than the heavier
-/// retrying `AnalyticsService` queue — a dropped registration ping is
-/// low-stakes and self-heals next time the key is seen. Deliberately no
-/// batching/queueing: this only runs while a developer has recording mode on
-/// and is manually walking the app, so request volume is inherently low — a
-/// debounce/batch buffer would be complexity this doesn't need.
+/// Fire-and-forget like `SurveySubmissionReporter`, not the retrying
+/// `AnalyticsService` queue — a dropped ping self-heals next time the key is
+/// seen. No batching: recording is manual and low-volume, so it's unneeded
+/// complexity.
 @MainActor
 final class ComponentRegistryService: ObservableObject {
     private static let keyEnabled = "digia_component_registry_recording_enabled"
@@ -28,21 +24,17 @@ final class ComponentRegistryService: ObservableObject {
     private var deviceId: String?
     private var isDebugBuildFlag = false
 
-    /// `@Published` so `RecordingBadgeView` and the debug-settings/session
-    /// screens all stay in sync no matter which of them flips it.
+    /// Kept in sync across `RecordingBadgeView` and the debug/session screens.
     @Published private(set) var isEnabled = false
 
-    /// Every distinct key recorded so far this process, in first-seen order —
-    /// what `DigiaRecordedSessionScreen` lists. `@Published` for the same
-    /// reason as `isEnabled`. Not persisted, same rationale as `seen` below.
+    /// Every distinct key recorded this process, in first-seen order — what
+    /// `DigiaRecordedSessionScreen` lists. Not persisted, see `seen` below.
     @Published private(set) var recordedThisSession: [RecordedComponentEntry] = []
 
-    /// `"<type>:<key>:<screenName>"` → already sent this process lifetime. Not
-    /// persisted: the backend call is an idempotent upsert, so re-sending known
-    /// keys on a fresh process start is harmless (and keeps `lastSeenAt` fresh) —
-    /// no cross-session dedupe is needed. This is what actually matters here —
-    /// without it, a view that re-registers repeatedly (e.g. an anchor inside a
-    /// recycled list cell) could refire the same key many times a second.
+    /// `"<type>:<key>:<screenName>"` already sent this process. Not persisted —
+    /// the backend upsert is idempotent, so resending on a fresh process is
+    /// harmless. Without this, a recycled view (e.g. a list-cell anchor) could
+    /// refire the same key repeatedly.
     private var seen = Set<String>()
 
     private let debugOverlay: DigiaDebugOverlayController?
@@ -66,14 +58,9 @@ final class ComponentRegistryService: ObservableObject {
         self.isEnabled = defaults.bool(forKey: Self.keyEnabled)
     }
 
-    /// Flips the persisted recording-mode toggle. Called from
-    /// `DigiaDebugSettingsView` and `DigiaRecordedSessionScreen`.
-    ///
-    /// Turning recording on also shows the debug bubble (`RecordingBadgeView`) if it's
-    /// currently hidden — a developer who just turned recording on almost certainly wants
-    /// the visual reminder that it's active, without a separate manual step. Turning
-    /// recording off does not hide the bubble back — bubble visibility is otherwise its
-    /// own independent setting.
+    /// Flips the persisted recording toggle. Also shows the bubble if hidden
+    /// (so it's visible when recording starts) — but turning recording off
+    /// doesn't hide it back; bubble visibility is otherwise independent.
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
         defaults.set(enabled, forKey: Self.keyEnabled)
@@ -86,9 +73,8 @@ final class ComponentRegistryService: ObservableObject {
         record(key: key, type: "page", screenName: nil)
     }
 
-    /// `screenName` is mandatory for anchors server-side — if it isn't known yet
-    /// (the developer hasn't called `Digia.setCurrentScreen` before this anchor
-    /// registered), skip rather than send a call guaranteed to be rejected.
+    /// `screenName` is mandatory server-side for anchors — skip rather than
+    /// send a call guaranteed to be rejected if it isn't set yet.
     func recordAnchor(_ key: String, screenName: String?) {
         guard let screenName, !screenName.isEmpty else {
             DigiaLog.warning(
@@ -115,9 +101,8 @@ final class ComponentRegistryService: ObservableObject {
         var entry: [String: Any] = ["componentKey": key, "componentType": type, "platform": "ios"]
         if let screenName, !screenName.isEmpty { entry["screenName"] = screenName }
 
-        // Serialize on the main actor and hand the Task only Sendable values
-        // (Data, [String: String], String) — [String: Any] itself can't safely
-        // cross into an unstructured Task under strict concurrency.
+        // Serialize before crossing into Task — [String: Any] isn't Sendable
+        // under strict concurrency, so only Data/String cross the boundary.
         guard let body = try? JSONSerialization.data(withJSONObject: ["components": [entry]]) else { return }
         let headers = [
             "Content-Type": "application/json",

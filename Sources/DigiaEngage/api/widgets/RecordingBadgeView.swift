@@ -1,19 +1,14 @@
 import SwiftUI
 
-/// Small always-on-top floating "Digia" bubble shown by `DigiaHost` — a general
-/// debug-tools launcher, not specific to any one feature. Tapping it presents the debug
-/// settings screen; dragging it repositions it, snapping to whichever horizontal edge
-/// it's closer to on release (vertical position is unconstrained).
+/// Floating "Digia" debug bubble. Tap presents debug settings; drag repositions
+/// and snaps to the nearer edge on release.
 ///
-/// Shown whenever `DigiaDebugOverlayController.isVisible` is true — its own independent,
-/// persisted setting. Turning on Engage Component Registry recording mode flips that to
-/// true automatically (see `ComponentRegistryService.setEnabled`), but the bubble can
-/// also be shown on its own for future debug controls unrelated to recording. The
-/// pulsing red dot inside it specifically reflects recording being active — the bubble
-/// itself can be visible with no dot if recording is off.
+/// Shown when `DigiaDebugOverlayController.isVisible` is true — its own
+/// persisted setting, flipped on automatically when recording mode turns on.
+/// The pulsing red dot reflects recording being active, independent of bubble
+/// visibility.
 ///
-/// Gated on `DigiaDebugDetection.isDebugBuild()` in addition to the overlay controller's
-/// own visible flag — same defense-in-depth reasoning as elsewhere in this feature.
+/// Also re-checks `DigiaDebugDetection.isDebugBuild()` — defense in depth.
 @MainActor
 struct RecordingBadgeView: View {
     @ObservedObject private var overlay = SDKInstance.shared.debugOverlayControllerSnapshot()
@@ -28,9 +23,8 @@ struct RecordingBadgeView: View {
 @MainActor
 private struct DraggableBadge: View {
     private static let margin: CGFloat = 8
-    // Default spawn point cleared well below a typical navigation bar
-    // (safe-area-top + ~44pt), not just the status bar — a host's own
-    // headerShown nav bar sits right in that gap otherwise.
+    // Cleared well below a typical nav bar, not just the status bar — a
+    // host's headerShown nav bar would otherwise sit right in that gap.
     private static let defaultTopClearance: CGFloat = 100
 
     @State private var offset: CGSize?
@@ -44,11 +38,9 @@ private struct DraggableBadge: View {
             BadgeContent()
                 .background(
                     GeometryReader { inner -> Color in
-                        // .global is the window's own coordinate space, which is what
-                        // a host's hitTest(_:with:) point is expressed in — publishing
-                        // badgeFrame from a manually-computed local-space rect measurably
-                        // didn't line up with real touch points, so this reads the
-                        // authoritative value directly instead of re-deriving it.
+                        // .global matches the coordinate space a host's hitTest(_:with:)
+                        // uses — a manually-computed local-space rect didn't line up
+                        // with real touches.
                         let globalFrame = inner.frame(in: .global)
                         DispatchQueue.main.async {
                             badgeSize = inner.size
