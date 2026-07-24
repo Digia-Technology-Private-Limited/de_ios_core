@@ -1,5 +1,4 @@
 import SwiftUI
-import Foundation
 
 /// Small always-on-top floating "Digia" bubble shown by `DigiaHost` — a general
 /// debug-tools launcher, not specific to any one feature. Tapping it presents the debug
@@ -29,10 +28,9 @@ struct RecordingBadgeView: View {
 @MainActor
 private struct DraggableBadge: View {
     private static let margin: CGFloat = 8
-    // TEMPORARY (diagnostic): default spawn point cleared well below a
-    // typical navigation bar (safe-area-top + ~44pt), not just the status
-    // bar — testing whether that's what's swallowing touches before hitTest
-    // ever sees them. 100 clears even a large-title nav bar.
+    // Default spawn point cleared well below a typical navigation bar
+    // (safe-area-top + ~44pt), not just the status bar — a host's own
+    // headerShown nav bar sits right in that gap otherwise.
     private static let defaultTopClearance: CGFloat = 100
 
     @State private var offset: CGSize?
@@ -46,16 +44,14 @@ private struct DraggableBadge: View {
             BadgeContent()
                 .background(
                     GeometryReader { inner -> Color in
-                        // .global is the window's own coordinate space — authoritative
-                        // regardless of whatever safeAreaInsets/layout assumptions our
-                        // own manual `current` math might be getting wrong. TEMPORARY:
-                        // logs both the size and this frame so the next test can confirm
-                        // it actually lines up with hitTest's point space, since the
-                        // manual-math version measurably didn't.
+                        // .global is the window's own coordinate space, which is what
+                        // a host's hitTest(_:with:) point is expressed in — publishing
+                        // badgeFrame from a manually-computed local-space rect measurably
+                        // didn't line up with real touch points, so this reads the
+                        // authoritative value directly instead of re-deriving it.
                         let globalFrame = inner.frame(in: .global)
                         DispatchQueue.main.async {
                             badgeSize = inner.size
-                            NSLog("%@", "[DigiaBadgeDebug] inner GeometryReader size=\(inner.size) global frame=\(globalFrame)")
                             SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = globalFrame
                         }
                         return Color.clear
@@ -65,7 +61,6 @@ private struct DraggableBadge: View {
                 .gesture(
                     DragGesture()
                         .onChanged { value in
-                            NSLog("%@", "[DigiaBadgeDebug] DragGesture.onChanged fired, translation=\(value.translation)")
                             let start = dragStartOffset ?? current
                             dragStartOffset = start
                             let maxX = max(0, proxy.size.width - badgeSize.width)
@@ -89,11 +84,9 @@ private struct DraggableBadge: View {
                         }
                 )
                 .onTapGesture {
-                    NSLog("%@", "[DigiaBadgeDebug] onTapGesture fired")
                     presentDebugSettings()
                 }
                 .onDisappear {
-                    NSLog("%@", "[DigiaBadgeDebug] onDisappear, clearing badgeFrame")
                     SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = nil
                 }
         }
