@@ -33,6 +33,18 @@ public struct DigiaDebugSettingsView: View {
                             set: { onToggleSync($0) }
                         )
                     )
+                    .background(
+                        // Hidden programmatic trigger for showSession — attached as a
+                        // background rather than a sibling row so it takes up no
+                        // layout space of its own (a bare row, even an empty/hidden
+                        // one, still gets List's standard row background and padding,
+                        // showing up as a stray empty box).
+                        NavigationLink(
+                            destination: DigiaRecordedSessionScreen(),
+                            isActive: $showSession
+                        ) { EmptyView() }
+                        .hidden()
+                    )
                     SettingsToggleRow(
                         title: "Digia bubble",
                         isOn: Binding(
@@ -41,11 +53,6 @@ public struct DigiaDebugSettingsView: View {
                         )
                     )
                 }
-                NavigationLink(
-                    destination: DigiaRecordedSessionScreen(),
-                    isActive: $showSession
-                ) { EmptyView() }
-                .hidden()
             }
             .navigationTitle("Digia Debug Settings")
         }
