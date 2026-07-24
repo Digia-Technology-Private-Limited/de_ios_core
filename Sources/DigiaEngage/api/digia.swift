@@ -40,11 +40,13 @@ public enum Digia {
     /// A no-op outside a debug build — this can never surface in a real
     /// production release, regardless of how or when it's called.
     public static func presentDebugSettings(from presenter: UIViewController) {
+        NSLog("%@", "[DigiaBadgeDebug] presentDebugSettings called, isDebugBuild=\(SDKInstance.shared.isDebugBuild)")
         guard SDKInstance.shared.isDebugBuild else {
             DigiaLog.warning("[Digia] presentDebugSettings() ignored — not a debug build.")
             return
         }
         let host = UIHostingController(rootView: DigiaDebugSettingsView())
+        NSLog("%@", "[DigiaBadgeDebug] presentDebugSettings: presenting host on \(presenter), isBeingPresented=\(presenter.isBeingPresented), presentedViewController=\(String(describing: presenter.presentedViewController))")
         presenter.present(host, animated: true)
     }
 
