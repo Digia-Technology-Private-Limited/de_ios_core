@@ -2,10 +2,11 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
-## Unreleased
+## [3.6.1] - 2026-07-18
 
-### New Features
-- Inline story overlays can now show dashboard-configured close and video-only mute controls, including visibility, icon color, background color, and overall size. Story settings can also start all videos muted or audible; once the viewer changes the audio state, that choice persists for the rest of the story session.
+### Bug Fixes
+- Fixed the guide step indicator and body text default colors rendering at the wrong opacity, caused by the built-in default color values using the wrong hex byte order.
+- Fixed inline story strips containing multiple videos exhausting the device's media pipeline: video players are now created only for on-screen cards and fully released when a card scrolls away or the story closes, so videos play reliably instead of failing once several are present.
 
 ## [3.6.0] - 2026-07-16
 
