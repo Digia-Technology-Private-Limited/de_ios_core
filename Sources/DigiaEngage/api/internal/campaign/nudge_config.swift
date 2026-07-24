@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// How a nudge surface presents over the host app. Mirrors Flutter's
@@ -40,12 +41,22 @@ struct NudgeCloseButtonConfig: Equatable {
 
     static func fromJson(_ json: [String: Any]?) -> NudgeCloseButtonConfig {
         let map = json ?? [:]
+        let defaults = NudgeCloseButtonConfig.defaults
         return NudgeCloseButtonConfig(
-            marginTop: nonNegative(map.double("marginTop", default: 12), fallback: 12),
-            marginRight: nonNegative(map.double("marginRight", default: 12), fallback: 12),
+            marginTop: nonNegative(
+                map.double("marginTop", default: Double(defaults.marginTop)),
+                fallback: defaults.marginTop
+            ),
+            marginRight: nonNegative(
+                map.double("marginRight", default: Double(defaults.marginRight)),
+                fallback: defaults.marginRight
+            ),
             backgroundColor: color(map.string("backgroundColor"), fallback: defaults.backgroundColor),
             iconColor: color(map.string("iconColor"), fallback: defaults.iconColor),
-            iconSize: nonNegative(map.double("iconSize", default: 16), fallback: 16)
+            iconSize: nonNegative(
+                map.double("iconSize", default: Double(defaults.iconSize)),
+                fallback: defaults.iconSize
+            )
         )
     }
 
@@ -55,6 +66,11 @@ struct NudgeCloseButtonConfig: Equatable {
 
     private static func color(_ value: String, fallback: Color) -> Color {
         let trimmed = value.trimmingCharacters(in: .whitespaces)
+        let hex = trimmed.hasPrefix("#") ? String(trimmed.dropFirst()) : ""
+        let allowed = CharacterSet(charactersIn: "0123456789ABCDEFabcdef")
+        guard (hex.count == 6 || hex.count == 8),
+              hex.unicodeScalars.allSatisfy(allowed.contains)
+        else { return fallback }
         return Color(hex: trimmed) ?? fallback
     }
 }

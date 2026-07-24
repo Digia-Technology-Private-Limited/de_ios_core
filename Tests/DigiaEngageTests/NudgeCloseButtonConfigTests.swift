@@ -46,8 +46,8 @@ struct NudgeCloseButtonConfigTests {
         let close = try config(container: [
             "closeButton": [
                 "marginTop": "invalid",
-                "backgroundColor": "transparent",
-                "iconColor": "#12345",
+                "backgroundColor": "112233",
+                "iconColor": "#11-22-33",
                 "iconSize": "invalid",
             ]
         ]).surface.closeButton
