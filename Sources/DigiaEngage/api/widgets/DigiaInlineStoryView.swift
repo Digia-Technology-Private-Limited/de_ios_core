@@ -9,11 +9,12 @@ struct DigiaInlineStoryView: View {
 
     @ObservedObject private var overlayController = SDKInstance.shared.controller
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.scenePhase) private var scenePhase
     @State private var eligibleIndices: Set<Int> = []
     @State private var failedPlayerIdentities: [Int: String] = [:]
     @State private var sequentialActiveIndex: Int?
     @State private var slotVisible = false
+    @State private var applicationActive = false
+    @State private var playbackRestartGeneration = 0
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -35,7 +36,8 @@ struct DigiaInlineStoryView: View {
                                 ),
                             reduceMotion: reduceMotion,
                             mode: config.thumbnailVideoPlayback,
-                            playableIndices: playableIndices
+                            playableIndices: playableIndices,
+                            restartGeneration: playbackRestartGeneration
                         ),
                         onWindowCompleted: { advanceSequential(from: index) },
                         onFailed: { markFailed(index, playerIdentity: playerIdentity) }
@@ -73,6 +75,19 @@ struct DigiaInlineStoryView: View {
         .onPreferenceChange(StoryRailGeometryPreference.self) { geometry in
             updateEligibility(geometry)
         }
+        .onAppear {
+            applicationActive = UIApplication.shared.applicationState == .active
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didBecomeActiveNotification
+        )) { _ in
+            restartEligiblePlayback()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.willResignActiveNotification
+        )) { _ in
+            applicationActive = false
+        }
         .frame(height: CGFloat(config.card.height))
     }
 
@@ -84,7 +99,7 @@ struct DigiaInlineStoryView: View {
     }
 
     private var playbackAllowed: Bool {
-        scenePhase == .active
+        applicationActive
             && overlayController.activeStoryOverlay == nil
             && !reduceMotion
             && slotVisible
@@ -111,6 +126,16 @@ struct DigiaInlineStoryView: View {
         )
         eligibleIndices = next
         reconcileSequentialActive(playable: playableIndices)
+    }
+
+    private func restartEligiblePlayback() {
+        applicationActive = true
+        playbackRestartGeneration &+= 1
+        guard config.thumbnailVideoPlayback == .sequential else { return }
+        sequentialActiveIndex = nextThumbnailPlaybackIndex(
+            eligible: playableIndices,
+            afterIndex: nil
+        )
     }
 
     private func reconcileSequentialActive(playable: Set<Int>) {
