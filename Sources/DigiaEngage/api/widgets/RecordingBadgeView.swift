@@ -42,12 +42,22 @@ private struct DraggableBadge: View {
     var body: some View {
         GeometryReader { proxy in
             let current = offset ?? CGSize(width: Self.margin, height: proxy.safeAreaInsets.top + Self.defaultTopClearance)
-            let frame = CGRect(x: current.width, y: current.height, width: badgeSize.width, height: badgeSize.height)
 
             BadgeContent()
                 .background(
                     GeometryReader { inner -> Color in
-                        DispatchQueue.main.async { badgeSize = inner.size }
+                        // .global is the window's own coordinate space — authoritative
+                        // regardless of whatever safeAreaInsets/layout assumptions our
+                        // own manual `current` math might be getting wrong. TEMPORARY:
+                        // logs both the size and this frame so the next test can confirm
+                        // it actually lines up with hitTest's point space, since the
+                        // manual-math version measurably didn't.
+                        let globalFrame = inner.frame(in: .global)
+                        DispatchQueue.main.async {
+                            badgeSize = inner.size
+                            NSLog("%@", "[DigiaBadgeDebug] inner GeometryReader size=\(inner.size) global frame=\(globalFrame)")
+                            SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = globalFrame
+                        }
                         return Color.clear
                     }
                 )
@@ -81,18 +91,6 @@ private struct DraggableBadge: View {
                 .onTapGesture {
                     NSLog("%@", "[DigiaBadgeDebug] onTapGesture fired")
                     presentDebugSettings()
-                }
-                // Keeps DigiaDebugOverlayController.badgeFrame in sync so a host's hit
-                // testing (DigiaRootOverlayView in rn/core) can tell "this touch landed
-                // on the bubble" apart from "this touch landed on empty SwiftUI space" —
-                // see the doc comment on badgeFrame for why that distinction needs help.
-                .onChange(of: frame) { newValue in
-                    NSLog("%@", "[DigiaBadgeDebug] badgeFrame changed to \(newValue)")
-                    SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = newValue
-                }
-                .onAppear {
-                    NSLog("%@", "[DigiaBadgeDebug] onAppear, publishing badgeFrame=\(frame)")
-                    SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = frame
                 }
                 .onDisappear {
                     NSLog("%@", "[DigiaBadgeDebug] onDisappear, clearing badgeFrame")
