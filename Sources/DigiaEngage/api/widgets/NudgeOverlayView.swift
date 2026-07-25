@@ -166,7 +166,8 @@ private struct NudgeCloseButton: View {
                     Circle().fill(config.backgroundColor)
                     if config.iconSize > 0 {
                         Image(systemName: "xmark")
-                            .font(.system(size: config.iconSize, weight: .semibold))
+                            .font(.system(size: config.iconSize, weight: .regular))
+                            .imageScale(.small)
                             .foregroundStyle(config.iconColor)
                     }
                 }

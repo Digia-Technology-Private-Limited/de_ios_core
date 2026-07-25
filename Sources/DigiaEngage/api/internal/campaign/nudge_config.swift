@@ -44,44 +44,24 @@ struct NudgeCloseButtonConfig: Equatable {
         let defaults = NudgeCloseButtonConfig.defaults
         return NudgeCloseButtonConfig(
             marginTop: nonNegative(
-                number(map, key: "marginTop", fallback: Double(defaults.marginTop)),
+                map.double("marginTop", default: Double(defaults.marginTop)),
                 fallback: defaults.marginTop
             ),
             marginRight: nonNegative(
-                number(map, key: "marginRight", fallback: Double(defaults.marginRight)),
+                map.double("marginRight", default: Double(defaults.marginRight)),
                 fallback: defaults.marginRight
             ),
-            backgroundColor: color(map.string("backgroundColor"), fallback: defaults.backgroundColor),
-            iconColor: color(map.string("iconColor"), fallback: defaults.iconColor),
+            backgroundColor: Color(hex: map.string("backgroundColor")) ?? defaults.backgroundColor,
+            iconColor: Color(hex: map.string("iconColor")) ?? defaults.iconColor,
             iconSize: nonNegative(
-                number(map, key: "iconSize", fallback: Double(defaults.iconSize)),
+                map.double("iconSize", default: Double(defaults.iconSize)),
                 fallback: defaults.iconSize
             )
         )
     }
 
-    private static func number(
-        _ map: [String: Any],
-        key: String,
-        fallback: Double
-    ) -> Double {
-        guard let number = map[key] as? NSNumber,
-              CFGetTypeID(number) != CFBooleanGetTypeID()
-        else { return fallback }
-        return number.doubleValue
-    }
-
     private static func nonNegative(_ value: Double, fallback: CGFloat) -> CGFloat {
         value.isFinite ? max(0, CGFloat(value)) : fallback
-    }
-
-    private static func color(_ value: String, fallback: Color) -> Color {
-        let hex = value.hasPrefix("#") ? String(value.dropFirst()) : ""
-        let allowed = CharacterSet(charactersIn: "0123456789ABCDEFabcdef")
-        guard (hex.count == 6 || hex.count == 8),
-              hex.unicodeScalars.allSatisfy(allowed.contains)
-        else { return fallback }
-        return Color(hex: value) ?? fallback
     }
 }
 
