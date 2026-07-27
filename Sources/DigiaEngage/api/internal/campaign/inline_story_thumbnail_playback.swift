@@ -7,28 +7,40 @@ let thumbnailPlaybackStallSeconds = 10.0
 func updateThumbnailPlaybackEligibility(
     current: Set<Int>,
     visibleFractions: [Int: Double],
-    items: [StoryItemConfig],
-    entryThreshold: Double = thumbnailPlaybackEntryVisibility,
-    exitThreshold: Double = thumbnailPlaybackExitVisibility
+    items: [StoryItemConfig]
 ) -> Set<Int> {
-    precondition(entryThreshold > exitThreshold)
     var next = current.filter { index in
         guard items.indices.contains(index) else { return false }
         let item = items[index]
         return item.type == "video"
             && !item.url.isEmpty
-            && (visibleFractions[index] ?? 0) >= exitThreshold
+            && (visibleFractions[index] ?? 0) >= thumbnailPlaybackExitVisibility
     }
     for (index, rawFraction) in visibleFractions {
         guard items.indices.contains(index) else { continue }
         let item = items[index]
         guard item.type == "video", !item.url.isEmpty else { continue }
         let fraction = min(max(rawFraction, 0), 1)
-        if fraction >= entryThreshold {
+        if fraction >= thumbnailPlaybackEntryVisibility {
             next.insert(index)
         }
     }
     return next
+}
+
+func thumbnailPlayerLayerCanReveal(
+    shouldPlay: Bool,
+    startPrepared: Bool,
+    playerLayerReady: Bool,
+    seekInProgress: Bool,
+    positionMs: Int64,
+    effectiveStartMs: Int64
+) -> Bool {
+    shouldPlay
+        && startPrepared
+        && playerLayerReady
+        && !seekInProgress
+        && positionMs > effectiveStartMs + 10
 }
 
 func nextThumbnailPlaybackIndex(

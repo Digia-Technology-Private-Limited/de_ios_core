@@ -581,6 +581,34 @@ struct EngageActionParserTests {
         ))
     }
 
+    @Test("Story thumbnail layer stays hidden until the current seek advances")
+    func storyThumbnailLayerWaitsForCurrentSeek() {
+        #expect(!thumbnailPlayerLayerCanReveal(
+            shouldPlay: true,
+            startPrepared: true,
+            playerLayerReady: true,
+            seekInProgress: true,
+            positionMs: 47_000,
+            effectiveStartMs: 42_000
+        ))
+        #expect(!thumbnailPlayerLayerCanReveal(
+            shouldPlay: true,
+            startPrepared: true,
+            playerLayerReady: true,
+            seekInProgress: false,
+            positionMs: 42_000,
+            effectiveStartMs: 42_000
+        ))
+        #expect(thumbnailPlayerLayerCanReveal(
+            shouldPlay: true,
+            startPrepared: true,
+            playerLayerReady: true,
+            seekInProgress: false,
+            positionMs: 42_011,
+            effectiveStartMs: 42_000
+        ))
+    }
+
     @Test("Changing story thumbnail playback creates a retryable player identity")
     func storyThumbnailPlayerIdentityTracksPlaybackConfiguration() throws {
         let original = try #require(StoryItemConfig.fromJson([

@@ -213,6 +213,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     private var terminalFailureReported = false
     private var seekFallbackTask: Task<Void, Never>?
     private var seekGeneration: UInt = 0
+    private var seekInProgress = false
     private var imageGenerator: AVAssetImageGenerator?
     private var imageGenerationID: UUID?
     private var onWindowCompleted: () -> Void = {}
@@ -446,11 +447,13 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         completion: (@MainActor @Sendable () -> Void)? = nil
     ) {
         showPlayerLayer = false
+        seekInProgress = true
         seekGeneration &+= 1
         let generation = seekGeneration
         seekFallbackTask?.cancel()
         seekFallbackTask = nil
         guard let player else {
+            seekInProgress = false
             completion?()
             return
         }
@@ -497,6 +500,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         seekFallbackTask?.cancel()
         seekFallbackTask = nil
         if succeeded {
+            seekInProgress = false
             completion?()
         } else if retryAtZero, effectiveStartMs != 0 {
             effectiveStartMs = 0
@@ -563,11 +567,14 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     }
 
     private func revealPlayerLayerIfReady(positionMs: Int64) {
-        guard state.shouldPlay,
-              startPrepared,
-              playerLayerReady,
-              positionMs > effectiveStartMs + 10
-        else {
+        guard thumbnailPlayerLayerCanReveal(
+            shouldPlay: state.shouldPlay,
+            startPrepared: startPrepared,
+            playerLayerReady: playerLayerReady,
+            seekInProgress: seekInProgress,
+            positionMs: positionMs,
+            effectiveStartMs: effectiveStartMs
+        ) else {
             return
         }
         showPlayerLayer = true
@@ -614,6 +621,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         player = nil
         bundle = nil
         startPrepared = false
+        seekInProgress = false
         showPlayerLayer = false
         playerLayerReady = false
     }
