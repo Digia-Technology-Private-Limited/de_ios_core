@@ -498,6 +498,30 @@ struct EngageActionParserTests {
         #expect(color.thumbnail?.type == .color)
         #expect(color.thumbnail?.color == "#1A1A1A")
         #expect(malformed.thumbnail == nil)
+
+        let malformedURL = StoryItemConfig.fromJson([
+            "type": "video",
+            "url": "https://example.com/video.mp4",
+            "thumbnail": ["type": "image", "src": ["imageSrc": "not a URL"]],
+        ])
+        let malformedColor = StoryItemConfig.fromJson([
+            "type": "video",
+            "url": "https://example.com/video.mp4",
+            "thumbnail": ["type": "color", "color": "blue-ish"],
+        ])
+        #expect(malformedURL?.thumbnail == nil)
+        #expect(malformedColor?.thumbnail == nil)
+    }
+
+    @Test("Full story thumbnail playback ignores irrelevant duration")
+    func fullThumbnailPlaybackIgnoresDuration() {
+        let playback = StoryThumbnailPlaybackConfig.fromJson([
+            "durationMode": "full",
+            "durationMs": 5_000,
+        ])
+
+        #expect(playback.durationMode == .full)
+        #expect(playback.durationMs == nil)
     }
 
     @Test("Story thumbnail eligibility uses 75/25 hysteresis")

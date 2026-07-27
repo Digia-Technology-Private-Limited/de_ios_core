@@ -16,6 +16,7 @@ struct DigiaInlineStoryView: View {
     @State private var applicationActive = false
     @State private var playbackRestartGeneration = 0
     @State private var previousPlayerIdentities: [StoryThumbnailPlayerIdentity] = []
+    @State private var latestGeometry = StoryRailGeometry()
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -74,11 +75,16 @@ struct DigiaInlineStoryView: View {
             }
         }
         .onPreferenceChange(StoryRailGeometryPreference.self) { geometry in
+            latestGeometry = geometry
             updateEligibility(geometry)
         }
         .onAppear {
             applicationActive = UIApplication.shared.applicationState == .active
             previousPlayerIdentities = currentPlayerIdentities
+            Task { @MainActor in
+                await Task.yield()
+                updateEligibility(latestGeometry)
+            }
         }
         .onChange(of: currentPlayerIdentities) { nextIdentities in
             let retained = Set(nextIdentities)
@@ -97,12 +103,6 @@ struct DigiaInlineStoryView: View {
             for: UIApplication.willResignActiveNotification
         )) { _ in
             applicationActive = false
-        }
-        .overlay {
-            if StoryThumbnailPlaybackDiagnostics.isEnabled {
-                StoryThumbnailJankMonitor(slotKey: config.slotKey)
-                    .allowsHitTesting(false)
-            }
         }
         .frame(height: CGFloat(config.card.height))
     }
@@ -131,7 +131,6 @@ struct DigiaInlineStoryView: View {
         let visibleRail = rail.intersection(screen)
         let isSlotVisible = !visibleRail.isNull && !visibleRail.isEmpty
         slotVisible = isSlotVisible
-        guard isSlotVisible else { return }
         var fractions: [Int: Double] = [:]
         for (index, card) in geometry.cards where !card.isNull && !card.isEmpty {
             let visible = card.intersection(rail).intersection(screen)
@@ -145,7 +144,14 @@ struct DigiaInlineStoryView: View {
             items: config.items
         )
         eligibleIndices = next
-        reconcileSequentialActive(playable: playableIndices)
+        reconcileSequentialActive(playable: playableIndices(from: next))
+    }
+
+    private func playableIndices(from eligible: Set<Int>) -> Set<Int> {
+        Set(eligible.filter { index in
+            guard config.items.indices.contains(index) else { return false }
+            return failedPlayerIdentities[index] != thumbnailPlayerIdentity(config.items[index])
+        })
     }
 
     private func restartEligiblePlayback() {
@@ -653,9 +659,6 @@ private struct InlineStoryVideoView: View {
                     onReadyForDisplay: {
                         guard !firstFrameReady else { return }
                         firstFrameReady = true
-                        StoryThumbnailPlaybackDiagnostics.log(
-                            "overlay_first_frame id=\(urlString.hashValue)"
-                        )
                         onBuffering?(false)
                     }
                 )
@@ -665,9 +668,6 @@ private struct InlineStoryVideoView: View {
             guard let url = URL(string: urlString) else { return }
             tearDownPlayback()
             firstFrameReady = false
-            StoryThumbnailPlaybackDiagnostics.log(
-                "overlay_player_create id=\(urlString.hashValue)"
-            )
 
             // DigiaVideoPlaybackBundle overrides an incorrect server MIME type
             // while leaving HTTP transport/range handling to AVFoundation on
@@ -749,9 +749,6 @@ private struct InlineStoryVideoView: View {
         failObserver = nil
         bufferingObserver = nil
         firstFrameReady = false
-        StoryThumbnailPlaybackDiagnostics.log(
-            "overlay_player_release id=\(urlString.hashValue)"
-        )
         self.bundle = nil
     }
 }

@@ -92,7 +92,9 @@ struct StoryThumbnailConfig: Equatable {
         else { return nil }
         switch type {
         case .image:
-            guard let imageSrc = json.object("src")?.nonBlankString("imageSrc") else {
+            guard let imageSrc = json.object("src")?.nonBlankString("imageSrc"),
+                  isHTTPURL(imageSrc)
+            else {
                 return nil
             }
             return StoryThumbnailConfig(
@@ -105,7 +107,9 @@ struct StoryThumbnailConfig: Equatable {
                 color: nil
             )
         case .color:
-            guard let color = json.nonBlankString("color") else { return nil }
+            guard let color = json.nonBlankString("color"), isSupportedHexColor(color) else {
+                return nil
+            }
             return StoryThumbnailConfig(
                 type: .color,
                 imageSrc: nil,
@@ -146,9 +150,27 @@ struct StoryThumbnailPlaybackConfig: Equatable {
         return StoryThumbnailPlaybackConfig(
             startTimeMs: start,
             durationMode: mode,
-            durationMs: fixedDuration
+            durationMs: mode == .fixed ? fixedDuration : nil
         )
     }
+}
+
+private func isHTTPURL(_ value: String) -> Bool {
+    guard let components = URLComponents(string: value),
+          let scheme = components.scheme?.lowercased(),
+          scheme == "http" || scheme == "https",
+          components.host?.isEmpty == false
+    else {
+        return false
+    }
+    return true
+}
+
+private func isSupportedHexColor(_ value: String) -> Bool {
+    value.range(
+        of: #"^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"#,
+        options: .regularExpression
+    ) != nil
 }
 
 enum ThumbnailVideoPlaybackMode: String, Equatable {
