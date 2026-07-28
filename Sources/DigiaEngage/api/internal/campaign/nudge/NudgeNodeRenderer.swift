@@ -415,15 +415,11 @@ private struct NudgeVideoView: View {
                     Color.black
 
                     if let player, state != .failed {
-                        if node.showControls {
-                            VideoPlayer(player: player)
-                                .aspectRatio(contentMode: node.boxFit.contentMode)
-                        } else {
-                            PlayerLayerView(
-                                player: player,
-                                videoGravity: node.boxFit.videoGravity
-                            )
-                        }
+                        PlayerViewController(
+                            player: player,
+                            showsPlaybackControls: node.showControls,
+                            videoGravity: node.boxFit.videoGravity
+                        )
                     }
 
                     switch state {
@@ -499,23 +495,26 @@ private struct NudgeVideoView: View {
     }
 }
 
-/// Plays an `AVPlayer` without any system controls, honoring `showControls == false`.
-/// SwiftUI's `VideoPlayer` always shows controls, so we drop down to `AVPlayerLayer`.
-private struct PlayerLayerView: UIViewRepresentable {
+/// Keeps the native control chrome inside the authored frame while applying
+/// content fit only to the video surface.
+private struct PlayerViewController: UIViewControllerRepresentable {
     let player: AVPlayer
+    let showsPlaybackControls: Bool
     let videoGravity: AVLayerVideoGravity
 
-    func makeUIView(context: Context) -> PlayerContainerView {
-        let view = PlayerContainerView()
-        view.backgroundColor = .black
-        view.playerLayer.player = player
-        view.playerLayer.videoGravity = videoGravity
-        return view
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.view.backgroundColor = .black
+        controller.player = player
+        controller.showsPlaybackControls = showsPlaybackControls
+        controller.videoGravity = videoGravity
+        return controller
     }
 
-    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
-        uiView.playerLayer.player = player
-        uiView.playerLayer.videoGravity = videoGravity
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        controller.player = player
+        controller.showsPlaybackControls = showsPlaybackControls
+        controller.videoGravity = videoGravity
     }
 }
 
@@ -527,17 +526,6 @@ extension NudgeVideoFit {
         }
     }
 
-    var contentMode: ContentMode {
-        switch self {
-        case .cover: .fill
-        case .contain: .fit
-        }
-    }
-}
-
-private final class PlayerContainerView: UIView {
-    override class var layerClass: AnyClass { AVPlayerLayer.self }
-    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
 }
 
 // MARK: - Placeholder
