@@ -417,8 +417,12 @@ private struct NudgeVideoView: View {
                     if let player, state != .failed {
                         if node.showControls {
                             VideoPlayer(player: player)
+                                .aspectRatio(contentMode: node.boxFit.contentMode)
                         } else {
-                            PlayerLayerView(player: player)
+                            PlayerLayerView(
+                                player: player,
+                                videoGravity: node.boxFit.videoGravity
+                            )
                         }
                     }
 
@@ -445,6 +449,7 @@ private struct NudgeVideoView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: node.height)
+                .clipped()
             }
         }
         .onAppear { setupPlayer() }
@@ -498,17 +503,35 @@ private struct NudgeVideoView: View {
 /// SwiftUI's `VideoPlayer` always shows controls, so we drop down to `AVPlayerLayer`.
 private struct PlayerLayerView: UIViewRepresentable {
     let player: AVPlayer
+    let videoGravity: AVLayerVideoGravity
 
     func makeUIView(context: Context) -> PlayerContainerView {
         let view = PlayerContainerView()
         view.backgroundColor = .black
         view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspect
+        view.playerLayer.videoGravity = videoGravity
         return view
     }
 
     func updateUIView(_ uiView: PlayerContainerView, context: Context) {
         uiView.playerLayer.player = player
+        uiView.playerLayer.videoGravity = videoGravity
+    }
+}
+
+extension NudgeVideoFit {
+    var videoGravity: AVLayerVideoGravity {
+        switch self {
+        case .cover: .resizeAspectFill
+        case .contain: .resizeAspect
+        }
+    }
+
+    var contentMode: ContentMode {
+        switch self {
+        case .cover: .fill
+        case .contain: .fit
+        }
     }
 }
 
