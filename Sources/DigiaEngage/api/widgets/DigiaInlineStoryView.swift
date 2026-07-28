@@ -45,7 +45,7 @@ private struct StoryThumbnailCard: View {
             // Contained media leaves letterbox space. Keep that surface
             // opaque black across iOS, Android, and Flutter.
             Color.black
-            if item.type == "video" {
+            if item.type == .video {
                 InlineStoryVideoView(
                     urlString: item.url,
                     looping: true,
@@ -309,7 +309,7 @@ private struct InlineStoryOverlayContent: View {
     }
 
     private var progress: Double {
-        if currentItem?.type == "video" {
+        if currentItem?.type == .video {
             return min(max(videoProgress, 0), 1)
         }
         return min(max(elapsed / currentDuration, 0), 1)
@@ -335,7 +335,7 @@ private struct InlineStoryOverlayContent: View {
 
     private func tick() {
         guard let item = currentItem else { return }
-        if item.type == "video" {
+        if item.type == .video {
             // Buffering is legitimate loading, not a stall — pause the watchdog
             // so a slow network doesn't skip the video before it starts.
             if videoBuffering { return }
@@ -417,7 +417,7 @@ private struct FullScreenStoryItem: View {
     var body: some View {
         ZStack {
             Color.black
-            if item.type == "video" {
+            if item.type == .video {
                 InlineStoryVideoView(
                     urlString: item.url,
                     looping: false,

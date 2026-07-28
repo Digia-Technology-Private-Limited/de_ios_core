@@ -15,7 +15,7 @@ struct StoryCtaAction: Equatable {
 }
 
 struct StoryItemConfig: Equatable {
-    let type: String
+    let type: StoryMediaType
     let url: String
     let duration: Int?
     var boxFit: StoryMediaFit = .cover
@@ -36,10 +36,11 @@ struct StoryItemConfig: Equatable {
             ? EngageActionParser().parse(ctaActionJson)
             : parseLegacyStoryActions(ctaActionJson)
         let ctaAction = ctaActionJson.map(StoryCtaAction.fromJson)
-        let type = json.string("type", default: "image")
-        let mediaType = StoryMediaType.fromWireValue(type)
+        let mediaType = StoryMediaType.fromWireValue(
+            json.string("type", default: "image")
+        )
         return StoryItemConfig(
-            type: type,
+            type: mediaType,
             url: url,
             duration: json.positiveInt("duration"),
             boxFit: StoryMediaFit.fromWireValue(
@@ -88,7 +89,7 @@ enum StoryMediaFit: Equatable {
     }
 }
 
-enum StoryMediaType {
+enum StoryMediaType: Equatable {
     case image
     case video
 
