@@ -70,7 +70,7 @@ enum NudgeNode: Equatable {
 /// is a unitless multiplier.
 /// Per-run style overrides; nil/false fields inherit the Text widget's base.
 struct NudgeSpanStyle: Equatable {
-    let fontWeight: Font.Weight?
+    let fontWeight: Int?
     let fontSize: CGFloat?
     let color: Color?
     let highlightColor: Color?
@@ -94,7 +94,7 @@ struct NudgeText: Equatable {
     let box: NudgeBox
     let text: String
     let fontSize: CGFloat
-    let fontWeight: Font.Weight
+    let fontWeight: Int
     let color: Color
     let textAlignment: TextAlignment
     /// Block-level line height (unitless multiplier) for the whole text; nil = default.
@@ -117,11 +117,11 @@ struct NudgeButton: Equatable {
     let label: String
     let variant: NudgeButtonVariant
     let fontSize: CGFloat
-    let fontWeight: Font.Weight
+    let fontWeight: Int
     let background: Color
     let textColor: Color
     let radius: CGFloat
-    let actions: [NudgeAction]
+    let actions: [EngageAction]
     let isPrimary: Bool
 }
 
@@ -190,6 +190,5 @@ struct NudgeVideo: Equatable {
 struct NudgeColumn: Equatable {
     let crossAxisAlignment: NudgeCrossAxisAlignment
     let mainAxisAlignment: NudgeMainAxisAlignment
-    let spacing: CGFloat
     let children: [NudgeNode]
 }

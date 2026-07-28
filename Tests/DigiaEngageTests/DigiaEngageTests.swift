@@ -69,6 +69,79 @@ struct DigiaEngageTests {
         #expect(SDKInstance.shared.inlineController.getCarouselConfig("hero_banner")?.items.count == 1)
     }
 
+    @Test("campaign target screens are parsed")
+    func parsesCampaignTargetScreens() throws {
+        let campaign = try #require(CampaignModel.fromJson([
+            "id": "targeted-id",
+            "campaignKey": "help-inline",
+            "campaignType": "inline",
+            "targetScreenNames": ["names": ["Help", "Home"]],
+            "templateConfig": [
+                "templateType": "carousel",
+                "slotKey": "hero_banner",
+                "items": [["imageUrl": "https://example.com/a.png"]],
+            ],
+        ]))
+
+        #expect(campaign.targetScreenNames == ["Help", "Home"])
+    }
+
+    @Test("campaign screen matching is case sensitive")
+    func rejectsCampaignOnNonTargetedScreen() throws {
+        SDKInstance.shared.resetForTesting()
+        let campaign = try #require(CampaignModel.fromJson([
+            "id": "targeted-id",
+            "campaignKey": "help-inline",
+            "campaignType": "inline",
+            "targetScreenNames": ["names": ["Help"]],
+            "templateConfig": [
+                "templateType": "carousel",
+                "slotKey": "hero_banner",
+                "items": [["imageUrl": "https://example.com/a.png"]],
+            ],
+        ]))
+        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCurrentScreen("help")
+
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:]))
+
+        #expect(!accepted)
+        #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") == nil)
+    }
+
+    @Test("targeted campaign is rejected when current screen is unset")
+    func rejectsTargetedCampaignWhenScreenIsUnset() throws {
+        SDKInstance.shared.resetForTesting()
+        let campaign = try #require(targetedInlineCampaign())
+        SDKInstance.shared.campaignStore.populate([campaign])
+
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:]))
+
+        #expect(!accepted)
+        #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") == nil)
+    }
+
+    @Test("latest trimmed screen name wins and navigation does not dismiss accepted content")
+    func usesLatestScreenWithoutDismissingAcceptedContent() throws {
+        SDKInstance.shared.resetForTesting()
+        let campaign = try #require(targetedInlineCampaign())
+        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCurrentScreen("Home")
+        SDKInstance.shared.setCurrentScreen(" Help ")
+
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:]))
+        SDKInstance.shared.setCurrentScreen("Home")
+
+        #expect(accepted)
+        #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner")?.cepCampaignId == "ct-1")
+    }
+
     @Test("campaign-key inline story payloads route into the inline controller")
     func routesInlineStoryCampaignsIntoInlineController() throws {
         SDKInstance.shared.resetForTesting()
@@ -176,13 +249,13 @@ struct DigiaEngageTests {
     }
 }
 
-@Suite("NudgeActionParser")
-struct NudgeActionParserTests {
+@Suite("EngageActionParser")
+struct EngageActionParserTests {
     private func onClick(_ steps: [[String: Any]]) -> [String: Any] { ["steps": steps] }
 
     @Test("parses open url and deeplink by launch mode")
     func parsesUrls() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.openUrl", "data": ["url": "https://x/y", "launchMode": "externalApplication"]],
             ["type": "Action.openUrl", "data": ["url": "app://path", "launchMode": "platformDefault"]],
         ]))
@@ -191,7 +264,7 @@ struct NudgeActionParserTests {
 
     @Test("parses copy to clipboard from message")
     func parsesCopy() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.copyToClipBoard", "data": ["message": "PROMO50"]],
         ]))
         #expect(actions == [.copyToClipboard("PROMO50")])
@@ -199,7 +272,7 @@ struct NudgeActionParserTests {
 
     @Test("parses share from message")
     func parsesShare() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.share", "data": ["message": "check this out"]],
         ]))
         #expect(actions == [.share("check this out")])
@@ -207,10 +280,10 @@ struct NudgeActionParserTests {
 
     @Test("text payload falls back to text then value keys")
     func textFallbacks() {
-        let fromText = NudgeActionParser().parse(onClick([
+        let fromText = EngageActionParser().parse(onClick([
             ["type": "Action.copyToClipBoard", "data": ["text": "A"]],
         ]))
-        let fromValue = NudgeActionParser().parse(onClick([
+        let fromValue = EngageActionParser().parse(onClick([
             ["type": "Action.share", "data": ["value": "B"]],
         ]))
         #expect(fromText == [.copyToClipboard("A")])
@@ -219,7 +292,7 @@ struct NudgeActionParserTests {
 
     @Test("blank or missing text drops copy and share")
     func dropsBlank() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.copyToClipBoard", "data": [:]],
             ["type": "Action.share", "data": ["message": ""]],
         ]))
@@ -228,12 +301,222 @@ struct NudgeActionParserTests {
 
     @Test("dismiss for hide bottom sheet and dismiss dialog")
     func parsesDismiss() {
-        let actions = NudgeActionParser().parse(onClick([
+        let actions = EngageActionParser().parse(onClick([
             ["type": "Action.hideBottomSheet"],
             ["type": "Action.dismissDialog"],
         ]))
         #expect(actions == [.dismiss, .dismiss])
     }
+
+    @Test("analytics classifies share and copy explicitly")
+    func analyticsTypes() {
+        #expect(EngageAction.share("message").analyticsType == "share")
+        #expect(EngageAction.copyToClipboard("message").analyticsType == "copy")
+    }
+
+    @Test("Custom KV keeps only strings and resolves variables in keys and values")
+    func customKVResolvesVariables() throws {
+        let parsed = EngageActionParser().parse([
+            "steps": [[
+                "type": "Action.customKV",
+                "data": ["payload": [
+                    "redirectionType": "{{ destination_type }}",
+                    "{{ dynamic_key }}": "dynamic value",
+                    "redirectionParams": "{\"redirectionUrl\":\"{{ route }}\"}",
+                    "empty": "",
+                    "ignoredNumber": 42,
+                ]],
+            ]],
+        ])
+        let action = try #require(parsed.first)
+        #expect(action == .customKV([
+            "redirectionType": "{{ destination_type }}",
+            "{{ dynamic_key }}": "dynamic value",
+            "redirectionParams": "{\"redirectionUrl\":\"{{ route }}\"}",
+            "empty": "",
+        ]))
+        #expect(action.resolved(with: VariableContext(
+            values: [
+                "destination_type": "SCREEN",
+                "dynamic_key": "resolvedKey",
+                "route": "brands",
+            ],
+            types: [:]
+        )) == .customKV([
+            "redirectionType": "SCREEN",
+            "resolvedKey": "dynamic value",
+            "redirectionParams": "{\"redirectionUrl\":\"brands\"}",
+            "empty": "",
+        ]))
+    }
+
+    @Test("parses only canonical Custom KV structures")
+    func parsesCustomKVStructures() {
+        let actions = EngageActionParser().parse(onClick([
+            ["type": "Action.customKV", "data": ["payload": ["canonical": "yes"]]],
+            ["type": "customKV", "data": ["payload": ["ignored": "yes"]]],
+        ]))
+
+        #expect(actions == [
+            .customKV(["canonical": "yes"]),
+        ])
+    }
+
+    @Test("Story parses legacy CTA directly into Engage actions")
+    func storyParsesLegacyActions() throws {
+        let item = try #require(StoryItemConfig.fromJson([
+            "type": "image",
+            "url": "https://example.com/story.png",
+            "ctaAction": ["type": "deepLink", "url": "app://legacy"],
+        ]))
+
+        #expect(item.actions == [.openDeeplink("app://legacy"), .dismiss])
+    }
+
+    @Test("Story explicit empty flow does not fall back to legacy CTA")
+    func storyEmptyCanonicalFlowWins() throws {
+        let item = try #require(StoryItemConfig.fromJson([
+            "type": "image",
+            "url": "https://example.com/story.png",
+            "ctaAction": [
+                "type": "deepLink",
+                "url": "app://legacy",
+                "steps": [],
+            ],
+        ]))
+
+        #expect(item.actions.isEmpty)
+    }
+
+    @Test("Story CTA accepts a numeric dashboard font weight")
+    func storyCtaAcceptsNumericFontWeight() throws {
+        let item = try #require(StoryItemConfig.fromJson([
+            "type": "image",
+            "url": "https://example.com/story.png",
+            "ctaFontWeight": 700,
+        ]))
+
+        #expect(item.ctaFontWeight == 700)
+    }
+
+    @Test("Survey CTA accepts a numeric dashboard font weight")
+    func surveyCtaAcceptsNumericFontWeight() {
+        let cta = CtaSettings.from(["fontWeight": .int(500)])
+
+        #expect(cta.fontWeight == 500)
+    }
+
+    @Test("Carousel legacy deep link is parsed into Engage actions")
+    func carouselParsesLegacyActions() throws {
+        let config = try #require(InlineCarouselConfig.fromJson([
+            "slotKey": "home",
+            "items": [[
+                "imageUrl": "https://example.com/card.png",
+                "deepLink": "app://legacy",
+            ]],
+        ]))
+
+        #expect(config.items.first?.actions == [.openDeeplink("app://legacy")])
+    }
+
+    @Test("Guide explicit empty flow does not fall back to legacy action")
+    func guideEmptyCanonicalFlowWins() throws {
+        let config = GuideStepWidgetConfig.fromJson([
+            "actions": [[
+                "id": "continue",
+                "type": "NEXT",
+                "label": "Continue",
+                "onClick": ["steps": []],
+            ]],
+        ])
+
+        #expect(config.actions.first?.actions.isEmpty == true)
+    }
+
+    @Test("Guide parses flat dashboard typography including medium weight")
+    func guideParsesFlatTypography() throws {
+        let config = GuideStepWidgetConfig.fromJson([
+            "title": "Welcome",
+            "titleWeight": "500",
+            "titleSize": 18,
+            "titleColor": "#112233",
+            "body": "Start here",
+            "bodyWeight": 500,
+            "bodySize": 15,
+            "bodyColor": "#445566",
+            "content": [
+                "title": ["textStyle": ["textColor": "#FF0000"]],
+                "body": ["textStyle": ["textColor": "#00FF00"]],
+            ],
+            "buttonPrimaryBackgroundColor": "#123456",
+            "buttonPrimaryTextColor": "#FEDCBA",
+            "actions": [[
+                "id": "continue",
+                "type": "NEXT",
+                "label": "Continue",
+                "fontSize": 16,
+                "fontWeight": 700,
+            ]],
+        ])
+
+        #expect(config.content.title?.fontWeight == 500)
+        #expect(config.content.title?.text == "Welcome")
+        #expect(config.content.title?.fontSize == 18)
+        #expect(config.content.title?.textColor == "#112233")
+        #expect(config.content.body?.fontSize == 15)
+        #expect(config.content.body?.fontWeight == 500)
+        #expect(config.content.body?.text == "Start here")
+        #expect(config.content.body?.textColor == "#445566")
+        #expect(config.actions.first?.fontSize == 16)
+        #expect(config.actions.first?.fontWeight == 700)
+        #expect(config.actions.first?.backgroundColor == "#123456")
+        #expect(config.actions.first?.textColor == "#FEDCBA")
+    }
+
+    @Test("Guide keeps the legacy nested schema isolated from flat keys")
+    func guideParsesLegacyNestedTypography() throws {
+        let config = GuideStepWidgetConfig.fromJson([
+            "titleColor": "#FF0000",
+            "content": [
+                "title": [
+                    "text": "Legacy title",
+                    "textStyle": [
+                        "textColor": "#112233",
+                        "fontToken": ["font": ["weight": "medium", "size": 18]],
+                    ],
+                ],
+                "actions": [[
+                    "id": "legacy-next",
+                    "label": "Continue",
+                    "action_type": "NEXT",
+                    "background_color": "#334455",
+                    "text_color": "#FFFFFF",
+                    "corner_radius": 12,
+                ]],
+            ],
+        ])
+
+        #expect(config.content.title?.text == "Legacy title")
+        #expect(config.content.title?.fontWeight == 500)
+        #expect(config.content.title?.textColor == "#112233")
+        #expect(config.actions.first?.actionType == .next)
+        #expect(config.actions.first?.backgroundColor == "#334455")
+        #expect(config.actions.first?.cornerRadius == 12)
+    }
+}
+
+private func targetedInlineCampaign() -> CampaignModel? {
+    CampaignModel.fromJson([
+        "id": "targeted-id",
+        "campaignKey": "help-inline",
+        "campaignType": "inline",
+        "targetScreenNames": ["names": ["Help"]],
+        "templateConfig": [
+            "templateType": "carousel",
+            "slotKey": "hero_banner",
+            "items": [["imageUrl": "https://example.com/a.png"]],
+        ],
+    ])
 }
 
 private func minimalSurveyTemplate() -> [String: Any] {

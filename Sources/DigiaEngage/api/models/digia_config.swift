@@ -13,11 +13,14 @@ public enum DigiaEnvironment: Sendable, Equatable {
 
 public struct DigiaNetworkConfiguration: Sendable, Equatable {
     public let defaultHeaders: [String: String]
-    public let timeout: Duration
+    /// Seconds. `Duration` (iOS 16+) would raise this type's floor for every
+    /// consumer of `DigiaConfig`; `TimeInterval` keeps it representable down to
+    /// the SDK's iOS 15 minimum.
+    public let timeout: TimeInterval
 
     public init(
         defaultHeaders: [String: String] = [:],
-        timeout: Duration = .seconds(30)
+        timeout: TimeInterval = 30
     ) {
         self.defaultHeaders = defaultHeaders
         self.timeout = timeout
@@ -37,19 +40,19 @@ public struct DigiaDeveloperConfig: Sendable, Equatable {
     }
 }
 
-public struct DigiaConfig: Sendable, Equatable {
+public struct DigiaConfig: Sendable {
     public let apiKey: String
     public let logLevel: DigiaLogLevel
     public let environment: DigiaEnvironment
     public let networkConfiguration: DigiaNetworkConfiguration?
     public let developerConfig: DigiaDeveloperConfig?
     /// Optional global font family applied to all Digia-rendered text.
-    /// Resolved via `Font.custom` / `UIFont(name:)`, so it must match a font
-    /// registered with the app (e.g. a bundled custom font's PostScript name).
+    /// Must match a font family registered by the host app.
     public let fontFamily: String?
     public let analyticsConfig: AnalyticsConfig
     public let wrapperBinding: String?
     public let wrapperVersion: String?
+    public let actionHandlers: DigiaActionHandlers
 
     public init(
         apiKey: String,
@@ -60,7 +63,8 @@ public struct DigiaConfig: Sendable, Equatable {
         fontFamily: String? = nil,
         analyticsConfig: AnalyticsConfig = AnalyticsConfig(),
         wrapperBinding: String? = nil,
-        wrapperVersion: String? = nil
+        wrapperVersion: String? = nil,
+        actionHandlers: DigiaActionHandlers = DigiaActionHandlers()
     ) {
         self.apiKey = apiKey
         self.logLevel = logLevel
@@ -71,5 +75,20 @@ public struct DigiaConfig: Sendable, Equatable {
         self.analyticsConfig = analyticsConfig
         self.wrapperBinding = wrapperBinding
         self.wrapperVersion = wrapperVersion
+        self.actionHandlers = actionHandlers
+    }
+}
+
+extension DigiaConfig: Equatable {
+    public static func == (lhs: DigiaConfig, rhs: DigiaConfig) -> Bool {
+        lhs.apiKey == rhs.apiKey
+            && lhs.logLevel == rhs.logLevel
+            && lhs.environment == rhs.environment
+            && lhs.networkConfiguration == rhs.networkConfiguration
+            && lhs.developerConfig == rhs.developerConfig
+            && lhs.fontFamily == rhs.fontFamily
+            && lhs.analyticsConfig == rhs.analyticsConfig
+            && lhs.wrapperBinding == rhs.wrapperBinding
+            && lhs.wrapperVersion == rhs.wrapperVersion
     }
 }

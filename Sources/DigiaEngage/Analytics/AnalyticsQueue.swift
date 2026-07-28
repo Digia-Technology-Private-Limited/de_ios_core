@@ -4,6 +4,9 @@ struct QueueEntry: @unchecked Sendable {
     let eventId: String
     let payload: [String: Any]
     let createdAt: TimeInterval
+    /// Persisted so the retry cap survives app restarts — otherwise a user
+    /// force-quitting/reopening during a flaky connection would give every
+    /// stuck event a fresh set of retries each time.
     var attempts: Int
 }
 
@@ -35,17 +38,22 @@ final class AnalyticsQueue {
         save(load().filter { !ids.contains($0.eventId) })
     }
 
-    func incrementAttempt(eventIds: [String]) {
+    /// Increments the attempt counter on the matching entries and returns their
+    /// post-increment state, so the caller can decide whether any of them have
+    /// now exceeded the retry cap.
+    @discardableResult
+    func incrementAttempt(eventIds: [String]) -> [QueueEntry] {
         let ids = Set(eventIds)
-        save(load().map { entry in
+        var updated: [QueueEntry] = []
+        let entries = load().map { entry -> QueueEntry in
             guard ids.contains(entry.eventId) else { return entry }
-            return QueueEntry(
-                eventId: entry.eventId,
-                payload: entry.payload,
-                createdAt: entry.createdAt,
-                attempts: entry.attempts + 1
-            )
-        })
+            var e = entry
+            e.attempts += 1
+            updated.append(e)
+            return e
+        }
+        save(entries)
+        return updated
     }
 
     func clear() {

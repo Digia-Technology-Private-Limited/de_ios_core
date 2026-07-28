@@ -20,11 +20,11 @@ enum SurveyTokens {
 
 struct TextDefaults {
     let sizePt: CGFloat
-    let weight: Font.Weight
+    let weight: Int
     let color: Color
     let align: TextAlignment
 
-    init(sizePt: CGFloat, weight: Font.Weight, color: Color, align: TextAlignment = .leading) {
+    init(sizePt: CGFloat, weight: Int, color: Color, align: TextAlignment = .leading) {
         self.sizePt = sizePt
         self.weight = weight
         self.color = color
@@ -32,23 +32,23 @@ struct TextDefaults {
     }
 }
 
-let TitleDefaults = TextDefaults(sizePt: 20, weight: .bold, color: SurveyTokens.textPrimary)
-let BodyDefaults = TextDefaults(sizePt: 14, weight: .regular, color: SurveyTokens.textSecondary)
-let OptionDefaults = TextDefaults(sizePt: 16, weight: .medium, color: SurveyTokens.textPrimary)
+let TitleDefaults = TextDefaults(sizePt: 20, weight: 700, color: SurveyTokens.textPrimary)
+let BodyDefaults = TextDefaults(sizePt: 14, weight: 400, color: SurveyTokens.textSecondary)
+let OptionDefaults = TextDefaults(sizePt: 16, weight: 500, color: SurveyTokens.textPrimary)
 
 // MARK: - Fonts
 
 /// Resolves a survey font through the SDK-wide font factory so the global
 /// `DigiaConfig.fontFamily` applies to natively-rendered surveys, matching
 /// campaigns and guides. When no global family is configured the factory is
-/// `DefaultFontFactory`, which returns the system font — preserving the prior
+/// `DigiaFont`, which returns the system font — preserving the prior
 /// appearance. Shape mirrors `Font.system(size:weight:)` so it is a drop-in
 /// replacement at every call site.
 @MainActor
-func surveyFont(size: CGFloat, weight: Font.Weight = .regular) -> Font {
-    SDKInstance.shared.fontFactory.getDefaultFont(
+func surveyFont(size: CGFloat, weight: Int = 400) -> Font {
+    Font(SDKInstance.shared.font.resolve(
         size: Double(size), weight: weight, italic: false
-    )
+    ))
 }
 
 extension ElementStyle {
@@ -57,14 +57,7 @@ extension ElementStyle {
         size > 0 ? CGFloat(size) : def
     }
 
-    func resolveWeight() -> Font.Weight {
-        switch weight {
-        case .regular: return .regular
-        case .medium: return .medium
-        case .semibold: return .semibold
-        case .bold: return .bold
-        }
-    }
+    func resolveWeight() -> Int { weight }
 
     func resolveAlign() -> TextAlignment {
         switch align {
@@ -203,7 +196,7 @@ private struct StarRatingQuestion: View {
 
     var body: some View {
         let selected = Int(answer?.values.first ?? "") ?? 0
-        FlowLayout(spacing: 10) {
+        flowLayout(spacing: 10) {
             ForEach(1...range, id: \.self) { i in
                 let isOn = i <= selected
                 Button {
@@ -292,9 +285,18 @@ private struct NpsQuestion: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
+                // The two-param `onChange(of:initial:_:)` needs iOS 17; below that,
+                // `.onAppear` plus the older single-value `onChange` gives the same
+                // "report width now and on every subsequent change" behavior.
                 GeometryReader { geo in
-                    Color.clear.onChange(of: geo.size.width, initial: true) { _, w in
-                        rowWidth = w
+                    if #available(iOS 17, *) {
+                        Color.clear.onChange(of: geo.size.width, initial: true) { _, w in
+                            rowWidth = w
+                        }
+                    } else {
+                        Color.clear
+                            .onAppear { rowWidth = geo.size.width }
+                            .onChange(of: geo.size.width) { w in rowWidth = w }
                     }
                 }
             )
@@ -375,14 +377,19 @@ private struct ReactionQuestion: View {
 
     var body: some View {
         let selectedId = answer?.values.first
-        FlowLayout(spacing: 10) {
+        flowLayout(spacing: 10) {
             ForEach(block.options) { option in
                 let isOn = selectedId == option.id
                 Button {
                     onAnswer(SurveyAnswer(values: [option.id]))
                 } label: {
                     Text(option.label)
-                        .font(surveyFont(size: 32))
+                        .font(
+                            surveyFont(
+                                size: block.optionStyle?.resolveFontSize(default: 32) ?? 32,
+                                weight: block.optionStyle?.resolveWeight() ?? 400
+                            )
+                        )
                         .frame(width: 64, height: 64)
                         .background(
                             Circle().fill(isOn ? accent.opacity(0.14) : SurveyTokens.surfaceSunken)
@@ -430,7 +437,12 @@ private struct ThisOrThatQuestion: View {
                     ZStack(alignment: .bottomLeading) {
                         RoundedRectangle(cornerRadius: 14).fill(gradients[index % gradients.count])
                         Text(option.label)
-                            .font(surveyFont(size: 16, weight: .bold))
+                            .font(
+                                surveyFont(
+                                    size: block.optionStyle?.resolveFontSize(default: 16) ?? 16,
+                                    weight: block.optionStyle?.resolveWeight() ?? 700
+                                )
+                            )
                             .foregroundColor(.white)
                             .padding(14)
                     }
@@ -470,12 +482,15 @@ private struct TierListQuestion: View {
             ForEach(Array(tiers.enumerated()), id: \.offset) { _, t in
                 HStack(spacing: 6) {
                     Text(t.label)
-                        .font(surveyFont(size: 18, weight: .heavy))
+                        .font(surveyFont(size: 18, weight: 700))
                         .foregroundColor(.white)
                         .frame(width: 40, height: 40)
                         .background(RoundedRectangle(cornerRadius: 6).fill(t.color))
                     TierChips(
-                        items: block.options.filter { placements[$0.id] == t.label }, onTap: cycle
+                        items: block.options.filter { placements[$0.id] == t.label },
+                        optionStyle: block.optionStyle,
+                        accent: accent,
+                        onTap: cycle
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .frame(minHeight: 44)
@@ -490,6 +505,8 @@ private struct TierListQuestion: View {
             }
             TierChips(
                 items: block.options.filter { (placements[$0.id] ?? "-") == "-" },
+                optionStyle: block.optionStyle,
+                accent: accent,
                 onTap: cycle,
                 placeholder: "Tap a chip to assign a tier"
             )
@@ -529,6 +546,8 @@ private struct TierListQuestion: View {
 
 private struct TierChips: View {
     let items: [SurveyOption]
+    let optionStyle: ElementStyle?
+    let accent: Color
     let onTap: (String) -> Void
     var placeholder: String? = nil
 
@@ -540,14 +559,24 @@ private struct TierChips: View {
                     .foregroundColor(SurveyTokens.textTertiary)
             }
         } else {
-            FlowLayout(spacing: 6) {
+            flowLayout(spacing: 6) {
                 ForEach(items) { opt in
                     Button {
                         onTap(opt.id)
                     } label: {
                         Text(opt.label)
-                            .font(surveyFont(size: 12))
-                            .foregroundColor(SurveyTokens.textPrimary)
+                            .font(
+                                surveyFont(
+                                    size: optionStyle?.resolveFontSize(default: 12) ?? 12,
+                                    weight: optionStyle?.resolveWeight() ?? 400
+                                )
+                            )
+                            .foregroundColor(
+                                optionStyle?.resolveColor(
+                                    accent: accent,
+                                    default: SurveyTokens.textPrimary
+                                ) ?? SurveyTokens.textPrimary
+                            )
                             .padding(.horizontal, 10)
                             .padding(.vertical, 4)
                             .background(
@@ -727,7 +756,12 @@ private struct ChoiceCardRow: View {
                 }
                 if showDescription, let desc = option.description, !desc.isEmpty {
                     Text(desc)
-                        .font(surveyFont(size: 12))
+                        .font(
+                            surveyFont(
+                                size: optionStyle?.resolveFontSize(default: 12) ?? 12,
+                                weight: optionStyle?.resolveWeight() ?? 400
+                            )
+                        )
                         .foregroundColor(SurveyTokens.textSecondary)
                         .padding(.leading, 32)
                 }
@@ -780,9 +814,16 @@ struct OutlinedTextField: View {
                             .padding(.vertical, 14)
                             .allowsHitTesting(false)
                     }
-                    TextEditor(text: $text)
+                    // `.scrollContentBackground(.hidden)` needs iOS 16; below that,
+                    // the `TextEditor`'s default (opaque) background is used as-is.
+                    Group {
+                        if #available(iOS 16, *) {
+                            TextEditor(text: $text).scrollContentBackground(.hidden)
+                        } else {
+                            TextEditor(text: $text)
+                        }
+                    }
                         .focused($focused)
-                        .scrollContentBackground(.hidden)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                 }
@@ -921,6 +962,7 @@ private func validateDate(_ input: String) -> InputValidation {
 // MARK: - FlowLayout
 
 /// Minimal flow layout that wraps children onto new lines when out of width.
+@available(iOS 16, *)
 struct FlowLayout: Layout {
     var spacing: CGFloat = 8
 
@@ -966,5 +1008,18 @@ struct FlowLayout: Layout {
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
         }
+    }
+}
+
+/// `FlowLayout` needs iOS 16 (the `Layout` protocol); below that, a plain
+/// non-wrapping `HStack` is the closest built-in equivalent.
+@ViewBuilder
+private func flowLayout<Content: View>(
+    spacing: CGFloat, @ViewBuilder content: () -> Content
+) -> some View {
+    if #available(iOS 16, *) {
+        FlowLayout(spacing: spacing) { content() }
+    } else {
+        HStack(spacing: spacing) { content() }
     }
 }

@@ -12,7 +12,7 @@ public struct AnalyticsConfig: Sendable, Equatable {
         enabled: Bool = true,
         flushIntervalMs: Int = 30_000,
         flushBatchSize: Int = 50,
-        maxBatchSize: Int = 200,
+        maxBatchSize: Int = 100,
         queueMaxEvents: Int = 5_000,
         sessionTimeoutMs: Int = 30 * 60 * 1_000
     ) {

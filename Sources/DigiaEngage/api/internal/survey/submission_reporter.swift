@@ -12,14 +12,16 @@ struct SurveySubmissionReporter {
         campaignId: String,
         survey: SurveyConfigModel,
         answers: [String: SurveyAnswer],
-        startedAt: Date
+        startedAt: Date,
+        userId: String?
     ) {
         let body = Self.buildBody(
             campaignId: campaignId,
             survey: survey,
             answers: answers,
             startedAt: startedAt,
-            now: Date()
+            now: Date(),
+            userId: userId
         )
         Task.detached { await Self.post(config: config, deviceId: Self.deviceId(), body: body) }
     }
@@ -71,7 +73,8 @@ struct SurveySubmissionReporter {
         survey: SurveyConfigModel,
         answers: [String: SurveyAnswer],
         startedAt: Date,
-        now: Date
+        now: Date,
+        userId: String?
     ) -> [String: Any] {
         let promptNodes = survey.nodes.filter { node in
             guard let block = survey.blockFor(node) else { return false }
@@ -101,7 +104,7 @@ struct SurveySubmissionReporter {
             "responses": responses,
         ]
 
-        return [
+        var body: [String: Any] = [
             "campaignId": campaignId,
             "submissionKey": "attempt-\(Int(now.timeIntervalSince1970 * 1000))",
             "submissionType": "survey",
@@ -109,6 +112,8 @@ struct SurveySubmissionReporter {
             "computed": computed,
             "occurredAt": isoTimestamp(now),
         ]
+        if let userId { body["userId"] = userId }
+        return body
     }
 
     private static func buildResponse(block: SurveyBlock, answer: SurveyAnswer) -> [String: Any] {

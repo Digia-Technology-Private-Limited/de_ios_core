@@ -9,7 +9,11 @@ struct DigiaInlineStoryView: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: CGFloat(config.card.spacing)) {
+            // Match Android's LazyRow: an eager HStack creates an AVPlayerLooper
+            // for every video in the campaign, including cards far off-screen.
+            // That can exhaust the simulator/device media pipeline before the
+            // user has interacted with a single story.
+            LazyHStack(spacing: CGFloat(config.card.spacing)) {
                 ForEach(Array(config.items.enumerated()), id: \.offset) { index, item in
                     StoryThumbnailCard(item: item, config: config)
                         .onTapGesture {
@@ -134,6 +138,24 @@ private final class DigiaStoryHostingController<Content: View>: UIHostingControl
     }
 }
 
+/// The two-param `onChange(of:initial:_:)` needs iOS 17; below that, `.onAppear`
+/// plus the older single-value `onChange` reports the same "fire now and on every
+/// subsequent change" sequence.
+private struct StoryStepViewedReporter: ViewModifier {
+    let currentIndex: Int
+    let report: (Int) -> Void
+
+    func body(content: Content) -> some View {
+        if #available(iOS 17, *) {
+            content.onChange(of: currentIndex, initial: true) { _, idx in report(idx) }
+        } else {
+            content
+                .onAppear { report(currentIndex) }
+                .onChange(of: currentIndex) { idx in report(idx) }
+        }
+    }
+}
+
 @MainActor
 private struct InlineStoryOverlayContent: View {
     let state: InlineStoryOverlayState
@@ -198,7 +220,7 @@ private struct InlineStoryOverlayContent: View {
 
                         if item.ctaEnabled, let text = item.ctaText, !text.isEmpty {
                             StoryCTAButton(item: item, variables: variables) {
-                                handleCTA(item.ctaAction)
+                                handleCTA(item)
                             }
                             .padding(.horizontal, 24)
                             .padding(.bottom, safeAreaInsets.bottom + 20)
@@ -238,13 +260,17 @@ private struct InlineStoryOverlayContent: View {
         }
         // Step Viewed fires for each frame that becomes visible (including the
         // first), mirroring Android's LaunchedEffect(currentStoryIndex).
-        .onChange(of: currentIndex, initial: true) { _, idx in
+        //
+        // The two-param `onChange(of:initial:_:)` needs iOS 17; below that,
+        // `.onAppear` plus the older single-value `onChange` reports the same
+        // "fire now and on every subsequent change" sequence.
+        .modifier(StoryStepViewedReporter(currentIndex: currentIndex) { idx in
             SDKInstance.shared.reportStoryStepViewed(
                 state.payload,
                 itemIndex: idx + 1,
                 itemTotal: state.config.items.count
             )
-        }
+        })
         // Any teardown before the last frame is a user dismissal (swipe / edge /
         // ESC). Completion sets `completed` first, so it reports only once there.
         .onDisappear {
@@ -351,24 +377,25 @@ private struct InlineStoryOverlayContent: View {
         currentIndex = max(currentIndex - 1, 0)
     }
 
-    private func handleCTA(_ action: StoryCtaAction?) {
-        let label = currentItem?.ctaText.map { interpolate($0, context: variables) }
-        let actionUrl = action?.url.map { interpolate($0, context: variables) }
+    private func handleCTA(_ item: StoryItemConfig) {
+        let actions = item.actions
+        let reportedAction = actions.first?.resolved(with: variables)
+        let label = item.ctaText.map { interpolate($0, context: variables) }
         SDKInstance.shared.reportStoryStepClicked(
             state.payload,
             itemIndex: currentIndex + 1,
             ctaLabel: label,
-            actionType: action?.type,
-            actionUrl: actionUrl
+            actionType: reportedAction?.analyticsType,
+            actionUrl: reportedAction?.analyticsURL
         )
-        switch action?.type {
-        case "deepLink", "openUrl":
-            if let urlString = actionUrl, let url = URL(string: urlString) {
-                UIApplication.shared.open(url)
-            }
-            SDKInstance.shared.controller.dismissStoryOverlay()
-        default:
-            SDKInstance.shared.controller.dismissStoryOverlay()
+        Task {
+            await SDKInstance.shared.executeActionFlow(
+                actions,
+                variables: variables,
+                localActionExecutor: LocalActionExecutor(
+                    dismiss: { SDKInstance.shared.controller.dismissStoryOverlay() }
+                )
+            )
         }
     }
 }
@@ -448,10 +475,11 @@ private struct InlineStoryVideoView: View {
         }
         .task(id: "\(urlString)-\(looping)-\(muted)") {
             guard let url = URL(string: urlString) else { return }
-            // DigiaVideoPlaybackBundle.make streams via a resource-loader that
-            // forces the content type, so videos served with a non-video
-            // Content-Type (e.g. raw.githubusercontent.com) still play —
-            // matching Android's ExoPlayer. See DigiaVideoStreaming.
+            tearDownPlayback()
+
+            // DigiaVideoPlaybackBundle overrides an incorrect server MIME type
+            // while leaving HTTP transport/range handling to AVFoundation on
+            // supported OS versions. See DigiaVideoStreaming.
             let nextBundle = DigiaVideoPlaybackBundle.make(url: url, looping: looping)
             nextBundle.player.isMuted = muted
 
@@ -460,8 +488,8 @@ private struct InlineStoryVideoView: View {
                 timeObserver = nextBundle.player.addPeriodicTimeObserver(
                     forInterval: interval,
                     queue: .main
-                ) { time in
-                    guard let item = nextBundle.player.currentItem else { return }
+                ) { [weak player = nextBundle.player] time in
+                    guard let item = player?.currentItem else { return }
                     let duration = item.duration.seconds
                     guard duration.isFinite, duration > 0 else { return }
                     onProgress(min(max(time.seconds / duration, 0), 1))
@@ -497,18 +525,37 @@ private struct InlineStoryVideoView: View {
             nextBundle.player.play()
         }
         .onDisappear {
-            if let timeObserver {
-                bundle?.player.removeTimeObserver(timeObserver)
-            }
-            if let endObserver {
-                NotificationCenter.default.removeObserver(endObserver)
-            }
-            if let failObserver {
-                NotificationCenter.default.removeObserver(failObserver)
-            }
-            bufferingObserver?.invalidate()
-            bundle?.player.pause()
+            tearDownPlayback()
         }
+    }
+
+    private func tearDownPlayback() {
+        guard let bundle else { return }
+
+        if let timeObserver {
+            bundle.player.removeTimeObserver(timeObserver)
+        }
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+        }
+        if let failObserver {
+            NotificationCenter.default.removeObserver(failObserver)
+        }
+        bufferingObserver?.invalidate()
+
+        bundle.looper?.disableLooping()
+        bundle.player.pause()
+        if let queuePlayer = bundle.player as? AVQueuePlayer {
+            queuePlayer.removeAllItems()
+        } else {
+            bundle.player.replaceCurrentItem(with: nil)
+        }
+
+        timeObserver = nil
+        endObserver = nil
+        failObserver = nil
+        bufferingObserver = nil
+        self.bundle = nil
     }
 }
 
@@ -525,7 +572,10 @@ private struct InlineStoryPlayerLayer: UIViewRepresentable {
     func updateUIView(_ uiView: InlineStoryPlayerContainer, context _: Context) {
         uiView.playerLayer.player = player
         uiView.playerLayer.videoGravity = gravity
-        player.play()
+    }
+
+    static func dismantleUIView(_ uiView: InlineStoryPlayerContainer, coordinator _: Void) {
+        uiView.playerLayer.player = nil
     }
 }
 
@@ -570,7 +620,7 @@ private struct StoryProgressIndicator: View {
 
     private func backgroundColor(for index: Int) -> Color {
         if index < currentIndex {
-            return Color(hex: config.completedColor) ?? Color.white.opacity(0.67)
+            return Color(hex: config.activeColor) ?? Color.white.opacity(0.67)
         }
         return Color(hex: config.disabledColor) ?? Color.white.opacity(0.34)
     }
@@ -584,7 +634,13 @@ private struct StoryCTAButton: View {
     var body: some View {
         Button(action: action) {
             Text(interpolate(item.ctaText ?? "", context: variables))
-                .font(.system(size: 16, weight: .semibold))
+                .font(
+                    Font(SDKInstance.shared.font.resolve(
+                        size: 16,
+                        weight: item.ctaFontWeight,
+                        italic: false
+                    ))
+                )
                 .foregroundColor(Color(hex: item.ctaTextColor) ?? .white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 12)

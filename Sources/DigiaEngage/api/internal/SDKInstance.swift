@@ -10,7 +10,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     @Published private(set) var isHostMounted = false
 
     private var activePlugin: DigiaCEPPlugin?
-    private(set) var fontFactory: DUIFontFactory = DefaultFontFactory()
+    private let hostActionExecutor = HostActionExecutor()
+    private lazy var actionExecutor = EngageActionExecutor(
+        hostActionExecutor: hostActionExecutor
+    )
+    private(set) var font = DigiaFont()
     /// Mirrors Android's `ScreenTracker`: the last screen name reported via
     /// `Digia.setCurrentScreen`, forwarded to the active plugin and read into
     /// analytics events (`screenName`).
@@ -59,24 +63,23 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 getCampaign: { [weak self] key in self?.campaignStore.find(key) }
             )
         )
-        // Forward overlay CTA actions to the active CEP plugin (native open is the
-        // renderer's fallback when no plugin handles it). Mirrors Android's wiring.
         controller.onAction = { [weak self] actionType, url, payload in
             self?.activePlugin?.notifyAction(actionType: actionType, url: url, payload: payload) ?? false
+        }
+        hostActionExecutor.setLegacyActionHandler { [weak self] actionType, url in
+            guard let self, let payload = controller.activeNudge?.payload else { return false }
+            return controller.onAction?(actionType, url, payload) ?? false
         }
     }
 
     func initialize(_ config: DigiaConfig) async throws {
+        hostActionExecutor.configure(config.actionHandlers)
         guard self.config == nil else { return }
         self.config = config
         DigiaLog.configure(config.logLevel)
         DigiaEndpoints.configure(config)
 
-        if let family = config.fontFamily?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !family.isEmpty
-        {
-            fontFactory = ConfiguredFontFactory(fontFamily: family)
-        }
+        font = DigiaFont(fontFamily: config.fontFamily)
 
         if config.wrapperBinding == "react_native" {
             // RN fetches campaigns itself (it needs the same response to render
@@ -95,6 +98,30 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             logVerbose("CampaignFetcher failed: \(error)")
         }
         completeInitialization(campaigns)
+    }
+
+    func executeActionFlow(
+        _ actions: [EngageAction],
+        variables: VariableContext?,
+        localActionExecutor: LocalActionExecutor
+    ) async {
+        await actionExecutor.executeActionFlow(
+            actions,
+            variables: variables,
+            localActionExecutor: localActionExecutor
+        )
+    }
+
+    func setCustomKVHandler(_ handler: CustomKVHandler?) {
+        hostActionExecutor.setCustomKVHandler(handler)
+    }
+
+    func setDeepLinkHandler(_ handler: DeepLinkHandler?) {
+        hostActionExecutor.setDeepLinkHandler(handler)
+    }
+
+    func setOpenURLHandler(_ handler: OpenURLHandler?) {
+        hostActionExecutor.setOpenURLHandler(handler)
     }
 
     private func completeInitialization(_ campaigns: [CampaignModel]) {
@@ -157,13 +184,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func setCurrentScreen(_ name: String) {
-        logVerbose("Screen: \(name)")
-        _currentScreen = name
-        activePlugin?.forwardScreen(name)
-    }
-
-    func registerFontFactory(_ factory: DUIFontFactory) {
-        fontFactory = factory
+        let screenName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        _currentScreen = screenName.isEmpty ? nil : screenName
+        DigiaLog.warning("[SDKInstance] Current screen set: \(_currentScreen ?? "<unset>")")
+        activePlugin?.forwardScreen(screenName)
     }
 
     func registerPlaceholderForSlot(propertyID: String) -> Int? {
@@ -203,6 +227,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private func routeByCampaignKey(_ key: String, payload: CEPTriggerPayload) -> Bool {
         guard let campaign = campaignStore.find(key) else {
             logError("routeByCampaignKey: no campaign found for key '\(key)'")
+            return false
+        }
+
+        if !campaign.targetScreenNames.isEmpty
+            && !campaign.targetScreenNames.contains(_currentScreen ?? "")
+        {
+            DigiaLog.warning(
+                "[SDKInstance] Campaign dropped — screen not targeted: "
+                    + "campaignKey=\(key) currentScreen=\(_currentScreen ?? "<unset>") "
+                    + "targetScreenNames=\(campaign.targetScreenNames)"
+            )
             return false
         }
 
@@ -455,7 +490,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             campaignId: campaignId,
             survey: state.config,
             answers: answers,
-            startedAt: state.startedAt
+            startedAt: state.startedAt,
+            userId: analyticsService?.userId
         )
     }
 
@@ -486,6 +522,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func markInitializedForTesting(with config: DigiaConfig) {
         self.config = config
+        hostActionExecutor.configure(config.actionHandlers)
     }
 
     func setCampaignsForTesting(_ campaigns: [CampaignModel]) {
@@ -501,10 +538,22 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         analyticsService?.clearUserId()
     }
 
+    /// Removes inline content (carousel/story/payload) for each key in `placementKeys`.
+    func clearInlineContent(_ placementKeys: [String]) {
+        for key in placementKeys {
+            inlineController.dismissCampaign(key)
+        }
+    }
+
+    /// Clears inline content (carousel/story/payload) across every placement.
+    func clearAllInlineContent() {
+        inlineController.clear()
+    }
+
     // MARK: - Nudge lifecycle
     //
     // Impression and Dismissed go to both CEP and Digia analytics (toBoth); a
-    // primary-button Click is a Digia-only engagement signal (toDigia), matching
+    // CTA Click is a Digia-only engagement signal (toDigia), matching
     // Android's NudgeNodeRenderer.
 
     func reportNudgeImpression() {
@@ -587,8 +636,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     /// A carousel item (or its CTA) was tapped.
-    func reportCarouselStepClicked(payload: CEPTriggerPayload, itemIndex: Int, actionUrl: String?) {
-        let actionType = actionUrl.map { _ in "deeplink" }
+    func reportCarouselStepClicked(payload: CEPTriggerPayload, itemIndex: Int, action: EngageAction?) {
+        let actionType = action?.analyticsType
+        let actionUrl = action?.analyticsURL
         // The first item tap also counts as an experience-level engagement click (once).
         events.digiaExperienceClickedOnce(
             payload: payload,
@@ -596,7 +646,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
         events.toDigia(
             CarouselEvent.StepClicked(
-                itemIndex: itemIndex, actionType: actionType, actionUrl: actionUrl),
+                itemIndex: itemIndex,
+                actionType: actionType,
+                actionUrl: actionUrl
+            ),
             payload: payload
         )
     }
@@ -659,6 +712,24 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId)
             ),
             payload: payload
+        )
+    }
+
+    func previousGuide() {
+        guideOrchestrator.previous()
+    }
+
+    func reportGuideStepClicked(actionType: String?, actionUrl: String?, ctaLabel: String?) {
+        guard let state = guideOrchestrator.state, let step = state.currentStep else { return }
+        events.toDigia(
+            GuideEvent.StepClicked(
+                itemIndex: state.stepIndex + 1,
+                elementId: step.anchorKey,
+                ctaLabel: ctaLabel,
+                actionType: actionType,
+                actionUrl: actionUrl
+            ),
+            payload: state.payload
         )
     }
 
@@ -792,9 +863,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         analyticsService = nil
         frequencyManager = nil
         config = nil
+        hostActionExecutor.clearHandlers()
         sdkState = .notInitialized
         isHostMounted = false
-        fontFactory = DefaultFontFactory()
+        font = DigiaFont()
         campaignStore.clear()
         controller.dismissNudge()
         controller.dismissStoryOverlay()

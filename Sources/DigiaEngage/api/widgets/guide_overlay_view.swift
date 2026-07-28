@@ -104,7 +104,9 @@ private struct GuideStepOverlay: View {
                         GeometryReader { g in
                             Color.clear
                                 .onAppear { bubbleHeight = g.size.height }
-                                .onChange(of: g.size.height) { _, newValue in bubbleHeight = newValue }
+                                // Old-value param is unused, so the single-value overload
+                                // (available since iOS 14, unlike the two-param one) works as-is.
+                                .onChange(of: g.size.height) { newValue in bubbleHeight = newValue }
                         }
                     )
                     .frame(maxWidth: CGFloat(config.bubble.maxWidthDp))
@@ -130,17 +132,35 @@ private struct GuideStepOverlay: View {
         VStack(alignment: .leading, spacing: 4) {
             if let title = config.content.title, !title.text.isEmpty {
                 Text(interpolate(title.text, context: variables))
-                    .font(.system(size: CGFloat(title.fontSize), weight: .bold))
+                    .font(
+                        Font(SDKInstance.shared.font.resolve(
+                            size: Double(title.fontSize),
+                            weight: title.fontWeight,
+                            italic: false
+                        ))
+                    )
                     .foregroundColor(guideColor(title.textColor, fallback: .white))
             }
             if let bodyText = config.content.body, !bodyText.text.isEmpty {
                 Text(interpolate(bodyText.text, context: variables))
-                    .font(.system(size: CGFloat(bodyText.fontSize)))
+                    .font(
+                        Font(SDKInstance.shared.font.resolve(
+                            size: Double(bodyText.fontSize),
+                            weight: bodyText.fontWeight,
+                            italic: false
+                        ))
+                    )
                     .foregroundColor(guideColor(bodyText.textColor, fallback: .white.opacity(0.8)))
             }
             if config.content.stepIndicator.visible, totalSteps > 1 {
                 Text("\(stepIndex + 1) / \(totalSteps)")
-                    .font(.system(size: 12))
+                    .font(
+                        Font(SDKInstance.shared.font.resolve(
+                            size: 12,
+                            weight: config.content.stepIndicator.fontWeight,
+                            italic: false
+                        ))
+                    )
                     .foregroundColor(guideColor(config.content.stepIndicator.color, fallback: .white.opacity(0.67)))
             }
             if !config.actions.isEmpty {
@@ -149,7 +169,13 @@ private struct GuideStepOverlay: View {
                     ForEach(Array(config.actions.enumerated()), id: \.offset) { _, action in
                         Button(action: { handleAction(action) }) {
                             Text(interpolate(action.label, context: variables))
-                                .font(.system(size: 14))
+                                .font(
+                                    Font(SDKInstance.shared.font.resolve(
+                                        size: action.fontSize,
+                                        weight: action.fontWeight,
+                                        italic: false
+                                    ))
+                                )
                                 .foregroundColor(guideColor(action.textColor, fallback: bubbleBackground))
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 6)
@@ -169,9 +195,23 @@ private struct GuideStepOverlay: View {
     }
 
     private func handleAction(_ action: GuideAction) {
-        switch action.actionType {
-        case .dismiss, .next: onAdvance()
-        case .prev: break
+        guard let state = SDKInstance.shared.guideOrchestrator.state else { return }
+        let reportedAction = action.actions.first?.resolved(with: variables)
+        SDKInstance.shared.reportGuideStepClicked(
+            actionType: reportedAction?.analyticsType,
+            actionUrl: reportedAction?.analyticsURL,
+            ctaLabel: interpolate(action.label, context: variables)
+        )
+        Task {
+            await SDKInstance.shared.executeActionFlow(
+                action.actions,
+                variables: variables,
+                localActionExecutor: LocalActionExecutor(
+                    dismiss: onDismiss,
+                    next: onAdvance,
+                    previous: { SDKInstance.shared.previousGuide() }
+                )
+            )
         }
     }
 }

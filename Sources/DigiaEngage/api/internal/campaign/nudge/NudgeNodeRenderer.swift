@@ -2,7 +2,6 @@ import AVFoundation
 import AVKit
 @_implementationOnly import Lottie
 @_implementationOnly import SDWebImageSwiftUI
-import StoreKit
 import SwiftUI
 import UIKit
 
@@ -15,7 +14,7 @@ struct NudgeColumnContent: View {
     var body: some View {
         VStack(
             alignment: column.crossAxisAlignment.horizontalAlignment,
-            spacing: column.mainAxisAlignment == .start ? column.spacing : 0
+            spacing: 0
         ) {
             ForEach(Array(column.children.enumerated()), id: \.offset) { _, node in
                 NudgeNodeView(node: node, onDismiss: onDismiss)
@@ -101,7 +100,7 @@ private struct NudgeTextView: View {
     }
 
     private func runAttributes(_ style: NudgeSpanStyle?) -> [NSAttributedString.Key: Any] {
-        let font = SDKInstance.shared.fontFactory.getDefaultUIFont(
+        let font = SDKInstance.shared.font.resolve(
             size: Double(style?.fontSize ?? node.fontSize),
             weight: style?.fontWeight ?? node.fontWeight,
             italic: style?.italic ?? false
@@ -232,11 +231,10 @@ private struct NudgeButtonView: View {
         Button(action: handleTap) {
             Text(interpolate(node.label, context: variables))
                 .font(
-                    SDKInstance.shared.fontFactory.getDefaultFont(
+                    Font(SDKInstance.shared.font.resolve(
                         size: Double(node.fontSize), weight: node.fontWeight, italic: false
-                    )
+                    ))
                 )
-                .fontWeight(node.fontWeight)
                 .foregroundStyle(filled ? node.textColor : node.background)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
@@ -256,73 +254,22 @@ private struct NudgeButtonView: View {
     }
 
     private func handleTap() {
-        // A primary-button click is a Digia-only engagement signal (matches
-        // Android's NudgeNodeRenderer) — it is not forwarded to the CEP plugin.
         if node.isPrimary {
-            let action = node.actions.first
+            let action = node.actions.first?.resolved(with: variables)
             SDKInstance.shared.emitNudgeClick(
                 elementId: "cta_primary",
                 ctaLabel: node.label,
-                actionType: Self.actionType(for: action),
-                actionUrl: Self.actionUrl(for: action),
+                actionType: action?.analyticsType,
+                actionUrl: action?.analyticsURL,
                 ctaRole: "primary"
             )
         }
-        for action in node.actions {
-            switch action {
-            case .dismiss:
-                onDismiss()
-            case .openUrl(let url), .openDeeplink(let url):
-                // Consult the CEP plugin first; only fall back to a native open
-                // when no plugin handled the action (mirrors Android).
-                let payload = SDKInstance.shared.controller.activeNudge?.payload
-                let handled =
-                    payload.flatMap {
-                        SDKInstance.shared.controller.onAction?("deep_link", url, $0)
-                    } ?? false
-                if !handled, let u = URL(string: url) {
-                    UIApplication.shared.open(u)
-                }
-            case .copyToClipboard(let text):
-                UIPasteboard.general.string = interpolate(text, context: variables)
-            case .share(let text):
-                let activity = UIActivityViewController(
-                    activityItems: [interpolate(text, context: variables)],
-                    applicationActivities: nil
-                )
-                ViewControllerUtil.present(activity)
-            case .requestReview:
-                requestAppStoreReview()
-            }
-        }
-    }
-
-    /// Requests the App Store review prompt (`AppStore.requestReview`). Fire-and-forget
-    /// by design: the API is quota-limited and never reports whether the prompt was
-    /// shown or how the user rated, so a missing window scene is only logged.
-    private func requestAppStoreReview() {
-        guard let scene = ViewControllerUtil.findWindowScene() else {
-            DigiaLog.warning("[NudgeButtonView] requestReview: no window scene; skipping")
-            return
-        }
-        Task { await AppStore.requestReview(in: scene) }
-    }
-
-    private static func actionType(for action: NudgeAction?) -> String? {
-        switch action {
-        case .openUrl: return "url"
-        case .openDeeplink: return "deeplink"
-        case .dismiss: return "dismiss"
-        case .copyToClipboard, .share: return "custom"
-        case .requestReview: return "request_review"
-        case nil: return nil
-        }
-    }
-
-    private static func actionUrl(for action: NudgeAction?) -> String? {
-        switch action {
-        case .openUrl(let url), .openDeeplink(let url): return url
-        default: return nil
+        Task {
+            await SDKInstance.shared.executeActionFlow(
+                node.actions,
+                variables: variables,
+                localActionExecutor: LocalActionExecutor(dismiss: onDismiss)
+            )
         }
     }
 }
@@ -527,7 +474,11 @@ private struct NudgeVideoView: View {
                             Image(systemName: "exclamationmark.triangle")
                                 .font(.system(size: 28))
                             Text("Video failed")
-                                .font(.system(size: 13))
+                                .font(
+                                    Font(SDKInstance.shared.font.resolve(
+                                        size: 13, weight: 400, italic: false
+                                    ))
+                                )
                         }
                         .foregroundStyle(.white)
                     case .ready:
@@ -610,12 +561,17 @@ private final class PlayerContainerView: UIView {
 
 // MARK: - Placeholder
 
+@MainActor
 private func nudgePlaceholder(label: String, height: CGFloat) -> some View {
     ZStack {
         RoundedRectangle(cornerRadius: 8)
             .fill(Color(hex: "#F1F1F5") ?? Color(.systemGray6))
         Text(label)
-            .font(.system(size: 11))
+            .font(
+                Font(SDKInstance.shared.font.resolve(
+                    size: 11, weight: 400, italic: false
+                ))
+            )
             .foregroundStyle(Color(hex: "#9A9AAD") ?? .secondary)
     }
     .frame(maxWidth: .infinity)

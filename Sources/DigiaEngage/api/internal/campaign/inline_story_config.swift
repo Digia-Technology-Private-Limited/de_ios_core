@@ -20,24 +20,45 @@ struct StoryItemConfig: Equatable {
     let duration: Int?
     var ctaEnabled: Bool = false
     var ctaText: String?
+    var ctaFontWeight: Int = 600
     var ctaTextColor: String = "#FFFFFF"
     var ctaBackgroundColor: String = "#4945FF"
     var ctaCornerRadius: Int = 8
     var ctaAction: StoryCtaAction?
+    var actions: [EngageAction] = []
 
     static func fromJson(_ json: [String: Any]) -> StoryItemConfig? {
         guard let url = json.nonBlankString("url") else { return nil }
+        let ctaActionJson = json.object("ctaAction")
+        let actions = ctaActionJson?["steps"] != nil
+            ? EngageActionParser().parse(ctaActionJson)
+            : parseLegacyStoryActions(ctaActionJson)
+        let ctaAction = ctaActionJson.map(StoryCtaAction.fromJson)
         return StoryItemConfig(
             type: json.string("type", default: "image"),
             url: url,
             duration: json.positiveInt("duration"),
             ctaEnabled: json.bool("ctaEnabled", default: false),
             ctaText: json.nonBlankString("ctaText"),
+            ctaFontWeight: DigiaFontWeight.value(json["ctaFontWeight"], default: 600),
             ctaTextColor: json.nonBlankString("ctaTextColor") ?? "#FFFFFF",
             ctaBackgroundColor: json.nonBlankString("ctaBackgroundColor") ?? "#4945FF",
             ctaCornerRadius: json.int("ctaCornerRadius", default: 8),
-            ctaAction: json.object("ctaAction").map { StoryCtaAction.fromJson($0) }
+            ctaAction: ctaAction,
+            actions: actions
         )
+    }
+
+    private static func parseLegacyStoryActions(
+        _ ctaAction: [String: Any]?
+    ) -> [EngageAction] {
+        let type = ctaAction?.string("type", default: "dismiss") ?? "dismiss"
+        let url = ctaAction?.nonBlankString("url")
+        return switch type {
+        case "deepLink": [url.map(EngageAction.openDeeplink), .dismiss].compactMap { $0 }
+        case "openUrl": [url.map(EngageAction.openUrl), .dismiss].compactMap { $0 }
+        default: [.dismiss]
+        }
     }
 }
 
@@ -61,7 +82,6 @@ struct StoryCardConfig: Equatable {
 
 struct StoryIndicatorDisplayConfig: Equatable {
     var activeColor: String = "#FFFFFF"
-    var completedColor: String = "#AAAAAA"
     var disabledColor: String = "#555555"
     var height: Double = 3.5
     var borderRadius: Double = 4
@@ -73,7 +93,6 @@ struct StoryIndicatorDisplayConfig: Equatable {
         guard let json else { return StoryIndicatorDisplayConfig() }
         return StoryIndicatorDisplayConfig(
             activeColor: json.nonBlankString("activeColor") ?? "#FFFFFF",
-            completedColor: json.nonBlankString("completedColor") ?? "#AAAAAA",
             disabledColor: json.nonBlankString("disabledColor") ?? "#555555",
             height: json.double("height", default: 3.5),
             borderRadius: json.double("borderRadius", default: 4),

@@ -10,9 +10,11 @@ Digia Engage is an iOS SDK for rendering server-driven, Digia-managed experience
 
 |       | Minimum |
 | ----- | ------- |
-| iOS   | 17.0    |
-| Swift | 7.0    |
+| iOS   | 15.0    |
+| Swift | 6.0     |
 | Xcode | 16.0    |
+
+The SDK builds and links against a deployment target as low as iOS 15.0, but its functionality is active only on iOS 17.0 and above — on iOS 15 and 16 every entry point safely no-ops. Deploy to iOS 17.0+ if you need Digia Engage to render.
 
 ## Installation
 
@@ -24,7 +26,7 @@ Add the package to your `Package.swift`:
 dependencies: [
     .package(
         url: "https://github.com/Digia-Technology-Private-Limited/digia_engage_ios.git",
-        from: "3.3.0"
+        from: "3.6.0"
     ),
 ]
 ```
@@ -47,7 +49,7 @@ Or add it directly in Xcode via **File → Add Package Dependencies** and enter 
 DigiaEngage is not published to the CocoaPods trunk. To use it with CocoaPods, point your `Podfile` at a local checkout:
 
 ```ruby
-pod 'DigiaEngage', '~> 3.2.0'
+pod 'DigiaEngage', '~> 3.6.0'
 ```
 
 Then run:
@@ -66,6 +68,32 @@ import DigiaEngage
 try await Digia.initialize(
     DigiaConfig(apiKey: "YOUR_API_KEY")
 )
+```
+
+### Handle host actions
+
+Register only the actions your app owns. When a handler is present, Digia Engage does not run its
+default behavior for that action.
+
+```swift
+try await Digia.initialize(
+    DigiaConfig(
+        apiKey: "YOUR_API_KEY",
+        actionHandlers: DigiaActionHandlers(
+            customKV: { payload in handleCustomAction(payload) },
+            deepLink: { url in navigate(to: url) },
+            openURL: { url in openInAppBrowser(url) }
+        )
+    )
+)
+```
+
+Handlers can be replaced after initialization. Passing `nil` clears the override, so deep links
+and URLs return to SDK handling while Custom KV returns to a no-op.
+
+```swift
+Digia.setCustomKVHandler { payload in handleCustomAction(payload) }
+Digia.setCustomKVHandler(nil) // for example, when leaving the owning screen
 ```
 
 ### Render an experience
