@@ -611,7 +611,7 @@ private struct StoryOverlayButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: CGFloat(config.size) * 0.5, weight: .semibold))
+                .font(.system(size: CGFloat(config.size) * 0.5, weight: .regular))
                 .foregroundStyle(Color(hex: config.iconColor) ?? .white)
                 .frame(width: CGFloat(config.size), height: CGFloat(config.size))
                 .background(Color(hex: config.backgroundColor) ?? .black)
@@ -619,8 +619,8 @@ private struct StoryOverlayButton: View {
         }
         .buttonStyle(.plain)
         .frame(
-            width: max(CGFloat(config.size), 44),
-            height: max(CGFloat(config.size), 44)
+            width: max(CGFloat(config.size), 48),
+            height: max(CGFloat(config.size), 48)
         )
         .accessibilityLabel(accessibilityLabel)
     }
