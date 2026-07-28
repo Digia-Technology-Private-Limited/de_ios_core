@@ -42,7 +42,9 @@ private struct StoryThumbnailCard: View {
 
     var body: some View {
         ZStack {
-            Color(red: 0.10, green: 0.10, blue: 0.10)
+            // Contained media leaves letterbox space. Keep that surface
+            // opaque black across iOS, Android, and Flutter.
+            Color.black
             if item.type == "video" {
                 InlineStoryVideoView(
                     urlString: item.url,

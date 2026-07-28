@@ -38,8 +38,10 @@ struct InlineStoryMediaSizingTests {
         #expect(try item(type: "image", fit: "fill").boxFit == .fill)
         #expect(try item(type: "image", fit: "contain").boxFit == .contain)
         #expect(try item(type: "video", fit: "contain").boxFit == .contain)
+        #expect(try item(type: "video", fit: "cover").boxFit == .cover)
         #expect(try item(type: "video", fit: "fill").boxFit == .cover)
         #expect(try item(type: "video", fit: "future").boxFit == .cover)
+        #expect(try item(type: "video", fit: nil).boxFit == .cover)
         #expect(try item(type: "image", fit: "future").boxFit == .cover)
         #expect(try item(type: "image", fit: nil).boxFit == .cover)
     }
