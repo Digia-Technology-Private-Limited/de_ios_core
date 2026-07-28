@@ -8,6 +8,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     @Published private(set) var config: DigiaConfig?
     @Published private(set) var sdkState: SDKState = .notInitialized
     @Published private(set) var isHostMounted = false
+    @Published private(set) var pageCaptureStatus = PageCaptureStatus()
 
     private var activePlugin: DigiaCEPPlugin?
     private let hostActionExecutor = HostActionExecutor()
@@ -41,6 +42,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Registry, when the debug-only "recording mode" toggle is on. See
     /// `ComponentRegistryService`.
     private let componentRegistry: ComponentRegistryService
+    private let pageCaptureEngine = PageCaptureEngine()
     /// Whether the host app is a debug build, resolved once at `initialize`.
     /// Gates the component registry and `DigiaDebugSettingsView`.
     private(set) var isDebugBuild = false
@@ -208,6 +210,52 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         DigiaLog.warning("[SDKInstance] Current screen set: \(_currentScreen ?? "<unset>")")
         componentRegistry.recordPage(screenName)
         activePlugin?.forwardScreen(screenName)
+        if let target = guideOrchestrator.state?.currentStep?.semanticTarget,
+           target.pageKey != _currentScreen {
+            guideOrchestrator.dismiss()
+        }
+    }
+
+    var currentScreen: String? { _currentScreen }
+
+    func captureCurrentPage() {
+        guard isDebugBuild else {
+            pageCaptureStatus = PageCaptureStatus(
+                state: "error",
+                message: "Capture is available only in debug builds."
+            )
+            return
+        }
+        guard componentRegistry.isEnabled else {
+            pageCaptureStatus = PageCaptureStatus(
+                state: "error",
+                message: "Turn on Sync before capturing."
+            )
+            return
+        }
+        guard let pageKey = _currentScreen, !pageKey.isEmpty else {
+            pageCaptureStatus = PageCaptureStatus(
+                state: "error",
+                message: "Call Digia.setCurrentScreen() first."
+            )
+            return
+        }
+        pageCaptureStatus = PageCaptureStatus(state: "capturing", message: "Capturing \(pageKey)…")
+        Task {
+            do {
+                let capture = try await pageCaptureEngine.capture(pageKey: pageKey)
+                let uploaded = await componentRegistry.uploadPageCapture(capture)
+                let count = (capture["nodes"] as? [[String: Any]])?.count ?? 0
+                pageCaptureStatus = uploaded
+                    ? PageCaptureStatus(
+                        state: "success",
+                        message: "Captured \(pageKey) with \(count) semantic nodes."
+                    )
+                    : PageCaptureStatus(state: "error", message: "Capture upload failed.")
+            } catch {
+                pageCaptureStatus = PageCaptureStatus(state: "error", message: error.localizedDescription)
+            }
+        }
     }
 
     /// Called the first time an anchor key registers (`AnchorRegistry.register`).
@@ -300,7 +348,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             events.toCep(.impressed, payload: payload)
             events.toCep(.dismissed, payload: payload)
             return true
-        case .guide:
+        case .guide(let guide):
+            if guide.steps.first?.semanticTarget != nil {
+                dwellTracker.markViewed(payload.cepCampaignId)
+                guideOrchestrator.start(campaign, payload: payload)
+                return true
+            }
             if let renderViaJs = onGuideRenderRequest {
                 // RN: native owns capping, JS owns rendering. Gate here; the
                 // counter is bumped later on the guide's "Digia Experience

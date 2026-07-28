@@ -10,23 +10,45 @@ struct GuideOverlayView: View {
     @ObservedObject private var anchors = AnchorRegistry.shared
 
     var body: some View {
-        // Observing `anchors` re-resolves the anchor rect when an anchor
-        // registers after a guide has started.
         if let state = orchestrator.state,
-           let step = state.currentStep,
-           let anchorRect = AnchorRegistry.shared.getRect(for: step.anchorKey) {
-            GuideStepOverlay(
-                step: step,
-                stepIndex: state.stepIndex,
-                totalSteps: state.steps.count,
-                anchorRect: anchorRect,
-                cornerRadius: AnchorRegistry.shared.getCornerRadius(for: step.anchorKey),
-                onAdvance: { orchestrator.advance() },
-                onDismiss: { SDKInstance.shared.dismissGuide() }
-            )
-            .environment(\.digiaVariables, state.variableContext)
-            .id(state.stepIndex)
+           let step = state.currentStep {
+            TimelineView(.animation) { _ in
+                if let anchorRect = resolveRect(step) {
+                    GuideStepOverlay(
+                        step: step,
+                        stepIndex: state.stepIndex,
+                        totalSteps: state.steps.count,
+                        anchorRect: anchorRect,
+                        cornerRadius: step.semanticTarget == nil
+                            ? AnchorRegistry.shared.getCornerRadius(for: step.anchorKey)
+                            : CGFloat(step.widgetConfig.overlay.cutout.cornerRadius),
+                        onAdvance: { orchestrator.advance() },
+                        onDismiss: { SDKInstance.shared.dismissGuide() }
+                    )
+                    .environment(\.digiaVariables, state.variableContext)
+                    .id(state.stepIndex)
+                }
+            }
         }
+    }
+
+    private func resolveRect(_ step: GuideStepModel) -> CGRect? {
+        guard let target = step.semanticTarget else {
+            return AnchorRegistry.shared.getRect(for: step.anchorKey)
+        }
+        guard let window = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)
+        else { return nil }
+        if case let .resolved(rect) = SemanticTargetResolver.resolve(
+            root: window,
+            currentPageKey: SDKInstance.shared.currentScreen,
+            target: target
+        ) {
+            return rect
+        }
+        return nil
     }
 }
 
@@ -195,7 +217,7 @@ private struct GuideStepOverlay: View {
     }
 
     private func handleAction(_ action: GuideAction) {
-        guard let state = SDKInstance.shared.guideOrchestrator.state else { return }
+        guard SDKInstance.shared.guideOrchestrator.state != nil else { return }
         let reportedAction = action.actions.first?.resolved(with: variables)
         SDKInstance.shared.reportGuideStepClicked(
             actionType: reportedAction?.analyticsType,
@@ -257,11 +279,32 @@ private struct GuideSpotlightScrim: View {
 
         Canvas { context, size in
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color.opacity(alpha)))
-            context.blendMode = .clear
             let path = cutout.shape == "rect"
                 ? Path(hole)
                 : Path(roundedRect: hole, cornerRadius: radius)
-            context.fill(path, with: .color(.black))
+            var clearContext = context
+            clearContext.blendMode = .clear
+            clearContext.fill(path, with: .color(.black))
+
+            if cutout.glowWidth > 0 {
+                var outside = Path(CGRect(origin: .zero, size: size))
+                outside.addPath(path)
+                var glowContext = context
+                glowContext.clip(to: outside, style: FillStyle(eoFill: true))
+                glowContext.addFilter(.blur(radius: 1.5))
+                glowContext.stroke(
+                    path,
+                    with: .color(guideColor(cutout.glowColor, fallback: .clear)),
+                    lineWidth: CGFloat(cutout.glowWidth)
+                )
+                var strokeContext = context
+                strokeContext.clip(to: outside, style: FillStyle(eoFill: true))
+                strokeContext.stroke(
+                    path,
+                    with: .color(guideColor(cutout.glowColor, fallback: .clear)),
+                    lineWidth: CGFloat(cutout.glowWidth)
+                )
+            }
         }
     }
 }

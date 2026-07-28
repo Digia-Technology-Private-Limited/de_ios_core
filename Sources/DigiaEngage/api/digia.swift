@@ -3,6 +3,11 @@ import UIKit
 import SwiftUI
 
 @MainActor
+final class DigiaDebugSettingsHostingController:
+    UIHostingController<DigiaDebugSettingsView>
+{}
+
+@MainActor
 public enum Digia {
     /// Path suffix used to recognize the SDK's debug-settings deeplink. Digia
     /// doesn't own the host app's URL scheme, so this is a path convention the
@@ -36,7 +41,7 @@ public enum Digia {
             DigiaLog.warning("[Digia] presentDebugSettings() ignored — not a debug build.")
             return
         }
-        let host = UIHostingController(rootView: DigiaDebugSettingsView())
+        let host = DigiaDebugSettingsHostingController(rootView: DigiaDebugSettingsView())
         presenter.present(host, animated: true)
     }
 

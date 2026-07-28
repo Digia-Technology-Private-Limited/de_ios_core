@@ -90,6 +90,31 @@ final class ComponentRegistryService: ObservableObject {
         record(key: key, type: "slot", screenName: screenName)
     }
 
+    func uploadPageCapture(_ capture: [String: Any]) async -> Bool {
+        guard isEnabled, isDebugBuildFlag, let config, let deviceId,
+              let pageKey = capture["pageKey"] as? String,
+              let body = try? JSONSerialization.data(withJSONObject: capture),
+              body.count <= 8 * 1024 * 1024
+        else { return false }
+        let headers = [
+            "Content-Type": "application/json",
+            "x-digia-project-id": config.apiKey,
+            "x-digia-device-id": deviceId,
+        ]
+        do {
+            let status = try await sender.post(
+                url: DigiaEndpoints.recordPageCapture,
+                body: body,
+                headers: headers
+            )
+            DigiaLog.log("[ComponentRegistry] recordPageCapture HTTP \(status) (pageKey=\(pageKey))")
+            return (200...299).contains(status)
+        } catch {
+            DigiaLog.warning("[ComponentRegistry] recordPageCapture post failed: \(error)")
+            return false
+        }
+    }
+
     private func record(key: String, type: String, screenName: String?) {
         guard isEnabled, isDebugBuildFlag, let config, let deviceId else { return }
 

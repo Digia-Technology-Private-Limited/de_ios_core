@@ -23,4 +23,5 @@ enum DigiaEndpoints {
     static var session: String { "\(_baseUrl)/api/v1/engage/sdk/session" }
     static var submission: String { "\(_baseUrl)/api/v1/engage/sdk/recordSubmission" }
     static var recordComponents: String { "\(_baseUrl)/api/v1/engage/sdk/recordComponents" }
+    static var recordPageCapture: String { "\(_baseUrl)/api/v1/engage/sdk/recordPageCapture" }
 }

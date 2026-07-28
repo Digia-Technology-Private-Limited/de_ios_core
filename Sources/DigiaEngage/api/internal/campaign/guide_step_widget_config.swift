@@ -51,6 +51,8 @@ struct CutoutConfig: Equatable {
     let shape: String          // "rounded_rect"|"rect"|"circle"
     let cornerRadius: Double
     let padding: Double
+    let glowColor: String
+    let glowWidth: Double
 }
 
 struct OverlayConfig: Equatable {
@@ -105,34 +107,76 @@ struct GuideStepWidgetConfig: Equatable {
 
         let arrowObj = bubbleObj.object("arrow") ?? [:]
         let arrow = ArrowConfig(
-            visible: arrowObj.bool("visible", default: true),
-            preferredDirection: arrowObj.string("preferred_direction", default: "auto"),
-            size: arrowObj.int("size", default: 10),
-            color: color(arrowObj.string("color"), default: defaultArrowColor)
+            visible: arrowObj["visible"] != nil
+                ? arrowObj.bool("visible", default: true)
+                : json.bool("showArrow", default: true),
+            preferredDirection: arrowObj.nonBlankString("preferred_direction")
+                ?? flatArrowDirection(json.string("calloutPosition", default: "auto")),
+            size: arrowObj["size"] != nil
+                ? arrowObj.int("size", default: 10)
+                : json.int("arrowSize", default: 10),
+            color: color(
+                arrowObj.nonBlankString("color") ?? json.nonBlankString("arrowColor"),
+                default: json.string("calloutBackgroundColor", default: defaultArrowColor)
+            )
         )
 
         let bubble = BubbleConfig(
-            backgroundColor: color(bubbleObj.string("background_color"), default: defaultBubbleBackground),
-            cornerRadius: bubbleObj.double("corner_radius", default: 12),
-            paddingHorizontal: bubbleObj.double("padding_horizontal", default: 16),
-            paddingVertical: bubbleObj.double("padding_vertical", default: 12),
-            maxWidthDp: bubbleObj.double("max_width", default: 280),
-            elevation: bubbleObj.double("elevation", default: 6),
+            backgroundColor: color(
+                bubbleObj.nonBlankString("background_color")
+                    ?? json.nonBlankString("calloutBackgroundColor"),
+                default: defaultBubbleBackground
+            ),
+            cornerRadius: bubbleObj["corner_radius"] != nil
+                ? bubbleObj.double("corner_radius", default: 12)
+                : json.double("calloutCornerRadius", default: 12),
+            paddingHorizontal: bubbleObj["padding_horizontal"] != nil
+                ? bubbleObj.double("padding_horizontal", default: 16)
+                : json.double("calloutPadding", default: 16),
+            paddingVertical: bubbleObj["padding_vertical"] != nil
+                ? bubbleObj.double("padding_vertical", default: 12)
+                : json.double("calloutPadding", default: 16),
+            maxWidthDp: bubbleObj["max_width"] != nil
+                ? bubbleObj.double("max_width", default: 280)
+                : json.double("calloutMaxWidth", default: 280),
+            elevation: bubbleObj["elevation"] != nil
+                ? bubbleObj.double("elevation", default: 6)
+                : (json.bool("calloutShadow", default: true) ? 6 : 0),
             entranceAnimation: bubbleObj.string("entrance_animation", default: "elastic"),
             arrow: arrow
         )
 
         let cutoutObj = overlayObj.object("cutout") ?? [:]
         let cutout = CutoutConfig(
-            shape: cutoutObj.string("shape", default: "rounded_rect"),
-            cornerRadius: cutoutObj.double("corner_radius", default: 12),
-            padding: cutoutObj.double("padding", default: 8)
+            shape: cutoutObj.nonBlankString("shape")
+                ?? json.string("highlightShape", default: "rounded_rect"),
+            cornerRadius: cutoutObj["corner_radius"] != nil
+                ? cutoutObj.double("corner_radius", default: 12)
+                : json.double("highlightCornerRadius", default: 12),
+            padding: cutoutObj["padding"] != nil
+                ? cutoutObj.double("padding", default: 8)
+                : json.double("highlightPadding", default: 8),
+            glowColor: color(
+                cutoutObj.nonBlankString("glow_color")
+                    ?? json.nonBlankString("highlightGlowColor"),
+                default: "#4945FF"
+            ),
+            glowWidth: cutoutObj["glow_width"] != nil
+                ? cutoutObj.double("glow_width", default: 0)
+                : json.double("highlightGlowWidth", default: 0)
         )
 
         let overlay = OverlayConfig(
-            visible: overlayObj.bool("visible", default: false),
-            color: color(overlayObj.string("color"), default: defaultOverlayColor),
-            alpha: overlayObj.double("alpha", default: 0.6),
+            visible: overlayObj["visible"] != nil
+                ? overlayObj.bool("visible", default: false)
+                : json["overlayColor"] != nil || json["highlightShape"] != nil,
+            color: color(
+                overlayObj.nonBlankString("color") ?? json.nonBlankString("overlayColor"),
+                default: defaultOverlayColor
+            ),
+            alpha: overlayObj["alpha"] != nil
+                ? overlayObj.double("alpha", default: 0.6)
+                : json.double("overlayOpacity", default: 0.6),
             dismissOnTap: overlayObj.bool("dismiss_on_tap", default: false),
             entranceAnimation: overlayObj.string("entrance_animation", default: "fade"),
             cutout: cutout
@@ -217,6 +261,16 @@ struct GuideStepWidgetConfig: Equatable {
     private static func color(_ value: String?, default fallback: String) -> String {
         guard let value, !value.isEmpty else { return fallback }
         return value
+    }
+
+    private static func flatArrowDirection(_ placement: String) -> String {
+        switch placement {
+        case "above": return "bottom"
+        case "below": return "top"
+        case "left": return "end"
+        case "right": return "start"
+        default: return "auto"
+        }
     }
 
     private static func nestedText(

@@ -8,6 +8,8 @@ import SwiftUI
 /// visibility toggle; more debug controls can be added as rows here.
 @MainActor
 public struct DigiaDebugSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var sdk = SDKInstance.shared
     @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()
     @ObservedObject private var overlay = SDKInstance.shared.debugOverlayControllerSnapshot()
     @State private var showRestartHint = false
@@ -52,6 +54,23 @@ public struct DigiaDebugSettingsView: View {
                             set: { overlay.setVisible($0) }
                         )
                     )
+                }
+                Section {
+                    Text(sdk.currentScreen.map { "Current page: \($0)" } ?? "Current page is not set")
+                    Button(sdk.pageCaptureStatus.state == "capturing"
+                        ? "Capturing…"
+                        : "Capture current page") {
+                        dismiss()
+                        SDKInstance.shared.captureCurrentPage()
+                    }
+                    .disabled(
+                        !registry.isEnabled
+                            || sdk.currentScreen == nil
+                            || sdk.pageCaptureStatus.state == "capturing"
+                    )
+                    if let message = sdk.pageCaptureStatus.message {
+                        Text(message).font(.footnote).foregroundColor(.secondary)
+                    }
                 }
             }
             .navigationTitle("Digia Debug Settings")
