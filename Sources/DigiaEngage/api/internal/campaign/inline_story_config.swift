@@ -19,6 +19,7 @@ struct StoryItemConfig: Equatable {
     let url: String
     let duration: Int?
     var boxFit: StoryMediaFit = .cover
+    var thumbnailBoxFit: StoryMediaFit = .cover
     var ctaEnabled: Bool = false
     var ctaText: String?
     var ctaFontWeight: Int = 600
@@ -43,6 +44,10 @@ struct StoryItemConfig: Equatable {
             duration: json.positiveInt("duration"),
             boxFit: StoryMediaFit.fromWireValue(
                 json.string("boxFit", default: "cover"),
+                mediaType: mediaType
+            ),
+            thumbnailBoxFit: StoryMediaFit.fromWireValue(
+                json.string("thumbnailBoxFit", default: "cover"),
                 mediaType: mediaType
             ),
             ctaEnabled: json.bool("ctaEnabled", default: false),

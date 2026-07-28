@@ -46,6 +46,21 @@ struct InlineStoryMediaSizingTests {
         #expect(try item(type: "image", fit: nil).boxFit == .cover)
     }
 
+    @Test("parses overlay and thumbnail fits independently")
+    func parsesIndependentMediaFits() throws {
+        let image = try item(type: "image", fit: "contain", thumbnailFit: "fill")
+        #expect(image.boxFit == .contain)
+        #expect(image.thumbnailBoxFit == .fill)
+
+        let video = try item(type: "video", fit: "contain", thumbnailFit: "cover")
+        #expect(video.boxFit == .contain)
+        #expect(video.thumbnailBoxFit == .cover)
+
+        let missingThumbnailFit = try item(type: "video", fit: "contain")
+        #expect(missingThumbnailFit.boxFit == .contain)
+        #expect(missingThumbnailFit.thumbnailBoxFit == .cover)
+    }
+
     @Test("maps image and video rendering modes")
     func mapsRenderingModes() {
         #expect(StoryMediaFit.cover.imageContentMode == .fill)
@@ -56,13 +71,20 @@ struct InlineStoryMediaSizingTests {
         #expect(StoryMediaFit.fill.videoGravity == .resizeAspectFill)
     }
 
-    private func item(type: String, fit: String?) throws -> StoryItemConfig {
+    private func item(
+        type: String,
+        fit: String?,
+        thumbnailFit: String? = nil
+    ) throws -> StoryItemConfig {
         var json: [String: Any] = [
             "type": type,
             "url": "https://cdn.example.com/story",
         ]
         if let fit {
             json["boxFit"] = fit
+        }
+        if let thumbnailFit {
+            json["thumbnailBoxFit"] = thumbnailFit
         }
         return try #require(StoryItemConfig.fromJson(json))
     }

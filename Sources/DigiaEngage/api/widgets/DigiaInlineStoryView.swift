@@ -50,10 +50,10 @@ private struct StoryThumbnailCard: View {
                     urlString: item.url,
                     looping: true,
                     muted: true,
-                    gravity: item.boxFit.videoGravity
+                    gravity: item.thumbnailBoxFit.videoGravity
                 )
             } else {
-                StoryRemoteImage(urlString: item.url, fit: item.boxFit)
+                StoryRemoteImage(urlString: item.url, fit: item.thumbnailBoxFit)
             }
         }
         .frame(width: width, height: CGFloat(config.card.height))
