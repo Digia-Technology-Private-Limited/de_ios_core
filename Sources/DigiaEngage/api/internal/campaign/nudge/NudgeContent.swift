@@ -169,6 +169,5 @@ struct NudgeVideo: Equatable {
 struct NudgeColumn: Equatable {
     let crossAxisAlignment: NudgeCrossAxisAlignment
     let mainAxisAlignment: NudgeMainAxisAlignment
-    let spacing: CGFloat
     let children: [NudgeNode]
 }
