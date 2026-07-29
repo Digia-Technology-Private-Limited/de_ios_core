@@ -11,10 +11,8 @@ enum LiveTestSseEvent {
 
 /// Low-level transport for `POST /api/v1/engage/sdk/live/connect`, built on
 /// `URLSession.bytes(for:)` (`AsyncBytesSequence`, available since iOS 15,
-/// this package's deployment target) — no third-party SSE package exists or is
-/// needed; `AsyncLineSequence` already does the line-splitting, so the only
-/// custom parsing here is grouping lines into `event:`/`data:` blocks on the
-/// blank-line boundary.
+/// this package's deployment target) — no third-party SSE package exists or
+/// is needed. Framing is handled by `SSEFrameParser`, fed one byte at a time.
 ///
 /// There is no built-in reconnect — `scheduleReconnect` implements the same
 /// exponential-backoff-with-jitter loop used by this feature's sibling ports.
@@ -125,23 +123,13 @@ final class LiveTestSSEClient {
                 return
             }
 
-            var eventName: String?
-            var dataLines: [String] = []
-            for try await line in bytes.lines {
+            // See SSEFrameParser's doc comment for why this buffers raw bytes
+            // itself instead of using `bytes.lines` (`AsyncLineSequence`).
+            var parser = SSEFrameParser()
+            for try await byte in bytes {
                 if Task.isCancelled { return }
-                if line.isEmpty {
-                    if eventName != nil || !dataLines.isEmpty {
-                        dispatch(event: eventName, data: dataLines.joined(separator: "\n"))
-                    }
-                    eventName = nil
-                    dataLines = []
-                    continue
-                }
-                if line.hasPrefix(":") { continue } // heartbeat comment
-                if line.hasPrefix("event:") {
-                    eventName = line.dropFirst("event:".count).trimmingCharacters(in: .whitespaces)
-                } else if line.hasPrefix("data:") {
-                    dataLines.append(line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces))
+                if let frame = parser.feed(byte) {
+                    dispatch(event: frame.event, data: frame.data)
                 }
             }
             // The server closed the stream without throwing.
@@ -228,4 +216,61 @@ final class LiveTestSSEClient {
 func reconnectDelayMs(attempt: Int, jitterMs: Int) -> Int {
     let baseMs = 1000 * (1 << min(max(attempt, 0), 5))
     return min(max(baseMs, 1000), 30000) + jitterMs
+}
+
+/// Buffers raw SSE bytes and yields one `(event, data)` frame each time a
+/// blank-line boundary is crossed.
+///
+/// Deliberately *not* built on `bytes.lines` (`AsyncLineSequence`) — verified
+/// empirically (feed a byte sequence containing `"a\n\nb"` through
+/// `URL.lines`/`FileHandle.bytes.lines`, the same machinery
+/// `URLSession.AsyncBytes.lines` uses) that it silently *omits* blank lines
+/// entirely: it yields `["a", "b"]`, not `["a", "", "b"]` — no empty string,
+/// no signal at all. SSE's frame boundary *is* the blank line between blocks,
+/// so a parser that waits for `line.isEmpty` against `.lines` never fires:
+/// every event (including the very first `connected`) just accumulates
+/// forever and is never dispatched. The connection still looks perfectly
+/// healthy from the outside — the backend's presence-refresh timer lives on
+/// its own connection-owned server-side timer, independent of whether the
+/// client ever parses a byte of it — while the client-side state stays stuck
+/// at "connecting" and no `campaign_test` ever surfaces. Pulled out as its
+/// own type (rather than inline state in `runConnection`) so this framing
+/// logic is directly unit-testable without touching URLSession or Tasks —
+/// exactly the kind of bug a real test would have caught immediately instead
+/// of needing a live device to surface it.
+struct SSEFrameParser {
+    private var buffer = Data()
+    private var eventName: String?
+    private var dataLines: [String] = []
+
+    /// Feeds one byte. Returns a completed frame the moment a blank-line
+    /// boundary closes one (only when at least an event name or a data line
+    /// was buffered — a stray blank line is not a frame), else `nil`. A
+    /// single byte can complete at most one line (the previous line's `\n`
+    /// was already consumed by an earlier call), so one call per byte is
+    /// always sufficient — no internal loop needed.
+    mutating func feed(_ byte: UInt8) -> (event: String?, data: String)? {
+        buffer.append(byte)
+        guard let newlineIndex = buffer.firstIndex(of: UInt8(ascii: "\n")) else { return nil }
+        let lineData = buffer[buffer.startIndex..<newlineIndex]
+        buffer.removeSubrange(buffer.startIndex...newlineIndex)
+        var line = String(decoding: lineData, as: UTF8.self)
+        if line.hasSuffix("\r") { line.removeLast() }
+
+        if line.isEmpty {
+            defer {
+                eventName = nil
+                dataLines = []
+            }
+            guard eventName != nil || !dataLines.isEmpty else { return nil }
+            return (eventName, dataLines.joined(separator: "\n"))
+        }
+        if line.hasPrefix(":") { return nil } // heartbeat comment
+        if line.hasPrefix("event:") {
+            eventName = line.dropFirst("event:".count).trimmingCharacters(in: .whitespaces)
+        } else if line.hasPrefix("data:") {
+            dataLines.append(line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces))
+        }
+        return nil
+    }
 }
