@@ -20,7 +20,7 @@ struct DigiaRecordedSessionScreen: View {
             }
             Section {
                 if registry.recordedThisSession.isEmpty {
-                    Text("Nothing recorded yet this session.")
+                    Text("Nothing synced yet this session.")
                         .foregroundColor(.secondary)
                 } else {
                     ForEach(registry.recordedThisSession) { entry in
@@ -40,12 +40,18 @@ struct DigiaRecordedSessionScreen: View {
             } header: {
                 Text(
                     registry.recordedThisSession.isEmpty
-                        ? "Recorded Keys"
-                        : "Recorded Keys (\(registry.recordedThisSession.count))"
+                        ? "Synced Keys"
+                        : "Synced Keys (\(registry.recordedThisSession.count))"
                 )
             }
         }
-        .navigationTitle("Recorded This Session")
+        .navigationTitle("Synced This Session")
+        // This screen is a drill-down from L1's "Sync" row, not a root screen —
+        // per HIG (and Apple's own Settings app), a pushed detail screen uses
+        // the compact inline title, not the large title reserved for roots.
+        // Without this, the large title's loose flow left it visually
+        // crowding the Sync toggle row directly beneath it.
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
