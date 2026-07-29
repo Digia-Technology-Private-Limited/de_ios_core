@@ -62,6 +62,13 @@ public struct DigiaDebugSettingsView: View {
                 }
             }
             .navigationTitle("Digia Debug Settings")
+            // Presented via a page-sheet card (~85-90% of screen height, not
+            // full screen) — a large title's fixed point size eats a bigger
+            // share of that shorter viewport and reads as crowded against
+            // the Sync row right below it. Inline keeps a fixed, small bar
+            // height regardless of container size (same fix already applied
+            // to the L2 "Synced This Session" screen).
+            .navigationBarTitleDisplayMode(.inline)
         }
         .alert("Restart recommended", isPresented: $showRestartHint) {
             Button("OK", role: .cancel) {}
