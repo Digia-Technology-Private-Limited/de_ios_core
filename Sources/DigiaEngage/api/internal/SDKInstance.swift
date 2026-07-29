@@ -5,6 +5,11 @@ import Combine
 final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     static let shared = SDKInstance()
 
+    private struct ExternalGuide {
+        let campaign: CampaignModel
+        let payload: CEPTriggerPayload
+    }
+
     @Published private(set) var config: DigiaConfig?
     @Published private(set) var sdkState: SDKState = .notInitialized
     @Published private(set) var isHostMounted = false
@@ -19,6 +24,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// `Digia.setCurrentScreen`, forwarded to the active plugin and read into
     /// analytics events (`screenName`).
     private var _currentScreen: String?
+    private var activeExternalGuide: ExternalGuide?
 
     let campaignStore = CampaignStore()
     let controller = DigiaOverlayController()
@@ -188,6 +194,72 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         _currentScreen = screenName.isEmpty ? nil : screenName
         DigiaLog.warning("[SDKInstance] Current screen set: \(_currentScreen ?? "<unset>")")
         activePlugin?.forwardScreen(screenName)
+        dismissActiveCampaignsNotTargetingCurrentScreen()
+    }
+
+    /// Revalidates active overlays on every host screen update. Inline campaigns are
+    /// intentionally excluded because their placement lifecycle remains owned by the host view.
+    private func dismissActiveCampaignsNotTargetingCurrentScreen() {
+        if let nudge = controller.activeNudge {
+            dismissForScreenChangeIfNeeded(
+                campaignKey: nudge.payload.campaignKey,
+                campaignType: "nudge",
+                campaign: campaignStore.find(nudge.payload.campaignKey),
+                dismiss: { markNudgeDismissed() }
+            )
+        }
+
+        if let survey = surveyOrchestrator.state {
+            dismissForScreenChangeIfNeeded(
+                campaignKey: survey.payload.campaignKey,
+                campaignType: "survey",
+                campaign: campaignStore.find(survey.payload.campaignKey),
+                dismiss: { markSurveyDismissed() }
+            )
+        }
+
+        if let guide = guideOrchestrator.state {
+            dismissForScreenChangeIfNeeded(
+                campaignKey: guide.campaign.campaignKey,
+                campaignType: "guide",
+                campaign: guide.campaign,
+                dismiss: { dismissGuide() }
+            )
+        }
+
+        if let guide = activeExternalGuide {
+            dismissForScreenChangeIfNeeded(
+                campaignKey: guide.campaign.campaignKey,
+                campaignType: "guide",
+                campaign: guide.campaign
+            ) {
+                activeExternalGuide = nil
+                events.toCep(.dismissed, payload: guide.payload)
+            }
+        }
+    }
+
+    private func dismissForScreenChangeIfNeeded(
+        campaignKey: String,
+        campaignType: String,
+        campaign: CampaignModel?,
+        dismiss: () -> Void
+    ) {
+        let targetScreenNames = campaign?.targetScreenNames
+        let isMismatch =
+            targetScreenNames == nil
+            || (!(targetScreenNames?.isEmpty ?? true)
+                && !(targetScreenNames?.contains(_currentScreen ?? "") ?? false))
+        guard isMismatch else { return }
+
+        let targets = targetScreenNames.map { String(describing: $0) } ?? "<missing>"
+        DigiaLog.warning(
+            "[SDKInstance] Campaign dismissed — screen changed: "
+                + "campaignKey=\(campaignKey) campaignType=\(campaignType) "
+                + "currentScreen=\(_currentScreen ?? "<unset>") "
+                + "targetScreenNames=\(targets) reason=screen_changed"
+        )
+        dismiss()
     }
 
     func registerPlaceholderForSlot(propertyID: String) -> Int? {
@@ -269,6 +341,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     logVerbose("guide dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
                     return false
                 }
+                activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
                 renderViaJs(payload)
                 return true
             }
@@ -307,6 +380,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func onCampaignInvalidated(_ campaignID: String) {
+        if activeExternalGuide?.payload.cepCampaignId == campaignID {
+            activeExternalGuide = nil
+        }
         if controller.activeNudge?.payload.cepCampaignId == campaignID {
             controller.dismissNudge()
         }
@@ -755,6 +831,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         default:
             break
         }
+        if eventName == "Digia Experience Dismissed"
+            || eventName == "Digia Experience Completed"
+        {
+            if activeExternalGuide?.campaign.campaignKey == campaignKey {
+                activeExternalGuide = nil
+            }
+        }
         let payload = CEPTriggerPayload(
             cepCampaignId: campaign?.id ?? campaignKey, campaignKey: campaignKey, cepMetadata: [:])
         events.toDigia(event, payload: payload)
@@ -873,6 +956,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         inlineController.clear()
         surveyOrchestrator.dismiss()
         guideOrchestrator.dismiss()
+        activeExternalGuide = nil
         events.clearImpressions()
         dwellTracker.clear()
         completedSurveyToken = nil
