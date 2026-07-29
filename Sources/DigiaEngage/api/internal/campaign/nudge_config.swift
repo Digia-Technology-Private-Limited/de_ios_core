@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 /// How a nudge surface presents over the host app. Mirrors Flutter's
@@ -21,6 +22,49 @@ enum NudgeDisplayType: String, Equatable, Sendable {
     }
 }
 
+struct NudgeCloseButtonConfig: Equatable {
+    let marginTop: CGFloat
+    let marginRight: CGFloat
+    let backgroundColor: Color
+    let iconColor: Color
+    let iconSize: CGFloat
+
+    var diameter: CGFloat { iconSize + 10 }
+
+    static let defaults = NudgeCloseButtonConfig(
+        marginTop: 12,
+        marginRight: 12,
+        backgroundColor: Color(hex: "#14000000") ?? .clear,
+        iconColor: Color(hex: "#66667A") ?? .secondary,
+        iconSize: 16
+    )
+
+    static func fromJson(_ json: [String: Any]?) -> NudgeCloseButtonConfig {
+        let map = json ?? [:]
+        let defaults = NudgeCloseButtonConfig.defaults
+        return NudgeCloseButtonConfig(
+            marginTop: nonNegative(
+                map.double("marginTop", default: Double(defaults.marginTop)),
+                fallback: defaults.marginTop
+            ),
+            marginRight: nonNegative(
+                map.double("marginRight", default: Double(defaults.marginRight)),
+                fallback: defaults.marginRight
+            ),
+            backgroundColor: Color(hex: map.string("backgroundColor")) ?? defaults.backgroundColor,
+            iconColor: Color(hex: map.string("iconColor")) ?? defaults.iconColor,
+            iconSize: nonNegative(
+                map.double("iconSize", default: Double(defaults.iconSize)),
+                fallback: defaults.iconSize
+            )
+        )
+    }
+
+    private static func nonNegative(_ value: Double, fallback: CGFloat) -> CGFloat {
+        value.isFinite ? max(0, CGFloat(value)) : fallback
+    }
+}
+
 /// The presentation chrome for a nudge — everything *around* the content tree.
 /// Mirrors Flutter's `NudgeSurface` (`nudge_config.dart`): a pure value object,
 /// decoded from the `container` wire object. The content layout (spacing /
@@ -40,6 +84,8 @@ struct NudgeSurface: Equatable {
     let backdropDismissible: Bool
     /// Render an "×" close affordance on the surface.
     let showCloseButton: Bool
+    /// Visual configuration for the fixed cross close affordance.
+    let closeButton: NudgeCloseButtonConfig
     /// Show the drag-handle pill at the top of the sheet (bottom sheet only).
     let showHandle: Bool
     /// Allow dragging the sheet down to dismiss (bottom sheet only).
@@ -62,6 +108,7 @@ struct NudgeSurface: Equatable {
             padding: CGFloat(map.double("padding", default: 20)),
             backdropDismissible: map.bool("backdropDismissible", default: true),
             showCloseButton: map.bool("showCloseButton", default: false),
+            closeButton: NudgeCloseButtonConfig.fromJson(map["closeButton"] as? [String: Any]),
             showHandle: map.bool("showHandle", default: true),
             draggable: map.bool("draggable", default: true),
             // Stored as a 0…100 percentage; normalise to a 0…1 fraction.
