@@ -103,12 +103,33 @@ struct StoryIndicatorDisplayConfig: Equatable {
     }
 }
 
+struct StoryOverlayButtonConfig: Equatable {
+    var visible: Bool = false
+    var iconColor: String = "#FFFFFF"
+    var backgroundColor: String = "#000000"
+    var size: Double = 36
+
+    static func fromJson(_ json: [String: Any]?) -> StoryOverlayButtonConfig {
+        guard let json else { return StoryOverlayButtonConfig() }
+        let size = json.double("size", default: 36)
+        return StoryOverlayButtonConfig(
+            visible: json.bool("visible", default: false),
+            iconColor: json.nonBlankString("iconColor") ?? "#FFFFFF",
+            backgroundColor: json.nonBlankString("backgroundColor") ?? "#000000",
+            size: size.isFinite && size > 0 ? size : 36
+        )
+    }
+}
+
 struct InlineStoryConfig: Equatable {
     let slotKey: String
     var defaultDuration: Int = 5000
     var restartOnCompleted: Bool = false
+    var startMuted: Bool = false
     var card: StoryCardConfig = StoryCardConfig()
     var indicator: StoryIndicatorDisplayConfig = StoryIndicatorDisplayConfig()
+    var closeButton: StoryOverlayButtonConfig = StoryOverlayButtonConfig()
+    var muteButton: StoryOverlayButtonConfig = StoryOverlayButtonConfig()
     let items: [StoryItemConfig]
     var variableSchemas: [VariableSchema] = []
 
@@ -120,8 +141,11 @@ struct InlineStoryConfig: Equatable {
             slotKey: slotKey,
             defaultDuration: json.positiveInt("defaultDuration") ?? 5000,
             restartOnCompleted: json.bool("restartOnCompleted", default: false),
+            startMuted: json.bool("startMuted", default: false),
             card: StoryCardConfig.fromJson(json.object("card")),
             indicator: StoryIndicatorDisplayConfig.fromJson(json.object("indicator")),
+            closeButton: StoryOverlayButtonConfig.fromJson(json.object("closeButton")),
+            muteButton: StoryOverlayButtonConfig.fromJson(json.object("muteButton")),
             items: items,
             variableSchemas: NudgeConfig.parseVariableSchemas(json)
         )
