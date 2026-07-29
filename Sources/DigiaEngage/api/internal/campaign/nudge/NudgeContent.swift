@@ -157,6 +157,8 @@ struct NudgeCarousel: Equatable {
 struct NudgeVideo: Equatable {
     let box: NudgeBox
     let url: String
+    /// Width-to-height ratio; `0` keeps the fixed-height behavior.
+    let aspectRatio: CGFloat
     let height: CGFloat
     let autoplay: Bool
     let loop: Bool
