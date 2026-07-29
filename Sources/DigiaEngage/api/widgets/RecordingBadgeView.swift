@@ -4,9 +4,10 @@ import SwiftUI
 /// and snaps to the nearer edge on release.
 ///
 /// Shown when `DigiaDebugOverlayController.isVisible` is true — its own
-/// persisted setting, flipped on automatically when recording mode turns on.
-/// The pulsing red dot reflects recording being active, independent of bubble
-/// visibility.
+/// persisted setting, flipped on automatically when Sync turns on. The single
+/// dot is a traffic light for the live-test SSE connection (matching
+/// Android/Flutter): hidden while Sync is off, pulsing amber while
+/// connecting, steady green once connected, steady red on a connection error.
 ///
 /// Also re-checks `DigiaDebugDetection.isDebugBuild()` — defense in depth.
 @MainActor
@@ -92,29 +93,49 @@ private struct DraggableBadge: View {
 
 @MainActor
 private struct BadgeContent: View {
-    @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()
+    @ObservedObject private var liveTest = SDKInstance.shared.liveTestServiceSnapshot()
     @State private var pulse = false
+
+    private var dotColor: Color? {
+        switch liveTest.connectionState {
+        case .disconnected: return nil
+        case .connecting: return Color(hex: "#FFC107") // amber
+        case .connected: return Color(hex: "#69F0AE") // greenAccent
+        case .error: return Color(hex: "#FF5252") // redAccent
+        }
+    }
 
     var body: some View {
         HStack(spacing: 6) {
-            if registry.isEnabled {
-                Circle()
-                    .fill(Color.red)
-                    .frame(width: 8, height: 8)
-                    .opacity(pulse ? 1 : 0.35)
-                    .onAppear {
-                        withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
-                            pulse = true
-                        }
-                    }
-            }
             Text("Digia")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.white)
+            if let dotColor {
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: 8, height: 8)
+                    .opacity(liveTest.connectionState == .connecting ? (pulse ? 1 : 0.35) : 1)
+            }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(Color.black.opacity(0.87))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        // Keyed on connectionState (not a one-shot onAppear): the dot stays
+        // mounted continuously across connecting/connected/error — it only
+        // unmounts when Sync goes off — so an onAppear-driven pulse would
+        // only ever animate on the very first connect and stay steady-bright
+        // on every later reconnect. .task(id:) cancels and reruns this
+        // closure on every state change instead, restarting the pulse each
+        // time connectionState re-enters .connecting.
+        .task(id: liveTest.connectionState) {
+            guard liveTest.connectionState == .connecting else {
+                pulse = false
+                return
+            }
+            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
+                pulse = true
+            }
+        }
     }
 }

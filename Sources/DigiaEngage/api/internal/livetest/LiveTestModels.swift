@@ -28,8 +28,10 @@ enum LiveTestFailureCode: String {
     var wireValue: String { rawValue }
 }
 
-/// Connection state of the live-test SSE stream, surfaced in the debug settings screen.
-enum LiveTestConnectionState {
+/// Connection state of the live-test SSE stream, surfaced in the debug settings
+/// screen and the debug bubble. Equatable so the bubble can key a `.task(id:)`
+/// off it to restart the "connecting" pulse animation on every reconnect.
+enum LiveTestConnectionState: Equatable {
     case disconnected, connecting, connected, error
 }
 
