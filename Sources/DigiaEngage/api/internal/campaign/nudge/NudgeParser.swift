@@ -207,7 +207,8 @@ struct NudgeParser {
             autoplay: (props["autoPlay"] as? Bool) ?? false,
             loop: (props["looping"] as? Bool) ?? false,
             showControls: (props["showControls"] as? Bool) ?? true,
-            muted: (props["muted"] as? Bool) ?? false
+            muted: (props["muted"] as? Bool) ?? false,
+            boxFit: NudgeVideoFit.fromWireValue(props["boxFit"] as? String)
         )
     }
 

@@ -185,6 +185,16 @@ struct NudgeVideo: Equatable {
     let loop: Bool
     let showControls: Bool
     let muted: Bool
+    let boxFit: NudgeVideoFit
+}
+
+enum NudgeVideoFit: Equatable {
+    case cover
+    case contain
+
+    static func fromWireValue(_ value: String?) -> NudgeVideoFit {
+        value == "contain" ? .contain : .cover
+    }
 }
 
 // MARK: - Root column
