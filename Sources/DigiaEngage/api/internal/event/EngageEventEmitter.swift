@@ -17,10 +17,18 @@ private let eventLog = os.Logger(subsystem: "tech.digia.engage", category: "Digi
 /// fires a dual signal (e.g. a nudge impression). Also owns the first-render
 /// impression dedup, an emission concern rather than widget state. Ported from
 /// Android `internal/event/EngageEventEmitter.kt`.
+///
+/// A live test's synthetic payload (`isLiveTestCepId`) never reaches a real CEP
+/// plugin or Digia analytics — a test on a QA device must not pollute
+/// production campaign metrics. `DigiaExperienceEvent.impressed` is instead
+/// repurposed as the "shown" signal live testing waits for, via
+/// `onLiveTestShown` — nudge/survey both already fire it once their render is
+/// actually confirmed (`reportNudgeImpression`/`reportSurveyStarted`).
 @MainActor
 final class EngageEventEmitter {
     private let cep: CepPluginSink
     private let digia: DigiaAnalyticsSink
+    private let onLiveTestShown: ((String) -> Void)?
 
     /// `cepCampaignId`s that have already fired a Digia first-render impression.
     private var digiaImpressed: Set<String> = []
@@ -28,21 +36,27 @@ final class EngageEventEmitter {
     /// `cepCampaignId`s that have already fired a Digia first-engagement click.
     private var digiaClicked: Set<String> = []
 
-    init(cep: CepPluginSink, digia: DigiaAnalyticsSink) {
+    init(cep: CepPluginSink, digia: DigiaAnalyticsSink, onLiveTestShown: ((String) -> Void)? = nil) {
         self.cep = cep
         self.digia = digia
+        self.onLiveTestShown = onLiveTestShown
     }
 
     /// Coarse signal to the CEP plugin only.
     func toCep(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
+        if isLiveTestCepId(payload.cepCampaignId) {
+            if case .impressed = event { onLiveTestShown?(payload.cepCampaignId) }
+            return
+        }
         eventLog.info(
             "[DigiaEvent] Event fired → CEP: \(String(describing: event), privacy: .public) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public)"
         )
         cep.deliver(event, payload: payload)
     }
 
-    /// Rich analytics signal to Digia only.
+    /// Rich analytics signal to Digia only. Suppressed for a live test payload — see `toCep`.
     func toDigia(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload) {
+        if isLiveTestCepId(payload.cepCampaignId) { return }
         eventLog.info(
             "[DigiaEvent] Event fired → DIGIA: '\(event.eventName, privacy: .public)' (\(String(describing: type(of: event)), privacy: .public)) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public) properties=\(String(describing: event.properties), privacy: .public)"
         )
@@ -57,9 +71,15 @@ final class EngageEventEmitter {
 
     /// Records `event` (a campaign "Viewed") to Digia the first time its campaign
     /// renders, deduped by `cepCampaignId`. CEP is impressed separately and
-    /// instantly at route time.
+    /// instantly at route time. (Inline-only in practice today — nudge/survey's
+    /// "shown" signal is `toCep`'s `.impressed` branch above instead — but kept
+    /// live-test-aware for parity with the sibling ports.)
     func digiaImpressionOnce(payload: CEPTriggerPayload, event: EngageAnalyticsEvent) {
         guard digiaImpressed.insert(payload.cepCampaignId).inserted else { return }
+        if isLiveTestCepId(payload.cepCampaignId) {
+            onLiveTestShown?(payload.cepCampaignId)
+            return
+        }
         toDigia(event, payload: payload)
     }
 

@@ -10,6 +10,7 @@ import SwiftUI
 public struct DigiaDebugSettingsView: View {
     @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()
     @ObservedObject private var overlay = SDKInstance.shared.debugOverlayControllerSnapshot()
+    @ObservedObject private var liveTest = SDKInstance.shared.liveTestServiceSnapshot()
     @State private var showRestartHint = false
     @State private var showSession = false
 
@@ -45,6 +46,12 @@ public struct DigiaDebugSettingsView: View {
                         ) { EmptyView() }
                         .hidden()
                     )
+                    HStack {
+                        Text("Live test")
+                        Spacer()
+                        Text(liveTest.connectionState.label)
+                            .foregroundColor(.secondary)
+                    }
                     SettingsToggleRow(
                         title: "Digia bubble",
                         isOn: Binding(
@@ -73,6 +80,19 @@ public struct DigiaDebugSettingsView: View {
         // without a reload.
         if value && !wasEnabled {
             showRestartHint = true
+        }
+    }
+}
+
+/// Friendly label for the read-only "Live test" row — this state follows the
+/// "Sync" toggle above automatically; there's no separate switch for it.
+extension LiveTestConnectionState {
+    var label: String {
+        switch self {
+        case .disconnected: return "Disconnected"
+        case .connecting: return "Connecting…"
+        case .connected: return "Connected"
+        case .error: return "Reconnecting…"
         }
     }
 }
