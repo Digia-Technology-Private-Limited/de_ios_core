@@ -15,9 +15,11 @@ struct StoryCtaAction: Equatable {
 }
 
 struct StoryItemConfig: Equatable {
-    let type: String
+    let type: StoryMediaType
     let url: String
     let duration: Int?
+    var boxFit: StoryMediaFit = .cover
+    var thumbnailBoxFit: StoryMediaFit = .cover
     var ctaEnabled: Bool = false
     var ctaText: String?
     var ctaFontWeight: Int = 600
@@ -34,10 +36,21 @@ struct StoryItemConfig: Equatable {
             ? EngageActionParser().parse(ctaActionJson)
             : parseLegacyStoryActions(ctaActionJson)
         let ctaAction = ctaActionJson.map(StoryCtaAction.fromJson)
+        let mediaType = StoryMediaType.fromWireValue(
+            json.string("type", default: "image")
+        )
         return StoryItemConfig(
-            type: json.string("type", default: "image"),
+            type: mediaType,
             url: url,
             duration: json.positiveInt("duration"),
+            boxFit: StoryMediaFit.fromWireValue(
+                json.string("boxFit", default: "cover"),
+                mediaType: mediaType
+            ),
+            thumbnailBoxFit: StoryMediaFit.fromWireValue(
+                json.string("thumbnailBoxFit", default: "cover"),
+                mediaType: mediaType
+            ),
             ctaEnabled: json.bool("ctaEnabled", default: false),
             ctaText: json.nonBlankString("ctaText"),
             ctaFontWeight: DigiaFontWeight.value(json["ctaFontWeight"], default: 600),
@@ -62,18 +75,44 @@ struct StoryItemConfig: Equatable {
     }
 }
 
+enum StoryMediaFit: Equatable {
+    case cover
+    case contain
+    case fill
+
+    static func fromWireValue(_ value: String, mediaType: StoryMediaType) -> StoryMediaFit {
+        switch value {
+        case "contain": .contain
+        case "fill" where mediaType == .image: .fill
+        default: .cover
+        }
+    }
+}
+
+enum StoryMediaType: Equatable {
+    case image
+    case video
+
+    static func fromWireValue(_ value: String) -> StoryMediaType {
+        value == "video" ? .video : .image
+    }
+}
+
 struct StoryCardConfig: Equatable {
     var height: Int = 220
     var aspectRatio: Double = 0.6
     var borderRadius: Double = 12
     var spacing: Int = 8
+    var width: Double { Double(height) * aspectRatio }
 
     static func fromJson(_ json: [String: Any]?) -> StoryCardConfig {
         guard let json else { return StoryCardConfig() }
-        let aspectRatio = json.double("aspectRatio", default: 0.6)
+        let aspectRatio = json["aspectRatio"] is Bool
+            ? 0.6
+            : json.double("aspectRatio", default: 0.6)
         return StoryCardConfig(
             height: json.positiveInt("height") ?? 220,
-            aspectRatio: aspectRatio > 0 ? aspectRatio : 0.6,
+            aspectRatio: aspectRatio.isFinite && aspectRatio > 0 ? aspectRatio : 0.6,
             borderRadius: json.double("borderRadius", default: 12),
             spacing: json.int("spacing", default: 8)
         )
@@ -103,12 +142,33 @@ struct StoryIndicatorDisplayConfig: Equatable {
     }
 }
 
+struct StoryOverlayButtonConfig: Equatable {
+    var visible: Bool = false
+    var iconColor: String = "#FFFFFF"
+    var backgroundColor: String = "#000000"
+    var size: Double = 36
+
+    static func fromJson(_ json: [String: Any]?) -> StoryOverlayButtonConfig {
+        guard let json else { return StoryOverlayButtonConfig() }
+        let size = json.double("size", default: 36)
+        return StoryOverlayButtonConfig(
+            visible: json.bool("visible", default: false),
+            iconColor: json.nonBlankString("iconColor") ?? "#FFFFFF",
+            backgroundColor: json.nonBlankString("backgroundColor") ?? "#000000",
+            size: size.isFinite && size > 0 ? size : 36
+        )
+    }
+}
+
 struct InlineStoryConfig: Equatable {
     let slotKey: String
     var defaultDuration: Int = 5000
     var restartOnCompleted: Bool = false
+    var startMuted: Bool = false
     var card: StoryCardConfig = StoryCardConfig()
     var indicator: StoryIndicatorDisplayConfig = StoryIndicatorDisplayConfig()
+    var closeButton: StoryOverlayButtonConfig = StoryOverlayButtonConfig()
+    var muteButton: StoryOverlayButtonConfig = StoryOverlayButtonConfig()
     let items: [StoryItemConfig]
     var variableSchemas: [VariableSchema] = []
 
@@ -120,8 +180,11 @@ struct InlineStoryConfig: Equatable {
             slotKey: slotKey,
             defaultDuration: json.positiveInt("defaultDuration") ?? 5000,
             restartOnCompleted: json.bool("restartOnCompleted", default: false),
+            startMuted: json.bool("startMuted", default: false),
             card: StoryCardConfig.fromJson(json.object("card")),
             indicator: StoryIndicatorDisplayConfig.fromJson(json.object("indicator")),
+            closeButton: StoryOverlayButtonConfig.fromJson(json.object("closeButton")),
+            muteButton: StoryOverlayButtonConfig.fromJson(json.object("muteButton")),
             items: items,
             variableSchemas: NudgeConfig.parseVariableSchemas(json)
         )
