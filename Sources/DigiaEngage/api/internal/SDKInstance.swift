@@ -254,7 +254,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
         let targets = targetScreenNames.map { String(describing: $0) } ?? "<missing>"
         DigiaLog.warning(
-            "[SDKInstance] Campaign dismissed — screen changed: "
+            "[SDKInstance] Campaign dropped — screen changed: "
                 + "campaignKey=\(campaignKey) campaignType=\(campaignType) "
                 + "currentScreen=\(_currentScreen ?? "<unset>") "
                 + "targetScreenNames=\(targets) reason=screen_changed"
