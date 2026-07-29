@@ -180,6 +180,9 @@ private struct InlineStoryOverlayContent: View {
     /// `Completed` rather than `StepDismissed`.
     @State private var completed = false
     @State private var openedAt = Date()
+    /// Nil until the viewer changes the audio state. Before that, the story's
+    /// authored `startMuted` applies; afterwards the viewer's choice persists.
+    @State private var muteOverride: Bool?
 
     init(state: InlineStoryOverlayState) {
         self.state = state
@@ -197,8 +200,10 @@ private struct InlineStoryOverlayContent: View {
                     .ignoresSafeArea()
 
                 if let item = currentItem {
+                    let muted = muteOverride ?? state.config.startMuted
                     FullScreenStoryItem(
                         item: item,
+                        muted: muted,
                         onVideoProgress: { videoProgress = $0 },
                         onVideoEnded: { next() },
                         onVideoBuffering: { videoBuffering = $0 }
@@ -232,6 +237,40 @@ private struct InlineStoryOverlayContent: View {
                             .padding(.horizontal, 24)
                             .padding(.bottom, safeAreaInsets.bottom + 20)
                         }
+                    }
+
+                    VStack(spacing: 0) {
+                        HStack(spacing: 8) {
+                            Spacer(minLength: 0)
+
+                            if item.type == .video, state.config.muteButton.visible {
+                                StoryOverlayButton(
+                                    config: state.config.muteButton,
+                                    systemImage: muted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                                    accessibilityLabel: muted ? "Unmute story" : "Mute story",
+                                    action: { muteOverride = !muted }
+                                )
+                            }
+
+                            if state.config.closeButton.visible {
+                                StoryOverlayButton(
+                                    config: state.config.closeButton,
+                                    systemImage: "xmark",
+                                    accessibilityLabel: "Close story",
+                                    action: { SDKInstance.shared.controller.dismissStoryOverlay() }
+                                )
+                            }
+                        }
+                        .padding(
+                            .top,
+                            safeAreaInsets.top
+                                + CGFloat(state.config.indicator.topPadding)
+                                + CGFloat(state.config.indicator.height)
+                                + 12
+                        )
+                        .padding(.trailing, CGFloat(state.config.indicator.horizontalPadding))
+
+                        Spacer(minLength: 0)
                     }
                 }
             }
@@ -410,6 +449,7 @@ private struct InlineStoryOverlayContent: View {
 @MainActor
 private struct FullScreenStoryItem: View {
     let item: StoryItemConfig
+    let muted: Bool
     let onVideoProgress: (Double) -> Void
     let onVideoEnded: () -> Void
     let onVideoBuffering: @Sendable (Bool) -> Void
@@ -421,7 +461,7 @@ private struct FullScreenStoryItem: View {
                 InlineStoryVideoView(
                     urlString: item.url,
                     looping: false,
-                    muted: false,
+                    muted: muted,
                     gravity: item.boxFit.videoGravity,
                     onProgress: onVideoProgress,
                     onEnded: onVideoEnded,
@@ -483,7 +523,7 @@ private struct InlineStoryVideoView: View {
                 InlineStoryPlayerLayer(player: player, gravity: gravity)
             }
         }
-        .task(id: "\(urlString)-\(looping)-\(muted)") {
+        .task(id: "\(urlString)-\(looping)") {
             guard let url = URL(string: urlString) else { return }
             tearDownPlayback()
 
@@ -534,6 +574,9 @@ private struct InlineStoryVideoView: View {
             bundle = nextBundle
             nextBundle.player.play()
         }
+        .onChange(of: muted) { isMuted in
+            bundle?.player.isMuted = isMuted
+        }
         .onDisappear {
             tearDownPlayback()
         }
@@ -576,6 +619,30 @@ extension StoryMediaFit {
 
     var videoGravity: AVLayerVideoGravity {
         self == .contain ? .resizeAspect : .resizeAspectFill
+    }
+}
+
+private struct StoryOverlayButton: View {
+    let config: StoryOverlayButtonConfig
+    let systemImage: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: CGFloat(config.size) * 0.5, weight: .regular))
+                .foregroundStyle(Color(hex: config.iconColor) ?? .white)
+                .frame(width: CGFloat(config.size), height: CGFloat(config.size))
+                .background(Color(hex: config.backgroundColor) ?? .black)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .frame(
+            width: max(CGFloat(config.size), 48),
+            height: max(CGFloat(config.size), 48)
+        )
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 

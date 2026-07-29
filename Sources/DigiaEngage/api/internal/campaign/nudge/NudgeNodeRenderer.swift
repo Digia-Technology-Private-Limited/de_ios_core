@@ -14,7 +14,7 @@ struct NudgeColumnContent: View {
     var body: some View {
         VStack(
             alignment: column.crossAxisAlignment.horizontalAlignment,
-            spacing: column.mainAxisAlignment == .start ? column.spacing : 0
+            spacing: 0
         ) {
             ForEach(Array(column.children.enumerated()), id: \.offset) { _, node in
                 NudgeNodeView(node: node, onDismiss: onDismiss)
@@ -443,8 +443,7 @@ private struct NudgeVideoView: View {
                         EmptyView()
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: node.height)
+                .nudgeMediaFrame(aspectRatio: node.aspectRatio, height: node.height)
             }
         }
         .onAppear { setupPlayer() }
