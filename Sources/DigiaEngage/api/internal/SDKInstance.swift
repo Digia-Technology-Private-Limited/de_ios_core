@@ -25,6 +25,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// analytics events (`screenName`).
     private var _currentScreen: String?
     private var activeExternalGuide: ExternalGuide?
+    private var screenUpdateRevision = 0
 
     let campaignStore = CampaignStore()
     let controller = DigiaOverlayController()
@@ -190,11 +191,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func setCurrentScreen(_ name: String) {
+        screenUpdateRevision += 1
+        let revision = screenUpdateRevision
         let screenName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         _currentScreen = screenName.isEmpty ? nil : screenName
         DigiaLog.warning("[SDKInstance] Current screen set: \(_currentScreen ?? "<unset>")")
-        activePlugin?.forwardScreen(screenName)
         dismissActiveCampaignsNotTargetingCurrentScreen()
+        if screenUpdateRevision == revision {
+            activePlugin?.forwardScreen(screenName)
+        }
     }
 
     /// Revalidates active overlays on every host screen update. Inline campaigns are
@@ -577,6 +582,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func markSurveyDismissed(abandonedAtItem: Int? = nil, answeredCount: Int? = nil) {
         guard let state = surveyOrchestrator.state else { return }
+        surveyOrchestrator.dismiss()
         events.toBoth(
             .dismissed,
             SurveyEvent.Dismissed(
@@ -588,7 +594,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             payload: state.payload
         )
         clearQuestionViewedAt(token: state.token)
-        surveyOrchestrator.dismiss()
     }
 
     private func clearQuestionViewedAt(token: Int64) {
@@ -672,12 +677,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func markNudgeDismissed() {
         guard let nudge = controller.activeNudge else { return }
+        controller.dismissNudge()
         events.toBoth(
             .dismissed,
             NudgeEvent.Dismissed(dwellMs: dwellTracker.consumeDwellMs(nudge.payload.cepCampaignId)),
             payload: nudge.payload
         )
-        controller.dismissNudge()
     }
 
     // MARK: - Inline slot lifecycle
@@ -834,7 +839,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         if eventName == "Digia Experience Dismissed"
             || eventName == "Digia Experience Completed"
         {
-            if activeExternalGuide?.campaign.campaignKey == campaignKey {
+            if let payloadID = props["payload_id"] as? String,
+                activeExternalGuide?.payload.cepCampaignId == payloadID
+            {
                 activeExternalGuide = nil
             }
         }
