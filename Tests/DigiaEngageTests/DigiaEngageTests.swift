@@ -211,8 +211,10 @@ struct DigiaEngageTests {
         _ = SDKInstance.shared.onCampaignTriggered(
             CEPTriggerPayload(
                 cepCampaignId: "nudge-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        var reentered = false
         plugin.onNotifyEvent = { event, _ in
-            if event == .dismissed {
+            if event == .dismissed, !reentered {
+                reentered = true
                 SDKInstance.shared.setCurrentScreen("Home")
             }
         }
@@ -339,6 +341,32 @@ struct DigiaEngageTests {
         #expect(plugin.events.contains { event, payload in
             event == .dismissed && payload.cepCampaignId == "survey-1"
         })
+    }
+
+    @Test("reentrant screen change dismisses a survey once")
+    func reentrantScreenChangeDismissesSurveyOnce() throws {
+        SDKInstance.shared.resetForTesting()
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let campaign = try #require(targetedSurveyCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        _ = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "survey-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        var reentered = false
+        plugin.onNotifyEvent = { event, _ in
+            if event == .dismissed, !reentered {
+                reentered = true
+                SDKInstance.shared.setCurrentScreen("Home")
+            }
+        }
+
+        SDKInstance.shared.setCurrentScreen("Home")
+
+        #expect(plugin.events.filter { event, payload in
+            event == .dismissed && payload.cepCampaignId == "survey-1"
+        }.count == 1)
     }
 
     @Test("campaign-key inline story payloads route into the inline controller")
