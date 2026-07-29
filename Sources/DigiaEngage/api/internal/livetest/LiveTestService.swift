@@ -4,23 +4,8 @@ import UIKit
 
 /// Debug-only coordinator that keeps this SDK instance visible to the Engage
 /// dashboard as a live-test target, and routes incoming `campaign_test` events
-/// back to `SDKInstance` for rendering.
-///
-/// Active whenever the "Sync" toggle (`ComponentRegistryService.isEnabled`) is
-/// on — the same flag that already gates Engage Component Registry recording,
-/// reused here rather than adding a second switch. Reacts to the toggle live
-/// (opens/closes the stream immediately), unlike component-registry recording
-/// itself, which currently needs a reload to take effect — a live presence
-/// stream needs to reflect the toggle right away.
-///
-/// No-ops entirely outside a debug build (`configure`'s `isDebugBuild`
-/// parameter) — same defense-in-depth posture as `ComponentRegistryService`.
-///
-/// Constructed once and held for `SDKInstance`'s lifetime (like
-/// `ComponentRegistryService`) — `configure` can be called more than once
-/// (e.g. `completeInitialization` re-running from the RN `populateCampaigns`
-/// path), so it always tears down its previous wiring first rather than
-/// accumulating a second Combine subscription/notification observer pair.
+/// back to `SDKInstance` for rendering. Active whenever the "Sync" toggle
+/// (`ComponentRegistryService.isEnabled`) is on.
 @MainActor
 final class LiveTestService: ObservableObject {
     let ackReporter: LiveTestAckReporter
@@ -38,8 +23,6 @@ final class LiveTestService: ObservableObject {
         self.ackReporter = ackReporter
     }
 
-    /// Called from `SDKInstance.completeInitialization`, immediately after
-    /// `componentRegistry.configure(...)`.
     func configure(
         config: DigiaConfig,
         deviceId: String,
@@ -47,7 +30,7 @@ final class LiveTestService: ObservableObject {
         componentRegistry: ComponentRegistryService,
         onCampaignTest: @escaping (LiveTestInvocation) -> Void
     ) {
-        stop() // tear down any previous wiring before re-wiring
+        stop()
         isDebugBuildFlag = isDebugBuild
         self.componentRegistry = componentRegistry
         guard isDebugBuild else { return }
@@ -67,8 +50,6 @@ final class LiveTestService: ObservableObject {
             if enabled { sseClient?.start() } else { sseClient?.stop() }
         }
 
-        // So a backgrounded device doesn't hold a stale presence lease between
-        // heartbeats.
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
             object: nil,
@@ -88,9 +69,6 @@ final class LiveTestService: ObservableObject {
         }
     }
 
-    /// Tears this instance down: cancels the toggle subscription, stops the
-    /// SSE client, and removes the lifecycle observers. Called at the start of
-    /// every `configure` and from `SDKInstance.resetForTesting`.
     func stop() {
         toggleCancellable?.cancel()
         toggleCancellable = nil

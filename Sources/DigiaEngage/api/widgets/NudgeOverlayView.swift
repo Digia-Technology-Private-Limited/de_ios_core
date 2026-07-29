@@ -19,15 +19,9 @@ struct NudgeOverlayView: View {
             }
         }
         .fullScreenCover(item: sheetBinding) { nudge in
-            // `.id(nudge.id)` mirrors the dialog container above: `.fullScreenCover`'s
-            // content closure re-runs on every item change, but without a forced
-            // identity change SwiftUI still treats it as the same view at the
-            // same tree position and updates it in place — a direct swap from
-            // one active nudge straight to a different one (no nil in between)
-            // then never re-triggers `.onAppear`, so `NudgeSheetView` keeps
-            // showing the first nudge's stale content and its impression (the
-            // only path to a live test's "shown" ACK) never re-fires for the
-            // second one. The `.id()` forces a real teardown + remount instead.
+            // `.id(nudge.id)`: a direct swap between two active nudges (no nil in
+            // between) doesn't re-trigger `.onAppear` without a forced identity
+            // change — SwiftUI otherwise updates the same view in place.
             //
             // `.presentationBackground` needs iOS 16.4; below that, the cover's
             // (opaque) default background is used as-is.

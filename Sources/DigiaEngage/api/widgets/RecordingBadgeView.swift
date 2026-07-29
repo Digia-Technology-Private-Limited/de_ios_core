@@ -4,10 +4,8 @@ import SwiftUI
 /// and snaps to the nearer edge on release.
 ///
 /// Shown when `DigiaDebugOverlayController.isVisible` is true — its own
-/// persisted setting, flipped on automatically when Sync turns on. The single
-/// dot is a traffic light for the live-test SSE connection (matching
-/// Android/Flutter): hidden while Sync is off, pulsing amber while
-/// connecting, steady green once connected, steady red on a connection error.
+/// persisted setting, flipped on automatically when Sync turns on. The dot is
+/// a traffic light for the live-test SSE connection: amber/green/red.
 ///
 /// Also re-checks `DigiaDebugDetection.isDebugBuild()` — defense in depth.
 @MainActor
@@ -121,13 +119,9 @@ private struct BadgeContent: View {
         .padding(.vertical, 6)
         .background(Color.black.opacity(0.87))
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        // Keyed on connectionState (not a one-shot onAppear): the dot stays
-        // mounted continuously across connecting/connected/error — it only
-        // unmounts when Sync goes off — so an onAppear-driven pulse would
-        // only ever animate on the very first connect and stay steady-bright
-        // on every later reconnect. .task(id:) cancels and reruns this
-        // closure on every state change instead, restarting the pulse each
-        // time connectionState re-enters .connecting.
+        // `.task(id:)`, not `.onAppear` — the dot stays mounted across state
+        // changes, so onAppear would only fire once and never restart the
+        // pulse on a later reconnect.
         .task(id: liveTest.connectionState) {
             guard liveTest.connectionState == .connecting else {
                 pulse = false

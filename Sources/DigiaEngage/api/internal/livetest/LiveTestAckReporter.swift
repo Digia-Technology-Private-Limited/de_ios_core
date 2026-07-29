@@ -1,11 +1,7 @@
 import Foundation
 
-/// Posts `received` / `shown` / `failed` ACKs for a live-test invocation to
-/// `POST .../testInvocation/ack`.
-///
-/// Mirrors `ComponentRegistryService`'s `send` pattern — fire-and-forget, a
-/// failed ACK post is debug tooling, not user-facing, so it's logged and
-/// swallowed rather than surfaced.
+/// Posts `received` / `shown` / `failed` ACKs to `POST .../testInvocation/ack`.
+/// Fire-and-forget: a failed post is logged and swallowed, not surfaced.
 @MainActor
 final class LiveTestAckReporter {
     private let sender: any AnalyticsSender
@@ -16,7 +12,6 @@ final class LiveTestAckReporter {
         self.sender = sender
     }
 
-    /// Called once from `LiveTestService.configure`.
     func configure(config: DigiaConfig, deviceId: String) {
         self.config = config
         self.deviceId = deviceId

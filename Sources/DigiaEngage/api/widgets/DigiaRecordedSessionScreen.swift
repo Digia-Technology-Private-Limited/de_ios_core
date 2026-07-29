@@ -46,11 +46,6 @@ struct DigiaRecordedSessionScreen: View {
             }
         }
         .navigationTitle("Synced This Session")
-        // This screen is a drill-down from L1's "Sync" row, not a root screen —
-        // per HIG (and Apple's own Settings app), a pushed detail screen uses
-        // the compact inline title, not the large title reserved for roots.
-        // Without this, the large title's loose flow left it visually
-        // crowding the Sync toggle row directly beneath it.
         .navigationBarTitleDisplayMode(.inline)
     }
 }

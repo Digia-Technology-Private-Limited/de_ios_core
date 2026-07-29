@@ -41,24 +41,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Registry, when the debug-only "recording mode" toggle is on. See
     /// `ComponentRegistryService`.
     private let componentRegistry: ComponentRegistryService
-    /// Debug-only live-campaign-testing coordinator (SSE connect + ACKs), active
-    /// whenever "Sync" is on. See `LiveTestService`. `var`, not `let` — tests
-    /// swap this out for one wired to a fake `AnalyticsSender` (see
-    /// `setLiveTestServiceForTesting`).
+    /// Debug-only live-campaign-testing coordinator (SSE connect + ACKs).
     private var liveTestService = LiveTestService()
-    /// Transient campaigns parsed from a live test's inline `campaign` object
-    /// (see `handleLiveTestCampaign`) — deliberately never added to
-    /// `campaignStore`: a live test must never warm or otherwise mutate the
-    /// SDK's real campaign cache. Keyed by this invocation's own unique
-    /// `cepCampaignId`, not `campaignKey` — two tests of the same (possibly
-    /// edited) campaign share a `campaignKey` but never a `cepCampaignId`, so a
-    /// re-test always resolves to its own freshly-parsed content, never a stale
-    /// sibling.
+    /// Live-test campaigns, parsed on the spot — never added to `campaignStore`.
     private var liveTestCampaigns: [String: CampaignModel] = [:]
-    /// In-flight live test invocations, keyed by the same synthetic
-    /// `cepCampaignId`. `events`'s `onLiveTestShown` hook reports `shown` once a
-    /// render is confirmed via the normal impression path; removed once the
-    /// invocation reaches a terminal ACK (see `LiveTestContext`'s `onTerminal`).
+    /// In-flight live test invocations, keyed by synthetic `cepCampaignId`.
     private var liveTestContexts: [String: LiveTestContext] = [:]
     /// Whether the host app is a debug build, resolved once at `initialize`.
     /// Gates the component registry and `DigiaDebugSettingsView`.
@@ -306,12 +293,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         return route(campaign, payload: payload)
     }
 
-    /// The actual per-type dispatch, taking an already-resolved `campaign`
-    /// directly rather than a key — split out from `routeByCampaignKey` so a
-    /// live test (whose `CampaignModel` is parsed on the spot from the SSE
-    /// payload, never written into `campaignStore`) can route through the
-    /// exact same switch without a store lookup that would only ever find the
-    /// real, possibly-stale campaign.
     private func route(
         _ campaign: CampaignModel,
         payload: CEPTriggerPayload,
@@ -364,8 +345,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             guideOrchestrator.start(campaign, payload: payload)
             return true
         case .nudge(let nudgeConfig):
-            // A live test explicitly forces a render — bypass the cap. An
-            // organic trigger keeps today's behavior exactly.
             if testContext == nil, let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
                 logVerbose("nudge dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
                 return false
@@ -397,19 +376,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
     }
 
-    /// Handles one `campaign_test` SSE event from `LiveTestService`: ACKs
-    /// `received` immediately, then parses and routes the inline `campaign`
-    /// object through the exact same `route` switch every organic CEP trigger
-    /// uses — a live test is just a trigger whose payload came from the
-    /// dashboard instead of a CEP plugin, and whose `CampaignModel` was parsed
-    /// on the spot instead of pulled from `campaignStore` (never populated
-    /// from it either — a live test must never warm or otherwise mutate the
-    /// SDK's real campaign cache).
-    ///
-    /// Scope for this port: only `nudge`/`survey` are supported — guide and
-    /// inline are rejected immediately with `templateError`, before ever
-    /// reaching `route`, so their organic behavior is completely untouched by
-    /// this feature.
+    /// Handles one `campaign_test` SSE event. Only nudge/survey are supported.
     private func handleLiveTestCampaign(_ invocation: LiveTestInvocation) {
         let reporter = liveTestService.ackReporter
         reporter.postReceived(invocation.testInvocationId)
@@ -446,8 +413,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
 
-        // CEPTriggerPayload.variables is [String: String] (every trigger path
-        // shares this shape); the wire payload's variables are arbitrary JSON.
         let coercedVariables = invocation.variables.mapValues { "\($0)" }
         let cepCampaignId = liveTestCepId(invocation.testInvocationId)
         let payload = CEPTriggerPayload(
@@ -457,12 +422,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             variables: coercedVariables
         )
 
-        // Also forgets any Digia first-impression/first-click dedup mark
-        // digiaImpressionOnce/digiaExperienceClickedOnce may have recorded for
-        // this id — the only other caller of resetImpression is the
-        // organic-only onCampaignInvalidated CEP hook, which a live test's
-        // synthetic payload never reaches, so without this call those dedup
-        // sets would grow by one entry per live test forever.
         let cleanUpLiveTestState: () -> Void = { [weak self] in
             self?.liveTestContexts.removeValue(forKey: cepCampaignId)
             self?.liveTestCampaigns.removeValue(forKey: cepCampaignId)
@@ -475,17 +434,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             onTerminal: cleanUpLiveTestState
         )
         liveTestContexts[cepCampaignId] = testContext
-        // Keyed by this invocation's own cepCampaignId, not campaignKey — see
-        // liveTestCampaigns' doc comment for why that distinction is what
-        // makes a re-test of an edited campaign show the edit instead of
-        // stale content.
         liveTestCampaigns[cepCampaignId] = campaign
 
         let accepted = route(campaign, payload: payload, testContext: testContext)
         if !accepted {
-            // Every synchronous drop branch above already reports its
-            // specific failure reason via testContext; this just guarantees
-            // state is cleaned up even if a future branch forgets to.
             cleanUpLiveTestState()
         }
     }
@@ -517,8 +469,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let config = state.config
         dwellTracker.markViewed(state.payload.cepCampaignId)
         // Bump frequency on "Digia Experience Viewed" (the moment the survey shows).
-        // Skipped for a live test — it must never consume the real campaign's
-        // frequency-cap budget.
         if !isLiveTestCepId(state.payload.cepCampaignId) {
             let campaignKey = state.payload.campaignKey
             frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
@@ -643,7 +593,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let isLiveTest = isLiveTestCepId(state.payload.cepCampaignId)
 
         // Permanent stop on "Digia Experience Completed" when stopOn is set.
-        // Skipped for a live test — see reportSurveyStarted's frequency guard.
         if !isLiveTest {
             let campaignKey = state.payload.campaignKey
             frequencyManager?.recordCompleted(campaignKey, campaignStore.find(campaignKey)?.frequency)
@@ -662,9 +611,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             payload: state.payload
         )
 
-        // A live test's answers must not land in the project's real submission
-        // data either — same "never pollute production data" principle as the
-        // frequency-cap and CEP/analytics suppression above.
         if answers.isEmpty || isLiveTest {
             logVerbose("reportSurveyCompleted: skip submission — answers is empty or this is a live test")
             return
@@ -755,8 +701,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         guard let nudge = controller.activeNudge else { return }
         dwellTracker.markViewed(nudge.payload.cepCampaignId)
         // Bump frequency on "Digia Experience Viewed" (the moment the nudge shows).
-        // Skipped for a live test — it must never consume the real campaign's
-        // frequency-cap budget.
         if !isLiveTestCepId(nudge.payload.cepCampaignId) {
             let campaignKey = nudge.payload.campaignKey
             frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
@@ -1082,15 +1026,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         liveTestCampaigns.removeAll()
     }
 
-    /// Use in tests only: swaps in a `LiveTestService` wired to a fake
-    /// `AnalyticsSender` so ACK posts can be asserted on without touching the
-    /// network.
+    /// Test-only.
     func setLiveTestServiceForTesting(_ service: LiveTestService) {
         liveTestService = service
     }
 
-    /// Use in tests only: drives `handleLiveTestCampaign` directly, bypassing
-    /// the SSE transport entirely.
+    /// Test-only — bypasses the SSE transport.
     func handleLiveTestCampaignForTesting(_ invocation: LiveTestInvocation) {
         handleLiveTestCampaign(invocation)
     }
