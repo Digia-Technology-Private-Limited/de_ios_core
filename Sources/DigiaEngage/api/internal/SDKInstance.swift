@@ -290,13 +290,89 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             logError("routeByCampaignKey: no campaign found for key '\(key)'")
             return false
         }
-        return route(campaign, payload: payload)
+        return route(
+            campaign, payload: payload,
+            context: OrganicRoutingContext(frequencyManager: frequencyManager, events: events))
+    }
+
+    /// Abstracts the two points where `route` otherwise diverges between an
+    /// organic trigger and a live test — frequency capping, and how a
+    /// routed/dropped campaign reports back — so the routing switch itself never
+    /// branches on which one this is.
+    @MainActor
+    private protocol RoutingContext {
+        func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool
+        func onInlineRouted(payload: CEPTriggerPayload)
+        func onDropped(_ code: LiveTestFailureCode, message: String)
+    }
+
+    @MainActor
+    private struct OrganicRoutingContext: RoutingContext {
+        let frequencyManager: FrequencyManager?
+        let events: EngageEventEmitter
+
+        func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool {
+            guard let reason = frequencyManager?.blockReason(campaignKey: campaignKey, policy: policy) else {
+                return false
+            }
+            DigiaLog.warning(
+                "[SDKInstance] Campaign dropped — frequency capped: key=\(campaignKey) reason=\(reason) policy=\(String(describing: policy))"
+            )
+            return true
+        }
+
+        func onInlineRouted(payload: CEPTriggerPayload) {
+            // syncTemplate semantics: CEP considers an inline slot shown and done
+            // the moment it is delivered. Digia's impression fires only when the
+            // slot first renders (see reportSlotFirstRender).
+            events.toCep(.impressed, payload: payload)
+            events.toCep(.dismissed, payload: payload)
+        }
+
+        func onDropped(_ code: LiveTestFailureCode, message: String) {
+            // Nothing to report organically — the caller already logged why.
+        }
+    }
+
+    /// Seconds a live-test inline campaign waits for its target slot to mount
+    /// before giving up. Inline routing always "succeeds" immediately, so this
+    /// stands in for the synchronous anchor check guide gets.
+    private static let liveTestNoMatchTimeoutSeconds: UInt64 = 5
+
+    @MainActor
+    private final class LiveTestRoutingContext: RoutingContext {
+        private let testContext: LiveTestContext
+
+        init(testContext: LiveTestContext) {
+            self.testContext = testContext
+        }
+
+        func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool { false }
+
+        func onInlineRouted(payload: CEPTriggerPayload) {
+            // No synchronous way to know a matching DigiaSlot exists — bound it
+            // with a timeout; reportSlotFirstRender's shown ACK wins the race if
+            // a slot renders first (LiveTestContext is idempotent).
+            let testContext = testContext
+            let seconds = SDKInstance.liveTestNoMatchTimeoutSeconds
+            Task {
+                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+                testContext.reportFailed(
+                    .noMatchingScreen,
+                    message: "no matching slot for this campaign mounted within \(seconds)s"
+                )
+            }
+        }
+
+        func onDropped(_ code: LiveTestFailureCode, message: String) {
+            testContext.reportFailed(code, message: message)
+        }
     }
 
     private func route(
         _ campaign: CampaignModel,
         payload: CEPTriggerPayload,
-        testContext: LiveTestContext? = nil
+        context: RoutingContext
     ) -> Bool {
         let key = campaign.campaignKey
         if !campaign.targetScreenNames.isEmpty
@@ -317,27 +393,19 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 "routeByCampaignKey INLINE slotKey='\(cfg.slotKey)' items=\(cfg.items.count)")
             inlineController.setCarouselConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
-            // syncTemplate semantics: CEP considers an inline slot shown and done
-            // the moment it is delivered. Digia's impression fires only when the
-            // slot first renders (see reportSlotFirstRender).
-            events.toCep(.impressed, payload: payload)
-            events.toCep(.dismissed, payload: payload)
+            context.onInlineRouted(payload: payload)
             return true
         case .story(let cfg):
             inlineController.setStoryConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
-            events.toCep(.impressed, payload: payload)
-            events.toCep(.dismissed, payload: payload)
+            context.onInlineRouted(payload: payload)
             return true
         case .guide:
             if let renderViaJs = onGuideRenderRequest {
                 // RN: native owns capping, JS owns rendering. Gate here; the
                 // counter is bumped later on the guide's "Digia Experience
                 // Viewed" event (see captureAnalyticsEvent).
-                if let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
-                    logVerbose("guide dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
-                    return false
-                }
+                if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) { return false }
                 renderViaJs(payload)
                 return true
             }
@@ -345,10 +413,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             guideOrchestrator.start(campaign, payload: payload)
             return true
         case .nudge(let nudgeConfig):
-            if testContext == nil, let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
-                logVerbose("nudge dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
-                return false
-            }
+            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) { return false }
             // Resolve variable context: dashboard schemas define type + fallback;
             // CEP trigger variables win over fallbacks (D3′).
             let variableContext = buildVariableContext(
@@ -363,20 +428,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 ))
             return true
         case .survey(let cfg):
-            if testContext == nil, let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
-                logVerbose("survey dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
-                return false
-            }
+            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) { return false }
             let started = surveyOrchestrator.start(payload: payload, config: cfg)
             if !started {
                 logVerbose("survey campaign dropped: another survey is on screen: \(key)")
-                testContext?.reportFailed(.renderError, message: "another survey is already on screen")
+                context.onDropped(.renderError, message: "another survey is already on screen")
             }
             return started
         }
     }
 
-    /// Handles one `campaign_test` SSE event. Only nudge/survey are supported.
+    /// Handles one `campaign_test` SSE event. nudge/survey/inline are supported.
     private func handleLiveTestCampaign(_ invocation: LiveTestInvocation) {
         let reporter = liveTestService.ackReporter
         reporter.postReceived(invocation.testInvocationId)
@@ -405,7 +467,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
 
-        guard campaign.campaignType == "nudge" || campaign.campaignType == "survey" else {
+        guard campaign.campaignType == "nudge" || campaign.campaignType == "survey"
+            || campaign.campaignType == "inline"
+        else {
             reporter.postFailed(
                 invocation.testInvocationId, code: .templateError,
                 message: "campaign type '\(campaign.campaignType)' is not supported for live testing yet"
@@ -436,7 +500,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         liveTestContexts[cepCampaignId] = testContext
         liveTestCampaigns[cepCampaignId] = campaign
 
-        let accepted = route(campaign, payload: payload, testContext: testContext)
+        let accepted = route(
+            campaign, payload: payload, context: LiveTestRoutingContext(testContext: testContext))
         if !accepted {
             cleanUpLiveTestState()
         }
@@ -753,8 +818,16 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     // semantics — see routeByCampaignKey). Digia's impression fires once, when
     // the slot first actually renders, deduped per campaign.
 
+    /// Resolves the campaign for `payload`: a live test's transient entry if
+    /// present, else the real store. Every campaign-by-payload lookup should go
+    /// through this — a lookup that only checks `campaignStore` silently misses
+    /// for any live-tested campaign, since those are deliberately never added there.
+    private func findCampaign(_ payload: CEPTriggerPayload) -> CampaignModel? {
+        liveTestCampaigns[payload.cepCampaignId] ?? campaignStore.find(payload.campaignKey)
+    }
+
     func reportSlotFirstRender(_ payload: CEPTriggerPayload) {
-        guard let campaign = campaignStore.find(payload.campaignKey) else { return }
+        guard let campaign = findCampaign(payload) else { return }
         let viewed: EngageAnalyticsEvent
         switch campaign.config {
         case .inline(let cfg):
