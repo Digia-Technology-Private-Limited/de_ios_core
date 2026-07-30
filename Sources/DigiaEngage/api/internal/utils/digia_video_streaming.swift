@@ -274,4 +274,14 @@ struct DigiaVideoPlaybackBundle {
         }
         return DigiaVideoPlaybackBundle(player: AVPlayer(playerItem: item), looper: nil)
     }
+
+    func releasePlaybackResources() {
+        looper?.disableLooping()
+        player.pause()
+        if let queuePlayer = player as? AVQueuePlayer {
+            queuePlayer.removeAllItems()
+        } else {
+            player.replaceCurrentItem(with: nil)
+        }
+    }
 }

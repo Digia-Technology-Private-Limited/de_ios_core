@@ -81,12 +81,12 @@ struct StoryItemConfig: Equatable {
     }
 }
 
-enum StoryThumbnailType: String, Equatable {
+enum StoryThumbnailType: String, Hashable {
     case image
     case color
 }
 
-enum StoryThumbnailImageFit: String, Equatable {
+enum StoryThumbnailImageFit: String, Hashable {
     case cover
     case contain
     case fill
@@ -148,7 +148,7 @@ enum StoryMediaFit: Equatable {
     }
 }
 
-enum StoryMediaType: String, Equatable {
+enum StoryMediaType: String, Hashable {
     case image
     case video
 
@@ -157,7 +157,7 @@ enum StoryMediaType: String, Equatable {
     }
 }
 
-enum StoryThumbnailDurationMode: String, Equatable {
+enum StoryThumbnailDurationMode: String, Hashable {
     case full
     case fixed
 }

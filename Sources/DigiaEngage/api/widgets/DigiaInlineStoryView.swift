@@ -23,19 +23,22 @@ struct DigiaInlineStoryView: View {
             LazyHStack(spacing: CGFloat(config.card.spacing)) {
                 ForEach(Array(config.items.enumerated()), id: \.offset) { index, item in
                     let playerIdentity = thumbnailPlayerIdentity(item)
+                    let eligible = playableIndices.contains(index)
+                    let scheduled =
+                        eligible
+                        && !reduceMotion
+                        && (
+                            config.thumbnailVideoPlayback == .simultaneous
+                            || sequentialActiveIndex == index
+                        )
                     StoryThumbnailCard(
                         item: item,
                         config: config,
                         failed: failedPlayerIdentities[index] == playerIdentity,
                         playbackState: ThumbnailPlaybackViewState(
-                            eligible: playableIndices.contains(index),
-                            shouldPlay:
-                                playbackAllowed
-                                && playableIndices.contains(index)
-                                && (
-                                    config.thumbnailVideoPlayback == .simultaneous
-                                    || sequentialActiveIndex == index
-                                ),
+                            eligible: eligible,
+                            scheduled: scheduled,
+                            shouldPlay: playbackAllowed && scheduled,
                             reduceMotion: reduceMotion,
                             mode: config.thumbnailVideoPlayback,
                             playableIndices: playableIndices,
@@ -140,6 +143,7 @@ struct DigiaInlineStoryView: View {
         }
         let next = updateThumbnailPlaybackEligibility(
             current: eligibleIndices,
+            slotVisible: isSlotVisible,
             visibleFractions: fractions,
             items: config.items
         )
@@ -216,7 +220,10 @@ private struct StoryThumbnailCard: View {
             Color.black
             if item.type == .video,
                !failed,
-               item.thumbnail == nil || playbackState.shouldPlay
+               shouldComposeThumbnailPlayer(
+                   hasExplicitThumbnail: item.thumbnail != nil,
+                   scheduled: playbackState.scheduled
+               )
             {
                 StoryThumbnailVideoView(
                     item: item,
@@ -782,13 +789,7 @@ private struct InlineStoryVideoView: View {
         }
         bufferingObserver?.invalidate()
 
-        bundle.looper?.disableLooping()
-        bundle.player.pause()
-        if let queuePlayer = bundle.player as? AVQueuePlayer {
-            queuePlayer.removeAllItems()
-        } else {
-            bundle.player.replaceCurrentItem(with: nil)
-        }
+        bundle.releasePlaybackResources()
 
         timeObserver = nil
         endObserver = nil

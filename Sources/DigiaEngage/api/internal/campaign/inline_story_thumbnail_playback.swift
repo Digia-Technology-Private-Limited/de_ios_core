@@ -1,46 +1,48 @@
 import Foundation
 
-let thumbnailPlaybackEntryVisibility = 0.75
-let thumbnailPlaybackExitVisibility = 0.25
 let thumbnailPlaybackStallSeconds = 10.0
+
+struct ThumbnailVisibilityHysteresis: Equatable {
+    let entryThreshold: Double
+    let exitThreshold: Double
+
+    init?(entryThreshold: Double, exitThreshold: Double) {
+        guard entryThreshold > exitThreshold else { return nil }
+        self.entryThreshold = entryThreshold
+        self.exitThreshold = exitThreshold
+    }
+}
+
+let defaultThumbnailVisibilityHysteresis = ThumbnailVisibilityHysteresis(
+    entryThreshold: 0.75,
+    exitThreshold: 0.25
+)!
 
 func updateThumbnailPlaybackEligibility(
     current: Set<Int>,
+    slotVisible: Bool = true,
     visibleFractions: [Int: Double],
-    items: [StoryItemConfig]
+    items: [StoryItemConfig],
+    hysteresis: ThumbnailVisibilityHysteresis = defaultThumbnailVisibilityHysteresis
 ) -> Set<Int> {
+    guard slotVisible else { return current }
     var next = current.filter { index in
         guard items.indices.contains(index) else { return false }
         let item = items[index]
         return item.type == .video
             && !item.url.isEmpty
-            && (visibleFractions[index] ?? 0) >= thumbnailPlaybackExitVisibility
+            && (visibleFractions[index] ?? 0) >= hysteresis.exitThreshold
     }
     for (index, rawFraction) in visibleFractions {
         guard items.indices.contains(index) else { continue }
         let item = items[index]
         guard item.type == .video, !item.url.isEmpty else { continue }
         let fraction = min(max(rawFraction, 0), 1)
-        if fraction >= thumbnailPlaybackEntryVisibility {
+        if fraction >= hysteresis.entryThreshold {
             next.insert(index)
         }
     }
     return next
-}
-
-func thumbnailPlayerLayerCanReveal(
-    shouldPlay: Bool,
-    startPrepared: Bool,
-    playerLayerReady: Bool,
-    seekInProgress: Bool,
-    positionMs: Int64,
-    effectiveStartMs: Int64
-) -> Bool {
-    shouldPlay
-        && startPrepared
-        && playerLayerReady
-        && !seekInProgress
-        && positionMs > effectiveStartMs + 10
 }
 
 func nextThumbnailPlaybackIndex(
@@ -66,6 +68,31 @@ func effectiveThumbnailStartMs(
 ) -> Int64 {
     let start = max(item.thumbnailPlayback.startTimeMs, 0)
     return naturalDurationMs > 0 && start >= naturalDurationMs ? 0 : start
+}
+
+func shouldFallbackToZeroThumbnailStart(
+    effectiveStartMs: Int64,
+    naturalDurationMs: Int64
+) -> Bool {
+    effectiveStartMs > 0
+        && naturalDurationMs > 0
+        && effectiveStartMs >= naturalDurationMs
+}
+
+enum ThumbnailSeekRecoveryAction: Equatable {
+    case complete
+    case retryAtZero
+    case fail
+}
+
+func thumbnailSeekRecoveryAction(
+    succeeded: Bool,
+    retryAtZero: Bool,
+    effectiveStartMs: Int64
+) -> ThumbnailSeekRecoveryAction {
+    if succeeded { return .complete }
+    if retryAtZero, effectiveStartMs != 0 { return .retryAtZero }
+    return .fail
 }
 
 func thumbnailPlaybackWindowEnded(

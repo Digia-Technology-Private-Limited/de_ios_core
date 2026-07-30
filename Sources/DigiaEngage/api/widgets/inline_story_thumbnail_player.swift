@@ -22,6 +22,7 @@ struct StoryRailGeometryPreference: PreferenceKey {
 
 struct ThumbnailPlaybackViewState: Equatable {
     let eligible: Bool
+    let scheduled: Bool
     let shouldPlay: Bool
     let reduceMotion: Bool
     let mode: ThumbnailVideoPlaybackMode
@@ -30,51 +31,75 @@ struct ThumbnailPlaybackViewState: Equatable {
 }
 
 struct StoryThumbnailPlayerIdentity: Hashable {
-    let itemType: String
+    let itemType: StoryMediaType
     let url: String
-    let startTimeMs: Int64
-    let durationMode: String
-    let durationMs: Int64
-    let thumbnailType: String
-    let imageSrc: String
-    let imageFit: String
-    let blurHash: String
-    let color: String
+    let playback: StoryThumbnailPlaybackIdentity
+    let thumbnail: StoryThumbnailIdentity?
 
     var cacheKey: String {
-        [
-            itemType,
-            url,
-            String(startTimeMs),
-            durationMode,
-            String(durationMs),
-            thumbnailType,
-            imageSrc,
-            imageFit,
-            blurHash,
-            color,
-        ]
-        .map { "\($0.utf8.count):\($0)" }
-        .joined()
+        String(reflecting: self)
     }
+}
+
+struct StoryThumbnailPlaybackIdentity: Hashable {
+    let startTimeMs: Int64
+    let durationMode: StoryThumbnailDurationMode
+    let durationMs: Int64?
+}
+
+struct StoryThumbnailIdentity: Hashable {
+    let type: StoryThumbnailType
+    let imageSrc: String?
+    let imageFit: StoryThumbnailImageFit
+    let blurHash: String?
+    let color: String?
 }
 
 func thumbnailPlayerIdentity(_ item: StoryItemConfig) -> StoryThumbnailPlayerIdentity {
     StoryThumbnailPlayerIdentity(
-        itemType: item.type.rawValue,
+        itemType: item.type,
         url: item.url,
-        startTimeMs: item.thumbnailPlayback.startTimeMs,
-        durationMode: item.thumbnailPlayback.durationMode.rawValue,
-        durationMs:
-            item.thumbnailPlayback.durationMode == .fixed
-                ? item.thumbnailPlayback.durationMs ?? 0
-                : 0,
-        thumbnailType: item.thumbnail?.type.rawValue ?? "",
-        imageSrc: item.thumbnail?.imageSrc ?? "",
-        imageFit: item.thumbnail?.fit.rawValue ?? "",
-        blurHash: item.thumbnail?.placeholder?.blurHash ?? "",
-        color: item.thumbnail?.color ?? ""
+        playback: StoryThumbnailPlaybackIdentity(
+            startTimeMs: item.thumbnailPlayback.startTimeMs,
+            durationMode: item.thumbnailPlayback.durationMode,
+            durationMs:
+                item.thumbnailPlayback.durationMode == .fixed
+                    ? item.thumbnailPlayback.durationMs
+                    : nil
+        ),
+        thumbnail: item.thumbnail.map {
+            StoryThumbnailIdentity(
+                type: $0.type,
+                imageSrc: $0.imageSrc,
+                imageFit: $0.fit,
+                blurHash: $0.placeholder?.blurHash,
+                color: $0.color
+            )
+        }
     )
+}
+
+struct ThumbnailRevealState: Equatable {
+    let shouldPlay: Bool
+    let startPrepared: Bool
+    let playerLayerReady: Bool
+    let seekInProgress: Bool
+    let effectiveStartMs: Int64
+
+    func canReveal(at positionMs: Int64) -> Bool {
+        shouldPlay
+            && startPrepared
+            && playerLayerReady
+            && !seekInProgress
+            && positionMs > effectiveStartMs + 10
+    }
+}
+
+func shouldComposeThumbnailPlayer(
+    hasExplicitThumbnail: Bool,
+    scheduled: Bool
+) -> Bool {
+    !hasExplicitThumbnail || scheduled
 }
 
 struct StoryThumbnailPlaceholderView: View {
@@ -202,6 +227,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     private var bundle: DigiaVideoPlaybackBundle?
     private var state = ThumbnailPlaybackViewState(
         eligible: false,
+        scheduled: false,
         shouldPlay: false,
         reduceMotion: false,
         mode: .simultaneous,
@@ -215,6 +241,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     private var endObserver: NSObjectProtocol?
     private var failObserver: NSObjectProtocol?
     private var statusObserver: NSKeyValueObservation?
+    private var durationObserver: NSKeyValueObservation?
     private var watchdogTask: Task<Void, Never>?
     private var watchdogGeneration: UInt = 0
     private var terminalFailurePending = false
@@ -243,7 +270,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         self.state = state
         self.onWindowCompleted = onWindowCompleted
         self.onFailed = onFailed
-        if item.thumbnail != nil, !state.shouldPlay {
+        if item.thumbnail != nil, !state.scheduled {
             if bundle != nil {
                 tearDown()
             }
@@ -312,6 +339,14 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
                     }
                 }
             }
+            durationObserver = currentItem.observe(
+                \.duration,
+                options: [.initial, .new]
+            ) { [weak self] observed, _ in
+                Task { @MainActor in
+                    self?.revalidateStartAgainstKnownDuration(observed.duration)
+                }
+            }
             endObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime,
                 object: currentItem,
@@ -362,6 +397,27 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             if self.state.shouldPlay {
                 player.play()
             }
+        }
+    }
+
+    private func revalidateStartAgainstKnownDuration(_ duration: CMTime) {
+        let seconds = duration.seconds
+        let naturalDurationMs =
+            seconds.isFinite && seconds > 0 ? Int64(seconds * 1_000) : 0
+        guard startPrepared,
+              shouldFallbackToZeroThumbnailStart(
+                  effectiveStartMs: effectiveStartMs,
+                  naturalDurationMs: naturalDurationMs
+              )
+        else {
+            return
+        }
+
+        effectiveStartMs = 0
+        player?.pause()
+        seekToStart {
+            guard self.state.shouldPlay else { return }
+            self.player?.play()
         }
     }
 
@@ -485,7 +541,6 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             let target = Double(self.effectiveStartMs) / 1_000
             let position = expectedPlayer.currentTime().seconds
             let reachedTarget = position.isFinite && abs(position - target) <= 0.25
-            guard reachedTarget else { return }
             self.finishSeek(
                 generation: generation,
                 expectedPlayer: expectedPlayer,
@@ -507,12 +562,20 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         seekGeneration &+= 1
         seekFallbackTask?.cancel()
         seekFallbackTask = nil
-        if succeeded {
+        switch thumbnailSeekRecoveryAction(
+            succeeded: succeeded,
+            retryAtZero: retryAtZero,
+            effectiveStartMs: effectiveStartMs
+        ) {
+        case .complete:
             seekInProgress = false
             completion?()
-        } else if retryAtZero, effectiveStartMs != 0 {
+        case .retryAtZero:
             effectiveStartMs = 0
             seekToStart(completion: completion)
+        case .fail:
+            seekInProgress = false
+            handleTerminalFailure()
         }
     }
 
@@ -575,14 +638,14 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     }
 
     private func revealPlayerLayerIfReady(positionMs: Int64) {
-        guard thumbnailPlayerLayerCanReveal(
+        let revealState = ThumbnailRevealState(
             shouldPlay: state.shouldPlay,
             startPrepared: startPrepared,
             playerLayerReady: playerLayerReady,
             seekInProgress: seekInProgress,
-            positionMs: positionMs,
             effectiveStartMs: effectiveStartMs
-        ) else {
+        )
+        guard revealState.canReveal(at: positionMs) else {
             return
         }
         showPlayerLayer = true
@@ -602,6 +665,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         imageGenerator = nil
         imageGenerationID = nil
         statusObserver?.invalidate()
+        durationObserver?.invalidate()
         if let timeObserver, let player {
             player.removeTimeObserver(timeObserver)
         }
@@ -612,6 +676,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             NotificationCenter.default.removeObserver(failObserver)
         }
         statusObserver = nil
+        durationObserver = nil
         timeObserver = nil
         endObserver = nil
         failObserver = nil
@@ -682,13 +747,7 @@ private enum StoryThumbnailWarmPlayerCache {
     }
 
     static func release(_ bundle: DigiaVideoPlaybackBundle) {
-        bundle.looper?.disableLooping()
-        bundle.player.pause()
-        if let queuePlayer = bundle.player as? AVQueuePlayer {
-            queuePlayer.removeAllItems()
-        } else {
-            bundle.player.replaceCurrentItem(with: nil)
-        }
+        bundle.releasePlaybackResources()
     }
 }
 
