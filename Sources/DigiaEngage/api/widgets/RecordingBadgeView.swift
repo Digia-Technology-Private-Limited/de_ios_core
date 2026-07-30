@@ -103,6 +103,11 @@ private struct BadgeContent: View {
         }
     }
 
+    // connecting/error pulse (actively retrying); connected is the only steady state.
+    private var isPulsing: Bool {
+        liveTest.connectionState == .connecting || liveTest.connectionState == .error
+    }
+
     var body: some View {
         HStack(spacing: 6) {
             Text("Digia")
@@ -112,21 +117,19 @@ private struct BadgeContent: View {
                 Circle()
                     .fill(dotColor)
                     .frame(width: 8, height: 8)
-                    .opacity(liveTest.connectionState == .connecting ? (pulse ? 1 : 0.35) : 1)
+                    .opacity(isPulsing ? (pulse ? 1 : 0.35) : 1)
             }
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(Color.black.opacity(0.87))
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        // `.task(id:)`, not `.onAppear` — the dot stays mounted across state
-        // changes, so onAppear would only fire once and never restart the
-        // pulse on a later reconnect.
-        .task(id: liveTest.connectionState) {
-            guard liveTest.connectionState == .connecting else {
-                pulse = false
-                return
-            }
+        // Started once, forever — never stopped/restarted per state (that's what
+        // caused a real bug: a repeatForever animation doesn't reliably cancel on
+        // a later plain reassignment, so the dot kept pulsing green after
+        // connecting). `pulse`'s oscillating value is only ever *read*
+        // conditionally via `isPulsing`, matching Android/Flutter's pattern.
+        .onAppear {
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                 pulse = true
             }
