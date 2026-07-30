@@ -2,6 +2,18 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.7.0] - 2026-07-29
+
+### New Features
+- Added an inline banner campaign type: a tappable image banner that renders in a placement slot, with configurable image fit (cover, contain, or fill), aspect ratio, height, corner radius, margins, a loading placeholder, and a tap action (open URL, deep link, share, copy, or custom key-value).
+- Added a linear progress bar nudge widget: a determinate horizontal bar that shows either a percentage or a start/current/end range (e.g. "700 of 1000"), with configurable indicator and track colors, thickness, and corner radius.
+- Full-screen story overlays can now show configurable close and video-mute controls — including visibility, icon color, background color, and size. Stories can start videos muted or audible, and once the viewer changes the audio state that choice persists for the rest of the story session.
+- Inline carousels, inline and full-screen story media, and nudge videos now support configurable content fit (cover/contain, plus fill for images) and aspect ratio, so media is sized to match the design instead of a fixed default.
+- The nudge close button's icon color and size are now configurable from the dashboard.
+
+### Improvements
+- Screen-targeted campaigns are now dismissed when the app navigates to a screen outside their target set, not only prevented from showing when triggered — so a campaign tied to one screen no longer lingers after the user moves to another.
+
 ## [3.6.1] - 2026-07-18
 
 ### Bug Fixes
