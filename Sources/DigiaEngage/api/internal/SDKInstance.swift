@@ -1099,26 +1099,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         liveTestCampaigns.removeAll()
     }
 
-    /// Test-only.
-    func setLiveTestServiceForTesting(_ service: LiveTestService) {
-        liveTestService = service
-    }
-
-    /// Test-only — bypasses the SSE transport.
-    func handleLiveTestCampaignForTesting(_ invocation: LiveTestInvocation) {
-        handleLiveTestCampaign(invocation)
-    }
-
-    /// Use in tests only.
-    func liveTestCampaignsForTesting() -> [String: CampaignModel] {
-        liveTestCampaigns
-    }
-
-    /// Use in tests only.
-    func liveTestContextsForTesting() -> [String: LiveTestContext] {
-        liveTestContexts
-    }
-
 }
 
 // MARK: - Survey config metrics (Engage matrix props)
