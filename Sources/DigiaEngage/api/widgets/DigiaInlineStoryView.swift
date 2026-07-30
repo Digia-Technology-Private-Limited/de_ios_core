@@ -17,6 +17,7 @@ struct DigiaInlineStoryView: View {
     @State private var playbackRestartGeneration = 0
     @State private var previousPlayerIdentities: [StoryThumbnailPlayerIdentity] = []
     @State private var latestGeometry = StoryRailGeometry()
+    @State private var viewportBounds = CGRect.null
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -70,11 +71,18 @@ struct DigiaInlineStoryView: View {
             .padding(.horizontal, CGFloat(config.card.spacing))
         }
         .background {
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: StoryRailGeometryPreference.self,
-                    value: StoryRailGeometry(rail: proxy.frame(in: .global))
-                )
+            ZStack {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: StoryRailGeometryPreference.self,
+                        value: StoryRailGeometry(rail: proxy.frame(in: .global))
+                    )
+                }
+                StoryViewportReader { viewport in
+                    guard viewportBounds != viewport else { return }
+                    viewportBounds = viewport
+                    updateEligibility(latestGeometry, viewport: viewport)
+                }
             }
         }
         .onPreferenceChange(StoryRailGeometryPreference.self) { geometry in
@@ -128,23 +136,20 @@ struct DigiaInlineStoryView: View {
             && slotVisible
     }
 
-    private func updateEligibility(_ geometry: StoryRailGeometry) {
-        guard let rail = geometry.rail, !rail.isNull, !rail.isEmpty else { return }
-        let screen = UIScreen.main.bounds
-        let visibleRail = rail.intersection(screen)
-        let isSlotVisible = !visibleRail.isNull && !visibleRail.isEmpty
-        slotVisible = isSlotVisible
-        var fractions: [Int: Double] = [:]
-        for (index, card) in geometry.cards where !card.isNull && !card.isEmpty {
-            let visible = card.intersection(rail).intersection(screen)
-            let totalArea = card.width * card.height
-            let visibleArea = visible.isNull || visible.isEmpty ? 0 : visible.width * visible.height
-            fractions[index] = totalArea > 0 ? Double(visibleArea / totalArea) : 0
-        }
+    private func updateEligibility(
+        _ geometry: StoryRailGeometry,
+        viewport: CGRect? = nil
+    ) {
+        let visibility = storyRailVisibility(
+            rail: geometry.rail,
+            cards: geometry.cards,
+            viewport: viewport ?? viewportBounds
+        )
+        slotVisible = visibility.slotVisible
         let next = updateThumbnailPlaybackEligibility(
             current: eligibleIndices,
-            slotVisible: isSlotVisible,
-            visibleFractions: fractions,
+            slotVisible: visibility.slotVisible,
+            visibleFractions: visibility.cardFractions,
             items: config.items
         )
         eligibleIndices = next
@@ -197,6 +202,45 @@ struct DigiaInlineStoryView: View {
     private func markFailed(_ index: Int, playerIdentity: StoryThumbnailPlayerIdentity) {
         failedPlayerIdentities[index] = playerIdentity
         reconcileSequentialActive(playable: playableIndices)
+    }
+}
+
+private struct StoryViewportReader: UIViewRepresentable {
+    let onChange: (CGRect) -> Void
+
+    func makeUIView(context _: Context) -> StoryViewportUIView {
+        let view = StoryViewportUIView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateUIView(_ view: StoryViewportUIView, context _: Context) {
+        view.onChange = onChange
+        view.reportViewportIfNeeded()
+    }
+}
+
+private final class StoryViewportUIView: UIView {
+    var onChange: ((CGRect) -> Void)?
+    private var lastViewport = CGRect.null
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        reportViewportIfNeeded()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        reportViewportIfNeeded()
+    }
+
+    func reportViewportIfNeeded() {
+        let next = window?.bounds ?? .null
+        guard next != lastViewport else { return }
+        lastViewport = next
+        DispatchQueue.main.async { [weak self] in
+            self?.onChange?(next)
+        }
     }
 }
 

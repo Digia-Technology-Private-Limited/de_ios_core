@@ -1,4 +1,5 @@
 @testable import DigiaEngage
+import CoreGraphics
 import Testing
 
 @MainActor
@@ -175,6 +176,32 @@ struct InlineStoryThumbnailPlaybackTests {
             entryThreshold: 0.25,
             exitThreshold: 0.75
         ) == nil)
+    }
+
+    @Test("rail visibility uses the hosting viewport and collapses safely")
+    func railVisibilityUsesHostingViewport() {
+        let viewport = CGRect(x: 0, y: 0, width: 500, height: 300)
+        let visible = storyRailVisibility(
+            rail: CGRect(x: 0, y: 100, width: 700, height: 200),
+            cards: [
+                0: CGRect(x: 0, y: 100, width: 200, height: 200),
+                1: CGRect(x: 450, y: 100, width: 200, height: 200),
+                2: CGRect(x: 550, y: 100, width: 100, height: 200),
+            ],
+            viewport: viewport
+        )
+        let collapsed = storyRailVisibility(
+            rail: .zero,
+            cards: [0: CGRect(x: 0, y: 0, width: 200, height: 200)],
+            viewport: viewport
+        )
+
+        #expect(visible.slotVisible)
+        #expect(visible.cardFractions[0] == 1)
+        #expect(visible.cardFractions[1] == 0.25)
+        #expect(visible.cardFractions[2] == 0)
+        #expect(!collapsed.slotVisible)
+        #expect(collapsed.cardFractions.isEmpty)
     }
 
     @Test("helpers wrap and bound configured windows")

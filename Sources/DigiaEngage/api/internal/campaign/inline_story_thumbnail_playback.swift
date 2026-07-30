@@ -18,6 +18,39 @@ let defaultThumbnailVisibilityHysteresis = ThumbnailVisibilityHysteresis(
     exitThreshold: 0.25
 )!
 
+struct StoryRailVisibility: Equatable {
+    let slotVisible: Bool
+    let cardFractions: [Int: Double]
+}
+
+func storyRailVisibility(
+    rail: CGRect?,
+    cards: [Int: CGRect],
+    viewport: CGRect
+) -> StoryRailVisibility {
+    guard let rail,
+          !rail.isNull,
+          !rail.isEmpty,
+          !viewport.isNull,
+          !viewport.isEmpty
+    else {
+        return StoryRailVisibility(slotVisible: false, cardFractions: [:])
+    }
+
+    let visibleRail = rail.intersection(viewport)
+    let slotVisible = !visibleRail.isNull && !visibleRail.isEmpty
+    var fractions: [Int: Double] = [:]
+    for (index, card) in cards where !card.isNull && !card.isEmpty {
+        let visible = card.intersection(rail).intersection(viewport)
+        let totalArea = card.width * card.height
+        let visibleArea = visible.isNull || visible.isEmpty ? 0 : visible.width * visible.height
+        fractions[index] = totalArea > 0
+            ? min(max(Double(visibleArea / totalArea), 0), 1)
+            : 0
+    }
+    return StoryRailVisibility(slotVisible: slotVisible, cardFractions: fractions)
+}
+
 func updateThumbnailPlaybackEligibility(
     current: Set<Int>,
     slotVisible: Bool = true,
