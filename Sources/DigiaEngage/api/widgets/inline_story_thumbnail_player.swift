@@ -61,7 +61,7 @@ struct StoryThumbnailPlayerIdentity: Hashable {
 
 func thumbnailPlayerIdentity(_ item: StoryItemConfig) -> StoryThumbnailPlayerIdentity {
     StoryThumbnailPlayerIdentity(
-        itemType: item.type,
+        itemType: item.type.rawValue,
         url: item.url,
         startTimeMs: item.thumbnailPlayback.startTimeMs,
         durationMode: item.thumbnailPlayback.durationMode.rawValue,
@@ -151,14 +151,12 @@ struct StoryThumbnailVideoView: View {
             Color.black
             StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
             if item.thumbnail == nil, let poster = model.poster {
-                Image(uiImage: poster)
-                    .resizable()
-                    .scaledToFill()
+                fittedPoster(poster)
             }
             if let player = model.player {
                 InlineStoryPlayerLayer(
                     player: player,
-                    gravity: .resizeAspectFill,
+                    gravity: item.thumbnailBoxFit.videoGravity,
                     onReadyForDisplay: model.playerLayerDidBecomeReady
                 )
                 .opacity(model.showPlayerLayer ? 1 : 0)
@@ -180,6 +178,16 @@ struct StoryThumbnailVideoView: View {
         }
         .onDisappear {
             model.tearDown()
+        }
+    }
+
+    @ViewBuilder
+    private func fittedPoster(_ poster: UIImage) -> some View {
+        let image = Image(uiImage: poster).resizable()
+        if item.thumbnailBoxFit.stretchesImage {
+            image.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            image.aspectRatio(contentMode: item.thumbnailBoxFit.imageContentMode)
         }
     }
 }

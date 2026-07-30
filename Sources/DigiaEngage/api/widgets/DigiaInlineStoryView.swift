@@ -206,13 +206,15 @@ private struct StoryThumbnailCard: View {
     let onFailed: () -> Void
 
     private var width: CGFloat {
-        CGFloat(config.card.height) * CGFloat(config.card.aspectRatio)
+        CGFloat(config.card.width)
     }
 
     var body: some View {
         ZStack {
-            Color(red: 0.10, green: 0.10, blue: 0.10)
-            if item.type == "video",
+            // Contained media leaves letterbox space. Keep that surface
+            // opaque black across iOS, Android, and Flutter.
+            Color.black
+            if item.type == .video,
                !failed,
                item.thumbnail == nil || playbackState.shouldPlay
             {
@@ -223,12 +225,10 @@ private struct StoryThumbnailCard: View {
                     onFailed: onFailed
                 )
                 .id(thumbnailPlayerIdentity(item))
+            } else if item.type == .video {
+                StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
             } else {
-                if item.type == "video" {
-                    StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
-                } else {
-                    StoryRemoteImage(urlString: item.url)
-                }
+                StoryRemoteImage(urlString: item.url, fit: item.thumbnailBoxFit)
             }
         }
         .frame(width: width, height: CGFloat(config.card.height))
@@ -355,6 +355,9 @@ private struct InlineStoryOverlayContent: View {
     /// `Completed` rather than `StepDismissed`.
     @State private var completed = false
     @State private var openedAt = Date()
+    /// Nil until the viewer changes the audio state. Before that, the story's
+    /// authored `startMuted` applies; afterwards the viewer's choice persists.
+    @State private var muteOverride: Bool?
 
     init(state: InlineStoryOverlayState) {
         self.state = state
@@ -372,8 +375,10 @@ private struct InlineStoryOverlayContent: View {
                     .ignoresSafeArea()
 
                 if let item = currentItem {
+                    let muted = muteOverride ?? state.config.startMuted
                     FullScreenStoryItem(
                         item: item,
+                        muted: muted,
                         onVideoProgress: { videoProgress = $0 },
                         onVideoEnded: { next() },
                         onVideoBuffering: { videoBuffering = $0 }
@@ -407,6 +412,40 @@ private struct InlineStoryOverlayContent: View {
                             .padding(.horizontal, 24)
                             .padding(.bottom, safeAreaInsets.bottom + 20)
                         }
+                    }
+
+                    VStack(spacing: 0) {
+                        HStack(spacing: 8) {
+                            Spacer(minLength: 0)
+
+                            if item.type == .video, state.config.muteButton.visible {
+                                StoryOverlayButton(
+                                    config: state.config.muteButton,
+                                    systemImage: muted ? "speaker.slash.fill" : "speaker.wave.2.fill",
+                                    accessibilityLabel: muted ? "Unmute story" : "Mute story",
+                                    action: { muteOverride = !muted }
+                                )
+                            }
+
+                            if state.config.closeButton.visible {
+                                StoryOverlayButton(
+                                    config: state.config.closeButton,
+                                    systemImage: "xmark",
+                                    accessibilityLabel: "Close story",
+                                    action: { SDKInstance.shared.controller.dismissStoryOverlay() }
+                                )
+                            }
+                        }
+                        .padding(
+                            .top,
+                            safeAreaInsets.top
+                                + CGFloat(state.config.indicator.topPadding)
+                                + CGFloat(state.config.indicator.height)
+                                + 12
+                        )
+                        .padding(.trailing, CGFloat(state.config.indicator.horizontalPadding))
+
+                        Spacer(minLength: 0)
                     }
                 }
             }
@@ -484,7 +523,7 @@ private struct InlineStoryOverlayContent: View {
     }
 
     private var progress: Double {
-        if currentItem?.type == "video" {
+        if currentItem?.type == .video {
             return min(max(videoProgress, 0), 1)
         }
         return min(max(elapsed / currentDuration, 0), 1)
@@ -510,7 +549,7 @@ private struct InlineStoryOverlayContent: View {
 
     private func tick() {
         guard let item = currentItem else { return }
-        if item.type == "video" {
+        if item.type == .video {
             // Buffering is legitimate loading, not a stall — pause the watchdog
             // so a slow network doesn't skip the video before it starts.
             if videoBuffering { return }
@@ -585,6 +624,7 @@ private struct InlineStoryOverlayContent: View {
 @MainActor
 private struct FullScreenStoryItem: View {
     let item: StoryItemConfig
+    let muted: Bool
     let onVideoProgress: (Double) -> Void
     let onVideoEnded: () -> Void
     let onVideoBuffering: @Sendable (Bool) -> Void
@@ -592,20 +632,19 @@ private struct FullScreenStoryItem: View {
     var body: some View {
         ZStack {
             Color.black
-            if item.type == "video" {
+            if item.type == .video {
                 StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
                 InlineStoryVideoView(
                     urlString: item.url,
                     looping: false,
-                    muted: false,
-                    gravity: .resizeAspect,
+                    muted: muted,
+                    gravity: item.boxFit.videoGravity,
                     onProgress: onVideoProgress,
                     onEnded: onVideoEnded,
                     onBuffering: onVideoBuffering
                 )
             } else {
-                // Letterbox (never crop): show the whole image, bars where aspect differs.
-                StoryRemoteImage(urlString: item.url, contentMode: .fit)
+                StoryRemoteImage(urlString: item.url, fit: item.boxFit)
             }
         }
     }
@@ -614,16 +653,20 @@ private struct FullScreenStoryItem: View {
 @MainActor
 private struct StoryRemoteImage: View {
     let urlString: String
-    /// `.fill` crops to fill (story thumbnails); `.fit` letterboxes (full-screen).
-    var contentMode: ContentMode = .fill
+    let fit: StoryMediaFit
 
+    @ViewBuilder
     var body: some View {
         if let url = URL(string: urlString) {
-            DigiaCachedImageView(
+            let image = DigiaCachedImageView(
                 url: url,
                 placeholder: AnyView(Color(red: 0.10, green: 0.10, blue: 0.10))
             )
-            .aspectRatio(contentMode: contentMode)
+            if fit.stretchesImage {
+                image.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                image.aspectRatio(contentMode: fit.imageContentMode)
+            }
         } else {
             Color(red: 0.16, green: 0.16, blue: 0.16)
         }
@@ -635,7 +678,7 @@ private struct InlineStoryVideoView: View {
     let urlString: String
     let looping: Bool
     let muted: Bool
-    /// Aspect-fill for thumbnails (crop to fill), aspect-fit for full-screen.
+    /// Configurable cover/contain scaling shared by thumbnails and full-screen playback.
     var gravity: AVLayerVideoGravity = .resizeAspectFill
     /// Full-screen playback hooks; thumbnails leave these nil and skip the
     /// observers entirely.
@@ -664,7 +707,7 @@ private struct InlineStoryVideoView: View {
                 )
             }
         }
-        .task(id: "\(urlString)-\(looping)-\(muted)") {
+        .task(id: "\(urlString)-\(looping)") {
             guard let url = URL(string: urlString) else { return }
             tearDownPlayback()
             firstFrameReady = false
@@ -717,6 +760,9 @@ private struct InlineStoryVideoView: View {
             bundle = nextBundle
             nextBundle.player.play()
         }
+        .onChange(of: muted) { isMuted in
+            bundle?.player.isMuted = isMuted
+        }
         .onDisappear {
             tearDownPlayback()
         }
@@ -750,6 +796,40 @@ private struct InlineStoryVideoView: View {
         bufferingObserver = nil
         firstFrameReady = false
         self.bundle = nil
+    }
+}
+
+extension StoryMediaFit {
+    var stretchesImage: Bool { self == .fill }
+
+    var imageContentMode: ContentMode { self == .contain ? .fit : .fill }
+
+    var videoGravity: AVLayerVideoGravity {
+        self == .contain ? .resizeAspect : .resizeAspectFill
+    }
+}
+
+private struct StoryOverlayButton: View {
+    let config: StoryOverlayButtonConfig
+    let systemImage: String
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: CGFloat(config.size) * 0.5, weight: .regular))
+                .foregroundStyle(Color(hex: config.iconColor) ?? .white)
+                .frame(width: CGFloat(config.size), height: CGFloat(config.size))
+                .background(Color(hex: config.backgroundColor) ?? .black)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .frame(
+            width: max(CGFloat(config.size), 48),
+            height: max(CGFloat(config.size), 48)
+        )
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 

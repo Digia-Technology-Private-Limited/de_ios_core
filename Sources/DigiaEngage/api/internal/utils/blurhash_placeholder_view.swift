@@ -8,6 +8,13 @@ import SwiftUI
 /// only authors `blurhash` today.
 struct BlurHashPlaceholderView: View {
     let placeholder: ImagePlaceholder?
+    /// `nil` stretches the decoded image to the proposed frame.
+    let contentMode: ContentMode?
+
+    init(placeholder: ImagePlaceholder?, contentMode: ContentMode? = .fill) {
+        self.placeholder = placeholder
+        self.contentMode = contentMode
+    }
 
     /// Size the hash is decoded at; the upscale to the image box is the blur.
     private static let decodeSize = 32
@@ -22,9 +29,14 @@ struct BlurHashPlaceholderView: View {
 
     var body: some View {
         if let image = decoded {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
+            if let contentMode {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: contentMode)
+            } else {
+                Image(uiImage: image)
+                    .resizable()
+            }
         }
     }
 }
