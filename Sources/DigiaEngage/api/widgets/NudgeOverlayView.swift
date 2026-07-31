@@ -19,12 +19,16 @@ struct NudgeOverlayView: View {
             }
         }
         .fullScreenCover(item: sheetBinding) { nudge in
+            // `.id(nudge.id)`: a direct swap between two active nudges (no nil in
+            // between) doesn't re-trigger `.onAppear` without a forced identity
+            // change — SwiftUI otherwise updates the same view in place.
+            //
             // `.presentationBackground` needs iOS 16.4; below that, the cover's
             // (opaque) default background is used as-is.
             if #available(iOS 16.4, *) {
-                NudgeSheetView(presentation: nudge).presentationBackground(.clear)
+                NudgeSheetView(presentation: nudge).presentationBackground(.clear).id(nudge.id)
             } else {
-                NudgeSheetView(presentation: nudge)
+                NudgeSheetView(presentation: nudge).id(nudge.id)
             }
         }
         .transaction { $0.disablesAnimations = true }

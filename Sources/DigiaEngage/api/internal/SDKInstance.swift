@@ -41,6 +41,22 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Used to compute `time_to_answer_ms` on QuestionAnswered.
     private var questionViewedAt: [String: Date] = [:]
     private var analyticsService: AnalyticsService?
+    /// Whether the floating "Digia" debug bubble is shown. See
+    /// `DigiaDebugOverlayController`.
+    private let debugOverlayController = DigiaDebugOverlayController()
+    /// Batches pages/anchors/slots seen at runtime to the Engage Component
+    /// Registry, when the debug-only "recording mode" toggle is on. See
+    /// `ComponentRegistryService`.
+    private let componentRegistry: ComponentRegistryService
+    /// Debug-only live-campaign-testing coordinator (SSE connect + ACKs).
+    private var liveTestService = LiveTestService()
+    /// Live-test campaigns, parsed on the spot — never added to `campaignStore`.
+    private var liveTestCampaigns: [String: CampaignModel] = [:]
+    /// In-flight live test invocations, keyed by synthetic `cepCampaignId`.
+    private var liveTestContexts: [String: LiveTestContext] = [:]
+    /// Whether the host app is a debug build, resolved once at `initialize`.
+    /// Gates the component registry and `DigiaDebugSettingsView`.
+    private(set) var isDebugBuild = false
     /// Native frequency capping for all managed campaigns (nudge, survey, and —
     /// on React Native — guides, whose lifecycle events arrive over the bridge).
     private var frequencyManager: FrequencyManager?
@@ -61,6 +77,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private var events: EngageEventEmitter!
 
     private init() {
+        componentRegistry = ComponentRegistryService(debugOverlay: debugOverlayController)
         events = EngageEventEmitter(
             cep: CepPluginSink { [weak self] event, payload in
                 self?.activePlugin?.notifyEvent(event, payload: payload)
@@ -68,7 +85,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             digia: DigiaAnalyticsSink(
                 getAnalyticsService: { [weak self] in self?.analyticsService },
                 getCampaign: { [weak self] key in self?.campaignStore.find(key) }
-            )
+            ),
+            onLiveTestShown: { [weak self] cepCampaignId in
+                self?.liveTestContexts[cepCampaignId]?.reportShown()
+            }
         )
         controller.onAction = { [weak self] actionType, url, payload in
             self?.activePlugin?.notifyAction(actionType: actionType, url: url, payload: payload) ?? false
@@ -85,6 +105,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         self.config = config
         DigiaLog.configure(config.logLevel)
         DigiaEndpoints.configure(config)
+        isDebugBuild = DigiaDebugDetection.isDebugBuild()
 
         font = DigiaFont(fontFamily: config.fontFamily)
 
@@ -141,6 +162,20 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         if analyticsService == nil, let config {
             analyticsService = AnalyticsService.create(config: config)
         }
+        if let config, let analyticsService {
+            componentRegistry.configure(
+                config: config,
+                deviceId: analyticsService.identity.anonymousId,
+                isDebugBuild: isDebugBuild
+            )
+            liveTestService.configure(
+                config: config,
+                deviceId: analyticsService.identity.anonymousId,
+                isDebugBuild: isDebugBuild,
+                componentRegistry: componentRegistry,
+                onCampaignTest: { [weak self] invocation in self?.handleLiveTestCampaign(invocation) }
+            )
+        }
 
         // Frequency capping pulls the authoritative sessionId from analytics so
         // `session` windows track the same session the backend sees.
@@ -196,6 +231,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let screenName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         _currentScreen = screenName.isEmpty ? nil : screenName
         DigiaLog.warning("[SDKInstance] Current screen set: \(_currentScreen ?? "<unset>")")
+        componentRegistry.recordPage(screenName)
         dismissActiveCampaignsNotTargetingCurrentScreen()
         if screenUpdateRevision == revision {
             activePlugin?.forwardScreen(screenName)
@@ -267,6 +303,31 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         dismiss()
     }
 
+    /// Called the first time an anchor key registers (`AnchorRegistry.register`).
+    func recordAnchorSeen(_ anchorKey: String) {
+        componentRegistry.recordAnchor(anchorKey, screenName: _currentScreen)
+    }
+
+    /// Called the first time a placement key appears (`DigiaSlot`).
+    func recordSlotSeen(_ placementKey: String) {
+        componentRegistry.recordSlot(placementKey, screenName: _currentScreen)
+    }
+
+    /// Exposes the recording toggle + control surface to `DigiaDebugSettingsView`.
+    func componentRegistrySnapshot() -> ComponentRegistryService {
+        componentRegistry
+    }
+
+    /// Exposes the live-test connection state to `DigiaDebugSettingsView`.
+    func liveTestServiceSnapshot() -> LiveTestService {
+        liveTestService
+    }
+
+    /// Exposes bubble visibility to `RecordingBadgeView` and `DigiaDebugSettingsView`.
+    func debugOverlayControllerSnapshot() -> DigiaDebugOverlayController {
+        debugOverlayController
+    }
+
     func registerPlaceholderForSlot(propertyID: String) -> Int? {
         activePlugin?.registerPlaceholder(propertyID: propertyID)
     }
@@ -306,7 +367,91 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             logError("routeByCampaignKey: no campaign found for key '\(key)'")
             return false
         }
+        return route(
+            campaign, payload: payload,
+            context: OrganicRoutingContext(frequencyManager: frequencyManager, events: events))
+    }
 
+    /// Abstracts the two points where `route` otherwise diverges between an
+    /// organic trigger and a live test — frequency capping, and how a
+    /// routed/dropped campaign reports back — so the routing switch itself never
+    /// branches on which one this is.
+    @MainActor
+    private protocol RoutingContext {
+        func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool
+        func onInlineRouted(payload: CEPTriggerPayload)
+        func onDropped(_ code: LiveTestFailureCode, message: String)
+    }
+
+    @MainActor
+    private struct OrganicRoutingContext: RoutingContext {
+        let frequencyManager: FrequencyManager?
+        let events: EngageEventEmitter
+
+        func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool {
+            guard let reason = frequencyManager?.blockReason(campaignKey: campaignKey, policy: policy) else {
+                return false
+            }
+            DigiaLog.warning(
+                "[SDKInstance] Campaign dropped — frequency capped: key=\(campaignKey) reason=\(reason) policy=\(String(describing: policy))"
+            )
+            return true
+        }
+
+        func onInlineRouted(payload: CEPTriggerPayload) {
+            // syncTemplate semantics: CEP considers an inline slot shown and done
+            // the moment it is delivered. Digia's impression fires only when the
+            // slot first renders (see reportSlotFirstRender).
+            events.toCep(.impressed, payload: payload)
+            events.toCep(.dismissed, payload: payload)
+        }
+
+        func onDropped(_ code: LiveTestFailureCode, message: String) {
+            // Nothing to report organically — the caller already logged why.
+        }
+    }
+
+    /// Seconds a live-test inline campaign waits for its target slot to mount
+    /// before giving up. Inline routing always "succeeds" immediately, so this
+    /// stands in for the synchronous anchor check guide gets.
+    private static let liveTestNoMatchTimeoutSeconds: UInt64 = 5
+
+    @MainActor
+    private final class LiveTestRoutingContext: RoutingContext {
+        private let testContext: LiveTestContext
+
+        init(testContext: LiveTestContext) {
+            self.testContext = testContext
+        }
+
+        func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool { false }
+
+        func onInlineRouted(payload: CEPTriggerPayload) {
+            // No synchronous way to know a matching DigiaSlot exists — bound it
+            // with a timeout; reportSlotFirstRender's shown ACK wins the race if
+            // a slot renders first (LiveTestContext is idempotent).
+            let testContext = testContext
+            let seconds = SDKInstance.liveTestNoMatchTimeoutSeconds
+            Task {
+                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+                testContext.reportFailed(
+                    .noMatchingScreen,
+                    message: "no matching slot for this campaign mounted within \(seconds)s"
+                )
+            }
+        }
+
+        func onDropped(_ code: LiveTestFailureCode, message: String) {
+            testContext.reportFailed(code, message: message)
+        }
+    }
+
+    private func route(
+        _ campaign: CampaignModel,
+        payload: CEPTriggerPayload,
+        context: RoutingContext
+    ) -> Bool {
+        let key = campaign.campaignKey
         if !campaign.targetScreenNames.isEmpty
             && !campaign.targetScreenNames.contains(_currentScreen ?? "")
         {
@@ -325,11 +470,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 "routeByCampaignKey INLINE slotKey='\(cfg.slotKey)' items=\(cfg.items.count)")
             inlineController.setCarouselConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
-            // syncTemplate semantics: CEP considers an inline slot shown and done
-            // the moment it is delivered. Digia's impression fires only when the
-            // slot first renders (see reportSlotFirstRender).
-            events.toCep(.impressed, payload: payload)
-            events.toCep(.dismissed, payload: payload)
+            context.onInlineRouted(payload: payload)
             return true
         case .banner(let cfg):
             inlineController.setBannerConfig(cfg.slotKey, config: cfg)
@@ -340,18 +481,14 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         case .story(let cfg):
             inlineController.setStoryConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
-            events.toCep(.impressed, payload: payload)
-            events.toCep(.dismissed, payload: payload)
+            context.onInlineRouted(payload: payload)
             return true
         case .guide:
             if let renderViaJs = onGuideRenderRequest {
                 // RN: native owns capping, JS owns rendering. Gate here; the
                 // counter is bumped later on the guide's "Digia Experience
                 // Viewed" event (see captureAnalyticsEvent).
-                if let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
-                    logVerbose("guide dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
-                    return false
-                }
+                if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) { return false }
                 activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
                 renderViaJs(payload)
                 return true
@@ -360,10 +497,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             guideOrchestrator.start(campaign, payload: payload)
             return true
         case .nudge(let nudgeConfig):
-            if let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
-                logVerbose("nudge dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
-                return false
-            }
+            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) { return false }
             // Resolve variable context: dashboard schemas define type + fallback;
             // CEP trigger variables win over fallbacks (D3′).
             let variableContext = buildVariableContext(
@@ -378,15 +512,82 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 ))
             return true
         case .survey(let cfg):
-            if let capReason = frequencyManager?.blockReason(campaignKey: key, policy: campaign.frequency) {
-                logVerbose("survey dropped — frequency capped: key=\(key) cep=\(payload.cepCampaignId) reason=\(capReason) policy=\(String(describing: campaign.frequency))")
-                return false
-            }
+            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) { return false }
             let started = surveyOrchestrator.start(payload: payload, config: cfg)
             if !started {
                 logVerbose("survey campaign dropped: another survey is on screen: \(key)")
+                context.onDropped(.renderError, message: "another survey is already on screen")
             }
             return started
+        }
+    }
+
+    /// Handles one `campaign_test` SSE event. nudge/survey/inline are supported.
+    private func handleLiveTestCampaign(_ invocation: LiveTestInvocation) {
+        let reporter = liveTestService.ackReporter
+        reporter.postReceived(invocation.testInvocationId)
+
+        guard sdkState == .ready else {
+            reporter.postFailed(
+                invocation.testInvocationId, code: .renderError,
+                message: "SDK not ready (state=\(sdkState))"
+            )
+            return
+        }
+
+        guard let campaignJson = invocation.campaign else {
+            reporter.postFailed(
+                invocation.testInvocationId, code: .campaignNotFound,
+                message: "campaign_test message had no usable campaign object"
+            )
+            return
+        }
+
+        guard let campaign = CampaignModel.fromJson(campaignJson) else {
+            reporter.postFailed(
+                invocation.testInvocationId, code: .templateError,
+                message: "campaign object could not be parsed into a renderable campaign"
+            )
+            return
+        }
+
+        guard campaign.campaignType == "nudge" || campaign.campaignType == "survey"
+            || campaign.campaignType == "inline"
+        else {
+            reporter.postFailed(
+                invocation.testInvocationId, code: .templateError,
+                message: "campaign type '\(campaign.campaignType)' is not supported for live testing yet"
+            )
+            return
+        }
+
+        let coercedVariables = invocation.variables.mapValues { "\($0)" }
+        let cepCampaignId = liveTestCepId(invocation.testInvocationId)
+        let payload = CEPTriggerPayload(
+            cepCampaignId: cepCampaignId,
+            campaignKey: campaign.campaignKey,
+            cepMetadata: [:],
+            variables: coercedVariables
+        )
+
+        let cleanUpLiveTestState: () -> Void = { [weak self] in
+            self?.liveTestContexts.removeValue(forKey: cepCampaignId)
+            self?.liveTestCampaigns.removeValue(forKey: cepCampaignId)
+            self?.events.resetImpression(cepCampaignId)
+        }
+
+        let testContext = LiveTestContext(
+            testInvocationId: invocation.testInvocationId,
+            reporter: reporter,
+            onTerminal: cleanUpLiveTestState
+        )
+        liveTestContexts[cepCampaignId] = testContext
+        liveTestCampaigns[cepCampaignId] = campaign
+
+        let accepted = route(
+            campaign, payload: payload, context: LiveTestRoutingContext(testContext: testContext))
+        if !accepted {
+            cleanUpLiveTestState()
         }
     }
 
@@ -420,8 +621,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let config = state.config
         dwellTracker.markViewed(state.payload.cepCampaignId)
         // Bump frequency on "Digia Experience Viewed" (the moment the survey shows).
-        let campaignKey = state.payload.campaignKey
-        frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
+        if !isLiveTestCepId(state.payload.cepCampaignId) {
+            let campaignKey = state.payload.campaignKey
+            frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
+        }
         events.toBoth(
             .impressed,
             SurveyEvent.Viewed(
@@ -539,10 +742,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
         completedSurveyToken = state.token
+        let isLiveTest = isLiveTestCepId(state.payload.cepCampaignId)
 
         // Permanent stop on "Digia Experience Completed" when stopOn is set.
-        let campaignKey = state.payload.campaignKey
-        frequencyManager?.recordCompleted(campaignKey, campaignStore.find(campaignKey)?.frequency)
+        if !isLiveTest {
+            let campaignKey = state.payload.campaignKey
+            frequencyManager?.recordCompleted(campaignKey, campaignStore.find(campaignKey)?.frequency)
+        }
 
         // Analytics "Completed" fires once per survey showing, regardless of
         // whether a submission is reported to the backend below.
@@ -557,8 +763,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             payload: state.payload
         )
 
-        if answers.isEmpty {
-            logVerbose("reportSurveyCompleted: skip submission — answers is empty")
+        if answers.isEmpty || isLiveTest {
+            logVerbose("reportSurveyCompleted: skip submission — answers is empty or this is a live test")
             return
         }
         guard let config = self.config else {
@@ -647,8 +853,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         guard let nudge = controller.activeNudge else { return }
         dwellTracker.markViewed(nudge.payload.cepCampaignId)
         // Bump frequency on "Digia Experience Viewed" (the moment the nudge shows).
-        let campaignKey = nudge.payload.campaignKey
-        frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
+        if !isLiveTestCepId(nudge.payload.cepCampaignId) {
+            let campaignKey = nudge.payload.campaignKey
+            frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
+        }
         events.toBoth(
             .impressed,
             NudgeEvent.Viewed(
@@ -697,8 +905,16 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     // semantics — see routeByCampaignKey). Digia's impression fires once, when
     // the slot first actually renders, deduped per campaign.
 
+    /// Resolves the campaign for `payload`: a live test's transient entry if
+    /// present, else the real store. Every campaign-by-payload lookup should go
+    /// through this — a lookup that only checks `campaignStore` silently misses
+    /// for any live-tested campaign, since those are deliberately never added there.
+    private func findCampaign(_ payload: CEPTriggerPayload) -> CampaignModel? {
+        liveTestCampaigns[payload.cepCampaignId] ?? campaignStore.find(payload.campaignKey)
+    }
+
     func reportSlotFirstRender(_ payload: CEPTriggerPayload) {
-        guard let campaign = campaignStore.find(payload.campaignKey) else { return }
+        guard let campaign = findCampaign(payload) else { return }
         let viewed: EngageAnalyticsEvent
         switch campaign.config {
         case .inline(let cfg):
@@ -988,6 +1204,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         completedSurveyToken = nil
         welcomeStartToken = nil
         questionViewedAt.removeAll()
+        liveTestService.stop()
+        liveTestContexts.removeAll()
+        liveTestCampaigns.removeAll()
     }
 
 }
