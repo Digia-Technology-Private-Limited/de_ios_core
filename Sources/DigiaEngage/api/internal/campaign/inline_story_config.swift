@@ -81,60 +81,33 @@ struct StoryItemConfig: Equatable {
     }
 }
 
-enum StoryThumbnailType: String, Hashable {
-    case image
-    case color
-}
-
-enum StoryThumbnailImageFit: String, Hashable {
-    case cover
-    case contain
-    case fill
-}
-
-struct StoryThumbnailConfig: Equatable {
-    let type: StoryThumbnailType
-    let imageSrc: String?
-    let fit: StoryThumbnailImageFit
-    let placeholder: ImagePlaceholder?
-    let color: String?
+enum StoryThumbnailConfig: Equatable {
+    case image(source: String, fit: StoryMediaFit, placeholder: ImagePlaceholder?)
+    case color(String)
 
     static func fromJson(_ json: [String: Any]?) -> StoryThumbnailConfig? {
-        guard let json,
-              let type = StoryThumbnailType(rawValue: json.string("type", default: ""))
-        else { return nil }
-        switch type {
-        case .image:
-            guard let imageSrc = json.object("src")?.nonBlankString("imageSrc"),
-                  isHTTPURL(imageSrc)
-            else {
-                return nil
-            }
-            return StoryThumbnailConfig(
-                type: .image,
-                imageSrc: imageSrc,
-                fit: StoryThumbnailImageFit(
-                    rawValue: json.string("fit", default: "cover")
-                ) ?? .cover,
-                placeholder: ImagePlaceholder.from(json.object("placeholder")),
-                color: nil
+        guard let json else { return nil }
+        switch json.string("type", default: "") {
+        case "image":
+            guard let source = json.object("src")?.nonBlankString("imageSrc") else { return nil }
+            return .image(
+                source: source,
+                fit: StoryMediaFit.fromWireValue(
+                    json.string("fit", default: "cover"),
+                    mediaType: .image
+                ),
+                placeholder: ImagePlaceholder.from(json.object("placeholder"))
             )
-        case .color:
-            guard let color = json.nonBlankString("color"), isSupportedHexColor(color) else {
-                return nil
-            }
-            return StoryThumbnailConfig(
-                type: .color,
-                imageSrc: nil,
-                fit: .cover,
-                placeholder: nil,
-                color: color
-            )
+        case "color":
+            guard let color = json.nonBlankString("color") else { return nil }
+            return .color(color)
+        default:
+            return nil
         }
     }
 }
 
-enum StoryMediaFit: Equatable {
+enum StoryMediaFit: Hashable {
     case cover
     case contain
     case fill
@@ -189,24 +162,6 @@ struct StoryThumbnailPlaybackConfig: Equatable {
             durationMs: mode == .fixed ? fixedDuration : nil
         )
     }
-}
-
-private func isHTTPURL(_ value: String) -> Bool {
-    guard let components = URLComponents(string: value),
-          let scheme = components.scheme?.lowercased(),
-          scheme == "http" || scheme == "https",
-          components.host?.isEmpty == false
-    else {
-        return false
-    }
-    return true
-}
-
-private func isSupportedHexColor(_ value: String) -> Bool {
-    value.range(
-        of: #"^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"#,
-        options: .regularExpression
-    ) != nil
 }
 
 enum ThumbnailVideoPlaybackMode: String, Equatable {

@@ -8,7 +8,6 @@ struct DigiaInlineStoryView: View {
     let payload: CEPTriggerPayload
 
     @ObservedObject private var overlayController = SDKInstance.shared.controller
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var eligibleIndices: Set<Int> = []
     @State private var failedPlayerIdentities: [Int: StoryThumbnailPlayerIdentity] = [:]
     @State private var sequentialActiveIndex: Int?
@@ -20,6 +19,10 @@ struct DigiaInlineStoryView: View {
     @State private var viewportBounds = CGRect.null
 
     var body: some View {
+        storyRail
+    }
+
+    private var storyRail: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: CGFloat(config.card.spacing)) {
                 ForEach(Array(config.items.enumerated()), id: \.offset) { index, item in
@@ -27,7 +30,6 @@ struct DigiaInlineStoryView: View {
                     let eligible = playableIndices.contains(index)
                     let scheduled =
                         eligible
-                        && !reduceMotion
                         && (
                             config.thumbnailVideoPlayback == .simultaneous
                             || sequentialActiveIndex == index
@@ -40,7 +42,7 @@ struct DigiaInlineStoryView: View {
                             eligible: eligible,
                             scheduled: scheduled,
                             shouldPlay: playbackAllowed && scheduled,
-                            reduceMotion: reduceMotion,
+                            canLoad: applicationActive,
                             mode: config.thumbnailVideoPlayback,
                             playableIndices: playableIndices,
                             restartGeneration: playbackRestartGeneration
@@ -132,7 +134,6 @@ struct DigiaInlineStoryView: View {
     private var playbackAllowed: Bool {
         applicationActive
             && overlayController.activeStoryOverlay == nil
-            && !reduceMotion
             && slotVisible
     }
 
@@ -676,15 +677,18 @@ private struct InlineStoryOverlayContent: View {
 private struct FullScreenStoryItem: View {
     let item: StoryItemConfig
     let muted: Bool
-    let onVideoProgress: (Double) -> Void
-    let onVideoEnded: () -> Void
-    let onVideoBuffering: @Sendable (Bool) -> Void
+    let onVideoProgress: @MainActor @Sendable (Double) -> Void
+    let onVideoEnded: @MainActor @Sendable () -> Void
+    let onVideoBuffering: @MainActor @Sendable (Bool) -> Void
 
     var body: some View {
         ZStack {
             Color.black
             if item.type == .video {
-                StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
+                StoryThumbnailPlaceholderView(
+                    thumbnail: item.thumbnail,
+                    fitOverride: item.boxFit
+                )
                 InlineStoryVideoView(
                     urlString: item.url,
                     looping: false,
@@ -733,16 +737,18 @@ private struct InlineStoryVideoView: View {
     var gravity: AVLayerVideoGravity = .resizeAspectFill
     /// Full-screen playback hooks; thumbnails leave these nil and skip the
     /// observers entirely.
-    var onProgress: ((Double) -> Void)?
-    var onEnded: (() -> Void)?
-    var onBuffering: (@Sendable (Bool) -> Void)?
+    var onProgress: (@MainActor @Sendable (Double) -> Void)?
+    var onEnded: (@MainActor @Sendable () -> Void)?
+    var onBuffering: (@MainActor @Sendable (Bool) -> Void)?
 
     @State private var bundle: DigiaVideoPlaybackBundle?
     @State private var timeObserver: Any?
     @State private var endObserver: NSObjectProtocol?
     @State private var failObserver: NSObjectProtocol?
     @State private var bufferingObserver: NSKeyValueObservation?
+    @State private var itemStatusObserver: NSKeyValueObservation?
     @State private var firstFrameReady = false
+    @State private var endReported = false
 
     var body: some View {
         ZStack {
@@ -759,9 +765,13 @@ private struct InlineStoryVideoView: View {
             }
         }
         .task(id: "\(urlString)-\(looping)") {
-            guard let url = URL(string: urlString) else { return }
             tearDownPlayback()
             firstFrameReady = false
+            endReported = false
+            guard let url = URL(string: urlString) else {
+                reportEnd()
+                return
+            }
 
             // DigiaVideoPlaybackBundle overrides an incorrect server MIME type
             // while leaving HTTP transport/range handling to AVFoundation on
@@ -775,26 +785,38 @@ private struct InlineStoryVideoView: View {
                     forInterval: interval,
                     queue: .main
                 ) { [weak player = nextBundle.player] time in
-                    guard let item = player?.currentItem else { return }
-                    guard firstFrameReady else { return }
-                    let duration = item.duration.seconds
-                    guard duration.isFinite, duration > 0 else { return }
-                    onProgress(min(max(time.seconds / duration, 0), 1))
+                    Task { @MainActor in
+                        guard let item = player?.currentItem, firstFrameReady else { return }
+                        let duration = item.duration.seconds
+                        guard duration.isFinite, duration > 0 else { return }
+                        onProgress(min(max(time.seconds / duration, 0), 1))
+                    }
                 }
             }
-            if let onEnded {
+            if onEnded != nil {
                 // Advance on natural completion or on an unplayable item, so a
                 // broken URL doesn't leave the story stuck on a black frame.
+                itemStatusObserver = nextBundle.player.currentItem?.observe(
+                    \.status,
+                    options: [.initial, .new]
+                ) { item, _ in
+                    guard item.status == .failed else { return }
+                    Task { @MainActor in reportEnd() }
+                }
                 endObserver = NotificationCenter.default.addObserver(
                     forName: .AVPlayerItemDidPlayToEndTime,
                     object: nextBundle.player.currentItem,
                     queue: .main
-                ) { _ in onEnded() }
+                ) { _ in
+                    Task { @MainActor in reportEnd() }
+                }
                 failObserver = NotificationCenter.default.addObserver(
                     forName: .AVPlayerItemFailedToPlayToEndTime,
                     object: nextBundle.player.currentItem,
                     queue: .main
-                ) { _ in onEnded() }
+                ) { _ in
+                    Task { @MainActor in reportEnd() }
+                }
             }
             if let onBuffering {
                 // Report waiting-to-play so the story's stall watchdog can tell
@@ -819,6 +841,12 @@ private struct InlineStoryVideoView: View {
         }
     }
 
+    private func reportEnd() {
+        guard !endReported else { return }
+        endReported = true
+        onEnded?()
+    }
+
     private func tearDownPlayback() {
         guard let bundle else { return }
 
@@ -832,6 +860,7 @@ private struct InlineStoryVideoView: View {
             NotificationCenter.default.removeObserver(failObserver)
         }
         bufferingObserver?.invalidate()
+        itemStatusObserver?.invalidate()
 
         bundle.releasePlaybackResources()
 
@@ -839,6 +868,7 @@ private struct InlineStoryVideoView: View {
         endObserver = nil
         failObserver = nil
         bufferingObserver = nil
+        itemStatusObserver = nil
         firstFrameReady = false
         self.bundle = nil
     }

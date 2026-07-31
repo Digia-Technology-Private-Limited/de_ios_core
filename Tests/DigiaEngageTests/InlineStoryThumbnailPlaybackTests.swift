@@ -81,11 +81,14 @@ struct InlineStoryThumbnailPlaybackTests {
             ],
         ]))
 
-        #expect(item.thumbnail?.type == .image)
-        #expect(item.thumbnail?.imageSrc == "https://example.com/poster.jpg")
-        #expect(item.thumbnail?.fit == .contain)
-        #expect(item.thumbnail?.placeholder?.type == .blurhash)
-        #expect(item.thumbnail?.placeholder?.blurHash == "LEHV6nWB2yk8pyo0adR*.7kCMdnj")
+        guard case let .image(source, fit, placeholder) = item.thumbnail else {
+            Issue.record("Expected an image thumbnail")
+            return
+        }
+        #expect(source == "https://example.com/poster.jpg")
+        #expect(fit == .contain)
+        #expect(placeholder?.type == .blurhash)
+        #expect(placeholder?.blurHash == "LEHV6nWB2yk8pyo0adR*.7kCMdnj")
     }
 
     @Test("color thumbnail parses and malformed thumbnails keep legacy fallback")
@@ -101,19 +104,22 @@ struct InlineStoryThumbnailPlaybackTests {
             "thumbnail": ["type": "image", "src": [:]],
         ]))
 
-        #expect(color.thumbnail?.type == .color)
-        #expect(color.thumbnail?.color == "#1A1A1A")
+        guard case let .color(value) = color.thumbnail else {
+            Issue.record("Expected a color thumbnail")
+            return
+        }
+        #expect(value == "#1A1A1A")
         #expect(malformed.thumbnail == nil)
         #expect(StoryItemConfig.fromJson([
             "type": "video",
             "url": "https://example.com/video.mp4",
             "thumbnail": ["type": "image", "src": ["imageSrc": "not a URL"]],
-        ])?.thumbnail == nil)
+        ])?.thumbnail != nil)
         #expect(StoryItemConfig.fromJson([
             "type": "video",
             "url": "https://example.com/video.mp4",
             "thumbnail": ["type": "color", "color": "blue-ish"],
-        ])?.thumbnail == nil)
+        ])?.thumbnail != nil)
     }
 
     @Test("full playback ignores irrelevant duration")
@@ -127,8 +133,8 @@ struct InlineStoryThumbnailPlaybackTests {
         #expect(playback.durationMs == nil)
     }
 
-    @Test("eligibility uses configurable hysteresis and preserves a hidden slot")
-    func eligibilityUsesHysteresis() throws {
+    @Test("eligibility uses separate start and stop thresholds and preserves a hidden slot")
+    func eligibilityUsesVisibilityThresholds() throws {
         let video = try #require(StoryItemConfig.fromJson([
             "type": "video",
             "url": "https://example.com/story.mp4",
@@ -137,45 +143,40 @@ struct InlineStoryThumbnailPlaybackTests {
             "type": "image",
             "url": "https://example.com/story.png",
         ]))
-        let hysteresis = try #require(ThumbnailVisibilityHysteresis(
-            entryThreshold: 0.6,
-            exitThreshold: 0.4
-        ))
-
         let entered = updateThumbnailPlaybackEligibility(
             current: [],
             visibleFractions: [0: 0.6, 1: 1],
             items: [video, image],
-            hysteresis: hysteresis
+            startWhenVisible: 0.6,
+            stopWhenBelow: 0.4
         )
         let retained = updateThumbnailPlaybackEligibility(
             current: entered,
             visibleFractions: [0: 0.4],
             items: [video, image],
-            hysteresis: hysteresis
+            startWhenVisible: 0.6,
+            stopWhenBelow: 0.4
         )
         let hidden = updateThumbnailPlaybackEligibility(
             current: retained,
             slotVisible: false,
             visibleFractions: [:],
             items: [video, image],
-            hysteresis: hysteresis
+            startWhenVisible: 0.6,
+            stopWhenBelow: 0.4
         )
         let exited = updateThumbnailPlaybackEligibility(
             current: hidden,
             visibleFractions: [0: 0.399],
             items: [video, image],
-            hysteresis: hysteresis
+            startWhenVisible: 0.6,
+            stopWhenBelow: 0.4
         )
 
         #expect(entered == [0])
         #expect(retained == [0])
         #expect(hidden == [0])
         #expect(exited.isEmpty)
-        #expect(ThumbnailVisibilityHysteresis(
-            entryThreshold: 0.25,
-            exitThreshold: 0.75
-        ) == nil)
     }
 
     @Test("rail visibility uses the hosting viewport and collapses safely")

@@ -1,22 +1,10 @@
 import Foundation
 
-let thumbnailPlaybackStallSeconds = 10.0
+// Wait until most of a card is visible before starting it.
+let startPlaybackWhenVisible = 0.75
 
-struct ThumbnailVisibilityHysteresis: Equatable {
-    let entryThreshold: Double
-    let exitThreshold: Double
-
-    init?(entryThreshold: Double, exitThreshold: Double) {
-        guard entryThreshold > exitThreshold else { return nil }
-        self.entryThreshold = entryThreshold
-        self.exitThreshold = exitThreshold
-    }
-}
-
-let defaultThumbnailVisibilityHysteresis = ThumbnailVisibilityHysteresis(
-    entryThreshold: 0.75,
-    exitThreshold: 0.25
-)!
+// Once started, keep playing until the card is mostly off-screen.
+let stopPlaybackWhenBelow = 0.25
 
 struct StoryRailVisibility: Equatable {
     let slotVisible: Bool
@@ -56,22 +44,24 @@ func updateThumbnailPlaybackEligibility(
     slotVisible: Bool = true,
     visibleFractions: [Int: Double],
     items: [StoryItemConfig],
-    hysteresis: ThumbnailVisibilityHysteresis = defaultThumbnailVisibilityHysteresis
+    startWhenVisible: Double = startPlaybackWhenVisible,
+    stopWhenBelow: Double = stopPlaybackWhenBelow
 ) -> Set<Int> {
+    precondition(startWhenVisible > stopWhenBelow)
     guard slotVisible else { return current }
     var next = current.filter { index in
         guard items.indices.contains(index) else { return false }
         let item = items[index]
         return item.type == .video
             && !item.url.isEmpty
-            && (visibleFractions[index] ?? 0) >= hysteresis.exitThreshold
+            && (visibleFractions[index] ?? 0) >= stopWhenBelow
     }
     for (index, rawFraction) in visibleFractions {
         guard items.indices.contains(index) else { continue }
         let item = items[index]
         guard item.type == .video, !item.url.isEmpty else { continue }
         let fraction = min(max(rawFraction, 0), 1)
-        if fraction >= hysteresis.entryThreshold {
+        if fraction >= startWhenVisible {
             next.insert(index)
         }
     }

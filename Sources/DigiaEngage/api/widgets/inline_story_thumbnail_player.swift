@@ -24,7 +24,7 @@ struct ThumbnailPlaybackViewState: Equatable {
     let eligible: Bool
     let scheduled: Bool
     let shouldPlay: Bool
-    let reduceMotion: Bool
+    let canLoad: Bool
     let mode: ThumbnailVideoPlaybackMode
     let playableIndices: Set<Int>
     let restartGeneration: Int
@@ -47,12 +47,9 @@ struct StoryThumbnailPlaybackIdentity: Hashable {
     let durationMs: Int64?
 }
 
-struct StoryThumbnailIdentity: Hashable {
-    let type: StoryThumbnailType
-    let imageSrc: String?
-    let imageFit: StoryThumbnailImageFit
-    let blurHash: String?
-    let color: String?
+enum StoryThumbnailIdentity: Hashable {
+    case image(source: String, fit: StoryMediaFit, blurHash: String?)
+    case color(String)
 }
 
 func thumbnailPlayerIdentity(_ item: StoryItemConfig) -> StoryThumbnailPlayerIdentity {
@@ -67,14 +64,13 @@ func thumbnailPlayerIdentity(_ item: StoryItemConfig) -> StoryThumbnailPlayerIde
                     ? item.thumbnailPlayback.durationMs
                     : nil
         ),
-        thumbnail: item.thumbnail.map {
-            StoryThumbnailIdentity(
-                type: $0.type,
-                imageSrc: $0.imageSrc,
-                imageFit: $0.fit,
-                blurHash: $0.placeholder?.blurHash,
-                color: $0.color
-            )
+        thumbnail: item.thumbnail.map { thumbnail in
+            switch thumbnail {
+            case let .image(source, fit, placeholder):
+                .image(source: source, fit: fit, blurHash: placeholder?.blurHash)
+            case let .color(value):
+                .color(value)
+            }
         }
     )
 }
@@ -104,26 +100,24 @@ func shouldComposeThumbnailPlayer(
 
 struct StoryThumbnailPlaceholderView: View {
     let thumbnail: StoryThumbnailConfig?
+    var fitOverride: StoryMediaFit? = nil
 
     var body: some View {
         ZStack {
             Color(red: 0.10, green: 0.10, blue: 0.10)
-            switch thumbnail?.type {
-            case .color:
-                Color(hex: thumbnail?.color ?? "") ?? Color(red: 0.10, green: 0.10, blue: 0.10)
-            case .image:
-                if let thumbnail,
-                   let imageSrc = thumbnail.imageSrc,
-                   let url = URL(string: imageSrc)
-                {
+            switch thumbnail {
+            case let .color(value):
+                Color(hex: value) ?? Color(red: 0.10, green: 0.10, blue: 0.10)
+            case let .image(source, fit, placeholder):
+                if let url = URL(string: source) {
                     fitted(
                         DigiaCachedImageView(
                             url: url,
                             placeholder: AnyView(
-                                BlurHashPlaceholderView(placeholder: thumbnail.placeholder)
+                                BlurHashPlaceholderView(placeholder: placeholder)
                             )
                         ),
-                        fit: thumbnail.fit
+                        fit: fitOverride ?? fit
                     )
                 }
             case nil:
@@ -136,7 +130,7 @@ struct StoryThumbnailPlaceholderView: View {
     @ViewBuilder
     private func fitted<Content: View>(
         _ content: Content,
-        fit: StoryThumbnailImageFit
+        fit: StoryMediaFit
     ) -> some View {
         switch fit {
         case .cover:
@@ -229,7 +223,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         eligible: false,
         scheduled: false,
         shouldPlay: false,
-        reduceMotion: false,
+        canLoad: false,
         mode: .simultaneous,
         playableIndices: [],
         restartGeneration: 0
@@ -242,11 +236,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     private var failObserver: NSObjectProtocol?
     private var statusObserver: NSKeyValueObservation?
     private var durationObserver: NSKeyValueObservation?
-    private var watchdogTask: Task<Void, Never>?
-    private var watchdogGeneration: UInt = 0
-    private var terminalFailurePending = false
     private var terminalFailureReported = false
-    private var seekFallbackTask: Task<Void, Never>?
     private var seekGeneration: UInt = 0
     private var seekInProgress = false
     private var imageGenerator: AVAssetImageGenerator?
@@ -270,26 +260,33 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         self.state = state
         self.onWindowCompleted = onWindowCompleted
         self.onFailed = onFailed
+        if !state.canLoad {
+            if bundle != nil {
+                tearDown()
+            }
+            return
+        }
         if item.thumbnail != nil, !state.scheduled {
             if bundle != nil {
                 tearDown()
             }
             return
         }
+        if bundle == nil, !state.shouldPlay {
+            if item.thumbnail == nil, poster == nil, let url = URL(string: item.url) {
+                preparePoster(from: AVURLAsset(url: url))
+            }
+            return
+        }
         prepareIfNeeded()
 
         if terminalFailureReported { return }
-        if state.shouldPlay {
-            startWatchdog()
-        } else {
-            stopWatchdog()
-        }
         guard let player else { return }
         if restartRequested {
             completionHandled = false
             player.pause()
             guard startPrepared else { return }
-            seekToStart(retryAtZero: true) {
+            seekToStart(retryAtZero: true, hideCurrentFrame: false) {
                 guard self.state.shouldPlay else { return }
                 player.play()
             }
@@ -302,7 +299,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             }
         } else {
             player.pause()
-            if !state.eligible || state.reduceMotion {
+            if !state.eligible {
                 resetToStart()
             }
         }
@@ -423,7 +420,13 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
 
     private func preparePoster(from asset: AVAsset?) {
         let cacheKey = thumbnailPlayerIdentity(item)
-        guard item.thumbnail == nil, poster == nil, let asset else { return }
+        guard item.thumbnail == nil,
+              poster == nil,
+              imageGenerator == nil,
+              let asset
+        else {
+            return
+        }
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 512, height: 512)
@@ -478,7 +481,6 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         guard !completionHandled, let player else { return }
         completionHandled = true
         player.pause()
-        stopWatchdog()
 
         if state.shouldPlay,
            shouldRepeatThumbnailPlaybackWindow(
@@ -486,19 +488,18 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
                eligibleVideoCount: state.playableIndices.count
            )
         {
-            seekToStart(retryAtZero: true) {
+            seekToStart(retryAtZero: true, hideCurrentFrame: false) {
                 guard self.state.shouldPlay else { return }
                 self.completionHandled = false
                 player.play()
             }
-            startWatchdog()
         } else {
             // The outgoing player's reset is best-effort background cleanup.
             // Coordinator advancement must not depend on AVPlayer invoking a
             // remote seek callback; some assets move currentTime successfully
             // without ever calling that completion handler.
             onWindowCompleted()
-            seekToStart(retryAtZero: true)
+            seekToStart(retryAtZero: true, hideCurrentFrame: false)
         }
     }
 
@@ -508,14 +509,15 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
 
     private func seekToStart(
         retryAtZero: Bool = false,
+        hideCurrentFrame: Bool = true,
         completion: (@MainActor @Sendable () -> Void)? = nil
     ) {
-        showPlayerLayer = false
+        if hideCurrentFrame {
+            showPlayerLayer = false
+        }
         seekInProgress = true
         seekGeneration &+= 1
         let generation = seekGeneration
-        seekFallbackTask?.cancel()
-        seekFallbackTask = nil
         guard let player else {
             seekInProgress = false
             completion?()
@@ -527,27 +529,13 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             Task { @MainActor in
                 self?.finishSeek(
                     generation: generation,
-                    expectedPlayer: expectedPlayer,
-                    succeeded: succeeded,
-                    retryAtZero: retryAtZero,
-                    completion: completion
+                expectedPlayer: expectedPlayer,
+                succeeded: succeeded,
+                retryAtZero: retryAtZero,
+                hideCurrentFrame: hideCurrentFrame,
+                completion: completion
                 )
             }
-        }
-        seekFallbackTask = Task { [weak self, weak expectedPlayer] in
-            try? await Task.sleep(nanoseconds: 1_000_000_000)
-            guard !Task.isCancelled, let self, let expectedPlayer else { return }
-            guard self.seekGeneration == generation, self.player === expectedPlayer else { return }
-            let target = Double(self.effectiveStartMs) / 1_000
-            let position = expectedPlayer.currentTime().seconds
-            let reachedTarget = position.isFinite && abs(position - target) <= 0.25
-            self.finishSeek(
-                generation: generation,
-                expectedPlayer: expectedPlayer,
-                succeeded: reachedTarget,
-                retryAtZero: retryAtZero,
-                completion: completion
-            )
         }
     }
 
@@ -556,12 +544,11 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         expectedPlayer: AVPlayer,
         succeeded: Bool,
         retryAtZero: Bool,
+        hideCurrentFrame: Bool,
         completion: (@MainActor @Sendable () -> Void)?
     ) {
         guard seekGeneration == generation, player === expectedPlayer else { return }
         seekGeneration &+= 1
-        seekFallbackTask?.cancel()
-        seekFallbackTask = nil
         switch thumbnailSeekRecoveryAction(
             succeeded: succeeded,
             retryAtZero: retryAtZero,
@@ -572,7 +559,10 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             completion?()
         case .retryAtZero:
             effectiveStartMs = 0
-            seekToStart(completion: completion)
+            seekToStart(
+                hideCurrentFrame: hideCurrentFrame,
+                completion: completion
+            )
         case .fail:
             seekInProgress = false
             handleTerminalFailure()
@@ -580,56 +570,14 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     }
 
     private func handleTerminalFailure() {
-        guard !terminalFailurePending, !terminalFailureReported else { return }
-        terminalFailurePending = true
+        guard !terminalFailureReported else { return }
+        terminalFailureReported = true
         player?.pause()
         showPlayerLayer = false
         imageGenerator?.cancelAllCGImageGeneration()
         imageGenerator = nil
         imageGenerationID = nil
-        reportTerminalFailure()
-    }
-
-    private func reportTerminalFailure() {
-        guard !terminalFailureReported else { return }
-        terminalFailureReported = true
-        terminalFailurePending = false
-        stopWatchdog()
         onFailed()
-    }
-
-    private func startWatchdog() {
-        guard watchdogTask == nil else { return }
-        watchdogGeneration &+= 1
-        let generation = watchdogGeneration
-        watchdogTask = Task { [weak self] in
-            var lastPosition = self?.player?.currentTime().seconds ?? 0
-            var stalled = 0.0
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                guard let self else { return }
-                guard !Task.isCancelled, self.state.shouldPlay else { break }
-                let position = self.player?.currentTime().seconds ?? lastPosition
-                if position > lastPosition + 0.01 {
-                    lastPosition = position
-                    stalled = 0
-                } else {
-                    stalled += 0.5
-                    if stalled >= thumbnailPlaybackStallSeconds {
-                        self.handleTerminalFailure()
-                        break
-                    }
-                }
-            }
-            guard let self, self.watchdogGeneration == generation else { return }
-            self.watchdogTask = nil
-        }
-    }
-
-    private func stopWatchdog() {
-        watchdogGeneration &+= 1
-        watchdogTask?.cancel()
-        watchdogTask = nil
     }
 
     func playerLayerDidBecomeReady() {
@@ -657,10 +605,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     }
 
     func tearDown() {
-        stopWatchdog()
         seekGeneration &+= 1
-        seekFallbackTask?.cancel()
-        seekFallbackTask = nil
         imageGenerator?.cancelAllCGImageGeneration()
         imageGenerator = nil
         imageGenerationID = nil
@@ -682,7 +627,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         failObserver = nil
         player?.pause()
         if let bundle {
-            if terminalFailurePending || terminalFailureReported || item.thumbnail != nil {
+            if terminalFailureReported || item.thumbnail != nil {
                 StoryThumbnailWarmPlayerCache.release(bundle)
             } else {
                 StoryThumbnailWarmPlayerCache.store(
@@ -702,14 +647,16 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
 
 @MainActor
 private enum StoryThumbnailWarmPlayerCache {
-    private static let countLimit = 1
-    private static var entries: [StoryThumbnailPlayerIdentity: DigiaVideoPlaybackBundle] = [:]
-    private static var recency: [StoryThumbnailPlayerIdentity] = []
+    private static var entry: (
+        key: StoryThumbnailPlayerIdentity,
+        bundle: DigiaVideoPlaybackBundle
+    )?
     private static var invalidated: Set<StoryThumbnailPlayerIdentity> = []
 
     static func take(_ key: StoryThumbnailPlayerIdentity) -> DigiaVideoPlaybackBundle? {
-        recency.removeAll { $0 == key }
-        return entries.removeValue(forKey: key)
+        guard entry?.key == key else { return nil }
+        defer { entry = nil }
+        return entry?.bundle
     }
 
     static func store(
@@ -721,25 +668,17 @@ private enum StoryThumbnailWarmPlayerCache {
             release(bundle)
             return
         }
-        if let replaced = entries.updateValue(bundle, forKey: key) {
-            release(replaced)
+        if let previous = entry?.bundle, previous.player !== bundle.player {
+            release(previous)
         }
-        recency.removeAll { $0 == key }
-        recency.append(key)
-
-        while recency.count > countLimit {
-            let oldestKey = recency.removeFirst()
-            if let evicted = entries.removeValue(forKey: oldestKey) {
-                release(evicted)
-            }
-        }
+        entry = (key, bundle)
     }
 
     static func invalidate(_ key: StoryThumbnailPlayerIdentity) {
         invalidated.insert(key)
-        recency.removeAll { $0 == key }
-        if let bundle = entries.removeValue(forKey: key) {
-            release(bundle)
+        if let cached = entry, cached.key == key {
+            release(cached.bundle)
+            entry = nil
         }
         DispatchQueue.main.async {
             invalidated.remove(key)
@@ -756,8 +695,9 @@ func invalidateStoryThumbnailWarmPlayer(_ identity: StoryThumbnailPlayerIdentity
     StoryThumbnailWarmPlayerCache.invalidate(identity)
 }
 
+@MainActor
 private enum StoryThumbnailPosterCache {
-    nonisolated(unsafe) private static let cache: NSCache<NSString, UIImage> = {
+    private static let cache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
         cache.countLimit = 40
         cache.totalCostLimit = 20 * 1_024 * 1_024
