@@ -26,6 +26,9 @@ public struct DigiaHost<Content: View>: View {
 
             SurveyRenderer(orchestrator: surveyOrchestrator)
                 .zIndex(4)
+
+            RecordingBadgeView()
+                .zIndex(6)
         }
     }
 }

@@ -18,12 +18,14 @@ public final class AnchorRegistry: ObservableObject {
         viewRegistry[key] = WeakBox(view)
         cornerRadii[key] = cornerRadius
         version &+= 1
+        SDKInstance.shared.recordAnchorSeen(key)
     }
 
     public func register(key: String, rect: CGRect, cornerRadius: CGFloat = 0) {
         rectRegistry[key] = rect
         cornerRadii[key] = cornerRadius
         version &+= 1
+        SDKInstance.shared.recordAnchorSeen(key)
     }
 
     public func unregister(key: String) {

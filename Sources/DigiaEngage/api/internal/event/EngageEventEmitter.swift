@@ -19,8 +19,72 @@ private let eventLog = os.Logger(subsystem: "tech.digia.engage", category: "Digi
 /// Android `internal/event/EngageEventEmitter.kt`.
 @MainActor
 final class EngageEventEmitter {
-    private let cep: CepPluginSink
-    private let digia: DigiaAnalyticsSink
+    /// Where an event actually goes — real delivery, or a live test's ACK
+    /// redirect — decided once per call via `sink(for:)` rather than each
+    /// method separately checking `isLiveTestCepId`.
+    @MainActor
+    private protocol EventSink {
+        func toCep(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload)
+        func toDigia(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload)
+        func onFirstImpression(payload: CEPTriggerPayload, event: EngageAnalyticsEvent)
+    }
+
+    @MainActor
+    private final class RealEventSink: EventSink {
+        let cep: CepPluginSink
+        let digia: DigiaAnalyticsSink
+
+        init(cep: CepPluginSink, digia: DigiaAnalyticsSink) {
+            self.cep = cep
+            self.digia = digia
+        }
+
+        func toCep(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
+            eventLog.info(
+                "[DigiaEvent] Event fired → CEP: \(String(describing: event), privacy: .public) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public)"
+            )
+            cep.deliver(event, payload: payload)
+        }
+
+        func toDigia(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload) {
+            eventLog.info(
+                "[DigiaEvent] Event fired → DIGIA: '\(event.eventName, privacy: .public)' (\(String(describing: type(of: event)), privacy: .public)) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public) properties=\(String(describing: event.properties), privacy: .public)"
+            )
+            digia.deliver(event, payload: payload)
+        }
+
+        func onFirstImpression(payload: CEPTriggerPayload, event: EngageAnalyticsEvent) {
+            toDigia(event, payload: payload)
+        }
+    }
+
+    @MainActor
+    private final class LiveTestEventSink: EventSink {
+        let onLiveTestShown: ((String) -> Void)?
+
+        init(onLiveTestShown: ((String) -> Void)?) {
+            self.onLiveTestShown = onLiveTestShown
+        }
+
+        func toCep(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
+            if case .impressed = event { onLiveTestShown?(payload.cepCampaignId) }
+        }
+
+        func toDigia(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload) {
+            // Suppressed entirely — a live test must never reach real analytics.
+        }
+
+        func onFirstImpression(payload: CEPTriggerPayload, event: EngageAnalyticsEvent) {
+            onLiveTestShown?(payload.cepCampaignId)
+        }
+    }
+
+    private let realSink: RealEventSink
+    private let liveTestSink: LiveTestEventSink
+
+    private func sink(for payload: CEPTriggerPayload) -> EventSink {
+        isLiveTestCepId(payload.cepCampaignId) ? liveTestSink : realSink
+    }
 
     /// `cepCampaignId`s that have already fired a Digia first-render impression.
     private var digiaImpressed: Set<String> = []
@@ -28,25 +92,19 @@ final class EngageEventEmitter {
     /// `cepCampaignId`s that have already fired a Digia first-engagement click.
     private var digiaClicked: Set<String> = []
 
-    init(cep: CepPluginSink, digia: DigiaAnalyticsSink) {
-        self.cep = cep
-        self.digia = digia
+    init(cep: CepPluginSink, digia: DigiaAnalyticsSink, onLiveTestShown: ((String) -> Void)? = nil) {
+        self.realSink = RealEventSink(cep: cep, digia: digia)
+        self.liveTestSink = LiveTestEventSink(onLiveTestShown: onLiveTestShown)
     }
 
     /// Coarse signal to the CEP plugin only.
     func toCep(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
-        eventLog.info(
-            "[DigiaEvent] Event fired → CEP: \(String(describing: event), privacy: .public) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public)"
-        )
-        cep.deliver(event, payload: payload)
+        sink(for: payload).toCep(event, payload: payload)
     }
 
     /// Rich analytics signal to Digia only.
     func toDigia(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload) {
-        eventLog.info(
-            "[DigiaEvent] Event fired → DIGIA: '\(event.eventName, privacy: .public)' (\(String(describing: type(of: event)), privacy: .public)) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public) properties=\(String(describing: event.properties), privacy: .public)"
-        )
-        digia.deliver(event, payload: payload)
+        sink(for: payload).toDigia(event, payload: payload)
     }
 
     /// Fires a coarse CEP signal and its rich Digia counterpart together.
@@ -60,7 +118,7 @@ final class EngageEventEmitter {
     /// instantly at route time.
     func digiaImpressionOnce(payload: CEPTriggerPayload, event: EngageAnalyticsEvent) {
         guard digiaImpressed.insert(payload.cepCampaignId).inserted else { return }
-        toDigia(event, payload: payload)
+        sink(for: payload).onFirstImpression(payload: payload, event: event)
     }
 
     /// Records `event` (an experience-level "Clicked") to Digia the first time the
