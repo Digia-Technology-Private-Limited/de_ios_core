@@ -18,6 +18,8 @@ struct StoryItemConfig: Equatable {
     let type: StoryMediaType
     let url: String
     let duration: Int?
+    var thumbnailPlayback: StoryThumbnailPlaybackConfig = StoryThumbnailPlaybackConfig()
+    var thumbnail: StoryThumbnailConfig?
     var boxFit: StoryMediaFit = .cover
     var thumbnailBoxFit: StoryMediaFit = .cover
     var ctaEnabled: Bool = false
@@ -34,7 +36,7 @@ struct StoryItemConfig: Equatable {
         let ctaActionJson = json.object("ctaAction")
         let actions = ctaActionJson?["steps"] != nil
             ? EngageActionParser().parse(ctaActionJson)
-            : parseLegacyStoryActions(ctaActionJson)
+            : parseStoryActions(ctaActionJson)
         let ctaAction = ctaActionJson.map(StoryCtaAction.fromJson)
         let mediaType = StoryMediaType.fromWireValue(
             json.string("type", default: "image")
@@ -43,6 +45,10 @@ struct StoryItemConfig: Equatable {
             type: mediaType,
             url: url,
             duration: json.positiveInt("duration"),
+            thumbnailPlayback: StoryThumbnailPlaybackConfig.fromJson(
+                json.object("thumbnailPlayback")
+            ),
+            thumbnail: StoryThumbnailConfig.fromJson(json.object("thumbnail")),
             boxFit: StoryMediaFit.fromWireValue(
                 json.string("boxFit", default: "cover"),
                 mediaType: mediaType
@@ -62,7 +68,7 @@ struct StoryItemConfig: Equatable {
         )
     }
 
-    private static func parseLegacyStoryActions(
+    private static func parseStoryActions(
         _ ctaAction: [String: Any]?
     ) -> [EngageAction] {
         let type = ctaAction?.string("type", default: "dismiss") ?? "dismiss"
@@ -75,7 +81,33 @@ struct StoryItemConfig: Equatable {
     }
 }
 
-enum StoryMediaFit: Equatable {
+enum StoryThumbnailConfig: Equatable {
+    case image(source: String, fit: StoryMediaFit, placeholder: ImagePlaceholder?)
+    case color(String)
+
+    static func fromJson(_ json: [String: Any]?) -> StoryThumbnailConfig? {
+        guard let json else { return nil }
+        switch json.string("type", default: "") {
+        case "image":
+            guard let source = json.object("src")?.nonBlankString("imageSrc") else { return nil }
+            return .image(
+                source: source,
+                fit: StoryMediaFit.fromWireValue(
+                    json.string("fit", default: "cover"),
+                    mediaType: .image
+                ),
+                placeholder: ImagePlaceholder.from(json.object("placeholder"))
+            )
+        case "color":
+            guard let color = json.nonBlankString("color") else { return nil }
+            return .color(color)
+        default:
+            return nil
+        }
+    }
+}
+
+enum StoryMediaFit: Hashable {
     case cover
     case contain
     case fill
@@ -89,7 +121,7 @@ enum StoryMediaFit: Equatable {
     }
 }
 
-enum StoryMediaType: Equatable {
+enum StoryMediaType: String, Hashable {
     case image
     case video
 
@@ -98,6 +130,44 @@ enum StoryMediaType: Equatable {
     }
 }
 
+enum StoryThumbnailDurationMode: String, Hashable {
+    case full
+    case fixed
+}
+
+struct StoryThumbnailPlaybackConfig: Equatable {
+    var startTimeMs: Int64 = 0
+    var durationMode: StoryThumbnailDurationMode = .full
+    var durationMs: Int64?
+
+    static func fromJson(_ json: [String: Any]?) -> StoryThumbnailPlaybackConfig {
+        guard let json else { return StoryThumbnailPlaybackConfig() }
+        let rawStart = json.double("startTimeMs", default: 0)
+        let start =
+            rawStart.isFinite && rawStart >= 0 && rawStart < Double(Int64.max)
+                ? Int64(rawStart)
+                : 0
+        let rawDuration = json.double("durationMs", default: 0)
+        let fixedDuration =
+            rawDuration.isFinite && rawDuration > 0 && rawDuration < Double(Int64.max)
+                ? Int64(rawDuration)
+                : nil
+        let mode: StoryThumbnailDurationMode =
+            json.string("durationMode", default: "full") == "fixed" && fixedDuration != nil
+                ? .fixed
+                : .full
+        return StoryThumbnailPlaybackConfig(
+            startTimeMs: start,
+            durationMode: mode,
+            durationMs: mode == .fixed ? fixedDuration : nil
+        )
+    }
+}
+
+enum ThumbnailVideoPlaybackMode: String, Equatable {
+    case simultaneous
+    case sequential
+}
 struct StoryCardConfig: Equatable {
     var height: Int = 220
     var aspectRatio: Double = 0.6
@@ -162,6 +232,7 @@ struct StoryOverlayButtonConfig: Equatable {
 
 struct InlineStoryConfig: Equatable {
     let slotKey: String
+    var thumbnailVideoPlayback: ThumbnailVideoPlaybackMode = .simultaneous
     var defaultDuration: Int = 5000
     var restartOnCompleted: Bool = false
     var startMuted: Bool = false
@@ -178,6 +249,10 @@ struct InlineStoryConfig: Equatable {
         if items.isEmpty { return nil }
         return InlineStoryConfig(
             slotKey: slotKey,
+            thumbnailVideoPlayback:
+                json.string("thumbnailVideoPlayback", default: "simultaneous") == "sequential"
+                    ? .sequential
+                    : .simultaneous,
             defaultDuration: json.positiveInt("defaultDuration") ?? 5000,
             restartOnCompleted: json.bool("restartOnCompleted", default: false),
             startMuted: json.bool("startMuted", default: false),

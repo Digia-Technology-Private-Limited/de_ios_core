@@ -7,15 +7,53 @@ struct DigiaInlineStoryView: View {
     let config: InlineStoryConfig
     let payload: CEPTriggerPayload
 
+    @ObservedObject private var overlayController = SDKInstance.shared.controller
+    @State private var playback: InlineStoryRailPlaybackCoordinator
+    @State private var latestGeometry = StoryRailGeometry()
+    @State private var viewportBounds = CGRect.null
+    @State private var scrollSettleTask: Task<Void, Never>?
+    @State private var lastSettledVisibility: StoryRailVisibility?
+    @State private var cacheDemandOwner = UUID()
+
+    init(config: InlineStoryConfig, payload: CEPTriggerPayload) {
+        self.config = config
+        self.payload = payload
+        _playback = State(initialValue: InlineStoryRailPlaybackCoordinator(
+            items: config.items,
+            mode: config.thumbnailVideoPlayback
+        ))
+    }
+
     var body: some View {
+        storyRail
+    }
+
+    private var storyRail: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            // Match Android's LazyRow: an eager HStack creates an AVPlayerLooper
-            // for every video in the campaign, including cards far off-screen.
-            // That can exhaust the simulator/device media pipeline before the
-            // user has interacted with a single story.
             LazyHStack(spacing: CGFloat(config.card.spacing)) {
                 ForEach(Array(config.items.enumerated()), id: \.offset) { index, item in
-                    StoryThumbnailCard(item: item, config: config)
+                    let playerIdentity = thumbnailPlayerIdentity(item)
+                    StoryThumbnailCard(
+                        index: index,
+                        item: item,
+                        config: config,
+                        failed: playback.state.failedPlayerIdentities[index] == playerIdentity,
+                        playbackState: playback.playbackState(for: index),
+                        onWindowCompleted: { playback.send(.windowCompleted(index)) },
+                        onFailed: {
+                            playback.send(.failed(index: index, identity: playerIdentity))
+                        }
+                    )
+                        .background {
+                            GeometryReader { proxy in
+                                Color.clear.preference(
+                                    key: StoryRailGeometryPreference.self,
+                                    value: StoryRailGeometry(
+                                        cards: [index: proxy.frame(in: .global)]
+                                    )
+                                )
+                            }
+                        }
                         .onTapGesture {
                             SDKInstance.shared.reportStoryOpened(payload)
                             SDKInstance.shared.controller.showStoryOverlay(
@@ -28,13 +66,173 @@ struct DigiaInlineStoryView: View {
             }
             .padding(.horizontal, CGFloat(config.card.spacing))
         }
+        .background {
+            ZStack {
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: StoryRailGeometryPreference.self,
+                        value: StoryRailGeometry(rail: proxy.frame(in: .global))
+                    )
+                }
+                StoryViewportReader { viewport in
+                    guard viewportBounds != viewport else { return }
+                    viewportBounds = viewport
+                    scheduleEligibilityAfterScroll(latestGeometry)
+                }
+            }
+        }
+        .onPreferenceChange(StoryRailGeometryPreference.self) { geometry in
+            latestGeometry = geometry
+            scheduleEligibilityAfterScroll(geometry)
+        }
+        .onAppear {
+            playback.send(.configuration(
+                items: config.items,
+                mode: config.thumbnailVideoPlayback
+            ))
+            playback.send(.overlayChanged(overlayController.activeStoryOverlay != nil))
+            playback.send(.applicationActive(
+                UIApplication.shared.applicationState == .active
+            ))
+            Task { @MainActor in
+                await Task.yield()
+                settleVisibility(latestGeometry)
+            }
+        }
+        .onDisappear {
+            scrollSettleTask?.cancel()
+            scrollSettleTask = nil
+            let owner = cacheDemandOwner
+            Task { await DigiaVideoFileCache.shared.clearDemand(owner: owner) }
+        }
+        .task(id: playback.videoDemands) {
+            await DigiaVideoFileCache.shared.prepare(
+                playback.videoDemands,
+                owner: cacheDemandOwner
+            )
+        }
+        .onChange(of: StoryRailConfigurationIdentity(config: config)) { _ in
+            playback.send(.configuration(
+                items: config.items,
+                mode: config.thumbnailVideoPlayback
+            ))
+            lastSettledVisibility = nil
+            scheduleEligibilityAfterScroll(latestGeometry)
+        }
+        .onChange(of: overlayController.activeStoryOverlay != nil) { open in
+            playback.send(.overlayChanged(open))
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didBecomeActiveNotification
+        )) { _ in
+            playback.send(.applicationActive(true))
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.willResignActiveNotification
+        )) { _ in
+            playback.send(.applicationActive(false))
+        }
+        .frame(height: CGFloat(config.card.height))
+    }
+
+    private func settleVisibility(_ geometry: StoryRailGeometry) {
+        guard let rail = geometry.rail,
+              !rail.isNull,
+              !rail.isEmpty,
+              !geometry.cards.isEmpty,
+              !viewportBounds.isNull,
+              !viewportBounds.isEmpty else { return }
+        let visibility = storyRailVisibility(
+            rail: rail,
+            cards: geometry.cards,
+            viewport: viewportBounds
+        )
+        guard visibility.isMateriallyDifferent(
+            from: lastSettledVisibility,
+            retaining: playback.state.eligibleIndices
+        ) else { return }
+        lastSettledVisibility = visibility
+        playback.send(.scrollSettled(visibility))
+    }
+
+    private func scheduleEligibilityAfterScroll(_ geometry: StoryRailGeometry) {
+        scrollSettleTask?.cancel()
+        scrollSettleTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            guard !Task.isCancelled else { return }
+            settleVisibility(geometry)
+        }
+    }
+}
+
+private extension StoryRailVisibility {
+    func isMateriallyDifferent(
+        from previous: StoryRailVisibility?,
+        retaining eligibleIndices: Set<Int>
+    ) -> Bool {
+        guard let previous else { return true }
+        guard slotVisible == previous.slotVisible else { return true }
+        let indices = Set(cardFractions.keys).union(previous.cardFractions.keys)
+        let changed = indices.filter { index in
+            abs((cardFractions[index] ?? 0) - (previous.cardFractions[index] ?? 0)) > 0.01
+        }
+        guard !changed.isEmpty else { return false }
+        // A passive SwiftUI preference pass may briefly omit an eligible card.
+        // Ignore that pass unless another measured card actually moved.
+        return !changed.allSatisfy { index in
+            eligibleIndices.contains(index) && cardFractions[index] == nil
+        }
+    }
+}
+
+private struct StoryViewportReader: UIViewRepresentable {
+    let onChange: (CGRect) -> Void
+
+    func makeUIView(context _: Context) -> StoryViewportUIView {
+        let view = StoryViewportUIView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateUIView(_ view: StoryViewportUIView, context _: Context) {
+        view.onChange = onChange
+        view.reportViewportIfNeeded()
+    }
+}
+
+private final class StoryViewportUIView: UIView {
+    var onChange: ((CGRect) -> Void)?
+    private var lastViewport = CGRect.null
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        reportViewportIfNeeded()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        reportViewportIfNeeded()
+    }
+
+    func reportViewportIfNeeded() {
+        let next = window?.bounds ?? .null
+        guard next != lastViewport else { return }
+        lastViewport = next
+        DispatchQueue.main.async { [weak self] in
+            self?.onChange?(next)
+        }
     }
 }
 
 @MainActor
 private struct StoryThumbnailCard: View {
+    let index: Int
     let item: StoryItemConfig
     let config: InlineStoryConfig
+    let failed: Bool
+    let playbackState: ThumbnailPlaybackViewState
+    let onWindowCompleted: @MainActor @Sendable () -> Void
+    let onFailed: @MainActor @Sendable () -> Void
 
     private var width: CGFloat {
         CGFloat(config.card.width)
@@ -45,13 +243,25 @@ private struct StoryThumbnailCard: View {
             // Contained media leaves letterbox space. Keep that surface
             // opaque black across iOS, Android, and Flutter.
             Color.black
-            if item.type == .video {
-                InlineStoryVideoView(
-                    urlString: item.url,
-                    looping: true,
-                    muted: true,
-                    gravity: item.thumbnailBoxFit.videoGravity
+            if item.type == .video,
+               !failed,
+               shouldComposeThumbnailPlayer(
+                   hasExplicitThumbnail: item.thumbnail != nil,
+                   scheduled: playbackState.scheduled
+               )
+            {
+                StoryThumbnailVideoView(
+                    item: item,
+                    state: playbackState,
+                    onWindowCompleted: onWindowCompleted,
+                    onFailed: onFailed
                 )
+                .id(StoryThumbnailViewIdentity(
+                    index: index,
+                    player: thumbnailPlayerIdentity(item)
+                ))
+            } else if item.type == .video {
+                StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
             } else {
                 StoryRemoteImage(urlString: item.url, fit: item.thumbnailBoxFit)
             }
@@ -60,6 +270,21 @@ private struct StoryThumbnailCard: View {
         .clipped()
         .clipShape(RoundedRectangle(cornerRadius: CGFloat(config.card.borderRadius), style: .continuous))
         .contentShape(Rectangle())
+    }
+}
+
+private struct StoryThumbnailViewIdentity: Hashable {
+    let index: Int
+    let player: StoryThumbnailPlayerIdentity
+}
+
+private struct StoryRailConfigurationIdentity: Equatable {
+    let players: [StoryThumbnailPlayerIdentity]
+    let mode: ThumbnailVideoPlaybackMode
+
+    init(config: InlineStoryConfig) {
+        players = config.items.map(thumbnailPlayerIdentity)
+        mode = config.thumbnailVideoPlayback
     }
 }
 
@@ -168,14 +393,17 @@ private struct InlineStoryOverlayContent: View {
     let state: InlineStoryOverlayState
 
     @State private var currentIndex: Int
+    @State private var displayedIndex: Int
     @State private var elapsed: Double = 0
     @State private var videoProgress: Double = 0
     @State private var videoStalled: Double = 0
     @State private var lastVideoProgress: Double = 0
+    @State private var videoReady = false
     /// True while the current video is buffering (waiting to play). The stall
     /// watchdog pauses while this is set so a slow network isn't mistaken for a
     /// dead video and skipped.
     @State private var videoBuffering = false
+    @State private var applicationActive = UIApplication.shared.applicationState == .active
     /// Set when the story runs to its last frame, so the teardown reports
     /// `Completed` rather than `StepDismissed`.
     @State private var completed = false
@@ -186,7 +414,9 @@ private struct InlineStoryOverlayContent: View {
 
     init(state: InlineStoryOverlayState) {
         self.state = state
-        _currentIndex = State(initialValue: min(max(state.initialIndex, 0), max(state.config.items.count - 1, 0)))
+        let initialIndex = min(max(state.initialIndex, 0), max(state.config.items.count - 1, 0))
+        _currentIndex = State(initialValue: initialIndex)
+        _displayedIndex = State(initialValue: initialIndex)
     }
 
     private var variables: VariableContext {
@@ -201,16 +431,36 @@ private struct InlineStoryOverlayContent: View {
 
                 if let item = currentItem {
                     let muted = muteOverride ?? state.config.startMuted
-                    FullScreenStoryItem(
-                        item: item,
-                        muted: muted,
-                        onVideoProgress: { videoProgress = $0 },
-                        onVideoEnded: { next() },
-                        onVideoBuffering: { videoBuffering = $0 }
-                    )
-                        .id(currentIndex)
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .clipped()
+                    ForEach(renderedIndices, id: \.self) { index in
+                        if state.config.items.indices.contains(index) {
+                            FullScreenStoryItem(
+                                item: state.config.items[index],
+                                active: index == currentIndex,
+                                muted: muted,
+                                onVideoReady: {
+                                    guard index == currentIndex else { return }
+                                    videoReady = true
+                                    displayedIndex = index
+                                },
+                                onVideoProgress: {
+                                    guard index == currentIndex else { return }
+                                    videoProgress = $0
+                                },
+                                onVideoEnded: {
+                                    guard index == currentIndex else { return }
+                                    next()
+                                },
+                                onVideoBuffering: {
+                                    guard index == currentIndex else { return }
+                                    videoBuffering = $0
+                                }
+                            )
+                            .id(index)
+                            .frame(width: proxy.size.width, height: proxy.size.height)
+                            .clipped()
+                            .opacity(index == displayedIndex ? 1 : 0)
+                        }
+                    }
 
                     tapZones
 
@@ -304,6 +554,16 @@ private struct InlineStoryOverlayContent: View {
         .onReceive(Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()) { _ in
             tick()
         }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.willResignActiveNotification
+        )) { _ in
+            applicationActive = false
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didBecomeActiveNotification
+        )) { _ in
+            applicationActive = true
+        }
         // Step Viewed fires for each frame that becomes visible (including the
         // first), mirroring Android's LaunchedEffect(currentStoryIndex).
         //
@@ -342,6 +602,12 @@ private struct InlineStoryOverlayContent: View {
         state.config.items.indices.contains(currentIndex) ? state.config.items[currentIndex] : nil
     }
 
+    private var renderedIndices: [Int] {
+        displayedIndex == currentIndex
+            ? [currentIndex]
+            : [displayedIndex, currentIndex]
+    }
+
     private var currentDuration: Double {
         let ms = currentItem?.duration ?? state.config.defaultDuration
         return max(Double(ms) / 1000.0, 0.1)
@@ -373,11 +639,11 @@ private struct InlineStoryOverlayContent: View {
     }
 
     private func tick() {
-        guard let item = currentItem else { return }
+        guard applicationActive, let item = currentItem else { return }
         if item.type == .video {
-            // Buffering is legitimate loading, not a stall — pause the watchdog
-            // so a slow network doesn't skip the video before it starts.
-            if videoBuffering { return }
+            // File download and buffering are legitimate loading. Start the
+            // watchdog only after AVPlayer has displayed its first frame.
+            if !videoReady || videoBuffering { return }
             if videoProgress > lastVideoProgress + 0.0001 {
                 lastVideoProgress = videoProgress
                 videoStalled = 0
@@ -399,14 +665,15 @@ private struct InlineStoryOverlayContent: View {
         lastVideoProgress = 0
         videoStalled = 0
         videoBuffering = false
+        videoReady = false
     }
 
     private func next() {
         resetTiming()
         if currentIndex < state.config.items.count - 1 {
-            currentIndex += 1
+            move(to: currentIndex + 1)
         } else if state.config.restartOnCompleted {
-            currentIndex = 0
+            move(to: 0)
         } else {
             completed = true
             SDKInstance.shared.reportStoryCompleted(
@@ -420,7 +687,14 @@ private struct InlineStoryOverlayContent: View {
 
     private func previous() {
         resetTiming()
-        currentIndex = max(currentIndex - 1, 0)
+        move(to: max(currentIndex - 1, 0))
+    }
+
+    private func move(to index: Int) {
+        currentIndex = index
+        if state.config.items[index].type != .video {
+            displayedIndex = index
+        }
     }
 
     private func handleCTA(_ item: StoryItemConfig) {
@@ -449,20 +723,26 @@ private struct InlineStoryOverlayContent: View {
 @MainActor
 private struct FullScreenStoryItem: View {
     let item: StoryItemConfig
+    let active: Bool
     let muted: Bool
-    let onVideoProgress: (Double) -> Void
-    let onVideoEnded: () -> Void
-    let onVideoBuffering: @Sendable (Bool) -> Void
+    let onVideoReady: @MainActor @Sendable () -> Void
+    let onVideoProgress: @MainActor @Sendable (Double) -> Void
+    let onVideoEnded: @MainActor @Sendable () -> Void
+    let onVideoBuffering: @MainActor @Sendable (Bool) -> Void
 
     var body: some View {
         ZStack {
             Color.black
             if item.type == .video {
+                StoryThumbnailPlaceholderView(
+                    thumbnail: item.thumbnail,
+                    fitOverride: item.boxFit
+                )
                 InlineStoryVideoView(
-                    urlString: item.url,
-                    looping: false,
+                    item: item,
+                    active: active,
                     muted: muted,
-                    gravity: item.boxFit.videoGravity,
+                    onReadyForDisplay: onVideoReady,
                     onProgress: onVideoProgress,
                     onEnded: onVideoEnded,
                     onBuffering: onVideoBuffering
@@ -499,116 +779,76 @@ private struct StoryRemoteImage: View {
 
 @MainActor
 private struct InlineStoryVideoView: View {
-    let urlString: String
-    let looping: Bool
+    let item: StoryItemConfig
+    var active: Bool = true
     let muted: Bool
-    /// Configurable cover/contain scaling shared by thumbnails and full-screen playback.
-    var gravity: AVLayerVideoGravity = .resizeAspectFill
-    /// Full-screen playback hooks; thumbnails leave these nil and skip the
-    /// observers entirely.
-    var onProgress: ((Double) -> Void)?
-    var onEnded: (() -> Void)?
-    var onBuffering: (@Sendable (Bool) -> Void)?
+    var onReadyForDisplay: (@MainActor @Sendable () -> Void)?
+    var onProgress: (@MainActor @Sendable (Double) -> Void)?
+    var onEnded: (@MainActor @Sendable () -> Void)?
+    var onBuffering: (@MainActor @Sendable (Bool) -> Void)?
 
-    @State private var bundle: DigiaVideoPlaybackBundle?
-    @State private var timeObserver: Any?
-    @State private var endObserver: NSObjectProtocol?
-    @State private var failObserver: NSObjectProtocol?
-    @State private var bufferingObserver: NSKeyValueObservation?
+    @StateObject private var playback: StoryVideoPlayback
+
+    init(
+        item: StoryItemConfig,
+        active: Bool = true,
+        muted: Bool,
+        onReadyForDisplay: (@MainActor @Sendable () -> Void)? = nil,
+        onProgress: (@MainActor @Sendable (Double) -> Void)? = nil,
+        onEnded: (@MainActor @Sendable () -> Void)? = nil,
+        onBuffering: (@MainActor @Sendable (Bool) -> Void)? = nil
+    ) {
+        self.item = item
+        self.active = active
+        self.muted = muted
+        self.onReadyForDisplay = onReadyForDisplay
+        self.onProgress = onProgress
+        self.onEnded = onEnded
+        self.onBuffering = onBuffering
+        _playback = StateObject(wrappedValue: StoryVideoPlayback(
+            urlString: item.url,
+            purpose: .fullScreen(item)
+        ))
+    }
 
     var body: some View {
         ZStack {
-            Color.black
-            if let player = bundle?.player {
-                InlineStoryPlayerLayer(player: player, gravity: gravity)
+            if item.thumbnail == nil, let poster = playback.poster {
+                StoryPosterImage(image: poster, fit: item.boxFit)
+            }
+            if let player = playback.player {
+                InlineStoryPlayerLayer(
+                    player: player,
+                    gravity: item.boxFit.videoGravity,
+                    onReadyForDisplay: playback.playerLayerDidBecomeReady
+                )
+                .opacity(playback.showPlayerLayer ? 1 : 0)
             }
         }
-        .task(id: "\(urlString)-\(looping)") {
-            guard let url = URL(string: urlString) else { return }
-            tearDownPlayback()
-
-            // DigiaVideoPlaybackBundle overrides an incorrect server MIME type
-            // while leaving HTTP transport/range handling to AVFoundation on
-            // supported OS versions. See DigiaVideoStreaming.
-            let nextBundle = DigiaVideoPlaybackBundle.make(url: url, looping: looping)
-            nextBundle.player.isMuted = muted
-
-            if let onProgress {
-                let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
-                timeObserver = nextBundle.player.addPeriodicTimeObserver(
-                    forInterval: interval,
-                    queue: .main
-                ) { [weak player = nextBundle.player] time in
-                    guard let item = player?.currentItem else { return }
-                    let duration = item.duration.seconds
-                    guard duration.isFinite, duration > 0 else { return }
-                    onProgress(min(max(time.seconds / duration, 0), 1))
-                }
-            }
-            if let onEnded {
-                // Advance on natural completion or on an unplayable item, so a
-                // broken URL doesn't leave the story stuck on a black frame.
-                endObserver = NotificationCenter.default.addObserver(
-                    forName: .AVPlayerItemDidPlayToEndTime,
-                    object: nextBundle.player.currentItem,
-                    queue: .main
-                ) { _ in onEnded() }
-                failObserver = NotificationCenter.default.addObserver(
-                    forName: .AVPlayerItemFailedToPlayToEndTime,
-                    object: nextBundle.player.currentItem,
-                    queue: .main
-                ) { _ in onEnded() }
-            }
-            if let onBuffering {
-                // Report waiting-to-play so the story's stall watchdog can tell
-                // a buffering video from a dead one.
-                bufferingObserver = nextBundle.player.observe(
-                    \.timeControlStatus,
-                    options: [.initial, .new]
-                ) { player, _ in
-                    let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-                    Task { @MainActor in onBuffering(waiting) }
-                }
-            }
-
-            bundle = nextBundle
-            nextBundle.player.play()
-        }
-        .onChange(of: muted) { isMuted in
-            bundle?.player.isMuted = isMuted
-        }
-        .onDisappear {
-            tearDownPlayback()
-        }
+        .onAppear(perform: updatePlayback)
+        .onChange(of: active) { _ in updatePlayback() }
+        .onChange(of: muted) { _ in updatePlayback() }
+        .onDisappear { playback.tearDown() }
     }
 
-    private func tearDownPlayback() {
-        guard let bundle else { return }
-
-        if let timeObserver {
-            bundle.player.removeTimeObserver(timeObserver)
-        }
-        if let endObserver {
-            NotificationCenter.default.removeObserver(endObserver)
-        }
-        if let failObserver {
-            NotificationCenter.default.removeObserver(failObserver)
-        }
-        bufferingObserver?.invalidate()
-
-        bundle.looper?.disableLooping()
-        bundle.player.pause()
-        if let queuePlayer = bundle.player as? AVQueuePlayer {
-            queuePlayer.removeAllItems()
-        } else {
-            bundle.player.replaceCurrentItem(with: nil)
-        }
-
-        timeObserver = nil
-        endObserver = nil
-        failObserver = nil
-        bufferingObserver = nil
-        self.bundle = nil
+    private func updatePlayback() {
+        playback.update(
+            state: StoryVideoPlaybackState(
+                demand: .playback(.fullScreen),
+                active: active,
+                muted: muted,
+                repeatWindow: false,
+                restartGeneration: 0
+            ),
+            events: StoryVideoPlaybackEvents(
+                onReady: { onReadyForDisplay?() },
+                onProgress: { onProgress?($0) },
+                onEnded: { onEnded?() },
+                onBuffering: { onBuffering?($0) },
+                // A broken full-screen item advances rather than trapping the viewer.
+                onFailed: { onEnded?() }
+            )
+        )
     }
 }
 
@@ -618,7 +858,11 @@ extension StoryMediaFit {
     var imageContentMode: ContentMode { self == .contain ? .fit : .fill }
 
     var videoGravity: AVLayerVideoGravity {
-        self == .contain ? .resizeAspect : .resizeAspectFill
+        switch self {
+        case .cover: .resizeAspectFill
+        case .contain: .resizeAspect
+        case .fill: .resize
+        }
     }
 }
 
@@ -646,33 +890,88 @@ private struct StoryOverlayButton: View {
     }
 }
 
-private struct InlineStoryPlayerLayer: UIViewRepresentable {
+struct InlineStoryPlayerLayer: UIViewRepresentable {
     let player: AVPlayer
     var gravity: AVLayerVideoGravity = .resizeAspectFill
+    var onReadyForDisplay: (() -> Void)?
 
     func makeUIView(context _: Context) -> InlineStoryPlayerContainer {
         let view = InlineStoryPlayerContainer()
-        view.playerLayer.videoGravity = gravity
+        view.configure(
+            player: player,
+            gravity: gravity,
+            onReadyForDisplay: onReadyForDisplay
+        )
         return view
     }
 
     func updateUIView(_ uiView: InlineStoryPlayerContainer, context _: Context) {
-        uiView.playerLayer.player = player
-        uiView.playerLayer.videoGravity = gravity
+        uiView.configure(
+            player: player,
+            gravity: gravity,
+            onReadyForDisplay: onReadyForDisplay
+        )
     }
 
     static func dismantleUIView(_ uiView: InlineStoryPlayerContainer, coordinator _: Void) {
-        uiView.playerLayer.player = nil
+        uiView.tearDown()
     }
 }
 
-private final class InlineStoryPlayerContainer: UIView {
+final class InlineStoryPlayerContainer: UIView {
+    private var readyObservation: NSKeyValueObservation?
+    private var observedPlayer: AVPlayer?
+    private var didReportReady = false
+    private var onReadyForDisplay: (() -> Void)?
+
     override class var layerClass: AnyClass {
         AVPlayerLayer.self
     }
 
     var playerLayer: AVPlayerLayer {
         layer as! AVPlayerLayer
+    }
+
+    func configure(
+        player: AVPlayer,
+        gravity: AVLayerVideoGravity,
+        onReadyForDisplay: (() -> Void)?
+    ) {
+        self.onReadyForDisplay = onReadyForDisplay
+        playerLayer.videoGravity = gravity
+        guard observedPlayer !== player else {
+            revealIfReady()
+            return
+        }
+        readyObservation?.invalidate()
+        observedPlayer = player
+        didReportReady = false
+        playerLayer.opacity = 0
+        playerLayer.player = player
+        readyObservation = playerLayer.observe(
+            \.isReadyForDisplay,
+            options: [.initial, .new]
+        ) { [weak self] _, _ in
+            Task { @MainActor in self?.revealIfReady() }
+        }
+    }
+
+    func tearDown() {
+        readyObservation?.invalidate()
+        readyObservation = nil
+        observedPlayer = nil
+        onReadyForDisplay = nil
+        didReportReady = false
+        playerLayer.opacity = 0
+        playerLayer.player = nil
+    }
+
+    private func revealIfReady() {
+        guard playerLayer.isReadyForDisplay else { return }
+        playerLayer.opacity = 1
+        guard !didReportReady else { return }
+        didReportReady = true
+        onReadyForDisplay?()
     }
 }
 
