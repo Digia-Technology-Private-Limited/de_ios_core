@@ -12,6 +12,7 @@ struct DigiaInlineStoryView: View {
     @State private var latestGeometry = StoryRailGeometry()
     @State private var viewportBounds = CGRect.null
     @State private var scrollSettleTask: Task<Void, Never>?
+    @State private var cacheDemandOwner = UUID()
 
     init(config: InlineStoryConfig, payload: CEPTriggerPayload) {
         self.config = config
@@ -99,9 +100,14 @@ struct DigiaInlineStoryView: View {
         .onDisappear {
             scrollSettleTask?.cancel()
             scrollSettleTask = nil
+            let owner = cacheDemandOwner
+            Task { await DigiaVideoFileCache.shared.clearDemand(owner: owner) }
         }
         .task(id: playback.videoDemands) {
-            await DigiaVideoFileCache.shared.prepare(playback.videoDemands)
+            await DigiaVideoFileCache.shared.prepare(
+                playback.videoDemands,
+                owner: cacheDemandOwner
+            )
         }
         .onChange(of: config.items.map(thumbnailPlayerIdentity)) { _ in
             playback.send(.configuration(
@@ -351,6 +357,7 @@ private struct InlineStoryOverlayContent: View {
     /// watchdog pauses while this is set so a slow network isn't mistaken for a
     /// dead video and skipped.
     @State private var videoBuffering = false
+    @State private var applicationActive = UIApplication.shared.applicationState == .active
     /// Set when the story runs to its last frame, so the teardown reports
     /// `Completed` rather than `StepDismissed`.
     @State private var completed = false
@@ -500,6 +507,16 @@ private struct InlineStoryOverlayContent: View {
         .onReceive(Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()) { _ in
             tick()
         }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.willResignActiveNotification
+        )) { _ in
+            applicationActive = false
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didBecomeActiveNotification
+        )) { _ in
+            applicationActive = true
+        }
         // Step Viewed fires for each frame that becomes visible (including the
         // first), mirroring Android's LaunchedEffect(currentStoryIndex).
         //
@@ -575,7 +592,7 @@ private struct InlineStoryOverlayContent: View {
     }
 
     private func tick() {
-        guard let item = currentItem else { return }
+        guard applicationActive, let item = currentItem else { return }
         if item.type == .video {
             // Buffering is legitimate loading, not a stall — pause the watchdog
             // so a slow network doesn't skip the video before it starts.

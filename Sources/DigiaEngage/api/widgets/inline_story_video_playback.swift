@@ -128,11 +128,12 @@ final class StoryVideoPlayback: ObservableObject {
 
         guard !terminalFailureReported else { return }
         if nextState.demand == .none {
+            loadGeneration &+= 1
             loadTask?.cancel()
             loadTask = nil
             requestedPriority = nil
+            cancelPosterGeneration()
             releasePlayer()
-            prepareCachedPosterIfAvailable()
             return
         }
 
@@ -174,26 +175,6 @@ final class StoryVideoPlayback: ObservableObject {
         cancelPosterGeneration()
         releasePlayer()
         localAsset = nil
-    }
-
-    private func prepareCachedPosterIfAvailable() {
-        guard needsGeneratedPoster, poster == nil, loadTask == nil,
-              let remoteURL = URL(string: urlString) else { return }
-        let generation = loadGeneration &+ 1
-        loadGeneration = generation
-        loadTask = Task { @MainActor [weak self] in
-            guard let cachedURL = await DigiaVideoFileCache.shared.cachedURL(for: remoteURL),
-                  let self,
-                  !Task.isCancelled,
-                  self.loadGeneration == generation else {
-                self?.loadTask = nil
-                return
-            }
-            self.loadTask = nil
-            let asset = AVURLAsset(url: cachedURL)
-            self.localAsset = asset
-            self.preparePoster(from: asset)
-        }
     }
 
     private func ensureAsset(priority: StoryVideoCachePriority, needsPlayer: Bool) {
@@ -494,10 +475,6 @@ final class StoryVideoPlayback: ObservableObject {
     private var isThumbnail: Bool {
         if case .thumbnail = purpose { return true }
         return false
-    }
-
-    private var needsGeneratedPoster: Bool {
-        Self.posterFrameMs(for: purpose) != nil
     }
 
     private func configuredStartMs(for duration: CMTime) -> Int64 {

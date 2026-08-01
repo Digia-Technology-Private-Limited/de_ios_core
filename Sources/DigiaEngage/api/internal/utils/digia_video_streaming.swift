@@ -32,17 +32,36 @@ actor DigiaVideoFileCache {
     private static let failedDownloadRetryInterval: TimeInterval = 5 * 60
     private static let maximumActiveDownloads = 2
     private static let writeBufferBytes = 64 * 1_024
+    private static let defaultSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration)
+    }()
 
     private struct QueuedDownload {
         let remoteURL: URL
-        var priority: StoryVideoCachePriority
         let order: UInt64
-        var waiters: [CheckedContinuation<URL, Error>]
+        var demandPriorities: [UUID: StoryVideoCachePriority]
+        var waiters: [UUID: DownloadWaiter]
+
+        var priority: StoryVideoCachePriority {
+            (Array(demandPriorities.values) + waiters.values.map(\.priority)).max() ?? .lookAhead
+        }
+
+        var isNeeded: Bool {
+            !demandPriorities.isEmpty || !waiters.isEmpty
+        }
+    }
+
+    private struct DownloadWaiter {
+        let priority: StoryVideoCachePriority
+        let continuation: CheckedContinuation<URL, Error>
     }
 
     private struct ActiveDownload {
         let remoteURL: URL
-        var waiters: [CheckedContinuation<URL, Error>]
+        var waiters: [UUID: DownloadWaiter]
     }
 
     private let session: URLSession
@@ -55,11 +74,11 @@ actor DigiaVideoFileCache {
     private var directoryPrepared = false
 
     init(
-        session: URLSession = .shared,
+        session: URLSession? = nil,
         directory: URL? = nil,
         maxBytes: Int64 = defaultLimitBytes
     ) {
-        self.session = session
+        self.session = session ?? Self.defaultSession
         self.directory = directory
             ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
                 .appendingPathComponent("tech.digia.engage.video", isDirectory: true)
@@ -71,10 +90,16 @@ actor DigiaVideoFileCache {
         return usableCachedURL(for: remoteURL, touch: true)
     }
 
+    func peekCachedURL(for remoteURL: URL) -> URL? {
+        prepareDirectoryIfNeeded()
+        return usableCachedURL(for: remoteURL, touch: false)
+    }
+
     func localURL(
         for remoteURL: URL,
         priority: StoryVideoCachePriority
     ) async throws -> URL {
+        try Task.checkCancellation()
         prepareDirectoryIfNeeded()
         if let cached = usableCachedURL(for: remoteURL, touch: priority != .lookAhead) {
             return cached
@@ -84,19 +109,26 @@ actor DigiaVideoFileCache {
             throw URLError(.cannotLoadFromNetwork)
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            enqueue(
-                remoteURL,
-                priority: priority,
-                waiter: continuation,
-                startImmediately: true
-            )
+        let waiterID = UUID()
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                enqueue(
+                    remoteURL,
+                    priority: priority,
+                    waiterID: waiterID,
+                    waiter: continuation,
+                    demandOwner: nil,
+                    startImmediately: true
+                )
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(waiterID, key: key) }
         }
     }
 
-    /// Adds demand in Campaign order. This returns after queueing; downloads intentionally outlive
-    /// a rail render so scrolling cannot repeatedly cancel and restart the same network request.
-    func prepare(_ demands: [StoryVideoCacheDemand]) {
+    /// Replaces one rail's demand snapshot. Transfers already in progress finish and populate the
+    /// cache; stale work that has not started is removed once no rail or awaiting player needs it.
+    func prepare(_ demands: [StoryVideoCacheDemand], owner: UUID) {
         prepareDirectoryIfNeeded()
         var order: [String] = []
         var strongestByKey: [String: StoryVideoCacheDemand] = [:]
@@ -111,22 +143,33 @@ actor DigiaVideoFileCache {
                 strongestByKey[key] = demand
             }
         }
+
+        removeQueuedDemand(for: owner)
         for key in order {
             guard let demand = strongestByKey[key] else { continue }
             enqueue(
                 demand.url,
                 priority: demand.priority,
+                waiterID: nil,
                 waiter: nil,
+                demandOwner: owner,
                 startImmediately: false
             )
         }
         startDownloadsIfPossible()
     }
 
+    func clearDemand(owner: UUID) {
+        removeQueuedDemand(for: owner)
+        startDownloadsIfPossible()
+    }
+
     private func enqueue(
         _ remoteURL: URL,
         priority: StoryVideoCachePriority,
+        waiterID: UUID?,
         waiter: CheckedContinuation<URL, Error>?,
+        demandOwner: UUID?,
         startImmediately: Bool
     ) {
         if let cached = usableCachedURL(for: remoteURL, touch: priority != .lookAhead) {
@@ -140,25 +183,60 @@ actor DigiaVideoFileCache {
             return
         }
         if var download = active[key] {
-            if let waiter { download.waiters.append(waiter) }
+            if let waiterID, let waiter {
+                download.waiters[waiterID] = DownloadWaiter(
+                    priority: priority,
+                    continuation: waiter
+                )
+            }
             active[key] = download
             return
         }
         if var download = queued[key] {
-            download.priority = max(download.priority, priority)
-            if let waiter { download.waiters.append(waiter) }
+            if let demandOwner { download.demandPriorities[demandOwner] = priority }
+            if let waiterID, let waiter {
+                download.waiters[waiterID] = DownloadWaiter(
+                    priority: priority,
+                    continuation: waiter
+                )
+            }
             queued[key] = download
         } else {
             nextOrder &+= 1
             queued[key] = QueuedDownload(
                 remoteURL: remoteURL,
-                priority: priority,
                 order: nextOrder,
-                waiters: waiter.map { [$0] } ?? []
+                demandPriorities: demandOwner.map { [$0: priority] } ?? [:],
+                waiters: waiterID.flatMap { id in
+                    waiter.map { [id: DownloadWaiter(priority: priority, continuation: $0)] }
+                } ?? [:]
             )
         }
         if startImmediately {
             startDownloadsIfPossible()
+        }
+    }
+
+    private func removeQueuedDemand(for owner: UUID) {
+        for key in Array(queued.keys) {
+            guard var download = queued[key] else { continue }
+            download.demandPriorities[owner] = nil
+            queued[key] = download.isNeeded ? download : nil
+        }
+    }
+
+    private func cancelWaiter(_ waiterID: UUID, key: String) {
+        if var download = queued[key],
+           let waiter = download.waiters.removeValue(forKey: waiterID) {
+            waiter.continuation.resume(throwing: CancellationError())
+            queued[key] = download.isNeeded ? download : nil
+            startDownloadsIfPossible()
+            return
+        }
+        if var download = active[key],
+           let waiter = download.waiters.removeValue(forKey: waiterID) {
+            waiter.continuation.resume(throwing: CancellationError())
+            active[key] = download
         }
     }
 
@@ -210,10 +288,10 @@ actor DigiaVideoFileCache {
                 throw error
             }
             failedAt[key] = nil
-            download.waiters.forEach { $0.resume(returning: localURL) }
+            download.waiters.values.forEach { $0.continuation.resume(returning: localURL) }
         } catch {
             failedAt[key] = Date()
-            download.waiters.forEach { $0.resume(throwing: error) }
+            download.waiters.values.forEach { $0.continuation.resume(throwing: error) }
         }
         startDownloadsIfPossible()
     }

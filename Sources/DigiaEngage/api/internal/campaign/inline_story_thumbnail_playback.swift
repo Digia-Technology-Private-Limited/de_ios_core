@@ -140,7 +140,7 @@ struct InlineStoryRailPlaybackCoordinator {
                 && state.slotVisible
                 && !state.overlayOpen,
             // The full-screen player owns video resources while the story is open.
-            canLoad: state.applicationActive && !state.overlayOpen,
+            canLoad: state.applicationActive && state.slotVisible && !state.overlayOpen,
             cachePriority: cachePriority(for: index, playable: playable),
             mode: mode,
             playableIndices: playable,
