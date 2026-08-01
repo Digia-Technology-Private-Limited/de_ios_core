@@ -130,10 +130,7 @@ struct DigiaInlineStoryView: View {
     }
 
     private var playableIndices: Set<Int> {
-        Set(eligibleIndices.filter { index in
-            guard config.items.indices.contains(index) else { return false }
-            return failedPlayerIdentities[index] != thumbnailPlayerIdentity(config.items[index])
-        })
+        playableIndices(from: eligibleIndices)
     }
 
     private var currentPlayerIdentities: [StoryThumbnailPlayerIdentity] {
