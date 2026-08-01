@@ -6,10 +6,6 @@
 
 Digia Engage is an iOS SDK for rendering server-driven, Digia-managed experiences inside host applications. It provides dynamic page rendering, slots, overlays, dialogs, toasts, action execution, and cached image loading for SwiftUI-based integrations.
 
-## Engineering references
-
-- [Inline Story thumbnail autoplay contract and cross-stack test plan](https://github.com/Digia-Technology-Private-Limited/de_workspace/blob/main/ai_docs/inline-story-thumbnail-autoplay-plan.md)
-
 ## Requirements
 
 |       | Minimum |

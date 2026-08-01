@@ -155,7 +155,7 @@ struct DigiaInlineStoryView: View {
         )
         slotVisible = visibility.slotVisible
         let next = updateThumbnailPlaybackEligibility(
-            current: eligibleIndices,
+            current: restartPlayback ? [] : eligibleIndices,
             slotVisible: visibility.slotVisible,
             visibleFractions: visibility.cardFractions,
             items: config.items
