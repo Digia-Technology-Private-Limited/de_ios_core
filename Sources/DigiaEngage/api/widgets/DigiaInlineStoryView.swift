@@ -33,6 +33,7 @@ struct DigiaInlineStoryView: View {
                 ForEach(Array(config.items.enumerated()), id: \.offset) { index, item in
                     let playerIdentity = thumbnailPlayerIdentity(item)
                     StoryThumbnailCard(
+                        index: index,
                         item: item,
                         config: config,
                         failed: playback.state.failedPlayerIdentities[index] == playerIdentity,
@@ -199,6 +200,7 @@ private final class StoryViewportUIView: UIView {
 
 @MainActor
 private struct StoryThumbnailCard: View {
+    let index: Int
     let item: StoryItemConfig
     let config: InlineStoryConfig
     let failed: Bool
@@ -228,7 +230,10 @@ private struct StoryThumbnailCard: View {
                     onWindowCompleted: onWindowCompleted,
                     onFailed: onFailed
                 )
-                .id(thumbnailPlayerIdentity(item))
+                .id(StoryThumbnailViewIdentity(
+                    index: index,
+                    player: thumbnailPlayerIdentity(item)
+                ))
             } else if item.type == .video {
                 StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
             } else {
@@ -240,6 +245,11 @@ private struct StoryThumbnailCard: View {
         .clipShape(RoundedRectangle(cornerRadius: CGFloat(config.card.borderRadius), style: .continuous))
         .contentShape(Rectangle())
     }
+}
+
+private struct StoryThumbnailViewIdentity: Hashable {
+    let index: Int
+    let player: StoryThumbnailPlayerIdentity
 }
 
 // MARK: - Dedicated story presenter

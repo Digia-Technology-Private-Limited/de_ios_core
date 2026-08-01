@@ -1,8 +1,5 @@
 import CryptoKit
 import Foundation
-#if DEBUG
-import AVFoundation
-#endif
 
 enum StoryVideoCachePriority: Int, Comparable, Sendable {
     case lookAhead
@@ -491,54 +488,3 @@ actor DigiaVideoFileCache {
         )
     }
 }
-
-#if DEBUG
-// Kept only so the unchanged legacy test target can compile while this MR removes the old
-// resource-loader implementation. Production playback always uses the local cached file.
-enum DigiaVideoStreaming {
-    static func makeAsset(for url: URL) -> AVURLAsset {
-        AVURLAsset(url: url)
-    }
-
-    static func mimeType(for url: URL) -> String {
-        switch url.pathExtension.lowercased() {
-        case "mov": "video/quicktime"
-        case "m4v": "video/x-m4v"
-        default: "video/mp4"
-        }
-    }
-}
-
-enum DigiaStreamingResourceLoaderDelegate {
-    struct ContentRange {
-        let start: Int64
-        let total: Int64
-    }
-
-    static func contentRange(from response: HTTPURLResponse) -> ContentRange? {
-        guard let value = response.value(forHTTPHeaderField: "Content-Range") else { return nil }
-        let components = value.split(separator: " ", maxSplits: 1)
-        guard components.count == 2, components[0].lowercased() == "bytes" else { return nil }
-        let rangeAndTotal = components[1].split(separator: "/", maxSplits: 1)
-        guard rangeAndTotal.count == 2,
-              let total = Int64(rangeAndTotal[1]),
-              let startPart = rangeAndTotal[0].split(separator: "-", maxSplits: 1).first,
-              let start = Int64(startPart) else { return nil }
-        return ContentRange(start: start, total: total)
-    }
-
-    static func payload(
-        from data: Data,
-        responseStart: Int64,
-        requestedStart: Int64,
-        requestedLength: Int?
-    ) -> Data? {
-        let relativeStart = requestedStart - responseStart
-        guard relativeStart >= 0, relativeStart <= Int64(data.count) else { return nil }
-        let lowerBound = Int(relativeStart)
-        let upperBound = requestedLength.map { min(lowerBound + $0, data.count) } ?? data.count
-        guard upperBound > lowerBound else { return nil }
-        return data.subdata(in: lowerBound..<upperBound)
-    }
-}
-#endif
