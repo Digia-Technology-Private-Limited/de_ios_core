@@ -121,6 +121,7 @@ final class StoryVideoPlayback: ObservableObject {
         state nextState: StoryVideoPlaybackState,
         events: StoryVideoPlaybackEvents
     ) {
+        refreshPosterFromCache()
         let previous = state
         state = nextState
         self.events = events
@@ -512,6 +513,14 @@ final class StoryVideoPlayback: ObservableObject {
             cacheKey: cacheKey,
             retryAtZero: true,
             generationID: generationID
+        )
+    }
+
+    private func refreshPosterFromCache() {
+        guard poster == nil,
+              let frameMs = Self.posterFrameMs(for: purpose) else { return }
+        poster = StoryVideoPosterCache.image(
+            for: StoryVideoPosterIdentity(url: urlString, frameMs: frameMs)
         )
     }
 
