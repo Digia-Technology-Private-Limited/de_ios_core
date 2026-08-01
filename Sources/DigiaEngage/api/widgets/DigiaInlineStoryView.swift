@@ -17,6 +17,7 @@ struct DigiaInlineStoryView: View {
     @State private var previousPlayerIdentities: [StoryThumbnailPlayerIdentity] = []
     @State private var latestGeometry = StoryRailGeometry()
     @State private var viewportBounds = CGRect.null
+    @State private var scrollSettleTask: Task<Void, Never>?
 
     var body: some View {
         storyRail
@@ -83,21 +84,29 @@ struct DigiaInlineStoryView: View {
                 StoryViewportReader { viewport in
                     guard viewportBounds != viewport else { return }
                     viewportBounds = viewport
-                    updateEligibility(latestGeometry, viewport: viewport)
+                    updateEligibility(
+                        latestGeometry,
+                        viewport: viewport,
+                        restartPlayback: true
+                    )
                 }
             }
         }
         .onPreferenceChange(StoryRailGeometryPreference.self) { geometry in
             latestGeometry = geometry
-            updateEligibility(geometry)
+            scheduleEligibilityAfterScroll(geometry)
         }
         .onAppear {
             applicationActive = UIApplication.shared.applicationState == .active
             previousPlayerIdentities = currentPlayerIdentities
             Task { @MainActor in
                 await Task.yield()
-                updateEligibility(latestGeometry)
+                updateEligibility(latestGeometry, restartPlayback: true)
             }
+        }
+        .onDisappear {
+            scrollSettleTask?.cancel()
+            scrollSettleTask = nil
         }
         .onChange(of: currentPlayerIdentities) { nextIdentities in
             let retained = Set(nextIdentities)
@@ -139,7 +148,8 @@ struct DigiaInlineStoryView: View {
 
     private func updateEligibility(
         _ geometry: StoryRailGeometry,
-        viewport: CGRect? = nil
+        viewport: CGRect? = nil,
+        restartPlayback: Bool = false
     ) {
         let visibility = storyRailVisibility(
             rail: geometry.rail,
@@ -154,7 +164,27 @@ struct DigiaInlineStoryView: View {
             items: config.items
         )
         eligibleIndices = next
-        reconcileSequentialActive(playable: playableIndices(from: next))
+        let playable = playableIndices(from: next)
+        if restartPlayback {
+            playbackRestartGeneration &+= 1
+            sequentialActiveIndex = config.thumbnailVideoPlayback == .sequential
+                ? nextThumbnailPlaybackIndex(eligible: playable, afterIndex: nil)
+                : nil
+        } else {
+            reconcileSequentialActive(playable: playable)
+        }
+    }
+
+    private func scheduleEligibilityAfterScroll(_ geometry: StoryRailGeometry) {
+        // Pause while geometry is moving. Once it is stable, restart from the
+        // first eligible campaign index rather than resuming the previous player.
+        slotVisible = false
+        scrollSettleTask?.cancel()
+        scrollSettleTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            guard !Task.isCancelled else { return }
+            updateEligibility(geometry, restartPlayback: true)
+        }
     }
 
     private func playableIndices(from eligible: Set<Int>) -> Set<Int> {
