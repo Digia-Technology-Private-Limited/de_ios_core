@@ -14,7 +14,6 @@ struct DigiaInlineStoryView: View {
     @State private var slotVisible = false
     @State private var applicationActive = false
     @State private var playbackRestartGeneration = 0
-    @State private var previousPlayerIdentities: [StoryThumbnailPlayerIdentity] = []
     @State private var latestGeometry = StoryRailGeometry()
     @State private var viewportBounds = CGRect.null
     @State private var scrollSettleTask: Task<Void, Never>?
@@ -98,7 +97,6 @@ struct DigiaInlineStoryView: View {
         }
         .onAppear {
             applicationActive = UIApplication.shared.applicationState == .active
-            previousPlayerIdentities = currentPlayerIdentities
             Task { @MainActor in
                 await Task.yield()
                 updateEligibility(latestGeometry, restartPlayback: true)
@@ -108,13 +106,8 @@ struct DigiaInlineStoryView: View {
             scrollSettleTask?.cancel()
             scrollSettleTask = nil
         }
-        .onChange(of: currentPlayerIdentities) { nextIdentities in
-            let retained = Set(nextIdentities)
-            for previousIdentity in previousPlayerIdentities
-            where !retained.contains(previousIdentity) {
-                invalidateStoryThumbnailWarmPlayer(previousIdentity)
-            }
-            previousPlayerIdentities = nextIdentities
+        .task(id: videoPrefetchIdentity) {
+            await DigiaVideoFileCache.shared.prefetch(videoPrefetchURLs)
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.didBecomeActiveNotification
@@ -133,8 +126,12 @@ struct DigiaInlineStoryView: View {
         playableIndices(from: eligibleIndices)
     }
 
-    private var currentPlayerIdentities: [StoryThumbnailPlayerIdentity] {
-        config.items.map(thumbnailPlayerIdentity)
+    private var videoPrefetchIdentity: [String] {
+        config.items.filter { $0.type == .video }.map(\.url)
+    }
+
+    private var videoPrefetchURLs: [URL] {
+        videoPrefetchIdentity.compactMap(URL.init(string:))
     }
 
     private var playbackAllowed: Bool {
@@ -864,10 +861,17 @@ private struct InlineStoryVideoView: View {
                 return
             }
 
-            // DigiaVideoPlaybackBundle overrides an incorrect server MIME type
-            // while leaving HTTP transport/range handling to AVFoundation on
-            // supported OS versions. See DigiaVideoStreaming.
-            let nextBundle = DigiaVideoPlaybackBundle.make(url: url, looping: looping)
+            guard let nextBundle = try? await DigiaVideoPlaybackBundle.make(
+                url: url,
+                looping: looping
+            ) else {
+                reportEnd()
+                return
+            }
+            guard !Task.isCancelled else {
+                nextBundle.releasePlaybackResources()
+                return
+            }
             nextBundle.player.isMuted = muted
 
             if let onProgress {
@@ -983,7 +987,11 @@ extension StoryMediaFit {
     var imageContentMode: ContentMode { self == .contain ? .fit : .fill }
 
     var videoGravity: AVLayerVideoGravity {
-        self == .contain ? .resizeAspect : .resizeAspectFill
+        switch self {
+        case .cover: .resizeAspectFill
+        case .contain: .resizeAspect
+        case .fill: .resize
+        }
     }
 }
 

@@ -87,7 +87,7 @@ struct ThumbnailRevealState: Equatable {
             && startPrepared
             && playerLayerReady
             && !seekInProgress
-            && positionMs > effectiveStartMs + 10
+            && positionMs >= effectiveStartMs
     }
 }
 
@@ -244,6 +244,8 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
     private var onWindowCompleted: () -> Void = {}
     private var onFailed: () -> Void = {}
     private var playerLayerReady = false
+    private var playerPreparationTask: Task<Void, Never>?
+    private var posterPreparationTask: Task<Void, Never>?
 
     init(item: StoryItemConfig) {
         self.item = item
@@ -273,9 +275,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             return
         }
         if bundle == nil, !state.shouldPlay {
-            if item.thumbnail == nil, poster == nil, let url = URL(string: item.url) {
-                preparePoster(from: AVURLAsset(url: url))
-            }
+            prepareCachedPosterIfNeeded()
             return
         }
         prepareIfNeeded()
@@ -311,9 +311,30 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
             handleTerminalFailure()
             return
         }
-        let cacheKey = thumbnailPlayerIdentity(item)
-        let next = StoryThumbnailWarmPlayerCache.take(cacheKey)
-            ?? DigiaVideoPlaybackBundle.make(url: url, looping: false)
+        guard playerPreparationTask == nil else { return }
+        playerPreparationTask = Task { @MainActor [weak self] in
+            do {
+                let next = try await DigiaVideoPlaybackBundle.make(url: url, looping: false)
+                guard let self, !Task.isCancelled else {
+                    next.releasePlaybackResources()
+                    return
+                }
+                self.playerPreparationTask = nil
+                guard self.state.canLoad,
+                      self.item.thumbnail == nil || self.state.scheduled else {
+                    next.releasePlaybackResources()
+                    return
+                }
+                self.install(next)
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                self.playerPreparationTask = nil
+                self.handleTerminalFailure()
+            }
+        }
+    }
+
+    private func install(_ next: DigiaVideoPlaybackBundle) {
         next.player.isMuted = true
         bundle = next
         player = next.player
@@ -376,6 +397,27 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
                 ) {
                     self.completeWindow()
                 }
+            }
+        }
+    }
+
+    private func prepareCachedPosterIfNeeded() {
+        guard item.thumbnail == nil,
+              poster == nil,
+              imageGenerator == nil,
+              posterPreparationTask == nil,
+              let remoteURL = URL(string: item.url) else {
+            return
+        }
+        posterPreparationTask = Task { @MainActor [weak self] in
+            do {
+                let localURL = try await DigiaVideoFileCache.shared.localURL(for: remoteURL)
+                guard let self, !Task.isCancelled else { return }
+                self.posterPreparationTask = nil
+                self.preparePoster(from: DigiaVideoStreaming.makeAsset(for: localURL))
+            } catch {
+                guard let self, !Task.isCancelled else { return }
+                self.posterPreparationTask = nil
             }
         }
     }
@@ -606,6 +648,10 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
 
     func tearDown() {
         seekGeneration &+= 1
+        playerPreparationTask?.cancel()
+        posterPreparationTask?.cancel()
+        playerPreparationTask = nil
+        posterPreparationTask = nil
         imageGenerator?.cancelAllCGImageGeneration()
         imageGenerator = nil
         imageGenerationID = nil
@@ -627,14 +673,7 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         failObserver = nil
         player?.pause()
         if let bundle {
-            if terminalFailureReported || item.thumbnail != nil {
-                StoryThumbnailWarmPlayerCache.release(bundle)
-            } else {
-                StoryThumbnailWarmPlayerCache.store(
-                    bundle,
-                    for: thumbnailPlayerIdentity(item)
-                )
-            }
+            bundle.releasePlaybackResources()
         }
         player = nil
         bundle = nil
@@ -643,56 +682,6 @@ private final class StoryThumbnailPlayerModel: ObservableObject {
         showPlayerLayer = false
         playerLayerReady = false
     }
-}
-
-@MainActor
-private enum StoryThumbnailWarmPlayerCache {
-    private static var entry: (
-        key: StoryThumbnailPlayerIdentity,
-        bundle: DigiaVideoPlaybackBundle
-    )?
-    private static var invalidated: Set<StoryThumbnailPlayerIdentity> = []
-
-    static func take(_ key: StoryThumbnailPlayerIdentity) -> DigiaVideoPlaybackBundle? {
-        guard entry?.key == key else { return nil }
-        defer { entry = nil }
-        return entry?.bundle
-    }
-
-    static func store(
-        _ bundle: DigiaVideoPlaybackBundle,
-        for key: StoryThumbnailPlayerIdentity
-    ) {
-        bundle.player.pause()
-        if invalidated.remove(key) != nil {
-            release(bundle)
-            return
-        }
-        if let previous = entry?.bundle, previous.player !== bundle.player {
-            release(previous)
-        }
-        entry = (key, bundle)
-    }
-
-    static func invalidate(_ key: StoryThumbnailPlayerIdentity) {
-        invalidated.insert(key)
-        if let cached = entry, cached.key == key {
-            release(cached.bundle)
-            entry = nil
-        }
-        DispatchQueue.main.async {
-            invalidated.remove(key)
-        }
-    }
-
-    static func release(_ bundle: DigiaVideoPlaybackBundle) {
-        bundle.releasePlaybackResources()
-    }
-}
-
-@MainActor
-func invalidateStoryThumbnailWarmPlayer(_ identity: StoryThumbnailPlayerIdentity) {
-    StoryThumbnailWarmPlayerCache.invalidate(identity)
 }
 
 @MainActor

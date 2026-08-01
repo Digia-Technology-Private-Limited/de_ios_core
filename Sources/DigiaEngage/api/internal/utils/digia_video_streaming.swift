@@ -1,5 +1,175 @@
 import AVFoundation
+import CryptoKit
 import Foundation
+
+// MARK: - Persistent progressive-video cache
+
+/// Stores each remote MP4 once and gives every thumbnail/full-screen player the
+/// same local file. AVPlayer's range buffering is not a persistent download
+/// cache, so recreating players can otherwise create many requests for one URL.
+actor DigiaVideoFileCache {
+    static let shared = DigiaVideoFileCache()
+
+    private static let defaultLimitBytes: Int64 = 256 * 1_024 * 1_024
+    private static let failedDownloadRetryInterval: TimeInterval = 5 * 60
+
+    private let session: URLSession
+    private let directory: URL
+    private let maxBytes: Int64
+    private var inFlight: [String: Task<URL, Error>] = [:]
+    private var failedAt: [String: Date] = [:]
+
+    init(
+        session: URLSession = .shared,
+        directory: URL? = nil,
+        maxBytes: Int64 = defaultLimitBytes
+    ) {
+        self.session = session
+        self.directory = directory
+            ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("tech.digia.engage.video", isDirectory: true)
+        self.maxBytes = max(maxBytes, 1)
+    }
+
+    func localURL(for remoteURL: URL) async throws -> URL {
+        let key = Self.key(for: remoteURL)
+        let destination = directory.appendingPathComponent(
+            Self.fileName(for: remoteURL, key: key)
+        )
+        if Self.isUsableFile(destination, maxBytes: maxBytes) {
+            failedAt[key] = nil
+            Self.touch(destination)
+            return destination
+        }
+        if FileManager.default.fileExists(atPath: destination.path) {
+            try? FileManager.default.removeItem(at: destination)
+        }
+        if let existing = inFlight[key] {
+            return try await existing.value
+        }
+        if let lastFailure = failedAt[key],
+           Date().timeIntervalSince(lastFailure) < Self.failedDownloadRetryInterval {
+            throw URLError(.cannotLoadFromNetwork)
+        }
+
+        let session = session
+        let directory = directory
+        let maxBytes = maxBytes
+        let task = Task<URL, Error> {
+            let fileManager = FileManager.default
+            try fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true
+            )
+
+            var request = URLRequest(url: remoteURL)
+            // This directory is the source of truth. Avoid creating another
+            // opaque URLCache copy of the same multi-megabyte response.
+            request.cachePolicy = .reloadIgnoringLocalCacheData
+            let (temporaryURL, response) = try await session.download(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  http.statusCode == 200 else {
+                throw URLError(.badServerResponse)
+            }
+
+            guard Self.isUsableFile(temporaryURL, maxBytes: maxBytes) else {
+                throw URLError(.dataLengthExceedsMaximum)
+            }
+            if Self.isUsableFile(destination, maxBytes: maxBytes) {
+                try? fileManager.removeItem(at: temporaryURL)
+                return destination
+            }
+            if fileManager.fileExists(atPath: destination.path) {
+                try fileManager.removeItem(at: destination)
+            }
+            try fileManager.moveItem(at: temporaryURL, to: destination)
+            Self.touch(destination)
+            Self.evictOldFiles(
+                in: directory,
+                keeping: destination,
+                maxBytes: maxBytes
+            )
+            return destination
+        }
+        inFlight[key] = task
+        defer { inFlight[key] = nil }
+        do {
+            let result = try await task.value
+            failedAt[key] = nil
+            return result
+        } catch {
+            failedAt[key] = Date()
+            throw error
+        }
+    }
+
+    func prefetch(_ remoteURLs: [URL], maxConcurrent: Int = 4) async {
+        let uniqueURLs = Array(Set(remoteURLs))
+        let batchSize = max(maxConcurrent, 1)
+        for start in stride(from: 0, to: uniqueURLs.count, by: batchSize) {
+            let end = min(start + batchSize, uniqueURLs.count)
+            await withTaskGroup(of: Void.self) { group in
+                for url in uniqueURLs[start..<end] {
+                    group.addTask {
+                        _ = try? await self.localURL(for: url)
+                    }
+                }
+            }
+        }
+    }
+
+    private static func key(for url: URL) -> String {
+        SHA256.hash(data: Data(url.absoluteString.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    private static func fileName(for url: URL, key: String) -> String {
+        let pathExtension = url.pathExtension.isEmpty ? "video" : url.pathExtension
+        return "\(key).\(pathExtension)"
+    }
+
+    private static func isUsableFile(_ url: URL, maxBytes: Int64) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]) else {
+            return false
+        }
+        let size = Int64(values.fileSize ?? 0)
+        return values.isRegularFile == true && size > 0 && size <= maxBytes
+    }
+
+    private static func touch(_ url: URL) {
+        try? FileManager.default.setAttributes(
+            [.modificationDate: Date()],
+            ofItemAtPath: url.path
+        )
+    }
+
+    private static func evictOldFiles(in directory: URL, keeping: URL, maxBytes: Int64) {
+        let keys: Set<URLResourceKey> = [
+            .isRegularFileKey,
+            .fileSizeKey,
+            .contentModificationDateKey,
+        ]
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: Array(keys),
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+        var files = urls.compactMap { url -> (URL, Int64, Date)? in
+            guard let values = try? url.resourceValues(forKeys: keys),
+                  values.isRegularFile == true else { return nil }
+            return (url, Int64(values.fileSize ?? 0), values.contentModificationDate ?? .distantPast)
+        }
+        var totalBytes = files.reduce(Int64(0)) { $0 + $1.1 }
+        files.sort { $0.2 < $1.2 }
+        for (url, size, _) in files where totalBytes > maxBytes && url != keeping {
+            guard (try? FileManager.default.removeItem(at: url)) != nil else { continue }
+            totalBytes -= size
+        }
+    }
+}
 
 // MARK: - Playback with a forced content type (ExoPlayer parity)
 
@@ -261,8 +431,9 @@ struct DigiaVideoPlaybackBundle {
     let player: AVPlayer
     let looper: AVPlayerLooper?
 
-    static func make(url: URL, looping: Bool) -> DigiaVideoPlaybackBundle {
-        make(asset: DigiaVideoStreaming.makeAsset(for: url), looping: looping)
+    static func make(url: URL, looping: Bool) async throws -> DigiaVideoPlaybackBundle {
+        let playbackURL = try await DigiaVideoFileCache.shared.localURL(for: url)
+        return make(asset: DigiaVideoStreaming.makeAsset(for: playbackURL), looping: looping)
     }
 
     static func make(asset: AVURLAsset, looping: Bool) -> DigiaVideoPlaybackBundle {

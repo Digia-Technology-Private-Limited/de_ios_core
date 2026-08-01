@@ -179,6 +179,24 @@ struct InlineStoryThumbnailPlaybackTests {
         #expect(exited.isEmpty)
     }
 
+    @Test("settled scroll includes every card above threshold and starts at lowest index")
+    func settledScrollStartsAtFirstEligibleIndex() throws {
+        let videos = try (0..<3).map { index in
+            try #require(StoryItemConfig.fromJson([
+                "type": "video",
+                "url": "https://example.com/story-\(index).mp4",
+            ]))
+        }
+        let eligible = updateThumbnailPlaybackEligibility(
+            current: [],
+            visibleFractions: [0: 0.8, 1: 1, 2: 1],
+            items: videos
+        )
+
+        #expect(eligible == [0, 1, 2])
+        #expect(nextThumbnailPlaybackIndex(eligible: eligible, afterIndex: nil) == 0)
+    }
+
     @Test("rail visibility uses the hosting viewport and collapses safely")
     func railVisibilityUsesHostingViewport() {
         let viewport = CGRect(x: 0, y: 0, width: 500, height: 300)
