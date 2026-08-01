@@ -169,8 +169,6 @@ struct InlineStoryRailPlaybackCoordinator {
             state.slotVisible = visibility.slotVisible
             // A settled scroll is a new playback session. Rebuild from no previous eligibility,
             // then select the lowest eligible Campaign index rather than resuming.
-            // Clear UI failures too; the file cache still blocks network retries for five minutes.
-            state.failedPlayerIdentities = [:]
             state.eligibleIndices = updateThumbnailPlaybackEligibility(
                 current: [],
                 slotVisible: visibility.slotVisible,

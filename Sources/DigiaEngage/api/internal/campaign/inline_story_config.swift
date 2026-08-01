@@ -36,7 +36,7 @@ struct StoryItemConfig: Equatable {
         let ctaActionJson = json.object("ctaAction")
         let actions = ctaActionJson?["steps"] != nil
             ? EngageActionParser().parse(ctaActionJson)
-            : parseLegacyStoryActions(ctaActionJson)
+            : parseStoryActions(ctaActionJson)
         let ctaAction = ctaActionJson.map(StoryCtaAction.fromJson)
         let mediaType = StoryMediaType.fromWireValue(
             json.string("type", default: "image")
@@ -68,7 +68,7 @@ struct StoryItemConfig: Equatable {
         )
     }
 
-    private static func parseLegacyStoryActions(
+    private static func parseStoryActions(
         _ ctaAction: [String: Any]?
     ) -> [EngageAction] {
         let type = ctaAction?.string("type", default: "dismiss") ?? "dismiss"

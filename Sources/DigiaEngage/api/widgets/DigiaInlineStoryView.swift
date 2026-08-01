@@ -110,14 +110,7 @@ struct DigiaInlineStoryView: View {
                 owner: cacheDemandOwner
             )
         }
-        .onChange(of: config.items.map(thumbnailPlayerIdentity)) { _ in
-            playback.send(.configuration(
-                items: config.items,
-                mode: config.thumbnailVideoPlayback
-            ))
-            scheduleEligibilityAfterScroll(latestGeometry)
-        }
-        .onChange(of: config.thumbnailVideoPlayback) { _ in
+        .onChange(of: StoryRailConfigurationIdentity(config: config)) { _ in
             playback.send(.configuration(
                 items: config.items,
                 mode: config.thumbnailVideoPlayback
@@ -252,6 +245,16 @@ private struct StoryThumbnailViewIdentity: Hashable {
     let player: StoryThumbnailPlayerIdentity
 }
 
+private struct StoryRailConfigurationIdentity: Equatable {
+    let players: [StoryThumbnailPlayerIdentity]
+    let mode: ThumbnailVideoPlaybackMode
+
+    init(config: InlineStoryConfig) {
+        players = config.items.map(thumbnailPlayerIdentity)
+        mode = config.thumbnailVideoPlayback
+    }
+}
+
 // MARK: - Dedicated story presenter
 
 /// Presents the full-screen inline story as a modal `.overFullScreen`
@@ -362,6 +365,7 @@ private struct InlineStoryOverlayContent: View {
     @State private var videoProgress: Double = 0
     @State private var videoStalled: Double = 0
     @State private var lastVideoProgress: Double = 0
+    @State private var videoReady = false
     /// True while the current video is buffering (waiting to play). The stall
     /// watchdog pauses while this is set so a slow network isn't mistaken for a
     /// dead video and skipped.
@@ -402,6 +406,7 @@ private struct InlineStoryOverlayContent: View {
                                 muted: muted,
                                 onVideoReady: {
                                     guard index == currentIndex else { return }
+                                    videoReady = true
                                     displayedIndex = index
                                 },
                                 onVideoProgress: {
@@ -603,9 +608,9 @@ private struct InlineStoryOverlayContent: View {
     private func tick() {
         guard applicationActive, let item = currentItem else { return }
         if item.type == .video {
-            // Buffering is legitimate loading, not a stall — pause the watchdog
-            // so a slow network doesn't skip the video before it starts.
-            if videoBuffering { return }
+            // File download and buffering are legitimate loading. Start the
+            // watchdog only after AVPlayer has displayed its first frame.
+            if !videoReady || videoBuffering { return }
             if videoProgress > lastVideoProgress + 0.0001 {
                 lastVideoProgress = videoProgress
                 videoStalled = 0
@@ -627,6 +632,7 @@ private struct InlineStoryOverlayContent: View {
         lastVideoProgress = 0
         videoStalled = 0
         videoBuffering = false
+        videoReady = false
     }
 
     private func next() {
