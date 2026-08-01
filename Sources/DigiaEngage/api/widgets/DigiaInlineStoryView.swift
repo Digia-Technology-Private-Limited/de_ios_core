@@ -149,7 +149,6 @@ struct DigiaInlineStoryView: View {
     }
 
     private func scheduleEligibilityAfterScroll(_ geometry: StoryRailGeometry) {
-        playback.send(.scrollStarted)
         scrollSettleTask?.cancel()
         scrollSettleTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 100_000_000)

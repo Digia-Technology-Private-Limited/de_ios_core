@@ -79,7 +79,6 @@ struct InlineStoryRailPlaybackState: Equatable {
 
 enum InlineStoryRailPlaybackEvent {
     case configuration(items: [StoryItemConfig], mode: ThumbnailVideoPlaybackMode)
-    case scrollStarted
     case scrollSettled(StoryRailVisibility)
     case applicationActive(Bool)
     case overlayChanged(Bool)
@@ -165,9 +164,6 @@ struct InlineStoryRailPlaybackCoordinator {
                     && thumbnailPlayerIdentity(nextItems[index]) == identity
             }
             reconcileActive()
-
-        case .scrollStarted:
-            state.slotVisible = false
 
         case let .scrollSettled(visibility):
             state.slotVisible = visibility.slotVisible
