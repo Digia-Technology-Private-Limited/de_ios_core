@@ -673,17 +673,10 @@ private struct FullScreenStoryItem: View {
                     thumbnail: item.thumbnail,
                     fitOverride: item.boxFit
                 )
-                if item.thumbnail == nil,
-                   let poster = StoryThumbnailPosterCache.image(
-                       for: thumbnailPlayerIdentity(item)
-                   ) {
-                    StoryPosterImage(image: poster, fit: item.boxFit)
-                }
                 InlineStoryVideoView(
-                    urlString: item.url,
+                    item: item,
                     active: active,
                     muted: muted,
-                    gravity: item.boxFit.videoGravity,
                     onReadyForDisplay: onVideoReady,
                     onProgress: onVideoProgress,
                     onEnded: onVideoEnded,
@@ -721,10 +714,9 @@ private struct StoryRemoteImage: View {
 
 @MainActor
 private struct InlineStoryVideoView: View {
-    let urlString: String
+    let item: StoryItemConfig
     var active: Bool = true
     let muted: Bool
-    var gravity: AVLayerVideoGravity = .resizeAspectFill
     var onReadyForDisplay: (@MainActor @Sendable () -> Void)?
     var onProgress: (@MainActor @Sendable (Double) -> Void)?
     var onEnded: (@MainActor @Sendable () -> Void)?
@@ -733,35 +725,36 @@ private struct InlineStoryVideoView: View {
     @StateObject private var playback: StoryVideoPlayback
 
     init(
-        urlString: String,
+        item: StoryItemConfig,
         active: Bool = true,
         muted: Bool,
-        gravity: AVLayerVideoGravity = .resizeAspectFill,
         onReadyForDisplay: (@MainActor @Sendable () -> Void)? = nil,
         onProgress: (@MainActor @Sendable (Double) -> Void)? = nil,
         onEnded: (@MainActor @Sendable () -> Void)? = nil,
         onBuffering: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
-        self.urlString = urlString
+        self.item = item
         self.active = active
         self.muted = muted
-        self.gravity = gravity
         self.onReadyForDisplay = onReadyForDisplay
         self.onProgress = onProgress
         self.onEnded = onEnded
         self.onBuffering = onBuffering
         _playback = StateObject(wrappedValue: StoryVideoPlayback(
-            urlString: urlString,
-            purpose: .fullScreen
+            urlString: item.url,
+            purpose: .fullScreen(item)
         ))
     }
 
     var body: some View {
         ZStack {
+            if item.thumbnail == nil, let poster = playback.poster {
+                StoryPosterImage(image: poster, fit: item.boxFit)
+            }
             if let player = playback.player {
                 InlineStoryPlayerLayer(
                     player: player,
-                    gravity: gravity,
+                    gravity: item.boxFit.videoGravity,
                     onReadyForDisplay: playback.playerLayerDidBecomeReady
                 )
                 .opacity(playback.showPlayerLayer ? 1 : 0)

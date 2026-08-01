@@ -31,6 +31,7 @@ actor DigiaVideoFileCache {
     private static let defaultLimitBytes: Int64 = 256 * 1_024 * 1_024
     private static let failedDownloadRetryInterval: TimeInterval = 5 * 60
     private static let maximumActiveDownloads = 2
+    private static let writeBufferBytes = 64 * 1_024
 
     private struct QueuedDownload {
         let remoteURL: URL
@@ -51,6 +52,7 @@ actor DigiaVideoFileCache {
     private var active: [String: ActiveDownload] = [:]
     private var failedAt: [String: Date] = [:]
     private var nextOrder: UInt64 = 0
+    private var directoryPrepared = false
 
     init(
         session: URLSession = .shared,
@@ -65,14 +67,16 @@ actor DigiaVideoFileCache {
     }
 
     func cachedURL(for remoteURL: URL) -> URL? {
-        usableCachedURL(for: remoteURL, touch: true)
+        prepareDirectoryIfNeeded()
+        return usableCachedURL(for: remoteURL, touch: true)
     }
 
     func localURL(
         for remoteURL: URL,
         priority: StoryVideoCachePriority
     ) async throws -> URL {
-        if let cached = usableCachedURL(for: remoteURL, touch: true) {
+        prepareDirectoryIfNeeded()
+        if let cached = usableCachedURL(for: remoteURL, touch: priority != .lookAhead) {
             return cached
         }
         let key = Self.key(for: remoteURL)
@@ -93,6 +97,7 @@ actor DigiaVideoFileCache {
     /// Adds demand in Campaign order. This returns after queueing; downloads intentionally outlive
     /// a rail render so scrolling cannot repeatedly cancel and restart the same network request.
     func prepare(_ demands: [StoryVideoCacheDemand]) {
+        prepareDirectoryIfNeeded()
         var order: [String] = []
         var strongestByKey: [String: StoryVideoCacheDemand] = [:]
         for demand in demands {
@@ -124,7 +129,7 @@ actor DigiaVideoFileCache {
         waiter: CheckedContinuation<URL, Error>?,
         startImmediately: Bool
     ) {
-        if let cached = usableCachedURL(for: remoteURL, touch: true) {
+        if let cached = usableCachedURL(for: remoteURL, touch: priority != .lookAhead) {
             waiter?.resume(returning: cached)
             return
         }
@@ -176,11 +181,14 @@ actor DigiaVideoFileCache {
             let session = session
             Task {
                 do {
-                    var request = URLRequest(url: download.remoteURL)
-                    // The SDK cache is the sole persistent copy of this multi-megabyte response.
-                    request.cachePolicy = .reloadIgnoringLocalCacheData
-                    let result = try await session.download(for: request)
-                    finishDownload(key: key, result: .success(result))
+                    let temporaryURL = try await Self.download(
+                        remoteURL: download.remoteURL,
+                        key: key,
+                        session: session,
+                        directory: directory,
+                        maxBytes: maxBytes
+                    )
+                    finishDownload(key: key, result: .success(temporaryURL))
                 } catch {
                     finishDownload(key: key, result: .failure(error))
                 }
@@ -190,22 +198,14 @@ actor DigiaVideoFileCache {
 
     private func finishDownload(
         key: String,
-        result: Result<(URL, URLResponse), Error>
+        result: Result<URL, Error>
     ) {
         guard let download = active.removeValue(forKey: key) else { return }
         do {
             let localURL: URL
             switch result {
-            case let .success((temporaryURL, response)):
-                guard let http = response as? HTTPURLResponse,
-                      http.statusCode == 200 else {
-                    throw URLError(.badServerResponse)
-                }
-                localURL = try publish(
-                    temporaryURL,
-                    remoteURL: download.remoteURL,
-                    expectedBytes: response.expectedContentLength
-                )
+            case let .success(temporaryURL):
+                localURL = try publish(temporaryURL, remoteURL: download.remoteURL)
             case let .failure(error):
                 throw error
             }
@@ -220,10 +220,13 @@ actor DigiaVideoFileCache {
 
     private func publish(
         _ downloadedURL: URL,
-        remoteURL: URL,
-        expectedBytes: Int64
+        remoteURL: URL
     ) throws -> URL {
         let fileManager = FileManager.default
+        var published = false
+        defer {
+            if !published { try? fileManager.removeItem(at: downloadedURL) }
+        }
         try fileManager.createDirectory(
             at: directory,
             withIntermediateDirectories: true
@@ -241,29 +244,32 @@ actor DigiaVideoFileCache {
         guard downloadedBytes > 0, downloadedBytes <= maxBytes else {
             throw URLError(.dataLengthExceedsMaximum)
         }
-        guard expectedBytes < 0 || downloadedBytes == expectedBytes else {
-            throw URLError(.cannotDecodeContentData)
-        }
-
-        let staged = directory.appendingPathComponent(".\(key)-\(UUID().uuidString).partial")
-        defer { try? fileManager.removeItem(at: staged) }
-        do {
-            try fileManager.moveItem(at: downloadedURL, to: staged)
-        } catch {
-            try fileManager.copyItem(at: downloadedURL, to: staged)
-            try? fileManager.removeItem(at: downloadedURL)
-        }
-        guard try Self.fileSize(staged) == downloadedBytes else {
-            throw URLError(.cannotDecodeContentData)
-        }
         if fileManager.fileExists(atPath: destination.path) {
             try fileManager.removeItem(at: destination)
         }
-        // The staging file is in the cache directory, so this final rename is atomic.
-        try fileManager.moveItem(at: staged, to: destination)
+        // The completed partial is in this directory, so publication is one atomic rename.
+        try fileManager.moveItem(at: downloadedURL, to: destination)
+        published = true
         Self.touch(destination)
         evictOldFiles(keeping: destination)
         return destination
+    }
+
+    private func prepareDirectoryIfNeeded() {
+        guard !directoryPrepared else { return }
+        directoryPrepared = true
+        let fileManager = FileManager.default
+        try? fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        if let files = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil,
+            options: []
+        ) {
+            for file in files where file.lastPathComponent.hasSuffix(".partial") {
+                try? fileManager.removeItem(at: file)
+            }
+        }
+        evictOldFiles()
     }
 
     private func usableCachedURL(for remoteURL: URL, touch: Bool) -> URL? {
@@ -288,7 +294,7 @@ actor DigiaVideoFileCache {
         return Date().timeIntervalSince(lastFailure) < Self.failedDownloadRetryInterval
     }
 
-    private func evictOldFiles(keeping: URL) {
+    private func evictOldFiles(keeping: URL? = nil) {
         let keys: Set<URLResourceKey> = [
             .isRegularFileKey,
             .fileSizeKey,
@@ -309,9 +315,74 @@ actor DigiaVideoFileCache {
         }
         var totalBytes = files.reduce(Int64(0)) { $0 + $1.1 }
         files.sort { $0.2 < $1.2 }
-        for (url, size, _) in files where totalBytes > maxBytes && url != keeping {
+        for (url, size, _) in files where totalBytes > maxBytes {
+            if let keeping, url == keeping { continue }
             guard (try? FileManager.default.removeItem(at: url)) != nil else { continue }
             totalBytes -= size
+        }
+    }
+
+    private static func download(
+        remoteURL: URL,
+        key: String,
+        session: URLSession,
+        directory: URL,
+        maxBytes: Int64
+    ) async throws -> URL {
+        var request = URLRequest(url: remoteURL)
+        // The SDK cache is the sole persistent copy of this multi-megabyte response.
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        let (bytes, response) = try await session.bytes(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            bytes.task.cancel()
+            throw URLError(.badServerResponse)
+        }
+        let expectedBytes = response.expectedContentLength
+        guard expectedBytes < 0 || expectedBytes <= maxBytes else {
+            bytes.task.cancel()
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+
+        let partial = directory.appendingPathComponent(".\(key)-\(UUID().uuidString).partial")
+        let fileManager = FileManager.default
+        guard fileManager.createFile(atPath: partial.path, contents: nil) else {
+            bytes.task.cancel()
+            throw CocoaError(.fileWriteUnknown)
+        }
+
+        do {
+            let handle = try FileHandle(forWritingTo: partial)
+            defer { try? handle.close() }
+            var buffer = Data()
+            buffer.reserveCapacity(writeBufferBytes)
+            var receivedBytes: Int64 = 0
+
+            for try await byte in bytes {
+                try Task.checkCancellation()
+                receivedBytes += 1
+                guard receivedBytes <= maxBytes else {
+                    bytes.task.cancel()
+                    throw URLError(.dataLengthExceedsMaximum)
+                }
+                buffer.append(byte)
+                if buffer.count >= writeBufferBytes {
+                    try handle.write(contentsOf: buffer)
+                    buffer.removeAll(keepingCapacity: true)
+                }
+            }
+            if !buffer.isEmpty {
+                try handle.write(contentsOf: buffer)
+            }
+            try handle.synchronize()
+            guard receivedBytes > 0,
+                  expectedBytes < 0 || receivedBytes == expectedBytes else {
+                throw URLError(.cannotDecodeContentData)
+            }
+            return partial
+        } catch {
+            bytes.task.cancel()
+            try? fileManager.removeItem(at: partial)
+            throw error
         }
     }
 

@@ -38,7 +38,16 @@ struct StoryVideoPlaybackEvents {
 
 enum StoryVideoPlaybackPurpose {
     case thumbnail(StoryItemConfig)
-    case fullScreen
+    case fullScreen(StoryItemConfig)
+}
+
+struct StoryVideoPosterIdentity: Hashable {
+    let url: String
+    let frameMs: Int64
+
+    var cacheKey: String {
+        String(reflecting: self)
+    }
 }
 
 /// Owns local-file resolution and the complete AVPlayer lifecycle for both story surfaces.
@@ -52,6 +61,8 @@ final class StoryVideoPlayback: ObservableObject {
 
     private let urlString: String
     private let purpose: StoryVideoPlaybackPurpose
+    private var applicationActive: Bool
+    private var lifecycleSubscriptions = Set<AnyCancellable>()
     private var state = StoryVideoPlaybackState(
         demand: .none,
         active: false,
@@ -87,9 +98,23 @@ final class StoryVideoPlayback: ObservableObject {
     init(urlString: String, purpose: StoryVideoPlaybackPurpose) {
         self.urlString = urlString
         self.purpose = purpose
-        if case let .thumbnail(item) = purpose {
-            poster = StoryThumbnailPosterCache.image(for: thumbnailPlayerIdentity(item))
+        applicationActive = UIApplication.shared.applicationState == .active
+        if let frameMs = Self.posterFrameMs(for: purpose) {
+            poster = StoryVideoPosterCache.image(
+                for: StoryVideoPosterIdentity(url: urlString, frameMs: frameMs)
+            )
         }
+
+        NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.setApplicationActive(false) }
+            }
+            .store(in: &lifecycleSubscriptions)
+        NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                Task { @MainActor in self?.setApplicationActive(true) }
+            }
+            .store(in: &lifecycleSubscriptions)
     }
 
     func update(
@@ -126,10 +151,10 @@ final class StoryVideoPlayback: ObservableObject {
             completionHandled = false
             player.pause()
             seekToStart(retryAtZero: true, hideCurrentFrame: false) { [weak self] in
-                guard let self, self.state.active else { return }
+                guard let self, self.state.active, self.applicationActive else { return }
                 self.player?.play()
             }
-        } else if nextState.active {
+        } else if nextState.active, applicationActive {
             if startPrepared { player.play() }
         } else {
             player.pause()
@@ -276,7 +301,7 @@ final class StoryVideoPlayback: ObservableObject {
         effectiveStartMs = configuredStartMs(for: item.duration)
         startPrepared = true
         seekToStart(retryAtZero: isThumbnail) { [weak self] in
-            guard let self, self.state.active else { return }
+            guard let self, self.state.active, self.applicationActive else { return }
             self.player?.play()
         }
     }
@@ -291,13 +316,13 @@ final class StoryVideoPlayback: ObservableObject {
         effectiveStartMs = 0
         player?.pause()
         seekToStart { [weak self] in
-            guard let self, self.state.active else { return }
+            guard let self, self.state.active, self.applicationActive else { return }
             self.player?.play()
         }
     }
 
     private func handleTimeUpdate(_ time: CMTime) {
-        guard let player, state.active else { return }
+        guard let player, state.active, applicationActive else { return }
         let positionMs = milliseconds(time)
         revealPlayerIfReady(positionMs: positionMs)
         let duration = player.currentItem?.duration.seconds ?? 0
@@ -315,18 +340,17 @@ final class StoryVideoPlayback: ObservableObject {
     }
 
     private func completeWindow() {
-        guard !completionHandled, let player else { return }
+        guard applicationActive, !completionHandled, let player else { return }
         completionHandled = true
         player.pause()
 
         guard isThumbnail else {
-            showPlayerLayer = false
             events.onEnded()
             return
         }
         if state.active, state.repeatWindow {
             seekToStart(retryAtZero: true, hideCurrentFrame: false) { [weak self] in
-                guard let self, self.state.active else { return }
+                guard let self, self.state.active, self.applicationActive else { return }
                 self.completionHandled = false
                 self.player?.play()
             }
@@ -398,6 +422,7 @@ final class StoryVideoPlayback: ObservableObject {
 
     private func revealPlayerIfReady(positionMs: Int64) {
         guard state.active,
+              applicationActive,
               startPrepared,
               playerLayerReady,
               !seekInProgress,
@@ -443,14 +468,36 @@ final class StoryVideoPlayback: ObservableObject {
         readyReported = false
     }
 
+    private func setApplicationActive(_ active: Bool) {
+        guard applicationActive != active else { return }
+        applicationActive = active
+        guard active else {
+            player?.pause()
+            return
+        }
+        guard state.active, state.demand.needsPlayer, startPrepared else { return }
+
+        if isThumbnail {
+            // Thumbnail sessions always restart from their configured beginning.
+            completionHandled = false
+            player?.pause()
+            seekToStart(retryAtZero: true, hideCurrentFrame: false) { [weak self] in
+                guard let self, self.state.active, self.applicationActive else { return }
+                self.player?.play()
+            }
+        } else {
+            // A full-screen story resumes where the app was interrupted.
+            player?.play()
+        }
+    }
+
     private var isThumbnail: Bool {
         if case .thumbnail = purpose { return true }
         return false
     }
 
     private var needsGeneratedPoster: Bool {
-        if case let .thumbnail(item) = purpose { return item.thumbnail == nil }
-        return false
+        Self.posterFrameMs(for: purpose) != nil
     }
 
     private func configuredStartMs(for duration: CMTime) -> Int64 {
@@ -472,11 +519,10 @@ final class StoryVideoPlayback: ObservableObject {
     }
 
     private func preparePoster(from asset: AVAsset) {
-        guard case let .thumbnail(item) = purpose,
-              item.thumbnail == nil,
+        guard let frameMs = Self.posterFrameMs(for: purpose),
               poster == nil,
               imageGenerator == nil else { return }
-        let cacheKey = thumbnailPlayerIdentity(item)
+        let cacheKey = StoryVideoPosterIdentity(url: urlString, frameMs: frameMs)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 512, height: 512)
@@ -485,7 +531,7 @@ final class StoryVideoPlayback: ObservableObject {
         imageGenerationID = generationID
         generatePoster(
             with: generator,
-            atMilliseconds: max(item.thumbnailPlayback.startTimeMs, 0),
+            atMilliseconds: frameMs,
             cacheKey: cacheKey,
             retryAtZero: true,
             generationID: generationID
@@ -495,7 +541,7 @@ final class StoryVideoPlayback: ObservableObject {
     private func generatePoster(
         with generator: AVAssetImageGenerator,
         atMilliseconds milliseconds: Int64,
-        cacheKey: StoryThumbnailPlayerIdentity,
+        cacheKey: StoryVideoPosterIdentity,
         retryAtZero: Bool,
         generationID: UUID
     ) {
@@ -506,7 +552,7 @@ final class StoryVideoPlayback: ObservableObject {
                 guard let self, self.imageGenerationID == generationID else { return }
                 if result == .succeeded, let image {
                     let poster = UIImage(cgImage: image)
-                    StoryThumbnailPosterCache.store(poster, for: cacheKey)
+                    StoryVideoPosterCache.store(poster, for: cacheKey)
                     self.poster = poster
                     self.cancelPosterGeneration()
                 } else if retryAtZero, milliseconds != 0 {
@@ -530,10 +576,19 @@ final class StoryVideoPlayback: ObservableObject {
         imageGenerator = nil
         imageGenerationID = nil
     }
+
+    private static func posterFrameMs(for purpose: StoryVideoPlaybackPurpose) -> Int64? {
+        switch purpose {
+        case let .thumbnail(item):
+            item.thumbnail == nil ? max(item.thumbnailPlayback.startTimeMs, 0) : nil
+        case let .fullScreen(item):
+            item.thumbnail == nil ? 0 : nil
+        }
+    }
 }
 
 @MainActor
-enum StoryThumbnailPosterCache {
+enum StoryVideoPosterCache {
     private static let cache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
         cache.countLimit = 40
@@ -541,11 +596,11 @@ enum StoryThumbnailPosterCache {
         return cache
     }()
 
-    static func image(for key: StoryThumbnailPlayerIdentity) -> UIImage? {
+    static func image(for key: StoryVideoPosterIdentity) -> UIImage? {
         cache.object(forKey: key.cacheKey as NSString)
     }
 
-    static func store(_ image: UIImage, for key: StoryThumbnailPlayerIdentity) {
+    static func store(_ image: UIImage, for key: StoryVideoPosterIdentity) {
         let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
         cache.setObject(image, forKey: key.cacheKey as NSString, cost: cost)
     }
