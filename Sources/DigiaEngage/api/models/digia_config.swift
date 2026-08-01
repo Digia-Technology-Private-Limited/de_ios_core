@@ -11,41 +11,10 @@ public enum DigiaEnvironment: Sendable, Equatable {
     case sandbox
 }
 
-public struct DigiaNetworkConfiguration: Sendable, Equatable {
-    public let defaultHeaders: [String: String]
-    /// Seconds. `Duration` (iOS 16+) would raise this type's floor for every
-    /// consumer of `DigiaConfig`; `TimeInterval` keeps it representable down to
-    /// the SDK's iOS 15 minimum.
-    public let timeout: TimeInterval
-
-    public init(
-        defaultHeaders: [String: String] = [:],
-        timeout: TimeInterval = 30
-    ) {
-        self.defaultHeaders = defaultHeaders
-        self.timeout = timeout
-    }
-}
-
-public struct DigiaDeveloperConfig: Sendable, Equatable {
-    public let proxyURL: String?
-    public let baseURL: String
-
-    public init(
-        proxyURL: String? = nil,
-        baseURL: String = "https://app.digia.tech/api/v1"
-    ) {
-        self.proxyURL = proxyURL
-        self.baseURL = baseURL
-    }
-}
-
 public struct DigiaConfig: Sendable {
     public let apiKey: String
     public let logLevel: DigiaLogLevel
     public let environment: DigiaEnvironment
-    public let networkConfiguration: DigiaNetworkConfiguration?
-    public let developerConfig: DigiaDeveloperConfig?
     /// Optional global font family applied to all Digia-rendered text.
     /// Must match a font family registered by the host app.
     public let fontFamily: String?
@@ -58,8 +27,6 @@ public struct DigiaConfig: Sendable {
         apiKey: String,
         logLevel: DigiaLogLevel = .error,
         environment: DigiaEnvironment = .production,
-        networkConfiguration: DigiaNetworkConfiguration? = nil,
-        developerConfig: DigiaDeveloperConfig? = nil,
         fontFamily: String? = nil,
         analyticsConfig: AnalyticsConfig = AnalyticsConfig(),
         wrapperBinding: String? = nil,
@@ -69,8 +36,6 @@ public struct DigiaConfig: Sendable {
         self.apiKey = apiKey
         self.logLevel = logLevel
         self.environment = environment
-        self.networkConfiguration = networkConfiguration
-        self.developerConfig = developerConfig
         self.fontFamily = fontFamily
         self.analyticsConfig = analyticsConfig
         self.wrapperBinding = wrapperBinding
@@ -84,8 +49,6 @@ extension DigiaConfig: Equatable {
         lhs.apiKey == rhs.apiKey
             && lhs.logLevel == rhs.logLevel
             && lhs.environment == rhs.environment
-            && lhs.networkConfiguration == rhs.networkConfiguration
-            && lhs.developerConfig == rhs.developerConfig
             && lhs.fontFamily == rhs.fontFamily
             && lhs.analyticsConfig == rhs.analyticsConfig
             && lhs.wrapperBinding == rhs.wrapperBinding

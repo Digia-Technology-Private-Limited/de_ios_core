@@ -13,7 +13,6 @@ struct DigiaEngageTests {
         #expect(config.apiKey == "prod_123")
         #expect(config.logLevel == .error)
         #expect(config.environment == .production)
-        #expect(config.developerConfig == nil)
     }
 
     @Test("initialize is idempotent")
