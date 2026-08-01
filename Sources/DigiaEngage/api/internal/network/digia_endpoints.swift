@@ -7,10 +7,7 @@ enum DigiaEndpoints {
     nonisolated(unsafe) private static var _baseUrl: String = production
 
     static func configure(_ config: DigiaConfig) {
-        _baseUrl =
-            (config.developerConfig?.baseURL
-            ?? (config.environment == .sandbox ? sandbox : production))
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        _baseUrl = config.environment == .sandbox ? sandbox : production
     }
 
     /// Resets to production default. Use in tests only.
