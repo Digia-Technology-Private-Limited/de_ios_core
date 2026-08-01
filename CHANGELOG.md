@@ -2,6 +2,16 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.8.0] - 2026-08-01
+
+### New Features
+- Added the Engage Component Registry: a debug-build tool that records the Engage component keys and slots your app renders so they surface in the dashboard. It's reached through a new in-app debug settings screen — opened from your own debug menu via `Digia.presentDebugSettings(from:)`, or by routing the SDK's `_digia/debug-settings` deep link through `Digia.handleDeepLink(_:from:)` — and surfaced by a draggable on-screen debug bubble. It activates only in development builds and is inert in release builds.
+- Added live campaign testing: in a development build, use the debug bubble's Sync toggle to connect to the dashboard and preview nudge and survey campaigns live as you edit them.
+- Inline story strips now autoplay muted video previews in their thumbnails: a story card backed by a video plays in place while it's on screen and stops when it scrolls away, instead of showing a static poster frame.
+
+### Bug Fixes
+- Fixed a bottom-sheet nudge showing the previous nudge's content, and not recording an impression, when one nudge replaced another in quick succession.
+
 ## [3.7.0] - 2026-07-29
 
 ### New Features
