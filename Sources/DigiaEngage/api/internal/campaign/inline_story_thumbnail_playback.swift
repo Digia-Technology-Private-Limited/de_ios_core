@@ -167,10 +167,10 @@ struct InlineStoryRailPlaybackCoordinator {
 
         case let .scrollSettled(visibility):
             state.slotVisible = visibility.slotVisible
-            // A settled scroll is a new playback session. Rebuild from no previous eligibility,
-            // then select the lowest eligible Campaign index rather than resuming.
+            // Keep cards until they drop below the exit threshold, then restart from the
+            // lowest eligible Campaign index instead of resuming the previous position.
             state.eligibleIndices = updateThumbnailPlaybackEligibility(
-                current: [],
+                current: state.eligibleIndices,
                 slotVisible: visibility.slotVisible,
                 visibleFractions: visibility.cardFractions,
                 items: items

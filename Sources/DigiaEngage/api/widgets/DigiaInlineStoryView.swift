@@ -12,6 +12,7 @@ struct DigiaInlineStoryView: View {
     @State private var latestGeometry = StoryRailGeometry()
     @State private var viewportBounds = CGRect.null
     @State private var scrollSettleTask: Task<Void, Never>?
+    @State private var lastSettledVisibility: StoryRailVisibility?
     @State private var cacheDemandOwner = UUID()
 
     init(config: InlineStoryConfig, payload: CEPTriggerPayload) {
@@ -115,6 +116,7 @@ struct DigiaInlineStoryView: View {
                 items: config.items,
                 mode: config.thumbnailVideoPlayback
             ))
+            lastSettledVisibility = nil
             scheduleEligibilityAfterScroll(latestGeometry)
         }
         .onChange(of: overlayController.activeStoryOverlay != nil) { open in
@@ -134,11 +136,22 @@ struct DigiaInlineStoryView: View {
     }
 
     private func settleVisibility(_ geometry: StoryRailGeometry) {
+        guard let rail = geometry.rail,
+              !rail.isNull,
+              !rail.isEmpty,
+              !geometry.cards.isEmpty,
+              !viewportBounds.isNull,
+              !viewportBounds.isEmpty else { return }
         let visibility = storyRailVisibility(
-            rail: geometry.rail,
+            rail: rail,
             cards: geometry.cards,
             viewport: viewportBounds
         )
+        guard visibility.isMateriallyDifferent(
+            from: lastSettledVisibility,
+            retaining: playback.state.eligibleIndices
+        ) else { return }
+        lastSettledVisibility = visibility
         playback.send(.scrollSettled(visibility))
     }
 
@@ -148,6 +161,26 @@ struct DigiaInlineStoryView: View {
             try? await Task.sleep(nanoseconds: 100_000_000)
             guard !Task.isCancelled else { return }
             settleVisibility(geometry)
+        }
+    }
+}
+
+private extension StoryRailVisibility {
+    func isMateriallyDifferent(
+        from previous: StoryRailVisibility?,
+        retaining eligibleIndices: Set<Int>
+    ) -> Bool {
+        guard let previous else { return true }
+        guard slotVisible == previous.slotVisible else { return true }
+        let indices = Set(cardFractions.keys).union(previous.cardFractions.keys)
+        let changed = indices.filter { index in
+            abs((cardFractions[index] ?? 0) - (previous.cardFractions[index] ?? 0)) > 0.01
+        }
+        guard !changed.isEmpty else { return false }
+        // A passive SwiftUI preference pass may briefly omit an eligible card.
+        // Ignore that pass unless another measured card actually moved.
+        return !changed.allSatisfy { index in
+            eligibleIndices.contains(index) && cardFractions[index] == nil
         }
     }
 }
