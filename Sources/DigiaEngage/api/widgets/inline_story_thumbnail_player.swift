@@ -696,7 +696,7 @@ func invalidateStoryThumbnailWarmPlayer(_ identity: StoryThumbnailPlayerIdentity
 }
 
 @MainActor
-private enum StoryThumbnailPosterCache {
+enum StoryThumbnailPosterCache {
     private static let cache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
         cache.countLimit = 40

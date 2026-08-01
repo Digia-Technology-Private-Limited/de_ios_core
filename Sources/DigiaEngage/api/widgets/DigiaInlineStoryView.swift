@@ -395,6 +395,7 @@ private struct InlineStoryOverlayContent: View {
     let state: InlineStoryOverlayState
 
     @State private var currentIndex: Int
+    @State private var displayedIndex: Int
     @State private var elapsed: Double = 0
     @State private var videoProgress: Double = 0
     @State private var videoStalled: Double = 0
@@ -413,7 +414,9 @@ private struct InlineStoryOverlayContent: View {
 
     init(state: InlineStoryOverlayState) {
         self.state = state
-        _currentIndex = State(initialValue: min(max(state.initialIndex, 0), max(state.config.items.count - 1, 0)))
+        let initialIndex = min(max(state.initialIndex, 0), max(state.config.items.count - 1, 0))
+        _currentIndex = State(initialValue: initialIndex)
+        _displayedIndex = State(initialValue: initialIndex)
     }
 
     private var variables: VariableContext {
@@ -428,16 +431,35 @@ private struct InlineStoryOverlayContent: View {
 
                 if let item = currentItem {
                     let muted = muteOverride ?? state.config.startMuted
-                    FullScreenStoryItem(
-                        item: item,
-                        muted: muted,
-                        onVideoProgress: { videoProgress = $0 },
-                        onVideoEnded: { next() },
-                        onVideoBuffering: { videoBuffering = $0 }
-                    )
-                        .id(currentIndex)
-                        .frame(width: proxy.size.width, height: proxy.size.height)
-                        .clipped()
+                    ForEach(renderedIndices, id: \.self) { index in
+                        if state.config.items.indices.contains(index) {
+                            FullScreenStoryItem(
+                                item: state.config.items[index],
+                                active: index == currentIndex,
+                                muted: muted,
+                                onVideoReady: {
+                                    guard index == currentIndex else { return }
+                                    displayedIndex = index
+                                },
+                                onVideoProgress: {
+                                    guard index == currentIndex else { return }
+                                    videoProgress = $0
+                                },
+                                onVideoEnded: {
+                                    guard index == currentIndex else { return }
+                                    next()
+                                },
+                                onVideoBuffering: {
+                                    guard index == currentIndex else { return }
+                                    videoBuffering = $0
+                                }
+                            )
+                            .id(index)
+                            .frame(width: proxy.size.width, height: proxy.size.height)
+                            .clipped()
+                            .opacity(index == displayedIndex ? 1 : 0)
+                        }
+                    }
 
                     tapZones
 
@@ -569,6 +591,12 @@ private struct InlineStoryOverlayContent: View {
         state.config.items.indices.contains(currentIndex) ? state.config.items[currentIndex] : nil
     }
 
+    private var renderedIndices: [Int] {
+        displayedIndex == currentIndex
+            ? [currentIndex]
+            : [displayedIndex, currentIndex]
+    }
+
     private var currentDuration: Double {
         let ms = currentItem?.duration ?? state.config.defaultDuration
         return max(Double(ms) / 1000.0, 0.1)
@@ -631,9 +659,9 @@ private struct InlineStoryOverlayContent: View {
     private func next() {
         resetTiming()
         if currentIndex < state.config.items.count - 1 {
-            currentIndex += 1
+            move(to: currentIndex + 1)
         } else if state.config.restartOnCompleted {
-            currentIndex = 0
+            move(to: 0)
         } else {
             completed = true
             SDKInstance.shared.reportStoryCompleted(
@@ -647,7 +675,14 @@ private struct InlineStoryOverlayContent: View {
 
     private func previous() {
         resetTiming()
-        currentIndex = max(currentIndex - 1, 0)
+        move(to: max(currentIndex - 1, 0))
+    }
+
+    private func move(to index: Int) {
+        currentIndex = index
+        if state.config.items[index].type != .video {
+            displayedIndex = index
+        }
     }
 
     private func handleCTA(_ item: StoryItemConfig) {
@@ -676,7 +711,9 @@ private struct InlineStoryOverlayContent: View {
 @MainActor
 private struct FullScreenStoryItem: View {
     let item: StoryItemConfig
+    let active: Bool
     let muted: Bool
+    let onVideoReady: @MainActor @Sendable () -> Void
     let onVideoProgress: @MainActor @Sendable (Double) -> Void
     let onVideoEnded: @MainActor @Sendable () -> Void
     let onVideoBuffering: @MainActor @Sendable (Bool) -> Void
@@ -689,11 +726,19 @@ private struct FullScreenStoryItem: View {
                     thumbnail: item.thumbnail,
                     fitOverride: item.boxFit
                 )
+                if item.thumbnail == nil,
+                   let poster = StoryThumbnailPosterCache.image(
+                       for: thumbnailPlayerIdentity(item)
+                   ) {
+                    StoryPosterImage(image: poster, fit: item.boxFit)
+                }
                 InlineStoryVideoView(
                     urlString: item.url,
                     looping: false,
+                    active: active,
                     muted: muted,
                     gravity: item.boxFit.videoGravity,
+                    onReadyForDisplay: onVideoReady,
                     onProgress: onVideoProgress,
                     onEnded: onVideoEnded,
                     onBuffering: onVideoBuffering
@@ -701,6 +746,21 @@ private struct FullScreenStoryItem: View {
             } else {
                 StoryRemoteImage(urlString: item.url, fit: item.boxFit)
             }
+        }
+    }
+}
+
+private struct StoryPosterImage: View {
+    let image: UIImage
+    let fit: StoryMediaFit
+
+    @ViewBuilder
+    var body: some View {
+        let content = Image(uiImage: image).resizable()
+        if fit.stretchesImage {
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            content.aspectRatio(contentMode: fit.imageContentMode)
         }
     }
 }
@@ -732,9 +792,11 @@ private struct StoryRemoteImage: View {
 private struct InlineStoryVideoView: View {
     let urlString: String
     let looping: Bool
+    var active: Bool = true
     let muted: Bool
     /// Configurable cover/contain scaling shared by thumbnails and full-screen playback.
     var gravity: AVLayerVideoGravity = .resizeAspectFill
+    var onReadyForDisplay: (@MainActor @Sendable () -> Void)?
     /// Full-screen playback hooks; thumbnails leave these nil and skip the
     /// observers entirely.
     var onProgress: (@MainActor @Sendable (Double) -> Void)?
@@ -760,8 +822,10 @@ private struct InlineStoryVideoView: View {
                         guard !firstFrameReady else { return }
                         firstFrameReady = true
                         onBuffering?(false)
+                        onReadyForDisplay?()
                     }
                 )
+                .opacity(firstFrameReady ? 1 : 0)
             }
         }
         .task(id: "\(urlString)-\(looping)") {
@@ -831,7 +895,16 @@ private struct InlineStoryVideoView: View {
             }
 
             bundle = nextBundle
-            nextBundle.player.play()
+            if active {
+                nextBundle.player.play()
+            }
+        }
+        .onChange(of: active) { shouldPlay in
+            if shouldPlay {
+                bundle?.player.play()
+            } else {
+                bundle?.player.pause()
+            }
         }
         .onChange(of: muted) { isMuted in
             bundle?.player.isMuted = isMuted
@@ -844,6 +917,9 @@ private struct InlineStoryVideoView: View {
     private func reportEnd() {
         guard !endReported else { return }
         endReported = true
+        // Hide a possible black encoded end frame and expose the cached poster
+        // while the next story prepares its correctly fitted first frame.
+        firstFrameReady = false
         onEnded?()
     }
 
