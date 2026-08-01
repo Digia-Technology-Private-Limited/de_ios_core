@@ -1,23 +1,56 @@
-import AVFoundation
 import CryptoKit
 import Foundation
+#if DEBUG
+import AVFoundation
+#endif
 
-// MARK: - Persistent progressive-video cache
+enum StoryVideoCachePriority: Int, Comparable, Sendable {
+    case lookAhead
+    case eligible
+    case scheduled
+    case fullScreen
 
-/// Stores each remote MP4 once and gives every thumbnail/full-screen player the
-/// same local file. AVPlayer's range buffering is not a persistent download
-/// cache, so recreating players can otherwise create many requests for one URL.
+    static func < (lhs: StoryVideoCachePriority, rhs: StoryVideoCachePriority) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+}
+
+struct StoryVideoCacheDemand: Hashable, Sendable {
+    let url: URL
+    let priority: StoryVideoCachePriority
+}
+
+/// Process-wide persistent cache for progressive story videos.
+///
+/// The exact remote URL is the cache identity. At most two distinct URLs are downloaded at once;
+/// repeated demand joins the same queued or active download. File publication and LRU eviction run
+/// on this actor, so a player can never observe a partially written cache entry.
 actor DigiaVideoFileCache {
     static let shared = DigiaVideoFileCache()
 
     private static let defaultLimitBytes: Int64 = 256 * 1_024 * 1_024
     private static let failedDownloadRetryInterval: TimeInterval = 5 * 60
+    private static let maximumActiveDownloads = 2
+
+    private struct QueuedDownload {
+        let remoteURL: URL
+        var priority: StoryVideoCachePriority
+        let order: UInt64
+        var waiters: [CheckedContinuation<URL, Error>]
+    }
+
+    private struct ActiveDownload {
+        let remoteURL: URL
+        var waiters: [CheckedContinuation<URL, Error>]
+    }
 
     private let session: URLSession
     private let directory: URL
     private let maxBytes: Int64
-    private var inFlight: [String: Task<URL, Error>] = [:]
+    private var queued: [String: QueuedDownload] = [:]
+    private var active: [String: ActiveDownload] = [:]
     private var failedAt: [String: Date] = [:]
+    private var nextOrder: UInt64 = 0
 
     init(
         session: URLSession = .shared,
@@ -31,120 +64,231 @@ actor DigiaVideoFileCache {
         self.maxBytes = max(maxBytes, 1)
     }
 
-    func localURL(for remoteURL: URL) async throws -> URL {
+    func cachedURL(for remoteURL: URL) -> URL? {
+        usableCachedURL(for: remoteURL, touch: true)
+    }
+
+    func localURL(
+        for remoteURL: URL,
+        priority: StoryVideoCachePriority
+    ) async throws -> URL {
+        if let cached = usableCachedURL(for: remoteURL, touch: true) {
+            return cached
+        }
         let key = Self.key(for: remoteURL)
-        let destination = directory.appendingPathComponent(
-            Self.fileName(for: remoteURL, key: key)
-        )
-        if Self.isUsableFile(destination, maxBytes: maxBytes) {
-            failedAt[key] = nil
-            Self.touch(destination)
-            return destination
-        }
-        if FileManager.default.fileExists(atPath: destination.path) {
-            try? FileManager.default.removeItem(at: destination)
-        }
-        if let existing = inFlight[key] {
-            return try await existing.value
-        }
-        if let lastFailure = failedAt[key],
-           Date().timeIntervalSince(lastFailure) < Self.failedDownloadRetryInterval {
+        if isCoolingDown(key) {
             throw URLError(.cannotLoadFromNetwork)
         }
 
-        let session = session
-        let directory = directory
-        let maxBytes = maxBytes
-        let task = Task<URL, Error> {
-            let fileManager = FileManager.default
-            try fileManager.createDirectory(
-                at: directory,
-                withIntermediateDirectories: true
+        return try await withCheckedThrowingContinuation { continuation in
+            enqueue(
+                remoteURL,
+                priority: priority,
+                waiter: continuation,
+                startImmediately: true
             )
-
-            var request = URLRequest(url: remoteURL)
-            // This directory is the source of truth. Avoid creating another
-            // opaque URLCache copy of the same multi-megabyte response.
-            request.cachePolicy = .reloadIgnoringLocalCacheData
-            let (temporaryURL, response) = try await session.download(for: request)
-            guard let http = response as? HTTPURLResponse,
-                  http.statusCode == 200 else {
-                throw URLError(.badServerResponse)
-            }
-
-            guard Self.isUsableFile(temporaryURL, maxBytes: maxBytes) else {
-                throw URLError(.dataLengthExceedsMaximum)
-            }
-            if Self.isUsableFile(destination, maxBytes: maxBytes) {
-                try? fileManager.removeItem(at: temporaryURL)
-                return destination
-            }
-            if fileManager.fileExists(atPath: destination.path) {
-                try fileManager.removeItem(at: destination)
-            }
-            try fileManager.moveItem(at: temporaryURL, to: destination)
-            Self.touch(destination)
-            Self.evictOldFiles(
-                in: directory,
-                keeping: destination,
-                maxBytes: maxBytes
-            )
-            return destination
-        }
-        inFlight[key] = task
-        defer { inFlight[key] = nil }
-        do {
-            let result = try await task.value
-            failedAt[key] = nil
-            return result
-        } catch {
-            failedAt[key] = Date()
-            throw error
         }
     }
 
-    func prefetch(_ remoteURLs: [URL], maxConcurrent: Int = 4) async {
-        let uniqueURLs = Array(Set(remoteURLs))
-        let batchSize = max(maxConcurrent, 1)
-        for start in stride(from: 0, to: uniqueURLs.count, by: batchSize) {
-            let end = min(start + batchSize, uniqueURLs.count)
-            await withTaskGroup(of: Void.self) { group in
-                for url in uniqueURLs[start..<end] {
-                    group.addTask {
-                        _ = try? await self.localURL(for: url)
-                    }
+    /// Adds demand in Campaign order. This returns after queueing; downloads intentionally outlive
+    /// a rail render so scrolling cannot repeatedly cancel and restart the same network request.
+    func prepare(_ demands: [StoryVideoCacheDemand]) {
+        var order: [String] = []
+        var strongestByKey: [String: StoryVideoCacheDemand] = [:]
+        for demand in demands {
+            let key = Self.key(for: demand.url)
+            if let existing = strongestByKey[key] {
+                if demand.priority > existing.priority {
+                    strongestByKey[key] = demand
+                }
+            } else {
+                order.append(key)
+                strongestByKey[key] = demand
+            }
+        }
+        for key in order {
+            guard let demand = strongestByKey[key] else { continue }
+            enqueue(
+                demand.url,
+                priority: demand.priority,
+                waiter: nil,
+                startImmediately: false
+            )
+        }
+        startDownloadsIfPossible()
+    }
+
+    private func enqueue(
+        _ remoteURL: URL,
+        priority: StoryVideoCachePriority,
+        waiter: CheckedContinuation<URL, Error>?,
+        startImmediately: Bool
+    ) {
+        if let cached = usableCachedURL(for: remoteURL, touch: true) {
+            waiter?.resume(returning: cached)
+            return
+        }
+
+        let key = Self.key(for: remoteURL)
+        if isCoolingDown(key) {
+            waiter?.resume(throwing: URLError(.cannotLoadFromNetwork))
+            return
+        }
+        if var download = active[key] {
+            if let waiter { download.waiters.append(waiter) }
+            active[key] = download
+            return
+        }
+        if var download = queued[key] {
+            download.priority = max(download.priority, priority)
+            if let waiter { download.waiters.append(waiter) }
+            queued[key] = download
+        } else {
+            nextOrder &+= 1
+            queued[key] = QueuedDownload(
+                remoteURL: remoteURL,
+                priority: priority,
+                order: nextOrder,
+                waiters: waiter.map { [$0] } ?? []
+            )
+        }
+        if startImmediately {
+            startDownloadsIfPossible()
+        }
+    }
+
+    private func startDownloadsIfPossible() {
+        while active.count < Self.maximumActiveDownloads,
+              let next = queued.min(by: { lhs, rhs in
+                  if lhs.value.priority != rhs.value.priority {
+                      return lhs.value.priority > rhs.value.priority
+                  }
+                  return lhs.value.order < rhs.value.order
+              })
+        {
+            let key = next.key
+            let download = next.value
+            queued[key] = nil
+            active[key] = ActiveDownload(
+                remoteURL: download.remoteURL,
+                waiters: download.waiters
+            )
+            let session = session
+            Task {
+                do {
+                    var request = URLRequest(url: download.remoteURL)
+                    // The SDK cache is the sole persistent copy of this multi-megabyte response.
+                    request.cachePolicy = .reloadIgnoringLocalCacheData
+                    let result = try await session.download(for: request)
+                    finishDownload(key: key, result: .success(result))
+                } catch {
+                    finishDownload(key: key, result: .failure(error))
                 }
             }
         }
     }
 
-    private static func key(for url: URL) -> String {
-        SHA256.hash(data: Data(url.absoluteString.utf8))
-            .map { String(format: "%02x", $0) }
-            .joined()
-    }
-
-    private static func fileName(for url: URL, key: String) -> String {
-        let pathExtension = url.pathExtension.isEmpty ? "video" : url.pathExtension
-        return "\(key).\(pathExtension)"
-    }
-
-    private static func isUsableFile(_ url: URL, maxBytes: Int64) -> Bool {
-        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]) else {
-            return false
+    private func finishDownload(
+        key: String,
+        result: Result<(URL, URLResponse), Error>
+    ) {
+        guard let download = active.removeValue(forKey: key) else { return }
+        do {
+            let localURL: URL
+            switch result {
+            case let .success((temporaryURL, response)):
+                guard let http = response as? HTTPURLResponse,
+                      http.statusCode == 200 else {
+                    throw URLError(.badServerResponse)
+                }
+                localURL = try publish(
+                    temporaryURL,
+                    remoteURL: download.remoteURL,
+                    expectedBytes: response.expectedContentLength
+                )
+            case let .failure(error):
+                throw error
+            }
+            failedAt[key] = nil
+            download.waiters.forEach { $0.resume(returning: localURL) }
+        } catch {
+            failedAt[key] = Date()
+            download.waiters.forEach { $0.resume(throwing: error) }
         }
-        let size = Int64(values.fileSize ?? 0)
-        return values.isRegularFile == true && size > 0 && size <= maxBytes
+        startDownloadsIfPossible()
     }
 
-    private static func touch(_ url: URL) {
-        try? FileManager.default.setAttributes(
-            [.modificationDate: Date()],
-            ofItemAtPath: url.path
+    private func publish(
+        _ downloadedURL: URL,
+        remoteURL: URL,
+        expectedBytes: Int64
+    ) throws -> URL {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
         )
+        let key = Self.key(for: remoteURL)
+        let destination = directory.appendingPathComponent(
+            Self.fileName(for: remoteURL, key: key)
+        )
+        if let cached = usableCachedURL(for: remoteURL, touch: true) {
+            try? fileManager.removeItem(at: downloadedURL)
+            return cached
+        }
+
+        let downloadedBytes = try Self.fileSize(downloadedURL)
+        guard downloadedBytes > 0, downloadedBytes <= maxBytes else {
+            throw URLError(.dataLengthExceedsMaximum)
+        }
+        guard expectedBytes < 0 || downloadedBytes == expectedBytes else {
+            throw URLError(.cannotDecodeContentData)
+        }
+
+        let staged = directory.appendingPathComponent(".\(key)-\(UUID().uuidString).partial")
+        defer { try? fileManager.removeItem(at: staged) }
+        do {
+            try fileManager.moveItem(at: downloadedURL, to: staged)
+        } catch {
+            try fileManager.copyItem(at: downloadedURL, to: staged)
+            try? fileManager.removeItem(at: downloadedURL)
+        }
+        guard try Self.fileSize(staged) == downloadedBytes else {
+            throw URLError(.cannotDecodeContentData)
+        }
+        if fileManager.fileExists(atPath: destination.path) {
+            try fileManager.removeItem(at: destination)
+        }
+        // The staging file is in the cache directory, so this final rename is atomic.
+        try fileManager.moveItem(at: staged, to: destination)
+        Self.touch(destination)
+        evictOldFiles(keeping: destination)
+        return destination
     }
 
-    private static func evictOldFiles(in directory: URL, keeping: URL, maxBytes: Int64) {
+    private func usableCachedURL(for remoteURL: URL, touch: Bool) -> URL? {
+        let destination = directory.appendingPathComponent(
+            Self.fileName(for: remoteURL, key: Self.key(for: remoteURL))
+        )
+        guard let size = try? Self.fileSize(destination),
+              size > 0,
+              size <= maxBytes else {
+            if FileManager.default.fileExists(atPath: destination.path) {
+                try? FileManager.default.removeItem(at: destination)
+            }
+            return nil
+        }
+        failedAt[Self.key(for: remoteURL)] = nil
+        if touch { Self.touch(destination) }
+        return destination
+    }
+
+    private func isCoolingDown(_ key: String) -> Bool {
+        guard let lastFailure = failedAt[key] else { return false }
+        return Date().timeIntervalSince(lastFailure) < Self.failedDownloadRetryInterval
+    }
+
+    private func evictOldFiles(keeping: URL) {
         let keys: Set<URLResourceKey> = [
             .isRegularFileKey,
             .fileSizeKey,
@@ -158,7 +302,8 @@ actor DigiaVideoFileCache {
             return
         }
         var files = urls.compactMap { url -> (URL, Int64, Date)? in
-            guard let values = try? url.resourceValues(forKeys: keys),
+            guard !url.lastPathComponent.hasSuffix(".partial"),
+                  let values = try? url.resourceValues(forKeys: keys),
                   values.isRegularFile == true else { return nil }
             return (url, Int64(values.fileSize ?? 0), values.contentModificationDate ?? .distantPast)
         }
@@ -169,54 +314,41 @@ actor DigiaVideoFileCache {
             totalBytes -= size
         }
     }
+
+    private static func key(for url: URL) -> String {
+        SHA256.hash(data: Data(url.absoluteString.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    private static func fileName(for url: URL, key: String) -> String {
+        let candidate = url.pathExtension
+        let isSafe = !candidate.isEmpty
+            && candidate.count <= 8
+            && candidate.unicodeScalars.allSatisfy(CharacterSet.alphanumerics.contains)
+        return "\(key).\(isSafe ? candidate : "video")"
+    }
+
+    private static func fileSize(_ url: URL) throws -> Int64 {
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true else { return 0 }
+        return Int64(values.fileSize ?? 0)
+    }
+
+    private static func touch(_ url: URL) {
+        try? FileManager.default.setAttributes(
+            [.modificationDate: Date()],
+            ofItemAtPath: url.path
+        )
+    }
 }
 
-// MARK: - Playback with a forced content type (ExoPlayer parity)
-
-/// Builds AVURLAssets for remote videos whose HTTP `Content-Type` isn't a video
-/// MIME type.
-///
-/// AVPlayer trusts the server's `Content-Type` to decide an asset's format, so a
-/// host like `raw.githubusercontent.com` — which serves `.mp4` as
-/// `application/octet-stream` with `X-Content-Type-Options: nosniff` — makes
-/// AVFoundation refuse to play, even though the same URL plays on Android.
-/// Android's ExoPlayer ignores `Content-Type` and sniffs the container instead.
-///
-/// On iOS 17 and newer, `AVURLAssetOverrideMIMETypeKey` gives us that parity
-/// while AVFoundation retains ownership of redirects, ranges, cancellation and
-/// streaming. Older systems use the resource-loader compatibility path below.
+#if DEBUG
+// Kept only so the unchanged legacy test target can compile while this MR removes the old
+// resource-loader implementation. Production playback always uses the local cached file.
 enum DigiaVideoStreaming {
-    // Only used for its stable address as an associated-object key; never read
-    // or mutated as a value, so unchecked concurrency access is safe.
-    nonisolated(unsafe) private static var delegateKey: UInt8 = 0
-
     static func makeAsset(for url: URL) -> AVURLAsset {
-        guard let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https",
-              var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
-            return AVURLAsset(url: url)
-        }
-
-        if #available(iOS 17, *) {
-            return AVURLAsset(
-                url: url,
-                options: [AVURLAssetOverrideMIMETypeKey: mimeType(for: url)]
-            )
-        }
-
-        // Swap the scheme to a custom one so AVFoundation hands all loading to
-        // our iOS 15/16 compatibility delegate instead of trying (and failing)
-        // to play it directly.
-        components.scheme = DigiaStreamingResourceLoaderDelegate.scheme
-        guard let proxyURL = components.url else { return AVURLAsset(url: url) }
-
-        let asset = AVURLAsset(url: proxyURL)
-        let delegate = DigiaStreamingResourceLoaderDelegate(originalURL: url)
-        asset.resourceLoader.setDelegate(delegate, queue: DispatchQueue(label: "tech.digia.video.resourceloader"))
-        // `setDelegate` does not retain the delegate, so tie its lifetime to the
-        // asset's.
-        objc_setAssociatedObject(asset, &delegateKey, delegate, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        return asset
+        AVURLAsset(url: url)
     }
 
     static func mimeType(for url: URL) -> String {
@@ -228,152 +360,7 @@ enum DigiaVideoStreaming {
     }
 }
 
-/// Streams a remote video via HTTP byte-range requests and reports a forced
-/// content type, so AVPlayer plays sources whose `Content-Type` isn't a video
-/// MIME type. Mirrors Android's ExoPlayer (container sniffing + progressive
-/// streaming). See `DigiaVideoStreaming`.
-final class DigiaStreamingResourceLoaderDelegate: NSObject, AVAssetResourceLoaderDelegate,
-    @unchecked Sendable
-{
-    static let scheme = "digiastream"
-
-    private let originalURL: URL
-    private let contentTypeUTI: String
-    private let session = URLSession(configuration: .default)
-    private let taskLock = NSLock()
-    private var tasks: [ObjectIdentifier: URLSessionDataTask] = [:]
-
-    init(originalURL: URL) {
-        self.originalURL = originalURL
-        switch originalURL.pathExtension.lowercased() {
-        case "mov": contentTypeUTI = "com.apple.quicktime-movie"
-        case "m4v": contentTypeUTI = "com.apple.m4v-video"
-        default: contentTypeUTI = "public.mpeg-4"
-        }
-    }
-
-    func resourceLoader(
-        _ resourceLoader: AVAssetResourceLoader,
-        shouldWaitForLoadingOfRequestedResource loadingRequest: AVAssetResourceLoadingRequest
-    ) -> Bool {
-        var request = URLRequest(url: originalURL)
-        let requestID = ObjectIdentifier(loadingRequest)
-        let requestedStart: Int64
-        let requestedLength: Int?
-
-        if let dataRequest = loadingRequest.dataRequest {
-            // AVFoundation may already have consumed part of a request. Asking
-            // again from requestedOffset returns duplicate bytes and can make
-            // the parser repeatedly request the same range.
-            let start = dataRequest.currentOffset
-            let consumed = max(start - dataRequest.requestedOffset, 0)
-            let remaining = max(dataRequest.requestedLength - Int(consumed), 0)
-            requestedStart = start
-            requestedLength = dataRequest.requestsAllDataToEndOfResource ? nil : remaining
-
-            if dataRequest.requestsAllDataToEndOfResource {
-                request.setValue("bytes=\(start)-", forHTTPHeaderField: "Range")
-            } else {
-                guard remaining > 0 else {
-                    loadingRequest.finishLoading()
-                    return true
-                }
-                let end = start + Int64(remaining) - 1
-                request.setValue("bytes=\(start)-\(end)", forHTTPHeaderField: "Range")
-            }
-        } else {
-            requestedStart = 0
-            requestedLength = 0
-            // A content-information-only request should not download the
-            // entire video on the compatibility path.
-            request.setValue("bytes=0-1", forHTTPHeaderField: "Range")
-        }
-
-        let task = session.dataTask(with: request) { [weak self, contentTypeUTI] data, response, error in
-            self?.removeTask(for: requestID)
-            guard !loadingRequest.isCancelled else { return }
-
-            if let error {
-                loadingRequest.finishLoading(with: error)
-                return
-            }
-
-            guard let http = response as? HTTPURLResponse,
-                  (200..<300).contains(http.statusCode) else {
-                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                loadingRequest.finishLoading(with: Self.httpError(status: status))
-                return
-            }
-
-            let contentRange = Self.contentRange(from: http)
-            if http.statusCode == 206, contentRange == nil {
-                loadingRequest.finishLoading(with: Self.invalidRangeError())
-                return
-            }
-            if http.statusCode == 200, requestedStart > 0 {
-                // The server ignored a non-zero Range header. Passing bytes
-                // from offset zero as if they began at requestedStart corrupts
-                // AVFoundation's parser state and causes an endless retry loop.
-                loadingRequest.finishLoading(with: Self.invalidRangeError())
-                return
-            }
-
-            if let info = loadingRequest.contentInformationRequest {
-                info.contentType = contentTypeUTI
-                info.isByteRangeAccessSupported = http.statusCode == 206
-                let totalLength = contentRange?.total ?? http.expectedContentLength
-                if totalLength >= 0 {
-                    info.contentLength = totalLength
-                }
-            }
-
-            if let dataRequest = loadingRequest.dataRequest,
-               let data,
-               let responseStart = contentRange?.start ?? (http.statusCode == 200 ? 0 : nil),
-               let payload = Self.payload(
-                   from: data,
-                   responseStart: responseStart,
-                   requestedStart: requestedStart,
-                   requestedLength: requestedLength
-               ) {
-                dataRequest.respond(with: payload)
-            } else if loadingRequest.dataRequest != nil {
-                loadingRequest.finishLoading(with: Self.invalidRangeError())
-                return
-            }
-            loadingRequest.finishLoading()
-        }
-        store(task, for: requestID)
-        task.resume()
-        return true
-    }
-
-    func resourceLoader(
-        _ resourceLoader: AVAssetResourceLoader,
-        didCancel loadingRequest: AVAssetResourceLoadingRequest
-    ) {
-        removeTask(for: ObjectIdentifier(loadingRequest))?.cancel()
-    }
-
-    deinit {
-        session.invalidateAndCancel()
-    }
-
-    private func store(_ task: URLSessionDataTask, for requestID: ObjectIdentifier) {
-        taskLock.lock()
-        let previous = tasks.updateValue(task, forKey: requestID)
-        taskLock.unlock()
-        previous?.cancel()
-    }
-
-    @discardableResult
-    private func removeTask(for requestID: ObjectIdentifier) -> URLSessionDataTask? {
-        taskLock.lock()
-        let task = tasks.removeValue(forKey: requestID)
-        taskLock.unlock()
-        return task
-    }
-
+enum DigiaStreamingResourceLoaderDelegate {
     struct ContentRange {
         let start: Int64
         let total: Int64
@@ -400,59 +387,9 @@ final class DigiaStreamingResourceLoaderDelegate: NSObject, AVAssetResourceLoade
         let relativeStart = requestedStart - responseStart
         guard relativeStart >= 0, relativeStart <= Int64(data.count) else { return nil }
         let lowerBound = Int(relativeStart)
-        let upperBound: Int
-        if let requestedLength {
-            upperBound = min(lowerBound + requestedLength, data.count)
-        } else {
-            upperBound = data.count
-        }
+        let upperBound = requestedLength.map { min(lowerBound + $0, data.count) } ?? data.count
         guard upperBound > lowerBound else { return nil }
         return data.subdata(in: lowerBound..<upperBound)
     }
-
-    private static func httpError(status: Int) -> NSError {
-        NSError(
-            domain: "tech.digia.video.http",
-            code: status,
-            userInfo: [NSLocalizedDescriptionKey: "Video request failed with HTTP status \(status)."]
-        )
-    }
-
-    private static func invalidRangeError() -> NSError {
-        NSError(
-            domain: "tech.digia.video.range",
-            code: 1,
-            userInfo: [NSLocalizedDescriptionKey: "Video server returned an invalid byte-range response."]
-        )
-    }
 }
-
-struct DigiaVideoPlaybackBundle {
-    let player: AVPlayer
-    let looper: AVPlayerLooper?
-
-    static func make(url: URL, looping: Bool) async throws -> DigiaVideoPlaybackBundle {
-        let playbackURL = try await DigiaVideoFileCache.shared.localURL(for: url)
-        return make(asset: DigiaVideoStreaming.makeAsset(for: playbackURL), looping: looping)
-    }
-
-    static func make(asset: AVURLAsset, looping: Bool) -> DigiaVideoPlaybackBundle {
-        let item = AVPlayerItem(asset: asset)
-        if looping {
-            let queuePlayer = AVQueuePlayer(playerItem: item)
-            let looper = AVPlayerLooper(player: queuePlayer, templateItem: item)
-            return DigiaVideoPlaybackBundle(player: queuePlayer, looper: looper)
-        }
-        return DigiaVideoPlaybackBundle(player: AVPlayer(playerItem: item), looper: nil)
-    }
-
-    func releasePlaybackResources() {
-        looper?.disableLooping()
-        player.pause()
-        if let queuePlayer = player as? AVQueuePlayer {
-            queuePlayer.removeAllItems()
-        } else {
-            player.replaceCurrentItem(with: nil)
-        }
-    }
-}
+#endif

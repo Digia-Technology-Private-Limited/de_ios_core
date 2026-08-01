@@ -626,7 +626,6 @@ struct EngageActionParserTests {
         #expect(item.ctaFontWeight == 700)
     }
 
-
     @Test("Survey CTA accepts a numeric dashboard font weight")
     func surveyCtaAcceptsNumericFontWeight() {
         let cta = CtaSettings.from(["fontWeight": .int(500)])
