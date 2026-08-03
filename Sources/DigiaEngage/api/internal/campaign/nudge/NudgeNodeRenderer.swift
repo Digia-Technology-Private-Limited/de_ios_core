@@ -357,7 +357,12 @@ private struct NudgeLottieView: View {
 
     // `.resizable()` lets the animation fill the frame; `contentMode` then applies the fit.
     private func lottie(url: URL) -> LottieView<EmptyView> {
-        LottieView { await LottieAnimation.loadedFrom(url: url) }
+        LottieView {
+            if url.pathExtension.lowercased() == "lottie" {
+                return try await DotLottieFile.loadedFrom(url: url).animationSource
+            }
+            return await LottieAnimation.loadedFrom(url: url)?.animationSource
+        }
             .resizable()
             .configure(\.contentMode, to: node.fit.uiContentMode)
     }
