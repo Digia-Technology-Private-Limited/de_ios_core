@@ -2,6 +2,15 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.9.0] - 2026-08-03
+
+### New Features
+- Nudge Lottie widgets now support dotLottie (`.lottie`) animation files in addition to JSON Lottie files.
+- Dialog nudges can now present full-screen and can be constrained to the device safe area through a new option; dialog content taller than the available height now scrolls instead of being clipped.
+
+### Bug Fixes
+- Fixed inline story thumbnail video previews playing for the wrong cards and not tracking the visible area correctly; thumbnails now play based on their actual on-screen position and show the correct poster frame.
+
 ## [3.8.0] - 2026-08-01
 
 ### New Features
