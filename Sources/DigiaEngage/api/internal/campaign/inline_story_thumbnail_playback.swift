@@ -169,9 +169,6 @@ struct InlineStoryRailPlaybackCoordinator {
             state.slotVisible = visibility.slotVisible
             // Keep cards until they drop below the exit threshold, then restart from the
             // lowest eligible Campaign index instead of resuming the previous position.
-            // A settled scroll is also a safe retry point. The file cache still prevents
-            // another network request while a failed URL is cooling down.
-            state.failedPlayerIdentities = [:]
             state.eligibleIndices = updateThumbnailPlaybackEligibility(
                 current: state.eligibleIndices,
                 slotVisible: visibility.slotVisible,

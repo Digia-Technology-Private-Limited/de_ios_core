@@ -61,6 +61,7 @@ final class StoryVideoPlayback: ObservableObject {
 
     private let urlString: String
     private let purpose: StoryVideoPlaybackPurpose
+    private let posterIdentity: StoryVideoPosterIdentity?
     private var applicationActive: Bool
     private var lifecycleSubscriptions = Set<AnyCancellable>()
     private var state = StoryVideoPlaybackState(
@@ -94,15 +95,22 @@ final class StoryVideoPlayback: ObservableObject {
 
     private var imageGenerator: AVAssetImageGenerator?
     private var imageGenerationID: UUID?
+    private var cachedPosterLookupTask: Task<Void, Never>?
 
     init(urlString: String, purpose: StoryVideoPlaybackPurpose) {
         self.urlString = urlString
         self.purpose = purpose
+        posterIdentity = Self.posterFrameMs(for: purpose).map {
+            StoryVideoPosterIdentity(url: urlString, frameMs: $0)
+        }
         applicationActive = UIApplication.shared.applicationState == .active
-        if let frameMs = Self.posterFrameMs(for: purpose) {
-            poster = StoryVideoPosterCache.image(
-                for: StoryVideoPosterIdentity(url: urlString, frameMs: frameMs)
-            )
+        if let posterIdentity {
+            poster = StoryVideoPosterCache.image(for: posterIdentity)
+            StoryVideoPosterCache.publisher(for: posterIdentity)
+                .sink { [weak self] image in
+                    Task { @MainActor in self?.poster = image }
+                }
+                .store(in: &lifecycleSubscriptions)
         }
 
         NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
@@ -115,13 +123,13 @@ final class StoryVideoPlayback: ObservableObject {
                 Task { @MainActor in self?.setApplicationActive(true) }
             }
             .store(in: &lifecycleSubscriptions)
+        preparePosterFromCachedFileIfAvailable()
     }
 
     func update(
         state nextState: StoryVideoPlaybackState,
         events: StoryVideoPlaybackEvents
     ) {
-        refreshPosterFromCache()
         let previous = state
         state = nextState
         self.events = events
@@ -133,8 +141,12 @@ final class StoryVideoPlayback: ObservableObject {
             loadTask?.cancel()
             loadTask = nil
             requestedPriority = nil
-            cancelPosterGeneration()
             releasePlayer()
+            if applicationActive {
+                preparePosterFromCachedFileIfAvailable()
+            } else {
+                cancelPosterWork()
+            }
             return
         }
 
@@ -173,12 +185,14 @@ final class StoryVideoPlayback: ObservableObject {
         loadTask?.cancel()
         loadTask = nil
         requestedPriority = nil
-        cancelPosterGeneration()
+        cancelPosterWork()
         releasePlayer()
         localAsset = nil
     }
 
     private func ensureAsset(priority: StoryVideoCachePriority, needsPlayer: Bool) {
+        cachedPosterLookupTask?.cancel()
+        cachedPosterLookupTask = nil
         if let localAsset {
             preparePoster(from: localAsset)
             if needsPlayer, player == nil { installPlayer(asset: localAsset) }
@@ -421,7 +435,7 @@ final class StoryVideoPlayback: ObservableObject {
         terminalFailureReported = true
         player?.pause()
         showPlayerLayer = false
-        cancelPosterGeneration()
+        cancelPosterWork()
         events.onFailed()
     }
 
@@ -455,8 +469,10 @@ final class StoryVideoPlayback: ObservableObject {
         applicationActive = active
         guard active else {
             player?.pause()
+            cancelPosterWork()
             return
         }
+        preparePosterFromCachedFileIfAvailable()
         guard state.active, state.demand.needsPlayer, startPrepared else { return }
 
         if isThumbnail {
@@ -497,10 +513,9 @@ final class StoryVideoPlayback: ObservableObject {
     }
 
     private func preparePoster(from asset: AVAsset) {
-        guard let frameMs = Self.posterFrameMs(for: purpose),
+        guard let posterIdentity,
               poster == nil,
               imageGenerator == nil else { return }
-        let cacheKey = StoryVideoPosterIdentity(url: urlString, frameMs: frameMs)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 512, height: 512)
@@ -509,19 +524,32 @@ final class StoryVideoPlayback: ObservableObject {
         imageGenerationID = generationID
         generatePoster(
             with: generator,
-            atMilliseconds: frameMs,
-            cacheKey: cacheKey,
+            atMilliseconds: posterIdentity.frameMs,
+            cacheKey: posterIdentity,
             retryAtZero: true,
             generationID: generationID
         )
     }
 
-    private func refreshPosterFromCache() {
-        guard poster == nil,
-              let frameMs = Self.posterFrameMs(for: purpose) else { return }
-        poster = StoryVideoPosterCache.image(
-            for: StoryVideoPosterIdentity(url: urlString, frameMs: frameMs)
-        )
+    private func preparePosterFromCachedFileIfAvailable() {
+        guard applicationActive,
+              poster == nil,
+              posterIdentity != nil else { return }
+        if let localAsset {
+            preparePoster(from: localAsset)
+            return
+        }
+        guard cachedPosterLookupTask == nil,
+              let remoteURL = URL(string: urlString) else { return }
+        cachedPosterLookupTask = Task { @MainActor [weak self] in
+            let cachedURL = await DigiaVideoFileCache.shared.cachedURL(for: remoteURL)
+            guard let self, !Task.isCancelled else { return }
+            self.cachedPosterLookupTask = nil
+            guard let cachedURL, self.localAsset == nil else { return }
+            let asset = AVURLAsset(url: cachedURL)
+            self.localAsset = asset
+            self.preparePoster(from: asset)
+        }
     }
 
     private func generatePoster(
@@ -563,6 +591,12 @@ final class StoryVideoPlayback: ObservableObject {
         imageGenerationID = nil
     }
 
+    private func cancelPosterWork() {
+        cachedPosterLookupTask?.cancel()
+        cachedPosterLookupTask = nil
+        cancelPosterGeneration()
+    }
+
     private static func posterFrameMs(for purpose: StoryVideoPlaybackPurpose) -> Int64? {
         switch purpose {
         case let .thumbnail(item):
@@ -575,6 +609,7 @@ final class StoryVideoPlayback: ObservableObject {
 
 @MainActor
 enum StoryVideoPosterCache {
+    private static let stored = PassthroughSubject<StoryVideoPosterIdentity, Never>()
     private static let cache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
         cache.countLimit = 40
@@ -586,8 +621,18 @@ enum StoryVideoPosterCache {
         cache.object(forKey: key.cacheKey as NSString)
     }
 
+    static func publisher(
+        for key: StoryVideoPosterIdentity
+    ) -> AnyPublisher<UIImage, Never> {
+        stored.compactMap { storedKey in
+            storedKey == key ? image(for: key) : nil
+        }
+        .eraseToAnyPublisher()
+    }
+
     static func store(_ image: UIImage, for key: StoryVideoPosterIdentity) {
         let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4)
         cache.setObject(image, forKey: key.cacheKey as NSString, cost: cost)
+        stored.send(key)
     }
 }
