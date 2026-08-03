@@ -10,15 +10,28 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Primary (fat binary) podspec — the source of truth for the version when no arg is given.
 SOURCE_PODSPEC="DigiaEngage.podspec"
-BINARY_PODSPEC="DigiaEngage-binary.podspec"
-VERSION_FILE="Sources/DigiaEngage/DigiaSdkVersion.swift"
+# Every other podspec that must stay on the same version. -source = the local dev spec that
+# compiles from source (DigiaEngage-source.podspec); -binary = the slim/dynamic spec (may not
+# exist yet). Any that is absent is skipped, so this never fails on a missing file.
+OTHER_PODSPECS=("DigiaEngage-source.podspec" "DigiaEngage-binary.podspec")
+# The tracked, source-of-truth version constant. NB: the file is SdkVersion.swift — pointing this
+# at a different name (e.g. DigiaSdkVersion.swift) makes this script CREATE A DUPLICATE `enum
+# DigiaSdkVersion`, which then fails every build with "ambiguous use of 'value'".
+VERSION_FILE="Sources/DigiaEngage/SdkVersion.swift"
+
+set_version() {
+  sed -i '' "s/^\([[:space:]]*s.version[[:space:]]*=[[:space:]]*\).*/\1'$1'/" "$2"
+}
 
 if [ "${1:-}" != "" ]; then
   VERSION="$1"
-  # Keep both podspecs unified on the requested version.
-  sed -i '' "s/^\([[:space:]]*s.version[[:space:]]*=[[:space:]]*\).*/\1'$VERSION'/" "$SOURCE_PODSPEC"
-  sed -i '' "s/^\([[:space:]]*s.version[[:space:]]*=[[:space:]]*\).*/\1'$VERSION'/" "$BINARY_PODSPEC"
+  # Keep every existing podspec unified on the requested version.
+  set_version "$VERSION" "$SOURCE_PODSPEC"
+  for spec in "${OTHER_PODSPECS[@]}"; do
+    [ -f "$spec" ] && set_version "$VERSION" "$spec"
+  done
 else
   VERSION=$(grep -E "^[[:space:]]*s.version" "$SOURCE_PODSPEC" | head -1 | sed -E "s/.*'([^']+)'.*/\1/")
 fi
