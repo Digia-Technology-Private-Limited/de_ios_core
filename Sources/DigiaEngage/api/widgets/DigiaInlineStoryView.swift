@@ -2,13 +2,30 @@ import AVFoundation
 import SwiftUI
 import UIKit
 
+private let storyRailCoordinateSpace = "DigiaInlineStoryRail"
+
+@MainActor
+final class InlineStoryRailPlaybackStore: ObservableObject {
+    @Published private(set) var coordinator: InlineStoryRailPlaybackCoordinator
+
+    init(items: [StoryItemConfig], mode: ThumbnailVideoPlaybackMode) {
+        coordinator = InlineStoryRailPlaybackCoordinator(items: items, mode: mode)
+    }
+
+    func send(_ event: InlineStoryRailPlaybackEvent) {
+        var next = coordinator
+        next.send(event)
+        coordinator = next
+    }
+}
+
 @MainActor
 struct DigiaInlineStoryView: View {
     let config: InlineStoryConfig
     let payload: CEPTriggerPayload
 
     @ObservedObject private var overlayController = SDKInstance.shared.controller
-    @State private var playback: InlineStoryRailPlaybackCoordinator
+    @StateObject private var playbackStore: InlineStoryRailPlaybackStore
     @State private var latestGeometry = StoryRailGeometry()
     @State private var viewportBounds = CGRect.null
     @State private var scrollSettleTask: Task<Void, Never>?
@@ -18,7 +35,7 @@ struct DigiaInlineStoryView: View {
     init(config: InlineStoryConfig, payload: CEPTriggerPayload) {
         self.config = config
         self.payload = payload
-        _playback = State(initialValue: InlineStoryRailPlaybackCoordinator(
+        _playbackStore = StateObject(wrappedValue: InlineStoryRailPlaybackStore(
             items: config.items,
             mode: config.thumbnailVideoPlayback
         ))
@@ -26,6 +43,10 @@ struct DigiaInlineStoryView: View {
 
     var body: some View {
         storyRail
+    }
+
+    private var playback: InlineStoryRailPlaybackCoordinator {
+        playbackStore.coordinator
     }
 
     private var storyRail: some View {
@@ -37,20 +58,19 @@ struct DigiaInlineStoryView: View {
                         index: index,
                         item: item,
                         config: config,
-                        failed: playback.state.failedPlayerIdentities[index] == playerIdentity,
-                        playbackState: playback.playbackState(for: index),
-                        onWindowCompleted: { playback.send(.windowCompleted(index)) },
+                        playbackStore: playbackStore,
+                        onWindowCompleted: { playbackStore.send(.windowCompleted(index)) },
                         onFailed: {
-                            playback.send(.failed(index: index, identity: playerIdentity))
+                            playbackStore.send(.failed(index: index, identity: playerIdentity))
                         }
                     )
                         .background {
                             GeometryReader { proxy in
                                 Color.clear.preference(
                                     key: StoryRailGeometryPreference.self,
-                                    value: StoryRailGeometry(
-                                        cards: [index: proxy.frame(in: .global)]
-                                    )
+                                    value: StoryRailGeometry(cards: [
+                                        index: proxy.frame(in: .named(storyRailCoordinateSpace))
+                                    ])
                                 )
                             }
                         }
@@ -66,12 +86,15 @@ struct DigiaInlineStoryView: View {
             }
             .padding(.horizontal, CGFloat(config.card.spacing))
         }
+        .coordinateSpace(name: storyRailCoordinateSpace)
         .background {
             ZStack {
                 GeometryReader { proxy in
                     Color.clear.preference(
                         key: StoryRailGeometryPreference.self,
-                        value: StoryRailGeometry(rail: proxy.frame(in: .global))
+                        value: StoryRailGeometry(
+                            rail: CGRect(origin: .zero, size: proxy.size)
+                        )
                     )
                 }
                 StoryViewportReader { viewport in
@@ -86,12 +109,12 @@ struct DigiaInlineStoryView: View {
             scheduleEligibilityAfterScroll(geometry)
         }
         .onAppear {
-            playback.send(.configuration(
+            playbackStore.send(.configuration(
                 items: config.items,
                 mode: config.thumbnailVideoPlayback
             ))
-            playback.send(.overlayChanged(overlayController.activeStoryOverlay != nil))
-            playback.send(.applicationActive(
+            playbackStore.send(.overlayChanged(overlayController.activeStoryOverlay != nil))
+            playbackStore.send(.applicationActive(
                 UIApplication.shared.applicationState == .active
             ))
             Task { @MainActor in
@@ -112,7 +135,7 @@ struct DigiaInlineStoryView: View {
             )
         }
         .onChange(of: StoryRailConfigurationIdentity(config: config)) { _ in
-            playback.send(.configuration(
+            playbackStore.send(.configuration(
                 items: config.items,
                 mode: config.thumbnailVideoPlayback
             ))
@@ -120,17 +143,17 @@ struct DigiaInlineStoryView: View {
             scheduleEligibilityAfterScroll(latestGeometry)
         }
         .onChange(of: overlayController.activeStoryOverlay != nil) { open in
-            playback.send(.overlayChanged(open))
+            playbackStore.send(.overlayChanged(open))
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.didBecomeActiveNotification
         )) { _ in
-            playback.send(.applicationActive(true))
+            playbackStore.send(.applicationActive(true))
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.willResignActiveNotification
         )) { _ in
-            playback.send(.applicationActive(false))
+            playbackStore.send(.applicationActive(false))
         }
         .frame(height: CGFloat(config.card.height))
     }
@@ -152,7 +175,7 @@ struct DigiaInlineStoryView: View {
             retaining: playback.state.eligibleIndices
         ) else { return }
         lastSettledVisibility = visibility
-        playback.send(.scrollSettled(visibility))
+        playbackStore.send(.scrollSettled(visibility))
     }
 
     private func scheduleEligibilityAfterScroll(_ geometry: StoryRailGeometry) {
@@ -163,6 +186,7 @@ struct DigiaInlineStoryView: View {
             settleVisibility(geometry)
         }
     }
+
 }
 
 private extension StoryRailVisibility {
@@ -203,9 +227,17 @@ private struct StoryViewportReader: UIViewRepresentable {
 private final class StoryViewportUIView: UIView {
     var onChange: ((CGRect) -> Void)?
     private var lastViewport = CGRect.null
+    private var scrollObservations: [NSKeyValueObservation] = []
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        observeAncestorScrollViews()
+        reportViewportIfNeeded()
+    }
+
+    override func didMoveToSuperview() {
+        super.didMoveToSuperview()
+        observeAncestorScrollViews()
         reportViewportIfNeeded()
     }
 
@@ -215,12 +247,62 @@ private final class StoryViewportUIView: UIView {
     }
 
     func reportViewportIfNeeded() {
-        let next = window?.bounds ?? .null
-        guard next != lastViewport else { return }
+        guard let window else {
+            report(.null)
+            return
+        }
+
+        var visibleInWindow = convert(bounds, to: window).intersection(window.bounds)
+        var ancestor = superview
+        while let view = ancestor {
+            if view.clipsToBounds {
+                visibleInWindow = visibleInWindow.intersection(
+                    view.convert(view.bounds, to: window)
+                )
+            }
+            ancestor = view.superview
+        }
+        let next = visibleInWindow.isNull || visibleInWindow.isEmpty
+            ? CGRect.null
+            : convert(visibleInWindow, from: window)
+        report(next)
+    }
+
+    private func observeAncestorScrollViews() {
+        scrollObservations.removeAll()
+        var ancestor = superview
+        while let view = ancestor {
+            if let scrollView = view as? UIScrollView {
+                scrollObservations.append(
+                    scrollView.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in
+                        Task { @MainActor in self?.reportViewportIfNeeded() }
+                    }
+                )
+            }
+            ancestor = view.superview
+        }
+    }
+
+    private func report(_ next: CGRect) {
+        guard !viewport(next, isApproximatelyEqualTo: lastViewport) else { return }
         lastViewport = next
         DispatchQueue.main.async { [weak self] in
             self?.onChange?(next)
         }
+    }
+
+    private func viewport(
+        _ lhs: CGRect,
+        isApproximatelyEqualTo rhs: CGRect,
+        tolerance: CGFloat = 0.5
+    ) -> Bool {
+        if lhs.isNull || rhs.isNull {
+            return lhs.isNull && rhs.isNull
+        }
+        return abs(lhs.minX - rhs.minX) <= tolerance
+            && abs(lhs.minY - rhs.minY) <= tolerance
+            && abs(lhs.width - rhs.width) <= tolerance
+            && abs(lhs.height - rhs.height) <= tolerance
     }
 }
 
@@ -229,10 +311,18 @@ private struct StoryThumbnailCard: View {
     let index: Int
     let item: StoryItemConfig
     let config: InlineStoryConfig
-    let failed: Bool
-    let playbackState: ThumbnailPlaybackViewState
+    @ObservedObject var playbackStore: InlineStoryRailPlaybackStore
     let onWindowCompleted: @MainActor @Sendable () -> Void
     let onFailed: @MainActor @Sendable () -> Void
+
+    private var playbackState: ThumbnailPlaybackViewState {
+        playbackStore.coordinator.playbackState(for: index)
+    }
+
+    private var failed: Bool {
+        playbackStore.coordinator.state.failedPlayerIdentities[index]
+            == thumbnailPlayerIdentity(item)
+    }
 
     private var width: CGFloat {
         CGFloat(config.card.width)
@@ -251,8 +341,9 @@ private struct StoryThumbnailCard: View {
                )
             {
                 StoryThumbnailVideoView(
+                    index: index,
                     item: item,
-                    state: playbackState,
+                    playbackStore: playbackStore,
                     onWindowCompleted: onWindowCompleted,
                     onFailed: onFailed
                 )

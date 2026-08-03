@@ -87,21 +87,24 @@ struct StoryPosterImage: View {
 
 @MainActor
 struct StoryThumbnailVideoView: View {
+    let index: Int
     let item: StoryItemConfig
-    let state: ThumbnailPlaybackViewState
+    @ObservedObject var playbackStore: InlineStoryRailPlaybackStore
     let onWindowCompleted: @MainActor @Sendable () -> Void
     let onFailed: @MainActor @Sendable () -> Void
 
     @StateObject private var playback: StoryVideoPlayback
 
     init(
+        index: Int,
         item: StoryItemConfig,
-        state: ThumbnailPlaybackViewState,
+        playbackStore: InlineStoryRailPlaybackStore,
         onWindowCompleted: @escaping @MainActor @Sendable () -> Void,
         onFailed: @escaping @MainActor @Sendable () -> Void
     ) {
+        self.index = index
         self.item = item
-        self.state = state
+        self.playbackStore = playbackStore
         self.onWindowCompleted = onWindowCompleted
         self.onFailed = onFailed
         _playback = StateObject(wrappedValue: StoryVideoPlayback(
@@ -127,14 +130,20 @@ struct StoryThumbnailVideoView: View {
             }
         }
         .onAppear(perform: updatePlayback)
-        .onChange(of: state) { _ in updatePlayback() }
+        .onReceive(playbackStore.$coordinator) { coordinator in
+            updatePlayback(state: coordinator.playbackState(for: index))
+        }
         .onDisappear { playback.tearDown() }
     }
 
     private func updatePlayback() {
+        updatePlayback(state: playbackStore.coordinator.playbackState(for: index))
+    }
+
+    private func updatePlayback(state: ThumbnailPlaybackViewState) {
         playback.update(
             state: StoryVideoPlaybackState(
-                demand: loadDemand,
+                demand: loadDemand(for: state),
                 active: state.shouldPlay,
                 muted: true,
                 repeatWindow: shouldRepeatThumbnailPlaybackWindow(
@@ -150,7 +159,7 @@ struct StoryThumbnailVideoView: View {
         )
     }
 
-    private var loadDemand: StoryVideoLoadDemand {
+    private func loadDemand(for state: ThumbnailPlaybackViewState) -> StoryVideoLoadDemand {
         guard state.canLoad else { return .none }
         if state.scheduled {
             return .playback(state.cachePriority ?? .scheduled)
