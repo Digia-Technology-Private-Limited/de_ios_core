@@ -12,6 +12,7 @@ public struct DigiaDebugSettingsView: View {
     @ObservedObject private var sdk = SDKInstance.shared
     @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()
     @ObservedObject private var overlay = SDKInstance.shared.debugOverlayControllerSnapshot()
+    @ObservedObject private var liveTest = SDKInstance.shared.liveTestServiceSnapshot()
     @State private var showRestartHint = false
     @State private var showSession = false
 
@@ -47,6 +48,12 @@ public struct DigiaDebugSettingsView: View {
                         ) { EmptyView() }
                         .hidden()
                     )
+                    HStack {
+                        Text("Live test")
+                        Spacer()
+                        Text(liveTest.connectionState.label)
+                            .foregroundColor(.secondary)
+                    }
                     SettingsToggleRow(
                         title: "Digia bubble",
                         isOn: Binding(
@@ -74,6 +81,7 @@ public struct DigiaDebugSettingsView: View {
                 }
             }
             .navigationTitle("Digia Debug Settings")
+            .navigationBarTitleDisplayMode(.inline)
         }
         .alert("Restart recommended", isPresented: $showRestartHint) {
             Button("OK", role: .cancel) {}
@@ -92,6 +100,17 @@ public struct DigiaDebugSettingsView: View {
         // without a reload.
         if value && !wasEnabled {
             showRestartHint = true
+        }
+    }
+}
+
+extension LiveTestConnectionState {
+    var label: String {
+        switch self {
+        case .disconnected: return "Disconnected"
+        case .connecting: return "Connecting…"
+        case .connected: return "Connected"
+        case .error: return "Reconnecting…"
         }
     }
 }

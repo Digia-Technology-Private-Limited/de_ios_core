@@ -2,6 +2,37 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.9.0] - 2026-08-03
+
+### New Features
+- Nudge Lottie widgets now support dotLottie (`.lottie`) animation files in addition to JSON Lottie files.
+- Dialog nudges can now present full-screen and can be constrained to the device safe area through a new option; dialog content taller than the available height now scrolls instead of being clipped.
+
+### Bug Fixes
+- Fixed inline story thumbnail video previews playing for the wrong cards and not tracking the visible area correctly; thumbnails now play based on their actual on-screen position and show the correct poster frame.
+
+## [3.8.0] - 2026-08-01
+
+### New Features
+- Added the Engage Component Registry: a debug-build tool that records the Engage component keys and slots your app renders so they surface in the dashboard. It's reached through a new in-app debug settings screen — opened from your own debug menu via `Digia.presentDebugSettings(from:)`, or by routing the SDK's `_digia/debug-settings` deep link through `Digia.handleDeepLink(_:from:)` — and surfaced by a draggable on-screen debug bubble. It activates only in development builds and is inert in release builds.
+- Added live campaign testing: in a development build, use the debug bubble's Sync toggle to connect to the dashboard and preview nudge and survey campaigns live as you edit them.
+- Inline story strips now autoplay muted video previews in their thumbnails: a story card backed by a video plays in place while it's on screen and stops when it scrolls away, instead of showing a static poster frame.
+
+### Bug Fixes
+- Fixed a bottom-sheet nudge showing the previous nudge's content, and not recording an impression, when one nudge replaced another in quick succession.
+
+## [3.7.0] - 2026-07-29
+
+### New Features
+- Added an inline banner campaign type: a tappable image banner that renders in a placement slot, with configurable image fit (cover, contain, or fill), aspect ratio, height, corner radius, margins, a loading placeholder, and a tap action (open URL, deep link, share, copy, or custom key-value).
+- Added a linear progress bar nudge widget: a determinate horizontal bar that shows either a percentage or a start/current/end range (e.g. "700 of 1000"), with configurable indicator and track colors, thickness, and corner radius.
+- Full-screen story overlays can now show configurable close and video-mute controls — including visibility, icon color, background color, and size. Stories can start videos muted or audible, and once the viewer changes the audio state that choice persists for the rest of the story session.
+- Inline carousels, inline and full-screen story media, and nudge videos now support configurable content fit (cover/contain, plus fill for images) and aspect ratio, so media is sized to match the design instead of a fixed default.
+- The nudge close button's icon color and size are now configurable from the dashboard.
+
+### Improvements
+- Screen-targeted campaigns are now dismissed when the app navigates to a screen outside their target set, not only prevented from showing when triggered — so a campaign tied to one screen no longer lingers after the user moves to another.
+
 ## [3.6.1] - 2026-07-18
 
 ### Bug Fixes

@@ -19,14 +19,19 @@ struct NudgeOverlayView: View {
             }
         }
         .fullScreenCover(item: sheetBinding) { nudge in
+            // `.id(nudge.id)`: a direct swap between two active nudges (no nil in
+            // between) doesn't re-trigger `.onAppear` without a forced identity
+            // change — SwiftUI otherwise updates the same view in place.
+            //
             // `.presentationBackground` needs iOS 16.4; below that, the cover's
             // (opaque) default background is used as-is.
             if #available(iOS 16.4, *) {
-                NudgeSheetView(presentation: nudge).presentationBackground(.clear)
+                NudgeSheetView(presentation: nudge).presentationBackground(.clear).id(nudge.id)
             } else {
-                NudgeSheetView(presentation: nudge)
+                NudgeSheetView(presentation: nudge).id(nudge.id)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .transaction { $0.disablesAnimations = true }
     }
 
@@ -97,6 +102,8 @@ private struct NudgeSheetView: View {
 private struct NudgeDialogContainer: View {
     let presentation: DigiaNudgePresentation
 
+    @State private var contentHeight: CGFloat = 0
+
     private var surface: NudgeSurface { presentation.config.surface }
     private var scrimColor: Color { surface.barrierColor ?? Color.black.opacity(0.4) }
     private var backgroundColor: Color { surface.backgroundColor ?? .white }
@@ -110,44 +117,74 @@ private struct NudgeDialogContainer: View {
                 .contentShape(Rectangle())
                 .onTapGesture { if surface.backdropDismissible { dismiss() } }
 
-            dialogPanel
+            GeometryReader { geometry in
+                let insets = surface.useSafeArea ? windowSafeAreaInsets : .zero
+                let width = geometry.size.width - insets.left - insets.right
+                let height = geometry.size.height - insets.top - insets.bottom
+                dialogPanel(
+                    width: width * surface.widthFraction,
+                    maxHeight: height
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(EdgeInsets(
+                    top: insets.top,
+                    leading: insets.left,
+                    bottom: insets.bottom,
+                    trailing: insets.right
+                ))
+            }
         }
+        .ignoresSafeArea()
+        .onPreferenceChange(DialogHeightKey.self) { contentHeight = $0 }
         // Fires once per presentation: the `.id(nudge.id)` on the container gives
         // each nudge a fresh view identity, so `onAppear` runs once.
         .onAppear { SDKInstance.shared.reportNudgeImpression() }
     }
 
     /// Mirrors Flutter's `_DialogFrame`: centred, width-constrained, fully
-    /// rounded surface that *sizes to its content* (unbounded height), with an
-    /// optional close button.
-    private var dialogPanel: some View {
+    /// rounded surface that sizes to its content up to the available area, with
+    /// an optional close button.
+    private func dialogPanel(width: CGFloat, maxHeight: CGFloat) -> some View {
         ZStack(alignment: .topTrailing) {
-            VStack(spacing: 0) { renderedContent }
-                .padding(surface.padding)
-                .frame(width: dialogWidth)
-                .background(backgroundColor)
-                .clipShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
+            ScrollView {
+                VStack(spacing: 0) { renderedContent }
+                    .padding(surface.padding)
+                    .frame(width: width)
+                    .background(
+                        GeometryReader { geometry in
+                            Color.clear.preference(key: DialogHeightKey.self, value: geometry.size.height)
+                        }
+                    )
+            }
+            .frame(width: width, height: min(contentHeight, maxHeight))
 
             if surface.showCloseButton {
                 NudgeCloseButton(config: surface.closeButton, action: dismiss)
             }
         }
-        // Cap very tall dialogs to the screen; short content hugs naturally.
-        .frame(maxHeight: UIScreen.main.bounds.height * 0.9)
+        .background(backgroundColor)
+        .clipShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .transition(.opacity)
     }
 
-    /// Dialog width = screen × `widthFraction`, but always inset 24pt from each
-    /// screen edge (mirrors Flutter's `Dialog.insetPadding`), so a 100% width
-    /// still leaves a margin instead of bleeding to the edges.
-    private var dialogWidth: CGFloat {
-        let screen = UIScreen.main.bounds.width
-        return min(screen * surface.widthFraction, screen - 48)
+    private var windowSafeAreaInsets: UIEdgeInsets {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .windows.first(where: \.isKeyWindow)?
+            .safeAreaInsets ?? .zero
     }
 
     private var renderedContent: some View {
         NudgeColumnContent(column: presentation.config.layout, onDismiss: dismiss)
             .environment(\.digiaVariables, presentation.variables)
+    }
+}
+
+private struct DialogHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 

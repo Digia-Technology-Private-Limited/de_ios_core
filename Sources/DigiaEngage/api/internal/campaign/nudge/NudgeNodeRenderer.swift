@@ -46,6 +46,7 @@ private struct NudgeNodeView: View {
             case .button(let n): NudgeButtonView(node: n, onDismiss: onDismiss)
             case .gap(let n): Spacer().frame(height: n.height)
             case .divider(let n): NudgeDividerView(node: n)
+            case .progressBar(let n): NudgeProgressBarView(node: n)
             case .lottie(let n): NudgeLottieView(node: n)
             case .carousel(let n): NudgeCarouselView(node: n)
             case .video(let n): NudgeVideoView(node: n)
@@ -290,6 +291,47 @@ private struct NudgeDividerView: View {
     }
 }
 
+// MARK: - Progress bar
+
+private struct NudgeProgressBarView: View {
+    let node: NudgeProgressBar
+    @Environment(\.digiaVariables) private var variables
+
+    private var percent: Double {
+        let raw: Double
+        switch node.valueMode {
+        case .percent:
+            raw = Double(interpolate(node.percent, context: variables)) ?? 0
+        case .range:
+            raw = rangePercent()
+        }
+        return min(max(raw, 0), 100)
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                RoundedRectangle(cornerRadius: node.borderRadius)
+                    .fill(node.trackColor)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                RoundedRectangle(cornerRadius: node.borderRadius)
+                    .fill(node.indicatorColor)
+                    .frame(width: geo.size.width * CGFloat(percent / 100), height: geo.size.height)
+            }
+        }
+        .frame(height: node.thickness)
+        .frame(maxWidth: .infinity)
+    }
+
+    private func rangePercent() -> Double {
+        let start = Double(interpolate(node.rangeStart, context: variables)) ?? 0
+        let current = Double(interpolate(node.rangeCurrent, context: variables)) ?? 0
+        let end = Double(interpolate(node.rangeEnd, context: variables)) ?? 0
+        let span = end - start
+        return span == 0 ? 0 : (current - start) / span * 100
+    }
+}
+
 // MARK: - Lottie
 
 private struct NudgeLottieView: View {
@@ -315,7 +357,12 @@ private struct NudgeLottieView: View {
 
     // `.resizable()` lets the animation fill the frame; `contentMode` then applies the fit.
     private func lottie(url: URL) -> LottieView<EmptyView> {
-        LottieView { await LottieAnimation.loadedFrom(url: url) }
+        LottieView {
+            if url.pathExtension.lowercased() == "lottie" {
+                return try await DotLottieFile.loadedFrom(url: url).animationSource
+            }
+            return await LottieAnimation.loadedFrom(url: url)?.animationSource
+        }
             .resizable()
             .configure(\.contentMode, to: node.fit.uiContentMode)
     }
@@ -415,11 +462,11 @@ private struct NudgeVideoView: View {
                     Color.black
 
                     if let player, state != .failed {
-                        if node.showControls {
-                            VideoPlayer(player: player)
-                        } else {
-                            PlayerLayerView(player: player)
-                        }
+                        PlayerViewController(
+                            player: player,
+                            showsPlaybackControls: node.showControls,
+                            videoGravity: node.boxFit.videoGravity
+                        )
                     }
 
                     switch state {
@@ -443,8 +490,7 @@ private struct NudgeVideoView: View {
                         EmptyView()
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: node.height)
+                .nudgeMediaFrame(aspectRatio: node.aspectRatio, height: node.height)
             }
         }
         .onAppear { setupPlayer() }
@@ -494,27 +540,37 @@ private struct NudgeVideoView: View {
     }
 }
 
-/// Plays an `AVPlayer` without any system controls, honoring `showControls == false`.
-/// SwiftUI's `VideoPlayer` always shows controls, so we drop down to `AVPlayerLayer`.
-private struct PlayerLayerView: UIViewRepresentable {
+/// Keeps the native control chrome inside the authored frame while applying
+/// content fit only to the video surface.
+private struct PlayerViewController: UIViewControllerRepresentable {
     let player: AVPlayer
+    let showsPlaybackControls: Bool
+    let videoGravity: AVLayerVideoGravity
 
-    func makeUIView(context: Context) -> PlayerContainerView {
-        let view = PlayerContainerView()
-        view.backgroundColor = .black
-        view.playerLayer.player = player
-        view.playerLayer.videoGravity = .resizeAspect
-        return view
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.view.backgroundColor = .black
+        controller.player = player
+        controller.showsPlaybackControls = showsPlaybackControls
+        controller.videoGravity = videoGravity
+        return controller
     }
 
-    func updateUIView(_ uiView: PlayerContainerView, context: Context) {
-        uiView.playerLayer.player = player
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        controller.player = player
+        controller.showsPlaybackControls = showsPlaybackControls
+        controller.videoGravity = videoGravity
     }
 }
 
-private final class PlayerContainerView: UIView {
-    override class var layerClass: AnyClass { AVPlayerLayer.self }
-    var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+extension NudgeVideoFit {
+    var videoGravity: AVLayerVideoGravity {
+        switch self {
+        case .cover: .resizeAspectFill
+        case .contain: .resizeAspect
+        }
+    }
+
 }
 
 // MARK: - Placeholder

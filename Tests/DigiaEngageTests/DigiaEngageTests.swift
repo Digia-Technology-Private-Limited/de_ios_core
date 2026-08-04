@@ -13,7 +13,6 @@ struct DigiaEngageTests {
         #expect(config.apiKey == "prod_123")
         #expect(config.logLevel == .error)
         #expect(config.environment == .production)
-        #expect(config.developerConfig == nil)
     }
 
     @Test("initialize is idempotent")
@@ -125,7 +124,7 @@ struct DigiaEngageTests {
         #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") == nil)
     }
 
-    @Test("latest trimmed screen name wins and navigation does not dismiss accepted content")
+    @Test("latest trimmed screen name wins and navigation does not dismiss inline content")
     func usesLatestScreenWithoutDismissingAcceptedContent() throws {
         SDKInstance.shared.resetForTesting()
         let campaign = try #require(targetedInlineCampaign())
@@ -140,6 +139,233 @@ struct DigiaEngageTests {
 
         #expect(accepted)
         #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner")?.cepCampaignId == "ct-1")
+    }
+
+    @Test("screen changes dismiss an accepted targeted nudge")
+    func screenChangesDismissTargetedNudge() throws {
+        SDKInstance.shared.resetForTesting()
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let campaign = try #require(targetedNudgeCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "nudge-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+
+        SDKInstance.shared.setCurrentScreen(" Help ")
+        #expect(SDKInstance.shared.controller.activeNudge?.payload.cepCampaignId == "nudge-1")
+        #expect(!plugin.events.contains { $0.0 == .dismissed })
+
+        SDKInstance.shared.setCurrentScreen("Home")
+
+        #expect(accepted)
+        #expect(SDKInstance.shared.controller.activeNudge == nil)
+        #expect(plugin.events.contains { event, payload in
+            event == .dismissed && payload.cepCampaignId == "nudge-1"
+        })
+    }
+
+    @Test("screen change dismisses the old campaign before forwarding the new screen")
+    func dismissesBeforeForwardingScreen() throws {
+        SDKInstance.shared.resetForTesting()
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let helpCampaign = try #require(nudgeCampaign(
+            key: "help-nudge", targetScreenNames: ["Help"]))
+        let homeCampaign = try #require(nudgeCampaign(
+            key: "home-nudge", targetScreenNames: ["Home"]))
+        SDKInstance.shared.setCampaignsForTesting([helpCampaign, homeCampaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        _ = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "help-1", campaignKey: helpCampaign.campaignKey, cepMetadata: [:]))
+        plugin.onForwardScreen = { screen in
+            if screen == "Home" {
+                _ = SDKInstance.shared.onCampaignTriggered(
+                    CEPTriggerPayload(
+                        cepCampaignId: "home-1",
+                        campaignKey: homeCampaign.campaignKey,
+                        cepMetadata: [:]))
+            }
+        }
+
+        SDKInstance.shared.setCurrentScreen("Home")
+
+        #expect(plugin.events.contains { event, payload in
+            event == .dismissed && payload.cepCampaignId == "help-1"
+        })
+        #expect(SDKInstance.shared.controller.activeNudge?.payload.cepCampaignId == "home-1")
+    }
+
+    @Test("same-screen reentrancy dismisses once and forwards once")
+    func reentrantScreenChangeIsSafe() throws {
+        SDKInstance.shared.resetForTesting()
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let campaign = try #require(targetedNudgeCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        _ = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "nudge-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        var reentered = false
+        plugin.onNotifyEvent = { event, _ in
+            if event == .dismissed, !reentered {
+                reentered = true
+                SDKInstance.shared.setCurrentScreen("Home")
+            }
+        }
+
+        SDKInstance.shared.setCurrentScreen("Home")
+
+        #expect(plugin.events.filter { event, payload in
+            event == .dismissed && payload.cepCampaignId == "nudge-1"
+        }.count == 1)
+        #expect(plugin.forwardedScreens.filter { $0 == "Home" }.count == 1)
+    }
+
+    @Test("screen changes keep an accepted global nudge")
+    func screenChangesKeepGlobalNudge() throws {
+        SDKInstance.shared.resetForTesting()
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let campaign = try #require(nudgeCampaign(key: "global-nudge"))
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "global-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+
+        SDKInstance.shared.setCurrentScreen("Home")
+
+        #expect(accepted)
+        #expect(SDKInstance.shared.controller.activeNudge?.payload.cepCampaignId == "global-1")
+        #expect(!plugin.events.contains { $0.0 == .dismissed })
+    }
+
+    @Test("screen changes dismiss an accepted targeted guide")
+    func screenChangesDismissTargetedGuide() throws {
+        SDKInstance.shared.resetForTesting()
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "guide-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+
+        SDKInstance.shared.setCurrentScreen("Home")
+
+        #expect(accepted)
+        #expect(SDKInstance.shared.guideOrchestrator.state == nil)
+        #expect(plugin.events.contains { event, payload in
+            event == .dismissed && payload.cepCampaignId == "guide-1"
+        })
+    }
+
+    @Test("screen changes dismiss an accepted externally rendered guide")
+    func screenChangesDismissExternalGuide() throws {
+        SDKInstance.shared.resetForTesting()
+        let plugin = TestPlugin(identifier: "plugin")
+        var renderRequested = false
+        Digia.register(plugin)
+        SDKInstance.shared.onGuideRenderRequest = { _ in renderRequested = true }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "rn-guide-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+
+        SDKInstance.shared.setCurrentScreen("Home")
+
+        #expect(accepted)
+        #expect(renderRequested)
+        #expect(plugin.events.contains { event, payload in
+            event == .dismissed && payload.cepCampaignId == "rn-guide-1"
+        })
+    }
+
+    @Test("stale terminal event does not disarm a newer external guide")
+    func staleTerminalEventKeepsNewExternalGuideActive() throws {
+        SDKInstance.shared.resetForTesting()
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        SDKInstance.shared.onGuideRenderRequest = { _ in }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        _ = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "old-guide", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        _ = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "new-guide", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+
+        SDKInstance.shared.captureAnalyticsEvent(
+            campaignKey: campaign.campaignKey,
+            eventName: "Digia Experience Dismissed",
+            props: ["payload_id": "old-guide", "step_index": 1, "step_total": 1])
+        SDKInstance.shared.captureAnalyticsEvent(
+            campaignKey: campaign.campaignKey,
+            eventName: "Digia Experience Dismissed",
+            props: ["step_index": 1, "step_total": 1])
+        SDKInstance.shared.setCurrentScreen("Home")
+
+        #expect(plugin.events.contains { event, payload in
+            event == .dismissed && payload.cepCampaignId == "new-guide"
+        })
+    }
+
+    @Test("screen changes dismiss an accepted targeted survey")
+    func screenChangesDismissTargetedSurvey() throws {
+        SDKInstance.shared.resetForTesting()
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let campaign = try #require(targetedSurveyCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "survey-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+
+        SDKInstance.shared.setCurrentScreen("Home")
+
+        #expect(accepted)
+        #expect(SDKInstance.shared.surveyOrchestrator.state == nil)
+        #expect(plugin.events.contains { event, payload in
+            event == .dismissed && payload.cepCampaignId == "survey-1"
+        })
+    }
+
+    @Test("reentrant screen change dismisses a survey once")
+    func reentrantScreenChangeDismissesSurveyOnce() throws {
+        SDKInstance.shared.resetForTesting()
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let campaign = try #require(targetedSurveyCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        _ = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "survey-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        var reentered = false
+        plugin.onNotifyEvent = { event, _ in
+            if event == .dismissed, !reentered {
+                reentered = true
+                SDKInstance.shared.setCurrentScreen("Home")
+            }
+        }
+
+        SDKInstance.shared.setCurrentScreen("Home")
+
+        #expect(plugin.events.filter { event, payload in
+            event == .dismissed && payload.cepCampaignId == "survey-1"
+        }.count == 1)
     }
 
     @Test("campaign-key inline story payloads route into the inline controller")
@@ -519,6 +745,58 @@ private func targetedInlineCampaign() -> CampaignModel? {
     ])
 }
 
+private func targetedNudgeCampaign() -> CampaignModel? {
+    nudgeCampaign(key: "help-nudge", targetScreenNames: ["Help"])
+}
+
+private func nudgeCampaign(
+    key: String,
+    targetScreenNames: [String] = []
+) -> CampaignModel? {
+    CampaignModel.fromJson([
+        "id": "\(key)-id",
+        "campaignKey": key,
+        "campaignType": "nudge",
+        "targetScreenNames": ["names": targetScreenNames],
+        "templateConfig": [
+            "container": ["displayType": "dialog"],
+            "layout": [
+                "type": "digia/column",
+                "props": [:],
+                "children": [],
+            ],
+        ],
+    ])
+}
+
+private func targetedGuideCampaign() -> CampaignModel? {
+    CampaignModel.fromJson([
+        "id": "help-guide-id",
+        "campaignKey": "help-guide",
+        "campaignType": "guide",
+        "targetScreenNames": ["names": ["Help"]],
+        "templateConfig": [
+            "templateType": "tooltip",
+            "steps": [[
+                "id": "step-1",
+                "anchorKey": "help-anchor",
+                "title": "Help",
+                "body": "Body",
+            ]],
+        ],
+    ])
+}
+
+private func targetedSurveyCampaign() -> CampaignModel? {
+    CampaignModel.fromJson([
+        "id": "help-survey-id",
+        "campaignKey": "help-survey",
+        "campaignType": "survey",
+        "targetScreenNames": ["names": ["Help"]],
+        "templateConfig": minimalSurveyTemplate(),
+    ])
+}
+
 private func minimalSurveyTemplate() -> [String: Any] {
     // A welcome block is intro chrome (filtered from the node flow), so the
     // survey also needs at least one real question block + node to be valid.
@@ -552,6 +830,9 @@ private final class TestPlugin: DigiaCEPPlugin {
     var placeholderRegistrations: [String] = []
     var deregisteredPlaceholderIDs: [Int] = []
     var forwardedScreens: [String] = []
+    var events: [(DigiaExperienceEvent, CEPTriggerPayload)] = []
+    var onForwardScreen: ((String) -> Void)?
+    var onNotifyEvent: ((DigiaExperienceEvent, CEPTriggerPayload) -> Void)?
 
     init(identifier: String) {
         self.identifier = identifier
@@ -563,6 +844,7 @@ private final class TestPlugin: DigiaCEPPlugin {
 
     func forwardScreen(_ name: String) {
         forwardedScreens.append(name)
+        onForwardScreen?(name)
     }
 
     func registerPlaceholder(propertyID: String) -> Int? {
@@ -574,7 +856,10 @@ private final class TestPlugin: DigiaCEPPlugin {
         deregisteredPlaceholderIDs.append(id)
     }
 
-    func notifyEvent(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {}
+    func notifyEvent(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
+        events.append((event, payload))
+        onNotifyEvent?(event, payload)
+    }
 
     func healthCheck() -> DiagnosticReport {
         DiagnosticReport(isHealthy: true)

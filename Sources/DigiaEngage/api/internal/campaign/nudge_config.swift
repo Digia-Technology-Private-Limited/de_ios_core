@@ -90,8 +90,10 @@ struct NudgeSurface: Equatable {
     let showHandle: Bool
     /// Allow dragging the sheet down to dismiss (bottom sheet only).
     let draggable: Bool
-    /// Dialog width as a fraction of the screen width, 0…1 (dialog only).
+    /// Dialog width as a fraction of the selected safe/full window area, 0…1.
     let widthFraction: CGFloat
+    /// Keep dialog content inside system safe-area insets (dialog only).
+    let useSafeArea: Bool
 
     var isBottomSheet: Bool { displayType == .bottomSheet }
 
@@ -112,7 +114,10 @@ struct NudgeSurface: Equatable {
             showHandle: map.bool("showHandle", default: true),
             draggable: map.bool("draggable", default: true),
             // Stored as a 0…100 percentage; normalise to a 0…1 fraction.
-            widthFraction: CGFloat(min(max(widthPct / 100, 0.3), 1.0))
+            widthFraction: CGFloat(min(max(widthPct / 100, 0.3), 1.0)),
+            useSafeArea: (map["useSafeArea"] as? NSNumber).map {
+                CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue
+            } ?? false
         )
     }
 
