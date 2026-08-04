@@ -7,6 +7,8 @@ struct DigiaBottomSheetConfig {
     var showHandle: Bool = true
     var allowInteractiveDismiss: Bool = true
     var heightCapFraction: CGFloat = 0.85
+    var handleOverlaysContent: Bool = false
+    var bottomPadding: CGFloat = 8
 }
 
 /// A bottom sheet whose card attaches flush to the screen edges (the system
@@ -47,17 +49,8 @@ struct DigiaBottomSheet<Content: View>: View {
     }
 
     private func card(cap: CGFloat) -> some View {
-        let base = VStack(spacing: 0) {
-            if config.showHandle {
-                Capsule()
-                    .fill(Color(hex: "#E0E0E6") ?? Color.secondary.opacity(0.35))
-                    .frame(width: 36, height: 4)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
-            }
-            sheetBody(cap: cap)
-        }
-        .padding(.bottom, 8)
+        let base = cardContents(cap: cap)
+        .padding(.bottom, config.bottomPadding)
         .frame(maxWidth: .infinity)
         .background(config.background)
 
@@ -73,6 +66,29 @@ struct DigiaBottomSheet<Content: View>: View {
             }
         }
         .overlay(alignment: .topTrailing) { cardOverlay }
+    }
+
+    @ViewBuilder
+    private func cardContents(cap: CGFloat) -> some View {
+        if config.handleOverlaysContent {
+            ZStack(alignment: .top) {
+                sheetBody(cap: cap)
+                if config.showHandle { handle.padding(.top, 12) }
+            }
+        } else {
+            VStack(spacing: 0) {
+                if config.showHandle {
+                    handle.padding(.top, 12).padding(.bottom, 8)
+                }
+                sheetBody(cap: cap)
+            }
+        }
+    }
+
+    private var handle: some View {
+        Capsule()
+            .fill(Color(hex: "#E0E0E6") ?? Color.secondary.opacity(0.35))
+            .frame(width: 36, height: 4)
     }
 
     @ViewBuilder

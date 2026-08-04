@@ -40,6 +40,7 @@ enum NudgeMainAxisAlignment  { case start, center, end, spaceBetween, spaceAroun
 
 enum NudgeNode: Equatable {
     case text(NudgeText)
+    case canvasContainer(NudgeCanvasContainer)
     case image(NudgeImage)
     case button(NudgeButton)
     case gap(NudgeGap)
@@ -52,6 +53,7 @@ enum NudgeNode: Equatable {
     var box: NudgeBox {
         switch self {
         case .text(let n):    return n.box
+        case .canvasContainer(let n): return n.box
         case .image(let n):   return n.box
         case .button(let n):  return n.box
         case .gap(let n):     return n.box
@@ -97,10 +99,35 @@ struct NudgeText: Equatable {
     let fontWeight: Int
     let color: Color
     let textAlignment: TextAlignment
+    let verticalAlignment: String
+    let sizingMode: String
+    let overflow: String
+    let maxLines: Int
     /// Block-level line height (unitless multiplier) for the whole text; nil = default.
     let lineHeight: CGFloat?
     /// Optional rich overlay; empty = render plain `text` with the base style.
     var spans: [NudgeTextSpan] = []
+}
+
+struct NudgeCanvasContainer: Equatable {
+    let box: NudgeBox
+    let fillType: String
+    let color: Color
+    let imageURL: String
+    let imagePositionX: CGFloat
+    let imagePositionY: CGFloat
+    let imageScale: CGFloat
+    let gradientStartColor: Color
+    let gradientEndColor: Color
+    let gradientAngle: CGFloat
+    let borderColor: Color
+    let borderWidth: CGFloat
+    let cornerRadius: CGFloat
+    let shadowColor: Color
+    let shadowOpacity: CGFloat
+    let shadowBlur: CGFloat
+    let shadowOffsetX: CGFloat
+    let shadowOffsetY: CGFloat
 }
 
 struct NudgeImage: Equatable {

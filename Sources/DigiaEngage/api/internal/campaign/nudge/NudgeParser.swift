@@ -6,6 +6,82 @@ struct NudgeParser {
         return parseColumn(layout)
     }
 
+    /// Decodes the reusable absolute-position canvas shared by canvas campaign runtimes.
+    func parseCanvas(_ json: [String: Any]) -> NudgeCanvas {
+        let rawWidth = CGFloat(parseDouble(json["canvasWidth"]) ?? 360)
+        let rawHeight = CGFloat(parseDouble(json["canvasHeight"]) ?? 420)
+        let width = rawWidth.isFinite && rawWidth > 0 ? rawWidth : 360
+        let height = rawHeight.isFinite && rawHeight > 0 ? rawHeight : 420
+        let background = parseCanvasBackground(json["background"] as? [String: Any])
+        var children: [NudgeCanvasChild] = []
+
+        for child in json["children"] as? [[String: Any]] ?? [] {
+            guard let rectJSON = child["rect"] as? [String: Any] else { continue }
+            let rawX = CGFloat(parseDouble(rectJSON["x"]) ?? 0)
+            let rawY = CGFloat(parseDouble(rectJSON["y"]) ?? 0)
+            let rawChildWidth = CGFloat(parseDouble(rectJSON["width"]) ?? 0)
+            let rawChildHeight = CGFloat(parseDouble(rectJSON["height"]) ?? 0)
+            let normalizedWire = rawChildWidth <= 1 && rawChildHeight <= 1
+            let rect = NudgeCanvasRect(
+                x: normalizedWire ? rawX * width : rawX,
+                y: normalizedWire ? rawY * height : rawY,
+                width: max(0, normalizedWire ? rawChildWidth * width : rawChildWidth),
+                height: max(0, normalizedWire ? rawChildHeight * height : rawChildHeight)
+            )
+            let id = child["id"] as? String ?? ""
+            switch child["kind"] as? String {
+            case "tapRegion":
+                let actions = EngageActionParser().parse(child["onClick"] as? [String: Any])
+                if !actions.isEmpty {
+                    children.append(.tapRegion(id: id, rect: rect, actions: actions))
+                }
+            case "widget":
+                guard let widgetJSON = child["widget"] as? [String: Any],
+                      let node = parseNode(widgetJSON)
+                else { continue }
+                // Carousel deliberately remains outside canvas V1.
+                if case .carousel = node { continue }
+                children.append(.widget(id: id, rect: rect, node: node))
+            default:
+                continue
+            }
+        }
+
+        return NudgeCanvas(
+            version: Int(parseDouble(json["version"]) ?? 1),
+            width: width,
+            height: height,
+            background: background,
+            children: children
+        )
+    }
+
+    private func parseCanvasBackground(_ json: [String: Any]?) -> NudgeCanvasBackground {
+        let map = json ?? [:]
+        switch map["type"] as? String {
+        case "image":
+            return .image(
+                url: map["imageUrl"] as? String ?? "",
+                positionX: min(max(CGFloat(parseDouble(map["positionX"]) ?? 0.5), 0), 1),
+                positionY: min(max(CGFloat(parseDouble(map["positionY"]) ?? 0.5), 0), 1),
+                scale: min(max(CGFloat(parseDouble(map["scale"]) ?? 1), 0.1), 10)
+            )
+        case "gradient":
+            let stops = (map["stops"] as? [[String: Any]] ?? []).map { stop in
+                NudgeCanvasGradientStop(
+                    color: parseColor(stop["color"] as? String) ?? .white,
+                    offset: min(max(CGFloat(parseDouble(stop["offset"]) ?? 0), 0), 1)
+                )
+            }
+            return .gradient(
+                angleDegrees: CGFloat(parseDouble(map["angleDeg"]) ?? 180),
+                stops: stops
+            )
+        default:
+            return .color(parseColor(map["color"] as? String) ?? .white)
+        }
+    }
+
     private func parseColumn(_ json: [String: Any]) -> NudgeColumn {
         let props = json["props"] as? [String: Any] ?? [:]
         return NudgeColumn(
@@ -36,6 +112,7 @@ struct NudgeParser {
         let box = parseBox(json["containerProps"] as? [String: Any])
         switch type {
         case "digia/text": return .text(parseText(props, box: box))
+        case "digia/canvasContainer": return .canvasContainer(parseCanvasContainer(props, box: box))
         case "digia/image": return .image(parseImage(props, box: box))
         case "digia/button": return .button(parseButton(props, box: box))
         case "fw/sized_box":
@@ -62,8 +139,39 @@ struct NudgeParser {
             fontWeight: DigiaFontWeight.value(font["weight"], default: 400),
             color: parseColor(style["textColor"] as? String) ?? Color(hex: "#111111") ?? .primary,
             textAlignment: parseTextAlignment(props["alignment"] as? String ?? "left"),
+            verticalAlignment: props["verticalAlignment"] as? String ?? "top",
+            sizingMode: props["sizingMode"] as? String ?? "wrap",
+            overflow: props["overflow"] as? String ?? "visible",
+            maxLines: max(0, Int(parseDouble(props["maxLines"]) ?? 0)),
             lineHeight: (props["lineHeight"] as? Double).map { CGFloat($0) },
             spans: parseSpans(props["spans"])
+        )
+    }
+
+    private func parseCanvasContainer(
+        _ props: [String: Any], box: NudgeBox
+    ) -> NudgeCanvasContainer {
+        NudgeCanvasContainer(
+            box: box,
+            fillType: props["fillType"] as? String ?? "solid",
+            color: parseColor(props["color"] as? String) ?? .white,
+            imageURL: props["imageUrl"] as? String ?? "",
+            imagePositionX: min(max(CGFloat(parseDouble(props["imagePositionX"]) ?? 0.5), 0), 1),
+            imagePositionY: min(max(CGFloat(parseDouble(props["imagePositionY"]) ?? 0.5), 0), 1),
+            imageScale: min(max(CGFloat(parseDouble(props["imageScale"]) ?? 1), 0.1), 10),
+            gradientStartColor: parseColor(props["gradientStartColor"] as? String) ?? .white,
+            gradientEndColor: parseColor(props["gradientEndColor"] as? String)
+                ?? Color(hex: "#E0E7FF") ?? .white,
+            gradientAngle: CGFloat(parseDouble(props["gradientAngle"]) ?? 180),
+            borderColor: parseColor(props["borderColor"] as? String)
+                ?? Color(hex: "#E5E7EB") ?? .gray,
+            borderWidth: min(max(CGFloat(parseDouble(props["borderWidth"]) ?? 0), 0), 100),
+            cornerRadius: min(max(CGFloat(parseDouble(props["cornerRadius"]) ?? 0), 0), 1000),
+            shadowColor: parseColor(props["shadowColor"] as? String) ?? .black,
+            shadowOpacity: min(max(CGFloat(parseDouble(props["shadowOpacity"]) ?? 0), 0), 1),
+            shadowBlur: min(max(CGFloat(parseDouble(props["shadowBlur"]) ?? 0), 0), 200),
+            shadowOffsetX: CGFloat(parseDouble(props["shadowOffsetX"]) ?? 0),
+            shadowOffsetY: CGFloat(parseDouble(props["shadowOffsetY"]) ?? 0)
         )
     }
 

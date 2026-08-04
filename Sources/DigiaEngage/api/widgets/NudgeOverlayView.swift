@@ -6,33 +6,27 @@ struct NudgeOverlayView: View {
     @ObservedObject private var controller = SDKInstance.shared.controller
 
     var body: some View {
-        // Center dialogs and bottom sheets both render as custom overlays. The
-        // bottom sheet uses a full-screen cover with a clear background and
-        // disabled cover animation, so `DigiaBottomSheet` can attach its card
-        // flush to the screen edges (the native `.sheet` reserves a bottom
-        // safe-area strip that can't be removed) and drive its own spring.
-        ZStack {
-            if let nudge = controller.activeNudge, !nudge.config.surface.isBottomSheet {
-                NudgeDialogContainer(presentation: nudge)
+        // Keep the dialog host full-bleed even while no campaign is active. A
+        // scale transition on this root would also scale the scrim and briefly
+        // expose safe-area bands, so only opacity is allowed at this level.
+        GeometryReader { geometry in
+            ZStack {
+                if let nudge = controller.activeNudge, !nudge.config.surface.isBottomSheet {
+                    NudgeDialogContainer(
+                        presentation: nudge,
+                        viewportSize: geometry.size,
+                        safeAreaInsets: activeWindowSafeAreaInsets
+                    )
                     .id(nudge.id)
-                    .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .center)))
+                    .transition(.opacity)
+                }
+
+                NudgeSheetPresenter(sheet: sheetBinding)
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
-        .fullScreenCover(item: sheetBinding) { nudge in
-            // `.id(nudge.id)`: a direct swap between two active nudges (no nil in
-            // between) doesn't re-trigger `.onAppear` without a forced identity
-            // change — SwiftUI otherwise updates the same view in place.
-            //
-            // `.presentationBackground` needs iOS 16.4; below that, the cover's
-            // (opaque) default background is used as-is.
-            if #available(iOS 16.4, *) {
-                NudgeSheetView(presentation: nudge).presentationBackground(.clear).id(nudge.id)
-            } else {
-                NudgeSheetView(presentation: nudge).id(nudge.id)
-            }
-        }
+        .ignoresSafeArea()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .transaction { $0.disablesAnimations = true }
     }
 
     /// Drives the cover from the controller's active nudge, but only for
@@ -54,13 +48,44 @@ struct NudgeOverlayView: View {
     }
 }
 
+/// Isolates the UIKit full-screen-cover transaction from the inline dialog
+/// layer. Disabling the cover animation here must not suppress or mutate dialog
+/// transitions elsewhere in `NudgeOverlayView`.
+private struct NudgeSheetPresenter: View {
+    let sheet: Binding<DigiaNudgePresentation?>
+
+    var body: some View {
+        Color.clear
+            .fullScreenCover(item: sheet) { nudge in
+                // `.id(nudge.id)`: a direct swap between two active nudges (no
+                // nil in between) must still create a fresh presentation view.
+                if #available(iOS 16.4, *) {
+                    NudgeSheetView(presentation: nudge)
+                        .presentationBackground(.clear)
+                        .id(nudge.id)
+                } else {
+                    NudgeSheetView(presentation: nudge).id(nudge.id)
+                }
+            }
+            .transaction { $0.disablesAnimations = true }
+    }
+}
+
 // MARK: - Bottom sheet (native, via shared DigiaBottomSheet)
 
 @MainActor
 private struct NudgeSheetView: View {
     let presentation: DigiaNudgePresentation
 
-    private var surface: NudgeSurface { presentation.config.surface }
+    private var authoredSurface: NudgeSurface { presentation.config.surface }
+    private var canvas: NudgeCanvas? { presentation.config.canvas }
+    private var runtimeSize: CGSize { activeWindowSize }
+    private var naturalScale: CGFloat {
+        canvas == nil ? 1 : runtimeSize.width / max(presentation.config.designWidth, 1)
+    }
+    private var surface: NudgeSurface {
+        canvas == nil ? authoredSurface : authoredSurface.scaled(naturalScale)
+    }
 
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
 
@@ -68,15 +93,36 @@ private struct NudgeSheetView: View {
         DigiaBottomSheet(
             config: DigiaBottomSheetConfig(
                 cornerRadius: surface.cornerRadius,
-                background: surface.backgroundColor ?? .white,
+                background: canvas == nil ? (surface.backgroundColor ?? .white) : .clear,
                 scrimColor: surface.barrierColor ?? Color.black.opacity(0.4),
                 showHandle: surface.showHandle,
-                allowInteractiveDismiss: surface.draggable || surface.backdropDismissible
+                allowInteractiveDismiss: surface.draggable || surface.backdropDismissible,
+                heightCapFraction: canvas == nil ? 0.85 : 1,
+                handleOverlaysContent: canvas != nil,
+                bottomPadding: canvas == nil ? 8 : 0
             ),
+            scrollable: canvas == nil,
             onDismiss: dismiss,
             content: {
-                renderedContent
-                    .padding(surface.padding)
+                if let canvas {
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        CampaignCanvasView(
+                            canvas: canvas,
+                            surface: authoredSurface,
+                            designWidth: presentation.config.designWidth,
+                            availableSize: CGSize(
+                                width: runtimeSize.width,
+                                height: max(1, runtimeSize.height - 48)
+                            ),
+                            onDismiss: dismiss
+                        )
+                        Spacer(minLength: 0)
+                    }
+                    .environment(\.digiaVariables, presentation.variables)
+                } else {
+                    renderedContent.padding(surface.padding)
+                }
             },
             cardOverlay: surface.showCloseButton
                 ? AnyView(NudgeCloseButton(config: surface.closeButton, action: dismiss))
@@ -101,44 +147,90 @@ private struct NudgeSheetView: View {
 @MainActor
 private struct NudgeDialogContainer: View {
     let presentation: DigiaNudgePresentation
+    let viewportSize: CGSize
+    let safeAreaInsets: UIEdgeInsets
 
     @State private var contentHeight: CGFloat = 0
 
-    private var surface: NudgeSurface { presentation.config.surface }
+    private var authoredSurface: NudgeSurface { presentation.config.surface }
+    private var surface: NudgeSurface { authoredSurface }
     private var scrimColor: Color { surface.barrierColor ?? Color.black.opacity(0.4) }
     private var backgroundColor: Color { surface.backgroundColor ?? .white }
-
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
 
     var body: some View {
+        let insets = surface.useSafeArea ? safeAreaInsets : .zero
+        let width = max(1, viewportSize.width - insets.left - insets.right)
+        let height = max(1, viewportSize.height - insets.top - insets.bottom)
+
         ZStack {
             scrimColor
-                .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { if surface.backdropDismissible { dismiss() } }
 
-            GeometryReader { geometry in
-                let insets = surface.useSafeArea ? windowSafeAreaInsets : .zero
-                let width = geometry.size.width - insets.left - insets.right
-                let height = geometry.size.height - insets.top - insets.bottom
-                dialogPanel(
-                    width: width * surface.widthFraction,
-                    maxHeight: height
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(EdgeInsets(
-                    top: insets.top,
-                    leading: insets.left,
-                    bottom: insets.bottom,
-                    trailing: insets.right
-                ))
+            Group {
+                if let canvas = presentation.config.canvas {
+                    let designWidth = max(presentation.config.designWidth, 1)
+                    let horizontalMargin = min(
+                        max(authoredSurface.minHorizontalMargin, 0),
+                        max(0, (designWidth - 1) / 2)
+                    )
+                    let naturalScale = min(width / designWidth, 1.15)
+                    let scaledSurface = authoredSurface.scaled(naturalScale)
+                    canvasDialogPanel(
+                        canvas: canvas,
+                        surface: scaledSurface,
+                        runtimeViewportWidth: width,
+                        availableSize: CGSize(
+                            width: width * ((designWidth - 2 * horizontalMargin) / designWidth),
+                            height: max(1, height - 48)
+                        )
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    dialogPanel(
+                        width: width * surface.widthFraction,
+                        maxHeight: height
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
+            .frame(width: width, height: height)
+            .padding(EdgeInsets(
+                top: insets.top,
+                leading: insets.left,
+                bottom: insets.bottom,
+                trailing: insets.right
+            ))
         }
-        .ignoresSafeArea()
+        .frame(width: viewportSize.width, height: viewportSize.height)
         .onPreferenceChange(DialogHeightKey.self) { contentHeight = $0 }
         // Fires once per presentation: the `.id(nudge.id)` on the container gives
         // each nudge a fresh view identity, so `onAppear` runs once.
         .onAppear { SDKInstance.shared.reportNudgeImpression() }
+    }
+
+    private func canvasDialogPanel(
+        canvas: NudgeCanvas,
+        surface: NudgeSurface,
+        runtimeViewportWidth: CGFloat,
+        availableSize: CGSize
+    ) -> some View {
+        ZStack(alignment: .topTrailing) {
+            CampaignCanvasView(
+                canvas: canvas,
+                surface: authoredSurface,
+                designWidth: presentation.config.designWidth,
+                runtimeViewportWidth: runtimeViewportWidth,
+                availableSize: availableSize,
+                onDismiss: dismiss
+            )
+            if surface.showCloseButton {
+                NudgeCloseButton(config: surface.closeButton, action: dismiss)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
+        .environment(\.digiaVariables, presentation.variables)
     }
 
     /// Mirrors Flutter's `_DialogFrame`: centred, width-constrained, fully
@@ -167,18 +259,26 @@ private struct NudgeDialogContainer: View {
         .transition(.opacity)
     }
 
-    private var windowSafeAreaInsets: UIEdgeInsets {
-        UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first(where: { $0.activationState == .foregroundActive })?
-            .windows.first(where: \.isKeyWindow)?
-            .safeAreaInsets ?? .zero
-    }
-
     private var renderedContent: some View {
         NudgeColumnContent(column: presentation.config.layout, onDismiss: dismiss)
             .environment(\.digiaVariables, presentation.variables)
     }
+}
+
+@MainActor private var activeWindowSize: CGSize {
+    UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .first(where: { $0.activationState == .foregroundActive })?
+        .windows.first(where: \.isKeyWindow)?
+        .bounds.size ?? UIScreen.main.bounds.size
+}
+
+@MainActor private var activeWindowSafeAreaInsets: UIEdgeInsets {
+    UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .first(where: { $0.activationState == .foregroundActive })?
+        .windows.first(where: \.isKeyWindow)?
+        .safeAreaInsets ?? .zero
 }
 
 private struct DialogHeightKey: PreferenceKey {
