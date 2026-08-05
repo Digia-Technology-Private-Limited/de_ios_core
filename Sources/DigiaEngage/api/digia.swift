@@ -114,6 +114,22 @@ public enum Digia {
 #endif
     }
 
+    /// Writes the correlated local Test Kit export on demand. The control token
+    /// is required by the host protocol but is never persisted or logged.
+    public static func requestTestKitEvidenceExport(runId: String, controlToken: String) {
+#if DEBUG
+        guard SDKInstance.shared.isDebugBuild,
+              !controlToken.isEmpty
+        else { return }
+        do {
+            let exportURL = try TestKitNativeEvidenceExporterV1().export(runId: runId)
+            DigiaLog.info("[TestKit] Native evidence exported to \(exportURL.lastPathComponent)")
+        } catch {
+            DigiaLog.warning("[TestKit] Native evidence export failed: \(error)")
+        }
+#endif
+    }
+
     static func testKitExportRequest(from url: URL) -> TestKitExportRequest? {
         let rawWithoutQuery = String(url.absoluteString.split(separator: "?", maxSplits: 1)[0])
         let afterScheme: Substring
