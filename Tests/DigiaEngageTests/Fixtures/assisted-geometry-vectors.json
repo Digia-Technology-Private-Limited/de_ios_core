@@ -1,0 +1,931 @@
+{
+  "schemaVersion": 1,
+  "inferencePolicyVersion": "assisted-inference-v1",
+  "targetVersion": 1,
+  "modelVersion": 1,
+  "preparationFailurePrecedence": [
+    "campaign_mode_mismatch",
+    "unsupported_target_version",
+    "missing_platform_variant",
+    "platform_mismatch",
+    "logical_unit_mismatch",
+    "unsupported_model_version",
+    "unsupported_orientation",
+    "invalid_source",
+    "invalid_author_intent",
+    "invalid_reference_container",
+    "invalid_model"
+  ],
+  "axisRuleVectors": [
+    {
+      "name": "horizontal-start-ltr",
+      "axis": "horizontal",
+      "frame": {
+        "start": 100,
+        "end": 300
+      },
+      "density": 2,
+      "layoutDirection": "ltr",
+      "rule": {
+        "kind": "startFixed",
+        "startOffset": 10,
+        "width": 20
+      },
+      "expected": {
+        "start": 120,
+        "end": 160
+      }
+    },
+    {
+      "name": "horizontal-start-rtl",
+      "axis": "horizontal",
+      "frame": {
+        "start": 100,
+        "end": 300
+      },
+      "density": 2,
+      "layoutDirection": "rtl",
+      "rule": {
+        "kind": "startFixed",
+        "startOffset": 10,
+        "width": 20
+      },
+      "expected": {
+        "start": 240,
+        "end": 280
+      }
+    },
+    {
+      "name": "horizontal-end-ltr",
+      "axis": "horizontal",
+      "frame": {
+        "start": 100,
+        "end": 300
+      },
+      "density": 2,
+      "layoutDirection": "ltr",
+      "rule": {
+        "kind": "endFixed",
+        "endOffset": 10,
+        "width": 20
+      },
+      "expected": {
+        "start": 240,
+        "end": 280
+      }
+    },
+    {
+      "name": "horizontal-end-rtl",
+      "axis": "horizontal",
+      "frame": {
+        "start": 100,
+        "end": 300
+      },
+      "density": 2,
+      "layoutDirection": "rtl",
+      "rule": {
+        "kind": "endFixed",
+        "endOffset": 10,
+        "width": 20
+      },
+      "expected": {
+        "start": 120,
+        "end": 160
+      }
+    },
+    {
+      "name": "horizontal-center-negative-offset",
+      "axis": "horizontal",
+      "frame": {
+        "start": 100,
+        "end": 300
+      },
+      "density": 2,
+      "layoutDirection": "ltr",
+      "rule": {
+        "kind": "centerFixed",
+        "centerOffset": -5,
+        "width": 20
+      },
+      "expected": {
+        "start": 170,
+        "end": 210
+      }
+    },
+    {
+      "name": "horizontal-stretch-ltr",
+      "axis": "horizontal",
+      "frame": {
+        "start": 100,
+        "end": 300
+      },
+      "density": 2,
+      "layoutDirection": "ltr",
+      "rule": {
+        "kind": "stretch",
+        "startInset": 10,
+        "endInset": 20
+      },
+      "expected": {
+        "start": 120,
+        "end": 260
+      }
+    },
+    {
+      "name": "horizontal-stretch-rtl",
+      "axis": "horizontal",
+      "frame": {
+        "start": 100,
+        "end": 300
+      },
+      "density": 2,
+      "layoutDirection": "rtl",
+      "rule": {
+        "kind": "stretch",
+        "startInset": 10,
+        "endInset": 20
+      },
+      "expected": {
+        "start": 140,
+        "end": 280
+      }
+    },
+    {
+      "name": "horizontal-proportional-ltr",
+      "axis": "horizontal",
+      "frame": {
+        "start": 100,
+        "end": 300
+      },
+      "density": 2,
+      "layoutDirection": "ltr",
+      "rule": {
+        "kind": "proportional",
+        "startFraction": 0.25,
+        "endFraction": 0.5
+      },
+      "expected": {
+        "start": 150,
+        "end": 200
+      }
+    },
+    {
+      "name": "horizontal-proportional-rtl",
+      "axis": "horizontal",
+      "frame": {
+        "start": 100,
+        "end": 300
+      },
+      "density": 2,
+      "layoutDirection": "rtl",
+      "rule": {
+        "kind": "proportional",
+        "startFraction": 0.25,
+        "endFraction": 0.5
+      },
+      "expected": {
+        "start": 200,
+        "end": 250
+      }
+    },
+    {
+      "name": "vertical-top",
+      "axis": "vertical",
+      "frame": {
+        "start": 100,
+        "end": 500
+      },
+      "density": 2,
+      "rule": {
+        "kind": "topFixed",
+        "topOffset": 5,
+        "height": 20
+      },
+      "expected": {
+        "start": 110,
+        "end": 150
+      }
+    },
+    {
+      "name": "vertical-bottom",
+      "axis": "vertical",
+      "frame": {
+        "start": 100,
+        "end": 500
+      },
+      "density": 2,
+      "rule": {
+        "kind": "bottomFixed",
+        "bottomOffset": 5,
+        "height": 20
+      },
+      "expected": {
+        "start": 450,
+        "end": 490
+      }
+    },
+    {
+      "name": "vertical-center-negative-offset",
+      "axis": "vertical",
+      "frame": {
+        "start": 100,
+        "end": 500
+      },
+      "density": 2,
+      "rule": {
+        "kind": "centerFixed",
+        "centerOffset": -5,
+        "height": 20
+      },
+      "expected": {
+        "start": 270,
+        "end": 310
+      }
+    },
+    {
+      "name": "vertical-stretch",
+      "axis": "vertical",
+      "frame": {
+        "start": 100,
+        "end": 500
+      },
+      "density": 2,
+      "rule": {
+        "kind": "stretch",
+        "topInset": 5,
+        "bottomInset": 10
+      },
+      "expected": {
+        "start": 110,
+        "end": 480
+      }
+    },
+    {
+      "name": "vertical-proportional",
+      "axis": "vertical",
+      "frame": {
+        "start": 100,
+        "end": 500
+      },
+      "density": 2,
+      "rule": {
+        "kind": "proportional",
+        "topFraction": 0.25,
+        "bottomFraction": 0.5
+      },
+      "expected": {
+        "start": 200,
+        "end": 300
+      }
+    }
+  ],
+  "roundingVectors": [
+    {
+      "name": "below-half",
+      "input": 10.499999,
+      "expected": 10
+    },
+    {
+      "name": "at-half",
+      "input": 10.5,
+      "expected": 11
+    },
+    {
+      "name": "above-half",
+      "input": 10.500001,
+      "expected": 11
+    },
+    {
+      "name": "containment-inside-tolerance",
+      "allowed": 100,
+      "input": 100.000001,
+      "expectedNormalized": 100,
+      "expectedFailure": null
+    },
+    {
+      "name": "containment-outside-tolerance",
+      "allowed": 100,
+      "input": 100.000002,
+      "expectedNormalized": null,
+      "expectedFailure": "target_out_of_bounds"
+    }
+  ],
+  "runtimeVectors": [
+    {
+      "name": "android-baseline",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": "home",
+        "density": 3,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "layoutDirection": "ltr",
+        "orientation": "portrait",
+        "formFactor": "phone",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "1",
+        "locale": "en-IN",
+        "fontScale": 1
+      },
+      "expected": {
+        "status": "resolved",
+        "roundedTargetPx": {
+          "left": 270,
+          "top": 2220,
+          "right": 540,
+          "bottom": 2380
+        },
+        "overlayTarget": {
+          "left": 90,
+          "top": 740,
+          "right": 180,
+          "bottom": 793.3333333333334
+        },
+        "warnings": [],
+        "failure": null
+      }
+    },
+    {
+      "name": "android-compact",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": "home",
+        "density": 2,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 720,
+          "bottom": 1600
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 720,
+          "bottom": 1600
+        },
+        "layoutDirection": "ltr",
+        "orientation": "portrait",
+        "formFactor": "phone",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "1",
+        "locale": "en-IN",
+        "fontScale": 1
+      },
+      "expected": {
+        "status": "resolved",
+        "roundedTargetPx": {
+          "left": 180,
+          "top": 1480,
+          "right": 360,
+          "bottom": 1587
+        },
+        "overlayTarget": {
+          "left": 90,
+          "top": 740,
+          "right": 180,
+          "bottom": 793.5
+        },
+        "warnings": [],
+        "failure": null
+      }
+    },
+    {
+      "name": "android-rtl",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": "home",
+        "density": 3,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "layoutDirection": "rtl",
+        "orientation": "portrait",
+        "formFactor": "phone",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "1",
+        "locale": "en-IN",
+        "fontScale": 1
+      },
+      "expected": {
+        "status": "resolved",
+        "roundedTargetPx": {
+          "left": 540,
+          "top": 2220,
+          "right": 810,
+          "bottom": 2380
+        },
+        "overlayTarget": {
+          "left": 180,
+          "top": 740,
+          "right": 270,
+          "bottom": 793.3333333333334
+        },
+        "warnings": [],
+        "failure": null
+      }
+    },
+    {
+      "name": "ios-baseline",
+      "platform": "ios",
+      "variant": "ios",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "ios",
+        "pageKey": "home",
+        "density": 3,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1179,
+          "bottom": 2556
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1179,
+          "bottom": 2556
+        },
+        "layoutDirection": "ltr",
+        "orientation": "portrait",
+        "formFactor": "phone",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "1",
+        "locale": "en-IN",
+        "fontScale": 1
+      },
+      "expected": {
+        "status": "resolved",
+        "roundedTargetPx": {
+          "left": 295,
+          "top": 2376,
+          "right": 590,
+          "bottom": 2536
+        },
+        "overlayTarget": {
+          "left": 98.33333333333333,
+          "top": 792,
+          "right": 196.66666666666666,
+          "bottom": 845.3333333333334
+        },
+        "warnings": [],
+        "failure": null
+      }
+    },
+    {
+      "name": "ordered-warnings",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "variantPatch": {
+        "comparisonContext": {
+          "appBuild": "1",
+          "locale": "en-IN",
+          "fontScale": 1,
+          "riskFlags": [
+            "scrollableSelection"
+          ]
+        }
+      },
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": "home",
+        "density": 3,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "layoutDirection": "ltr",
+        "orientation": "portrait",
+        "formFactor": "phone",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "2",
+        "locale": "fr-FR",
+        "fontScale": 1.011
+      },
+      "expected": {
+        "status": "warning",
+        "roundedTargetPx": {
+          "left": 270,
+          "top": 2220,
+          "right": 540,
+          "bottom": 2380
+        },
+        "overlayTarget": {
+          "left": 90,
+          "top": 740,
+          "right": 180,
+          "bottom": 793.3333333333334
+        },
+        "warnings": [
+          "app_build_mismatch",
+          "locale_mismatch",
+          "font_scale_mismatch",
+          "scroll_state_unverifiable"
+        ],
+        "failure": null
+      }
+    },
+    {
+      "name": "font-scale-boundary-is-not-warning",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": "home",
+        "density": 3,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "layoutDirection": "ltr",
+        "orientation": "portrait",
+        "formFactor": "phone",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "1",
+        "locale": "en_in",
+        "fontScale": 1.01
+      },
+      "expected": {
+        "status": "resolved",
+        "roundedTargetPx": {
+          "left": 270,
+          "top": 2220,
+          "right": 540,
+          "bottom": 2380
+        },
+        "overlayTarget": {
+          "left": 90,
+          "top": 740,
+          "right": 180,
+          "bottom": 793.3333333333334
+        },
+        "warnings": [],
+        "failure": null
+      }
+    },
+    {
+      "name": "missing-page",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": null,
+        "density": 3,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "layoutDirection": "ltr",
+        "orientation": "portrait",
+        "formFactor": "phone",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "1",
+        "locale": "en-IN",
+        "fontScale": 1
+      },
+      "expected": {
+        "status": "failed",
+        "warnings": [],
+        "failure": "page_mismatch"
+      }
+    },
+    {
+      "name": "wrong-page",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": "cart",
+        "density": 3,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "layoutDirection": "ltr",
+        "orientation": "portrait",
+        "formFactor": "phone",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "1",
+        "locale": "en-IN",
+        "fontScale": 1
+      },
+      "expected": {
+        "status": "failed",
+        "warnings": [],
+        "failure": "page_mismatch"
+      }
+    },
+    {
+      "name": "wrong-app",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": "home",
+        "density": 3,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "layoutDirection": "ltr",
+        "orientation": "portrait",
+        "formFactor": "phone",
+        "appIdentifier": "com.example.other",
+        "appBuild": "1",
+        "locale": "en-IN",
+        "fontScale": 1
+      },
+      "expected": {
+        "status": "failed",
+        "warnings": [],
+        "failure": "app_identifier_mismatch"
+      }
+    },
+    {
+      "name": "landscape",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": "home",
+        "density": 3,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 2400,
+          "bottom": 1080
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 2400,
+          "bottom": 1080
+        },
+        "layoutDirection": "ltr",
+        "orientation": "landscape",
+        "formFactor": "phone",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "1",
+        "locale": "en-IN",
+        "fontScale": 1
+      },
+      "expected": {
+        "status": "failed",
+        "warnings": [],
+        "failure": "unsupported_orientation"
+      }
+    },
+    {
+      "name": "tablet",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": "home",
+        "density": 2,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1600,
+          "bottom": 2560
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1600,
+          "bottom": 2560
+        },
+        "layoutDirection": "ltr",
+        "orientation": "portrait",
+        "formFactor": "tablet",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "1",
+        "locale": "en-IN",
+        "fontScale": 1
+      },
+      "expected": {
+        "status": "failed",
+        "warnings": [],
+        "failure": "unsupported_form_factor"
+      }
+    },
+    {
+      "name": "invalid-runtime-frame",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": "home",
+        "density": 0,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "layoutDirection": "ltr",
+        "orientation": "portrait",
+        "formFactor": "phone",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "1",
+        "locale": "en-IN",
+        "fontScale": 1
+      },
+      "expected": {
+        "status": "failed",
+        "warnings": [],
+        "failure": "invalid_runtime_frame"
+      }
+    },
+    {
+      "name": "target-out-of-bounds",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "variantPatch": {
+        "model": {
+          "horizontal": {
+            "frame": "window",
+            "rule": {
+              "kind": "startFixed",
+              "startOffset": -1,
+              "width": 90
+            }
+          }
+        }
+      },
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": "home",
+        "density": 3,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "layoutDirection": "ltr",
+        "orientation": "portrait",
+        "formFactor": "phone",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "1",
+        "locale": "en-IN",
+        "fontScale": 1
+      },
+      "expected": {
+        "status": "failed",
+        "warnings": [],
+        "failure": "target_out_of_bounds"
+      }
+    }
+  ],
+  "inferenceVectors": [
+    {
+      "name": "medihub-overlap-focus",
+      "captureFixture": "medihub-home-android-capture-v2.sanitized.json",
+      "pointPx": {
+        "x": 405,
+        "y": 2300
+      },
+      "expected": {
+        "status": "choose",
+        "retainsAllHits": true,
+        "focusedMeaningClass": 3
+      }
+    },
+    {
+      "name": "empty-hit",
+      "captureFixture": "medihub-home-android-capture-v2.sanitized.json",
+      "pointPx": {
+        "x": -1,
+        "y": -1
+      },
+      "expected": {
+        "status": "unsupported",
+        "reason": "no_bounded_node_at_point"
+      }
+    }
+  ],
+  "diagnostics": {
+    "fifoCapacity": 100,
+    "appendCountForEviction": 101,
+    "expectedOldestRetainedIndex": 2,
+    "forbiddenFields": [
+      "screenshot",
+      "semanticNodeId",
+      "label",
+      "text",
+      "contentDescription",
+      "className",
+      "url",
+      "cepVariables",
+      "userId",
+      "advertisingId",
+      "deviceId",
+      "accessToken",
+      "rawCampaign",
+      "rawProvenance"
+    ]
+  }
+}
+
