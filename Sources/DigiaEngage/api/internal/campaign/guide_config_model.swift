@@ -7,6 +7,9 @@ struct GuideStepModel: Equatable {
     let sequenceOrder: Int
     let anchorKey: String
     let semanticTarget: SemanticTarget?
+    let geometryTarget: TypedGeometryTargetV1?
+    /// Stable backend-authored step identifier used for O(1) Assisted Geometry lookup.
+    let assistedStepId: String?
     let displayStyle: String
     let widgetConfig: GuideStepWidgetConfig
     let advanceTrigger: String
@@ -20,4 +23,6 @@ struct GuideConfigModel: Equatable {
     /// Dashboard-declared variable schemas; resolved against CEP trigger variables
     /// at render time via `buildVariableContext()`.
     let variableSchemas: [VariableSchema]
+    /// Validated once for the complete campaign before any guide presentation begins.
+    let assistedCampaign: PreparedAssistedCampaignV1?
 }

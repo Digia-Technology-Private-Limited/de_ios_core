@@ -8,6 +8,7 @@ import Combine
 struct GuideOverlayView: View {
     @ObservedObject private var orchestrator = SDKInstance.shared.guideOrchestrator
     @ObservedObject private var anchors = AnchorRegistry.shared
+    @StateObject private var semanticSessions = SemanticTargetSessionStore()
 
     var body: some View {
         if let state = orchestrator.state,
@@ -20,6 +21,8 @@ struct GuideOverlayView: View {
                         totalSteps: state.steps.count,
                         anchorRect: anchorRect,
                         cornerRadius: step.semanticTarget == nil
+                            && step.geometryTarget == nil
+                            && step.assistedStepId == nil
                             ? AnchorRegistry.shared.getCornerRadius(for: step.anchorKey)
                             : CGFloat(step.widgetConfig.overlay.cutout.cornerRadius),
                         onAdvance: { orchestrator.advance() },
@@ -27,28 +30,120 @@ struct GuideOverlayView: View {
                     )
                     .environment(\.digiaVariables, state.variableContext)
                     .id(state.stepIndex)
+                    .onAppear { SDKInstance.shared.reportNativeGuideStepVisible() }
                 }
             }
         }
     }
 
     private func resolveRect(_ step: GuideStepModel) -> CGRect? {
+        if let stepId = step.assistedStepId,
+           let campaign = orchestrator.state?.campaign.guideConfig?.assistedCampaign,
+           let window = keyWindow() {
+            let snapshot = runtimeSnapshot(window)
+            switch AssistedGeometryRuntimeV1.resolve(campaign, stepId: stepId, snapshot: snapshot) {
+            case .resolved(_, _, let overlay, let warnings, let trace):
+                if !warnings.isEmpty {
+                    DigiaLog.warning(
+                        "[AssistedGeometry] resolved with warnings: \(warnings.map(\.rawValue).joined(separator: ",")) variantId=\(trace.variantId ?? "")"
+                    )
+                }
+                return CGRect(
+                    x: overlay.left,
+                    y: overlay.top,
+                    width: overlay.width,
+                    height: overlay.height
+                )
+            case .failed(let failure, let trace):
+                DigiaLog.warning(
+                    "[AssistedGeometry] resolution failed: \(failure.rawValue) variantId=\(trace.variantId ?? "")"
+                )
+                reportTargetFailure(
+                    failure == .pageMismatch ? .noMatchingScreen : .renderError,
+                    message: "Assisted Geometry failed: \(failure.rawValue)"
+                )
+                return nil
+            }
+        }
+        if step.assistedStepId != nil {
+            reportTargetFailure(.renderError, message: "Assisted Geometry host window is unavailable")
+            return nil
+        }
+        if let geometryTarget = step.geometryTarget {
+            guard geometryTarget.pageKey == SDKInstance.shared.currentScreen else {
+                reportTargetFailure(.noMatchingScreen, message: "Typed Geometry page does not match")
+                return nil
+            }
+            guard let window = keyWindow() else {
+                reportTargetFailure(.renderError, message: "Typed Geometry host window is unavailable")
+                return nil
+            }
+            if let rect = geometryTarget.resolve(snapshot: runtimeSnapshot(window)) {
+                return rect
+            }
+            reportTargetFailure(.renderError, message: "Typed Geometry target could not be resolved")
+            return nil
+        }
         guard let target = step.semanticTarget else {
             return AnchorRegistry.shared.getRect(for: step.anchorKey)
         }
-        guard let window = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .flatMap(\.windows)
-            .first(where: \.isKeyWindow)
-        else { return nil }
-        if case let .resolved(rect) = SemanticTargetResolver.resolve(
+        guard let window = keyWindow() else { return nil }
+        if case let .resolved(rect) = semanticSessions.resolve(
+            stepId: step.id,
             root: window,
             currentPageKey: SDKInstance.shared.currentScreen,
             target: target
         ) {
             return rect
         }
+        reportTargetFailure(.noMatchingScreen, message: "semantic target was not found on this screen")
         return nil
+    }
+
+    private func reportTargetFailure(_ code: LiveTestFailureCode, message: String) {
+        Task { @MainActor in
+            SDKInstance.shared.reportNativeGuideTargetFailure(code, message: message)
+        }
+    }
+
+    private func keyWindow() -> UIWindow? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first(where: \.isKeyWindow)
+    }
+
+    private func runtimeSnapshot(_ window: UIWindow) -> RuntimeGeometrySnapshotV1 {
+        let scale = Double(window.screen.scale)
+        let bounds = window.bounds
+        let contentView = window.rootViewController?.view ?? window
+        let contentBounds = contentView.convert(contentView.bounds, to: window)
+        let direction = UIView.userInterfaceLayoutDirection(for: window.semanticContentAttribute)
+        return RuntimeGeometrySnapshotV1(
+            snapshotVersion: 1,
+            platform: .ios,
+            pageKey: SDKInstance.shared.currentScreen,
+            density: scale,
+            windowBoundsPx: EdgeRectV1(
+                left: 0,
+                top: 0,
+                right: Double(bounds.width) * scale,
+                bottom: Double(bounds.height) * scale
+            ),
+            appContentBoundsPx: EdgeRectV1(
+                left: Double(contentBounds.minX) * scale,
+                top: Double(contentBounds.minY) * scale,
+                right: Double(contentBounds.maxX) * scale,
+                bottom: Double(contentBounds.maxY) * scale
+            ),
+            layoutDirection: direction == .rightToLeft ? "rtl" : "ltr",
+            orientation: bounds.height >= bounds.width ? "portrait" : "landscape",
+            formFactor: UIDevice.current.userInterfaceIdiom == .phone ? "phone" : "tablet",
+            appIdentifier: Bundle.main.bundleIdentifier ?? "",
+            appBuild: Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+            locale: Locale.current.identifier,
+            fontScale: Double(UIFontMetrics.default.scaledValue(for: 1))
+        )
     }
 }
 

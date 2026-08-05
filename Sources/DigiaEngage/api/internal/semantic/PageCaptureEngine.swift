@@ -7,19 +7,52 @@ final class PageCaptureEngine {
         let tree = SemanticViewTree.capture(window)
         let image = render(window)
         let screenshot = try encode(image)
+        let density = window.screen.scale
+        let windowBounds = physicalBounds(window.bounds, density: density)
+        let contentView = window.rootViewController?.view ?? window
+        let contentBounds = physicalBounds(
+            contentView.convert(contentView.bounds, to: window),
+            density: density
+        )
+        let safeArea = window.safeAreaInsets
+        let info = Bundle.main.infoDictionary ?? [:]
+        let sdkInfo = Bundle(for: PageCaptureBundleToken.self).infoDictionary ?? [:]
         return [
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "pageKey": pageKey,
             "capturedAt": ISO8601DateFormatter().string(from: Date()),
             "device": [
                 "platform": "ios",
                 "apiLevel": UIDevice.current.systemVersion,
-                "widthPx": Int(window.bounds.width),
-                "heightPx": Int(window.bounds.height),
-                "density": window.screen.scale,
+                "widthPx": Int(windowBounds["right"] as! Double),
+                "heightPx": Int(windowBounds["bottom"] as! Double),
+                "density": density,
+            ],
+            "source": [
+                "density": density,
+                "windowBoundsPx": windowBounds,
+                "appContentBoundsPx": contentBounds,
+                "insetsPx": [
+                    "left": Int((safeArea.left * density).rounded()),
+                    "top": Int((safeArea.top * density).rounded()),
+                    "right": Int((safeArea.right * density).rounded()),
+                    "bottom": Int((safeArea.bottom * density).rounded()),
+                ],
+                "orientation": window.bounds.height >= window.bounds.width ? "portrait" : "landscape",
+                "layoutDirection": window.effectiveUserInterfaceLayoutDirection == .rightToLeft ? "rtl" : "ltr",
+            ],
+            "app": [
+                "bundleIdentifier": Bundle.main.bundleIdentifier ?? "unknown",
+                "versionName": info["CFBundleShortVersionString"] as? String ?? "0",
+                "buildNumber": info["CFBundleVersion"] as? String ?? "0",
+            ],
+            "runtime": [
+                "locale": Locale.current.identifier,
+                "fontScale": UIFontMetrics.default.scaledValue(for: 1),
+                "sdkVersion": sdkInfo["CFBundleShortVersionString"] as? String ?? "source",
             ],
             "screenshot": screenshot,
-            "nodes": tree.nodes.map(nodeJson),
+            "nodes": tree.nodes.map { nodeJson($0, density: density) },
         ]
     }
 
@@ -63,11 +96,15 @@ final class PageCaptureEngine {
 
     private func render(_ window: UIWindow) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
+        format.scale = window.screen.scale
         format.opaque = true
-        return UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+        let rendered = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
         }
+        guard let image = rendered.cgImage else { return rendered }
+        // Normalize UIImage.size to physical pixels so screenshot dimensions and
+        // semantic bounds use the same coordinate space.
+        return UIImage(cgImage: image, scale: 1, orientation: .up)
     }
 
     private func encode(_ source: UIImage) throws -> [String: Any] {
@@ -107,7 +144,7 @@ final class PageCaptureEngine {
         )
     }
 
-    private func nodeJson(_ node: SemanticNodeSnapshot) -> [String: Any] {
+    private func nodeJson(_ node: SemanticNodeSnapshot, density: CGFloat) -> [String: Any] {
         var json: [String: Any] = [
             "nodeId": node.nodeId,
             "indexInParent": node.indexInParent,
@@ -124,16 +161,22 @@ final class PageCaptureEngine {
         json["text"] = node.text
         json["contentDescription"] = node.contentDescription
         if let bounds = node.bounds {
-            json["bounds"] = [
-                "left": Int(bounds.minX.rounded()),
-                "top": Int(bounds.minY.rounded()),
-                "right": Int(bounds.maxX.rounded()),
-                "bottom": Int(bounds.maxY.rounded()),
-            ]
+            json["bounds"] = physicalBounds(bounds, density: density)
         }
         return json
     }
+
+    private func physicalBounds(_ bounds: CGRect, density: CGFloat) -> [String: Any] {
+        [
+            "left": Double((bounds.minX * density).rounded()),
+            "top": Double((bounds.minY * density).rounded()),
+            "right": Double((bounds.maxX * density).rounded()),
+            "bottom": Double((bounds.maxY * density).rounded()),
+        ]
+    }
 }
+
+private final class PageCaptureBundleToken: NSObject {}
 
 enum PageCaptureError: LocalizedError {
     case hostWindowUnavailable

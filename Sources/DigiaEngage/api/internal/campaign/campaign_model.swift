@@ -57,7 +57,23 @@ struct CampaignModel: Equatable {
         let config: CampaignConfigModel
         switch campaignType {
         case "guide":
-            guard let guideConfig = parseGuideConfig(json, fallbackId: id) else { return nil }
+            let assistedCampaign: PreparedAssistedCampaignV1?
+            if AssistedGeometryRuntimeV1.isAssistedCampaign(json) {
+                switch AssistedGeometryRuntimeV1.prepare(json, platform: .ios) {
+                case .prepared(let prepared):
+                    assistedCampaign = prepared
+                case .rejected(let failure, _):
+                    DigiaLog.warning("[AssistedGeometry] Campaign preparation failed: \(failure.rawValue)")
+                    return nil
+                }
+            } else {
+                assistedCampaign = nil
+            }
+            guard let guideConfig = parseGuideConfig(
+                json,
+                fallbackId: id,
+                assistedCampaign: assistedCampaign
+            ) else { return nil }
             config = .guide(guideConfig)
         case "nudge":
             guard let templateConfig = json.object("templateConfig"),
@@ -112,24 +128,43 @@ struct CampaignModel: Equatable {
 
     // ── guide parsing ─────────────────────────────────────────────────────────
 
-    private static func parseGuideConfig(_ json: [String: Any], fallbackId: String) -> GuideConfigModel? {
+    private static func parseGuideConfig(
+        _ json: [String: Any],
+        fallbackId: String,
+        assistedCampaign: PreparedAssistedCampaignV1?
+    ) -> GuideConfigModel? {
         if let guideJson = json.object("guideConfig") {
             // Variables may live on guideConfig or on the sibling templateConfig
             let templateJson = json.object("templateConfig")
             let schemas = NudgeConfig.parseVariableSchemas(templateJson ?? guideJson)
-            return parseGuideSteps(guideJson, fallbackId: fallbackId, variableSchemas: schemas)
+            return parseGuideSteps(
+                guideJson,
+                fallbackId: fallbackId,
+                variableSchemas: schemas,
+                assistedCampaign: assistedCampaign
+            )
         }
         if let templateJson = json.object("templateConfig") {
             let templateType = templateJson.string("templateType")
             if templateType == "tooltip" || templateType == "spotlight" {
                 let schemas = NudgeConfig.parseVariableSchemas(templateJson)
-                return parseFlatGuideTemplate(templateJson, fallbackId: fallbackId, variableSchemas: schemas)
+                return parseFlatGuideTemplate(
+                    templateJson,
+                    fallbackId: fallbackId,
+                    variableSchemas: schemas,
+                    assistedCampaign: assistedCampaign
+                )
             }
         }
         return nil
     }
 
-    private static func parseGuideSteps(_ guideJson: [String: Any], fallbackId: String, variableSchemas: [VariableSchema]) -> GuideConfigModel? {
+    private static func parseGuideSteps(
+        _ guideJson: [String: Any],
+        fallbackId: String,
+        variableSchemas: [VariableSchema],
+        assistedCampaign: PreparedAssistedCampaignV1?
+    ) -> GuideConfigModel? {
         let guideId = guideJson.nonBlankString("id") ?? guideJson.nonBlankString("_id") ?? fallbackId
         guard let stepsArr = guideJson["steps"] as? [Any] else { return nil }
         return buildGuideConfig(
@@ -138,11 +173,17 @@ struct CampaignModel: Equatable {
             stepsArr: stepsArr,
             displayStyle: nil,
             variableSchemas: variableSchemas,
+            assistedCampaign: assistedCampaign,
             widgetJsonForStep: { stepJson in stepJson.object("widgetConfig") }
         )
     }
 
-    private static func parseFlatGuideTemplate(_ templateJson: [String: Any], fallbackId: String, variableSchemas: [VariableSchema]) -> GuideConfigModel? {
+    private static func parseFlatGuideTemplate(
+        _ templateJson: [String: Any],
+        fallbackId: String,
+        variableSchemas: [VariableSchema],
+        assistedCampaign: PreparedAssistedCampaignV1?
+    ) -> GuideConfigModel? {
         guard let stepsArr = templateJson["steps"] as? [Any] else { return nil }
         return buildGuideConfig(
             guideId: templateJson.nonBlankString("templateId") ?? fallbackId,
@@ -150,6 +191,7 @@ struct CampaignModel: Equatable {
             stepsArr: stepsArr,
             displayStyle: templateJson.string("templateType", default: "tooltip"),
             variableSchemas: variableSchemas,
+            assistedCampaign: assistedCampaign,
             widgetJsonForStep: { stepJson in stepJson }
         )
     }
@@ -160,16 +202,24 @@ struct CampaignModel: Equatable {
         stepsArr: [Any],
         displayStyle: String?,
         variableSchemas: [VariableSchema],
+        assistedCampaign: PreparedAssistedCampaignV1?,
         widgetJsonForStep: ([String: Any]) -> [String: Any]?
     ) -> GuideConfigModel? {
         var steps: [GuideStepModel] = []
 
         for (index, element) in stepsArr.enumerated() {
             guard let stepJson = element as? [String: Any] else { continue }
-            let stepId = stepJson.nonBlankString("id") ?? stepJson.string("_id")
+            let assistedStepId = stepJson.object("target")?.string("type") == "assistedGeometry"
+                ? stepJson.nonBlankString("stepId")
+                : nil
+            let geometryTarget = TypedGeometryTargetV1.fromJson(stepJson.object("target"))
+            let stepId = stepJson.nonBlankString("id")
+                ?? stepJson.nonBlankString("_id")
+                ?? assistedStepId
+                ?? ""
             let anchorKey = stepJson.nonBlankString("anchorKey") ?? ""
             let semanticTarget = SemanticTarget.fromJson(stepJson.object("target"))
-            guard !anchorKey.isEmpty || semanticTarget != nil else { continue }
+            guard !anchorKey.isEmpty || semanticTarget != nil || geometryTarget != nil || assistedStepId != nil else { continue }
             guard let widgetJson = widgetJsonForStep(stepJson) else { continue }
             steps.append(
                 GuideStepModel(
@@ -177,6 +227,8 @@ struct CampaignModel: Equatable {
                     sequenceOrder: stepJson.int("sequenceOrder", default: index),
                     anchorKey: anchorKey,
                     semanticTarget: semanticTarget,
+                    geometryTarget: geometryTarget,
+                    assistedStepId: assistedStepId,
                     displayStyle: displayStyle ?? stepJson.string("displayStyle", default: "tooltip"),
                     widgetConfig: GuideStepWidgetConfig.fromJson(widgetJson),
                     advanceTrigger: stepJson.string("advanceTrigger", default: "tap"),
@@ -190,7 +242,8 @@ struct CampaignModel: Equatable {
             id: guideId,
             multiStep: multiStep,
             steps: steps.sorted { $0.sequenceOrder < $1.sequenceOrder },
-            variableSchemas: variableSchemas
+            variableSchemas: variableSchemas,
+            assistedCampaign: assistedCampaign
         )
     }
 }

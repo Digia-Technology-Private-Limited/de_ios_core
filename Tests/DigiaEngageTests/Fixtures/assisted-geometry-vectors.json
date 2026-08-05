@@ -408,6 +408,85 @@
       }
     },
     {
+      "name": "android-medihub-gym-extras-a015-density",
+      "platform": "android",
+      "variant": "android",
+      "stepId": "fd7d350d-e586-4a42-83f0-764f3393436e",
+      "variantPatch": {
+        "source": {
+          "density": 2.625
+        },
+        "authorIntentPx": {
+          "left": 360,
+          "top": 912,
+          "right": 629,
+          "bottom": 1017
+        },
+        "referenceContainer": null,
+        "model": {
+          "version": 1,
+          "horizontal": {
+            "frame": "window",
+            "rule": {
+              "kind": "startFixed",
+              "startOffset": 137.14285714285714,
+              "width": 102.47619047619048
+            }
+          },
+          "vertical": {
+            "frame": "window",
+            "rule": {
+              "kind": "topFixed",
+              "topOffset": 347.42857142857144,
+              "height": 40
+            }
+          }
+        }
+      },
+      "snapshot": {
+        "snapshotVersion": 1,
+        "platform": "android",
+        "pageKey": "home",
+        "density": 2.34375,
+        "windowBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "appContentBoundsPx": {
+          "left": 0,
+          "top": 0,
+          "right": 1080,
+          "bottom": 2400
+        },
+        "layoutDirection": "ltr",
+        "orientation": "portrait",
+        "formFactor": "phone",
+        "appIdentifier": "com.digia.medihub.rn.clevertap",
+        "appBuild": "1",
+        "locale": "en-IN",
+        "fontScale": 1
+      },
+      "expected": {
+        "status": "resolved",
+        "roundedTargetPx": {
+          "left": 321,
+          "top": 814,
+          "right": 562,
+          "bottom": 908
+        },
+        "overlayTarget": {
+          "left": 136.96,
+          "top": 347.3066666666667,
+          "right": 239.78666666666666,
+          "bottom": 387.41333333333336
+        },
+        "warnings": [],
+        "failure": null
+      }
+    },
+    {
       "name": "android-rtl",
       "platform": "android",
       "variant": "android",
@@ -841,7 +920,7 @@
             "frame": "window",
             "rule": {
               "kind": "startFixed",
-              "startOffset": -1,
+              "startOffset": 90,
               "width": 90
             }
           }
@@ -851,17 +930,17 @@
         "snapshotVersion": 1,
         "platform": "android",
         "pageKey": "home",
-        "density": 3,
+        "density": 6,
         "windowBoundsPx": {
           "left": 0,
           "top": 0,
-          "right": 1080,
+          "right": 720,
           "bottom": 2400
         },
         "appContentBoundsPx": {
           "left": 0,
           "top": 0,
-          "right": 1080,
+          "right": 720,
           "bottom": 2400
         },
         "layoutDirection": "ltr",
@@ -928,4 +1007,3 @@
     ]
   }
 }
-

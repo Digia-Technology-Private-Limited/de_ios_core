@@ -504,6 +504,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     + "campaignKey=\(key) currentScreen=\(_currentScreen ?? "<unset>") "
                     + "targetScreenNames=\(campaign.targetScreenNames)"
             )
+            context.onDropped(
+                .noMatchingScreen,
+                message: "current screen does not match the campaign target"
+            )
             return false
         }
 
@@ -528,7 +532,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             context.onInlineRouted(payload: payload)
             return true
         case .guide(let guide):
-            if guide.steps.first?.semanticTarget != nil {
+            if guide.steps.first?.semanticTarget != nil || guide.assistedCampaign != nil {
                 dwellTracker.markViewed(payload.cepCampaignId)
                 guideOrchestrator.start(campaign, payload: payload)
                 return true
@@ -571,7 +575,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
     }
 
-    /// Handles one `campaign_test` SSE event. nudge/survey/inline are supported.
+    /// Handles one `campaign_test` SSE event. Guide, nudge, survey, and inline are supported.
     private func handleLiveTestCampaign(_ invocation: LiveTestInvocation) {
         let reporter = liveTestService.ackReporter
         reporter.postReceived(invocation.testInvocationId)
@@ -600,7 +604,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
 
-        guard campaign.campaignType == "nudge" || campaign.campaignType == "survey"
+        guard campaign.campaignType == "guide" || campaign.campaignType == "nudge"
+            || campaign.campaignType == "survey"
             || campaign.campaignType == "inline"
         else {
             reporter.postFailed(
@@ -1064,6 +1069,41 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     // MARK: - Guide lifecycle
+
+    /// Called by the native guide overlay once a resolved step is actually on screen.
+    /// The first-render event is also the terminal "shown" ACK for live testing.
+    func reportNativeGuideStepVisible() {
+        guard let state = guideOrchestrator.state, let step = state.currentStep else { return }
+        let payload = state.payload
+        events.digiaImpressionOnce(
+            payload: payload,
+            event: GuideEvent.Viewed(
+                displayStyle: step.displayStyle,
+                itemTotal: state.steps.count,
+                screenName: _currentScreen
+            )
+        )
+        events.toDigia(
+            GuideEvent.StepViewed(
+                itemIndex: state.stepIndex + 1,
+                itemTotal: state.steps.count,
+                anchorKey: step.anchorKey.isEmpty ? step.assistedStepId : step.anchorKey,
+                displayStyle: step.displayStyle
+            ),
+            payload: payload
+        )
+    }
+
+    /// Converts a native target-resolution failure into a terminal live-test ACK.
+    /// Organic campaigns keep their existing fail-closed behavior and only log.
+    func reportNativeGuideTargetFailure(_ code: LiveTestFailureCode, message: String) {
+        guard let payload = guideOrchestrator.state?.payload,
+              isLiveTestCepId(payload.cepCampaignId),
+              let context = liveTestContexts[payload.cepCampaignId]
+        else { return }
+        guideOrchestrator.dismiss()
+        context.reportFailed(code, message: message)
+    }
 
     func dismissGuide() {
         guard let state = guideOrchestrator.state else { return }
