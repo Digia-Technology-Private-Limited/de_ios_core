@@ -100,11 +100,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func initialize(_ config: DigiaConfig) async throws {
-        hostActionExecutor.configure(config.actionHandlers)
         guard self.config == nil else { return }
+        DigiaEndpoints.configure(config)
+        hostActionExecutor.configure(config.actionHandlers)
         self.config = config
         DigiaLog.configure(config.logLevel)
-        DigiaEndpoints.configure(config)
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
 
         font = DigiaFont(fontFamily: config.fontFamily)
@@ -1181,6 +1181,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func resetForTesting() {
+        DigiaEndpoints.resetForTest()
         activePlugin?.teardown()
         activePlugin = nil
         _currentScreen = nil
