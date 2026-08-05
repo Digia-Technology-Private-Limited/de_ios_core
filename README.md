@@ -70,6 +70,18 @@ try await Digia.initialize(
 )
 ```
 
+### Use the local Test Kit
+
+Keep arbitrary hosts out of production configuration. A debug/noop harness can install a mock
+server root before normal initialization; the root excludes `/api/v1`.
+
+```swift
+try DigiaTestKit.useMockServer("http://localhost:9871")
+try await Digia.initialize(DigiaConfig(apiKey: "local-testkit"))
+```
+
+Call `DigiaTestKit.clearMockServer()` to restore the environment selected by `DigiaConfig`.
+
 ### Handle host actions
 
 Register only the actions your app owns. When a handler is present, Digia Engage does not run its
