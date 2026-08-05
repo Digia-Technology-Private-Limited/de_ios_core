@@ -48,12 +48,12 @@ struct GuideOverlayView: View {
                         "[AssistedGeometry] resolved with warnings: \(warnings.map(\.rawValue).joined(separator: ",")) variantId=\(trace.variantId ?? "")"
                     )
                 }
-                return CGRect(
+                return observeTarget(CGRect(
                     x: overlay.left,
                     y: overlay.top,
                     width: overlay.width,
                     height: overlay.height
-                )
+                ), step: step)
             case .failed(let failure, let trace):
                 DigiaLog.warning(
                     "[AssistedGeometry] resolution failed: \(failure.rawValue) variantId=\(trace.variantId ?? "")"
@@ -62,42 +62,87 @@ struct GuideOverlayView: View {
                     failure == .pageMismatch ? .noMatchingScreen : .renderError,
                     message: "Assisted Geometry failed: \(failure.rawValue)"
                 )
+                observeTargetFailure(step: step, code: failure.rawValue)
                 return nil
             }
         }
         if step.assistedStepId != nil {
             reportTargetFailure(.renderError, message: "Assisted Geometry host window is unavailable")
+            observeTargetFailure(step: step, code: "host_window_unavailable")
             return nil
         }
         if let geometryTarget = step.geometryTarget {
             guard geometryTarget.pageKey == SDKInstance.shared.currentScreen else {
                 reportTargetFailure(.noMatchingScreen, message: "Typed Geometry page does not match")
+                observeTargetFailure(step: step, code: "page_mismatch")
                 return nil
             }
             guard let window = keyWindow() else {
                 reportTargetFailure(.renderError, message: "Typed Geometry host window is unavailable")
+                observeTargetFailure(step: step, code: "host_window_unavailable")
                 return nil
             }
             if let rect = geometryTarget.resolve(snapshot: runtimeSnapshot(window)) {
-                return rect
+                return observeTarget(rect, step: step)
             }
             reportTargetFailure(.renderError, message: "Typed Geometry target could not be resolved")
+            observeTargetFailure(step: step, code: "geometry_resolution_failed")
             return nil
         }
         guard let target = step.semanticTarget else {
-            return AnchorRegistry.shared.getRect(for: step.anchorKey)
+            guard let rect = AnchorRegistry.shared.getRect(for: step.anchorKey) else {
+                observeTargetFailure(step: step, code: "registered_anchor_not_found")
+                return nil
+            }
+            return observeTarget(rect, step: step)
         }
-        guard let window = keyWindow() else { return nil }
+        guard let window = keyWindow() else {
+            observeTargetFailure(step: step, code: "host_window_unavailable")
+            return nil
+        }
         if case let .resolved(rect) = semanticSessions.resolve(
             stepId: step.id,
             root: window,
             currentPageKey: SDKInstance.shared.currentScreen,
             target: target
         ) {
-            return rect
+            return observeTarget(rect, step: step)
         }
         reportTargetFailure(.noMatchingScreen, message: "semantic target was not found on this screen")
+        observeTargetFailure(step: step, code: "semantic_target_not_found")
         return nil
+    }
+
+    private func observeTarget(_ rect: CGRect, step: GuideStepModel) -> CGRect {
+#if DEBUG
+        RenderedTargetObservationStoreV1.shared.record(
+            approach: targetApproach(step),
+            stepId: step.id,
+            frameLogical: rect,
+            paddingLogical: step.widgetConfig.overlay.cutout.padding,
+            failureCode: nil
+        )
+#endif
+        return rect
+    }
+
+    private func observeTargetFailure(step: GuideStepModel, code: String) {
+#if DEBUG
+        RenderedTargetObservationStoreV1.shared.record(
+            approach: targetApproach(step),
+            stepId: step.id,
+            frameLogical: .zero,
+            paddingLogical: step.widgetConfig.overlay.cutout.padding,
+            failureCode: code
+        )
+#endif
+    }
+
+    private func targetApproach(_ step: GuideStepModel) -> RenderedTargetApproachV1 {
+        if step.assistedStepId != nil { return .assisted }
+        if step.geometryTarget != nil { return .geometry }
+        if step.semanticTarget != nil { return .semantic }
+        return .registered
     }
 
     private func reportTargetFailure(_ code: LiveTestFailureCode, message: String) {

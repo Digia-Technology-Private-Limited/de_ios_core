@@ -14,6 +14,12 @@ public enum Digia {
     /// host routes on from its own deep-linking/`onOpenURL` handling — see
     /// `isDebugSettingsDeepLink`.
     public static let debugSettingsDeepLinkPath = "_digia/debug-settings"
+    static let testKitExportDeepLinkPath = "_digia/testkit/export"
+
+    struct TestKitExportRequest {
+        let runId: String
+        let token: String
+    }
 
     /// Whether `url` is the SDK's debug-settings deeplink.
     ///
@@ -21,7 +27,8 @@ public enum Digia {
     /// URL parsing treats `_digia` as the host, not the path, so a path-only
     /// check would never match a custom scheme.
     public static func isDebugSettingsDeepLink(_ url: URL) -> Bool {
-        let raw = url.absoluteString
+        let raw = String(url.absoluteString.split(separator: "?", maxSplits: 1)[0])
+            .split(separator: "#", maxSplits: 1)[0]
         let afterScheme: Substring
         if let range = raw.range(of: "://") {
             afterScheme = raw[range.upperBound...]
@@ -32,15 +39,30 @@ public enum Digia {
         return trimmed == debugSettingsDeepLinkPath || trimmed.hasSuffix("/\(debugSettingsDeepLinkPath)")
     }
 
+    static func debugSettingsPairingToken(from url: URL) -> String? {
+        guard let value = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == "pairingToken" })?
+            .value?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty
+        else { return nil }
+        return value
+    }
+
     /// Presents the SDK's debug-only settings screen. Trigger from the host's
     /// own debug menu, or via a deeplink (see `isDebugSettingsDeepLink`).
     ///
     /// No-op outside a debug build.
-    public static func presentDebugSettings(from presenter: UIViewController) {
+    public static func presentDebugSettings(
+        from presenter: UIViewController,
+        pairingToken: String? = nil
+    ) {
         guard SDKInstance.shared.isDebugBuild else {
             DigiaLog.warning("[Digia] presentDebugSettings() ignored — not a debug build.")
             return
         }
+        SDKInstance.shared.setPageCapturePairingToken(pairingToken)
         let host = DigiaDebugSettingsHostingController(rootView: DigiaDebugSettingsView())
         presenter.present(host, animated: true)
     }
@@ -49,9 +71,67 @@ public enum Digia {
     /// `true`; otherwise returns `false` so the host can continue its own routing.
     @discardableResult
     public static func handleDeepLink(_ url: URL, from presenter: UIViewController) -> Bool {
-        guard isDebugSettingsDeepLink(url) else { return false }
-        presentDebugSettings(from: presenter)
-        return true
+        if isDebugSettingsDeepLink(url) {
+            presentDebugSettings(
+                from: presenter,
+                pairingToken: debugSettingsPairingToken(from: url)
+            )
+            return true
+        }
+#if DEBUG
+        if let request = testKitExportRequest(from: url) {
+            guard SDKInstance.shared.isDebugBuild else { return false }
+            do {
+                let exportURL = try TestKitNativeEvidenceExporterV1().export(runId: request.runId)
+                DigiaLog.info("[TestKit] Native evidence exported to \(exportURL.path)")
+            } catch {
+                DigiaLog.warning("[TestKit] Native evidence export failed: \(error)")
+            }
+            return true
+        }
+#endif
+        return false
+    }
+
+    /// Debug-only correlation for the local Assisted evidence harness. This stores
+    /// only the opaque run identifier; no authored or runtime geometry crosses the
+    /// React Native bridge. Passing `nil` tears down and clears the local buffer.
+    public static func setTestKitRunId(_ runId: String?) {
+#if DEBUG
+        guard SDKInstance.shared.isDebugBuild else { return }
+        do {
+            if let runId {
+                try RenderedTargetObservationStoreV1.shared.setRunId(runId)
+                AssistedGeometryRuntimeV1.diagnostics.clear()
+            } else {
+                RenderedTargetObservationStoreV1.shared.clear()
+                AssistedGeometryRuntimeV1.diagnostics.clear()
+            }
+        } catch {
+            RenderedTargetObservationStoreV1.shared.clear()
+            DigiaLog.warning("[TestKit] Rejected invalid evidence run identifier")
+        }
+#endif
+    }
+
+    static func testKitExportRequest(from url: URL) -> TestKitExportRequest? {
+        let rawWithoutQuery = String(url.absoluteString.split(separator: "?", maxSplits: 1)[0])
+        let afterScheme: Substring
+        if let schemeRange = rawWithoutQuery.range(of: "://") {
+            afterScheme = rawWithoutQuery[schemeRange.upperBound...]
+        } else {
+            afterScheme = rawWithoutQuery[...]
+        }
+        let route = afterScheme.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard route == testKitExportDeepLinkPath || route.hasSuffix("/\(testKitExportDeepLinkPath)"),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        else { return nil }
+        guard let runId = components.queryItems?.first(where: { $0.name == "runId" })?.value,
+              !runId.isEmpty,
+              let token = components.queryItems?.first(where: { $0.name == "token" })?.value,
+              !token.isEmpty
+        else { return nil }
+        return TestKitExportRequest(runId: runId, token: token)
     }
     /// Initializes the Digia SDK. No-ops below iOS 17 — the SDUI rendering layer
     /// requires APIs (`Layout`, newer `SwiftUI` scroll/animation modifiers) that

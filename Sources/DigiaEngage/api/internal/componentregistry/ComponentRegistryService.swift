@@ -23,9 +23,11 @@ final class ComponentRegistryService: ObservableObject {
     private var config: DigiaConfig?
     private var deviceId: String?
     private var isDebugBuildFlag = false
+    private var capturePairingToken: String?
 
     /// Kept in sync across `RecordingBadgeView` and the debug/session screens.
     @Published private(set) var isEnabled = false
+    var isCapturePaired: Bool { capturePairingToken != nil }
 
     /// Every distinct key recorded this process, in first-seen order — what
     /// `DigiaRecordedSessionScreen` lists. Not persisted, see `seen` below.
@@ -69,6 +71,11 @@ final class ComponentRegistryService: ObservableObject {
         }
     }
 
+    func setCapturePairingToken(_ token: String?) {
+        let value = token?.trimmingCharacters(in: .whitespacesAndNewlines)
+        capturePairingToken = value?.isEmpty == false ? value : nil
+    }
+
     func recordPage(_ key: String) {
         record(key: key, type: "page", screenName: nil)
     }
@@ -92,8 +99,13 @@ final class ComponentRegistryService: ObservableObject {
 
     func uploadPageCapture(_ capture: [String: Any]) async -> Bool {
         guard isEnabled, isDebugBuildFlag, let config, let deviceId,
+              let capturePairingToken,
               let pageKey = capture["pageKey"] as? String,
-              let body = try? JSONSerialization.data(withJSONObject: capture),
+              !pageKey.isEmpty
+        else { return false }
+        var authenticatedCapture = capture
+        authenticatedCapture["pairingToken"] = capturePairingToken
+        guard let body = try? JSONSerialization.data(withJSONObject: authenticatedCapture),
               body.count <= 8 * 1024 * 1024
         else { return false }
         let headers = [

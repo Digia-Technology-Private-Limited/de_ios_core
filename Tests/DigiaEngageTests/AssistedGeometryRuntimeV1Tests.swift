@@ -52,6 +52,45 @@ final class AssistedGeometryRuntimeV1Tests: XCTestCase {
         XCTAssertEqual(guide.assistedCampaign?.steps.count, 1)
     }
 
+    func testDebugCrossPlatformPreviewAllowsMarkedAndroidAppIdentifierOnIOS() throws {
+        let variant = deepMerge(baseIOSVariant(), [
+            "comparisonContext": [
+                "appIdentifier": "com.digia.medihub.android",
+                "riskFlags": [AssistedGeometryRuntimeV1.crossPlatformPreviewRiskFlag],
+            ],
+        ])
+        guard case .prepared(let prepared) = AssistedGeometryRuntimeV1.prepare(
+            campaign(variant), platform: .ios
+        ) else { return XCTFail("marked cross-platform preview did not prepare") }
+
+        let result = AssistedGeometryRuntimeV1.resolve(
+            prepared,
+            stepId: stepId,
+            snapshot: runtimeSnapshot(appIdentifier: "com.digia.medihub.ios")
+        )
+
+        guard case .resolved = result else {
+            return XCTFail("marked debug preview unexpectedly failed: \(result)")
+        }
+    }
+
+    func testUnmarkedAppIdentifierMismatchRemainsRejected() throws {
+        guard case .prepared(let prepared) = AssistedGeometryRuntimeV1.prepare(
+            campaign(baseIOSVariant()), platform: .ios
+        ) else { return XCTFail("iOS campaign did not prepare") }
+
+        let result = AssistedGeometryRuntimeV1.resolve(
+            prepared,
+            stepId: stepId,
+            snapshot: runtimeSnapshot(appIdentifier: "com.example.different-app")
+        )
+
+        guard case .failed(let failure, _) = result else {
+            return XCTFail("unmarked identifier mismatch unexpectedly resolved")
+        }
+        XCTAssertEqual(failure, .appIdentifierMismatch)
+    }
+
     @MainActor
     func testAssistedGuideUsesNativeRendererWhenReactNativeGuideCallbackExists() throws {
         SDKInstance.shared.resetForTesting()
@@ -229,6 +268,24 @@ final class AssistedGeometryRuntimeV1Tests: XCTestCase {
                 ],
             ],
         ]
+    }
+
+    private func runtimeSnapshot(appIdentifier: String) -> RuntimeGeometrySnapshotV1 {
+        RuntimeGeometrySnapshotV1(
+            snapshotVersion: 1,
+            platform: .ios,
+            pageKey: "home",
+            density: 3,
+            windowBoundsPx: EdgeRectV1(left: 0, top: 0, right: 1179, bottom: 2556),
+            appContentBoundsPx: EdgeRectV1(left: 0, top: 0, right: 1179, bottom: 2556),
+            layoutDirection: "ltr",
+            orientation: "portrait",
+            formFactor: "phone",
+            appIdentifier: appIdentifier,
+            appBuild: "1",
+            locale: "en-IN",
+            fontScale: 1
+        )
     }
 
     private func deepMerge(_ base: [String: Any], _ patch: [String: Any]?) -> [String: Any] {

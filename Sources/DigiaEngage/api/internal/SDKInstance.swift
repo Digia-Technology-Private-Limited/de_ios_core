@@ -307,6 +307,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     var currentScreen: String? { _currentScreen }
 
+    func setPageCapturePairingToken(_ token: String?) {
+        componentRegistry.setCapturePairingToken(token)
+    }
+
     func captureCurrentPage() {
         guard isDebugBuild else {
             pageCaptureStatus = PageCaptureStatus(

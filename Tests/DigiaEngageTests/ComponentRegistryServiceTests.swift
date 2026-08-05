@@ -9,12 +9,16 @@ final class FakeComponentSender: AnalyticsSender, @unchecked Sendable {
     private var _callCount = 0
     var callCount: Int { _callCount }
     private(set) var bodies: [[String: Any]] = []
+    private(set) var pageCaptureBodies: [[String: Any]] = []
 
     func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
-        guard url == DigiaEndpoints.recordComponents else { return 200 }
-        _callCount += 1
         if let parsed = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
-            bodies.append(parsed)
+            if url == DigiaEndpoints.recordComponents {
+                _callCount += 1
+                bodies.append(parsed)
+            } else if url == DigiaEndpoints.recordPageCapture {
+                pageCaptureBodies.append(parsed)
+            }
         }
         return 200
     }
@@ -165,5 +169,26 @@ struct ComponentRegistryServiceTests {
         reconfigured.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1", isDebugBuild: true)
 
         #expect(reconfigured.isEnabled)
+    }
+
+    @Test("page capture requires an in-memory pairing and sends its token")
+    func pageCaptureRequiresPairingToken() async {
+        let (service, sender) = makeService()
+        service.setEnabled(true)
+        let capture: [String: Any] = [
+            "schemaVersion": 2,
+            "pageKey": "home",
+            "nodes": [],
+        ]
+
+        #expect(await !service.uploadPageCapture(capture))
+        #expect(sender.pageCaptureBodies.isEmpty)
+
+        service.setCapturePairingToken(" short-lived-proof ")
+        #expect(service.isCapturePaired)
+        #expect(await service.uploadPageCapture(capture))
+        #expect(sender.pageCaptureBodies.count == 1)
+        #expect(sender.pageCaptureBodies.first?["pairingToken"] as? String == "short-lived-proof")
+        #expect(capture["pairingToken"] == nil)
     }
 }

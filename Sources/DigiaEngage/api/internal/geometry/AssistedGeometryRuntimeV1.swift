@@ -211,6 +211,7 @@ enum AssistedResolution: Equatable {
 
 enum AssistedGeometryRuntimeV1 {
     private static let containmentTolerancePx = 0.000001
+    static let crossPlatformPreviewRiskFlag = "debug_cross_platform_model_reuse"
     static let diagnostics = AssistedGeometryDiagnosticsV1()
 
     static func isAssistedCampaign(_ rawCampaign: [String: Any]) -> Bool {
@@ -386,8 +387,15 @@ enum AssistedGeometryRuntimeV1 {
         guard snapshot.pageKey == step.pageKey else {
             return failed(campaign.campaignKey, step, .pageMismatch)
         }
-        guard snapshot.appIdentifier == step.comparisonContext.appIdentifier else {
+        let appIdentifierMatches = snapshot.appIdentifier == step.comparisonContext.appIdentifier
+        guard appIdentifierMatches || allowsCrossPlatformDebugPreview(step) else {
             return failed(campaign.campaignKey, step, .appIdentifierMismatch)
+        }
+        if !appIdentifierMatches {
+            DigiaLog.warning(
+                "[AssistedGeometry] DEBUG preview is reusing an Android-authored model on iOS; "
+                    + "this is not confirmed iOS authoring."
+            )
         }
         guard snapshot.orientation == "portrait" else {
             return failed(campaign.campaignKey, step, .unsupportedOrientation)
@@ -439,6 +447,14 @@ enum AssistedGeometryRuntimeV1 {
             status: outcome, roundedTargetPx: rounded, overlayTarget: overlay,
             warnings: warningValues, trace: trace
         )
+    }
+
+    private static func allowsCrossPlatformDebugPreview(_ step: PreparedAssistedStepV1) -> Bool {
+        #if DEBUG
+        step.comparisonContext.riskFlags.contains(crossPlatformPreviewRiskFlag)
+        #else
+        false
+        #endif
     }
 
     static func resolveGeometryModel(

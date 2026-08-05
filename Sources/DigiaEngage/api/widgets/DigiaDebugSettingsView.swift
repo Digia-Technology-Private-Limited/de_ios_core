@@ -72,9 +72,18 @@ public struct DigiaDebugSettingsView: View {
                     }
                     .disabled(
                         !registry.isEnabled
+                            || !registry.isCapturePaired
                             || sdk.currentScreen == nil
                             || sdk.pageCaptureStatus.state == "capturing"
                     )
+                    if !registry.isCapturePaired {
+                        Text(
+                            "Open the project pairing link from the Dashboard to authorize "
+                                + "capture for this session."
+                        )
+                        .font(.footnote)
+                        .foregroundColor(.red)
+                    }
                     if let message = sdk.pageCaptureStatus.message {
                         Text(message).font(.footnote).foregroundColor(.secondary)
                     }
