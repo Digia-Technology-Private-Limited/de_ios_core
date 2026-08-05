@@ -64,10 +64,10 @@ private struct CampaignCanvasStage: View {
                 let rect = child.rect
                 CanvasChildView(child: child, onDismiss: onDismiss)
                     .frame(width: rect.width, height: rect.height, alignment: .topLeading)
-                    // Clip after applying the authored rectangle. Some resizable
-                    // media views draw outside their proposed size; clipping inside
-                    // the child only clips their ideal size, not this wire rect.
-                    .clipped()
+                    // Media must remain inside its authored rectangle, while a
+                    // container's configured drop shadow is allowed to extend
+                    // beyond that rectangle (the stage still clips at the surface).
+                    .modifier(CanvasChildBoundsModifier(clips: child.clipsToAuthoredRect))
                     .offset(x: rect.x, y: rect.y)
             }
         }
@@ -221,7 +221,7 @@ private struct CanvasContainerView: View {
         .clipShape(RoundedRectangle(cornerRadius: node.cornerRadius))
         .overlay(
             RoundedRectangle(cornerRadius: node.cornerRadius)
-                .stroke(node.borderColor, lineWidth: node.borderWidth)
+                .strokeBorder(node.borderColor, lineWidth: node.borderWidth)
         )
         .shadow(
             color: node.shadowColor.opacity(node.shadowOpacity),
@@ -245,6 +245,28 @@ private struct CanvasContainerView: View {
         case "solid": node.color
         default: Color.clear
         }
+    }
+}
+
+private struct CanvasChildBoundsModifier: ViewModifier {
+    let clips: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if clips {
+            content.clipped()
+        } else {
+            content
+        }
+    }
+}
+
+private extension NudgeCanvasChild {
+    var clipsToAuthoredRect: Bool {
+        if case .widget(_, _, .canvasContainer(_)) = self {
+            return false
+        }
+        return true
     }
 }
 
