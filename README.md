@@ -80,7 +80,9 @@ try DigiaTestKit.useMockServer("http://localhost:9871")
 try await Digia.initialize(DigiaConfig(apiKey: "local-testkit"))
 ```
 
-Call `DigiaTestKit.clearMockServer()` to restore the environment selected by `DigiaConfig`.
+The value must be an HTTP(S) origin with no path, credentials, query, or fragment, and it
+cannot change after initialization. A dedicated release-mode test build can pass
+`allowInRelease: true`; ordinary production-distributed builds reject the override.
 
 ### Handle host actions
 

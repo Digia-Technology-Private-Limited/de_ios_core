@@ -3,13 +3,12 @@ import XCTest
 
 final class DigiaEndpointRegistryTests: XCTestCase {
     override func tearDown() {
-        DigiaTestKit.clearMockServer()
         DigiaEndpoints.resetForTest()
         super.tearDown()
     }
 
     func testMockServerWinsOverEnvironmentAndTrimsTrailingSlash() throws {
-        try DigiaTestKit.useMockServer("http://127.0.0.1:9871/")
+        try DigiaTestKit.useMockServer("http://127.0.0.1:9871/", allowInRelease: true)
         DigiaEndpoints.configure(DigiaConfig(apiKey: "test", environment: .sandbox))
 
         XCTAssertEqual(
@@ -18,21 +17,34 @@ final class DigiaEndpointRegistryTests: XCTestCase {
         )
     }
 
-    func testClearingMockServerRestoresConfiguredEnvironment() throws {
+    func testMockServerCannotChangeAfterInitialization() throws {
         DigiaEndpoints.configure(DigiaConfig(apiKey: "test", environment: .sandbox))
-        try DigiaTestKit.useMockServer("http://127.0.0.1:9871")
-
-        DigiaTestKit.clearMockServer()
-
-        XCTAssertEqual(
-            DigiaEndpoints.campaigns,
-            "https://dev.digia.tech/api/v1/engage/sdk/getCampaigns"
-        )
+        XCTAssertThrowsError(
+            try DigiaTestKit.useMockServer("http://127.0.0.1:9871", allowInRelease: true)
+        ) { error in
+            XCTAssertEqual(error as? DigiaTestKitError, .alreadyInitialized)
+        }
     }
 
-    func testMockServerRequiresAbsoluteHTTPURL() {
-        XCTAssertThrowsError(
-            try DigiaTestKit.useMockServer("file:///tmp/mock-server")
-        )
+    func testMockServerRequiresOriginWithoutURLSuffixes() {
+        let invalidRoots = [
+            "localhost:9871",
+            "file:///tmp/mock-server",
+            "https://user@example.com",
+            "https://@example.com",
+            "https://example.com/api",
+            "https://example.com///",
+            "https://example.com?fixture=nudge",
+            "https://example.com?",
+            "https://example.com#fragment",
+            "https://example.com#",
+            "https://example.com:",
+        ]
+
+        for root in invalidRoots {
+            XCTAssertThrowsError(
+                try DigiaTestKit.useMockServer(root, allowInRelease: true)
+            )
+        }
     }
 }

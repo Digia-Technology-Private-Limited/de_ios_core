@@ -6,27 +6,61 @@ enum DigiaEndpointRegistry {
 
     nonisolated(unsafe) private static var environmentRoot = production
     nonisolated(unsafe) private static var testRoot: String?
+    nonisolated(unsafe) private static var initialized = false
 
     static func configure(_ config: DigiaConfig) {
         environmentRoot = config.environment == .sandbox ? sandbox : production
+        initialized = true
     }
 
-    static func useMockServer(_ rootURL: String) throws {
-        guard let parsedURL = URL(string: rootURL.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+    static func useMockServer(_ rootURL: String, allowInRelease: Bool) throws {
+        guard !initialized else {
+            throw DigiaTestKitError.alreadyInitialized
+        }
+        guard DigiaDebugDetection.isDebugBuild() || allowInRelease else {
+            throw DigiaTestKitError.unavailableInRelease
+        }
+
+        let candidate = rootURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let schemeDelimiter = candidate.range(of: "://") else {
             throw DigiaTestKitError.invalidMockServerURL(rootURL)
         }
+        let suffix = String(candidate[schemeDelimiter.upperBound...])
+        let authority = suffix.hasSuffix("/") ? String(suffix.dropLast()) : suffix
         guard
-            let scheme = parsedURL.scheme?.lowercased(),
+            let components = URLComponents(string: candidate),
+            components.url != nil,
+            let scheme = components.scheme?.lowercased(),
             scheme == "http" || scheme == "https",
-            parsedURL.host?.isEmpty == false
+            let host = components.host,
+            !host.isEmpty,
+            !authority.isEmpty,
+            !authority.contains("/"),
+            !authority.contains("\\"),
+            !authority.contains("@"),
+            !authority.hasSuffix(":"),
+            !suffix.contains("?"),
+            !suffix.contains("#"),
+            components.user == nil,
+            components.password == nil,
+            components.percentEncodedPath.isEmpty || components.percentEncodedPath == "/",
+            components.percentEncodedQuery == nil,
+            components.percentEncodedFragment == nil,
+            components.port == nil || (1...65_535).contains(components.port!)
         else {
             throw DigiaTestKitError.invalidMockServerURL(rootURL)
         }
-        testRoot = parsedURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    }
 
-    static func clearMockServer() {
-        testRoot = nil
+        var origin = URLComponents()
+        origin.scheme = scheme
+        origin.host = host
+        origin.port = components.port
+        guard let normalizedURL = origin.url else {
+            throw DigiaTestKitError.invalidMockServerURL(rootURL)
+        }
+        testRoot = normalizedURL.absoluteString.trimmingCharacters(
+            in: CharacterSet(charactersIn: "/")
+        )
     }
 
     static var rootURL: String {
@@ -34,11 +68,10 @@ enum DigiaEndpointRegistry {
     }
 
     /// Resets all endpoint state. Use in tests only.
-    static func resetForTest(_ rootURL: String? = nil) {
-        environmentRoot = (rootURL ?? production).trimmingCharacters(
-            in: CharacterSet(charactersIn: "/")
-        )
+    static func resetForTest() {
+        environmentRoot = production
         testRoot = nil
+        initialized = false
     }
 }
 
@@ -47,9 +80,9 @@ enum DigiaEndpoints {
         DigiaEndpointRegistry.configure(config)
     }
 
-    /// Resets to production default, or `baseURL`. Use in tests only.
-    static func resetForTest(_ baseURL: String? = nil) {
-        DigiaEndpointRegistry.resetForTest(baseURL)
+    /// Resets to the production default. Use in tests only.
+    static func resetForTest() {
+        DigiaEndpointRegistry.resetForTest()
     }
 
     private static var baseURL: String { DigiaEndpointRegistry.rootURL }
