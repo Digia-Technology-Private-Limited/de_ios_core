@@ -15,7 +15,7 @@ final class GuideOverlayWiringTests: XCTestCase {
         XCTAssertFalse(source.contains("Capture"))
         XCTAssertTrue(source.contains("case let .ready"))
         XCTAssertTrue(source.contains("case .notReady"))
-        XCTAssertTrue(source.contains("case let .failed"))
+        XCTAssertTrue(source.contains("case .failed"))
         XCTAssertTrue(source.contains("calloutGap"))
         XCTAssertTrue(source.contains("cornerRadius: cornerRadius"))
     }

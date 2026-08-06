@@ -40,10 +40,15 @@ final class AnchorlessArchitectureTests: XCTestCase {
             .deletingLastPathComponent() // Tests
             .deletingLastPathComponent() // ios/core
         let directory = root.appendingPathComponent(relativePath)
-        return try FileManager.default.contentsOfDirectory(
+        let enumerator = FileManager.default.enumerator(
             at: directory,
-            includingPropertiesForKeys: nil
-        ).filter { $0.pathExtension == "swift" }
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )
+        return try XCTUnwrap(enumerator?.compactMap { item -> URL? in
+            guard let url = item as? URL, url.pathExtension == "swift" else { return nil }
+            return url
+        })
     }
 
     private func readSource(_ url: URL) -> String {

@@ -31,7 +31,7 @@ struct GuideOverlayView: View {
                 .id(state.stepIndex)
             case .notReady:
                 EmptyView()
-            case let .failed(_):
+            case .failed:
                 EmptyView()
             }
         } else {
