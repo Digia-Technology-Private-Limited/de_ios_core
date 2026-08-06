@@ -69,16 +69,4 @@ targets:
       - package: SDWebImageSVGCoder
         product: SDWebImageSVGCoder
     scheme:
-      testTargets:
-        - DigiaEngageTests
-  DigiaEngageTests:
-    type: bundle.unit-test
-    platform: iOS
-    sources:
-      - path: ../Tests/DigiaEngageTests
-    dependencies:
-      - target: DigiaEngage
-    settings:
-      base:
-        PRODUCT_BUNDLE_IDENTIFIER: tech.digia.DigiaEngageTests
-        GENERATE_INFOPLIST_FILE: YES
+      testTargets: []

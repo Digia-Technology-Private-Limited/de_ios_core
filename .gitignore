@@ -31,15 +31,7 @@ xcuserdata/
 .derivedData/
 docs/.worktrees/
 FatBuild/.derived/
-.ci-derived/
 FatBuild/.archives
 FatBuild/DigiaEngageFat.xcodeproj/
 DigiaEngage.xcframework
 dist/
-
-# Anchorless Spotlight research artifacts. These may contain customer-visible
-# pixels or capture diagnostics and must never enter a product commit.
-*.digia-capture.json
-digia-captures/
-testkit-exports/
-*.hprof
