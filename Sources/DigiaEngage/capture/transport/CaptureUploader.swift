@@ -79,10 +79,15 @@ internal final class URLSessionCaptureUploader: CaptureUploader {
     }
 
     private func captureId(from data: Data) -> String? {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let id = object["captureId"] as? String,
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        let payload = ((object["data"] as? [String: Any])?["response"] as? [String: Any]) ?? object
+        guard let id = payload["captureId"] as? String,
               !id.isEmpty
-        else { return nil }
+        else {
+            return nil
+        }
         return id
     }
 }
