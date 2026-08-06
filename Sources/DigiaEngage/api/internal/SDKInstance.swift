@@ -24,6 +24,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// `Digia.setCurrentScreen`, forwarded to the active plugin and read into
     /// analytics events (`screenName`).
     private var _currentScreen: String?
+
+    /// Read-only value injection for the Anchorless eligibility seam. Targeting
+    /// remains owned by the runtime; the adapter only receives page identity.
+    internal var currentScreenForAnchorless: String? { _currentScreen }
     private var activeExternalGuide: ExternalGuide?
     private var screenUpdateRevision = 0
 
