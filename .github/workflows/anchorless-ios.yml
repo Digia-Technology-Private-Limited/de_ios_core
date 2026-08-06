@@ -1,0 +1,48 @@
+name: Anchorless iOS contract
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+
+jobs:
+  contract:
+    runs-on: macos-15
+    steps:
+      - name: Check out iOS core
+        uses: actions/checkout@v4
+
+      - name: Check out central contracts and testkit
+        uses: actions/checkout@v4
+        with:
+          repository: Digia-Technology-Private-Limited/de_workspace
+          path: de_workspace
+          token: ${{ secrets.DE_WORKSPACE_READ_TOKEN }}
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the iOS test project
+        run: xcodegen generate --spec FatBuild/project.yml
+
+      - name: Run iOS unit tests
+        run: >-
+          xcodebuild test
+          -project FatBuild/DigiaEngageFat.xcodeproj
+          -scheme DigiaEngage
+          -destination 'platform=iOS Simulator,name=iPhone 16'
+          -derivedDataPath .ci-derived
+          CODE_SIGNING_ALLOWED=NO
+
+      - name: Run the shared Conformance Vector reader
+        run: node de_workspace/testkit/runner/anchorless/solver-vectors.test.mjs
+
+      - name: Run CV-2 forbidden-token scan
+        run: >-
+          node de_workspace/testkit/runner/anchorless/cv2-forbidden-tokens.mjs
+          "$GITHUB_WORKSPACE" --scope capture --tokens core
+
+      - name: Run CV-3 endpoint hygiene scan
+        run: >-
+          node de_workspace/testkit/runner/anchorless/cv3-endpoints.mjs
+          "$GITHUB_WORKSPACE" --scope shipped

@@ -7,53 +7,36 @@ import Combine
 @MainActor
 struct GuideOverlayView: View {
     @ObservedObject private var orchestrator = SDKInstance.shared.guideOrchestrator
-    @ObservedObject private var anchors = AnchorRegistry.shared
-
-    private var targetAdapter: GuideTargetAdapter {
-        GuideTargetAdapter(
-            anchorSource: RegistryAnchorSource(registry: anchors),
-            anchorlessRuntime: AnchorlessRuntime(
-                snapshotProvider: UIWindowSnapshotProvider(),
-                deviceStateProvider: UIKitDeviceStateProvider(
-                    currentPageKeySource: { SDKInstance.shared.currentScreenForAnchorless }
-                ),
-                diagnostics: AnchorlessDiagnostics.makeDefaultSink()
-            )
-        )
-    }
+    @StateObject private var targetAdapterStore = GuideTargetAdapterStore.shared
 
     var body: some View {
-        // Observing `anchors` re-resolves the anchor rect when an anchor
-        // registers after a guide has started.
-        if let state = orchestrator.state,
-           let step = state.currentStep,
-           case let .ready(anchorRect, cornerRadius) = targetAdapter.resolveTarget(
-               GuideTargetStep(
-                   spec: step.target,
-                   cornerRadius: step.widgetConfig.overlay.cutout.cornerRadius
-               )
-           ) {
-            GuideStepOverlay(
-                step: step,
-                stepIndex: state.stepIndex,
-                totalSteps: state.steps.count,
-                anchorRect: anchorRect,
-                cornerRadius: cornerRadius,
-                onAdvance: { orchestrator.advance() },
-                onDismiss: { SDKInstance.shared.dismissGuide() }
-            )
-            .environment(\.digiaVariables, state.variableContext)
-            .id(state.stepIndex)
+        if let state = orchestrator.state, let step = state.currentStep {
+            switch targetAdapterStore.adapter.resolveTarget(
+                GuideTargetStep(
+                    spec: step.target,
+                    cornerRadius: step.widgetConfig.overlay.cutout.cornerRadius
+                )
+            ) {
+            case let .ready(anchorRect, cornerRadius):
+                GuideStepOverlay(
+                    step: step,
+                    stepIndex: state.stepIndex,
+                    totalSteps: state.steps.count,
+                    anchorRect: anchorRect,
+                    cornerRadius: cornerRadius,
+                    onAdvance: { orchestrator.advance() },
+                    onDismiss: { SDKInstance.shared.dismissGuide() }
+                )
+                .environment(\.digiaVariables, state.variableContext)
+                .id(state.stepIndex)
+            case .notReady:
+                EmptyView()
+            case let .failed(_):
+                EmptyView()
+            }
+        } else {
+            EmptyView()
         }
-    }
-}
-
-@MainActor
-private struct RegistryAnchorSource: RegisteredAnchorSource {
-    let registry: AnchorRegistry
-
-    func rect(forAnchorKey anchorKey: String) -> CGRect? {
-        registry.getRect(for: anchorKey)
     }
 }
 
@@ -69,7 +52,7 @@ private struct GuideStepOverlay: View {
     @Environment(\.digiaVariables) private var variables
     @State private var bubbleHeight: CGFloat = 0
 
-    private let gap: CGFloat = 8
+    private let calloutGap: CGFloat = 8
     private let arrowH: CGFloat = 10
     private let arrowW: CGFloat = 18
 
@@ -88,13 +71,13 @@ private struct GuideStepOverlay: View {
                 switch preferred {
                 case "top": return true
                 case "bottom", "start", "end": return false
-                default: return spaceBelow >= bubbleHeight + gap + arrowH || spaceBelow >= anchorRect.minY
+                default: return spaceBelow >= bubbleHeight + calloutGap + arrowH || spaceBelow >= anchorRect.minY
                 }
             }()
 
             let contentY = placeBelow
-                ? anchorRect.maxY + gap + arrowH
-                : anchorRect.minY - gap - arrowH - bubbleHeight
+                ? anchorRect.maxY + calloutGap + arrowH
+                : anchorRect.minY - calloutGap - arrowH - bubbleHeight
             let arrowCX = min(max(anchorRect.midX, arrowW / 2 + 8), screenW - arrowW / 2 - 8)
             let arrowTipY = placeBelow ? anchorRect.maxY + 2 : anchorRect.minY - 2
             let arrowBaseY = placeBelow ? anchorRect.maxY + 2 + arrowH : anchorRect.minY - 2 - arrowH
@@ -280,7 +263,7 @@ private struct GuideSpotlightScrim: View {
         let hole = anchorRect.insetBy(dx: -pad, dy: -pad)
         let radius: CGFloat = cutout.shape == "circle"
             ? max(hole.width, hole.height) / 2
-            : CGFloat(cutout.cornerRadius)
+            : cornerRadius
 
         Canvas { context, size in
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color.opacity(alpha)))

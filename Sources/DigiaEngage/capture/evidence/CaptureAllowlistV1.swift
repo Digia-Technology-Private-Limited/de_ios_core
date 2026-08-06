@@ -20,7 +20,7 @@
 
 import Foundation
 
-// MARK: - Value shapes (§2.3 valueTypes)
+// MARK: - Wire shapes (§2.3 valueTypes)
 
 /// `{left, top, right, bottom}` finite integers in physical pixels.
 internal struct CaptureEdgeRect: Equatable, Sendable {

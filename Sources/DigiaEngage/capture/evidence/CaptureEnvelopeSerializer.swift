@@ -146,7 +146,7 @@ internal enum CaptureEnvelopeSerializer {
         ]
     }
 
-    // MARK: - Value shapes
+    // MARK: - Wire shapes
 
     private static func edgeRect(_ rect: CaptureEdgeRect) -> [String: Any] {
         ["left": rect.left, "top": rect.top, "right": rect.right, "bottom": rect.bottom]

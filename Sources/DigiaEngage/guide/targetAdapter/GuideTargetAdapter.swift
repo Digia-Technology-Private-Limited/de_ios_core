@@ -11,7 +11,7 @@
 //
 // ARCH-3: no presentation-host type is imported here. The host consumes
 // `TargetOutcome`; this module never names the host. Wiring into `GuideOverlayView`
-// is package W2a and is deliberately absent from this change.
+// is wired into the iOS host through the same blind-consumption surface.
 
 import CoreGraphics
 
@@ -48,12 +48,22 @@ internal struct GuideTargetStep: Sendable {
     }
 }
 
+internal struct RegisteredAnchorMeasurement: Equatable, Sendable {
+    internal let rect: CGRect
+    internal let cornerRadius: CGFloat
+
+    internal init(rect: CGRect, cornerRadius: CGFloat) {
+        self.rect = rect
+        self.cornerRadius = cornerRadius
+    }
+}
+
 /// The seam onto the existing anchor registry. Injected as a value so the adapter
-/// is testable with no host and no registry.
+/// is testable with no host and no registry. The host never reads this seam.
 @MainActor
 internal protocol RegisteredAnchorSource {
     /// `nil` when the anchor has not been measured yet.
-    func rect(forAnchorKey anchorKey: String) -> CGRect?
+    func target(forAnchorKey anchorKey: String) -> RegisteredAnchorMeasurement?
 }
 
 @MainActor
@@ -69,8 +79,8 @@ internal struct GuideTargetAdapter {
     internal func resolveTarget(_ step: GuideTargetStep) -> TargetOutcome {
         switch step.spec {
         case let .registeredAnchor(anchorKey):
-            guard let rect = anchorSource.rect(forAnchorKey: anchorKey) else { return .notReady }
-            return .ready(rect: rect, cornerRadius: step.cornerRadius)
+            guard let measurement = anchorSource.target(forAnchorKey: anchorKey) else { return .notReady }
+            return .ready(rect: measurement.rect, cornerRadius: measurement.cornerRadius)
 
         case let .anchorless(target):
             switch anchorlessRuntime.resolve(target: target) {

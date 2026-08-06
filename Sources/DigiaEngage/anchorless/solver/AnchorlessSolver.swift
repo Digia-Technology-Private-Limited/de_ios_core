@@ -166,7 +166,9 @@ internal enum AnchorlessSolver {
         else {
             return reject(.invalidModel, variantId: variantId, pageKey: pageKey)
         }
-        let cropPresent = variant["crop"] != nil
+        // `null` is still a physically present field. Element mode forbids the
+        // field itself, not merely a usable crop value.
+        let cropPresent = variant.hasMember("crop")
         switch mode {
         case .image:
             guard cropPresent else { return reject(.invalidModel, variantId: variantId, pageKey: pageKey) }
