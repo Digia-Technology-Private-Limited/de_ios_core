@@ -1,5 +1,21 @@
 import Foundation
 import Combine
+import UIKit
+import CryptoKit
+
+private extension CaptureRefusal {
+    var userMessage: String {
+        switch self {
+        case .notDebugBuild: return "debug capture is disabled for this build"
+        case .syncDisabled: return "Sync is disabled"
+        case .captureModeDisabled: return "Anchorless Capture is off"
+        case .pageIdentityMissing: return "current screen is not set"
+        case .offline: return "the device is offline"
+        case .explicitActionRequired: return "tap the camera button to capture"
+        case .alreadyInFlight: return "another capture is still uploading"
+        }
+    }
+}
 
 @MainActor
 final class SDKInstance: ObservableObject, DigiaCEPDelegate {
@@ -13,6 +29,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     @Published private(set) var config: DigiaConfig?
     @Published private(set) var sdkState: SDKState = .notInitialized
     @Published private(set) var isHostMounted = false
+    @Published private(set) var captureModeEnabled = UserDefaults.standard.bool(forKey: "digia_anchorless_capture_enabled")
+    @Published private(set) var capturedPages: [CaptureDebugPage] = []
+    @Published private(set) var captureStatusMessage: String?
 
     private var activePlugin: DigiaCEPPlugin?
     private let hostActionExecutor = HostActionExecutor()
@@ -240,6 +259,127 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         if screenUpdateRevision == revision {
             activePlugin?.forwardScreen(screenName)
         }
+    }
+
+    func setCaptureModeEnabled(_ enabled: Bool) {
+        guard isDebugBuild || !enabled else { return }
+        captureModeEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "digia_anchorless_capture_enabled")
+        if enabled { debugOverlayController.setVisible(true) }
+        publishCaptureStatus(
+            enabled
+                ? "Anchorless Capture on — camera button added"
+                : "Anchorless Capture off — camera button removed"
+        )
+    }
+
+    /// One explicit camera action. The PNG and envelope are local variables only and are
+    /// released after the uploader returns; nothing is cached or retried.
+    func captureCurrentPage() {
+        guard let config, let pageKey = _currentScreen,
+              !pageKey.isEmpty,
+              let window = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .flatMap(\.windows)
+                .first(where: { $0.isKeyWindow })
+        else {
+            let reason = config == nil
+                ? "SDK is not initialized"
+                : _currentScreen == nil
+                    ? "current screen is not set"
+                    : "no active app window"
+            publishCaptureStatus("Capture unavailable — \(reason)")
+            DigiaLog.warning("[Digia] Anchorless Capture unavailable — \(reason).")
+            return
+        }
+
+        publishCaptureStatus("Capturing current screen…")
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let wasVisible = debugOverlayController.isVisible
+            debugOverlayController.setVisible(false)
+            defer { if wasVisible { debugOverlayController.setVisible(true) } }
+            try? await Task.sleep(nanoseconds: 25_000_000)
+
+            guard let source = UIKitCaptureFacts.sourceFrame(window: window),
+                  let png = Self.renderPNG(window: window)
+            else {
+                publishCaptureStatus("Capture unavailable — screen could not be rendered")
+                return
+            }
+
+            let density = window.screen.scale
+            let walk = CaptureEvidenceWalker.walk(
+                root: UIKitCaptureNode(view: window, rootView: window, density: density),
+                windowBoundsPx: source.windowBoundsPx
+            )
+            let digest = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
+            let envelope = PageCaptureEnvelopeV1(
+                pageKey: pageKey,
+                capturedAt: ISO8601DateFormatter().string(from: Date()),
+                devicePlatform: .ios,
+                binding: config.wrapperBinding == "react_native" ? .reactNative : .native,
+                screenshot: CaptureScreenshotFacts(
+                    widthPx: source.windowBoundsPx.width,
+                    heightPx: source.windowBoundsPx.height,
+                    byteLength: png.count,
+                    sha256: digest
+                ),
+                source: source,
+                app: UIKitCaptureFacts.appFacts(),
+                runtime: UIKitCaptureFacts.runtimeFacts(
+                    sdkVersion: "ios-core",
+                    wrapperVersion: config.wrapperVersion
+                ),
+                nodes: walk.nodes,
+                integrity: walk.integrity
+            )
+
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            let result = await CaptureSession(
+                gates: CaptureGateState(
+                    isDebugBuild: isDebugBuild,
+                    syncEnabled: componentRegistry.isEnabled,
+                    captureModeEnabled: captureModeEnabled,
+                    pageKey: pageKey,
+                    connectivityAvailable: true,
+                    explicitAction: true
+                ),
+                uploader: URLSessionCaptureUploader(apiKey: config.apiKey)
+            ).capture(envelope: envelope, png: png)
+
+            switch result {
+            case let .uploaded(upload):
+                switch upload {
+                case let .accepted(captureId), let .duplicate(captureId):
+                    publishCaptureStatus("Captured \(pageKey)")
+                    capturedPages = (capturedPages + [CaptureDebugPage(
+                        pageKey: pageKey,
+                        captureId: captureId,
+                        capturedAt: envelope.capturedAt
+                    )]).reduce(into: []) { pages, page in
+                        if !pages.contains(where: { $0.pageKey == page.pageKey }) { pages.append(page) }
+                    }
+                case .rejected:
+                    publishCaptureStatus("Capture failed — the backend rejected the screenshot")
+                }
+            case let .refused(reason):
+                publishCaptureStatus("Capture unavailable — \(reason.userMessage)")
+            }
+        }
+    }
+
+    func clearCaptureStatus() {
+        captureStatusMessage = nil
+    }
+
+    private func publishCaptureStatus(_ message: String) {
+        captureStatusMessage = message
+    }
+
+    private static func renderPNG(window: UIWindow) -> Data? {
+        let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+        return renderer.pngData { context in window.layer.render(in: context.cgContext) }
     }
 
     /// Revalidates active overlays on every host screen update. Inline campaigns are
@@ -1213,6 +1353,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         liveTestCampaigns.removeAll()
     }
 
+}
+
+struct CaptureDebugPage: Identifiable {
+    let pageKey: String
+    let captureId: String
+    let capturedAt: String
+    var id: String { pageKey }
 }
 
 // MARK: - Survey config metrics (Engage matrix props)

@@ -18,8 +18,7 @@ internal final class URLSessionCaptureUploader: CaptureUploader {
 
     internal func upload(
         envelope: PageCaptureEnvelopeV1,
-        png: Data,
-        pairingToken: String
+        png: Data
     ) async -> CaptureUploadResult {
         guard png.count <= CaptureLimits.maxPngBytes,
               let captureJSON = CaptureEnvelopeSerializer.jsonBytes(envelope),
@@ -36,7 +35,6 @@ internal final class URLSessionCaptureUploader: CaptureUploader {
         request.httpMethod = "POST"
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         request.setValue(apiKey, forHTTPHeaderField: "x-digia-project-id")
-        request.setValue(pairingToken, forHTTPHeaderField: "x-digia-capture-pairing")
 
         var body = Data()
         appendPart(name: "capture", contentType: "application/json", data: captureJSON, boundary: boundary, to: &body)

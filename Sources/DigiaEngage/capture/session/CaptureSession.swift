@@ -10,7 +10,6 @@ internal enum CaptureRefusal: Equatable, Sendable {
     case notDebugBuild
     case syncDisabled
     case captureModeDisabled
-    case pairingMissing
     case pageIdentityMissing
     case offline
     case explicitActionRequired
@@ -38,8 +37,7 @@ internal enum CaptureUploadResult: Equatable, Sendable {
 internal protocol CaptureUploader: AnyObject {
     func upload(
         envelope: PageCaptureEnvelopeV1,
-        png: Data,
-        pairingToken: String
+        png: Data
     ) async -> CaptureUploadResult
 }
 
@@ -47,7 +45,6 @@ internal struct CaptureGateState: Equatable, Sendable {
     internal let isDebugBuild: Bool
     internal let syncEnabled: Bool
     internal let captureModeEnabled: Bool
-    internal let pairingToken: String?
     internal let pageKey: String?
     internal let connectivityAvailable: Bool
     internal let explicitAction: Bool
@@ -56,7 +53,6 @@ internal struct CaptureGateState: Equatable, Sendable {
         isDebugBuild: Bool = true,
         syncEnabled: Bool = true,
         captureModeEnabled: Bool = true,
-        pairingToken: String? = "paired",
         pageKey: String? = "home",
         connectivityAvailable: Bool = true,
         explicitAction: Bool = true
@@ -64,7 +60,6 @@ internal struct CaptureGateState: Equatable, Sendable {
         self.isDebugBuild = isDebugBuild
         self.syncEnabled = syncEnabled
         self.captureModeEnabled = captureModeEnabled
-        self.pairingToken = pairingToken
         self.pageKey = pageKey
         self.connectivityAvailable = connectivityAvailable
         self.explicitAction = explicitAction
@@ -92,11 +87,7 @@ internal final class CaptureSession {
         png: Data
     ) async -> CaptureSessionResult {
         guard gates.isDebugBuild else { return .refused(.notDebugBuild) }
-        guard gates.syncEnabled else { return .refused(.syncDisabled) }
         guard gates.captureModeEnabled else { return .refused(.captureModeDisabled) }
-        guard let pairingToken = gates.pairingToken, !pairingToken.isEmpty else {
-            return .refused(.pairingMissing)
-        }
         guard let pageKey = gates.pageKey, !pageKey.isEmpty, pageKey == envelope.pageKey else {
             return .refused(.pageIdentityMissing)
         }
@@ -108,8 +99,7 @@ internal final class CaptureSession {
         defer { isCaptureInFlight = false }
         return .uploaded(await uploader.upload(
             envelope: envelope,
-            png: png,
-            pairingToken: pairingToken
+            png: png
         ))
     }
 }

@@ -34,7 +34,10 @@ private struct DraggableBadge: View {
         GeometryReader { proxy in
             let current = offset ?? CGSize(width: Self.margin, height: proxy.safeAreaInsets.top + Self.defaultTopClearance)
 
-            BadgeContent()
+            BadgeContent(
+                onCapture: { SDKInstance.shared.captureCurrentPage() },
+                onSettings: { presentDebugSettings() }
+            )
                 .background(
                     GeometryReader { inner -> Color in
                         // .global matches the coordinate space a host's hitTest(_:with:)
@@ -74,9 +77,6 @@ private struct DraggableBadge: View {
                             }
                         }
                 )
-                .onTapGesture {
-                    presentDebugSettings()
-                }
                 .onDisappear {
                     SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = nil
                 }
@@ -91,8 +91,12 @@ private struct DraggableBadge: View {
 
 @MainActor
 private struct BadgeContent: View {
+    let onCapture: () -> Void
+    let onSettings: () -> Void
+    @ObservedObject private var sdk = SDKInstance.shared
     @ObservedObject private var liveTest = SDKInstance.shared.liveTestServiceSnapshot()
     @State private var pulse = false
+    @State private var showCaptureStatus = false
 
     private var dotColor: Color? {
         switch liveTest.connectionState {
@@ -110,9 +114,22 @@ private struct BadgeContent: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text("Digia")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white)
+            if sdk.captureModeEnabled {
+                Button(action: onCapture) {
+                    Image(systemName: "camera")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                }
+                Divider()
+                    .overlay(Color.white.opacity(0.3))
+                    .frame(height: 18)
+            }
+            Button(action: onSettings) {
+                Text("Digia")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+            }
             if let dotColor {
                 Circle()
                     .fill(dotColor)
@@ -124,6 +141,7 @@ private struct BadgeContent: View {
         .padding(.vertical, 6)
         .background(Color.black.opacity(0.87))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .buttonStyle(.plain)
         // Started once, forever — never stopped/restarted per state (that's what
         // caused a real bug: a repeatForever animation doesn't reliably cancel on
         // a later plain reassignment, so the dot kept pulsing green after
@@ -133,6 +151,14 @@ private struct BadgeContent: View {
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                 pulse = true
             }
+        }
+        .onChange(of: sdk.captureStatusMessage) { _, message in
+            showCaptureStatus = message != nil
+        }
+        .alert("Anchorless Capture", isPresented: $showCaptureStatus) {
+            Button("OK") { sdk.clearCaptureStatus() }
+        } message: {
+            Text(sdk.captureStatusMessage ?? "")
         }
     }
 }

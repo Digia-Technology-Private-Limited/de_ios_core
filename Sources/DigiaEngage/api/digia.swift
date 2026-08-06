@@ -23,8 +23,12 @@ public enum Digia {
         } else {
             afterScheme = raw[...]
         }
-        let trimmed = afterScheme.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return trimmed == debugSettingsDeepLinkPath || trimmed.hasSuffix("/\(debugSettingsDeepLinkPath)")
+        let trimmed = afterScheme
+            .split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+            .first
+            .map(String.init) ?? ""
+        let normalized = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return normalized == debugSettingsDeepLinkPath || normalized.hasSuffix("/\(debugSettingsDeepLinkPath)")
     }
 
     /// Presents the SDK's debug-only settings screen. Trigger from the host's

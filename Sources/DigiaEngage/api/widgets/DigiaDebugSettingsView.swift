@@ -11,8 +11,10 @@ public struct DigiaDebugSettingsView: View {
     @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()
     @ObservedObject private var overlay = SDKInstance.shared.debugOverlayControllerSnapshot()
     @ObservedObject private var liveTest = SDKInstance.shared.liveTestServiceSnapshot()
+    @ObservedObject private var instance = SDKInstance.shared
     @State private var showRestartHint = false
     @State private var showSession = false
+    @State private var showCapture = false
 
     public init() {}
 
@@ -43,6 +45,22 @@ public struct DigiaDebugSettingsView: View {
                         NavigationLink(
                             destination: DigiaRecordedSessionScreen(),
                             isActive: $showSession
+                        ) { EmptyView() }
+                        .hidden()
+                    )
+                    SettingsToggleRow(
+                        title: "Anchorless Capture",
+                        subtitle: "Capture one screen at a time for Spotlight authoring.",
+                        onTap: { showCapture = true },
+                        isOn: Binding(
+                            get: { instance.captureModeEnabled },
+                            set: { instance.setCaptureModeEnabled($0) }
+                        )
+                    )
+                    .background(
+                        NavigationLink(
+                            destination: DigiaCaptureSessionScreen(),
+                            isActive: $showCapture
                         ) { EmptyView() }
                         .hidden()
                     )
@@ -82,6 +100,47 @@ public struct DigiaDebugSettingsView: View {
         if value && !wasEnabled {
             showRestartHint = true
         }
+    }
+}
+
+@MainActor
+private struct DigiaCaptureSessionScreen: View {
+    @ObservedObject private var instance = SDKInstance.shared
+
+    var body: some View {
+        List {
+            SettingsToggleRow(
+                title: "Capture current screen",
+                        subtitle: "Turn this on, then tap the camera icon on the Digia bubble.",
+                isOn: Binding(
+                    get: { instance.captureModeEnabled },
+                    set: { instance.setCaptureModeEnabled($0) }
+                )
+            )
+            if instance.capturedPages.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("No screens captured yet.")
+                        .font(.headline)
+                    Text("Open the screen you want to author, then tap the capture button on the floating bubble.")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 24)
+            } else {
+                Section("Captured screens") {
+                    ForEach(instance.capturedPages) { page in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(page.pageKey)
+                            Text("capture \(page.captureId) · \(page.capturedAt)")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+        .navigationTitle("Anchorless Capture")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
