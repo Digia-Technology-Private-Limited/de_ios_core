@@ -60,6 +60,18 @@ internal struct UIKitCaptureNode: CaptureNodeSource {
         }
     }
 
+    internal var nodeType: CaptureNodeType {
+        if view is UIScrollView { return .container }
+        if view is UIControl || (view as? UITextView)?.isEditable == true ||
+            !(view.gestureRecognizers?.isEmpty ?? true) {
+            return .interactive
+        }
+        if view is UIImageView { return .image }
+        if view is UILabel || view is UITextView { return .text }
+        if view is UIScrollView || !view.subviews.isEmpty { return .container }
+        return .unknown
+    }
+
     internal var sizePx: CaptureSize {
         CaptureSize(
             width: Int((view.bounds.width * density).rounded()),
@@ -194,6 +206,7 @@ internal enum UIKitCaptureFacts {
         // §2.3 — the Beta is portrait phones only, and `CaptureOrientation` has no
         // landscape member, so a landscape window produces no frame at all.
         guard bounds.height >= bounds.width else { return nil }
+        guard window.effectiveUserInterfaceLayoutDirection == .leftToRight else { return nil }
 
         let insets = window.safeAreaInsets
         let windowBoundsPx = CaptureEdgeRect(
@@ -222,9 +235,7 @@ internal enum UIKitCaptureFacts {
             appContentBoundsPx: appContentBoundsPx,
             insetsPx: insetsPx,
             orientation: .portrait,
-            layoutDirection: window.effectiveUserInterfaceLayoutDirection == .rightToLeft
-                ? .rtl
-                : .ltr
+            layoutDirection: .ltr
         )
     }
 

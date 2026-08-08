@@ -18,156 +18,72 @@ internal enum CaptureEnvelopeSerializer {
     /// §2.1 — the `capture` JSON part of the multipart upload.
     internal static func jsonObject(_ envelope: PageCaptureEnvelopeV1) -> [String: Any] {
         [
-            "captureSchemaVersion": PageCaptureEnvelopeV1.captureSchemaVersion,
-            "allowlistVersion": PageCaptureEnvelopeV1.allowlistVersion,
+            "schemaVersion": PageCaptureEnvelopeV1.captureSchemaVersion,
             "pageKey": envelope.pageKey,
-            "capturedAt": envelope.capturedAt,
-            "devicePlatform": envelope.devicePlatform.rawValue,
-            "binding": envelope.binding.rawValue,
-            "screenshot": screenshot(envelope.screenshot),
-            "source": source(envelope.source),
-            "app": app(envelope.app),
-            "runtime": runtime(envelope.runtime),
-            "nodes": envelope.nodes.map(node),
-            "integrity": integrity(envelope.integrity),
+            "platform": envelope.devicePlatform.rawValue,
+            "unit": "px",
+            "pixelScale": envelope.source.density,
+            "orientation": envelope.source.orientation.rawValue,
+            "layoutDirection": envelope.source.layoutDirection.rawValue,
+            "window": rect(envelope.source.windowBoundsPx),
+            "appContent": rect(envelope.source.appContentBoundsPx),
+            "nodes": minimalNodes(envelope.nodes),
         ]
     }
 
     /// Deterministic bytes: sorted keys, no escaped slashes. Two runs of the same
     /// capture produce the same bytes, so a digest over them means something.
     internal static func jsonBytes(_ envelope: PageCaptureEnvelopeV1) -> Data? {
-        try? JSONSerialization.data(
+        guard !envelope.integrity.truncated else { return nil }
+        return try? JSONSerialization.data(
             withJSONObject: jsonObject(envelope),
             options: [.sortedKeys, .withoutEscapingSlashes]
         )
     }
 
-    // MARK: - Objects
+    // MARK: - Minimal graph wire shape
 
-    private static func screenshot(_ facts: CaptureScreenshotFacts) -> [String: Any] {
-        // No base-64 member, no source dimensions, no quality, no scale, no URL —
-        // §2.2 and §8. The PNG is the multipart file part and is never inlined.
-        [
-            "mimeType": CaptureScreenshotFacts.mimeType,
-            "widthPx": facts.widthPx,
-            "heightPx": facts.heightPx,
-            "byteLength": facts.byteLength,
-            "sha256": facts.sha256,
-        ]
+    private static func minimalNodes(_ allNodes: [CaptureStructuralNode]) -> [[String: Any]] {
+        let included = allNodes.filter(isWireVisible)
+        let includedIDs = Set(included.map(\.nodeId))
+        let byID = Dictionary(uniqueKeysWithValues: allNodes.map { ($0.nodeId, $0) })
+        return included.map { capturedNode in
+            var parentID = capturedNode.parentId
+            while let candidate = parentID, !includedIDs.contains(candidate) {
+                parentID = byID[candidate]?.parentId
+            }
+            return node(capturedNode, parentID: parentID)
+        }
     }
 
-    private static func source(_ frame: CaptureSourceFrame) -> [String: Any] {
-        [
-            "density": frame.density,
-            "windowBoundsPx": edgeRect(frame.windowBoundsPx),
-            "appContentBoundsPx": edgeRect(frame.appContentBoundsPx),
-            "insetsPx": [
-                "left": frame.insetsPx.left,
-                "top": frame.insetsPx.top,
-                "right": frame.insetsPx.right,
-                "bottom": frame.insetsPx.bottom,
-            ],
-            "orientation": frame.orientation.rawValue,
-            "layoutDirection": frame.layoutDirection.rawValue,
-        ]
-    }
-
-    private static func app(_ facts: CaptureAppFacts) -> [String: Any] {
-        [
-            "bundleIdentifier": facts.bundleIdentifier,
-            "versionName": facts.versionName,
-            "buildNumber": facts.buildNumber,
-        ]
-    }
-
-    private static func runtime(_ facts: CaptureRuntimeFacts) -> [String: Any] {
-        [
-            "osVersion": facts.osVersion,
-            "locale": facts.locale,
-            "fontScale": facts.fontScale,
-            "sdkVersion": facts.sdkVersion,
-            "wrapperVersion": facts.wrapperVersion ?? NSNull(),
-            "formFactor": facts.formFactor.rawValue,
-        ]
-    }
-
-    private static func integrity(_ facts: CaptureIntegrityFacts) -> [String: Any] {
-        [
-            "nodeCount": facts.nodeCount,
-            "maxDepth": facts.maxDepth,
-            "truncated": facts.truncated,
-            "truncationReason": facts.truncationReason?.rawValue ?? NSNull(),
-        ]
+    private static func isWireVisible(_ node: CaptureStructuralNode) -> Bool {
+        node.valid && node.inheritedShown && node.effectiveAlpha > 0 && !node.rootBoundsPx.isEmpty &&
+            node.visibilityState != .fullyClipped && node.visibilityState != .offscreen
     }
 
     /// §2.6, in the group order the section lists.
-    private static func node(_ node: CaptureStructuralNode) -> [String: Any] {
-        [
-            // Topology
-            "nodeId": node.nodeId,
-            "parentId": node.parentId ?? NSNull(),
+    private static func node(_ node: CaptureStructuralNode, parentID: String?) -> [String: Any] {
+        var result: [String: Any] = [
+            "id": node.nodeId,
+            "parentId": parentID ?? NSNull(),
             "childIndex": node.childIndex,
-            "paintOrder": node.paintOrder,
-            // Geometry
-            "localBoundsPx": edgeRect(node.localBoundsPx),
-            "transformToRoot": affine(node.transformToRoot),
-            "rootBoundsPx": edgeRect(node.rootBoundsPx),
-            "visibleBoundsPx": node.visibleBoundsPx.map(edgeRect) ?? NSNull(),
-            "clipContainerId": node.clipContainerId ?? NSNull(),
-            "clipBoundsPx": node.clipBoundsPx.map(edgeRect) ?? NSNull(),
-            // Visibility
-            "inheritedShown": node.inheritedShown,
-            "effectiveAlpha": node.effectiveAlpha,
-            "visibleFraction": node.visibleFraction,
-            "visibilityState": node.visibilityState.rawValue,
-            // Containers
-            "containerTraits": node.containerTraits.map(\.wireName),
-            "scrollAxes": node.scrollAxes.map(\.rawValue),
-            "viewportBoundsPx": node.viewportBoundsPx.map(edgeRect) ?? NSNull(),
-            "scrollOffsetPx": node.scrollOffsetPx.map(point) ?? NSNull(),
-            "contentExtentPx": node.contentExtentPx.map(size) ?? NSNull(),
-            "scrollParentId": node.scrollParentId ?? NSNull(),
-            "virtualized": node.virtualized,
-            // Meaning
-            "role": node.role?.wireName ?? NSNull(),
-            "supportedActions": node.supportedActions.map(\.wireName),
-            // Content-free state
-            "enabled": node.enabled,
-            "selected": node.selected,
-            "checked": node.checked ?? NSNull(),
-            "expanded": node.expanded ?? NSNull(),
-            "focused": node.focused,
-            "editable": node.editable,
-            "hasText": node.hasText,
-            "renderedLineCount": node.renderedLineCount,
-            "hasAccessibilityLabel": node.hasAccessibilityLabel,
-            // Integrity
-            "valid": node.valid,
+            "rect": rect(node.rootBoundsPx),
+            "viewportVisibility": node.visibilityState == .unclipped
+                ? "fullyVisible"
+                : "partiallyVisible",
+            "nodeType": node.nodeType.rawValue,
         ]
+        let axes = Set(node.scrollAxes)
+        if axes == Set([CaptureScrollAxis.horizontal]) { result["scrollAxis"] = "horizontal" }
+        if axes == Set([CaptureScrollAxis.vertical]) { result["scrollAxis"] = "vertical" }
+        if axes == Set([CaptureScrollAxis.horizontal, .vertical]) { result["scrollAxis"] = "both" }
+        return result
     }
 
     // MARK: - Wire shapes
 
-    private static func edgeRect(_ rect: CaptureEdgeRect) -> [String: Any] {
-        ["left": rect.left, "top": rect.top, "right": rect.right, "bottom": rect.bottom]
+    private static func rect(_ rect: CaptureEdgeRect) -> [String: Any] {
+        ["x": rect.left, "y": rect.top, "w": rect.width, "h": rect.height]
     }
 
-    private static func point(_ point: CapturePoint) -> [String: Any] {
-        ["x": point.x, "y": point.y]
-    }
-
-    private static func size(_ size: CaptureSize) -> [String: Any] {
-        ["width": size.width, "height": size.height]
-    }
-
-    private static func affine(_ transform: CaptureAffine) -> [String: Any] {
-        [
-            "a": transform.a,
-            "b": transform.b,
-            "c": transform.c,
-            "d": transform.d,
-            "tx": transform.tx,
-            "ty": transform.ty,
-        ]
-    }
 }

@@ -45,11 +45,6 @@ internal enum AnchorlessTargetFrame: String, Equatable, Sendable, CaseIterable {
     case referenceContainer
 }
 
-internal enum AnchorlessLayoutDirection: String, Equatable, Sendable, CaseIterable {
-    case ltr
-    case rtl
-}
-
 // MARK: - Geometry values (§2)
 
 /// A floating-point rectangle in logical units. Used for frames and for the
@@ -71,7 +66,7 @@ internal struct FrameRect: Equatable, Sendable {
     internal var height: Double { bottom - top }
 }
 
-/// The whole of the device state the solver is allowed to see: three fields.
+/// The whole of the device state the solver is allowed to see: two frames.
 ///
 /// `orientation`, `formFactor`, `pageKey`, and `logicalUnit` were deliberately
 /// removed (§2). The prohibition on runtime semantic lookup is therefore
@@ -82,16 +77,12 @@ internal struct RuntimeGeometrySnapshot: Equatable, Sendable {
     /// `window` minus safe-area insets, ignoring the IME, so a target never moves
     /// because a keyboard opened.
     internal let appContent: FrameRect
-    internal let layoutDirection: AnchorlessLayoutDirection
-
     internal init(
         window: FrameRect,
-        appContent: FrameRect,
-        layoutDirection: AnchorlessLayoutDirection
+        appContent: FrameRect
     ) {
         self.window = window
         self.appContent = appContent
-        self.layoutDirection = layoutDirection
     }
 }
 

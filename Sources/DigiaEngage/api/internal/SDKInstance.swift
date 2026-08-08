@@ -301,18 +301,35 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             defer { if wasVisible { debugOverlayController.setVisible(true) } }
             try? await Task.sleep(nanoseconds: 25_000_000)
 
-            guard let source = UIKitCaptureFacts.sourceFrame(window: window),
-                  let png = Self.renderPNG(window: window)
-            else {
+            guard let source = UIKitCaptureFacts.sourceFrame(window: window) else {
                 publishCaptureStatus("Capture unavailable — screen could not be rendered")
                 return
             }
 
             let density = window.screen.scale
-            let walk = CaptureEvidenceWalker.walk(
-                root: UIKitCaptureNode(view: window, rootView: window, density: density),
-                windowBoundsPx: source.windowBoundsPx
-            )
+            var stableWalk: CaptureWalkResult?
+            var stablePNG: Data?
+            for attempt in 0..<3 {
+                let before = CaptureEvidenceWalker.walk(
+                    root: UIKitCaptureNode(view: window, rootView: window, density: density),
+                    windowBoundsPx: source.windowBoundsPx
+                )
+                guard let candidatePNG = Self.renderPNG(window: window) else { break }
+                let after = CaptureEvidenceWalker.walk(
+                    root: UIKitCaptureNode(view: window, rootView: window, density: density),
+                    windowBoundsPx: source.windowBoundsPx
+                )
+                if CaptureSnapshotComparator.matches(before, after) {
+                    stableWalk = after
+                    stablePNG = candidatePNG
+                    break
+                }
+                if attempt < 2 { try? await Task.sleep(nanoseconds: 16_000_000) }
+            }
+            guard let walk = stableWalk, let png = stablePNG else {
+                publishCaptureStatus("Capture unavailable — layout did not settle")
+                return
+            }
             let digest = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
             let envelope = PageCaptureEnvelopeV1(
                 pageKey: pageKey,
@@ -627,8 +644,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             context.onInlineRouted(payload: payload)
             return true
-        case .guide:
-            if let renderViaJs = onGuideRenderRequest {
+        case .guide(let guideConfig):
+            // React Native normally renders guides in JavaScript. Anchorless geometry is owned by
+            // the native cores, however, so an RN callback must never intercept a guide containing
+            // an anchorless step. Mixed guides also stay native to keep one presentation owner.
+            let containsAnchorlessStep = guideConfig.steps.contains { step in
+                if case .anchorless = step.target { return true }
+                return false
+            }
+            if !containsAnchorlessStep, let renderViaJs = onGuideRenderRequest {
                 // RN: native owns capping, JS owns rendering. Gate here; the
                 // counter is bumped later on the guide's "Digia Experience
                 // Viewed" event (see captureAnalyticsEvent).

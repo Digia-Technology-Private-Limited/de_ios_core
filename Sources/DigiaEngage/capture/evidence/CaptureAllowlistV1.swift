@@ -151,6 +151,15 @@ internal enum CaptureScrollAxis: String, Equatable, Sendable, CaseIterable {
     case vertical
 }
 
+/// Coarse, content-free authoring intent category exported by capture schema v1.
+internal enum CaptureNodeType: String, Equatable, Sendable, CaseIterable {
+    case interactive
+    case text
+    case image
+    case container
+    case unknown
+}
+
 internal enum CaptureTruncationReason: String, Equatable, Sendable, CaseIterable {
     case nodeLimit
     case depthLimit
@@ -327,6 +336,7 @@ internal struct CaptureStructuralNode: Equatable, Sendable {
 
     // Integrity
     internal let valid: Bool
+    internal let nodeType: CaptureNodeType
 }
 
 /// §2.7. `truncated: false` with a limit hit is a rejection, not a silent success,
@@ -354,8 +364,7 @@ internal struct CaptureIntegrityFacts: Equatable, Sendable {
 internal struct PageCaptureEnvelopeV1: Equatable, Sendable {
     /// §2.1 literals. `1` is rejected by the backend; there is no POC compatibility
     /// and no property that could request one.
-    internal static let captureSchemaVersion = 2
-    internal static let allowlistVersion = 1
+    internal static let captureSchemaVersion = 1
 
     internal let pageKey: String
     internal let capturedAt: String

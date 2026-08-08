@@ -31,7 +31,9 @@ internal struct UIWindowSnapshotProvider: SnapshotProvider {
     }
 
     internal func currentSnapshot() -> RuntimeGeometrySnapshot? {
-        guard let window = windowSource() else { return nil }
+        guard let window = windowSource(),
+              window.effectiveUserInterfaceLayoutDirection == .leftToRight
+        else { return nil }
 
         let bounds = window.bounds
         let windowFrame = FrameRect(
@@ -53,13 +55,9 @@ internal struct UIWindowSnapshotProvider: SnapshotProvider {
             bottom: Double(bounds.maxY - insets.bottom)
         )
 
-        let layoutDirection: AnchorlessLayoutDirection =
-            window.effectiveUserInterfaceLayoutDirection == .rightToLeft ? .rtl : .ltr
-
         return RuntimeGeometrySnapshot(
             window: windowFrame,
-            appContent: appContent,
-            layoutDirection: layoutDirection
+            appContent: appContent
         )
     }
 

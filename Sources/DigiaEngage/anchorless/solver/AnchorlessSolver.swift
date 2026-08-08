@@ -312,8 +312,7 @@ internal enum AnchorlessSolver {
             let horizontalFrame = rootFrame(container.horizontalFrame, in: snapshot)
             let horizontalSpan = mapHorizontal(
                 span: horizontalSpan(container.horizontalRule, extent: horizontalFrame.width),
-                frame: horizontalFrame,
-                layoutDirection: snapshot.layoutDirection
+                frame: horizontalFrame
             )
             let verticalFrame = rootFrame(container.verticalFrame, in: snapshot)
             let verticalOffsets = verticalSpan(container.verticalRule, extent: verticalFrame.height)
@@ -347,8 +346,7 @@ internal enum AnchorlessSolver {
         )
         let mapped = mapHorizontal(
             span: horizontalSpan(prepared.horizontalRule, extent: horizontalBounds.far - horizontalBounds.near),
-            frame: horizontalFrameRect,
-            layoutDirection: snapshot.layoutDirection
+            frame: horizontalFrameRect
         )
         let verticalOffsets = verticalSpan(
             prepared.verticalRule, extent: verticalBounds.far - verticalBounds.near
@@ -443,25 +441,12 @@ extension AnchorlessSolver {
         }
     }
 
-    /// Maps a `u`-space span into frame coordinates (§4.1).
-    ///
-    /// Under `rtl` the near-in-`u` edge becomes the larger `x`, so the mapped pair
-    /// is swapped back into `left <= right` order. Mirroring happens here, inside
-    /// the solver and **before** containment validation, because a mirrored
-    /// rectangle must still be proven inside its own frame.
+    /// Maps an LTR horizontal span into frame coordinates. RTL is unsupported in v1.
     fileprivate static func mapHorizontal(
         span: (near: Double, far: Double),
-        frame: FrameRect,
-        layoutDirection: AnchorlessLayoutDirection
+        frame: FrameRect
     ) -> (near: Double, far: Double) {
-        switch layoutDirection {
-        case .ltr:
-            return (frame.left + span.near, frame.left + span.far)
-        case .rtl:
-            let a = frame.right - span.near
-            let b = frame.right - span.far
-            return (min(a, b), max(a, b))
-        }
+        (frame.left + span.near, frame.left + span.far)
     }
 
     fileprivate static func rootFrame(

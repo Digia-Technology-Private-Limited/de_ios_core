@@ -170,7 +170,8 @@ internal enum CaptureEvidenceWalker {
             contentExtentPx: node.scroll?.contentExtentPx,
             scrollParentId: scrollParentId,
             virtualized: node.virtualized,
-            state: node.state
+            state: node.state,
+            nodeType: node.nodeType
         ))
         walkState.deepestEmitted = max(walkState.deepestEmitted, depth)
 
@@ -264,6 +265,7 @@ internal enum CaptureEvidenceWalker {
         let scrollParentId: String?
         let virtualized: Bool
         let state: CaptureNodeState
+        let nodeType: CaptureNodeType
 
         func finished(paintOrder: Double) -> CaptureStructuralNode {
             CaptureStructuralNode(
@@ -305,7 +307,8 @@ internal enum CaptureEvidenceWalker {
                 // node that reached this point was walked without incident, so it
                 // is reported valid; inventing a falsifying condition would be a
                 // product decision this package is not entitled to make.
-                valid: true
+                valid: true,
+                nodeType: nodeType
             )
         }
     }

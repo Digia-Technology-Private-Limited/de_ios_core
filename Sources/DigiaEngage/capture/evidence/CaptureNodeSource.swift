@@ -88,6 +88,7 @@ internal protocol CaptureNodeSource {
     var virtualized: Bool { get }
 
     var state: CaptureNodeState { get }
+    var nodeType: CaptureNodeType { get }
 
     /// A Digia Engage-owned view: the capture bubble, a guide overlay, a nudge.
     ///
@@ -95,4 +96,8 @@ internal protocol CaptureNodeSource {
     /// The walker drops the node **and its whole subtree**, so an overlay cannot
     /// contribute structure through a child either. Guarded by T-3.
     var isDigiaOwned: Bool { get }
+}
+
+internal extension CaptureNodeSource {
+    var nodeType: CaptureNodeType { .unknown }
 }
