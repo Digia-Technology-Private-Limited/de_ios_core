@@ -1,16 +1,3 @@
-// Module: anchorless/solver
-//
-// Strict parse, structural and numeric validation, RTL mirroring, Reference
-// Container re-resolution, rule arithmetic, single-pass rounding.
-// Native runtime contract §2, §3, §4, §5.
-//
-// The solver owns no platform type, no snapshot acquisition, no page identity, no
-// logging and no presentation. It imports nothing — not even Foundation — so that
-// ARCH-1 is true by construction rather than by review.
-//
-// **The solver never throws.** Both phases return a result value carrying either a
-// success or a failure code plus a content-free trace.
-
 // MARK: - Prepared target
 
 /// The opaque product of `prepare`.
@@ -374,15 +361,35 @@ internal enum AnchorlessSolver {
         guard rect.right > rect.left, rect.bottom > rect.top else {
             return fail(.nonPositiveRect, pre: pre, post: rect)
         }
-        let containedInOwnFrame = Double(rect.left) >= horizontalBounds.near
-            && Double(rect.right) <= horizontalBounds.far
-            && Double(rect.top) >= verticalBounds.near
-            && Double(rect.bottom) <= verticalBounds.far
-        let containedInWindow = Double(rect.left) >= snapshot.window.left
-            && Double(rect.right) <= snapshot.window.right
-            && Double(rect.top) >= snapshot.window.top
-            && Double(rect.bottom) <= snapshot.window.bottom
-        guard containedInOwnFrame, containedInWindow else {
+        let rawContainedInOwnFrame = pre.left >= horizontalBounds.near
+            && pre.right <= horizontalBounds.far
+            && pre.top >= verticalBounds.near
+            && pre.bottom <= verticalBounds.far
+        let rawContainedInWindow = pre.left >= snapshot.window.left
+            && pre.right <= snapshot.window.right
+            && pre.top >= snapshot.window.top
+            && pre.bottom <= snapshot.window.bottom
+        guard let roundedHorizontalNear = roundEdge(horizontalBounds.near),
+              let roundedHorizontalFar = roundEdge(horizontalBounds.far),
+              let roundedVerticalNear = roundEdge(verticalBounds.near),
+              let roundedVerticalFar = roundEdge(verticalBounds.far),
+              let roundedWindowLeft = roundEdge(snapshot.window.left),
+              let roundedWindowTop = roundEdge(snapshot.window.top),
+              let roundedWindowRight = roundEdge(snapshot.window.right),
+              let roundedWindowBottom = roundEdge(snapshot.window.bottom)
+        else {
+            return fail(.rectOutsideFrame, pre: pre, post: rect)
+        }
+        let containedInOwnFrame = rect.left >= roundedHorizontalNear
+            && rect.right <= roundedHorizontalFar
+            && rect.top >= roundedVerticalNear
+            && rect.bottom <= roundedVerticalFar
+        let containedInWindow = rect.left >= roundedWindowLeft
+            && rect.right <= roundedWindowRight
+            && rect.top >= roundedWindowTop
+            && rect.bottom <= roundedWindowBottom
+        guard rawContainedInOwnFrame, rawContainedInWindow,
+              containedInOwnFrame, containedInWindow else {
             return fail(.rectOutsideFrame, pre: pre, post: rect)
         }
 

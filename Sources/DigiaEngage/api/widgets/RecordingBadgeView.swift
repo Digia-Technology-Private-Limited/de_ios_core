@@ -29,6 +29,7 @@ private struct DraggableBadge: View {
     @State private var offset: CGSize?
     @State private var dragStartOffset: CGSize?
     @State private var badgeSize: CGSize = .zero
+    @State private var snappedEdge: BadgeEdge = .leading
 
     var body: some View {
         GeometryReader { proxy in
@@ -45,7 +46,24 @@ private struct DraggableBadge: View {
                         // with real touches.
                         let globalFrame = inner.frame(in: .global)
                         DispatchQueue.main.async {
-                            badgeSize = inner.size
+                            if badgeSize != inner.size {
+                                badgeSize = inner.size
+                                let latest = offset ?? current
+                                let pinnedX: CGFloat = snappedEdge == .leading
+                                    ? Self.margin
+                                    : proxy.size.width - inner.size.width - Self.margin
+                                let minY = proxy.safeAreaInsets.top
+                                let maxY = max(
+                                    minY,
+                                    proxy.size.height - proxy.safeAreaInsets.bottom - inner.size.height
+                                )
+                                // Capture Mode changes the bubble width. Keep the selected edge
+                                // invariant instead of keeping an obsolete absolute x coordinate.
+                                offset = CGSize(
+                                    width: min(max(0, pinnedX), max(0, proxy.size.width - inner.size.width)),
+                                    height: min(max(minY, latest.height), maxY)
+                                )
+                            }
                             SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = globalFrame
                         }
                         return Color.clear
@@ -69,7 +87,9 @@ private struct DraggableBadge: View {
                             dragStartOffset = nil
                             let latest = offset ?? current
                             let center = proxy.size.width / 2
-                            let snappedX: CGFloat = (latest.width + badgeSize.width / 2) < center
+                            let leading = (latest.width + badgeSize.width / 2) < center
+                            snappedEdge = leading ? .leading : .trailing
+                            let snappedX: CGFloat = leading
                                 ? Self.margin
                                 : proxy.size.width - badgeSize.width - Self.margin
                             withAnimation(.easeOut(duration: 0.22)) {
@@ -82,6 +102,8 @@ private struct DraggableBadge: View {
                 }
         }
     }
+
+    private enum BadgeEdge { case leading, trailing }
 
     private func presentDebugSettings() {
         guard let presenter = ViewControllerUtil.topViewController() else { return }
@@ -152,7 +174,7 @@ private struct BadgeContent: View {
                 pulse = true
             }
         }
-        .onChange(of: sdk.captureStatusMessage) { _, message in
+        .onChange(of: sdk.captureStatusMessage) { message in
             showCaptureStatus = message != nil
         }
         .alert("Anchorless Capture", isPresented: $showCaptureStatus) {

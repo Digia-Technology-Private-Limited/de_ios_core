@@ -17,13 +17,14 @@ struct GuideOverlayView: View {
                     cornerRadius: step.widgetConfig.overlay.cutout.cornerRadius
                 )
             ) {
-            case let .ready(anchorRect, cornerRadius):
+            case let .ready(anchorRect, cornerRadius, crop):
                 GuideStepOverlay(
                     step: step,
                     stepIndex: state.stepIndex,
                     totalSteps: state.steps.count,
                     anchorRect: anchorRect,
                     cornerRadius: cornerRadius,
+                    crop: crop,
                     onAdvance: { orchestrator.advance() },
                     onDismiss: { SDKInstance.shared.dismissGuide() }
                 )
@@ -46,41 +47,48 @@ private struct GuideStepOverlay: View {
     let totalSteps: Int
     let anchorRect: CGRect
     let cornerRadius: CGFloat
+    let crop: AnchorlessCropRef?
     let onAdvance: () -> Void
     let onDismiss: () -> Void
 
     @Environment(\.digiaVariables) private var variables
-    @State private var bubbleHeight: CGFloat = 0
-
-    private let calloutGap: CGFloat = 8
-    private let arrowH: CGFloat = 10
-    private let arrowW: CGFloat = 18
+    @State private var bubbleSize: CGSize = .zero
+    @State private var cropLoaded = false
 
     private var config: GuideStepWidgetConfig { step.widgetConfig }
     private var isSpotlight: Bool { config.overlay.visible }
 
     var body: some View {
         GeometryReader { geo in
-            let screenH = geo.size.height
-            let screenW = geo.size.width
-
-            // Honor preferred direction ("top" → bubble below anchor); otherwise auto by space.
-            let preferred = config.bubble.arrow.preferredDirection
-            let spaceBelow = screenH - anchorRect.maxY
-            let placeBelow: Bool = {
-                switch preferred {
-                case "top": return true
-                case "bottom", "start", "end": return false
-                default: return spaceBelow >= bubbleHeight + calloutGap + arrowH || spaceBelow >= anchorRect.minY
-                }
-            }()
-
-            let contentY = placeBelow
-                ? anchorRect.maxY + calloutGap + arrowH
-                : anchorRect.minY - calloutGap - arrowH - bubbleHeight
-            let arrowCX = min(max(anchorRect.midX, arrowW / 2 + 8), screenW - arrowW / 2 - 8)
-            let arrowTipY = placeBelow ? anchorRect.maxY + 2 : anchorRect.minY - 2
-            let arrowBaseY = placeBelow ? anchorRect.maxY + 2 + arrowH : anchorRect.minY - 2 - arrowH
+            let arrowSize = CGFloat(config.bubble.arrow.size)
+            let arrowVisible = config.bubble.arrow.visible
+            let gap = CGFloat(config.bubble.calloutGap) + (arrowVisible ? arrowSize : 0)
+            let paddedAnchor = anchorRect.insetBy(
+                dx: -CGFloat(config.overlay.cutout.padding),
+                dy: -CGFloat(config.overlay.cutout.padding)
+            )
+            let placement = resolvedPlacement(
+                preferred: config.bubble.arrow.preferredDirection,
+                anchor: paddedAnchor,
+                bubble: bubbleSize,
+                screen: geo.size,
+                gap: gap
+            )
+            let bubbleOrigin = calloutOrigin(
+                placement: placement,
+                anchor: paddedAnchor,
+                bubble: bubbleSize,
+                screen: geo.size,
+                gap: gap
+            )
+            let arrowPosition = calloutArrowPosition(
+                placement: placement,
+                anchor: paddedAnchor,
+                bubbleOrigin: bubbleOrigin,
+                bubble: bubbleSize,
+                cornerRadius: CGFloat(config.bubble.cornerRadius),
+                arrowSize: arrowSize
+            )
 
             ZStack(alignment: .topLeading) {
                 // Background: spotlight scrim with cutout, or transparent tap-to-dismiss.
@@ -102,32 +110,62 @@ private struct GuideStepOverlay: View {
                         .ignoresSafeArea()
                 }
 
-                if config.bubble.arrow.visible {
-                    GuideArrow(pointUp: placeBelow, color: guideColor(config.bubble.arrow.color, fallback: bubbleBackground))
-                        .frame(width: arrowW, height: arrowH)
-                        .position(x: arrowCX, y: (arrowTipY + arrowBaseY) / 2)
+                if let crop, let url = URL(string: crop.url) {
+                    DigiaCachedImageView(
+                        url: url,
+                        onSuccess: { _ in cropLoaded = true },
+                        onFailure: { SDKInstance.shared.reportGuideRenderFailure() }
+                    )
+                    .scaledToFill()
+                    .frame(width: anchorRect.width, height: anchorRect.height)
+                    .clipShape(
+                        GuideCutoutShape(
+                            shape: config.overlay.cutout.shape,
+                            cornerRadius: cornerRadius
+                        )
+                    )
+                    .position(x: anchorRect.midX, y: anchorRect.midY)
+                } else if crop != nil {
+                    Color.clear.onAppear { SDKInstance.shared.reportGuideRenderFailure() }
+                }
+
+                if arrowVisible && bubbleSize != .zero {
+                    GuideArrow(
+                        direction: placement.arrowDirection,
+                        color: guideColor(config.bubble.arrow.color, fallback: bubbleBackground)
+                    )
+                        .frame(
+                            width: placement.isVertical ? arrowSize * 2 : arrowSize,
+                            height: placement.isVertical ? arrowSize : arrowSize * 2
+                        )
+                        .position(arrowPosition)
                         .allowsHitTesting(false)
                 }
 
                 bubble
+                    .frame(width: min(CGFloat(config.bubble.maxWidthDp), geo.size.width - 32))
                     .background(
                         GeometryReader { g in
                             Color.clear
-                                .onAppear { bubbleHeight = g.size.height }
-                                // Old-value param is unused, so the single-value overload
-                                // (available since iOS 14, unlike the two-param one) works as-is.
-                                .onChange(of: g.size.height) { newValue in bubbleHeight = newValue }
+                                .onAppear { bubbleSize = g.size }
+                                .onChange(of: g.size) { bubbleSize = $0 }
                         }
                     )
-                    .frame(maxWidth: CGFloat(config.bubble.maxWidthDp))
                     .position(
-                        x: min(max(anchorRect.midX, CGFloat(config.bubble.maxWidthDp) / 2 + 8),
-                                screenW - CGFloat(config.bubble.maxWidthDp) / 2 - 8),
-                        y: contentY + bubbleHeight / 2
+                        x: bubbleOrigin.x + bubbleSize.width / 2,
+                        y: bubbleOrigin.y + bubbleSize.height / 2
                     )
+                    .opacity(bubbleSize == .zero ? 0 : 1)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea()
+            .opacity(crop == nil || cropLoaded ? 1 : 0)
+        }
+        .onAppear {
+            if crop == nil { SDKInstance.shared.reportGuideShown() }
+        }
+        .onChange(of: cropLoaded) { loaded in
+            if loaded { SDKInstance.shared.reportGuideShown() }
         }
         .task(id: stepIndex) {
             guard step.advanceTrigger == "auto", let delayMs = step.autoDelayMs, delayMs > 0 else { return }
@@ -177,21 +215,7 @@ private struct GuideStepOverlay: View {
                 HStack(spacing: 8) {
                     Spacer()
                     ForEach(Array(config.actions.enumerated()), id: \.offset) { _, action in
-                        Button(action: { handleAction(action) }) {
-                            Text(interpolate(action.label, context: variables))
-                                .font(
-                                    Font(SDKInstance.shared.font.resolve(
-                                        size: action.fontSize,
-                                        weight: action.fontWeight,
-                                        italic: false
-                                    ))
-                                )
-                                .foregroundColor(guideColor(action.textColor, fallback: bubbleBackground))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(guideColor(action.backgroundColor, fallback: .white))
-                                .clipShape(RoundedRectangle(cornerRadius: CGFloat(action.cornerRadius)))
-                        }
+                        actionButton(action)
                     }
                 }
                 .padding(.top, 4)
@@ -201,11 +225,59 @@ private struct GuideStepOverlay: View {
         .padding(.vertical, CGFloat(config.bubble.paddingVertical))
         .background(bubbleBackground)
         .clipShape(RoundedRectangle(cornerRadius: CGFloat(config.bubble.cornerRadius)))
+        .overlay(
+            RoundedRectangle(cornerRadius: CGFloat(config.bubble.cornerRadius))
+                .stroke(
+                    guideColor(config.bubble.borderColor, fallback: .clear),
+                    lineWidth: CGFloat(config.bubble.borderWidth)
+                )
+        )
         .shadow(radius: CGFloat(config.bubble.elevation))
     }
 
+    private func actionButton(_ action: GuideAction) -> some View {
+        let filled = action.style == "fill" || action.style == "filled" || action.style == "elevated"
+        let outlined = action.style == "outline"
+        let accent = guideColor(
+            action.backgroundColor,
+            fallback: Color(red: 73 / 255, green: 69 / 255, blue: 1)
+        )
+        let shape = RoundedRectangle(cornerRadius: CGFloat(action.cornerRadius))
+        return Button(action: { handleAction(action) }) {
+            Text(interpolate(action.label, context: variables))
+                .font(
+                    Font(SDKInstance.shared.font.resolve(
+                        size: action.fontSize,
+                        weight: action.fontWeight,
+                        italic: false
+                    ))
+                )
+                .foregroundColor(filled ? guideColor(action.textColor, fallback: .white) : accent)
+                .padding(
+                    EdgeInsets(
+                        top: CGFloat(action.padding.top),
+                        leading: CGFloat(action.padding.left),
+                        bottom: CGFloat(action.padding.bottom),
+                        trailing: CGFloat(action.padding.right)
+                    )
+                )
+                .background(filled ? accent : .clear)
+                .clipShape(shape)
+                .overlay(shape.stroke(outlined ? accent : .clear, lineWidth: outlined ? 1.5 : 0))
+                .shadow(radius: action.style == "elevated" ? 3 : 0, y: action.style == "elevated" ? 2 : 0)
+        }
+        .padding(
+            EdgeInsets(
+                top: CGFloat(action.margin.top),
+                leading: CGFloat(action.margin.left),
+                bottom: CGFloat(action.margin.bottom),
+                trailing: CGFloat(action.margin.right)
+            )
+        )
+    }
+
     private func handleAction(_ action: GuideAction) {
-        guard let state = SDKInstance.shared.guideOrchestrator.state else { return }
+        guard SDKInstance.shared.guideOrchestrator.state != nil else { return }
         let reportedAction = action.actions.first?.resolved(with: variables)
         SDKInstance.shared.reportGuideStepClicked(
             actionType: reportedAction?.analyticsType,
@@ -226,8 +298,114 @@ private struct GuideStepOverlay: View {
     }
 }
 
+private enum CalloutPlacement {
+    case above
+    case below
+    case left
+    case right
+
+    var isVertical: Bool { self == .above || self == .below }
+
+    var arrowDirection: GuideArrowDirection {
+        switch self {
+        case .above: return .down
+        case .below: return .up
+        case .left: return .right
+        case .right: return .left
+        }
+    }
+}
+
+private enum GuideArrowDirection {
+    case up
+    case down
+    case left
+    case right
+}
+
+private func resolvedPlacement(
+    preferred: String,
+    anchor: CGRect,
+    bubble: CGSize,
+    screen: CGSize,
+    gap: CGFloat
+) -> CalloutPlacement {
+    let requested: CalloutPlacement = switch preferred {
+    case "above", "bottom": .above
+    case "below", "top": .below
+    case "left", "start": .left
+    case "right", "end": .right
+    default: .below
+    }
+    guard bubble != .zero else { return requested }
+    let margin: CGFloat = 16
+    let fitsAbove = anchor.minY - gap - bubble.height >= margin
+    let fitsBelow = anchor.maxY + gap + bubble.height <= screen.height - margin
+    let fitsLeft = anchor.minX - gap - bubble.width >= margin
+    let fitsRight = anchor.maxX + gap + bubble.width <= screen.width - margin
+    switch requested {
+    case .above: return fitsAbove || !fitsBelow ? .above : .below
+    case .below: return fitsBelow || !fitsAbove ? .below : .above
+    case .left: return fitsLeft || !fitsRight ? .left : .right
+    case .right: return fitsRight || !fitsLeft ? .right : .left
+    }
+}
+
+private func calloutOrigin(
+    placement: CalloutPlacement,
+    anchor: CGRect,
+    bubble: CGSize,
+    screen: CGSize,
+    gap: CGFloat
+) -> CGPoint {
+    let margin: CGFloat = 16
+    let raw: CGPoint = switch placement {
+    case .above:
+        CGPoint(x: anchor.midX - bubble.width / 2, y: anchor.minY - gap - bubble.height)
+    case .below:
+        CGPoint(x: anchor.midX - bubble.width / 2, y: anchor.maxY + gap)
+    case .left:
+        CGPoint(x: anchor.minX - gap - bubble.width, y: anchor.midY - bubble.height / 2)
+    case .right:
+        CGPoint(x: anchor.maxX + gap, y: anchor.midY - bubble.height / 2)
+    }
+    return CGPoint(
+        x: min(max(raw.x, margin), max(margin, screen.width - margin - bubble.width)),
+        y: min(max(raw.y, margin), max(margin, screen.height - margin - bubble.height))
+    )
+}
+
+private func calloutArrowPosition(
+    placement: CalloutPlacement,
+    anchor: CGRect,
+    bubbleOrigin: CGPoint,
+    bubble: CGSize,
+    cornerRadius: CGFloat,
+    arrowSize: CGFloat
+) -> CGPoint {
+    let inset = cornerRadius + arrowSize + 2
+    if placement.isVertical {
+        let x = min(
+            max(anchor.midX, bubbleOrigin.x + inset),
+            bubbleOrigin.x + bubble.width - inset
+        )
+        let y = placement == .below
+            ? bubbleOrigin.y - arrowSize / 2
+            : bubbleOrigin.y + bubble.height + arrowSize / 2
+        return CGPoint(x: x, y: y)
+    }
+    let y = min(
+        max(anchor.midY, bubbleOrigin.y + inset),
+        bubbleOrigin.y + bubble.height - inset
+    )
+    let x = placement == .right
+        ? bubbleOrigin.x - arrowSize / 2
+        : bubbleOrigin.x + bubble.width + arrowSize / 2
+    return CGPoint(x: x, y: y)
+}
+
 private struct GuideArrow: View {
-    let pointUp: Bool
+    let direction: GuideArrowDirection
     let color: Color
 
     var body: some View {
@@ -235,14 +413,23 @@ private struct GuideArrow: View {
             Path { path in
                 let w = geo.size.width
                 let h = geo.size.height
-                if pointUp {
+                switch direction {
+                case .up:
                     path.move(to: CGPoint(x: w / 2, y: 0))
                     path.addLine(to: CGPoint(x: w, y: h))
                     path.addLine(to: CGPoint(x: 0, y: h))
-                } else {
+                case .down:
                     path.move(to: CGPoint(x: 0, y: 0))
                     path.addLine(to: CGPoint(x: w, y: 0))
                     path.addLine(to: CGPoint(x: w / 2, y: h))
+                case .left:
+                    path.move(to: CGPoint(x: 0, y: h / 2))
+                    path.addLine(to: CGPoint(x: w, y: 0))
+                    path.addLine(to: CGPoint(x: w, y: h))
+                case .right:
+                    path.move(to: CGPoint(x: w, y: h / 2))
+                    path.addLine(to: CGPoint(x: 0, y: h))
+                    path.addLine(to: CGPoint(x: 0, y: 0))
                 }
                 path.closeSubpath()
             }
@@ -261,17 +448,51 @@ private struct GuideSpotlightScrim: View {
     var body: some View {
         let pad = CGFloat(cutout.padding)
         let hole = anchorRect.insetBy(dx: -pad, dy: -pad)
-        let radius: CGFloat = cutout.shape == "circle"
-            ? max(hole.width, hole.height) / 2
-            : cornerRadius
+        let shape = GuideCutoutShape(shape: cutout.shape, cornerRadius: cornerRadius)
 
         Canvas { context, size in
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color.opacity(alpha)))
             context.blendMode = .clear
-            let path = cutout.shape == "rect"
-                ? Path(hole)
-                : Path(roundedRect: hole, cornerRadius: radius)
+            let path = shape.path(in: hole)
             context.fill(path, with: .color(.black))
+            if cutout.glowWidth > 0 {
+                context.blendMode = .normal
+                context.addFilter(
+                    .shadow(
+                        color: guideColor(cutout.glowColor, fallback: .clear),
+                        radius: 1.5
+                    )
+                )
+                context.stroke(
+                    path,
+                    with: .color(guideColor(cutout.glowColor, fallback: .clear)),
+                    lineWidth: CGFloat(cutout.glowWidth)
+                )
+            }
+        }
+    }
+}
+
+private struct GuideCutoutShape: Shape {
+    let shape: String
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        switch shape {
+        case "circle":
+            let side = max(rect.width, rect.height)
+            return Path(ellipseIn: CGRect(
+                x: rect.midX - side / 2,
+                y: rect.midY - side / 2,
+                width: side,
+                height: side
+            ))
+        case "pill":
+            return Path(roundedRect: rect, cornerRadius: rect.height / 2)
+        case "rect" where cornerRadius == 0:
+            return Path(rect)
+        default:
+            return Path(roundedRect: rect, cornerRadius: cornerRadius)
         }
     }
 }

@@ -19,7 +19,7 @@ final class GuideTargetAdapterStore: ObservableObject {
                 deviceStateProvider: UIKitDeviceStateProvider(
                     currentPageKeySource: { SDKInstance.shared.currentScreenForAnchorless }
                 ),
-                diagnostics: AnchorlessDiagnostics.makeDefaultSink()
+                diagnostics: logAnchorlessTrace
             )
         )
         registryObservation = registry.objectWillChange.sink { [weak self] _ in

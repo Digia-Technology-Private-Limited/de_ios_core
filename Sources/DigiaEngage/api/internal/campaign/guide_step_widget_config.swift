@@ -26,7 +26,16 @@ struct GuideAction: Equatable {
     let fontSize: Double
     let fontWeight: Int
     let cornerRadius: Double
+    let padding: GuideInsets
+    let margin: GuideInsets
     let actions: [EngageAction]
+}
+
+struct GuideInsets: Equatable {
+    let top: Double
+    let right: Double
+    let bottom: Double
+    let left: Double
 }
 
 struct ArrowConfig: Equatable {
@@ -38,11 +47,14 @@ struct ArrowConfig: Equatable {
 
 struct BubbleConfig: Equatable {
     let backgroundColor: String
+    let borderColor: String
+    let borderWidth: Double
     let cornerRadius: Double
     let paddingHorizontal: Double
     let paddingVertical: Double
     let maxWidthDp: Double
     let elevation: Double
+    let calloutGap: Double
     let entranceAnimation: String // "elastic"|"circular"|"fade"|"overshoot"|"none"
     let arrow: ArrowConfig
 }
@@ -51,6 +63,8 @@ struct CutoutConfig: Equatable {
     let shape: String          // "rounded_rect"|"rect"|"circle"
     let cornerRadius: Double
     let padding: Double
+    let glowColor: String
+    let glowWidth: Double
 }
 
 struct OverlayConfig: Equatable {
@@ -99,40 +113,90 @@ struct GuideStepWidgetConfig: Equatable {
     private static let defaultTitleColor = "#FFFFFF"
 
     static func fromJson(_ json: [String: Any]) -> GuideStepWidgetConfig {
+        let isFlatSpotlight = json["overlayColor"] != nil || json["calloutBackgroundColor"] != nil
         let bubbleObj = json.object("bubble") ?? [:]
         let overlayObj = json.object("overlay") ?? [:]
         let contentObj = json.object("content") ?? [:]
 
         let arrowObj = bubbleObj.object("arrow") ?? [:]
+        let calloutBackground = color(
+            json.string("calloutBackgroundColor"),
+            default: defaultBubbleBackground
+        )
         let arrow = ArrowConfig(
-            visible: arrowObj.bool("visible", default: true),
-            preferredDirection: arrowObj.string("preferred_direction", default: "auto"),
-            size: arrowObj.int("size", default: 10),
-            color: color(arrowObj.string("color"), default: defaultArrowColor)
+            visible: isFlatSpotlight
+                ? json.bool("showArrow", default: true)
+                : arrowObj.bool("visible", default: true),
+            preferredDirection: isFlatSpotlight
+                ? json.string("calloutPosition", default: "auto")
+                : arrowObj.string("preferred_direction", default: "auto"),
+            size: isFlatSpotlight
+                ? json.int("arrowSize", default: 8)
+                : arrowObj.int("size", default: 10),
+            color: isFlatSpotlight
+                ? calloutBackground
+                : color(arrowObj.string("color"), default: defaultArrowColor)
         )
 
         let bubble = BubbleConfig(
-            backgroundColor: color(bubbleObj.string("background_color"), default: defaultBubbleBackground),
-            cornerRadius: bubbleObj.double("corner_radius", default: 12),
-            paddingHorizontal: bubbleObj.double("padding_horizontal", default: 16),
-            paddingVertical: bubbleObj.double("padding_vertical", default: 12),
-            maxWidthDp: bubbleObj.double("max_width", default: 280),
-            elevation: bubbleObj.double("elevation", default: 6),
+            backgroundColor: isFlatSpotlight
+                ? calloutBackground
+                : color(bubbleObj.string("background_color"), default: defaultBubbleBackground),
+            borderColor: isFlatSpotlight
+                ? color(json.string("calloutBorderColor"), default: "#00000000")
+                : color(bubbleObj.string("border_color"), default: "#00000000"),
+            borderWidth: isFlatSpotlight
+                ? json.double("calloutBorderWidth", default: 0)
+                : bubbleObj.double("border_width", default: 0),
+            cornerRadius: isFlatSpotlight
+                ? json.double("calloutCornerRadius", default: 12)
+                : bubbleObj.double("corner_radius", default: 12),
+            paddingHorizontal: isFlatSpotlight
+                ? json.double("calloutPadding", default: 16)
+                : bubbleObj.double("padding_horizontal", default: 16),
+            paddingVertical: isFlatSpotlight
+                ? json.double("calloutPadding", default: 16)
+                : bubbleObj.double("padding_vertical", default: 12),
+            maxWidthDp: isFlatSpotlight
+                ? json.double("calloutMaxWidth", default: 280)
+                : bubbleObj.double("max_width", default: 280),
+            elevation: isFlatSpotlight
+                ? (json.bool("calloutShadow", default: true) ? 6 : 0)
+                : bubbleObj.double("elevation", default: 6),
+            calloutGap: isFlatSpotlight
+                ? json.double("calloutGap", default: 8)
+                : bubbleObj.double("callout_gap", default: 8),
             entranceAnimation: bubbleObj.string("entrance_animation", default: "elastic"),
             arrow: arrow
         )
 
         let cutoutObj = overlayObj.object("cutout") ?? [:]
         let cutout = CutoutConfig(
-            shape: cutoutObj.string("shape", default: "rounded_rect"),
-            cornerRadius: cutoutObj.double("corner_radius", default: 12),
-            padding: cutoutObj.double("padding", default: 8)
+            shape: isFlatSpotlight
+                ? json.string("highlightShape", default: "rect")
+                : cutoutObj.string("shape", default: "rounded_rect"),
+            cornerRadius: isFlatSpotlight
+                ? json.double("highlightCornerRadius", default: 12)
+                : cutoutObj.double("corner_radius", default: 12),
+            padding: isFlatSpotlight
+                ? json.double("highlightPadding", default: 8)
+                : cutoutObj.double("padding", default: 8),
+            glowColor: isFlatSpotlight
+                ? color(json.string("highlightGlowColor"), default: "#00000000")
+                : color(cutoutObj.string("glow_color"), default: "#00000000"),
+            glowWidth: isFlatSpotlight
+                ? json.double("highlightGlowWidth", default: 0)
+                : cutoutObj.double("glow_width", default: 0)
         )
 
         let overlay = OverlayConfig(
-            visible: overlayObj.bool("visible", default: false),
-            color: color(overlayObj.string("color"), default: defaultOverlayColor),
-            alpha: overlayObj.double("alpha", default: 0.6),
+            visible: isFlatSpotlight || overlayObj.bool("visible", default: false),
+            color: isFlatSpotlight
+                ? color(json.string("overlayColor"), default: defaultOverlayColor)
+                : color(overlayObj.string("color"), default: defaultOverlayColor),
+            alpha: isFlatSpotlight
+                ? json.double("overlayOpacity", default: 0.6)
+                : overlayObj.double("alpha", default: 0.6),
             dismissOnTap: overlayObj.bool("dismiss_on_tap", default: false),
             entranceAnimation: overlayObj.string("entrance_animation", default: "fade"),
             cutout: cutout
@@ -172,8 +236,13 @@ struct GuideStepWidgetConfig: Equatable {
             let typeStr = obj.nonBlankString("action_type")
                 ?? obj.string("type", default: "dismiss")
             let actionType = GuideActionType.parse(typeStr)
-            let style = obj.string("style", default: "filled")
-            let isPrimary = style == "filled" || style == "primary"
+            let style = switch obj.string("style", default: "fill") {
+            case "primary": "fill"
+            case "secondary": "outline"
+            case "ghost": "text"
+            case let value: value
+            }
+            let isPrimary = style == "fill" || style == "filled" || style == "elevated"
             let defaultBackground = isPrimary
                 ? color(json.string("buttonPrimaryBackgroundColor"), default: defaultButtonBackground)
                 : "#00000000"
@@ -182,6 +251,8 @@ struct GuideStepWidgetConfig: Equatable {
                 default: defaultButtonText
             )
             let onClick = obj.object("onClick")
+            let padding = obj.object("padding") ?? [:]
+            let margin = obj.object("margin") ?? [:]
             let legacyAction: EngageAction = switch typeStr.lowercased() {
             case "next": .next
             case "prev", "back", "previous": .previous
@@ -195,17 +266,31 @@ struct GuideStepWidgetConfig: Equatable {
                     label: obj.string("label"),
                     style: style,
                     actionType: actionType,
-                    backgroundColor: obj.nonBlankString("background_color")
+                    backgroundColor: (obj.nonBlankString("backgroundColor")
+                        ?? obj.nonBlankString("background_color"))
                         .map { color($0, default: defaultButtonBackground) }
                         ?? defaultBackground,
-                    textColor: obj.nonBlankString("text_color")
+                    textColor: (obj.nonBlankString("textColor")
+                        ?? obj.nonBlankString("text_color"))
                         .map { color($0, default: defaultButtonText) }
                         ?? defaultText,
                     fontSize: max(1, obj.double("fontSize", default: 14)),
                     fontWeight: DigiaFontWeight.value(obj["fontWeight"], default: 600),
-                    cornerRadius: obj["corner_radius"] == nil
-                        ? 8
+                    cornerRadius: obj["cornerRadius"] != nil
+                        ? obj.double("cornerRadius", default: 8)
                         : obj.double("corner_radius", default: 8),
+                    padding: GuideInsets(
+                        top: padding.double("top", default: 8),
+                        right: padding.double("right", default: 12),
+                        bottom: padding.double("bottom", default: 8),
+                        left: padding.double("left", default: 12)
+                    ),
+                    margin: GuideInsets(
+                        top: margin.double("top", default: 0),
+                        right: margin.double("right", default: 0),
+                        bottom: margin.double("bottom", default: 0),
+                        left: margin.double("left", default: index > 0 ? 8 : 0)
+                    ),
                     actions: onClick.map { EngageActionParser().parse($0) } ?? [legacyAction]
                 )
             )

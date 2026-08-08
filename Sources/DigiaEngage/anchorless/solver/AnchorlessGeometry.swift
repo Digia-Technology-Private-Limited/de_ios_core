@@ -144,9 +144,7 @@ internal struct AnchorlessCropRef: Equatable, Sendable {
 
 /// The closed, content-free trace value a solver result carries.
 ///
-/// `anchorless/solver` does not know `DiagnosticsSink` exists — it returns this in
-/// its result and `anchorless/runtime` decides what to do with it, which keeps the
-/// trace assertable from Conformance Vectors rather than by scraping logs.
+/// Returned with solver results so the runtime can record the outcome locally.
 ///
 /// Every field is an enum, a number, or an authored identifier. There is no host
 /// string, no captured text, and no free-form map.

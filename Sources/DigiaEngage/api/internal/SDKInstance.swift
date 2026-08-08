@@ -690,7 +690,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
     }
 
-    /// Handles one `campaign_test` SSE event. nudge/survey/inline are supported.
+    /// Handles one `campaign_test` SSE event. Native Anchorless guides are supported;
+    /// externally-rendered guides remain unsupported.
     private func handleLiveTestCampaign(_ invocation: LiveTestInvocation) {
         let reporter = liveTestService.ackReporter
         reporter.postReceived(invocation.testInvocationId)
@@ -719,9 +720,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
 
-        guard campaign.campaignType == "nudge" || campaign.campaignType == "survey"
-            || campaign.campaignType == "inline"
-        else {
+        let supportsLiveTest: Bool
+        switch campaign.config {
+        case .guide(let guideConfig):
+            supportsLiveTest = guideConfig.steps.contains { step in
+                if case .anchorless = step.target { return true }
+                return false
+            }
+        case .nudge, .survey, .inline, .banner, .story:
+            supportsLiveTest = true
+        }
+        guard supportsLiveTest else {
             reporter.postFailed(
                 invocation.testInvocationId, code: .templateError,
                 message: "campaign type '\(campaign.campaignType)' is not supported for live testing yet"
@@ -1201,6 +1210,35 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func previousGuide() {
         guideOrchestrator.previous()
+    }
+
+    func reportGuideShown() {
+        guard let state = guideOrchestrator.state else { return }
+        let payload = state.payload
+        if !isLiveTestCepId(payload.cepCampaignId) {
+            events.toCep(.impressed, payload: payload)
+            frequencyManager?.recordShow(
+                payload.campaignKey,
+                campaignStore.find(payload.campaignKey)?.frequency
+            )
+        }
+        events.digiaImpressionOnce(
+            payload: payload,
+            event: GuideEvent.Viewed(
+                displayStyle: "spotlight",
+                itemTotal: state.steps.count,
+                screenName: _currentScreen
+            )
+        )
+    }
+
+    func reportGuideRenderFailure() {
+        guard let payload = guideOrchestrator.state?.payload else { return }
+        guideOrchestrator.dismiss()
+        liveTestContexts[payload.cepCampaignId]?.reportFailed(
+            .renderError,
+            message: "Anchorless Spotlight image could not be rendered"
+        )
     }
 
     func reportGuideStepClicked(actionType: String?, actionUrl: String?, ctaLabel: String?) {
