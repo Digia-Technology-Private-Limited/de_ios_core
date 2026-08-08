@@ -129,19 +129,6 @@ private struct GuideStepOverlay: View {
                     Color.clear.onAppear { SDKInstance.shared.reportGuideRenderFailure() }
                 }
 
-                if arrowVisible && bubbleSize != .zero {
-                    GuideArrow(
-                        direction: placement.arrowDirection,
-                        color: guideColor(config.bubble.arrow.color, fallback: bubbleBackground)
-                    )
-                        .frame(
-                            width: placement.isVertical ? arrowSize * 2 : arrowSize,
-                            height: placement.isVertical ? arrowSize : arrowSize * 2
-                        )
-                        .position(arrowPosition)
-                        .allowsHitTesting(false)
-                }
-
                 bubble
                     .frame(width: min(CGFloat(config.bubble.maxWidthDp), geo.size.width - 32))
                     .background(
@@ -156,6 +143,19 @@ private struct GuideStepOverlay: View {
                         y: bubbleOrigin.y + bubbleSize.height / 2
                     )
                     .opacity(bubbleSize == .zero ? 0 : 1)
+
+                if arrowVisible && bubbleSize != .zero {
+                    GuideArrow(
+                        direction: placement.arrowDirection,
+                        color: guideColor(config.bubble.arrow.color, fallback: bubbleBackground)
+                    )
+                        .frame(
+                            width: placement.isVertical ? arrowSize * 2 : arrowSize,
+                            height: placement.isVertical ? arrowSize : arrowSize * 2
+                        )
+                        .position(arrowPosition)
+                        .allowsHitTesting(false)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea()
@@ -383,7 +383,7 @@ private func calloutArrowPosition(
     cornerRadius: CGFloat,
     arrowSize: CGFloat
 ) -> CGPoint {
-    let inset = cornerRadius + arrowSize + 2
+    let inset = max(cornerRadius, arrowSize)
     if placement.isVertical {
         let x = min(
             max(anchor.midX, bubbleOrigin.x + inset),

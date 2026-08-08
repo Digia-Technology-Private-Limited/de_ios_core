@@ -150,7 +150,11 @@ struct CampaignModel: Equatable {
             stepsArr: stepsArr,
             displayStyle: templateJson.string("templateType", default: "tooltip"),
             variableSchemas: variableSchemas,
-            widgetJsonForStep: { stepJson in stepJson }
+            widgetJsonForStep: { stepJson in
+                var widgetJson = stepJson
+                widgetJson["outsideTapBehavior"] = templateJson["outsideTapBehavior"]
+                return widgetJson
+            }
         )
     }
 

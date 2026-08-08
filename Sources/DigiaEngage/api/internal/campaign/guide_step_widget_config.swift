@@ -197,7 +197,9 @@ struct GuideStepWidgetConfig: Equatable {
             alpha: isFlatSpotlight
                 ? json.double("overlayOpacity", default: 0.6)
                 : overlayObj.double("alpha", default: 0.6),
-            dismissOnTap: overlayObj.bool("dismiss_on_tap", default: false),
+            dismissOnTap: isFlatSpotlight
+                ? json.string("outsideTapBehavior", default: "next") != "nothing"
+                : overlayObj.bool("dismiss_on_tap", default: false),
             entranceAnimation: overlayObj.string("entrance_animation", default: "fade"),
             cutout: cutout
         )

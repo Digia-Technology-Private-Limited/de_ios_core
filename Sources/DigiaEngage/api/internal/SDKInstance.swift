@@ -293,13 +293,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
 
-        publishCaptureStatus("Capturing current screen…")
+        let wasVisible = debugOverlayController.isVisible
+        debugOverlayController.setVisible(false)
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let wasVisible = debugOverlayController.isVisible
-            debugOverlayController.setVisible(false)
             defer { if wasVisible { debugOverlayController.setVisible(true) } }
-            try? await Task.sleep(nanoseconds: 25_000_000)
+            try? await Task.sleep(nanoseconds: 50_000_000)
 
             guard let source = UIKitCaptureFacts.sourceFrame(window: window) else {
                 publishCaptureStatus("Capture unavailable — screen could not be rendered")
@@ -396,7 +395,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     private static func renderPNG(window: UIWindow) -> Data? {
         let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
-        return renderer.pngData { context in window.layer.render(in: context.cgContext) }
+        var didRender = false
+        let image = renderer.image { _ in
+            didRender = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+        }
+        return didRender ? image.pngData() : nil
     }
 
     /// Revalidates active overlays on every host screen update. Inline campaigns are
