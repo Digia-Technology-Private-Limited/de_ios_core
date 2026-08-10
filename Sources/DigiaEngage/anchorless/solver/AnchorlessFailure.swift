@@ -30,7 +30,6 @@ internal enum AnchorlessFailure: String, Equatable, Sendable, CaseIterable {
     case invalidModel
     case stepCountInvalid
     case missingPlatformVariant
-    case unitMismatch
     case danglingReferenceContainer
 
     // MARK: eligibility gate — owned by anchorless/runtime
@@ -49,7 +48,7 @@ internal enum AnchorlessFailure: String, Equatable, Sendable, CaseIterable {
     internal var phase: AnchorlessPhase {
         switch self {
         case .unknownTargetType, .unknownTargetVersion, .unknownRuleKind, .invalidModel,
-             .stepCountInvalid, .missingPlatformVariant, .unitMismatch, .danglingReferenceContainer:
+             .stepCountInvalid, .missingPlatformVariant, .danglingReferenceContainer:
             return .prepare
         case .pageKeyMismatch, .unsupportedOrientation, .unsupportedFormFactor:
             return .gate

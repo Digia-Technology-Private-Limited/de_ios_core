@@ -131,7 +131,7 @@ private struct DigiaCaptureSessionScreen: View {
                     ForEach(instance.capturedPages) { page in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(page.pageKey)
-                            Text("capture \(page.captureId) · \(page.capturedAt)")
+                            Text("capture \(page.assetId) · \(page.capturedAt)")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }

@@ -233,58 +233,10 @@ internal enum UIKitCaptureFacts {
             density: Double(density),
             windowBoundsPx: windowBoundsPx,
             appContentBoundsPx: appContentBoundsPx,
-            insetsPx: insetsPx,
             orientation: .portrait,
             layoutDirection: .ltr
         )
     }
 
-    internal static func appFacts(bundle: Bundle = .main) -> CaptureAppFacts {
-        CaptureAppFacts(
-            bundleIdentifier: bundle.bundleIdentifier ?? "",
-            versionName: bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? "",
-            buildNumber: bundle.infoDictionary?["CFBundleVersion"] as? String ?? ""
-        )
-    }
-
-    internal static func runtimeFacts(
-        sdkVersion: String,
-        wrapperVersion: String?,
-        device: UIDevice = .current,
-        traits: UITraitCollection = .current
-    ) -> CaptureRuntimeFacts {
-        CaptureRuntimeFacts(
-            osVersion: device.systemVersion,
-            locale: Locale.current.identifier.replacingOccurrences(of: "_", with: "-"),
-            fontScale: Double(
-                traits.preferredContentSizeCategory.fontScaleApproximation
-            ),
-            sdkVersion: sdkVersion,
-            wrapperVersion: wrapperVersion,
-            formFactor: .phone
-        )
-    }
-}
-
-extension UIContentSizeCategory {
-    /// A coarse, finite, strictly positive multiplier. §2.5 requires a number, and
-    /// UIKit publishes a category rather than a scale.
-    fileprivate var fontScaleApproximation: Double {
-        switch self {
-        case .extraSmall: return 0.82
-        case .small: return 0.88
-        case .medium: return 0.95
-        case .large: return 1.0
-        case .extraLarge: return 1.12
-        case .extraExtraLarge: return 1.23
-        case .extraExtraExtraLarge: return 1.35
-        case .accessibilityMedium: return 1.6
-        case .accessibilityLarge: return 1.9
-        case .accessibilityExtraLarge: return 2.35
-        case .accessibilityExtraExtraLarge: return 2.76
-        case .accessibilityExtraExtraExtraLarge: return 3.12
-        default: return 1.0
-        }
-    }
 }
 #endif

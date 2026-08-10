@@ -3,6 +3,6 @@ internal func logAnchorlessTrace(_ trace: AnchorlessTrace) {
     DigiaLog.verbose(
         "[Anchorless] phase=\(trace.phase.rawValue)"
             + " outcome=\(trace.failure?.rawValue ?? "resolved")"
-            + " variantId=\(trace.variantId ?? "-")"
+            + " assetId=\(trace.assetId ?? "-")"
     )
 }

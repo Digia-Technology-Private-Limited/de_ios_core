@@ -1,13 +1,11 @@
 import Foundation
 import Combine
 import UIKit
-import CryptoKit
 
 private extension CaptureRefusal {
     var userMessage: String {
         switch self {
         case .notDebugBuild: return "debug capture is disabled for this build"
-        case .syncDisabled: return "Sync is disabled"
         case .captureModeDisabled: return "Anchorless Capture is off"
         case .pageIdentityMissing: return "current screen is not set"
         case .offline: return "the device is offline"
@@ -329,24 +327,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 publishCaptureStatus("Capture unavailable — layout did not settle")
                 return
             }
-            let digest = SHA256.hash(data: png).map { String(format: "%02x", $0) }.joined()
+            let capturedAt = ISO8601DateFormatter().string(from: Date())
             let envelope = PageCaptureEnvelopeV1(
                 pageKey: pageKey,
-                capturedAt: ISO8601DateFormatter().string(from: Date()),
                 devicePlatform: .ios,
-                binding: config.wrapperBinding == "react_native" ? .reactNative : .native,
-                screenshot: CaptureScreenshotFacts(
-                    widthPx: source.windowBoundsPx.width,
-                    heightPx: source.windowBoundsPx.height,
-                    byteLength: png.count,
-                    sha256: digest
-                ),
                 source: source,
-                app: UIKitCaptureFacts.appFacts(),
-                runtime: UIKitCaptureFacts.runtimeFacts(
-                    sdkVersion: "ios-core",
-                    wrapperVersion: config.wrapperVersion
-                ),
                 nodes: walk.nodes,
                 integrity: walk.integrity
             )
@@ -355,7 +340,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             let result = await CaptureSession(
                 gates: CaptureGateState(
                     isDebugBuild: isDebugBuild,
-                    syncEnabled: componentRegistry.isEnabled,
                     captureModeEnabled: captureModeEnabled,
                     pageKey: pageKey,
                     connectivityAvailable: true,
@@ -367,12 +351,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             switch result {
             case let .uploaded(upload):
                 switch upload {
-                case let .accepted(captureId), let .duplicate(captureId):
+                case let .accepted(assetId):
                     publishCaptureStatus("Captured \(pageKey)")
                     capturedPages = (capturedPages + [CaptureDebugPage(
                         pageKey: pageKey,
-                        captureId: captureId,
-                        capturedAt: envelope.capturedAt
+                        assetId: assetId,
+                        capturedAt: capturedAt
                     )]).reduce(into: []) { pages, page in
                         if !pages.contains(where: { $0.pageKey == page.pageKey }) { pages.append(page) }
                     }
@@ -1422,7 +1406,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
 struct CaptureDebugPage: Identifiable {
     let pageKey: String
-    let captureId: String
+    let assetId: String
     let capturedAt: String
     var id: String { pageKey }
 }

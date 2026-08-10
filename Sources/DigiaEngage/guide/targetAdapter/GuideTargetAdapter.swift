@@ -1,7 +1,7 @@
 import CoreGraphics
 
 internal enum TargetOutcome: Equatable, Sendable {
-    case ready(rect: CGRect, cornerRadius: CGFloat, crop: AnchorlessCropRef? = nil)
+    case ready(rect: CGRect, cornerRadius: CGFloat, image: AnchorlessImage? = nil)
 
     case notReady
     case failed(AnchorlessFailure?)
@@ -59,7 +59,7 @@ internal struct GuideTargetAdapter {
                 return .ready(
                     rect: Self.cgRect(from: rect),
                     cornerRadius: step.cornerRadius,
-                    crop: prepared.crop
+                    image: prepared.image
                 )
             case let .failed(failure):
                 return .failed(failure)

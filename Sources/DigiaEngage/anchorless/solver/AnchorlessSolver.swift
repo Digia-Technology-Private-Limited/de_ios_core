@@ -1,3 +1,5 @@
+import Foundation
+
 // MARK: - Prepared target
 
 /// The opaque product of `prepare`.
@@ -6,11 +8,9 @@
 /// file; callers outside it can read only the identity fields `anchorless/runtime`
 /// needs for the eligibility gate and the presentation host needs for `image` mode.
 internal struct PreparedAnchorlessTarget: Sendable {
-    internal let variantId: String
     internal let pageKey: String
-    internal let devicePlatform: AnchorlessDevicePlatform
-    internal let mode: AnchorlessMode
-    internal let crop: AnchorlessCropRef?
+    internal let assetId: String
+    internal let image: AnchorlessImage
     internal let horizontalFrame: AnchorlessTargetFrame
     internal let verticalFrame: AnchorlessTargetFrame
 
@@ -91,14 +91,10 @@ internal enum AnchorlessSolver {
         return prepare(target: steps[0], platform: platform)
     }
 
-    /// The single-step form. Identical to `prepare(steps:platform:)` with one
-    /// element, and the form the Conformance Vector file exercises — an
-    /// `AnchorlessSolverVectorV1` carries one `target` and has no step list.
     internal static func prepare(
         target: AnchorlessJSONValue,
         platform: AnchorlessDevicePlatform
     ) -> AnchorlessPrepareResult {
-        // --- target identity -------------------------------------------------
         guard target.objectValue != nil else { return reject(.invalidModel) }
 
         guard let type = target["type"]?.stringValue, type == "anchorless" else {
@@ -108,92 +104,41 @@ internal enum AnchorlessSolver {
             return reject(.unknownTargetVersion)
         }
 
-        // --- platform variant selection --------------------------------------
         guard let variants = target["variants"], variants.objectValue != nil else {
             return reject(.invalidModel)
         }
         guard let variant = variants[platform.rawValue], variant.objectValue != nil else {
             return reject(.missingPlatformVariant)
         }
-        // `devicePlatform` MUST equal its key in `variants`.
-        guard let declaredPlatform = variant["devicePlatform"]?.stringValue,
-              declaredPlatform == platform.rawValue
+        guard let capture = variant["capture"], capture.objectValue != nil,
+              let assetId = nonEmptyString(capture["assetId"]),
+              nonEmptyString(capture["nodeId"]) != nil,
+              capture["algorithmVersion"]?.numberValue == 1,
+              let pageKey = nonEmptyString(variant["pageKey"]),
+              let image = parseImage(variant["image"])
         else {
             return reject(.invalidModel)
         }
 
-        guard let variantId = nonEmptyString(variant["variantId"]),
-              let pageKey = nonEmptyString(variant["pageKey"])
-        else {
-            return reject(.invalidModel)
-        }
-
-        // --- unit agreement ---------------------------------------------------
-        // Checked before rule numerics: a variant delivered in the wrong unit is
-        // `unitMismatch` whatever its rules say.
-        guard let unitRaw = variant["logicalUnit"]?.stringValue,
-              let unit = AnchorlessLogicalUnit(rawValue: unitRaw)
-        else {
-            return reject(.invalidModel, variantId: variantId, pageKey: pageKey)
-        }
-        guard unit == platform.requiredLogicalUnit else {
-            return reject(.unitMismatch, variantId: variantId, pageKey: pageKey)
-        }
-
-        // --- orientation ------------------------------------------------------
-        // The Beta is portrait only; the wire shape admits no other value.
-        guard variant["orientation"]?.stringValue == "portrait" else {
-            return reject(.invalidModel, variantId: variantId, pageKey: pageKey)
-        }
-
-        // --- mode and crop ----------------------------------------------------
-        // `mode` absent is rejected, never defaulted.
-        guard let modeRaw = target["mode"]?.stringValue,
-              let mode = AnchorlessMode(rawValue: modeRaw)
-        else {
-            return reject(.invalidModel, variantId: variantId, pageKey: pageKey)
-        }
-        // `null` is still a physically present field. Element mode forbids the
-        // field itself, not merely a usable crop value.
-        let cropPresent = variant.hasMember("crop")
-        switch mode {
-        case .image:
-            guard cropPresent else { return reject(.invalidModel, variantId: variantId, pageKey: pageKey) }
-        case .element:
-            guard !cropPresent else { return reject(.invalidModel, variantId: variantId, pageKey: pageKey) }
-        }
-        var crop: AnchorlessCropRef?
-        if cropPresent {
-            guard let parsed = parseCrop(variant["crop"]) else {
-                return reject(.invalidModel, variantId: variantId, pageKey: pageKey)
-            }
-            crop = parsed
-        }
-
-        // --- axis frames and container wiring ---------------------------------
-        // Structural container checks run before rule numerics so that a dangling
-        // container is reported as such rather than as whatever its rules contain.
         guard let horizontalAxis = variant["horizontal"], horizontalAxis.objectValue != nil,
               let verticalAxis = variant["vertical"], verticalAxis.objectValue != nil
         else {
-            return reject(.invalidModel, variantId: variantId, pageKey: pageKey)
+            return reject(.invalidModel, assetId: assetId, pageKey: pageKey)
         }
         guard let horizontalFrameRaw = horizontalAxis["frame"]?.stringValue,
               let horizontalFrame = AnchorlessTargetFrame(rawValue: horizontalFrameRaw),
               let verticalFrameRaw = verticalAxis["frame"]?.stringValue,
               let verticalFrame = AnchorlessTargetFrame(rawValue: verticalFrameRaw)
         else {
-            return reject(.invalidModel, variantId: variantId, pageKey: pageKey)
+            return reject(.invalidModel, assetId: assetId, pageKey: pageKey)
         }
 
         let containerJSON = variant["referenceContainer"]
         let referencesContainer = horizontalFrame == .referenceContainer
             || verticalFrame == .referenceContainer
 
-        // A target axis naming `referenceContainer` requires the container present.
-        // A delivered container no axis references is invalid, not ignored.
         guard (containerJSON != nil) == referencesContainer else {
-            return reject(.danglingReferenceContainer, variantId: variantId, pageKey: pageKey)
+            return reject(.danglingReferenceContainer, assetId: assetId, pageKey: pageKey)
         }
 
         var container: PreparedReferenceContainer?
@@ -204,9 +149,8 @@ internal enum AnchorlessSolver {
                   let containerHorizontalFrameRaw = containerHorizontal["frame"]?.stringValue,
                   let containerVerticalFrameRaw = containerVertical["frame"]?.stringValue
             else {
-                return reject(.invalidModel, variantId: variantId, pageKey: pageKey)
+                return reject(.invalidModel, assetId: assetId, pageKey: pageKey)
             }
-            // The container's own axes name only `window` or `appContent`, never itself.
             guard let containerHorizontalFrame = AnchorlessRootFrame(rawValue: containerHorizontalFrameRaw),
                   let containerVerticalFrame = AnchorlessRootFrame(rawValue: containerVerticalFrameRaw)
             else {
@@ -214,18 +158,18 @@ internal enum AnchorlessSolver {
                     || containerVerticalFrameRaw == AnchorlessTargetFrame.referenceContainer.rawValue
                 return reject(
                     selfReferential ? .danglingReferenceContainer : .invalidModel,
-                    variantId: variantId,
+                    assetId: assetId,
                     pageKey: pageKey
                 )
             }
 
             switch parseHorizontalRule(containerHorizontal["rule"]) {
             case let .failure(code):
-                return reject(code, variantId: variantId, pageKey: pageKey)
+                return reject(code, assetId: assetId, pageKey: pageKey)
             case let .success(containerHorizontalRule):
                 switch parseVerticalRule(containerVertical["rule"]) {
                 case let .failure(code):
-                    return reject(code, variantId: variantId, pageKey: pageKey)
+                    return reject(code, assetId: assetId, pageKey: pageKey)
                 case let .success(containerVerticalRule):
                     container = PreparedReferenceContainer(
                         horizontalFrame: containerHorizontalFrame,
@@ -237,25 +181,22 @@ internal enum AnchorlessSolver {
             }
         }
 
-        // --- rule kinds and numerics ------------------------------------------
         let horizontalRule: AnchorlessHorizontalRule
         switch parseHorizontalRule(horizontalAxis["rule"]) {
-        case let .failure(code): return reject(code, variantId: variantId, pageKey: pageKey)
+        case let .failure(code): return reject(code, assetId: assetId, pageKey: pageKey)
         case let .success(rule): horizontalRule = rule
         }
 
         let verticalRule: AnchorlessVerticalRule
         switch parseVerticalRule(verticalAxis["rule"]) {
-        case let .failure(code): return reject(code, variantId: variantId, pageKey: pageKey)
+        case let .failure(code): return reject(code, assetId: assetId, pageKey: pageKey)
         case let .success(rule): verticalRule = rule
         }
 
         let prepared = PreparedAnchorlessTarget(
-            variantId: variantId,
             pageKey: pageKey,
-            devicePlatform: platform,
-            mode: mode,
-            crop: crop,
+            assetId: assetId,
+            image: image,
             horizontalFrame: horizontalFrame,
             verticalFrame: verticalFrame,
             horizontalRule: horizontalRule,
@@ -264,7 +205,7 @@ internal enum AnchorlessSolver {
         )
         return .prepared(prepared, AnchorlessTrace(
             phase: .prepare,
-            variantId: variantId,
+            assetId: assetId,
             pageKey: pageKey,
             horizontalFrame: horizontalFrame,
             verticalFrame: verticalFrame
@@ -282,7 +223,7 @@ internal enum AnchorlessSolver {
             .failed(code, AnchorlessTrace(
                 phase: .resolve,
                 failure: code,
-                variantId: prepared.variantId,
+                assetId: prepared.assetId,
                 pageKey: prepared.pageKey,
                 horizontalFrame: prepared.horizontalFrame,
                 verticalFrame: prepared.verticalFrame,
@@ -409,7 +350,7 @@ internal enum AnchorlessSolver {
 
         return .resolved(rect, AnchorlessTrace(
             phase: .resolve,
-            variantId: prepared.variantId,
+            assetId: prepared.assetId,
             pageKey: prepared.pageKey,
             horizontalFrame: prepared.horizontalFrame,
             verticalFrame: prepared.verticalFrame,
@@ -507,11 +448,11 @@ extension AnchorlessSolver {
 
     fileprivate static func reject(
         _ code: AnchorlessFailure,
-        variantId: String? = nil,
+        assetId: String? = nil,
         pageKey: String? = nil
     ) -> AnchorlessPrepareResult {
         .rejected(code, AnchorlessTrace(
-            phase: .prepare, failure: code, variantId: variantId, pageKey: pageKey
+            phase: .prepare, failure: code, assetId: assetId, pageKey: pageKey
         ))
     }
 
@@ -609,25 +550,14 @@ extension AnchorlessSolver {
         near >= 0 && near < far && far <= 1
     }
 
-    fileprivate static func parseCrop(_ json: AnchorlessJSONValue?) -> AnchorlessCropRef? {
+    fileprivate static func parseImage(_ json: AnchorlessJSONValue?) -> AnchorlessImage? {
         guard let json, json.objectValue != nil,
-              let cropId = nonEmptyString(json["cropId"]),
-              let url = nonEmptyString(json["url"]),
-              let widthPx = positive(json["widthPx"]),
-              let heightPx = positive(json["heightPx"]),
-              let sourceScale = positive(json["sourceScale"]),
-              let focal = json["focal"], focal.objectValue != nil,
-              let focalX = finite(focal["x"]),
-              let focalY = finite(focal["y"])
+              json["mimeType"]?.stringValue == "image/png",
+              let base64 = json["base64"]?.stringValue,
+              let data = Data(base64Encoded: base64),
+              data.count <= 1_048_576,
+              data.starts(with: [137, 80, 78, 71, 13, 10, 26, 10])
         else { return nil }
-        return AnchorlessCropRef(
-            cropId: cropId,
-            url: url,
-            widthPx: widthPx,
-            heightPx: heightPx,
-            sourceScale: sourceScale,
-            focalX: focalX,
-            focalY: focalY
-        )
+        return AnchorlessImage(data: data)
     }
 }

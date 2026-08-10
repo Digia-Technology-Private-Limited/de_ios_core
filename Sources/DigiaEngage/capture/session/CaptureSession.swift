@@ -1,14 +1,7 @@
-// Module: capture/session
-//
-// Explicit capture gating and the uploader seam. This module owns no image
-// encoding or HTTP; it only decides whether a caller's one deliberate capture
-// action may cross into capture/transport.
-
 import Foundation
 
 internal enum CaptureRefusal: Equatable, Sendable {
     case notDebugBuild
-    case syncDisabled
     case captureModeDisabled
     case pageIdentityMissing
     case offline
@@ -25,14 +18,10 @@ internal enum CaptureUploadRejection: Equatable, Sendable {
 }
 
 internal enum CaptureUploadResult: Equatable, Sendable {
-    case accepted(captureId: String)
-    case duplicate(captureId: String)
+    case accepted(assetId: String)
     case rejected(CaptureUploadRejection)
 }
 
-/// The single transport seam shared by capture/session and capture/transport.
-/// The PNG is an argument for the duration of the upload only; the session never
-/// stores it, queues it, retries it, or writes it to disk.
 @MainActor
 internal protocol CaptureUploader: AnyObject {
     func upload(
@@ -43,7 +32,6 @@ internal protocol CaptureUploader: AnyObject {
 
 internal struct CaptureGateState: Equatable, Sendable {
     internal let isDebugBuild: Bool
-    internal let syncEnabled: Bool
     internal let captureModeEnabled: Bool
     internal let pageKey: String?
     internal let connectivityAvailable: Bool
@@ -51,14 +39,12 @@ internal struct CaptureGateState: Equatable, Sendable {
 
     internal init(
         isDebugBuild: Bool = true,
-        syncEnabled: Bool = true,
         captureModeEnabled: Bool = true,
         pageKey: String? = "home",
         connectivityAvailable: Bool = true,
         explicitAction: Bool = true
     ) {
         self.isDebugBuild = isDebugBuild
-        self.syncEnabled = syncEnabled
         self.captureModeEnabled = captureModeEnabled
         self.pageKey = pageKey
         self.connectivityAvailable = connectivityAvailable

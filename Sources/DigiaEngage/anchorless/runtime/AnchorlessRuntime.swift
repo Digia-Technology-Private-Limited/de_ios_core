@@ -44,14 +44,7 @@ internal final class AnchorlessRuntime {
 
     internal func resolve(target: AnchorlessJSONValue) -> AnchorlessRuntimeOutcome {
         let prepared: PreparedAnchorlessTarget
-        let iosResult = AnchorlessSolver.prepare(target: target, platform: .ios)
-        // Temporary: allow Android variants while validating cross-platform behavior on iOS.
-        let preparation: AnchorlessPrepareResult
-        if case .rejected(.missingPlatformVariant, _) = iosResult {
-            preparation = AnchorlessSolver.prepare(target: target, platform: .android)
-        } else {
-            preparation = iosResult
-        }
+        let preparation = AnchorlessSolver.prepare(target: target, platform: .ios)
         switch preparation {
         case let .rejected(failure, trace):
             return dispatchFailure(failure, trace)
@@ -66,7 +59,7 @@ internal final class AnchorlessRuntime {
             return dispatchFailure(gateFailure, AnchorlessTrace(
                 phase: .gate,
                 failure: gateFailure,
-                variantId: prepared.variantId,
+                assetId: prepared.assetId,
                 pageKey: prepared.pageKey,
                 horizontalFrame: prepared.horizontalFrame,
                 verticalFrame: prepared.verticalFrame
@@ -79,7 +72,7 @@ internal final class AnchorlessRuntime {
             // invented for it — one codeless trace, and nothing is shown.
             diagnostics(AnchorlessTrace(
                 phase: .resolve,
-                variantId: prepared.variantId,
+                assetId: prepared.assetId,
                 pageKey: prepared.pageKey,
                 horizontalFrame: prepared.horizontalFrame,
                 verticalFrame: prepared.verticalFrame

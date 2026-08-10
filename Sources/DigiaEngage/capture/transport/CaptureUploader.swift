@@ -1,9 +1,3 @@
-// Module: capture/transport
-//
-// One-step PNG multipart transport. It accepts the closed envelope produced by
-// capture/evidence and hands the PNG directly to URLSession; no local file,
-// retry queue, or encoded image field is introduced.
-
 import Foundation
 
 @MainActor
@@ -44,14 +38,11 @@ internal final class URLSessionCaptureUploader: CaptureUploader {
         do {
             let (responseBody, response) = try await session.upload(for: request, from: body)
             guard let http = response as? HTTPURLResponse else { return .rejected(.invalidResponse) }
-            let id = captureId(from: responseBody)
-            if (200..<300).contains(http.statusCode), let id {
-                return .accepted(captureId: id)
+            guard (200..<300).contains(http.statusCode) else {
+                return .rejected(.server(status: http.statusCode))
             }
-            if http.statusCode == 409, let id {
-                return .duplicate(captureId: id)
-            }
-            return .rejected(.server(status: http.statusCode))
+            guard let id = assetId(from: responseBody) else { return .rejected(.invalidResponse) }
+            return .accepted(assetId: id)
         } catch {
             // Only the normalized reason crosses the logging boundary. The
             // throwable may contain a host, URL, request body, or headers.
@@ -78,12 +69,12 @@ internal final class URLSessionCaptureUploader: CaptureUploader {
         body.append(Data("\r\n".utf8))
     }
 
-    private func captureId(from data: Data) -> String? {
+    private func assetId(from data: Data) -> String? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
         let payload = ((object["data"] as? [String: Any])?["response"] as? [String: Any]) ?? object
-        guard let id = payload["captureId"] as? String,
+        guard let id = payload["assetId"] as? String,
               !id.isEmpty
         else {
             return nil

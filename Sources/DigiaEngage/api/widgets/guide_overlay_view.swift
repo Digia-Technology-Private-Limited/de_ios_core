@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import UIKit
 
 // Native multi-step guide renderer (tooltip / spotlight), ported from Android's
 // `GuideRenderer.kt`. Driven by GuideOrchestrator state and styled entirely from
@@ -17,14 +18,14 @@ struct GuideOverlayView: View {
                     cornerRadius: step.widgetConfig.overlay.cutout.cornerRadius
                 )
             ) {
-            case let .ready(anchorRect, cornerRadius, crop):
+            case let .ready(anchorRect, cornerRadius, image):
                 GuideStepOverlay(
                     step: step,
                     stepIndex: state.stepIndex,
                     totalSteps: state.steps.count,
                     anchorRect: anchorRect,
                     cornerRadius: cornerRadius,
-                    crop: crop,
+                    image: image,
                     onAdvance: { orchestrator.advance() },
                     onDismiss: { SDKInstance.shared.dismissGuide() }
                 )
@@ -47,13 +48,14 @@ private struct GuideStepOverlay: View {
     let totalSteps: Int
     let anchorRect: CGRect
     let cornerRadius: CGFloat
-    let crop: AnchorlessCropRef?
+    let image: AnchorlessImage?
     let onAdvance: () -> Void
     let onDismiss: () -> Void
 
     @Environment(\.digiaVariables) private var variables
     @State private var bubbleSize: CGSize = .zero
-    @State private var cropLoaded = false
+    @State private var targetImage: UIImage?
+    @State private var imageLoaded = false
 
     private var config: GuideStepWidgetConfig { step.widgetConfig }
     private var isSpotlight: Bool { config.overlay.visible }
@@ -110,12 +112,9 @@ private struct GuideStepOverlay: View {
                         .ignoresSafeArea()
                 }
 
-                if let crop, let url = URL(string: crop.url) {
-                    DigiaCachedImageView(
-                        url: url,
-                        onSuccess: { _ in cropLoaded = true },
-                        onFailure: { SDKInstance.shared.reportGuideRenderFailure() }
-                    )
+                if let targetImage {
+                    Image(uiImage: targetImage)
+                    .resizable()
                     .scaledToFill()
                     .frame(width: anchorRect.width, height: anchorRect.height)
                     .clipShape(
@@ -125,8 +124,6 @@ private struct GuideStepOverlay: View {
                         )
                     )
                     .position(x: anchorRect.midX, y: anchorRect.midY)
-                } else if crop != nil {
-                    Color.clear.onAppear { SDKInstance.shared.reportGuideRenderFailure() }
                 }
 
                 bubble
@@ -159,13 +156,24 @@ private struct GuideStepOverlay: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea()
-            .opacity(crop == nil || cropLoaded ? 1 : 0)
+            .opacity(image == nil || imageLoaded ? 1 : 0)
         }
         .onAppear {
-            if crop == nil { SDKInstance.shared.reportGuideShown() }
+            if image == nil { SDKInstance.shared.reportGuideShown() }
         }
-        .onChange(of: cropLoaded) { loaded in
+        .onChange(of: imageLoaded) { loaded in
             if loaded { SDKInstance.shared.reportGuideShown() }
+        }
+        .task(id: image?.data) {
+            targetImage = nil
+            imageLoaded = false
+            guard let image else { return }
+            guard let decoded = UIImage(data: image.data) else {
+                SDKInstance.shared.reportGuideRenderFailure()
+                return
+            }
+            targetImage = decoded
+            imageLoaded = true
         }
         .task(id: stepIndex) {
             guard step.advanceTrigger == "auto", let delayMs = step.autoDelayMs, delayMs > 0 else { return }
