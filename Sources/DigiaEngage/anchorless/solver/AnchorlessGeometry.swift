@@ -123,6 +123,7 @@ internal enum AnchorlessVerticalRule: Equatable, Sendable {
     case centered(height: Double)
     case stretch(topInset: Double, bottomInset: Double)
     case proportional(topFraction: Double, bottomFraction: Double)
+    case widthScaled(topRatio: Double, height: Double)
 }
 
 // MARK: - Crop reference (§3)

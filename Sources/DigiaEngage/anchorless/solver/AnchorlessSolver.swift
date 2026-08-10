@@ -302,7 +302,11 @@ internal enum AnchorlessSolver {
                 frame: horizontalFrame
             )
             let verticalFrame = rootFrame(container.verticalFrame, in: snapshot)
-            let verticalOffsets = verticalSpan(container.verticalRule, extent: verticalFrame.height)
+            let verticalOffsets = verticalSpan(
+                container.verticalRule,
+                extent: verticalFrame.height,
+                frameWidth: verticalFrame.width
+            )
             containerHorizontal = horizontalSpan
             containerVertical = (
                 near: verticalFrame.top + verticalOffsets.near,
@@ -320,12 +324,20 @@ internal enum AnchorlessSolver {
             horizontalBounds = containerHorizontal
         }
         let verticalBounds: (near: Double, far: Double)
+        let verticalFrameWidth: Double
         switch prepared.verticalFrame {
-        case .window: verticalBounds = (snapshot.window.top, snapshot.window.bottom)
-        case .appContent: verticalBounds = (snapshot.appContent.top, snapshot.appContent.bottom)
+        case .window:
+            verticalBounds = (snapshot.window.top, snapshot.window.bottom)
+            verticalFrameWidth = snapshot.window.width
+        case .appContent:
+            verticalBounds = (snapshot.appContent.top, snapshot.appContent.bottom)
+            verticalFrameWidth = snapshot.appContent.width
         case .referenceContainer:
-            guard let containerVertical else { return fail(.rectOutsideFrame) }
+            guard let containerVertical, let containerHorizontal else {
+                return fail(.rectOutsideFrame)
+            }
             verticalBounds = containerVertical
+            verticalFrameWidth = containerHorizontal.far - containerHorizontal.near
         }
 
         let horizontalFrameRect = FrameRect(
@@ -336,7 +348,9 @@ internal enum AnchorlessSolver {
             frame: horizontalFrameRect
         )
         let verticalOffsets = verticalSpan(
-            prepared.verticalRule, extent: verticalBounds.far - verticalBounds.near
+            prepared.verticalRule,
+            extent: verticalBounds.far - verticalBounds.near,
+            frameWidth: verticalFrameWidth
         )
 
         let pre = FrameRect(
@@ -432,7 +446,8 @@ extension AnchorlessSolver {
     /// physical top to physical bottom; there is no mirroring.
     fileprivate static func verticalSpan(
         _ rule: AnchorlessVerticalRule,
-        extent: Double
+        extent: Double,
+        frameWidth: Double
     ) -> (near: Double, far: Double) {
         switch rule {
         case let .topFixed(topOffset, height):
@@ -445,6 +460,9 @@ extension AnchorlessSolver {
             return (topInset, extent - bottomInset)
         case let .proportional(topFraction, bottomFraction):
             return (topFraction * extent, bottomFraction * extent)
+        case let .widthScaled(topRatio, height):
+            let top = topRatio * frameWidth
+            return (top, top + height)
         }
     }
 
@@ -577,6 +595,10 @@ extension AnchorlessSolver {
                   let bottomFraction = finite(json["bottomFraction"]),
                   validFractions(near: topFraction, far: bottomFraction) else { return .failure(.invalidModel) }
             return .success(.proportional(topFraction: topFraction, bottomFraction: bottomFraction))
+        case "widthScaled":
+            guard let topRatio = nonNegative(json["topRatio"]),
+                  let height = positive(json["height"]) else { return .failure(.invalidModel) }
+            return .success(.widthScaled(topRatio: topRatio, height: height))
         default:
             return .failure(.unknownRuleKind)
         }
