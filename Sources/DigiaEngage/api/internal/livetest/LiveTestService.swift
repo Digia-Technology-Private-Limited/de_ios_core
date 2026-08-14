@@ -8,9 +8,13 @@ import UIKit
 /// (`ComponentRegistryService.isEnabled`) is on.
 @MainActor
 final class LiveTestService: ObservableObject {
+    private static let deviceNameKey = "digia_live_testing_device_name"
+
     let ackReporter: LiveTestAckReporter
+    private let defaults: UserDefaults
 
     @Published private(set) var connectionState: LiveTestConnectionState = .disconnected
+    @Published private(set) var deviceName: String?
 
     private var client: LiveTestSSEClient?
     private var toggleCancellable: AnyCancellable?
@@ -19,8 +23,13 @@ final class LiveTestService: ObservableObject {
     private var isDebugBuildFlag = false
     private var componentRegistry: ComponentRegistryService?
 
-    init(ackReporter: LiveTestAckReporter = LiveTestAckReporter()) {
+    init(
+        defaults: UserDefaults = .standard,
+        ackReporter: LiveTestAckReporter = LiveTestAckReporter()
+    ) {
+        self.defaults = defaults
         self.ackReporter = ackReporter
+        self.deviceName = Self.normalizeDeviceName(defaults.string(forKey: Self.deviceNameKey))
     }
 
     func configure(
@@ -39,6 +48,7 @@ final class LiveTestService: ObservableObject {
         let sseClient = LiveTestSSEClient(
             config: { config },
             deviceId: { deviceId },
+            deviceName: { [weak self] in self?.deviceName },
             onEvent: { event in
                 if case .campaignTest(let invocation) = event { onCampaignTest(invocation) }
             },
@@ -69,6 +79,22 @@ final class LiveTestService: ObservableObject {
         }
     }
 
+    func setDeviceName(_ value: String) {
+        let updatedName = Self.normalizeDeviceName(value)
+        guard updatedName != deviceName else { return }
+
+        deviceName = updatedName
+        if let updatedName {
+            defaults.set(updatedName, forKey: Self.deviceNameKey)
+        } else {
+            defaults.removeObject(forKey: Self.deviceNameKey)
+        }
+
+        guard client?.isRunning == true else { return }
+        client?.stop()
+        client?.start()
+    }
+
     func stop() {
         toggleCancellable?.cancel()
         toggleCancellable = nil
@@ -78,5 +104,10 @@ final class LiveTestService: ObservableObject {
         backgroundObserver = nil
         foregroundObserver = nil
         connectionState = .disconnected
+    }
+
+    private static func normalizeDeviceName(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
     }
 }
