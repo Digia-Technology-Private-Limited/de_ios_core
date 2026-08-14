@@ -1,4 +1,28 @@
 import SwiftUI
+
+@MainActor
+private func performCanvasAction(
+    _ request: CampaignCanvasActionRequest,
+    variables: VariableContext?,
+    dismiss: @escaping () -> Void
+) {
+    guard !request.actions.isEmpty else { return }
+    let action = request.actions.first?.resolved(with: variables)
+    SDKInstance.shared.emitNudgeClick(
+        elementId: request.elementId,
+        ctaLabel: request.label,
+        actionType: action?.analyticsType,
+        actionUrl: action?.analyticsURL,
+        ctaRole: request.isPrimary ? "primary" : "secondary"
+    )
+    Task {
+        await SDKInstance.shared.executeActionFlow(
+            request.actions,
+            variables: variables,
+            localActionExecutor: LocalActionExecutor(dismiss: dismiss)
+        )
+    }
+}
 import Combine
 
 @MainActor
@@ -78,7 +102,7 @@ private struct NudgeSheetView: View {
     let presentation: DigiaNudgePresentation
 
     private var authoredSurface: NudgeSurface { presentation.config.surface }
-    private var canvas: NudgeCanvas? { presentation.config.canvas }
+    private var canvas: CampaignCanvas? { presentation.config.canvas }
     private var runtimeSize: CGSize { activeWindowSize }
     private var naturalScale: CGFloat {
         canvas == nil ? 1 : runtimeSize.width / max(presentation.config.designWidth, 1)
@@ -115,7 +139,9 @@ private struct NudgeSheetView: View {
                                 width: runtimeSize.width,
                                 height: max(1, runtimeSize.height - 48)
                             ),
-                            onDismiss: dismiss
+                            onAction: { request in
+                                performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
+                            }
                         )
                         Spacer(minLength: 0)
                     }
@@ -211,7 +237,7 @@ private struct NudgeDialogContainer: View {
     }
 
     private func canvasDialogPanel(
-        canvas: NudgeCanvas,
+        canvas: CampaignCanvas,
         surface: NudgeSurface,
         runtimeViewportWidth: CGFloat,
         availableSize: CGSize
@@ -223,7 +249,9 @@ private struct NudgeDialogContainer: View {
                 designWidth: presentation.config.designWidth,
                 runtimeViewportWidth: runtimeViewportWidth,
                 availableSize: availableSize,
-                onDismiss: dismiss
+                onAction: { request in
+                    performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
+                }
             )
             if surface.showCloseButton {
                 NudgeCloseButton(config: surface.closeButton, action: dismiss)

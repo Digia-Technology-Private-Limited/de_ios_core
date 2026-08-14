@@ -1,69 +1,84 @@
 import Foundation
 
-struct CampaignFetcher {
+enum CampaignFetchFailureCategory: Equatable { case transport, httpStatus, invalidResponse }
+
+struct CampaignFetchError: LocalizedError {
+    let category: CampaignFetchFailureCategory
+    let endpoint: String
+    let statusCode: Int?
+    let message: String
+    let underlying: Error?
+    var errorDescription: String? { message }
+}
+
+struct CampaignAPIResponse { let statusCode: Int; let data: Data }
+protocol CampaignAPI { func fetchCampaignBundle() async throws -> CampaignAPIResponse }
+
+private struct URLSessionCampaignAPI: CampaignAPI {
     let config: DigiaConfig
     let session: URLSession
 
-    init(config: DigiaConfig, session: URLSession = .shared) {
-        self.config = config
-        self.session = session
-    }
-
-    func fetch() async throws -> [CampaignModel] {
-        let fullURL = DigiaEndpoints.campaigns
-
-        log("[CampaignFetcher] fetching: \(fullURL) (env=\(config.environment))")
-        guard let url = URL(string: fullURL) else {
-            throw DigiaConfigError.network("Invalid getCampaigns URL: \(fullURL)")
+    func fetchCampaignBundle() async throws -> CampaignAPIResponse {
+        let endpoint = DigiaEndpoints.campaignBundle
+        guard let url = URL(string: endpoint) else {
+            throw CampaignFetchError(category: .transport, endpoint: endpoint, statusCode: nil, message: "Invalid campaign bundle URL", underlying: nil)
         }
-
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue(config.apiKey, forHTTPHeaderField: "x-digia-project-id")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 10
         request.httpBody = Data("{}".utf8)
-
-        let (data, response) = try await session.data(for: request)
-        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-        log("[CampaignFetcher] response: HTTP \(statusCode)")
-        guard statusCode == 200 else {
-            throw DigiaConfigError.network("getCampaigns failed: HTTP \(statusCode)")
+        do {
+            let (data, response) = try await session.data(for: request)
+            return CampaignAPIResponse(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1, data: data)
+        } catch {
+            throw CampaignFetchError(category: .transport, endpoint: endpoint, statusCode: nil, message: "Campaign bundle transport failed: \(error.localizedDescription)", underlying: error)
         }
+    }
+}
 
-        return try Self.parse(data)
+struct CampaignFetcher {
+    let api: any CampaignAPI
+    init(config: DigiaConfig, session: URLSession = .shared) { api = URLSessionCampaignAPI(config: config, session: session) }
+    init(api: any CampaignAPI) { self.api = api }
+
+    func fetch() async throws -> CampaignBundle {
+        let endpoint = DigiaEndpoints.campaignBundle
+        DigiaLog.verbose("[CampaignFetcher] fetching: \(endpoint)")
+        let response = try await api.fetchCampaignBundle()
+        guard (200...299).contains(response.statusCode) else {
+            throw CampaignFetchError(category: .httpStatus, endpoint: endpoint, statusCode: response.statusCode, message: "Campaign bundle request failed: HTTP \(response.statusCode)", underlying: nil)
+        }
+        do { return try Self.parse(response.data) }
+        catch let error as CampaignFetchError { throw error }
+        catch {
+            throw CampaignFetchError(category: .invalidResponse, endpoint: endpoint, statusCode: response.statusCode, message: "Invalid campaign bundle response: \(error.localizedDescription)", underlying: error)
+        }
     }
 
-    /// Parses a getCampaigns response body into campaign models without any network
-    /// call. Used both by `fetch()` and by callers (e.g. the React Native bridge)
-    /// that already fetched the same payload themselves and just need it parsed.
-    static func parse(_ data: Data) throws -> [CampaignModel] {
-        let array = try extractCampaignArray(data)
-        return array.compactMap { CampaignModel.fromJson($0) }
-    }
-
-    private static func extractCampaignArray(_ data: Data) throws -> [[String: Any]] {
-        let root = try JSONSerialization.jsonObject(with: data)
-
-        if let array = root as? [Any] {
-            return array.compactMap { $0 as? [String: Any] }
+    static func parse(_ data: Data) throws -> CampaignBundle {
+        let endpoint = DigiaEndpoints.campaignBundle
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw CampaignFetchError(category: .invalidResponse, endpoint: endpoint, statusCode: nil, message: "Campaign bundle response is not an object", underlying: nil)
         }
-
-        guard let envelope = root as? [String: Any] else {
-            throw DigiaConfigError.decodeFailure("getCampaigns response is not an object or array")
+        let bundle: [String: Any]?
+        if let data = root["data"] as? [String: Any], let response = data["response"] as? [String: Any] { bundle = response }
+        else if let response = root["response"] as? [String: Any] { bundle = response }
+        else if root["campaigns"] != nil { bundle = root }
+        else { bundle = nil }
+        guard let bundle, let campaignValues = bundle["campaigns"] as? [Any] else {
+            throw CampaignFetchError(category: .invalidResponse, endpoint: endpoint, statusCode: nil, message: "Campaign bundle is missing campaigns array", underlying: nil)
         }
-
-        if let nested = (envelope.object("data")?["response"]) as? [Any] {
-            return nested.compactMap { $0 as? [String: Any] }
+        let raw = campaignValues.compactMap { $0 as? [String: Any] }
+        let designTokens: [String: Any]?
+        switch bundle["designTokens"] {
+        case nil, is NSNull: designTokens = nil
+        case let value as [String: Any]: designTokens = value
+        default:
+            DigiaLog.warning("[CampaignFetcher] designTokens is not an object; using literals only")
+            designTokens = nil
         }
-        if let response = envelope["response"] as? [Any] {
-            return response.compactMap { $0 as? [String: Any] }
-        }
-
-        throw DigiaConfigError.decodeFailure("getCampaigns response missing data.response")
-    }
-
-    private func log(_ message: String) {
-        DigiaLog.verbose(message)
+        return CampaignBundle.create(rawCampaigns: raw, designTokensJSON: designTokens)
     }
 }

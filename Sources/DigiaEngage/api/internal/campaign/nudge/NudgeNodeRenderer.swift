@@ -42,7 +42,6 @@ private struct NudgeNodeView: View {
         Group {
             switch node {
             case .text(let n): NudgeTextView(node: n, canvasMode: false)
-            case .canvasContainer: EmptyView()
             case .image(let n): NudgeImageView(node: n, canvasMode: false)
             case .button(let n): NudgeButtonView(node: n, onDismiss: onDismiss, canvasMode: false)
             case .gap(let n): Spacer().frame(height: n.height)
@@ -54,31 +53,6 @@ private struct NudgeNodeView: View {
             }
         }
         .nudgeBox(node.box)
-    }
-}
-
-/// Shared leaf dispatch for the absolute campaign canvas. Geometry is owned by
-/// the canvas stage, so leaf renderers fill the authored child rectangle and do
-/// not re-apply stack-only width/height or margin rules.
-struct NudgeCanvasNodeContent: View {
-    let node: NudgeNode
-    let onDismiss: () -> Void
-
-    var body: some View {
-        Group {
-            switch node {
-            case .text(let n): NudgeTextView(node: n, canvasMode: true)
-            case .canvasContainer: EmptyView()
-            case .image(let n): NudgeImageView(node: n, canvasMode: true)
-            case .button(let n): NudgeButtonView(node: n, onDismiss: onDismiss, canvasMode: true)
-            case .gap: Color.clear
-            case .divider(let n): NudgeDividerView(node: n)
-            case .progressBar(let n): NudgeProgressBarView(node: n)
-            case .lottie(let n): NudgeLottieView(node: n, canvasMode: true)
-            case .carousel: EmptyView()
-            case .video(let n): NudgeVideoView(node: n, canvasMode: true)
-            }
-        }
     }
 }
 

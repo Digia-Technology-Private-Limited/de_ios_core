@@ -108,19 +108,20 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
 
         font = DigiaFont(fontFamily: config.fontFamily)
+        CampaignCanvasTheme.shared.update(config.themeMode)
 
         if config.wrapperBinding == "react_native" {
             // RN fetches campaigns itself (it needs the same response to render
-            // JS-side campaigns) and hands them to us via populateCampaigns() —
+            // JS-side campaigns) and hands them to us via populateCampaignBundle() —
             // fetching here too would duplicate the network call. sdkState stays
             // .notInitialized until that call arrives.
-            logVerbose("Skipping native campaign fetch — awaiting populateCampaigns() from RN")
+            logVerbose("Skipping native campaign fetch — awaiting populateCampaignBundle() from RN")
             return
         }
 
         var campaigns: [CampaignModel] = []
         do {
-            campaigns = try await CampaignFetcher(config: config).fetch()
+            campaigns = try await CampaignFetcher(config: config).fetch().campaigns
         } catch {
             // Campaign fetch failure must not block SDK readiness.
             logVerbose("CampaignFetcher failed: \(error)")
@@ -195,17 +196,19 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     /// RN-only entrypoint: JS already fetched campaigns for its own rendering needs,
-    /// so it hands the raw getCampaigns response here instead of native re-fetching.
+    /// so it hands the raw campaign-bundle response here instead of native re-fetching.
     /// Called once after `initialize` when `wrapperBinding == "react_native"`.
-    func populateCampaigns(_ campaignsJson: String) {
+    func populateCampaignBundle(_ bundleJson: String) {
         var campaigns: [CampaignModel] = []
         do {
-            campaigns = try CampaignFetcher.parse(Data(campaignsJson.utf8))
+            campaigns = try CampaignFetcher.parse(Data(bundleJson.utf8)).campaigns
         } catch {
-            logVerbose("populateCampaigns: failed to parse campaigns JSON: \(error)")
+            logVerbose("populateCampaignBundle: failed to parse campaign bundle: \(error)")
         }
         completeInitialization(campaigns)
     }
+
+    func setThemeMode(_ mode: DigiaThemeMode) { CampaignCanvasTheme.shared.update(mode) }
 
     private func logVerbose(_ message: String) {
         DigiaLog.verbose("[SDKInstance] \(message)")

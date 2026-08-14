@@ -54,4 +54,28 @@ struct DigiaFontTests {
 
         #expect(font.fontDescriptor.symbolicTraits.contains(.traitBold))
     }
+
+    @Test("a configured host family prevents the dashboard label from taking precedence")
+    func configuredFamilyWinsOverDashboardFallback() {
+        let font = DigiaFont(fontFamily: "DefinitelyNotARegisteredFont").resolve(
+            size: 18,
+            weight: 400,
+            italic: false,
+            fallbackFamily: "Chalkduster"
+        )
+
+        #expect(font.fontName != "Chalkduster")
+    }
+
+    @Test("the dashboard family is attempted when no host family is configured")
+    func dashboardFallbackWithoutHostFamily() {
+        let font = DigiaFont().resolve(
+            size: 18,
+            weight: 400,
+            italic: false,
+            fallbackFamily: "Chalkduster"
+        )
+
+        #expect(font.fontName == "Chalkduster")
+    }
 }

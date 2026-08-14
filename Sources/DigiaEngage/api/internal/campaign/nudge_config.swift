@@ -166,7 +166,7 @@ struct NudgeSurface: Equatable {
 struct NudgeConfig: Equatable {
     let surface: NudgeSurface
     let layout: NudgeColumn
-    let canvas: NudgeCanvas?
+    let canvas: CampaignCanvas?
     let designWidth: CGFloat
     /// Dashboard-declared variable schemas (`templateConfig.variables`). Carries
     /// name, type, and fallbackValue for each declared variable; resolved against
@@ -176,16 +176,20 @@ struct NudgeConfig: Equatable {
     /// Decodes a nudge `templateConfig` (`{ container, layout, variables }`).
     /// Returns nil when the content tree is missing — such a campaign has
     /// nothing to show.
-    static func fromJson(_ json: [String: Any]) -> NudgeConfig? {
-        let rawDesignWidth = CGFloat(json.double("designWidth", default: Double(defaultCanvasDesignWidth)))
+    static func fromJson(_ json: [String: Any], designTokens: DesignTokenCatalog = .empty) -> NudgeConfig? {
+        let rawDesignWidth = CGFloat(json.double("designWidth", default: Double(defaultCampaignCanvasDesignWidth)))
         let designWidth = rawDesignWidth.isFinite && rawDesignWidth > 0
-            ? rawDesignWidth : defaultCanvasDesignWidth
+            ? rawDesignWidth : defaultCampaignCanvasDesignWidth
         let parser = NudgeParser()
-        let canvas: NudgeCanvas?
+        let canvas: CampaignCanvas?
         let layout: NudgeColumn
         if json.string("layoutMode") == "canvas" {
             guard let rawCanvas = json["canvas"] as? [String: Any] else { return nil }
-            canvas = parser.parseCanvas(rawCanvas)
+            do { canvas = try CampaignCanvasParser(designTokens: designTokens).parse(rawCanvas) }
+            catch {
+                DigiaLog.warning("[NudgeConfig] rejected Canvas campaign: \(error.localizedDescription)")
+                return nil
+            }
             layout = NudgeColumn(
                 crossAxisAlignment: .start,
                 mainAxisAlignment: .start,

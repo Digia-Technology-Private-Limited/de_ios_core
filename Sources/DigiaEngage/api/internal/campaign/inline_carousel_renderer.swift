@@ -52,7 +52,7 @@ private struct InlineCarouselView: View {
         // iOS 17 view-aligned scrolling APIs (`scrollTargetLayout`, `scrollPosition`,
         // `scrollTargetBehavior(.viewAligned)`, `safeAreaPadding`); there's no small
         // native substitute, so below iOS 17 this renders nothing (unreachable in
-        // practice — `Digia.initialize`/`populateCampaigns` no-op below iOS 17, so
+        // practice — `Digia.initialize`/`populateCampaignBundle` no-op below iOS 17, so
         // no campaign trigger ever reaches this view on those OS versions).
         if items.isEmpty {
             EmptyView()

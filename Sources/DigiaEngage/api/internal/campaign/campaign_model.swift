@@ -48,7 +48,7 @@ struct CampaignModel: Equatable {
         return nil
     }
 
-    static func fromJson(_ json: [String: Any]) -> CampaignModel? {
+    static func fromJson(_ json: [String: Any], designTokens: DesignTokenCatalog = .empty) -> CampaignModel? {
         guard let id = json.nonBlankString("id") ?? json.nonBlankString("_id") else { return nil }
         guard let campaignKey = json.nonBlankString("campaignKey") else { return nil }
         guard let campaignType = json.nonBlankString("campaignType") else { return nil }
@@ -61,7 +61,7 @@ struct CampaignModel: Equatable {
             config = .guide(guideConfig)
         case "nudge":
             guard let templateConfig = json.object("templateConfig"),
-                  let nudgeConfig = NudgeConfig.fromJson(templateConfig) else { return nil }
+                  let nudgeConfig = NudgeConfig.fromJson(templateConfig, designTokens: designTokens) else { return nil }
             config = .nudge(nudgeConfig)
         case "inline":
             guard let templateConfig = json.object("templateConfig") else { return nil }

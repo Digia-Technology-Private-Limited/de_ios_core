@@ -77,15 +77,19 @@ public enum Digia {
         SDKInstance.shared.setOpenURLHandler(handler)
     }
 
-    /// RN-only: hand native the same getCampaigns response JS already fetched, so
+    /// RN-only: hand native the same campaign-bundle response JS already fetched, so
     /// native doesn't also fetch it. Call once after `initialize` when the config's
     /// `wrapperBinding` is `"react_native"`.
     ///
     /// No-ops below iOS 17 (see `initialize`) — this bypasses `initialize`'s own
     /// state guard, so it needs the same OS check independently.
-    public static func populateCampaigns(_ campaignsJson: String) {
+    public static func populateCampaignBundle(_ bundleJson: String) {
         guard #available(iOS 17, *) else { return }
-        SDKInstance.shared.populateCampaigns(campaignsJson)
+        SDKInstance.shared.populateCampaignBundle(bundleJson)
+    }
+
+    public static func setThemeMode(_ mode: DigiaThemeMode) {
+        SDKInstance.shared.setThemeMode(mode)
     }
 
     /// Silently dismisses any active nudge overlay without animation.

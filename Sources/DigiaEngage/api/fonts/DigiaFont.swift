@@ -10,16 +10,29 @@ struct DigiaFont {
     }
 
     /// Resolves the one canonical UIKit font used by both UIKit and SwiftUI renderers.
-    func resolve(size: Double, weight: Int, italic: Bool) -> UIFont {
+    func resolve(size: Double, weight: Int, italic: Bool, fallbackFamily: String? = nil) -> UIFont {
         let uiWeight = UIFont.Weight(campaignWeight: weight)
         let base: UIFont
-        if let family, !UIFont.fontNames(forFamilyName: family).isEmpty {
+        if let family {
+            if !UIFont.fontNames(forFamilyName: family).isEmpty {
+                let descriptor = UIFontDescriptor(fontAttributes: [
+                    .family: family,
+                    .traits: [UIFontDescriptor.TraitKey.weight: uiWeight],
+                ])
+                base = UIFont(descriptor: descriptor, size: size)
+            } else if let exactFace = UIFont(name: family, size: size) {
+                base = exactFace
+            } else {
+                base = UIFont.systemFont(ofSize: size, weight: uiWeight)
+            }
+        } else if let fallback = fallbackFamily?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !fallback.isEmpty, !UIFont.fontNames(forFamilyName: fallback).isEmpty {
             let descriptor = UIFontDescriptor(fontAttributes: [
-                .family: family,
+                .family: fallback,
                 .traits: [UIFontDescriptor.TraitKey.weight: uiWeight],
             ])
             base = UIFont(descriptor: descriptor, size: size)
-        } else if let family, let exactFace = UIFont(name: family, size: size) {
+        } else if let fallback = fallbackFamily, let exactFace = UIFont(name: fallback, size: size) {
             base = exactFace
         } else {
             base = UIFont.systemFont(ofSize: size, weight: uiWeight)
