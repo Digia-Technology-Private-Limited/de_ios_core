@@ -21,6 +21,8 @@ struct AnchorlessTarget: Equatable {
               let pageKey = nonEmptyString(wire.pageKey),
               let imageURLString = nonEmptyString(wire.imageUrl),
               let imageURL = URL(string: imageURLString),
+              imageURL.scheme?.lowercased() == "https",
+              imageURL.host?.isEmpty == false,
               let placement = AnchorlessPlacement.fromWire(wire.placement)
         else { return nil }
 

@@ -46,6 +46,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private var screenUpdateRevision = 0
     private var captureInFlight = false
     private var guideCompletionFired = false
+    private var currentDesignTokens = DesignTokenCatalog.empty
 
     let campaignStore = CampaignStore()
     let controller = DigiaOverlayController()
@@ -141,7 +142,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
         var campaigns: [CampaignModel] = []
         do {
-            campaigns = try await CampaignFetcher(config: config).fetch().campaigns
+            let bundle = try await CampaignFetcher(config: config).fetch()
+            campaigns = bundle.campaigns
+            currentDesignTokens = bundle.designTokens
         } catch {
             // Campaign fetch failure must not block SDK readiness.
             logVerbose("CampaignFetcher failed: \(error)")
@@ -225,7 +228,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func populateCampaignBundle(_ bundleJson: String) {
         var campaigns: [CampaignModel] = []
         do {
-            campaigns = try CampaignFetcher.parse(Data(bundleJson.utf8)).campaigns
+            let bundle = try CampaignFetcher.parse(Data(bundleJson.utf8))
+            campaigns = bundle.campaigns
+            currentDesignTokens = bundle.designTokens
         } catch {
             logVerbose("populateCampaignBundle: failed to parse campaign bundle: \(error)")
         }
@@ -714,7 +719,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
 
-        guard let campaign = CampaignModel.fromJson(campaignJson) else {
+        guard let campaign = CampaignModel.fromJson(
+            campaignJson,
+            designTokens: currentDesignTokens
+        ) else {
             reporter.postFailed(
                 invocation.testInvocationId, code: .templateError,
                 message: "campaign object could not be parsed into a renderable campaign"
@@ -1484,6 +1492,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         sdkState = .notInitialized
         isHostMounted = false
         font = DigiaFont()
+        currentDesignTokens = .empty
         campaignStore.clear()
         controller.dismissNudge()
         controller.dismissStoryOverlay()
