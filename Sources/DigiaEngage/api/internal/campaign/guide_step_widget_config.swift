@@ -38,11 +38,14 @@ struct ArrowConfig: Equatable {
 
 struct BubbleConfig: Equatable {
     let backgroundColor: String
+    let borderColor: String
+    let borderWidth: Double
     let cornerRadius: Double
     let paddingHorizontal: Double
     let paddingVertical: Double
     let maxWidthDp: Double
     let elevation: Double
+    let calloutGap: Double
     let entranceAnimation: String // "elastic"|"circular"|"fade"|"overshoot"|"none"
     let arrow: ArrowConfig
 }
@@ -51,6 +54,8 @@ struct CutoutConfig: Equatable {
     let shape: String          // "rounded_rect"|"rect"|"circle"
     let cornerRadius: Double
     let padding: Double
+    let glowColor: String
+    let glowWidth: Double
 }
 
 struct OverlayConfig: Equatable {
@@ -87,6 +92,8 @@ struct GuideStepWidgetConfig: Equatable {
     let overlay: OverlayConfig
     let content: GuideContentConfig
     let actions: [GuideAction]
+    let layoutMode: String
+    let canvas: CampaignCanvas?
 
     // Defaults (hex strings, matching Android's parsed-color fallbacks).
     private static let defaultBubbleBackground = "#1E40AF"
@@ -98,42 +105,97 @@ struct GuideStepWidgetConfig: Equatable {
     private static let defaultBodyColor = "#CCFFFFFF"
     private static let defaultTitleColor = "#FFFFFF"
 
-    static func fromJson(_ json: [String: Any]) -> GuideStepWidgetConfig {
+    static func fromJson(
+        _ json: [String: Any],
+        designTokens: DesignTokenCatalog = .empty
+    ) -> GuideStepWidgetConfig {
+        let isFlatSpotlight = json.object("target")?.string("type") == "anchorless"
         let bubbleObj = json.object("bubble") ?? [:]
         let overlayObj = json.object("overlay") ?? [:]
         let contentObj = json.object("content") ?? [:]
 
         let arrowObj = bubbleObj.object("arrow") ?? [:]
+        let calloutBackground = color(
+            json.string("calloutBackgroundColor"),
+            default: "#FFFFFF"
+        )
         let arrow = ArrowConfig(
-            visible: arrowObj.bool("visible", default: true),
-            preferredDirection: arrowObj.string("preferred_direction", default: "auto"),
-            size: arrowObj.int("size", default: 10),
-            color: color(arrowObj.string("color"), default: defaultArrowColor)
+            visible: isFlatSpotlight
+                ? json.bool("showArrow", default: true)
+                : arrowObj.bool("visible", default: true),
+            preferredDirection: isFlatSpotlight
+                ? json.string("calloutPosition", default: "below")
+                : arrowObj.string("preferred_direction", default: "auto"),
+            size: isFlatSpotlight
+                ? json.int("arrowSize", default: 8)
+                : arrowObj.int("size", default: 10),
+            color: isFlatSpotlight
+                ? color(json.string("arrowColor"), default: calloutBackground)
+                : color(arrowObj.string("color"), default: defaultArrowColor)
         )
 
         let bubble = BubbleConfig(
-            backgroundColor: color(bubbleObj.string("background_color"), default: defaultBubbleBackground),
-            cornerRadius: bubbleObj.double("corner_radius", default: 12),
-            paddingHorizontal: bubbleObj.double("padding_horizontal", default: 16),
-            paddingVertical: bubbleObj.double("padding_vertical", default: 12),
-            maxWidthDp: bubbleObj.double("max_width", default: 280),
-            elevation: bubbleObj.double("elevation", default: 6),
+            backgroundColor: isFlatSpotlight
+                ? calloutBackground
+                : color(bubbleObj.string("background_color"), default: defaultBubbleBackground),
+            borderColor: isFlatSpotlight
+                ? color(json.string("calloutBorderColor"), default: "#00000000")
+                : color(bubbleObj.string("border_color"), default: "#00000000"),
+            borderWidth: isFlatSpotlight
+                ? json.double("calloutBorderWidth", default: 0)
+                : bubbleObj.double("border_width", default: 0),
+            cornerRadius: isFlatSpotlight
+                ? json.double("calloutCornerRadius", default: 8)
+                : bubbleObj.double("corner_radius", default: 12),
+            paddingHorizontal: isFlatSpotlight
+                ? json.double("calloutPadding", default: 12)
+                : bubbleObj.double("padding_horizontal", default: 16),
+            paddingVertical: isFlatSpotlight
+                ? json.double("calloutPadding", default: 12)
+                : bubbleObj.double("padding_vertical", default: 12),
+            maxWidthDp: isFlatSpotlight
+                ? json.double("calloutMaxWidth", default: 280)
+                : bubbleObj.double("max_width", default: 280),
+            elevation: isFlatSpotlight
+                ? (json.bool("calloutShadow", default: true) ? 6 : 0)
+                : bubbleObj.double("elevation", default: 6),
+            calloutGap: isFlatSpotlight
+                ? json.double("calloutGap", default: 8)
+                : bubbleObj.double("callout_gap", default: 8),
             entranceAnimation: bubbleObj.string("entrance_animation", default: "elastic"),
             arrow: arrow
         )
 
         let cutoutObj = overlayObj.object("cutout") ?? [:]
         let cutout = CutoutConfig(
-            shape: cutoutObj.string("shape", default: "rounded_rect"),
-            cornerRadius: cutoutObj.double("corner_radius", default: 12),
-            padding: cutoutObj.double("padding", default: 8)
+            shape: isFlatSpotlight
+                ? json.string("highlightShape", default: "rect")
+                : cutoutObj.string("shape", default: "rounded_rect"),
+            cornerRadius: isFlatSpotlight
+                ? json.double("highlightCornerRadius", default: 8)
+                : cutoutObj.double("corner_radius", default: 12),
+            padding: isFlatSpotlight
+                ? json.double("highlightPadding", default: 8)
+                : cutoutObj.double("padding", default: 8),
+            glowColor: isFlatSpotlight
+                ? color(json.string("highlightGlowColor"), default: "#00000000")
+                : color(cutoutObj.string("glow_color"), default: "#00000000"),
+            glowWidth: isFlatSpotlight
+                ? json.double("highlightGlowWidth", default: 0)
+                : cutoutObj.double("glow_width", default: 0)
         )
 
         let overlay = OverlayConfig(
-            visible: overlayObj.bool("visible", default: false),
-            color: color(overlayObj.string("color"), default: defaultOverlayColor),
-            alpha: overlayObj.double("alpha", default: 0.6),
-            dismissOnTap: overlayObj.bool("dismiss_on_tap", default: false),
+            visible: isFlatSpotlight || overlayObj.bool("visible", default: false),
+            color: isFlatSpotlight
+                ? color(json.string("overlayColor"), default: defaultOverlayColor)
+                : color(overlayObj.string("color"), default: defaultOverlayColor),
+            alpha: isFlatSpotlight
+                ? json.double("overlayOpacity", default: 0.7)
+                : overlayObj.double("alpha", default: 0.6),
+            dismissOnTap: isFlatSpotlight
+                ? json.string("outsideTapBehavior", default: "next") != "nothing"
+                : overlayObj.bool("dismiss_on_tap", default: false),
             entranceAnimation: overlayObj.string("entrance_animation", default: "fade"),
             cutout: cutout
         )
@@ -211,7 +273,20 @@ struct GuideStepWidgetConfig: Equatable {
             )
         }
 
-        return GuideStepWidgetConfig(bubble: bubble, overlay: overlay, content: content, actions: actions)
+        let layoutMode = json.string("layoutMode", default: "classic")
+        let canvas = isFlatSpotlight && layoutMode == "canvas"
+            ? (json.object("canvas").flatMap {
+                try? CampaignCanvasParser(designTokens: designTokens).parse($0)
+            })
+            : nil
+        return GuideStepWidgetConfig(
+            bubble: bubble,
+            overlay: overlay,
+            content: content,
+            actions: actions,
+            layoutMode: layoutMode,
+            canvas: canvas
+        )
     }
 
     private static func color(_ value: String?, default fallback: String) -> String {

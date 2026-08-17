@@ -29,6 +29,29 @@ public struct DigiaHost<Content: View>: View {
 
             RecordingBadgeView()
                 .zIndex(6)
+
+            CaptureFlashView()
+                .zIndex(7)
         }
+    }
+}
+
+@MainActor
+private struct CaptureFlashView: View {
+    @ObservedObject private var instance = SDKInstance.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var opacity = 0.0
+
+    var body: some View {
+        Color.white
+            .opacity(opacity)
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .onChange(of: instance.captureFlashRevision) { _ in
+                guard !reduceMotion else { return }
+                opacity = 0.35
+                withAnimation(.easeOut(duration: 0.15)) { opacity = 0 }
+            }
     }
 }

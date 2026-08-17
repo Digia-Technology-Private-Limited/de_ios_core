@@ -41,6 +41,36 @@ struct CampaignCanvasView: View {
     }
 }
 
+struct GuideCampaignCanvasView: View {
+    let canvas: CampaignCanvas
+    let designWidth: CGFloat
+    let viewportWidth: CGFloat
+    let availableSize: CGSize
+    let cornerRadius: CGFloat
+    let onAction: (CampaignCanvasActionRequest) -> Void
+    @ObservedObject private var theme = CampaignCanvasTheme.shared
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var scale: CGFloat {
+        let designScale = viewportWidth / max(designWidth, 1)
+        let widthScale = availableSize.width / max(canvas.width * designScale, 1)
+        let heightScale = availableSize.height / max(canvas.height * designScale, 1)
+        return designScale * min(1, widthScale, heightScale)
+    }
+
+    var body: some View {
+        CampaignCanvasStage(
+            canvas: canvas,
+            authoredCornerRadius: cornerRadius / max(scale, 0.001),
+            isDark: theme.isDark(colorScheme),
+            onAction: onAction
+        )
+        .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
+        .scaleEffect(scale, anchor: .topLeading)
+        .frame(width: canvas.width * scale, height: canvas.height * scale, alignment: .topLeading)
+    }
+}
+
 private struct CampaignCanvasStage: View {
     let canvas: CampaignCanvas
     let authoredCornerRadius: CGFloat

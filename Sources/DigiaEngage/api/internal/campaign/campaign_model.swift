@@ -57,7 +57,11 @@ struct CampaignModel: Equatable {
         let config: CampaignConfigModel
         switch campaignType {
         case "guide":
-            guard let guideConfig = parseGuideConfig(json, fallbackId: id) else { return nil }
+            guard let guideConfig = parseGuideConfig(
+                json,
+                fallbackId: id,
+                designTokens: designTokens
+            ) else { return nil }
             config = .guide(guideConfig)
         case "nudge":
             guard let templateConfig = json.object("templateConfig"),
@@ -112,24 +116,43 @@ struct CampaignModel: Equatable {
 
     // ── guide parsing ─────────────────────────────────────────────────────────
 
-    private static func parseGuideConfig(_ json: [String: Any], fallbackId: String) -> GuideConfigModel? {
+    private static func parseGuideConfig(
+        _ json: [String: Any],
+        fallbackId: String,
+        designTokens: DesignTokenCatalog
+    ) -> GuideConfigModel? {
         if let guideJson = json.object("guideConfig") {
             // Variables may live on guideConfig or on the sibling templateConfig
             let templateJson = json.object("templateConfig")
             let schemas = NudgeConfig.parseVariableSchemas(templateJson ?? guideJson)
-            return parseGuideSteps(guideJson, fallbackId: fallbackId, variableSchemas: schemas)
+            return parseGuideSteps(
+                guideJson,
+                fallbackId: fallbackId,
+                variableSchemas: schemas,
+                designTokens: designTokens
+            )
         }
         if let templateJson = json.object("templateConfig") {
             let templateType = templateJson.string("templateType")
             if templateType == "tooltip" || templateType == "spotlight" {
                 let schemas = NudgeConfig.parseVariableSchemas(templateJson)
-                return parseFlatGuideTemplate(templateJson, fallbackId: fallbackId, variableSchemas: schemas)
+                return parseFlatGuideTemplate(
+                    templateJson,
+                    fallbackId: fallbackId,
+                    variableSchemas: schemas,
+                    designTokens: designTokens
+                )
             }
         }
         return nil
     }
 
-    private static func parseGuideSteps(_ guideJson: [String: Any], fallbackId: String, variableSchemas: [VariableSchema]) -> GuideConfigModel? {
+    private static func parseGuideSteps(
+        _ guideJson: [String: Any],
+        fallbackId: String,
+        variableSchemas: [VariableSchema],
+        designTokens: DesignTokenCatalog
+    ) -> GuideConfigModel? {
         let guideId = guideJson.nonBlankString("id") ?? guideJson.nonBlankString("_id") ?? fallbackId
         guard let stepsArr = guideJson["steps"] as? [Any] else { return nil }
         return buildGuideConfig(
@@ -138,19 +161,36 @@ struct CampaignModel: Equatable {
             stepsArr: stepsArr,
             displayStyle: nil,
             variableSchemas: variableSchemas,
+            designTokens: designTokens,
+            designWidth: defaultCampaignCanvasDesignWidth,
             widgetJsonForStep: { stepJson in stepJson.object("widgetConfig") }
         )
     }
 
-    private static func parseFlatGuideTemplate(_ templateJson: [String: Any], fallbackId: String, variableSchemas: [VariableSchema]) -> GuideConfigModel? {
+    private static func parseFlatGuideTemplate(
+        _ templateJson: [String: Any],
+        fallbackId: String,
+        variableSchemas: [VariableSchema],
+        designTokens: DesignTokenCatalog
+    ) -> GuideConfigModel? {
         guard let stepsArr = templateJson["steps"] as? [Any] else { return nil }
+        let rawDesignWidth = CGFloat(templateJson.double(
+            "designWidth",
+            default: Double(defaultCampaignCanvasDesignWidth)
+        ))
         return buildGuideConfig(
             guideId: templateJson.nonBlankString("templateId") ?? fallbackId,
             multiStep: stepsArr.count > 1,
             stepsArr: stepsArr,
             displayStyle: templateJson.string("templateType", default: "tooltip"),
             variableSchemas: variableSchemas,
-            widgetJsonForStep: { stepJson in stepJson }
+            designTokens: designTokens,
+            designWidth: rawDesignWidth > 0 ? rawDesignWidth : defaultCampaignCanvasDesignWidth,
+            widgetJsonForStep: { stepJson in
+                var widget = stepJson
+                widget["outsideTapBehavior"] = templateJson["outsideTapBehavior"]
+                return widget
+            }
         )
     }
 
@@ -160,22 +200,57 @@ struct CampaignModel: Equatable {
         stepsArr: [Any],
         displayStyle: String?,
         variableSchemas: [VariableSchema],
+        designTokens: DesignTokenCatalog,
+        designWidth: CGFloat,
         widgetJsonForStep: ([String: Any]) -> [String: Any]?
     ) -> GuideConfigModel? {
         var steps: [GuideStepModel] = []
+        let hasRawAnchorlessStep = stepsArr.contains { element in
+            guard let step = element as? [String: Any],
+                  let target = step.object("target")
+            else { return false }
+            return target.string("type") == "anchorless"
+        }
 
         for (index, element) in stepsArr.enumerated() {
             guard let stepJson = element as? [String: Any] else { continue }
-            let stepId = stepJson.nonBlankString("id") ?? stepJson.string("_id")
-            guard let anchorKey = stepJson.nonBlankString("anchorKey") else { continue }
+            let explicitStepId = stepJson.nonBlankString("stepId")
+            let stepId = explicitStepId
+                ?? stepJson.nonBlankString("id")
+                ?? stepJson.string("_id")
+            let configuredAnchorKey = stepJson.nonBlankString("anchorKey")
+            let anchorlessTarget = stepJson.object("target")
+                .flatMap { try? JSONSerialization.data(withJSONObject: $0) }
+                .flatMap(AnchorlessTarget.decode)
+            let target: GuideTarget
+            if let anchorKey = configuredAnchorKey, anchorlessTarget == nil {
+                target = .registeredAnchor(anchorKey)
+            } else if configuredAnchorKey == nil, let anchorless = anchorlessTarget {
+                target = .anchorless(anchorless)
+            } else {
+                continue
+            }
             guard let widgetJson = widgetJsonForStep(stepJson) else { continue }
+            let widgetConfig = GuideStepWidgetConfig.fromJson(
+                widgetJson,
+                designTokens: designTokens
+            )
+            if case .anchorless = target {
+                let outsideTapBehavior = widgetJson.string("outsideTapBehavior", default: "next")
+                guard displayStyle == "spotlight",
+                      explicitStepId != nil,
+                      widgetConfig.layoutMode == "canvas",
+                      widgetConfig.canvas != nil,
+                      outsideTapBehavior == "next" || outsideTapBehavior == "nothing"
+                else { return nil }
+            }
             steps.append(
                 GuideStepModel(
                     id: stepId,
                     sequenceOrder: stepJson.int("sequenceOrder", default: index),
-                    anchorKey: anchorKey,
+                    target: target,
                     displayStyle: displayStyle ?? stepJson.string("displayStyle", default: "tooltip"),
-                    widgetConfig: GuideStepWidgetConfig.fromJson(widgetJson),
+                    widgetConfig: widgetConfig,
                     advanceTrigger: stepJson.string("advanceTrigger", default: "tap"),
                     autoDelayMs: stepJson["autoDelayMs"] != nil ? stepJson.int("autoDelayMs", default: 0) : nil
                 )
@@ -183,9 +258,21 @@ struct CampaignModel: Equatable {
         }
 
         if steps.isEmpty { return nil }
+        let anchorlessTargets = steps.compactMap { step -> AnchorlessTarget? in
+            if case let .anchorless(target) = step.target { return target }
+            return nil
+        }
+        if hasRawAnchorlessStep {
+            guard steps.count == stepsArr.count,
+                  anchorlessTargets.count == steps.count,
+                  Set(steps.map(\.id)).count == steps.count,
+                  Set(anchorlessTargets.map(\.pageKey)).count == 1
+            else { return nil }
+        }
         return GuideConfigModel(
             id: guideId,
             multiStep: multiStep,
+            designWidth: designWidth,
             steps: steps.sorted { $0.sequenceOrder < $1.sequenceOrder },
             variableSchemas: variableSchemas
         )

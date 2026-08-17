@@ -1,26 +1,49 @@
 import SwiftUI
 
-/// Lists every distinct page/anchor/slot key recorded this process — pushed
-/// from `DigiaDebugSettingsView`'s "Sync" row. In-memory only, cleared on a
-/// fresh process.
 @MainActor
 struct DigiaRecordedSessionScreen: View {
+    @ObservedObject private var instance = SDKInstance.shared
     @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()
 
     var body: some View {
         List {
+            SettingsToggleRow(
+                title: "Page & component capture",
+                isOn: Binding(
+                    get: { instance.captureModeEnabled },
+                    set: { instance.setCaptureModeEnabled($0) }
+                )
+            )
             Section {
+                Text("Interactive elements and their required structure are always included.")
+                    .foregroundColor(.secondary)
                 SettingsToggleRow(
-                    title: "Sync",
+                    title: "Include text nodes",
                     isOn: Binding(
-                        get: { registry.isEnabled },
-                        set: { registry.setEnabled($0) }
+                        get: { instance.captureTextEnabled },
+                        set: { instance.setCaptureProfile(includeText: $0) }
                     )
                 )
+                SettingsToggleRow(
+                    title: "Include images and media",
+                    isOn: Binding(
+                        get: { instance.captureMediaEnabled },
+                        set: { instance.setCaptureProfile(includeMedia: $0) }
+                    )
+                )
+                SettingsToggleRow(
+                    title: "Include other structural nodes",
+                    isOn: Binding(
+                        get: { instance.captureStructureEnabled },
+                        set: { instance.setCaptureProfile(includeStructure: $0) }
+                    )
+                )
+            } header: {
+                Text("Capture profile")
             }
-            Section {
+            Section("Detected this session") {
                 if registry.recordedThisSession.isEmpty {
-                    Text("Nothing synced yet this session.")
+                    Text("No pages, anchors, or slots detected yet.")
                         .foregroundColor(.secondary)
                 } else {
                     ForEach(registry.recordedThisSession) { entry in
@@ -37,15 +60,19 @@ struct DigiaRecordedSessionScreen: View {
                         }
                     }
                 }
-            } header: {
-                Text(
-                    registry.recordedThisSession.isEmpty
-                        ? "Synced Keys"
-                        : "Synced Keys (\(registry.recordedThisSession.count))"
-                )
+            }
+            Section("Uploaded this session") {
+                if instance.capturedPages.isEmpty {
+                    Text("No page captures uploaded yet.")
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(instance.capturedPages) { page in
+                        Label(page.pageKey, systemImage: "checkmark.circle")
+                    }
+                }
             }
         }
-        .navigationTitle("Synced This Session")
+        .navigationTitle("Page & component capture")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
