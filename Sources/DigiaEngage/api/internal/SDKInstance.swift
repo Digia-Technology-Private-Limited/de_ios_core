@@ -773,10 +773,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             cleanUpLiveTestState()
         } else if campaign.guideConfig?.isAnchorless == true {
             let seconds = Self.liveTestNoMatchTimeoutSeconds
-            let delayMs = UInt64(max(0, campaign.guideConfig?.steps.first?.delayInMs ?? 0))
+            let graceNanoseconds = seconds * 1_000_000_000
+            let maxDelayMs = (UInt64.max - graceNanoseconds) / 1_000_000
+            let delayMs = min(
+                UInt64(max(0, campaign.guideConfig?.steps.first?.delayInMs ?? 0)),
+                maxDelayMs
+            )
             Task { [weak self] in
                 try? await Task.sleep(
-                    nanoseconds: delayMs * 1_000_000 + seconds * 1_000_000_000)
+                    nanoseconds: delayMs * 1_000_000 + graceNanoseconds)
                 guard let self,
                       let context = self.liveTestContexts[cepCampaignId]
                 else { return }
