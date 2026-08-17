@@ -252,7 +252,10 @@ struct CampaignModel: Equatable {
                     displayStyle: displayStyle ?? stepJson.string("displayStyle", default: "tooltip"),
                     widgetConfig: widgetConfig,
                     advanceTrigger: stepJson.string("advanceTrigger", default: "tap"),
-                    autoDelayMs: stepJson["autoDelayMs"] != nil ? stepJson.int("autoDelayMs", default: 0) : nil
+                    autoDelayMs: stepJson["autoDelayMs"] != nil ? stepJson.int("autoDelayMs", default: 0) : nil,
+                    delayInMs: target.anchorlessTarget != nil && stepJson["delayInMs"] != nil
+                        ? stepJson.int("delayInMs", default: 0)
+                        : nil
                 )
             )
         }

@@ -26,6 +26,7 @@ struct GuideStepModel: Equatable {
     let widgetConfig: GuideStepWidgetConfig
     let advanceTrigger: String
     let autoDelayMs: Int?
+    let delayInMs: Int?
 
     var anchorKey: String { target.anchorKey ?? "" }
 }

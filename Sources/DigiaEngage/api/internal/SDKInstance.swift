@@ -771,6 +771,22 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             campaign, payload: payload, context: LiveTestRoutingContext(testContext: testContext))
         if !accepted {
             cleanUpLiveTestState()
+        } else if campaign.guideConfig?.isAnchorless == true {
+            let seconds = Self.liveTestNoMatchTimeoutSeconds
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+                guard let self,
+                      let context = self.liveTestContexts[cepCampaignId]
+                else { return }
+                context.reportFailed(
+                    .renderError,
+                    message: "Anchorless Spotlight host did not render within \(seconds)s"
+                )
+                if self.guideOrchestrator.state?.payload.cepCampaignId == cepCampaignId {
+                    self.guideOrchestrator.dismiss()
+                    self.guideCompletionFired = false
+                }
+            }
         }
     }
 

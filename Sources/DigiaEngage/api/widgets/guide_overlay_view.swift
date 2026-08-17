@@ -120,9 +120,15 @@ private struct GuideStepOverlay: View {
     @State private var bubbleSize: CGSize = .zero
     @State private var targetImage: UIImage?
     @State private var imageLoaded = false
+    @State private var delayElapsedForStep: Int?
 
     private var config: GuideStepWidgetConfig { step.widgetConfig }
     private var isSpotlight: Bool { config.overlay.visible }
+    private var isPresentationReady: Bool {
+        guard imageURL != nil else { return true }
+        let delayElapsed = (step.delayInMs ?? 0) <= 0 || delayElapsedForStep == stepIndex
+        return imageLoaded && delayElapsed
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -244,11 +250,11 @@ private struct GuideStepOverlay: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .ignoresSafeArea()
-            .opacity(imageURL == nil || imageLoaded ? 1 : 0)
-            .allowsHitTesting(imageURL == nil || imageLoaded)
+            .opacity(isPresentationReady ? 1 : 0)
+            .allowsHitTesting(isPresentationReady)
         }
-        .onChange(of: imageLoaded) { loaded in
-            if loaded { SDKInstance.shared.reportGuideShown() }
+        .onChange(of: isPresentationReady) { ready in
+            if imageURL != nil, ready { SDKInstance.shared.reportGuideShown() }
         }
         .task(id: imageURL) {
             targetImage = nil
@@ -263,6 +269,14 @@ private struct GuideStepOverlay: View {
             imageLoaded = true
         }
         .task(id: stepIndex) {
+            delayElapsedForStep = nil
+            if imageURL != nil {
+                let delayMs = step.delayInMs ?? 0
+                guard delayMs > 0 else { return }
+                try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
+                if !Task.isCancelled { delayElapsedForStep = stepIndex }
+                return
+            }
             guard step.advanceTrigger == "auto", let delayMs = step.autoDelayMs, delayMs > 0 else { return }
             try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
             if !Task.isCancelled { onAdvance() }
