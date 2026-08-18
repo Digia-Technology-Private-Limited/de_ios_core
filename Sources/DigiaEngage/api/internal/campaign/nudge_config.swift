@@ -22,6 +22,16 @@ enum NudgeDisplayType: String, Equatable, Sendable {
     }
 }
 
+enum BottomSafeAreaMode: String, Equatable, Sendable {
+    case insetContent
+    case insetSurface
+    case none
+
+    static func from(_ value: String?) -> BottomSafeAreaMode {
+        BottomSafeAreaMode(rawValue: value ?? "") ?? .insetContent
+    }
+}
+
 struct NudgeCloseButtonConfig: Equatable {
     let marginTop: CGFloat
     let marginRight: CGFloat
@@ -106,6 +116,8 @@ struct NudgeSurface: Equatable {
     let minHorizontalMargin: CGFloat
     /// Keep dialog content inside system safe-area insets (dialog only).
     let useSafeArea: Bool
+    /// Bottom-system-area treatment for bottom sheets only.
+    let bottomSafeAreaMode: BottomSafeAreaMode
 
     var isBottomSheet: Bool { displayType == .bottomSheet }
 
@@ -123,7 +135,8 @@ struct NudgeSurface: Equatable {
             draggable: draggable,
             widthFraction: widthFraction,
             minHorizontalMargin: minHorizontalMargin,
-            useSafeArea: useSafeArea
+            useSafeArea: useSafeArea,
+            bottomSafeAreaMode: bottomSafeAreaMode
         )
     }
 
@@ -151,7 +164,8 @@ struct NudgeSurface: Equatable {
             ),
             useSafeArea: (map["useSafeArea"] as? NSNumber).map {
                 CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue
-            } ?? false
+            } ?? false,
+            bottomSafeAreaMode: BottomSafeAreaMode.from(map["bottomSafeAreaMode"] as? String)
         )
     }
 
