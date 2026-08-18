@@ -280,7 +280,7 @@ private struct CanvasButtonRenderer: View {
                     }
                 }
                 .clipShape(CampaignCanvasRoundedShape(radius: cornerRadius))
-                .overlay(outline.map { CampaignCanvasRoundedShape(radius: cornerRadius).stroke(CampaignCanvasTheme.shared.color($0.color, isDark: isDark), lineWidth: $0.width) })
+                .overlay(outline.map { CampaignCanvasRoundedShape(radius: cornerRadius).strokeBorder(CampaignCanvasTheme.shared.color($0.color, isDark: isDark), lineWidth: $0.width) })
             }
         }
         .alert(confirm.title ?? "", isPresented: $confirming) {
@@ -448,7 +448,7 @@ private struct CanvasContainerRenderer: View {
             if let shadow { CampaignCanvasShadowView(shadow: shadow, cornerRadius: cornerRadius, isDark: isDark) }
             CampaignCanvasPaintView(paint: fill, isDark: isDark)
                 .clipShape(CampaignCanvasRoundedShape(radius: cornerRadius))
-                .overlay(border.map { CampaignCanvasRoundedShape(radius: cornerRadius).stroke(CampaignCanvasTheme.shared.color($0.color, isDark: isDark), lineWidth: $0.width) })
+                .overlay(border.map { CampaignCanvasRoundedShape(radius: cornerRadius).strokeBorder(CampaignCanvasTheme.shared.color($0.color, isDark: isDark), lineWidth: $0.width) })
         }
     }
 }
@@ -478,7 +478,7 @@ private struct CampaignCanvasBoxView<Content: View>: View {
                 if clipsContent { contentLayer.clipShape(CampaignCanvasRoundedShape(radius: box.cornerRadius)) }
                 else { contentLayer }
             }
-            .overlay(box.border.map { CampaignCanvasRoundedShape(radius: box.cornerRadius).stroke(CampaignCanvasTheme.shared.color($0.color, isDark: isDark), lineWidth: $0.width) })
+            .overlay(box.border.map { CampaignCanvasRoundedShape(radius: box.cornerRadius).strokeBorder(CampaignCanvasTheme.shared.color($0.color, isDark: isDark), lineWidth: $0.width) })
         }
     }
     private var contentLayer: some View {
@@ -588,13 +588,24 @@ private struct CanvasImageFit: ViewModifier {
     @ViewBuilder func body(content: Content) -> some View { switch fit { case "contain": content.scaledToFit(); case "fill": content; default: content.scaledToFill() } }
 }
 
-private struct CampaignCanvasRoundedShape: Shape {
+private struct CampaignCanvasRoundedShape: InsettableShape {
     let radius: CampaignCanvasCornerRadius
+    var insetAmount: CGFloat = 0
+
+    func inset(by amount: CGFloat) -> CampaignCanvasRoundedShape {
+        var copy = self
+        copy.insetAmount += amount
+        return copy
+    }
+
     func path(in rect: CGRect) -> Path {
-        let topLeft = min(max(0, radius.topLeft), min(rect.width, rect.height) / 2)
-        let topRight = min(max(0, radius.topRight), min(rect.width, rect.height) / 2)
-        let bottomRight = min(max(0, radius.bottomRight), min(rect.width, rect.height) / 2)
-        let bottomLeft = min(max(0, radius.bottomLeft), min(rect.width, rect.height) / 2)
+        let inset = min(max(0, insetAmount), min(rect.width, rect.height) / 2)
+        let rect = rect.insetBy(dx: inset, dy: inset)
+        let radiusLimit = min(rect.width, rect.height) / 2
+        let topLeft = min(max(0, radius.topLeft - inset), radiusLimit)
+        let topRight = min(max(0, radius.topRight - inset), radiusLimit)
+        let bottomRight = min(max(0, radius.bottomRight - inset), radiusLimit)
+        let bottomLeft = min(max(0, radius.bottomLeft - inset), radiusLimit)
         var path = Path()
         path.move(to: CGPoint(x: rect.minX + topLeft, y: rect.minY))
         path.addLine(to: CGPoint(x: rect.maxX - topRight, y: rect.minY))
