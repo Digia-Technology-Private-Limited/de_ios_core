@@ -24,6 +24,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// `Digia.setCurrentScreen`, forwarded to the active plugin and read into
     /// analytics events (`screenName`).
     private var _currentScreen: String?
+    private(set) var lastCampaignDropReason: String?
     private var activeExternalGuide: ExternalGuide?
     private var screenUpdateRevision = 0
 
@@ -32,6 +33,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     let inlineController = InlineCampaignController()
     let guideOrchestrator = GuideOrchestrator()
     let surveyOrchestrator = SurveyOrchestrator()
+    /// Assigned in `init()` — its callbacks close over `self`, so it can't be a
+    /// plain no-arg stored property the way `surveyOrchestrator` is. Mirrors
+    /// `events`'s identical implicitly-unwrapped-var pattern below.
+    var floaterOrchestrator: FloaterOrchestrator!
 
     private var completedSurveyToken: Int64?
     /// Survey whose start-engagement ("welcome_start") click has already fired
@@ -97,6 +102,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             guard let self, let payload = controller.activeNudge?.payload else { return false }
             return controller.onAction?(actionType, url, payload) ?? false
         }
+        floaterOrchestrator = FloaterOrchestrator(
+            onDismissed: { [weak self] state, reason, metrics in
+                self?.emitFloaterDismissed(state, reason, metrics)
+            },
+            onCompleted: { [weak self] state in self?.emitFloaterCompleted(state) },
+            onStepViewed: { [weak self] state in self?.emitFloaterStepViewed(state) },
+            onStepDismissed: { [weak self] state in self?.emitFloaterStepDismissed(state) },
+            onVisible: { [weak self] state in self?.reportFloaterImpression(state) }
+        )
     }
 
     func initialize(_ config: DigiaConfig) async throws {
@@ -156,7 +170,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private func completeInitialization(_ campaigns: [CampaignModel]) {
         campaignStore.populate(campaigns)
         if campaignStore.isEmpty {
-            logVerbose("No campaigns fetched — CampaignStore is empty")
+            DigiaLog.warning("[SDKInstance] CampaignStore populated empty")
+        } else {
+            DigiaLog.warning(
+                "[SDKInstance] CampaignStore populated count=\(campaigns.count) entries=[\(campaignStore.debugSummary)]"
+            )
         }
 
         sdkState = .ready
@@ -201,9 +219,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func populateCampaignBundle(_ bundleJson: String) {
         var campaigns: [CampaignModel] = []
         do {
-            campaigns = try CampaignFetcher.parse(Data(bundleJson.utf8)).campaigns
+            let bundle = try CampaignFetcher.parse(Data(bundleJson.utf8))
+            campaigns = bundle.campaigns
+            DigiaLog.warning(
+                "[SDKInstance] populateCampaignBundle parsed raw=\(bundle.rawCampaigns.count) accepted=\(campaigns.count)"
+            )
         } catch {
-            logVerbose("populateCampaignBundle: failed to parse campaign bundle: \(error)")
+            DigiaLog.warning("[SDKInstance] populateCampaignBundle failed: \(error.localizedDescription)")
         }
         completeInitialization(campaigns)
     }
@@ -281,6 +303,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 events.toCep(.dismissed, payload: guide.payload)
             }
         }
+
+        // Not the shared `dismissForScreenChangeIfNeeded` helper above — a floater
+        // is bound to the *exact* screen it appeared on, not `targetScreenNames`
+        // generally, so it has its own `onScreenChanged` (see that method's kdoc).
+        floaterOrchestrator.onScreenChanged(_currentScreen ?? "")
     }
 
     private func dismissForScreenChangeIfNeeded(
@@ -348,6 +375,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func onCampaignTriggered(_ payload: CEPTriggerPayload) -> Bool {
+        lastCampaignDropReason = nil
         logVerbose(
             "onCampaignTriggered cepCampaignId='\(payload.cepCampaignId)' "
                 + "campaignKey='\(payload.campaignKey)'")
@@ -359,7 +387,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             ? payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
             : key
         guard !resolvedKey.isEmpty, campaignStore.find(resolvedKey) != nil else {
-            logError("campaign dropped — no campaign for key '\(resolvedKey)'")
+            lastCampaignDropReason = "no native campaign for key '\(resolvedKey)'"
+            logError(
+                "campaign dropped — no campaign for key '\(resolvedKey)' knownKeys=[\(campaignStore.keys.joined(separator: ", "))]"
+            )
             return false
         }
         return routeByCampaignKey(resolvedKey, payload: payload)
@@ -449,6 +480,19 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
     }
 
+    /// Whether a nudge, survey, or an *expanded* floater currently occupies the
+    /// screen modally. A *collapsed* floater is deliberately not modal — it is a
+    /// third, independent lane that never blocks and is never blocked by the
+    /// others (`ai_docs/pip-campaign-design.md` §3.2) — so this only starts
+    /// returning true once the floater expands, at which point it behaves like
+    /// every other full-screen surface. Gates only floater's own start (mirrors
+    /// Android's `DigiaInstance.isModalCampaignActive`, used identically at its
+    /// one call site); nudge/survey routing is intentionally left unchanged.
+    private func isModalCampaignActive() -> Bool {
+        controller.activeNudge != nil || surveyOrchestrator.state != nil
+            || floaterOrchestrator.surface == .expanded
+    }
+
     private func route(
         _ campaign: CampaignModel,
         payload: CEPTriggerPayload,
@@ -458,6 +502,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         if !campaign.targetScreenNames.isEmpty
             && !campaign.targetScreenNames.contains(_currentScreen ?? "")
         {
+            lastCampaignDropReason =
+                "screen not targeted: currentScreen=\(_currentScreen ?? "<unset>") targetScreenNames=\(campaign.targetScreenNames)"
             DigiaLog.warning(
                 "[SDKInstance] Campaign dropped — screen not targeted: "
                     + "campaignKey=\(key) currentScreen=\(_currentScreen ?? "<unset>") "
@@ -491,7 +537,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 // RN: native owns capping, JS owns rendering. Gate here; the
                 // counter is bumped later on the guide's "Digia Experience
                 // Viewed" event (see captureAnalyticsEvent).
-                if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) { return false }
+                if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
+                    lastCampaignDropReason = "frequency capped"
+                    return false
+                }
                 activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
                 renderViaJs(payload)
                 return true
@@ -500,7 +549,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             guideOrchestrator.start(campaign, payload: payload)
             return true
         case .nudge(let nudgeConfig):
-            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) { return false }
+            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
+                lastCampaignDropReason = "frequency capped"
+                return false
+            }
             // Resolve variable context: dashboard schemas define type + fallback;
             // CEP trigger variables win over fallbacks (D3′).
             let variableContext = buildVariableContext(
@@ -515,11 +567,40 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 ))
             return true
         case .survey(let cfg):
-            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) { return false }
+            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
+                lastCampaignDropReason = "frequency capped"
+                return false
+            }
             let started = surveyOrchestrator.start(payload: payload, config: cfg)
             if !started {
+                lastCampaignDropReason = "another survey is already on screen"
                 logVerbose("survey campaign dropped: another survey is on screen: \(key)")
                 context.onDropped(.renderError, message: "another survey is already on screen")
+            }
+            return started
+        case .floater:
+            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
+                lastCampaignDropReason = "frequency capped"
+                return false
+            }
+            // A collapsed floater is a third, independent lane (see
+            // `isModalCampaignActive`'s kdoc) — it does not compete with
+            // nudge/survey. But it must not *start* while one of them is already
+            // the modal surface, since it would otherwise float on top of a
+            // nudge/survey that is supposed to own the screen exclusively.
+            if isModalCampaignActive() {
+                lastCampaignDropReason = "a nudge, survey, or expanded floater is already on screen"
+                logVerbose("floater campaign dropped: a nudge, survey, or expanded floater is already modal: \(key)")
+                context.onDropped(.renderError, message: "a nudge, survey, or expanded floater is already on screen")
+                return false
+            }
+            let started = floaterOrchestrator.start(campaign, payload: payload, screenName: _currentScreen)
+            if !started {
+                lastCampaignDropReason = floaterOrchestrator.lastStartFailureReason ?? "floater start failed"
+                DigiaLog.warning(
+                    "[SDKInstance] Floater campaign skipped: key=\(key) currentScreen=\(_currentScreen ?? "<unset>") reason=\(floaterOrchestrator.lastStartFailureReason ?? "unknown")"
+                )
+                context.onDropped(.renderError, message: "another floater is already on screen")
             }
             return started
         }
@@ -603,6 +684,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
         if surveyOrchestrator.state?.payload.cepCampaignId == campaignID {
             surveyOrchestrator.dismiss()
+        }
+        if floaterOrchestrator.state?.payload.cepCampaignId == campaignID {
+            floaterOrchestrator.dismiss(.invalidated)
         }
         inlineController.removeCampaign(campaignID)
         guideOrchestrator.dismissIfActive(campaignKey: campaignID)
@@ -900,6 +984,134 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             NudgeEvent.Dismissed(dwellMs: dwellTracker.consumeDwellMs(nudge.payload.cepCampaignId)),
             payload: nudge.payload
         )
+    }
+
+    // MARK: - Floater lifecycle
+    //
+    // Impression, Dismissed, and Completed go to both CEP and Digia analytics —
+    // except Completed, which has no CEP case (`DigiaExperienceEvent` has no
+    // `.completed`, matching how `reportSurveyCompleted` also only calls
+    // `toDigia`). Step/chrome/CTA signals (StepViewed/StepDismissed/Clicked/
+    // StepClicked) are Digia-only engagement signals (toDigia), same convention
+    // as nudge's CTA click above. Called from `FloaterOrchestrator`'s
+    // constructor-injected callbacks (state/metrics are the values *handed to*
+    // them, never re-read from `floaterOrchestrator.state`, which is about to be
+    // nulled by the time `onDismissed` runs) or directly from `FloaterSessionView`
+    // for chrome taps.
+
+    private func reportFloaterImpression(_ state: ActiveFloaterState) {
+        dwellTracker.markViewed(state.payload.cepCampaignId)
+        if !isLiveTestCepId(state.payload.cepCampaignId) {
+            let campaignKey = state.payload.campaignKey
+            frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
+        }
+        events.toBoth(.impressed, FloaterEvent.Viewed(screenName: _currentScreen), payload: state.payload)
+    }
+
+    /// SDK chrome click: expand, collapse, mute/unmute, play/pause. **Never** the
+    /// × — that routes straight to `dismissFloater`/`endFloaterExpanded` with no
+    /// Clicked report (see `FloaterEvent.Clicked`'s kdoc; this exact bug already
+    /// drove dismissal rate to a permanent 0% once in the Flutter build).
+    /// `pipState` is derived here from the live surface, not caller-supplied, so
+    /// it can never go stale relative to what actually happened.
+    func reportFloaterClicked(elementId: String, actionType: String, ctaRole: String) {
+        guard let state = floaterOrchestrator.state else { return }
+        events.toDigia(
+            FloaterEvent.Clicked(
+                elementId: elementId, actionType: actionType,
+                pipState: floaterOrchestrator.surface == .expanded ? "expanded" : "collapsed",
+                ctaRole: ctaRole,
+                timeToActionMs: dwellTracker.elapsedMs(state.payload.cepCampaignId)
+            ),
+            payload: state.payload
+        )
+    }
+
+    /// An authored CTA tapped inside the expanded content — the real conversion, as
+    /// opposed to `reportFloaterClicked`'s SDK chrome. Called from
+    /// `performFloaterCanvasAction` (`floater_overlay_view.swift`), the `onAction`
+    /// callback `FloaterExpandedContentView` hands to `CampaignCanvasView`.
+    ///
+    /// No `ctaRole` parameter, unlike `reportFloaterClicked` — every authored CTA here
+    /// is a genuine conversion with no chrome/content ambiguity, so `FloaterEvent
+    /// .StepClicked`'s own default (`"primary"`) applies; mirrors Android's identical
+    /// `DigiaInstance.reportFloaterStepClicked` signature.
+    func reportFloaterStepClicked(elementId: String, ctaLabel: String, actionType: String?, actionUrl: String?) {
+        guard let state = floaterOrchestrator.state else { return }
+        events.toDigia(
+            FloaterEvent.StepClicked(
+                elementId: elementId, ctaLabel: ctaLabel, actionType: actionType,
+                actionUrl: actionUrl,
+                timeToActionMs: dwellTracker.elapsedMs(state.payload.cepCampaignId)
+            ),
+            payload: state.payload
+        )
+    }
+
+    private func emitFloaterStepViewed(_ state: ActiveFloaterState) {
+        events.toDigia(FloaterEvent.StepViewed(), payload: state.payload)
+    }
+
+    private func emitFloaterStepDismissed(_ state: ActiveFloaterState) {
+        events.toDigia(FloaterEvent.StepDismissed(), payload: state.payload)
+    }
+
+    private func emitFloaterDismissed(
+        _ state: ActiveFloaterState, _ reason: FloaterDismissReason, _ metrics: FloaterMetrics
+    ) {
+        events.toBoth(
+            .dismissed,
+            FloaterEvent.Dismissed(
+                dismissReason: reason.wire,
+                dwellMs: dwellTracker.consumeDwellMs(state.payload.cepCampaignId),
+                moves: metrics.moves, expands: metrics.expands,
+                engagedMs: metrics.engagedMs, lastPosition: metrics.lastPosition
+            ),
+            payload: state.payload
+        )
+    }
+
+    private func emitFloaterCompleted(_ state: ActiveFloaterState) {
+        if !isLiveTestCepId(state.payload.cepCampaignId) {
+            let campaignKey = state.payload.campaignKey
+            frequencyManager?.recordCompleted(campaignKey, campaignStore.find(campaignKey)?.frequency)
+        }
+        events.toDigia(FloaterEvent.Completed(), payload: state.payload)
+    }
+
+    /// The × while collapsed, and the expanded content's own dismiss action
+    /// (`onDismiss` threaded through `NudgeColumnContent`) both route here —
+    /// straight to dismissal, no Clicked report.
+    func dismissFloater(_ reason: FloaterDismissReason) {
+        floaterOrchestrator.dismiss(reason)
+    }
+
+    /// Shared handler for the expanded ×, the swipe-down strip, and any future
+    /// `onBack` trigger — `expanded.onClose`/`expanded.onBack` are independent
+    /// config fields, but both resolve to one of these same two outcomes.
+    /// `.dismiss` ends the floater outright with no Clicked report. `.collapse`
+    /// reports a secondary click, then shrinks back to the small window.
+    func endFloaterExpanded(_ outcome: FloaterExpandedClose) {
+        switch outcome {
+        case .dismiss:
+            floaterOrchestrator.dismiss(.userClose)
+        case .collapse:
+            reportFloaterClicked(elementId: "pip_close", actionType: "collapse", ctaRole: "secondary")
+            floaterOrchestrator.collapse()
+        }
+    }
+
+    /// Any authored action taken from the expanded content also ends the showing
+    /// once it completes — floater's "CTA taken also dismisses" contract. Called
+    /// directly from `performFloaterCanvasAction` (`floater_overlay_view.swift`)
+    /// after its `executeActionFlow` await completes — unlike Android's
+    /// fire-and-forget `launchActionFlow`, iOS's `executeActionFlow` is already
+    /// `async`, so the caller can just chain this rather than needing an
+    /// `onComplete` callback parameter.
+    func onFloaterActionCompleted() {
+        guard floaterOrchestrator.state != nil else { return }
+        floaterOrchestrator.complete()
+        floaterOrchestrator.dismiss(.ctaTaken)
     }
 
     // MARK: - Inline slot lifecycle
@@ -1201,6 +1413,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         inlineController.clear()
         surveyOrchestrator.dismiss()
         guideOrchestrator.dismiss()
+        floaterOrchestrator.dispose()
         activeExternalGuide = nil
         events.clearImpressions()
         dwellTracker.clear()
