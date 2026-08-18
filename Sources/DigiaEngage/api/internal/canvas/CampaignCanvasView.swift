@@ -109,9 +109,27 @@ enum CampaignCanvasRendererRegistry {
 private struct CanvasTextRenderer: View {
     let box: CampaignCanvasBox; let block: CampaignCanvasTextBlock; let shadow: CampaignCanvasShadow?; let isDark: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
+    private var contentShadow: CampaignCanvasShadow? {
+        box.hasVisibleSurface(isDark: isDark) ? nil : box.shadow
+    }
+    private var boxWithoutContentShadow: CampaignCanvasBox {
+        guard contentShadow != nil else { return box }
+        var value = box
+        value.shadow = nil
+        return value
+    }
     var body: some View {
-        CampaignCanvasBoxView(box: box, isDark: isDark, clipsContent: false) {
-            CampaignCanvasTextView(block: block, isDark: isDark, onAction: onAction, shadow: shadow)
+        ZStack {
+            if contentShadow != nil {
+                CanvasAlphaContentShadow(shadow: contentShadow, isDark: isDark, includeContent: false) {
+                    CampaignCanvasBoxView(box: boxWithoutContentShadow, isDark: isDark, clipsContent: false) {
+                        CampaignCanvasTextView(block: block, isDark: isDark, onAction: onAction)
+                    }
+                }
+            }
+            CampaignCanvasBoxView(box: boxWithoutContentShadow, isDark: isDark, clipsContent: false) {
+                CampaignCanvasTextView(block: block, isDark: isDark, onAction: onAction, shadow: shadow)
+            }
         }
     }
 }
@@ -124,45 +142,51 @@ private struct CampaignCanvasTextView: View {
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
-        let content = attributed
-        ZStack {
-            if let shadow, shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0 {
-                CanvasRichText(
-                    attributed: shadowAttributed(from: content, color: CampaignCanvasTheme.shared.color(shadow.color, isDark: isDark)),
-                    fillWidth: block.sizingMode != "hug",
-                    maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
-                    overflow: block.overflow,
-                    textAlignment: block.textAlign.uiTextAlignment,
-                    onSpan: { _ in },
-                    spans: []
-                )
-                .blur(radius: shadow.blur / 2 + shadow.spread)
-                .offset(x: shadow.offsetX, y: shadow.offsetY)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            }
-            CanvasRichText(
-                attributed: content,
-                fillWidth: block.sizingMode != "hug",
-                maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
-                overflow: block.overflow,
-                textAlignment: block.textAlign.uiTextAlignment,
-                onSpan: { span in onAction(CampaignCanvasActionRequest(actions: span.actions, elementId: canvasTextSpanElementID, label: span.text)) },
-                spans: block.spans
-            )
-        }
+        CanvasRichText(
+            attributed: attributed,
+            fillWidth: block.sizingMode != "hug",
+            maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
+            overflow: block.overflow,
+            textAlignment: block.textAlign.uiTextAlignment,
+            onSpan: { span in onAction(CampaignCanvasActionRequest(actions: span.actions, elementId: canvasTextSpanElementID, label: span.text)) },
+            spans: block.spans,
+            drawingOutsets: glyphShadowOutsets
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: block.alignment)
     }
 
-    private func shadowAttributed(from attributed: NSAttributedString, color: Color) -> NSAttributedString {
-        let value = NSMutableAttributedString(attributedString: attributed)
-        let range = NSRange(location: 0, length: value.length)
-        value.addAttribute(.foregroundColor, value: UIColor(color), range: range)
-        [.backgroundColor, .link, .underlineStyle, .underlineColor, .strikethroughStyle,
-         .strikethroughColor, .digiaDecorationColor, .digiaDecorationThickness].forEach {
-            value.removeAttribute($0, range: range)
+    private var glyphShadow: NSShadow? {
+        guard let shadow,
+              shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0 else {
+            return nil
         }
+        let value = NSShadow()
+        value.shadowColor = UIColor(CampaignCanvasTheme.shared.color(shadow.color, isDark: isDark))
+        value.shadowBlurRadius = glyphShadowBlurRadius
+        value.shadowOffset = CGSize(width: shadow.offsetX, height: shadow.offsetY)
         return value
+    }
+
+    private var glyphShadowBlurRadius: CGFloat {
+        guard let shadow else { return 0 }
+        // Flutter converts the authored radius to sigma; Core Graphics' shadow
+        // parameter behaves like a blur diameter, so feed it twice that sigma.
+        let blurDiameter = shadow.blur > 0 ? 2 * (shadow.blur * 0.57735 + 0.5) : 0
+        return max(0, blurDiameter + shadow.spread)
+    }
+
+    private var glyphShadowOutsets: UIEdgeInsets {
+        guard let shadow,
+              shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0 else {
+            return .zero
+        }
+        let extent = max(shadow.blur * 2 + shadow.spread, glyphShadowBlurRadius * 2)
+        return UIEdgeInsets(
+            top: max(0, extent - shadow.offsetY),
+            left: max(0, extent - shadow.offsetX),
+            bottom: max(0, extent + shadow.offsetY),
+            right: max(0, extent + shadow.offsetX)
+        )
     }
 
     private var attributed: NSAttributedString {
@@ -189,6 +213,7 @@ private struct CampaignCanvasTextView: View {
                 .foregroundColor: color,
                 .paragraphStyle: paragraph,
             ]
+            if let glyphShadow { attributes[.shadow] = glyphShadow }
             if let spacing = typography?.letterSpacing ?? baseTypography.letterSpacing { attributes[.kern] = spacing }
             if let highlight = span.highlightColor { attributes[.backgroundColor] = UIColor(CampaignCanvasTheme.shared.color(highlight, isDark: isDark)) }
             switch span.decoration {
@@ -212,7 +237,7 @@ private struct CampaignCanvasTextView: View {
 private struct CanvasRichText: UIViewRepresentable {
     let attributed: NSAttributedString; let fillWidth: Bool; let maxLines: Int; let overflow: String
     let textAlignment: NSTextAlignment; let onSpan: (CampaignCanvasTextSpan) -> Void
-    var spans: [CampaignCanvasTextSpan] = []
+    var spans: [CampaignCanvasTextSpan] = []; var drawingOutsets: UIEdgeInsets = .zero
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var spans: [CampaignCanvasTextSpan] = []; var onSpan: ((CampaignCanvasTextSpan) -> Void)?
@@ -222,41 +247,197 @@ private struct CanvasRichText: UIViewRepresentable {
         }
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
-    func makeUIView(context: Context) -> UITextView {
+    func makeUIView(context: Context) -> CanvasRichTextContainerView {
         let storage = NSTextStorage(); let manager = DigiaDecorationLayoutManager(); let container = NSTextContainer(size: .zero)
         container.lineFragmentPadding = 0; container.widthTracksTextView = true
         manager.addTextContainer(container); storage.addLayoutManager(manager)
-        let view = UITextView(frame: .zero, textContainer: container)
-        view.delegate = context.coordinator; view.isEditable = false; view.isScrollEnabled = false
-        view.backgroundColor = .clear; view.textContainerInset = .zero
-        view.setContentHuggingPriority(.required, for: .vertical)
-        view.setContentHuggingPriority(fillWidth ? .defaultLow : .required, for: .horizontal)
-        return view
+        let value = CanvasRichTextContainerView(textContainer: container)
+        let textView = value.textView
+        textView.delegate = context.coordinator; textView.isEditable = false; textView.isScrollEnabled = false
+        textView.backgroundColor = .clear
+        value.setContentHuggingPriority(.required, for: .vertical)
+        value.setContentHuggingPriority(fillWidth ? .defaultLow : .required, for: .horizontal)
+        return value
     }
-    func updateUIView(_ view: UITextView, context: Context) {
+    func updateUIView(_ view: CanvasRichTextContainerView, context: Context) {
         context.coordinator.spans = spans; context.coordinator.onSpan = onSpan
-        view.textStorage.setAttributedString(attributed); view.textAlignment = textAlignment
-        view.textContainer.maximumNumberOfLines = max(0, maxLines)
-        view.textContainer.lineBreakMode = overflow == "ellipsis" ? .byTruncatingTail : .byClipping
+        let textView = view.textView
+        view.drawingOutsets = drawingOutsets
+        textView.textStorage.setAttributedString(attributed); textView.textAlignment = textAlignment
+        textView.textContainer.maximumNumberOfLines = max(0, maxLines)
+        textView.textContainer.lineBreakMode = overflow == "ellipsis" ? .byTruncatingTail : .byClipping
         let hasActions = !spans.allSatisfy { $0.actions.isEmpty }
-        view.isSelectable = hasActions
-        view.isUserInteractionEnabled = hasActions
+        textView.isSelectable = hasActions
+        textView.isUserInteractionEnabled = hasActions
+        textView.invalidateIntrinsicContentSize(); view.invalidateIntrinsicContentSize()
     }
-    static func dismantleUIView(_ view: UITextView, coordinator: Coordinator) {
-        view.delegate = nil; view.isSelectable = false; coordinator.onSpan = nil; coordinator.spans = []
+    static func dismantleUIView(_ view: CanvasRichTextContainerView, coordinator: Coordinator) {
+        view.textView.delegate = nil; view.textView.isSelectable = false; coordinator.onSpan = nil; coordinator.spans = []
     }
     @available(iOS 16, *)
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: CanvasRichTextContainerView, context: Context) -> CGSize? {
         let width = proposal.width ?? UIView.layoutFittingExpandedSize.width
-        let fit = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        let fit = uiView.logicalSizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
         return CGSize(width: fillWidth ? width : ceil(fit.width), height: ceil(fit.height))
+    }
+}
+
+private final class CanvasRichTextContainerView: UIView {
+    let textView: UITextView
+    var drawingOutsets: UIEdgeInsets = .zero {
+        didSet {
+            guard drawingOutsets != oldValue else { return }
+            textView.textContainerInset = drawingOutsets
+            setNeedsLayout()
+            invalidateIntrinsicContentSize()
+        }
+    }
+
+    init(textContainer: NSTextContainer) {
+        textView = UITextView(frame: .zero, textContainer: textContainer)
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        clipsToBounds = false
+        textView.textContainerInset = .zero
+        addSubview(textView)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { return nil }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Expand only the UIKit drawing surface. The matching text-container
+        // insets keep glyph layout unchanged while making room for shadow bleed.
+        textView.frame = CGRect(
+            x: -drawingOutsets.left,
+            y: -drawingOutsets.top,
+            width: bounds.width + drawingOutsets.left + drawingOutsets.right,
+            height: bounds.height + drawingOutsets.top + drawingOutsets.bottom
+        )
+    }
+
+    override var intrinsicContentSize: CGSize {
+        logicalSize(from: textView.intrinsicContentSize)
+    }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        logicalSizeThatFits(size)
+    }
+
+    func logicalSizeThatFits(_ size: CGSize) -> CGSize {
+        let expanded = CGSize(
+            width: size.width.isFinite ? size.width + drawingOutsets.left + drawingOutsets.right : size.width,
+            height: size.height.isFinite ? size.height + drawingOutsets.top + drawingOutsets.bottom : size.height
+        )
+        return logicalSize(from: textView.sizeThatFits(expanded))
+    }
+
+    private func logicalSize(from size: CGSize) -> CGSize {
+        CGSize(
+            width: size.width == UIView.noIntrinsicMetric
+                ? size.width
+                : max(0, size.width - drawingOutsets.left - drawingOutsets.right),
+            height: size.height == UIView.noIntrinsicMetric
+                ? size.height
+                : max(0, size.height - drawingOutsets.top - drawingOutsets.bottom)
+        )
     }
 }
 
 private struct CanvasImageRenderer: View {
     let box: CampaignCanvasBox; let source: CampaignCanvasMediaSource; let fit: String
     let positionX: CGFloat; let positionY: CGFloat; let scale: CGFloat; let tint: CampaignColor?; let isDark: Bool
-    var body: some View { CampaignCanvasBoxView(box: box, isDark: isDark) { FocalCanvasImage(source: source, isDark: isDark, fit: fit, x: positionX, y: positionY, scale: scale, tint: tint, failureLabel: "Image") } }
+    private var contentShadow: CampaignCanvasShadow? {
+        box.hasVisibleSurface(isDark: isDark) ? nil : box.shadow
+    }
+    private var boxWithoutContentShadow: CampaignCanvasBox {
+        guard contentShadow != nil else { return box }
+        var value = box
+        value.shadow = nil
+        return value
+    }
+    var body: some View {
+        CanvasAlphaContentShadow(shadow: contentShadow, isDark: isDark) {
+            CampaignCanvasBoxView(box: boxWithoutContentShadow, isDark: isDark) {
+                FocalCanvasImage(source: source, isDark: isDark, fit: fit, x: positionX, y: positionY, scale: scale, tint: tint, failureLabel: "Image")
+            }
+        }
+    }
+}
+
+private struct CanvasAlphaContentShadow<Content: View>: View {
+    let shadow: CampaignCanvasShadow?; let isDark: Bool; let includeContent: Bool; let content: Content
+
+    init(
+        shadow: CampaignCanvasShadow?,
+        isDark: Bool,
+        includeContent: Bool = true,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.shadow = shadow
+        self.isDark = isDark
+        self.includeContent = includeContent
+        self.content = content()
+    }
+
+    @ViewBuilder var body: some View {
+        if let shadow,
+           shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0 {
+            if includeContent {
+                shadowedContent(shadow)
+            } else {
+                ZStack {
+                    shadowedContent(shadow)
+                    content.blendMode(.destinationOut)
+                }
+                .compositingGroup()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+        } else if includeContent {
+            content
+        }
+    }
+
+    private func shadowedContent(_ shadow: CampaignCanvasShadow) -> some View {
+        content
+            .compositingGroup()
+            .shadow(
+                color: CampaignCanvasTheme.shared.color(shadow.color, isDark: isDark),
+                radius: shadow.nativeContentBlurRadius,
+                x: shadow.offsetX,
+                y: shadow.offsetY
+            )
+    }
+}
+
+private extension CampaignCanvasBox {
+    @MainActor
+    func hasVisibleSurface(isDark: Bool) -> Bool {
+        let hasFill: Bool
+        switch fill {
+        case .solid(let color):
+            hasFill = UIColor(CampaignCanvasTheme.shared.color(color, isDark: isDark)).cgColor.alpha > 0
+        case .none:
+            hasFill = false
+        default:
+            hasFill = true
+        }
+        let hasBorder = border.map {
+            $0.width > 0 && UIColor(CampaignCanvasTheme.shared.color($0.color, isDark: isDark)).cgColor.alpha > 0
+        } ?? false
+        return hasFill || hasBorder
+    }
+}
+
+private extension CampaignCanvasShadow {
+    var nativeContentBlurRadius: CGFloat {
+        // SwiftUI consumes a Gaussian radius here. NSShadow's text path uses a
+        // diameter-like value, but doubling this radius makes image halos too soft.
+        let sigma = blur > 0 ? blur * 0.57735 + 0.5 : 0
+        return max(0, sigma + spread)
+    }
 }
 
 private struct CanvasButtonRenderer: View {
