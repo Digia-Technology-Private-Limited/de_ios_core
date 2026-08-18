@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import UIKit
 
 @MainActor
 final class SDKInstance: ObservableObject, DigiaCEPDelegate {
@@ -37,6 +38,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// plain no-arg stored property the way `surveyOrchestrator` is. Mirrors
     /// `events`'s identical implicitly-unwrapped-var pattern below.
     var floaterOrchestrator: FloaterOrchestrator!
+    /// Wired to `floaterOrchestrator.setAppForegrounded` in `init()` — matches
+    /// Android's `DigiaInstance.kt` `ProcessLifecycleOwner` `ON_START`/`ON_STOP`
+    /// observer, pausing/resuming the floater's video when the app backgrounds.
+    private var appBackgroundObserver: NSObjectProtocol?
+    private var appForegroundObserver: NSObjectProtocol?
 
     private var completedSurveyToken: Int64?
     /// Survey whose start-engagement ("welcome_start") click has already fired
@@ -111,6 +117,25 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             onStepDismissed: { [weak self] state in self?.emitFloaterStepDismissed(state) },
             onVisible: { [weak self] state in self?.reportFloaterImpression(state) }
         )
+
+        appBackgroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.floaterOrchestrator.setAppForegrounded(false)
+            }
+        }
+        appForegroundObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.willEnterForegroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.floaterOrchestrator.setAppForegrounded(true)
+            }
+        }
     }
 
     func initialize(_ config: DigiaConfig) async throws {

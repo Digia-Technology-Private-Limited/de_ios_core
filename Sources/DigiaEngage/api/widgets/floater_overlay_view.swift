@@ -33,6 +33,7 @@ struct FloaterOverlayView: View {
         if let state = orchestrator.state, !orchestrator.awaitingMedia {
             FloaterSessionView(state: state, orchestrator: orchestrator)
                 .id(state.token)
+                .ignoresSafeArea(.all, edges: orchestrator.surface == .expanded ? .all : [])
         }
     }
 }
@@ -82,29 +83,33 @@ private func chromeButtonRects(activeRect: CGRect, config: FloaterConfig) -> [CG
     var rects: [CGRect] = []
     if config.controls.showClose {
         let width = pillWidth(iconCount: 1)
-        rects.append(CGRect(
-            x: activeRect.maxX - margin.right - width, y: activeRect.minY + margin.top,
-            width: width, height: pillHeight
-        ))
+        rects.append(
+            CGRect(
+                x: activeRect.maxX - margin.right - width, y: activeRect.minY + margin.top,
+                width: width, height: pillHeight
+            ))
     }
     let showsProgress = config.controls.showProgress && config.media.kind.isPlayable
     let bottomInset: CGFloat = showsProgress ? 8 : margin.bottom
     if config.controls.showExpand, config.behavior.tapExpands {
         let width = pillWidth(iconCount: 1)
-        rects.append(CGRect(
-            x: activeRect.minX + margin.left, y: activeRect.maxY - bottomInset - pillHeight,
-            width: width, height: pillHeight
-        ))
+        rects.append(
+            CGRect(
+                x: activeRect.minX + margin.left, y: activeRect.maxY - bottomInset - pillHeight,
+                width: width, height: pillHeight
+            ))
     }
     let showsMute = config.controls.showMute && config.media.kind == .video
     let showsPlayPause = config.controls.showPlayPause && config.media.kind.isPlayable
     if showsMute || showsPlayPause {
         let count = (showsMute ? 1 : 0) + (showsPlayPause ? 1 : 0)
         let width = pillWidth(iconCount: count)
-        rects.append(CGRect(
-            x: activeRect.maxX - margin.right - width, y: activeRect.maxY - bottomInset - pillHeight,
-            width: width, height: pillHeight
-        ))
+        rects.append(
+            CGRect(
+                x: activeRect.maxX - margin.right - width,
+                y: activeRect.maxY - bottomInset - pillHeight,
+                width: width, height: pillHeight
+            ))
     }
     return rects
 }
@@ -112,6 +117,12 @@ private func chromeButtonRects(activeRect: CGRect, config: FloaterConfig) -> [CG
 private struct FloaterSessionView: View {
     let state: ActiveFloaterState
     @ObservedObject var orchestrator: FloaterOrchestrator
+    // For resolving `config.collapsed.borderColor`/`config.expanded.backgroundColor`
+    // (design-token-aware `CampaignColor?`, not a flat SwiftUI `Color?`) to an actual
+    // color at render time — a token's real hex depends on the active theme, which
+    // isn't known while parsing. Same pattern `CampaignCanvasView` already uses.
+    @ObservedObject private var canvasTheme = CampaignCanvasTheme.shared
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var dragTranslation: CGSize = .zero
     @State private var isDragging = false
@@ -122,6 +133,7 @@ private struct FloaterSessionView: View {
 
     private var config: FloaterConfig { state.config }
     private var expanded: Bool { orchestrator.surface == .expanded }
+    private var isDark: Bool { canvasTheme.isDark(colorScheme) }
 
     var body: some View {
         GeometryReader { geo in
@@ -134,22 +146,18 @@ private struct FloaterSessionView: View {
             let delta = isDragging ? dragTranslation : settleResidual
             let width = expanded ? screenSize.width : resting.width
             let height = expanded ? screenSize.height : resting.height
-            // Clamped to the same safe-area/margin bounds `commitDrag` snaps into at
-            // drag end, not just applied there — otherwise the box could be dragged
-            // outside the safe area (or off-screen) for the duration of the gesture,
-            // only snapping back once released. A pure function of this render's own
-            // `resting`/`delta`, not of any stored, clamped drag state — `dragTranslation`
-            // itself (set from `FloaterCollapsedInteractionView`'s pan callback) stays an
-            // unclamped mirror of the finger throughout, so there's nothing for the
-            // gesture recognizer's own tracking to fall out of sync with.
-            let margin = config.collapsed.margin
-            let minX = safe.leading + margin.left
-            let maxX = screenSize.width - safe.trailing - margin.right - resting.width
-            let minY = safe.top + margin.top
-            let maxY = screenSize.height - safe.bottom - margin.bottom - resting.height
-            let left = (expanded ? 0 : (resting.minX + delta.width).clamped(min(minX, maxX), max(minX, maxX)))
+            // Deliberately unclamped during an active drag — a fast flick can carry
+            // the box past the safe area (or screen edge) while the finger is still
+            // moving, the same rubber-band feel Android's PIP already has, rather
+            // than hitting a hard wall mid-gesture. `commitDrag`, at drag end, is
+            // what snaps it back to a safe-area-respecting corner (via the existing
+            // `settleResidual` spring) — that clamp is real and unchanged; it's just
+            // not also duplicated here for every frame of the gesture itself.
+            let left =
+                (expanded ? 0 : resting.minX + delta.width)
                 + flyOffsetFraction.width * width
-            let top = (expanded ? 0 : (resting.minY + delta.height).clamped(min(minY, maxY), max(minY, maxY)))
+            let top =
+                (expanded ? 0 : resting.minY + delta.height)
                 + flyOffsetFraction.height * height
             let cornerRadius = expanded ? 0 : config.collapsed.cornerRadiusDp
 
@@ -211,7 +219,8 @@ private struct FloaterSessionView: View {
                         onTap: {
                             expandFromCollapsedMediaTap()
                         },
-                        chromeButtonBounds: chromeButtonRects(activeRect: activeRect, config: config)
+                        chromeButtonBounds: chromeButtonRects(
+                            activeRect: activeRect, config: config)
                     )
                     .frame(width: screenSize.width, height: screenSize.height)
                 }
@@ -219,7 +228,8 @@ private struct FloaterSessionView: View {
                 ZStack {
                     FloaterMediaView(
                         media: config.media, player: orchestrator.player,
-                        cover: !expanded || config.expanded.cover, resolvedUrl: state.resolvedMediaUrl
+                        cover: !expanded || config.expanded.cover,
+                        resolvedUrl: state.resolvedMediaUrl
                     )
                     .allowsHitTesting(false)
                     if expanded, config.expanded.scrimOpacity > 0 {
@@ -242,7 +252,8 @@ private struct FloaterSessionView: View {
                 // elevation-based approximation could. `radius: 0` when inapplicable is a
                 // cheap no-op rather than branching to a different view.
                 .shadow(
-                    color: (!expanded && config.collapsed.shadow) ? Color.black.opacity(0.45) : .clear,
+                    color: (!expanded && config.collapsed.shadow)
+                        ? Color.black.opacity(0.45) : .clear,
                     radius: (!expanded && config.collapsed.shadow) ? 12 : 0,
                     x: 0,
                     y: (!expanded && config.collapsed.shadow) ? 8 : 0
@@ -260,12 +271,18 @@ private struct FloaterSessionView: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: cornerRadius)
                         .stroke(
-                            config.collapsed.borderColor ?? .white,
+                            config.collapsed.borderColor.map {
+                                canvasTheme.color($0, isDark: isDark)
+                            } ?? .white,
                             lineWidth: (!expanded && config.collapsed.borderWidthDp > 0)
                                 ? config.collapsed.borderWidthDp : 0
                         )
                 )
-                .background((config.expanded.backgroundColor ?? .black).opacity(expanded ? 1 : 0))
+                .background(
+                    (config.expanded.backgroundColor.map { canvasTheme.color($0, isDark: isDark) }
+                        ?? .black)
+                        .opacity(expanded ? 1 : 0)
+                )
                 .position(x: left + width / 2, y: top + height / 2)
                 .opacity(alpha)
             }
@@ -299,7 +316,8 @@ private struct FloaterSessionView: View {
             // (cubic vs quartic) entirely, not a Quart/Cubic naming slip — so the
             // transition visibly read differently from Flutter's.
             .animation(
-                .timingCurve(0.77, 0, 0.175, 1, duration: Double(config.expanded.transitionMs) / 1000),
+                .timingCurve(
+                    0.77, 0, 0.175, 1, duration: Double(config.expanded.transitionMs) / 1000),
                 value: orchestrator.surface
             )
             .onChange(of: orchestrator.surface) { newSurface in
@@ -392,8 +410,10 @@ private struct FloaterSessionView: View {
         if config.controls.snapToCorner {
             let projectedLeft = resting.minX + predictedEndTranslation.width
             let projectedTop = resting.minY + predictedEndTranslation.height
-            let projectedFx: CGFloat = spanX <= 0 ? 0 : ((projectedLeft - minX) / spanX).clamped(0, 1)
-            let projectedFy: CGFloat = spanY <= 0 ? 0 : ((projectedTop - minY) / spanY).clamped(0, 1)
+            let projectedFx: CGFloat =
+                spanX <= 0 ? 0 : ((projectedLeft - minX) / spanX).clamped(0, 1)
+            let projectedFy: CGFloat =
+                spanY <= 0 ? 0 : ((projectedTop - minY) / spanY).clamped(0, 1)
             fx = projectedFx >= 0.5 ? 1 : 0
             fy = projectedFy >= 0.5 ? 1 : 0
         }
@@ -424,7 +444,9 @@ private struct FloaterSessionView: View {
         let flies = entry.type == .flyIn
         flyOffsetFraction = flies ? flyOffset(entry.from) : .zero
         let duration = Double(entry.durationMs) / 1000
-        withAnimation(flies ? easeOutBackCurve(duration: duration) : easeOutCubicCurve(duration: duration)) {
+        withAnimation(
+            flies ? easeOutBackCurve(duration: duration) : easeOutCubicCurve(duration: duration)
+        ) {
             alpha = 1
             flyOffsetFraction = .zero
         }
@@ -435,7 +457,9 @@ private struct FloaterSessionView: View {
         guard exit.type != .none, !expanded else { return }
         let flies = exit.type == .flyOut
         let duration = Double(exit.durationMs) / 1000
-        withAnimation(flies ? easeOutCubicCurve(duration: duration) : easeInCurve(duration: duration)) {
+        withAnimation(
+            flies ? easeOutCubicCurve(duration: duration) : easeInCurve(duration: duration)
+        ) {
             alpha = 0
             if flies { flyOffsetFraction = flyOffset(exit.to) }
         }
@@ -472,14 +496,16 @@ private struct FloaterCollapsedInteractionView: UIViewRepresentable {
     func makeUIView(context: Context) -> FloaterTouchShieldView {
         let view = FloaterTouchShieldView()
 
-        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        let pan = UIPanGestureRecognizer(
+            target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
         pan.cancelsTouchesInView = true
         pan.delaysTouchesBegan = true
         pan.delegate = context.coordinator
         view.addGestureRecognizer(pan)
         context.coordinator.pan = pan
 
-        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
+        let tap = UITapGestureRecognizer(
+            target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
         tap.cancelsTouchesInView = true
         tap.delaysTouchesBegan = true
         tap.delegate = context.coordinator
@@ -602,7 +628,7 @@ private final class FloaterTouchShieldView: UIView {
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         guard isUserInteractionEnabled, !activeRect.isNull, activeRect.contains(point),
-              !excludedRects.contains(where: { $0.contains(point) })
+            !excludedRects.contains(where: { $0.contains(point) })
         else {
             return nil
         }
@@ -634,7 +660,8 @@ private struct FloaterLayoutInsets {
 }
 
 private func collapsedRect(
-    config: FloaterConfig, screenSize: CGSize, safeInsets: EdgeInsets, dragFraction: FloaterFraction?
+    config: FloaterConfig, screenSize: CGSize, safeInsets: EdgeInsets,
+    dragFraction: FloaterFraction?
 ) -> CGRect {
     collapsedRect(
         config: config,
@@ -645,7 +672,8 @@ private func collapsedRect(
 }
 
 private func collapsedRect(
-    config: FloaterConfig, screenSize: CGSize, safeInsets: FloaterLayoutInsets, dragFraction: FloaterFraction?
+    config: FloaterConfig, screenSize: CGSize, safeInsets: FloaterLayoutInsets,
+    dragFraction: FloaterFraction?
 ) -> CGRect {
     let width = screenSize.width * config.collapsed.widthFraction
     let ratio = config.media.aspectRatio > 0 ? config.media.aspectRatio : 0.5625
@@ -765,7 +793,9 @@ private struct FloaterExpandedContentView: View {
 /// which reports and runs the (possibly empty, trivially-completing) action flow either
 /// way rather than treating "no actions" as a no-op.
 @MainActor
-private func performFloaterCanvasAction(_ request: CampaignCanvasActionRequest, state: ActiveFloaterState) {
+private func performFloaterCanvasAction(
+    _ request: CampaignCanvasActionRequest, state: ActiveFloaterState
+) {
     let resolvedAction = request.actions.first?.resolved(with: state.variableContext)
     SDKInstance.shared.reportFloaterStepClicked(
         elementId: request.elementId, ctaLabel: request.label ?? "",
@@ -774,7 +804,9 @@ private func performFloaterCanvasAction(_ request: CampaignCanvasActionRequest, 
     Task {
         await SDKInstance.shared.executeActionFlow(
             request.actions, variables: state.variableContext,
-            localActionExecutor: LocalActionExecutor(dismiss: { SDKInstance.shared.dismissFloater(.userClose) })
+            localActionExecutor: LocalActionExecutor(dismiss: {
+                SDKInstance.shared.dismissFloater(.userClose)
+            })
         )
         SDKInstance.shared.onFloaterActionCompleted()
     }
@@ -815,7 +847,9 @@ private struct FloaterChromeView: View {
                 .gesture(
                     DragGesture(minimumDistance: 0)
                         .onEnded { value in
-                            if value.translation.height > 120 || value.predictedEndTranslation.height > 700 {
+                            if value.translation.height > 120
+                                || value.predictedEndTranslation.height > 700
+                            {
                                 SDKInstance.shared.endFloaterExpanded(config.expanded.onBack)
                             }
                         }
@@ -937,8 +971,13 @@ private struct FloaterChromeView: View {
             .overlay(alignment: .bottomTrailing) {
                 if showsMute || showsPlayPause {
                     FloaterChromePill(size: collapsedIconSize) {
-                        if showsPlayPause { FloaterPlayPauseButton(orchestrator: orchestrator, size: collapsedIconSize) }
-                        if showsMute { FloaterMuteButton(orchestrator: orchestrator, size: collapsedIconSize) }
+                        if showsPlayPause {
+                            FloaterPlayPauseButton(
+                                orchestrator: orchestrator, size: collapsedIconSize)
+                        }
+                        if showsMute {
+                            FloaterMuteButton(orchestrator: orchestrator, size: collapsedIconSize)
+                        }
                     }
                     .padding(.trailing, collapsedMargin.right)
                     .padding(.bottom, bottomInset)
@@ -1044,8 +1083,11 @@ private enum FloaterIconGlyph {
     }
 
     private static let parsedPathCache: [FloaterIconGlyph: Path] = Dictionary(
-        uniqueKeysWithValues: [FloaterIconGlyph.close, .fullscreen, .fullscreenExit, .volumeUp, .volumeOff, .play, .pause]
-            .map { ($0, svgPath($0.pathData)) }
+        uniqueKeysWithValues: [
+            FloaterIconGlyph.close, .fullscreen, .fullscreenExit, .volumeUp, .volumeOff, .play,
+            .pause,
+        ]
+        .map { ($0, svgPath($0.pathData)) }
     )
 }
 
@@ -1078,7 +1120,9 @@ private func svgPath(_ data: String) -> Path {
     let commandLetters = Set("MmLlHhVvCcSsZz")
 
     func skipSeparators() {
-        while i < chars.count, chars[i] == "," || chars[i] == " " || chars[i] == "\n" || chars[i] == "\t" {
+        while i < chars.count,
+            chars[i] == "," || chars[i] == " " || chars[i] == "\n" || chars[i] == "\t"
+        {
             i += 1
         }
     }
@@ -1145,7 +1189,9 @@ private func svgPath(_ data: String) -> Path {
             current = CGPoint(x: current.x, y: command == "v" ? current.y + y : y)
             path.addLine(to: current)
         case "C", "c":
-            guard let c1 = readPoint(), let c2 = readPoint(), let p = readPoint() else { return path }
+            guard let c1 = readPoint(), let c2 = readPoint(), let p = readPoint() else {
+                return path
+            }
             let control1 = command == "c" ? CGPoint(x: current.x + c1.x, y: current.y + c1.y) : c1
             let control2 = command == "c" ? CGPoint(x: current.x + c2.x, y: current.y + c2.y) : c2
             let end = command == "c" ? CGPoint(x: current.x + p.x, y: current.y + p.y) : p
@@ -1156,7 +1202,9 @@ private func svgPath(_ data: String) -> Path {
             guard let c2 = readPoint(), let p = readPoint() else { return path }
             let control2 = command == "s" ? CGPoint(x: current.x + c2.x, y: current.y + c2.y) : c2
             let end = command == "s" ? CGPoint(x: current.x + p.x, y: current.y + p.y) : p
-            let control1 = lastControl.map { CGPoint(x: 2 * current.x - $0.x, y: 2 * current.y - $0.y) } ?? current
+            let control1 =
+                lastControl.map { CGPoint(x: 2 * current.x - $0.x, y: 2 * current.y - $0.y) }
+                ?? current
             path.addCurve(to: end, control1: control1, control2: control2)
             lastControl = control2
             current = end
@@ -1212,8 +1260,9 @@ private struct FloaterProgressBarView: View {
             .frame(height: 2)
         }
         .onReceive(timer) { _ in
-            guard let player = orchestrator.player, let duration = player.currentItem?.duration.seconds,
-                  duration.isFinite, duration > 0
+            guard let player = orchestrator.player,
+                let duration = player.currentItem?.duration.seconds,
+                duration.isFinite, duration > 0
             else {
                 fraction = 0
                 return

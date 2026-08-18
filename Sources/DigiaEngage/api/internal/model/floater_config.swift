@@ -20,25 +20,10 @@ import SwiftUI
 // and Android's `FloaterConfig.kt`. This is NOT a nudge-style widget tree; floater's
 // expanded content never reuses `NudgeColumn`/`NudgeColumnContent`.
 
-/// Reads a hex color at `key`, tolerating both a flat hex string and a `{ "value": "#hex" }`
-/// wrapper. The dashboard's PiP editor reuses its shared `TokenOrValue<string>` widget for
-/// `border.color`/`backgroundColor` even though neither is actually design-token-bound on this
-/// wire contract, so a raw color-picker selection round-trips as `{ "value": "#hex" }`, not a
-/// flat string — a plain `String` cast then fails and silently falls back to the caller's
-/// default (which is how a configured border color always rendered white regardless of what was
-/// picked; matches Android's `optColorField` fix in `FloaterConfig.kt`). A `{ "token": "..." }`
-/// reference is NOT resolved here — parsing this config has no token catalog available — so that
-/// case still falls back to the caller's default; only the far more common raw-value case is
-/// rescued.
-private func colorField(_ json: [String: Any], _ key: String) -> Color? {
-    switch json[key] {
-    case let hex as String:
-        return Color(hex: hex)
-    case let wrapper as [String: Any]:
-        return wrapper.nonBlankString("value").flatMap { Color(hex: $0) }
-    default:
-        return nil
-    }
+private func colorToken(_ json: [String: Any], _ key: String, designTokens: DesignTokenCatalog)
+    -> CampaignColor?
+{
+    try? designTokens.resolveColor(json[key])
 }
 
 enum FloaterMediaKind: Equatable {
@@ -233,7 +218,7 @@ struct FloaterCollapsedConfig: Equatable {
     let heightDp: CGFloat
     let cornerRadiusDp: CGFloat
     let borderWidthDp: CGFloat
-    let borderColor: Color?
+    let borderColor: CampaignColor?
     /// Parsed for schema completeness, matching Android — not yet rendered on either
     /// native platform (Compose has no direct `BoxShadow`-equivalent modifier as cheap
     /// as Flutter's, so both native SDKs deferred it rather than approximate it).
@@ -243,7 +228,9 @@ struct FloaterCollapsedConfig: Equatable {
 
     var hasFixedHeight: Bool { heightDp > 0 }
 
-    static func fromJson(_ json: [String: Any]?) -> FloaterCollapsedConfig {
+    static func fromJson(
+        _ json: [String: Any]?, designTokens: DesignTokenCatalog = .empty
+    ) -> FloaterCollapsedConfig {
         let j = json ?? [:]
         let border = j.object("border")
         return FloaterCollapsedConfig(
@@ -253,7 +240,7 @@ struct FloaterCollapsedConfig: Equatable {
             heightDp: CGFloat(j.double("heightDp", default: 0)),
             cornerRadiusDp: CGFloat(j.double("cornerRadiusDp", default: 12)),
             borderWidthDp: CGFloat(border?.double("widthDp", default: 0) ?? 0),
-            borderColor: border.flatMap { colorField($0, "color") },
+            borderColor: border.flatMap { colorToken($0, "color", designTokens: designTokens) },
             shadow: j.bool("shadow", default: true),
             entryAnimation: FloaterEntryAnimation.fromJson(j.object("entryAnimation")),
             exitAnimation: FloaterExitAnimation.fromJson(j.object("exitAnimation"))
@@ -277,7 +264,7 @@ struct FloaterExpandedConfig: Equatable {
     let canvas: CampaignCanvas
     /// The logical width the canvas rects were authored against.
     let designWidth: CGFloat
-    let backgroundColor: Color?
+    let backgroundColor: CampaignColor?
     let scrimOpacity: Double
     /// `true` = cover (crop to fill), matching `mediaFit: "cover"` (the default);
     /// `false` = contain.
@@ -310,20 +297,24 @@ struct FloaterExpandedConfig: Equatable {
     static func fromJson(
         _ json: [String: Any]?, designTokens: DesignTokenCatalog = .empty
     ) -> FloaterExpandedConfig? {
-        guard let j = json, let canvasJson = j.object("canvas"), !canvasJson.isEmpty else { return nil }
+        guard let j = json, let canvasJson = j.object("canvas"), !canvasJson.isEmpty else {
+            return nil
+        }
         let canvas: CampaignCanvas
         do {
             canvas = try CampaignCanvasParser(designTokens: designTokens).parse(canvasJson)
         } catch {
-            DigiaLog.warning("[FloaterConfig] rejected Canvas campaign: \(error.localizedDescription)")
+            DigiaLog.warning(
+                "[FloaterConfig] rejected Canvas campaign: \(error.localizedDescription)")
             return nil
         }
-        let rawDesignWidth = CGFloat(j.double("designWidth", default: Double(defaultCampaignCanvasDesignWidth)))
+        let rawDesignWidth = CGFloat(
+            j.double("designWidth", default: Double(defaultCampaignCanvasDesignWidth)))
         return FloaterExpandedConfig(
             canvas: canvas,
             designWidth: rawDesignWidth.isFinite && rawDesignWidth > 0
                 ? rawDesignWidth : defaultCampaignCanvasDesignWidth,
-            backgroundColor: colorField(j, "backgroundColor"),
+            backgroundColor: colorToken(j, "backgroundColor", designTokens: designTokens),
             scrimOpacity: j.double("scrimOpacity", default: 0.55).clamped(0, 1),
             cover: j.string("mediaFit", default: "cover") != "contain",
             showCloseButton: j.bool("showCloseButton", default: true),
@@ -447,13 +438,19 @@ struct FloaterConfig: Equatable {
     static func fromJson(
         _ templateConfig: [String: Any], designTokens: DesignTokenCatalog = .empty
     ) -> FloaterConfig? {
-        guard let media = FloaterMediaConfig.fromJson(templateConfig.object("media")) else { return nil }
-        guard let expanded = FloaterExpandedConfig.fromJson(
-            templateConfig.object("expanded"), designTokens: designTokens
-        ) else { return nil }
+        guard let media = FloaterMediaConfig.fromJson(templateConfig.object("media")) else {
+            return nil
+        }
+        guard
+            let expanded = FloaterExpandedConfig.fromJson(
+                templateConfig.object("expanded"), designTokens: designTokens
+            )
+        else { return nil }
         return FloaterConfig(
             media: media,
-            collapsed: FloaterCollapsedConfig.fromJson(templateConfig.object("collapsed")),
+            collapsed: FloaterCollapsedConfig.fromJson(
+                templateConfig.object("collapsed"), designTokens: designTokens
+            ),
             expanded: expanded,
             controls: FloaterControlsConfig.fromJson(templateConfig.object("controls")),
             behavior: FloaterBehaviorConfig.fromJson(templateConfig.object("behavior")),

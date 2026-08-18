@@ -1,6 +1,6 @@
+import Combine
 import SwiftUI
 import UIKit
-import Combine
 
 @MainActor
 public struct DigiaHost<Content: View>: View {
@@ -39,20 +39,7 @@ public struct DigiaHost<Content: View>: View {
             // plain SwiftUI sibling shares this single hosting context with
             // everything else here, so there's no second boundary for that
             // dispatch to disagree with itself across.
-            // Unconditional, not gated on `orchestrator.surface` (a change tried
-            // and reverted) — that made `GeometryReader`'s reported `size`/
-            // `safeAreaInsets` inside `FloaterSessionView` itself change identity
-            // between collapsed and expanded, which showed up as the drag no
-            // longer smoothly tracking the finger (confirmed live). Keeping this
-            // unconditional keeps that reader's own geometry stable throughout a
-            // drag; `FloaterSessionView`'s own `collapsedRect`/`left`/`top`
-            // clamping (computed explicitly from `safe.leading/trailing/top/
-            // bottom`) is what actually keeps the *collapsed* box within the safe
-            // area, so unconditionally ignoring it here doesn't let the PIP
-            // escape — the expanded state's own full-screen sizing already
-            // extends this same, stable `screenSize` edge-to-edge.
             FloaterOverlayView()
-                .ignoresSafeArea()
                 .zIndex(3)
 
             NudgeOverlayView()
