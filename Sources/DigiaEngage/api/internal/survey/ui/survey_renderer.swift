@@ -157,7 +157,8 @@ private struct SurveySheet<Content: View>: View {
                 cornerRadius: CGFloat(sheet.cornerRadius),
                 background: background,
                 showHandle: sheet.showHandle,
-                allowInteractiveDismiss: sheet.draggable || sheet.backdropDismissible,
+                allowBackdropDismiss: sheet.backdropDismissible,
+                allowDragDismiss: sheet.draggable,
                 heightCapFraction: heightCapFraction
             ),
             scrollable: false,
