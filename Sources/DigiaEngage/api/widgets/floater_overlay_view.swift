@@ -1034,9 +1034,25 @@ private struct FloaterChromeIcon: View {
 
     var body: some View {
         Button(action: onTap) {
-            FloaterVectorIcon(glyph: glyph)
-                .fill(Color.white)
-                .frame(width: size, height: size)
+            Group {
+                if glyph.rendersAsStroke {
+                    // fullscreen/fullscreenExit are open corner-arrow strokes (ported
+                    // from the dashboard's lucide `Maximize2`/`Minimize2`, matched to
+                    // Android core's identically-stroked vector), not closed filled
+                    // shapes — filling them would render nothing, since a zero-width
+                    // open path encloses no area.
+                    FloaterVectorIcon(glyph: glyph)
+                        .stroke(
+                            Color.white,
+                            style: StrokeStyle(
+                                lineWidth: size * (2.5 / 24), lineCap: .round, lineJoin: .round)
+                        )
+                } else {
+                    FloaterVectorIcon(glyph: glyph)
+                        .fill(Color.white)
+                }
+            }
+            .frame(width: size, height: size)
         }
         .buttonStyle(.plain)
     }
@@ -1048,6 +1064,17 @@ private struct FloaterChromeIcon: View {
 private enum FloaterIconGlyph {
     case close, fullscreen, fullscreenExit, volumeUp, volumeOff, play, pause
 
+    /// fullscreen/fullscreenExit are authored as open stroked polylines (matching
+    /// Android core's `android:strokeColor`/`strokeWidth` vectors, both ported from
+    /// the dashboard's lucide `Maximize2`/`Minimize2`), unlike every other glyph
+    /// here, which is a closed, filled shape.
+    var rendersAsStroke: Bool {
+        switch self {
+        case .fullscreen, .fullscreenExit: true
+        case .close, .volumeUp, .volumeOff, .play, .pause: false
+        }
+    }
+
     /// SVG-mini-language path data, straight from Android's `res/drawable/*.xml`,
     /// each authored at a 24x24 `android:viewportWidth`/`viewportHeight`. Android's
     /// `pathData` syntax is the SVG path grammar itself, so `svgPath(_:)` below
@@ -1057,9 +1084,9 @@ private enum FloaterIconGlyph {
         case .close:
             "M18.3,5.71L16.89,4.29L12,9.17L7.11,4.29L5.7,5.71L10.59,10.59L5.7,15.48L7.11,16.89L12,12L16.89,16.89L18.3,15.48L13.41,10.59z"
         case .fullscreen:
-            "M7,14H5v5h5v-2H7V14z M5,10h2V7h3V5H5V10z M17,17h-3v2h5v-5h-2V17z M14,5v2h3v3h2V5H14z"
+            "M15,3h6v6 M21,3l-7,7 M3,21l7,-7 M9,21H3v-6"
         case .fullscreenExit:
-            "M5,16h3v3h2v-5H5V16z M8,8H5v2h5V5H8V8z M14,19h2v-3h3v-2h-5V19z M16,8V5h-2v5h5V8H16z"
+            "M14,10l7,-7 M20,10h-6V4 M3,21l7,-7 M4,14h6v6"
         case .volumeUp:
             "M3,9v6h4l5,5V4L7,9H3zM16.5,12c0,-1.77 -1.02,-3.29 -2.5,-4.03v8.05c1.48,-0.73 2.5,-2.25 2.5,-4.02zM14,3.23v2.06c2.89,0.86 5,3.54 5,6.71s-2.11,5.85 -5,6.71v2.06c4.01,-0.91 7,-4.49 7,-8.77s-2.99,-7.86 -7,-8.77z"
         case .volumeOff:
