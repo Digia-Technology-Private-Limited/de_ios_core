@@ -195,6 +195,8 @@ private struct DialogContainer<Content: View>: View {
                             .fill(background)
                     )
                     .clipShape(RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius)))
+                    .contentShape(RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius)))
+                    .onTapGesture {}
                     .padding(16)
             }
             .task {

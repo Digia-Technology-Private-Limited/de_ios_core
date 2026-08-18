@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 @MainActor
@@ -23,7 +24,6 @@ private func performCanvasAction(
         )
     }
 }
-import Combine
 
 @MainActor
 struct NudgeOverlayView: View {
@@ -140,7 +140,8 @@ private struct NudgeSheetView: View {
                                 height: max(1, runtimeSize.height - 48)
                             ),
                             onAction: { request in
-                                performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
+                                performCanvasAction(
+                                    request, variables: presentation.variables, dismiss: dismiss)
                             }
                         )
                         Spacer(minLength: 0)
@@ -222,12 +223,13 @@ private struct NudgeDialogContainer: View {
                 }
             }
             .frame(width: width, height: height)
-            .padding(EdgeInsets(
-                top: insets.top,
-                leading: insets.left,
-                bottom: insets.bottom,
-                trailing: insets.right
-            ))
+            .padding(
+                EdgeInsets(
+                    top: insets.top,
+                    leading: insets.left,
+                    bottom: insets.bottom,
+                    trailing: insets.right
+                ))
         }
         .frame(width: viewportSize.width, height: viewportSize.height)
         .onPreferenceChange(DialogHeightKey.self) { contentHeight = $0 }
@@ -250,7 +252,8 @@ private struct NudgeDialogContainer: View {
                 runtimeViewportWidth: runtimeViewportWidth,
                 availableSize: availableSize,
                 onAction: { request in
-                    performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
+                    performCanvasAction(
+                        request, variables: presentation.variables, dismiss: dismiss)
                 }
             )
             if surface.showCloseButton {
@@ -258,6 +261,7 @@ private struct NudgeDialogContainer: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
+        .contentShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .environment(\.digiaVariables, presentation.variables)
     }
 
@@ -272,7 +276,8 @@ private struct NudgeDialogContainer: View {
                     .frame(width: width)
                     .background(
                         GeometryReader { geometry in
-                            Color.clear.preference(key: DialogHeightKey.self, value: geometry.size.height)
+                            Color.clear.preference(
+                                key: DialogHeightKey.self, value: geometry.size.height)
                         }
                     )
             }
@@ -284,6 +289,7 @@ private struct NudgeDialogContainer: View {
         }
         .background(backgroundColor)
         .clipShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
+        .contentShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .transition(.opacity)
     }
 
