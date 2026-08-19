@@ -13,15 +13,7 @@ internal enum CaptureUploadResult: Equatable, Sendable {
 }
 
 @MainActor
-internal protocol CaptureUploader: AnyObject {
-    func upload(
-        envelope: PageCaptureEnvelopeV1,
-        png: Data
-    ) async -> CaptureUploadResult
-}
-
-@MainActor
-internal final class URLSessionCaptureUploader: CaptureUploader {
+internal final class URLSessionCaptureUploader {
     private let apiKey: String
     private let session: URLSession
 
