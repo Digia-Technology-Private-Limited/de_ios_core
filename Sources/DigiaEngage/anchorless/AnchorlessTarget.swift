@@ -45,10 +45,6 @@ struct AnchorlessTarget: Equatable {
     @MainActor
     func resolve(currentPageKey: String?, window: UIWindow) -> Result<CGRect, AnchorlessFailure> {
         guard currentPageKey == pageKey else { return .failure(.pageKeyMismatch) }
-        // Geometry is expressed in the app window's local coordinate space. UIKit
-        // normally reports a zero-origin bounds rect, but preserving a custom
-        // bounds origin would diverge from Flutter's origin-zero window frame and
-        // shift every anchorless target in the overlay.
         let bounds = CGRect(origin: .zero, size: window.bounds.size)
         guard bounds.width.isFinite,
               bounds.height.isFinite,
