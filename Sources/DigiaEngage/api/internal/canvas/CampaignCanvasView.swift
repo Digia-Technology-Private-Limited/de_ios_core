@@ -8,6 +8,15 @@ import UIKit
 private let maxFloatingCanvasUpscale: CGFloat = 1.15
 private let canvasTextSpanElementID = "canvas_text_span"
 
+internal func anchorlessDesignScale(hostWidth: CGFloat, designWidth: CGFloat) -> CGFloat? {
+    guard hostWidth.isFinite, hostWidth > 0,
+          designWidth.isFinite, designWidth > 0
+    else { return nil }
+    let scale = hostWidth / designWidth
+    guard scale.isFinite, scale > 0 else { return nil }
+    return min(scale, maxFloatingCanvasUpscale)
+}
+
 struct CampaignCanvasView: View {
     let canvas: CampaignCanvas
     let surface: NudgeSurface
@@ -71,15 +80,163 @@ struct GuideCampaignCanvasView: View {
     }
 }
 
+/// A guide Canvas body and pointer rendered as one clipped surface. Flutter's
+/// guide renderer paints the background once across the rounded body + pointer
+/// union, so gradients/images do not become a separately painted arrow.
+struct GuideCanvasUnionSurface: View {
+    let canvas: CampaignCanvas
+    let designWidth: CGFloat
+    let viewportWidth: CGFloat
+    let availableSize: CGSize
+    let cornerRadius: CGFloat
+    let pointerDirection: GuideCanvasPointerDirection?
+    let pointerSize: CGFloat
+    let pointerCenter: CGFloat?
+    let borderColor: Color
+    let borderWidth: CGFloat
+    let shadowRadius: CGFloat
+    let onAction: (CampaignCanvasActionRequest) -> Void
+    @ObservedObject private var theme = CampaignCanvasTheme.shared
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var scale: CGFloat {
+        guideCanvasScale(
+            canvas: canvas,
+            designWidth: designWidth,
+            viewportWidth: viewportWidth,
+            availableSize: availableSize
+        )
+    }
+
+    private var bodySize: CGSize {
+        CGSize(width: canvas.width * scale, height: canvas.height * scale)
+    }
+
+    private var outerSize: CGSize {
+        guard pointerDirection != nil else { return bodySize }
+        let horizontal = pointerDirection == .left || pointerDirection == .right
+        return CGSize(
+            width: bodySize.width + (horizontal ? pointerSize : 0),
+            height: bodySize.height + (horizontal ? 0 : pointerSize)
+        )
+    }
+
+    private var bodyOffset: CGSize {
+        switch pointerDirection {
+        case .up: return CGSize(width: 0, height: pointerSize)
+        case .left: return CGSize(width: pointerSize, height: 0)
+        default: return .zero
+        }
+    }
+
+    var body: some View {
+        let isDark = theme.isDark(colorScheme)
+        let shape = GuideCanvasUnionShape(
+            bodySize: bodySize,
+            pointerDirection: pointerDirection,
+            pointerSize: pointerSize,
+            pointerCenter: pointerCenter,
+            cornerRadius: cornerRadius
+        )
+        ZStack(alignment: .topLeading) {
+            CampaignCanvasPaintView(paint: canvas.background, isDark: isDark)
+            CampaignCanvasStage(
+                canvas: canvas,
+                authoredCornerRadius: cornerRadius / max(scale, 0.001),
+                isDark: isDark,
+                onAction: onAction,
+                showBackground: false
+            )
+            .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
+            .scaleEffect(scale, anchor: .topLeading)
+            .frame(width: bodySize.width, height: bodySize.height, alignment: .topLeading)
+            .offset(bodyOffset)
+        }
+        .frame(width: outerSize.width, height: outerSize.height, alignment: .topLeading)
+        .clipShape(shape)
+        .overlay(shape.stroke(borderColor, lineWidth: borderWidth))
+        .shadow(radius: shadowRadius)
+    }
+}
+
+private func guideCanvasScale(
+    canvas: CampaignCanvas,
+    designWidth: CGFloat,
+    viewportWidth: CGFloat,
+    availableSize: CGSize
+) -> CGFloat {
+    guard let designScale = anchorlessDesignScale(
+        hostWidth: viewportWidth,
+        designWidth: designWidth
+    ) else { return 0 }
+    let widthScale = max(0, availableSize.width) / max(canvas.width * designScale, 1)
+    let heightScale = max(0, availableSize.height) / max(canvas.height * designScale, 1)
+    let fittedScale = designScale * min(1, widthScale, heightScale)
+    return fittedScale.isFinite && fittedScale > 0 ? fittedScale : 0
+}
+
+private struct GuideCanvasUnionShape: Shape {
+    let bodySize: CGSize
+    let pointerDirection: GuideCanvasPointerDirection?
+    let pointerSize: CGFloat
+    let pointerCenter: CGFloat?
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let horizontal = pointerDirection == .left || pointerDirection == .right
+        let bodyRect = CGRect(
+            x: pointerDirection == .left ? pointerSize : 0,
+            y: pointerDirection == .up ? pointerSize : 0,
+            width: bodySize.width,
+            height: bodySize.height
+        )
+        var path = Path(roundedRect: bodyRect, cornerRadius: min(cornerRadius, bodyRect.height / 2))
+        guard let pointerDirection, pointerSize > 0 else { return path }
+
+        let crossExtent = horizontal ? bodyRect.height : bodyRect.width
+        let clearance = min(crossExtent / 2, max(pointerSize, cornerRadius + pointerSize))
+        let requested = pointerCenter ?? (horizontal ? bodyRect.midY : bodyRect.midX)
+        let center = min(
+            max(requested, (horizontal ? bodyRect.minY : bodyRect.minX) + clearance),
+            (horizontal ? bodyRect.maxY : bodyRect.maxX) - clearance
+        )
+        var triangle = Path()
+        switch pointerDirection {
+        case .up:
+            triangle.move(to: CGPoint(x: center - pointerSize, y: bodyRect.minY))
+            triangle.addLine(to: CGPoint(x: center, y: 0))
+            triangle.addLine(to: CGPoint(x: center + pointerSize, y: bodyRect.minY))
+        case .down:
+            triangle.move(to: CGPoint(x: center - pointerSize, y: bodyRect.maxY))
+            triangle.addLine(to: CGPoint(x: center, y: bodyRect.maxY + pointerSize))
+            triangle.addLine(to: CGPoint(x: center + pointerSize, y: bodyRect.maxY))
+        case .left:
+            triangle.move(to: CGPoint(x: bodyRect.minX, y: center - pointerSize))
+            triangle.addLine(to: CGPoint(x: 0, y: center))
+            triangle.addLine(to: CGPoint(x: bodyRect.minX, y: center + pointerSize))
+        case .right:
+            triangle.move(to: CGPoint(x: bodyRect.maxX, y: center - pointerSize))
+            triangle.addLine(to: CGPoint(x: bodyRect.maxX + pointerSize, y: center))
+            triangle.addLine(to: CGPoint(x: bodyRect.maxX, y: center + pointerSize))
+        }
+        triangle.closeSubpath()
+        path.addPath(triangle)
+        return path
+    }
+}
+
 private struct CampaignCanvasStage: View {
     let canvas: CampaignCanvas
     let authoredCornerRadius: CGFloat
     let isDark: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
+    var showBackground = true
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            CampaignCanvasPaintView(paint: canvas.background, isDark: isDark)
+            if showBackground {
+                CampaignCanvasPaintView(paint: canvas.background, isDark: isDark)
+            }
             ForEach(canvas.children) { child in
                 CanvasChildView(child: child, isDark: isDark, onAction: onAction)
                     .frame(width: child.rect.width, height: child.rect.height, alignment: .topLeading)
@@ -548,7 +705,7 @@ private struct CampaignCanvasShadowView: View {
     }
 }
 
-private struct CampaignCanvasPaintView: View {
+struct CampaignCanvasPaintView: View {
     let paint: CampaignCanvasPaint; let isDark: Bool
     var body: some View {
         switch paint {
@@ -558,6 +715,10 @@ private struct CampaignCanvasPaintView: View {
         case .none: Color.clear
         }
     }
+}
+
+enum GuideCanvasPointerDirection: Equatable {
+    case up, down, left, right
 }
 
 private struct CampaignCanvasGradientView: View {

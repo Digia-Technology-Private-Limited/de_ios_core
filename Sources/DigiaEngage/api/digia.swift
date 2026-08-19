@@ -172,4 +172,18 @@ public enum Digia {
     public static func setCurrentScreen(name: String) {
         SDKInstance.shared.setCurrentScreen(name)
     }
+
+    /// Exports the current React Native page capture as JSON in debug builds only.
+    public static func exportCurrentPageCapture(
+        includeText: Bool,
+        includeImagesAndMedia: Bool,
+        includeOtherStructuralNodes: Bool
+    ) async -> String? {
+        guard #available(iOS 17, *) else { return nil }
+        return await SDKInstance.shared.exportCurrentPageCapture(
+            includeText: includeText,
+            includeImagesAndMedia: includeImagesAndMedia,
+            includeOtherStructuralNodes: includeOtherStructuralNodes
+        )
+    }
 }

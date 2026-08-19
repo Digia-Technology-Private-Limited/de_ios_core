@@ -47,7 +47,8 @@ internal struct UIKitCaptureNode: CaptureNodeSource {
 
     internal var nodeType: CaptureNodeType {
         if scrollAxis != nil { return .container }
-        if view is UIControl || (view as? UITextView)?.isEditable == true || hasGesture {
+        if view is UIControl || (view as? UITextView)?.isEditable == true || hasGesture ||
+            isAccessibilityIntentUnit {
             return .interactive
         }
         let className = NSStringFromClass(type(of: view))
@@ -73,6 +74,26 @@ internal struct UIKitCaptureNode: CaptureNodeSource {
 
     private var hasGesture: Bool {
         !(view is UIWindow) && !(view.gestureRecognizers?.isEmpty ?? true)
+    }
+
+    /// Fabric Pressable/Touchable targets are accessible RCT views; their root
+    /// touch handler dispatches presses instead of per-view UIKit gestures.
+    private var isAccessibilityIntentUnit: Bool {
+        let className = NSStringFromClass(type(of: view))
+        let isReactNativeView = className == "RCTView" ||
+            className.hasSuffix("RCTViewComponentView")
+        guard isReactNativeView, view.isAccessibilityElement else { return false }
+        if view.accessibilityLabel?.isEmpty == false { return true }
+        if (view.accessibilityAttributedLabel?.length ?? 0) > 0 { return true }
+
+        let actionableTraits: UIAccessibilityTraits = [
+            .button,
+            .link,
+            .adjustable,
+            .searchField,
+            .keyboardKey,
+        ]
+        return !view.accessibilityTraits.intersection(actionableTraits).isEmpty
     }
 }
 

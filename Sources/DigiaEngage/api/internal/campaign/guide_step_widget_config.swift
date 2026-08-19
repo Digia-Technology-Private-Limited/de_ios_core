@@ -141,27 +141,48 @@ struct GuideStepWidgetConfig: Equatable {
             borderColor: isFlatSpotlight
                 ? color(json.string("calloutBorderColor"), default: "#00000000")
                 : color(bubbleObj.string("border_color"), default: "#00000000"),
-            borderWidth: isFlatSpotlight
-                ? json.double("calloutBorderWidth", default: 0)
-                : bubbleObj.double("border_width", default: 0),
-            cornerRadius: isFlatSpotlight
-                ? json.double("calloutCornerRadius", default: 8)
-                : bubbleObj.double("corner_radius", default: 12),
-            paddingHorizontal: isFlatSpotlight
-                ? json.double("calloutPadding", default: 12)
-                : bubbleObj.double("padding_horizontal", default: 16),
-            paddingVertical: isFlatSpotlight
-                ? json.double("calloutPadding", default: 12)
-                : bubbleObj.double("padding_vertical", default: 12),
-            maxWidthDp: isFlatSpotlight
-                ? json.double("calloutMaxWidth", default: 280)
-                : bubbleObj.double("max_width", default: 280),
-            elevation: isFlatSpotlight
-                ? (json.bool("calloutShadow", default: true) ? 6 : 0)
-                : bubbleObj.double("elevation", default: 6),
-            calloutGap: isFlatSpotlight
-                ? json.double("calloutGap", default: 8)
-                : bubbleObj.double("callout_gap", default: 8),
+            borderWidth: nonNegative(
+                isFlatSpotlight
+                    ? json.double("calloutBorderWidth", default: 0)
+                    : bubbleObj.double("border_width", default: 0),
+                fallback: 0
+            ),
+            cornerRadius: nonNegative(
+                isFlatSpotlight
+                    ? json.double("calloutCornerRadius", default: 8)
+                    : bubbleObj.double("corner_radius", default: 12),
+                fallback: isFlatSpotlight ? 8 : 12
+            ),
+            paddingHorizontal: nonNegative(
+                isFlatSpotlight
+                    ? json.double("calloutPadding", default: 12)
+                    : bubbleObj.double("padding_horizontal", default: 16),
+                fallback: isFlatSpotlight ? 12 : 16
+            ),
+            paddingVertical: nonNegative(
+                isFlatSpotlight
+                    ? json.double("calloutPadding", default: 12)
+                    : bubbleObj.double("padding_vertical", default: 12),
+                fallback: 12
+            ),
+            maxWidthDp: positive(
+                isFlatSpotlight
+                    ? json.double("calloutMaxWidth", default: 280)
+                    : bubbleObj.double("max_width", default: 280),
+                fallback: 280
+            ),
+            elevation: nonNegative(
+                isFlatSpotlight
+                    ? (json.bool("calloutShadow", default: true) ? 6 : 0)
+                    : bubbleObj.double("elevation", default: 6),
+                fallback: 6
+            ),
+            calloutGap: nonNegative(
+                isFlatSpotlight
+                    ? json.double("calloutGap", default: 8)
+                    : bubbleObj.double("callout_gap", default: 8),
+                fallback: 8
+            ),
             entranceAnimation: bubbleObj.string("entrance_animation", default: "elastic"),
             arrow: arrow
         )
@@ -171,18 +192,27 @@ struct GuideStepWidgetConfig: Equatable {
             shape: isFlatSpotlight
                 ? json.string("highlightShape", default: "rect")
                 : cutoutObj.string("shape", default: "rounded_rect"),
-            cornerRadius: isFlatSpotlight
-                ? json.double("highlightCornerRadius", default: 8)
-                : cutoutObj.double("corner_radius", default: 12),
-            padding: isFlatSpotlight
-                ? json.double("highlightPadding", default: 8)
-                : cutoutObj.double("padding", default: 8),
+            cornerRadius: nonNegative(
+                isFlatSpotlight
+                    ? json.double("highlightCornerRadius", default: 8)
+                    : cutoutObj.double("corner_radius", default: 12),
+                fallback: isFlatSpotlight ? 8 : 12
+            ),
+            padding: nonNegative(
+                isFlatSpotlight
+                    ? json.double("highlightPadding", default: 8)
+                    : cutoutObj.double("padding", default: 8),
+                fallback: 8
+            ),
             glowColor: isFlatSpotlight
                 ? color(json.string("highlightGlowColor"), default: "#00000000")
                 : color(cutoutObj.string("glow_color"), default: "#00000000"),
-            glowWidth: isFlatSpotlight
-                ? json.double("highlightGlowWidth", default: 0)
-                : cutoutObj.double("glow_width", default: 0)
+            glowWidth: nonNegative(
+                isFlatSpotlight
+                    ? json.double("highlightGlowWidth", default: 0)
+                    : cutoutObj.double("glow_width", default: 0),
+                fallback: 0
+            )
         )
 
         let overlay = OverlayConfig(
@@ -190,9 +220,14 @@ struct GuideStepWidgetConfig: Equatable {
             color: isFlatSpotlight
                 ? color(json.string("overlayColor"), default: defaultOverlayColor)
                 : color(overlayObj.string("color"), default: defaultOverlayColor),
-            alpha: isFlatSpotlight
-                ? json.double("overlayOpacity", default: 0.7)
-                : overlayObj.double("alpha", default: 0.6),
+            alpha: bounded(
+                isFlatSpotlight
+                    ? json.double("overlayOpacity", default: 0.7)
+                    : overlayObj.double("alpha", default: 0.6),
+                lower: 0,
+                upper: 1,
+                fallback: isFlatSpotlight ? 0.7 : 0.6
+            ),
             dismissOnTap: isFlatSpotlight
                 ? json.string("outsideTapBehavior", default: "next") != "nothing"
                 : overlayObj.bool("dismiss_on_tap", default: false),
@@ -263,11 +298,12 @@ struct GuideStepWidgetConfig: Equatable {
                     textColor: obj.nonBlankString("text_color")
                         .map { color($0, default: defaultButtonText) }
                         ?? defaultText,
-                    fontSize: max(1, obj.double("fontSize", default: 14)),
+                    fontSize: positive(obj.double("fontSize", default: 14), fallback: 14),
                     fontWeight: DigiaFontWeight.value(obj["fontWeight"], default: 600),
-                    cornerRadius: obj["corner_radius"] == nil
-                        ? 8
-                        : obj.double("corner_radius", default: 8),
+                    cornerRadius: nonNegative(
+                        obj.double("corner_radius", default: 8),
+                        fallback: 8
+                    ),
                     actions: onClick.map { EngageActionParser().parse($0) } ?? [legacyAction]
                 )
             )
@@ -294,6 +330,23 @@ struct GuideStepWidgetConfig: Equatable {
         return value
     }
 
+    private static func nonNegative(_ value: Double, fallback: Double) -> Double {
+        value.isFinite ? max(0, value) : fallback
+    }
+
+    private static func positive(_ value: Double, fallback: Double) -> Double {
+        value.isFinite && value > 0 ? value : fallback
+    }
+
+    private static func bounded(
+        _ value: Double,
+        lower: Double,
+        upper: Double,
+        fallback: Double
+    ) -> Double {
+        value.isFinite ? min(max(value, lower), upper) : fallback
+    }
+
     private static func nestedText(
         _ json: [String: Any]?,
         defaultWeight: Int,
@@ -306,7 +359,7 @@ struct GuideStepWidgetConfig: Equatable {
         return GuideTextContent(
             text: text,
             fontWeight: DigiaFontWeight.value(font["weight"], default: defaultWeight),
-            fontSize: font.double("size", default: defaultSize),
+            fontSize: positive(font.double("size", default: defaultSize), fallback: defaultSize),
             textColor: color(style.string("textColor"), default: defaultColor)
         )
     }
@@ -322,7 +375,7 @@ struct GuideStepWidgetConfig: Equatable {
         return GuideTextContent(
             text: text,
             fontWeight: DigiaFontWeight.value(json["\(key)Weight"], default: defaultWeight),
-            fontSize: json.double("\(key)Size", default: defaultSize),
+            fontSize: positive(json.double("\(key)Size", default: defaultSize), fallback: defaultSize),
             textColor: color(json.string("\(key)Color"), default: defaultColor)
         )
     }

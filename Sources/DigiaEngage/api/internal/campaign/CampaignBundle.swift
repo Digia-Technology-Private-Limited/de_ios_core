@@ -5,7 +5,11 @@ struct CampaignBundle {
     let designTokens: DesignTokenCatalog
     let campaigns: [CampaignModel]
 
-    static func create(rawCampaigns: [[String: Any]], designTokensJSON: [String: Any]?) -> CampaignBundle {
+    static func create(
+        rawCampaigns: [[String: Any]],
+        designTokensJSON: [String: Any]?,
+        devicePlatform: String? = nil
+    ) -> CampaignBundle {
         let catalog: DesignTokenCatalog
         do { catalog = try designTokensJSON.map(DesignTokenCatalog.fromJson) ?? .empty }
         catch {
@@ -13,7 +17,7 @@ struct CampaignBundle {
             catalog = .empty
         }
         let campaigns = rawCampaigns.enumerated().compactMap { index, json in
-            if let campaign = CampaignModel.fromJson(json, designTokens: catalog) { return campaign }
+            if let campaign = CampaignModel.fromJson(json, designTokens: catalog, devicePlatform: devicePlatform) { return campaign }
             DigiaLog.warning("[CampaignBundle] skipping malformed campaign at index \(index)")
             return nil
         }

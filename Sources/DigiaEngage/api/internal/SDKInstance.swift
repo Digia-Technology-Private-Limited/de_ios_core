@@ -228,7 +228,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func populateCampaignBundle(_ bundleJson: String) {
         var campaigns: [CampaignModel] = []
         do {
-            let bundle = try CampaignFetcher.parse(Data(bundleJson.utf8))
+            let bundle = try CampaignFetcher.parse(Data(bundleJson.utf8), devicePlatform: "ios")
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
         } catch {
@@ -307,10 +307,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
         guard let config, let pageKey = _currentScreen, !pageKey.isEmpty,
-              let window = UIApplication.shared.connectedScenes
-                .compactMap({ $0 as? UIWindowScene })
-                .flatMap(\.windows)
-                .first(where: \.isKeyWindow),
+              let window = ViewControllerUtil.keyWindow(),
               let source = UIKitCaptureFacts.sourceFrame(window: window)
         else {
             publishCaptureStatus("Capture unavailable — current screen or app window is unavailable")
@@ -382,6 +379,59 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 publishCaptureStatus("Capture failed — upload was rejected")
             }
         }
+    }
+
+    func exportCurrentPageCapture(
+        includeText: Bool,
+        includeImagesAndMedia: Bool,
+        includeOtherStructuralNodes: Bool
+    ) async -> String? {
+        guard isDebugBuild, isCaptureSupported, !captureInFlight,
+              let pageKey = _currentScreen, !pageKey.isEmpty,
+              let window = ViewControllerUtil.keyWindow(),
+              let source = UIKitCaptureFacts.sourceFrame(window: window)
+        else { return nil }
+
+        captureInFlight = true
+        let wasVisible = debugOverlayController.isVisible
+        debugOverlayController.setVisible(false)
+        defer {
+            captureInFlight = false
+            if wasVisible { debugOverlayController.setVisible(true) }
+        }
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+
+        let profile = CaptureProfile(
+            includeText: includeText,
+            includeImagesAndMedia: includeImagesAndMedia,
+            includeOtherStructuralNodes: includeOtherStructuralNodes
+        )
+        let walk = await CaptureEvidenceWalker.walk(
+            root: UIKitCaptureNode(view: window, rootView: window),
+            windowBoundsPx: source.windowBoundsPx,
+            profile: profile
+        )
+        guard case let .succeeded(nodes, traversal) = walk else { return nil }
+
+        let appInfo = Bundle.main.infoDictionary ?? [:]
+        let envelope = PageCaptureEnvelopeV1(
+            pageKey: pageKey,
+            binding: "reactNative",
+            devicePlatform: .ios,
+            source: source,
+            screenshotSizePx: CaptureSize(
+                width: Int((window.bounds.width * window.screen.scale).rounded()),
+                height: Int((window.bounds.height * window.screen.scale).rounded())
+            ),
+            appVersion: appInfo["CFBundleShortVersionString"] as? String ?? "",
+            appBuildNumber: appInfo["CFBundleVersion"] as? String ?? "",
+            sdkVersion: DigiaSdkVersion.value,
+            profile: profile,
+            traversal: traversal,
+            nodes: nodes
+        )
+        guard let data = CaptureEnvelopeSerializer.jsonBytes(envelope) else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     func clearCaptureStatus() {
@@ -721,7 +771,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
         guard let campaign = CampaignModel.fromJson(
             campaignJson,
-            designTokens: currentDesignTokens
+            designTokens: currentDesignTokens,
+            devicePlatform: "ios"
         ) else {
             reporter.postFailed(
                 invocation.testInvocationId, code: .templateError,
@@ -732,7 +783,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
         let supportsLiveTest: Bool
         switch campaign.config {
-        case .guide(let config): supportsLiveTest = config.isAnchorless
+        case .guide: supportsLiveTest = true
         case .nudge, .survey, .inline: supportsLiveTest = true
         case .banner, .story: supportsLiveTest = false
         }
@@ -1308,8 +1359,22 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
     }
 
-    func reportGuideRenderFailure(_ failure: AnchorlessFailure?) {
-        guard let state = guideOrchestrator.state else { return }
+    func reportGuideRenderFailure(
+        _ failure: AnchorlessFailure?,
+        guideToken: Int64? = nil,
+        stepIndex: Int? = nil
+    ) {
+        guard let state = guideOrchestrator.state,
+              (guideToken == nil || guideToken == state.token),
+              (stepIndex == nil || stepIndex == state.stepIndex)
+        else { return }
+        if isDebugBuild {
+            DigiaLog.warning(
+                "[Anchorless] render failed: \(failure?.rawValue ?? "imageUnavailable")"
+                    + " step=\(state.stepIndex + 1)",
+                tag: "Digia"
+            )
+        }
         let payload = state.payload
         if dwellTracker.elapsedMs(payload.cepCampaignId) == nil {
             guideOrchestrator.dismiss()

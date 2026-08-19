@@ -48,27 +48,32 @@ struct CampaignModel: Equatable {
         return nil
     }
 
-    static func fromJson(_ json: [String: Any], designTokens: DesignTokenCatalog = .empty) -> CampaignModel? {
-        guard let id = json.nonBlankString("id") ?? json.nonBlankString("_id") else { return nil }
-        guard let campaignKey = json.nonBlankString("campaignKey") else { return nil }
-        guard let campaignType = json.nonBlankString("campaignType") else { return nil }
-        let targetScreenNames = json.object("targetScreenNames")?.stringArray("names") ?? []
+    static func fromJson(
+        _ json: [String: Any],
+        designTokens: DesignTokenCatalog = .empty,
+        devicePlatform: String? = nil
+    ) -> CampaignModel? {
+        guard let selectedJson = selectForDevice(json, devicePlatform: devicePlatform) else { return nil }
+        guard let id = selectedJson.nonBlankString("id") ?? selectedJson.nonBlankString("_id") else { return nil }
+        guard let campaignKey = selectedJson.nonBlankString("campaignKey") else { return nil }
+        guard let campaignType = selectedJson.nonBlankString("campaignType") else { return nil }
+        let targetScreenNames = selectedJson.object("targetScreenNames")?.stringArray("names") ?? []
 
         let config: CampaignConfigModel
         switch campaignType {
         case "guide":
             guard let guideConfig = parseGuideConfig(
-                json,
+                selectedJson,
                 fallbackId: id,
                 designTokens: designTokens
             ) else { return nil }
             config = .guide(guideConfig)
         case "nudge":
-            guard let templateConfig = json.object("templateConfig"),
+            guard let templateConfig = selectedJson.object("templateConfig"),
                   let nudgeConfig = NudgeConfig.fromJson(templateConfig, designTokens: designTokens) else { return nil }
             config = .nudge(nudgeConfig)
         case "inline":
-            guard let templateConfig = json.object("templateConfig") else { return nil }
+            guard let templateConfig = selectedJson.object("templateConfig") else { return nil }
             switch templateConfig.string("templateType", default: "carousel") {
             case "banner":
                 guard let bannerConfig = InlineBannerConfig.fromJson(templateConfig) else { return nil }
@@ -81,7 +86,7 @@ struct CampaignModel: Equatable {
                 config = .inline(carouselConfig)
             }
         case "survey":
-            guard let surveyConfig = parseSurveyConfig(json, fallbackId: id) else { return nil }
+            guard let surveyConfig = parseSurveyConfig(selectedJson, fallbackId: id) else { return nil }
             config = .survey(surveyConfig)
         default:
             // Any unknown type is skipped.
@@ -94,8 +99,54 @@ struct CampaignModel: Equatable {
             campaignType: campaignType,
             config: config,
             targetScreenNames: targetScreenNames,
-            frequency: FrequencyPolicy.fromJson(json.object("frequency"))
+            frequency: FrequencyPolicy.fromJson(selectedJson.object("frequency"))
         )
+    }
+
+    private static func selectForDevice(
+        _ json: [String: Any],
+        devicePlatform: String?
+    ) -> [String: Any]? {
+        if json.keys.contains("deliveryPlatforms") {
+            guard let devicePlatform,
+                  let platforms = json["deliveryPlatforms"] as? [Any],
+                  platforms.contains(where: { $0 as? String == devicePlatform })
+            else { return nil }
+        }
+
+        guard let template = json["templateConfig"] as? [String: Any],
+              let steps = template["steps"] as? [Any],
+              let data = try? JSONSerialization.data(withJSONObject: json),
+              let copy = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var copiedSteps = copy["templateConfig"] as? [String: Any],
+              var copiedStepsArray = copiedSteps["steps"] as? [Any]
+        else { return json }
+
+        for (index, step) in steps.enumerated() {
+            guard let step = step as? [String: Any],
+                  let target = step["target"] as? [String: Any],
+                  target["type"] as? String == "anchorless"
+            else { continue }
+            guard target.int("version", default: -1) == 1 else { return nil }
+            guard let variants = target["variants"] else { continue }
+            guard let devicePlatform,
+                  let variantMap = variants as? [String: Any],
+                  let variant = variantMap[devicePlatform] as? [String: Any],
+                  variant["devicePlatform"] as? String == devicePlatform
+            else { return nil }
+
+            var selected = variant
+            selected["type"] = "anchorless"
+            selected["version"] = target["version"]
+            guard var copiedStep = copiedStepsArray[index] as? [String: Any] else { return nil }
+            copiedStep["target"] = selected
+            copiedStepsArray[index] = copiedStep
+        }
+
+        copiedSteps["steps"] = copiedStepsArray
+        var selected = copy
+        selected["templateConfig"] = copiedSteps
+        return selected
     }
 
     // ── survey parsing ────────────────────────────────────────────────────────
@@ -185,7 +236,9 @@ struct CampaignModel: Equatable {
             displayStyle: templateJson.string("templateType", default: "tooltip"),
             variableSchemas: variableSchemas,
             designTokens: designTokens,
-            designWidth: rawDesignWidth > 0 ? rawDesignWidth : defaultCampaignCanvasDesignWidth,
+            designWidth: rawDesignWidth.isFinite && rawDesignWidth > 0
+                ? rawDesignWidth
+                : defaultCampaignCanvasDesignWidth,
             widgetJsonForStep: { stepJson in
                 var widget = stepJson
                 widget["outsideTapBehavior"] = templateJson["outsideTapBehavior"]

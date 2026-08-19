@@ -45,16 +45,41 @@ struct AnchorlessTarget: Equatable {
     @MainActor
     func resolve(currentPageKey: String?, window: UIWindow) -> Result<CGRect, AnchorlessFailure> {
         guard currentPageKey == pageKey else { return .failure(.pageKeyMismatch) }
-        let bounds = window.bounds
-        guard bounds.width > 0,
+        // Geometry is expressed in the app window's local coordinate space. UIKit
+        // normally reports a zero-origin bounds rect, but preserving a custom
+        // bounds origin would diverge from Flutter's origin-zero window frame and
+        // shift every anchorless target in the overlay.
+        let bounds = CGRect(origin: .zero, size: window.bounds.size)
+        guard bounds.width.isFinite,
+              bounds.height.isFinite,
+              bounds.width > 0,
               bounds.width < bounds.height,
               min(bounds.width, bounds.height) < 600,
               window.effectiveUserInterfaceLayoutDirection == .leftToRight
         else { return .failure(.unsupportedLayout) }
 
+        let safeInsets = window.safeAreaInsets
+        guard safeInsets.top.isFinite,
+              safeInsets.left.isFinite,
+              safeInsets.bottom.isFinite,
+              safeInsets.right.isFinite,
+              safeInsets.top >= 0,
+              safeInsets.left >= 0,
+              safeInsets.bottom >= 0,
+              safeInsets.right >= 0
+        else { return .failure(.invalidGeometry) }
+        let leftInset = min(safeInsets.left, bounds.width)
+        let topInset = min(safeInsets.top, bounds.height)
+        let rightInset = min(safeInsets.right, bounds.width - leftInset)
+        let bottomInset = min(safeInsets.bottom, bounds.height - topInset)
         let frames = AnchorlessFrames(
             window: bounds,
-            appContent: bounds.inset(by: window.safeAreaInsets),
+            appContent: CGRect(
+                x: leftInset,
+                y: topInset,
+                width: max(0, bounds.width - leftInset - rightInset),
+                height: max(0, bounds.height - topInset - bottomInset)
+            ),
             referenceContainer: nil
         )
         let referenceRect = referenceContainer?.resolve(in: frames, roundEdges: false)
@@ -135,7 +160,9 @@ private struct AnchorlessPlacement: Equatable {
             width: horizontalSpan.upperBound - horizontalSpan.lowerBound,
             height: verticalSpan.upperBound - verticalSpan.lowerBound
         )
-        guard horizontalFrame.minX <= rect.minX,
+        guard rect.width > 0,
+              rect.height > 0,
+              horizontalFrame.minX <= rect.minX,
               rect.maxX <= horizontalFrame.maxX,
               verticalFrame.minY <= rect.minY,
               rect.maxY <= verticalFrame.maxY
@@ -147,6 +174,13 @@ private struct AnchorlessPlacement: Equatable {
             let right = rect.maxX.rounded()
             let bottom = rect.maxY.rounded()
             rect = CGRect(x: left, y: top, width: right - left, height: bottom - top)
+            guard rect.width > 0,
+                  rect.height > 0,
+                  horizontalFrame.minX <= rect.minX,
+                  rect.maxX <= horizontalFrame.maxX,
+                  verticalFrame.minY <= rect.minY,
+                  rect.maxY <= verticalFrame.maxY
+            else { return nil }
         }
         return rect.width > 0 && rect.height > 0 ? rect : nil
     }
