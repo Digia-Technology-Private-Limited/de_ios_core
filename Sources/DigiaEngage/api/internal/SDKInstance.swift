@@ -243,7 +243,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 config: config,
                 deviceId: analyticsService.identity.anonymousId,
                 isDebugBuild: isDebugBuild,
-                componentRegistry: componentRegistry,
                 onCampaignTest: { [weak self] invocation in self?.handleLiveTestCampaign(invocation) }
             )
         }

@@ -7,43 +7,57 @@ struct DigiaRecordedSessionScreen: View {
 
     var body: some View {
         List {
-            SettingsToggleRow(
-                title: "Page & component capture",
-                isOn: Binding(
-                    get: { instance.captureModeEnabled },
-                    set: { instance.setCaptureModeEnabled($0) }
-                )
-            )
-            Section {
-                Text("Interactive elements and their required structure are always included.")
-                    .foregroundColor(.secondary)
+            if instance.isCaptureSupported {
                 SettingsToggleRow(
-                    title: "Include text nodes",
+                    title: "Page & component capture",
                     isOn: Binding(
-                        get: { instance.captureTextEnabled },
-                        set: { instance.setCaptureProfile(includeText: $0) }
+                        get: { instance.captureModeEnabled },
+                        set: { instance.setCaptureModeEnabled($0) }
                     )
                 )
+                Section {
+                    Text("Interactive elements and their required structure are always included.")
+                        .foregroundColor(.secondary)
+                    SettingsToggleRow(
+                        title: "Include text nodes",
+                        isOn: Binding(
+                            get: { instance.captureTextEnabled },
+                            set: { instance.setCaptureProfile(includeText: $0) }
+                        )
+                    )
+                    SettingsToggleRow(
+                        title: "Include images and media",
+                        isOn: Binding(
+                            get: { instance.captureMediaEnabled },
+                            set: { instance.setCaptureProfile(includeMedia: $0) }
+                        )
+                    )
+                    SettingsToggleRow(
+                        title: "Include other structural nodes",
+                        isOn: Binding(
+                            get: { instance.captureStructureEnabled },
+                            set: { instance.setCaptureProfile(includeStructure: $0) }
+                        )
+                    )
+                } header: {
+                    Text("Capture profile")
+                }
+            } else {
                 SettingsToggleRow(
-                    title: "Include images and media",
+                    title: "Sync",
                     isOn: Binding(
-                        get: { instance.captureMediaEnabled },
-                        set: { instance.setCaptureProfile(includeMedia: $0) }
+                        get: { registry.isEnabled },
+                        set: { registry.setEnabled($0) }
                     )
                 )
-                SettingsToggleRow(
-                    title: "Include other structural nodes",
-                    isOn: Binding(
-                        get: { instance.captureStructureEnabled },
-                        set: { instance.setCaptureProfile(includeStructure: $0) }
-                    )
-                )
-            } header: {
-                Text("Capture profile")
             }
-            Section("Detected this session") {
+            Section {
                 if registry.recordedThisSession.isEmpty {
-                    Text("No pages, anchors, or slots detected yet.")
+                    Text(
+                        instance.isCaptureSupported
+                            ? "No pages, anchors, or slots detected yet."
+                            : "Nothing synced yet this session."
+                    )
                         .foregroundColor(.secondary)
                 } else {
                     ForEach(registry.recordedThisSession) { entry in
@@ -60,19 +74,31 @@ struct DigiaRecordedSessionScreen: View {
                         }
                     }
                 }
+            } header: {
+                Text(
+                    instance.isCaptureSupported
+                        ? "Detected this session"
+                        : registry.recordedThisSession.isEmpty
+                            ? "Synced Keys"
+                            : "Synced Keys (\(registry.recordedThisSession.count))"
+                )
             }
-            Section("Uploaded this session") {
-                if instance.capturedPages.isEmpty {
-                    Text("No page captures uploaded yet.")
-                        .foregroundColor(.secondary)
-                } else {
-                    ForEach(instance.capturedPages) { page in
-                        Label(page.pageKey, systemImage: "checkmark.circle")
+            if instance.isCaptureSupported {
+                Section("Uploaded this session") {
+                    if instance.capturedPages.isEmpty {
+                        Text("No page captures uploaded yet.")
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(instance.capturedPages) { page in
+                            Label(page.pageKey, systemImage: "checkmark.circle")
+                        }
                     }
                 }
             }
         }
-        .navigationTitle("Page & component capture")
+        .navigationTitle(
+            instance.isCaptureSupported ? "Page & component capture" : "Synced This Session"
+        )
         .navigationBarTitleDisplayMode(.inline)
     }
 }
