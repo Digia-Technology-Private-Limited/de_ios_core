@@ -537,18 +537,33 @@ private struct CanvasProgressRenderer: View {
 private struct CanvasLottieRenderer: View {
     let box: CampaignCanvasBox; let source: CampaignCanvasMediaSource; let autoplay: Bool; let loop: Bool; let fit: String; let isDark: Bool
     @Environment(\.digiaVariables) private var variables
+    private var boxWithoutShadow: CampaignCanvasBox {
+        var value = box
+        value.shadow = nil
+        return value
+    }
     var body: some View {
-        CampaignCanvasBoxView(box: box, isDark: isDark) {
-            let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
-            let resolved = interpolate(raw, context: variables)
-            if resolved.isEmpty { CanvasPlaceholder(label: "Lottie") }
-            else if let url = URL(string: resolved) {
-                CanvasRemoteLottie(url: url, placeholder: source.placeholder, autoplay: autoplay, loop: loop, fit: fit)
-                    .id(resolved)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-            } else {
-                CanvasPlaceholder(label: "Lottie")
+        ZStack {
+            if let shadow = box.shadow {
+                CampaignCanvasShadowView(
+                    shadow: shadow,
+                    cornerRadius: box.cornerRadius,
+                    isDark: isDark,
+                    outsideOnly: true
+                )
+            }
+            CampaignCanvasBoxView(box: boxWithoutShadow, isDark: isDark) {
+                let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
+                let resolved = interpolate(raw, context: variables)
+                if resolved.isEmpty { CanvasPlaceholder(label: "Lottie") }
+                else if let url = URL(string: resolved) {
+                    CanvasRemoteLottie(url: url, placeholder: source.placeholder, autoplay: autoplay, loop: loop, fit: fit)
+                        .id(resolved)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                } else {
+                    CanvasPlaceholder(label: "Lottie")
+                }
             }
         }
     }
