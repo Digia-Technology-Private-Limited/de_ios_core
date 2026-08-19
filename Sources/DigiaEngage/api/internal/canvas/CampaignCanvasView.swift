@@ -52,37 +52,6 @@ struct CampaignCanvasView: View {
     }
 }
 
-struct GuideCampaignCanvasView: View {
-    let canvas: CampaignCanvas
-    let designWidth: CGFloat
-    let viewportWidth: CGFloat
-    let availableSize: CGSize
-    let cornerRadius: CGFloat
-    let onAction: (CampaignCanvasActionRequest) -> Void
-    @ObservedObject private var theme = CampaignCanvasTheme.shared
-    @Environment(\.colorScheme) private var colorScheme
-
-    private var scale: CGFloat {
-        let designScale = viewportWidth / max(designWidth, 1)
-        let widthScale = availableSize.width / max(canvas.width * designScale, 1)
-        let heightScale = availableSize.height / max(canvas.height * designScale, 1)
-        return designScale * min(1, widthScale, heightScale)
-    }
-
-    var body: some View {
-        CampaignCanvasStage(
-            canvas: canvas,
-            authoredCornerRadius: cornerRadius / max(scale, 0.001),
-            isDark: theme.isDark(colorScheme),
-            showBackground: true,
-            onAction: onAction
-        )
-        .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
-        .scaleEffect(scale, anchor: .topLeading)
-        .frame(width: canvas.width * scale, height: canvas.height * scale, alignment: .topLeading)
-    }
-}
-
 /// A guide Canvas body and pointer rendered as one clipped surface. Flutter's
 /// guide renderer paints the background once across the rounded body + pointer
 /// union, so gradients/images do not become a separately painted arrow.
@@ -115,19 +84,24 @@ struct GuideCanvasUnionSurface: View {
         CGSize(width: canvas.width * scale, height: canvas.height * scale)
     }
 
+    private var scaledPointerSize: CGFloat { max(0, pointerSize * scale) }
+    private var scaledCornerRadius: CGFloat { max(0, cornerRadius * scale) }
+    private var scaledBorderWidth: CGFloat { max(0, borderWidth * scale) }
+    private var scaledShadowRadius: CGFloat { max(0, shadowRadius * scale) }
+
     private var outerSize: CGSize {
         guard pointerDirection != nil else { return bodySize }
         let horizontal = pointerDirection == .left || pointerDirection == .right
         return CGSize(
-            width: bodySize.width + (horizontal ? pointerSize : 0),
-            height: bodySize.height + (horizontal ? 0 : pointerSize)
+            width: bodySize.width + (horizontal ? scaledPointerSize : 0),
+            height: bodySize.height + (horizontal ? 0 : scaledPointerSize)
         )
     }
 
     private var bodyOffset: CGSize {
         switch pointerDirection {
-        case .up: return CGSize(width: 0, height: pointerSize)
-        case .left: return CGSize(width: pointerSize, height: 0)
+        case .up: return CGSize(width: 0, height: scaledPointerSize)
+        case .left: return CGSize(width: scaledPointerSize, height: 0)
         default: return .zero
         }
     }
@@ -137,9 +111,9 @@ struct GuideCanvasUnionSurface: View {
         let shape = GuideCanvasUnionShape(
             bodySize: bodySize,
             pointerDirection: pointerDirection,
-            pointerSize: pointerSize,
+            pointerSize: scaledPointerSize,
             pointerCenter: pointerCenter,
-            cornerRadius: cornerRadius
+            cornerRadius: scaledCornerRadius
         )
         ZStack(alignment: .topLeading) {
             CampaignCanvasPaintView(paint: canvas.background, isDark: isDark)
@@ -157,8 +131,8 @@ struct GuideCanvasUnionSurface: View {
         }
         .frame(width: outerSize.width, height: outerSize.height, alignment: .topLeading)
         .clipShape(shape)
-        .overlay(shape.stroke(borderColor, lineWidth: borderWidth))
-        .shadow(radius: shadowRadius)
+        .overlay(shape.stroke(borderColor, lineWidth: scaledBorderWidth))
+        .shadow(radius: scaledShadowRadius)
     }
 }
 

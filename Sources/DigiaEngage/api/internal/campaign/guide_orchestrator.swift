@@ -33,13 +33,16 @@ final class GuideOrchestrator: ObservableObject {
     @Published private(set) var state: ActiveGuideState?
     private var tokenCounter: Int64 = 0
 
-    func start(_ campaign: CampaignModel, payload: CEPTriggerPayload) {
+    @discardableResult
+    func start(_ campaign: CampaignModel, payload: CEPTriggerPayload) -> Bool {
         guard campaign.campaignType == "guide",
               let guideConfig = campaign.guideConfig,
-              !guideConfig.steps.isEmpty
-        else { return }
+              !guideConfig.steps.isEmpty,
+              state == nil
+        else { return false }
         tokenCounter &+= 1
         state = ActiveGuideState(token: tokenCounter, campaign: campaign, stepIndex: 0, payload: payload)
+        return true
     }
 
     func advance() {

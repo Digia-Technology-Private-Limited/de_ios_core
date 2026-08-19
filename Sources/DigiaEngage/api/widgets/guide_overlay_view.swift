@@ -54,9 +54,7 @@ struct GuideOverlayView: View {
                         nextImageURL: state.steps.indices.contains(state.stepIndex + 1)
                             ? state.steps[state.stepIndex + 1].target.anchorlessTarget?.imageURL
                             : nil,
-                        onAdvance: imageURL == nil
-                            ? { orchestrator.advance() }
-                            : { SDKInstance.shared.advanceGuide() },
+                        onAdvance: { SDKInstance.shared.advanceGuide() },
                         onDismiss: { SDKInstance.shared.dismissGuide() }
                     )
                     .environment(\.digiaVariables, state.variableContext)
@@ -494,7 +492,7 @@ private struct GuideStepOverlay: View {
         SDKInstance.shared.reportGuideStepClicked(
             actionType: reportedAction?.analyticsType,
             actionUrl: reportedAction?.analyticsURL,
-            ctaLabel: request.label,
+            ctaLabel: request.label ?? request.elementId,
             action: reportedAction,
             elementId: request.elementId
         )

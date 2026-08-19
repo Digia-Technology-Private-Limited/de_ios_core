@@ -788,12 +788,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                 return false
             }
-            if guideConfig.isAnchorless {
-                guideCompletionFired = false
-            } else {
-                dwellTracker.markViewed(payload.cepCampaignId)
+            guard guideOrchestrator.start(campaign, payload: payload) else {
+                lastCampaignDropReason = "another guide is already on screen"
+                context.onDropped(.renderError, message: "another guide is already on screen")
+                return false
             }
-            guideOrchestrator.start(campaign, payload: payload)
+            guideCompletionFired = false
             return true
         case .nudge(let nudgeConfig):
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
@@ -1512,19 +1512,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func dismissGuide() {
         guard let state = guideOrchestrator.state else { return }
         let payload = state.payload
-        guard state.campaign.guideConfig?.isAnchorless == true else {
-            guideOrchestrator.dismiss()
-            events.toBoth(
-                .dismissed,
-                GuideEvent.Dismissed(
-                    abandonedAtItem: state.stepIndex + 1,
-                    itemTotal: state.campaign.guideConfig?.steps.count,
-                    dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId)
-                ),
-                payload: payload
-            )
-            return
-        }
         let total = state.steps.count
         let elapsed = dwellTracker.consumeDwellMs(payload.cepCampaignId)
         if guideCompletionFired, total > 1 {
@@ -1606,7 +1593,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         else { return }
         if isDebugBuild {
             DigiaLog.warning(
-                "[Anchorless] render failed: \(failure?.rawValue ?? "imageUnavailable")"
+                "[Anchorless] render failed: \(failure?.rawValue ?? "image load failed")"
                     + " step=\(state.stepIndex + 1)",
                 tag: "Digia"
             )
@@ -1648,8 +1635,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             ),
             payload: state.payload
         )
-        if state.campaign.guideConfig?.isAnchorless == true,
-           !state.hasNext,
+        if !state.hasNext,
            action != .previous {
             reportGuideCompletedIfNeeded(state)
         }

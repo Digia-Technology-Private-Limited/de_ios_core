@@ -155,6 +155,7 @@ private struct BadgeContent: View {
                 Circle()
                     .fill(dotColor)
                     .frame(width: 8, height: 8)
+                    .fixedSize()
                     .opacity(isPulsing ? (pulse ? 1 : 0.35) : 1)
             }
         }
