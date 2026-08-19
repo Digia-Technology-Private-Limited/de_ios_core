@@ -15,6 +15,7 @@ struct CampaignCanvasView: View {
     var runtimeViewportWidth: CGFloat? = nil
     let availableSize: CGSize
     let onAction: (CampaignCanvasActionRequest) -> Void
+    var showBackground = true
     @ObservedObject private var theme = CampaignCanvasTheme.shared
     @Environment(\.colorScheme) private var colorScheme
 
@@ -33,6 +34,7 @@ struct CampaignCanvasView: View {
             canvas: canvas,
             authoredCornerRadius: surface.cornerRadius / max(designScale, 0.001),
             isDark: theme.isDark(colorScheme),
+            showBackground: showBackground,
             onAction: onAction
         )
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
@@ -45,11 +47,14 @@ private struct CampaignCanvasStage: View {
     let canvas: CampaignCanvas
     let authoredCornerRadius: CGFloat
     let isDark: Bool
+    let showBackground: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            CampaignCanvasPaintView(paint: canvas.background, isDark: isDark)
+            if showBackground {
+                CampaignCanvasPaintView(paint: canvas.background, isDark: isDark)
+            }
             ForEach(canvas.children) { child in
                 CanvasChildView(child: child, isDark: isDark, onAction: onAction)
                     .frame(width: child.rect.width, height: child.rect.height, alignment: .topLeading)
@@ -696,6 +701,16 @@ private struct CampaignCanvasShadowView: View {
             .padding(-shadow.spread)
             .blur(radius: shadow.blur / 2)
             .offset(x: shadow.offsetX, y: shadow.offsetY)
+    }
+}
+
+struct CampaignCanvasBackgroundView: View {
+    let paint: CampaignCanvasPaint
+    @ObservedObject private var theme = CampaignCanvasTheme.shared
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        CampaignCanvasPaintView(paint: paint, isDark: theme.isDark(colorScheme))
     }
 }
 
