@@ -118,7 +118,7 @@ struct CampaignModel: Equatable {
         _ json: [String: Any],
         devicePlatform: String?
     ) -> [String: Any]? {
-        if let platforms = json["deliveryPlatforms"] as? [Any] {
+        if let platforms = json["deliveryPlatforms"] as? [Any], !platforms.isEmpty {
             guard let devicePlatform,
                   platforms.contains(where: { $0 as? String == devicePlatform })
             else { return nil }
