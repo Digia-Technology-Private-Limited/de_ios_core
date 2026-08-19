@@ -68,7 +68,7 @@ private struct DraggableBadge: View {
                     }
                 )
                 .offset(x: current.width, y: current.height)
-                .gesture(
+                .highPriorityGesture(
                     DragGesture()
                         .onChanged { value in
                             let start = dragStartOffset ?? current
