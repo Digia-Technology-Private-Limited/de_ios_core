@@ -1,5 +1,5 @@
-import Foundation
 import Combine
+import Foundation
 import UIKit
 
 @MainActor
@@ -102,7 +102,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             }
         )
         controller.onAction = { [weak self] actionType, url, payload in
-            self?.activePlugin?.notifyAction(actionType: actionType, url: url, payload: payload) ?? false
+            self?.activePlugin?.notifyAction(actionType: actionType, url: url, payload: payload)
+                ?? false
         }
         hostActionExecutor.setLegacyActionHandler { [weak self] actionType, url in
             guard let self, let payload = controller.activeNudge?.payload else { return false }
@@ -217,7 +218,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 deviceId: analyticsService.identity.anonymousId,
                 isDebugBuild: isDebugBuild,
                 componentRegistry: componentRegistry,
-                onCampaignTest: { [weak self] invocation in self?.handleLiveTestCampaign(invocation) }
+                onCampaignTest: { [weak self] invocation in self?.handleLiveTestCampaign(invocation)
+                }
             )
         }
 
@@ -250,7 +252,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 "[SDKInstance] populateCampaignBundle parsed raw=\(bundle.rawCampaigns.count) accepted=\(campaigns.count)"
             )
         } catch {
-            DigiaLog.warning("[SDKInstance] populateCampaignBundle failed: \(error.localizedDescription)")
+            DigiaLog.warning(
+                "[SDKInstance] populateCampaignBundle failed: \(error.localizedDescription)")
         }
         completeInitialization(campaigns)
     }
@@ -448,7 +451,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let events: EngageEventEmitter
 
         func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool {
-            guard let reason = frequencyManager?.blockReason(campaignKey: campaignKey, policy: policy) else {
+            guard
+                let reason = frequencyManager?.blockReason(campaignKey: campaignKey, policy: policy)
+            else {
                 return false
             }
             DigiaLog.warning(
@@ -588,7 +593,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 DigiaNudgePresentation(
                     config: nudgeConfig,
                     payload: payload,
-                    variables: variableContext.values.isEmpty && variableContext.types.isEmpty ? nil : variableContext
+                    variables: variableContext.values.isEmpty && variableContext.types.isEmpty
+                        ? nil : variableContext
                 ))
             return true
         case .survey(let cfg):
@@ -615,13 +621,19 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             // nudge/survey that is supposed to own the screen exclusively.
             if isModalCampaignActive() {
                 lastCampaignDropReason = "a nudge, survey, or expanded floater is already on screen"
-                logVerbose("floater campaign dropped: a nudge, survey, or expanded floater is already modal: \(key)")
-                context.onDropped(.renderError, message: "a nudge, survey, or expanded floater is already on screen")
+                logVerbose(
+                    "floater campaign dropped: a nudge, survey, or expanded floater is already modal: \(key)"
+                )
+                context.onDropped(
+                    .renderError,
+                    message: "a nudge, survey, or expanded floater is already on screen")
                 return false
             }
-            let started = floaterOrchestrator.start(campaign, payload: payload, screenName: _currentScreen)
+            let started = floaterOrchestrator.start(
+                campaign, payload: payload, screenName: _currentScreen)
             if !started {
-                lastCampaignDropReason = floaterOrchestrator.lastStartFailureReason ?? "floater start failed"
+                lastCampaignDropReason =
+                    floaterOrchestrator.lastStartFailureReason ?? "floater start failed"
                 DigiaLog.warning(
                     "[SDKInstance] Floater campaign skipped: key=\(key) currentScreen=\(_currentScreen ?? "<unset>") reason=\(floaterOrchestrator.lastStartFailureReason ?? "unknown")"
                 )
@@ -660,12 +672,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
 
-        guard campaign.campaignType == "nudge" || campaign.campaignType == "survey"
-            || campaign.campaignType == "inline"
+        guard
+            campaign.campaignType == "nudge" || campaign.campaignType == "survey"
+                || campaign.campaignType == "inline" || campaign.campaignType == "floater"
+                || campaign.campaignType == "guide"
         else {
             reporter.postFailed(
                 invocation.testInvocationId, code: .templateError,
-                message: "campaign type '\(campaign.campaignType)' is not supported for live testing yet"
+                message:
+                    "campaign type '\(campaign.campaignType)' is not supported for live testing yet"
             )
             return
         }
@@ -859,7 +874,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         // Permanent stop on "Digia Experience Completed" when stopOn is set.
         if !isLiveTest {
             let campaignKey = state.payload.campaignKey
-            frequencyManager?.recordCompleted(campaignKey, campaignStore.find(campaignKey)?.frequency)
+            frequencyManager?.recordCompleted(
+                campaignKey, campaignStore.find(campaignKey)?.frequency)
         }
 
         // Analytics "Completed" fires once per survey showing, regardless of
@@ -876,7 +892,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
 
         if answers.isEmpty || isLiveTest {
-            logVerbose("reportSurveyCompleted: skip submission — answers is empty or this is a live test")
+            logVerbose(
+                "reportSurveyCompleted: skip submission — answers is empty or this is a live test")
             return
         }
         guard let config = self.config else {
@@ -886,7 +903,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
         guard let campaignId = campaignStore.find(state.payload.campaignKey)?.id else {
             logVerbose(
-                "reportSurveyCompleted: skip submission — no campaign for key '\(state.payload.campaignKey)'")
+                "reportSurveyCompleted: skip submission — no campaign for key '\(state.payload.campaignKey)'"
+            )
             return
         }
         logVerbose(
@@ -1030,7 +1048,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             let campaignKey = state.payload.campaignKey
             frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
         }
-        events.toBoth(.impressed, FloaterEvent.Viewed(screenName: _currentScreen), payload: state.payload)
+        events.toBoth(
+            .impressed, FloaterEvent.Viewed(screenName: _currentScreen), payload: state.payload)
     }
 
     /// SDK chrome click: expand, collapse, mute/unmute, play/pause. **Never** the
@@ -1061,7 +1080,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// is a genuine conversion with no chrome/content ambiguity, so `FloaterEvent
     /// .StepClicked`'s own default (`"primary"`) applies; mirrors Android's identical
     /// `DigiaInstance.reportFloaterStepClicked` signature.
-    func reportFloaterStepClicked(elementId: String, ctaLabel: String, actionType: String?, actionUrl: String?) {
+    func reportFloaterStepClicked(
+        elementId: String, ctaLabel: String, actionType: String?, actionUrl: String?
+    ) {
         guard let state = floaterOrchestrator.state else { return }
         events.toDigia(
             FloaterEvent.StepClicked(
@@ -1099,7 +1120,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private func emitFloaterCompleted(_ state: ActiveFloaterState) {
         if !isLiveTestCepId(state.payload.cepCampaignId) {
             let campaignKey = state.payload.campaignKey
-            frequencyManager?.recordCompleted(campaignKey, campaignStore.find(campaignKey)?.frequency)
+            frequencyManager?.recordCompleted(
+                campaignKey, campaignStore.find(campaignKey)?.frequency)
         }
         events.toDigia(FloaterEvent.Completed(), payload: state.payload)
     }
@@ -1121,7 +1143,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         case .dismiss:
             floaterOrchestrator.dismiss(.userClose)
         case .collapse:
-            reportFloaterClicked(elementId: "pip_close", actionType: "collapse", ctaRole: "secondary")
+            reportFloaterClicked(
+                elementId: "pip_close", actionType: "collapse", ctaRole: "secondary")
             floaterOrchestrator.collapse()
         }
     }
@@ -1181,7 +1204,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     /// A carousel item (or its CTA) was tapped.
-    func reportCarouselStepClicked(payload: CEPTriggerPayload, itemIndex: Int, action: EngageAction?) {
+    func reportCarouselStepClicked(
+        payload: CEPTriggerPayload, itemIndex: Int, action: EngageAction?
+    ) {
         let actionType = action?.analyticsType
         let actionUrl = action?.analyticsURL
         // The first item tap also counts as an experience-level engagement click (once).
@@ -1219,7 +1244,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     /// A story frame became visible. `itemIndex` is 1-based; `itemTotal` = frames.
     func reportStoryStepViewed(_ payload: CEPTriggerPayload, itemIndex: Int, itemTotal: Int) {
-        events.toDigia(StoriesEvent.StepViewed(itemIndex: itemIndex, itemTotal: itemTotal), payload: payload)
+        events.toDigia(
+            StoriesEvent.StepViewed(itemIndex: itemIndex, itemTotal: itemTotal), payload: payload)
     }
 
     /// A CTA inside a story frame was tapped.
@@ -1247,7 +1273,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     /// Last story frame viewed. `itemTotal` = frames; `timeToCompleteMs` from open.
-    func reportStoryCompleted(_ payload: CEPTriggerPayload, itemTotal: Int, timeToCompleteMs: Int64?) {
+    func reportStoryCompleted(
+        _ payload: CEPTriggerPayload, itemTotal: Int, timeToCompleteMs: Int64?
+    ) {
         events.toDigia(
             StoriesEvent.Completed(itemTotal: itemTotal, timeToCompleteMs: timeToCompleteMs),
             payload: payload

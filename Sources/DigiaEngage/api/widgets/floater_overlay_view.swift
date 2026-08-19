@@ -246,16 +246,15 @@ private struct FloaterSessionView: View {
                         resolvedUrl: state.resolvedMediaUrl
                     )
                     .allowsHitTesting(false)
+                    .zIndex(0)
                     if expanded, config.expanded.scrimOpacity > 0 {
                         FloaterScrimView(opacity: config.expanded.scrimOpacity)
+                            .zIndex(1)
                     }
                     if expanded, expandedContentVisible {
                         FloaterExpandedContentView(state: state, safeAreaInsets: safe)
+                            .zIndex(2)
                     }
-                    FloaterChromeView(
-                        state: state, orchestrator: orchestrator, expanded: expanded,
-                        safeTop: safe.top
-                    )
                 }
                 .frame(width: width, height: height)
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
@@ -297,6 +296,16 @@ private struct FloaterSessionView: View {
                         ?? .black)
                         .opacity(expanded ? 1 : 0)
                 )
+                // Image/GIF/Lottie surfaces can be backed by library-owned render layers.
+                // Apply chrome as the final window overlay, with an explicit z-order, so the
+                // controls stay visually above every media kind in the collapsed state.
+                .overlay {
+                    FloaterChromeView(
+                        state: state, orchestrator: orchestrator, expanded: expanded,
+                        safeTop: safe.top
+                    )
+                    .zIndex(3)
+                }
                 .position(x: left + width / 2, y: top + height / 2)
                 .opacity(alpha)
             }

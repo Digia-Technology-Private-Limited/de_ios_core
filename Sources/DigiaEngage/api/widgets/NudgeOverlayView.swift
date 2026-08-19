@@ -72,6 +72,10 @@ struct NudgeOverlayView: View {
     }
 }
 
+private func nudgeScrimColor(_ surface: NudgeSurface) -> Color {
+    surface.barrierColor ?? Color.black.opacity(0.4)
+}
+
 /// Isolates the UIKit full-screen-cover transaction from the inline dialog
 /// layer. Disabling the cover animation here must not suppress or mutate dialog
 /// transitions elsewhere in `NudgeOverlayView`.
@@ -121,7 +125,7 @@ private struct NudgeSheetView: View {
             config: DigiaBottomSheetConfig(
                 cornerRadius: surface.cornerRadius,
                 background: canvas == nil ? (surface.backgroundColor ?? .white) : .clear,
-                scrimColor: surface.barrierColor ?? Color.black.opacity(0.4),
+                scrimColor: nudgeScrimColor(surface),
                 showHandle: surface.showHandle,
                 allowBackdropDismiss: surface.backdropDismissible,
                 allowDragDismiss: surface.draggable,
@@ -190,7 +194,7 @@ private struct NudgeDialogContainer: View {
 
     private var authoredSurface: NudgeSurface { presentation.config.surface }
     private var surface: NudgeSurface { authoredSurface }
-    private var scrimColor: Color { surface.barrierColor ?? Color.black.opacity(0.4) }
+    private var scrimColor: Color { nudgeScrimColor(surface) }
     private var backgroundColor: Color { surface.backgroundColor ?? .white }
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
 
