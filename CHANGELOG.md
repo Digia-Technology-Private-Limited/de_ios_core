@@ -2,6 +2,21 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.10.0] - 2026-08-19
+
+### New Features
+- Campaigns designed in the dashboard's canvas editor now render natively: a new design-token-based renderer draws canvas layouts — containers, decorations, shadows, borders, and rich text — with light/dark theming, for both dialog and bottom-sheet nudges.
+- Added Picture-in-Picture campaigns: a small draggable floating window that expands to full screen and plays media (video, image, or Lottie), with playback controls, mute, edge-snapping, and automatic pause/resume as the app backgrounds and foregrounds. Hosts can read the floating window's on-screen frame via `Digia.floaterActiveRect` to route taps on it correctly.
+- Added a theme mode setting — `DigiaConfig(themeMode:)` and `Digia.setThemeMode(_:)`, one of auto, light, or dark — that controls how design-token (canvas) content resolves its light and dark colors.
+
+### Improvements
+- The debug-only live campaign testing now lets you set a custom device name, shown when you connect a device for a live session.
+- The React Native bridging method `Digia.populateCampaigns(_:)` has been renamed to `Digia.populateCampaignBundle(_:)` and now takes the full campaign-bundle response (which includes canvas designs) instead of the earlier campaigns list.
+
+### Bug Fixes
+- A nudge or survey bottom sheet now honors its backdrop-tap-to-dismiss and drag-to-dismiss settings independently; previously, enabling either one enabled both.
+- Fixed text glyphs not covered by the configured font — for example an arrow appended to a button label — rendering at the wrong weight; a substituted glyph now matches the label's weight.
+
 ## [3.9.0] - 2026-08-03
 
 ### New Features

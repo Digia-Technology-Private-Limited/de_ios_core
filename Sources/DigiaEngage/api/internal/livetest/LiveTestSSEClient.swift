@@ -28,7 +28,7 @@ final class LiveTestSSEClient {
     init(
         config: @escaping () -> DigiaConfig,
         deviceId: @escaping () -> String,
-        deviceName: @escaping () -> String? = { nil },
+        deviceName: @escaping () -> String?,
         onEvent: @escaping (LiveTestSseEvent) -> Void,
         onConnectionStateChanged: @escaping (LiveTestConnectionState) -> Void,
         session: URLSession? = nil

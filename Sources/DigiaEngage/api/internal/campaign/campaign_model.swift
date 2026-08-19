@@ -11,6 +11,7 @@ enum CampaignConfigModel: Equatable {
     case banner(InlineBannerConfig)
     case story(InlineStoryConfig)
     case survey(SurveyConfigModel)
+    case floater(FloaterConfig)
 }
 
 struct CampaignModel: Equatable {
@@ -45,6 +46,11 @@ struct CampaignModel: Equatable {
 
     var surveyConfig: SurveyConfigModel? {
         if case let .survey(value) = config { return value }
+        return nil
+    }
+
+    var floaterConfig: FloaterConfig? {
+        if case let .floater(value) = config { return value }
         return nil
     }
 
@@ -88,6 +94,11 @@ struct CampaignModel: Equatable {
         case "survey":
             guard let surveyConfig = parseSurveyConfig(selectedJson, fallbackId: id) else { return nil }
             config = .survey(surveyConfig)
+        case "floater":
+            guard let templateConfig = selectedJson.object("templateConfig"),
+                  let floaterConfig = FloaterConfig.fromJson(templateConfig, designTokens: designTokens)
+            else { return nil }
+            config = .floater(floaterConfig)
         default:
             // Any unknown type is skipped.
             return nil

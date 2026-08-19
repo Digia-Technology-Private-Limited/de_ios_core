@@ -532,6 +532,130 @@ enum StoriesEvent {
     }
 }
 
+// ── Floater (PiP: a small draggable window that expands to full screen) ─────
+//
+// Reuses the same five event names every other campaign type uses — no new event
+// names, matching the shipped Flutter/Android parity source (`pip_orchestrator.dart`
+// / `FloaterOrchestrator.kt`). `trigger_type`/`trigger_event` are deliberately
+// absent from Viewed: nothing on the floater path populates them, and the backend
+// does not carry them as columns for exactly that reason (ai_docs/pip-campaign-design.md §5.2).
+
+enum FloaterEvent {
+    struct Viewed: EngageAnalyticsEvent {
+        var screenName: String?
+
+        var eventName: String { "Digia Experience Viewed" }
+        var properties: [String: Any] {
+            // display_style is unconditional, unlike screen_name: a floater has one
+            // style, so it is a constant, and the backend column is non-nullable.
+            var result = nonNull([("screen_name", screenName)])
+            result["display_style"] = "pip"
+            return result
+        }
+    }
+
+    /// Full screen opened. Fires on every expansion, not just the first — the step
+    /// is genuinely shown each time. No properties.
+    struct StepViewed: EngageAnalyticsEvent {
+        var eventName: String { "Digia Step Viewed" }
+    }
+
+    /// Full screen left back to the small window, without the showing ending. Not
+    /// fired when the showing ends *from* full screen — that path emits `Dismissed`
+    /// instead, so an exit is never counted twice.
+    struct StepDismissed: EngageAnalyticsEvent {
+        var eventName: String { "Digia Step Dismissed" }
+    }
+
+    /// SDK chrome: expand, collapse, mute/unmute, play/pause. **Never** the × — a
+    /// close always routes straight to `Dismissed` with no Clicked report, or
+    /// dismissal rate silently floors at 0% for any campaign closed instantly (a bug
+    /// already hit and fixed once in the Flutter build; see `ai_docs/pip-properties.md`).
+    /// `ctaRole` is required, not optional, unlike `NudgeEvent.Clicked` — `"primary"`
+    /// for the one chrome action that is a real click-through (opening full screen),
+    /// `"secondary"` for everything else — so the backend's click-through predicate
+    /// (which defaults a *missing* value to `"primary"`) never silently counts a
+    /// mute/pause/collapse tap as a conversion.
+    struct Clicked: EngageAnalyticsEvent {
+        let elementId: String
+        let actionType: String
+        let pipState: String
+        let ctaRole: String
+        var timeToActionMs: Int64?
+
+        var eventName: String { "Digia Experience Clicked" }
+        var properties: [String: Any] {
+            nonNull([
+                ("element_id", elementId),
+                ("action_type", actionType),
+                ("pip_state", pipState),
+                ("cta_role", ctaRole),
+                ("time_to_action_ms", timeToActionMs),
+            ])
+        }
+    }
+
+    /// The authored CTA inside the expanded content — the real conversion. `ctaRole`
+    /// is always `"primary"` here (every authored CTA is a genuine conversion; there
+    /// is no chrome/content ambiguity the way there is on `Clicked`), but still
+    /// passed explicitly rather than defaulted, so a future secondary in-content
+    /// action has somewhere to diverge without a breaking change.
+    struct StepClicked: EngageAnalyticsEvent {
+        let elementId: String
+        let ctaLabel: String
+        var actionType: String?
+        var actionUrl: String?
+        var ctaRole: String = "primary"
+        var timeToActionMs: Int64?
+
+        var eventName: String { "Digia Step Clicked" }
+        var properties: [String: Any] {
+            nonNull([
+                ("element_id", elementId),
+                ("cta_label", ctaLabel),
+                ("action_type", actionType),
+                ("action_url", actionUrl),
+                ("cta_role", ctaRole),
+                ("time_to_action_ms", timeToActionMs),
+            ])
+        }
+    }
+
+    /// The terminal event for **every** ending: close, screen exit, timeout, media
+    /// end. The wire key for `engagedMs` is `engaged_ms`, not `expanded_ms` — named
+    /// for the general concept ("time in the format's primary engaged state") rather
+    /// than the PiP-specific one, so a future campaign type can report its own
+    /// version into the same backend column.
+    struct Dismissed: EngageAnalyticsEvent {
+        let dismissReason: String
+        var dwellMs: Int64?
+        let moves: Int
+        let expands: Int
+        let engagedMs: Int64
+        let lastPosition: String
+
+        var eventName: String { "Digia Experience Dismissed" }
+        var properties: [String: Any] {
+            nonNull([
+                ("dismiss_reason", dismissReason),
+                ("dwell_ms", dwellMs),
+                ("engaged_ms", engagedMs),
+                ("moves", moves),
+                ("expands", expands),
+                ("last_position", lastPosition),
+            ])
+        }
+    }
+
+    /// Serving signal only — a campaign with `stopOn: experienceCompleted` retires
+    /// on this event. No properties by design: it fires only for the showings that
+    /// got that far, so any counter measured on it would describe that slice alone.
+    /// The interaction counters live on `Dismissed`, which fires for every showing.
+    struct Completed: EngageAnalyticsEvent {
+        var eventName: String { "Digia Experience Completed" }
+    }
+}
+
 // MARK: - Helpers
 
 /// Builds a wire map from named fields, dropping any whose value is nil.

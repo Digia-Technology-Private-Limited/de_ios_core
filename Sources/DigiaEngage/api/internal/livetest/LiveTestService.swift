@@ -4,46 +4,46 @@ import UIKit
 
 /// Debug-only coordinator that keeps this SDK instance visible to the Engage
 /// dashboard as a live-test target, and routes incoming `campaign_test` events
-/// back to `SDKInstance` for rendering.
+/// back to `SDKInstance` for rendering. Active whenever the "Sync" toggle
+/// (`ComponentRegistryService.isEnabled`) is on.
 @MainActor
 final class LiveTestService: ObservableObject {
-    private static let keyEnabled = "digia_live_testing_enabled"
-    private static let keyDeviceName = "digia_live_testing_device_name"
+    private static let deviceNameKey = "digia_live_testing_device_name"
 
     let ackReporter: LiveTestAckReporter
+    private let defaults: UserDefaults
 
-    @Published private(set) var isEnabled = false
     @Published private(set) var connectionState: LiveTestConnectionState = .disconnected
     @Published private(set) var deviceName: String?
-    @Published private(set) var deviceId: String?
 
-    private let defaults: UserDefaults
     private var client: LiveTestSSEClient?
+    private var toggleCancellable: AnyCancellable?
     private var backgroundObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
     private var isDebugBuildFlag = false
+    private var componentRegistry: ComponentRegistryService?
 
     init(
-        ackReporter: LiveTestAckReporter = LiveTestAckReporter(),
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        ackReporter: LiveTestAckReporter = LiveTestAckReporter()
     ) {
-        self.ackReporter = ackReporter
         self.defaults = defaults
+        self.ackReporter = ackReporter
+        self.deviceName = Self.normalizeDeviceName(defaults.string(forKey: Self.deviceNameKey))
     }
 
     func configure(
         config: DigiaConfig,
         deviceId: String,
         isDebugBuild: Bool,
+        componentRegistry: ComponentRegistryService,
         onCampaignTest: @escaping (LiveTestInvocation) -> Void
     ) {
         stop()
         isDebugBuildFlag = isDebugBuild
-        self.deviceId = deviceId
+        self.componentRegistry = componentRegistry
         guard isDebugBuild else { return }
 
-        isEnabled = defaults.bool(forKey: Self.keyEnabled)
-        deviceName = Self.normalizedName(defaults.string(forKey: Self.keyDeviceName))
         ackReporter.configure(config: config, deviceId: deviceId)
         let sseClient = LiveTestSSEClient(
             config: { config },
@@ -55,7 +55,10 @@ final class LiveTestService: ObservableObject {
             onConnectionStateChanged: { [weak self] state in self?.connectionState = state }
         )
         client = sseClient
-        if isEnabled { sseClient.start() }
+
+        toggleCancellable = componentRegistry.$isEnabled.sink { [weak sseClient] enabled in
+            if enabled { sseClient?.start() } else { sseClient?.stop() }
+        }
 
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
@@ -70,35 +73,31 @@ final class LiveTestService: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self, self.isDebugBuildFlag, self.isEnabled else { return }
+                guard let self, self.isDebugBuildFlag, self.componentRegistry?.isEnabled == true else { return }
                 self.client?.start()
             }
         }
     }
 
-    func setEnabled(_ enabled: Bool) {
-        guard isDebugBuildFlag || !enabled else { return }
-        isEnabled = enabled
-        defaults.set(enabled, forKey: Self.keyEnabled)
-        if enabled { client?.start() } else { client?.stop() }
-    }
-
     func setDeviceName(_ value: String) {
-        let name = Self.normalizedName(value)
-        guard name != deviceName else { return }
-        deviceName = name
-        if let name {
-            defaults.set(name, forKey: Self.keyDeviceName)
+        let updatedName = Self.normalizeDeviceName(value)
+        guard updatedName != deviceName else { return }
+
+        deviceName = updatedName
+        if let updatedName {
+            defaults.set(updatedName, forKey: Self.deviceNameKey)
         } else {
-            defaults.removeObject(forKey: Self.keyDeviceName)
+            defaults.removeObject(forKey: Self.deviceNameKey)
         }
-        if isEnabled {
-            client?.stop()
-            client?.start()
-        }
+
+        guard client?.isRunning == true else { return }
+        client?.stop()
+        client?.start()
     }
 
     func stop() {
+        toggleCancellable?.cancel()
+        toggleCancellable = nil
         client?.stop()
         if let obs = backgroundObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = foregroundObserver { NotificationCenter.default.removeObserver(obs) }
@@ -107,8 +106,8 @@ final class LiveTestService: ObservableObject {
         connectionState = .disconnected
     }
 
-    private static func normalizedName(_ value: String?) -> String? {
-        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty ? nil : String(trimmed.prefix(80))
+    private static func normalizeDeviceName(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
     }
 }

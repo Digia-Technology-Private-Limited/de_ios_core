@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 @MainActor
@@ -23,7 +24,6 @@ private func performCanvasAction(
         )
     }
 }
-import Combine
 
 @MainActor
 struct NudgeOverlayView: View {
@@ -110,6 +110,9 @@ private struct NudgeSheetView: View {
     private var surface: NudgeSurface {
         canvas == nil ? authoredSurface : authoredSurface.scaled(naturalScale)
     }
+    private var hostPaintsCanvasBackground: Bool {
+        canvas != nil && surface.bottomSafeAreaMode == .insetContent
+    }
 
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
 
@@ -120,10 +123,13 @@ private struct NudgeSheetView: View {
                 background: canvas == nil ? (surface.backgroundColor ?? .white) : .clear,
                 scrimColor: surface.barrierColor ?? Color.black.opacity(0.4),
                 showHandle: surface.showHandle,
-                allowInteractiveDismiss: surface.draggable || surface.backdropDismissible,
+                allowBackdropDismiss: surface.backdropDismissible,
+                allowDragDismiss: surface.draggable,
                 heightCapFraction: canvas == nil ? 0.85 : 1,
                 handleOverlaysContent: canvas != nil,
-                bottomPadding: canvas == nil ? 8 : 0
+                bottomPadding: canvas == nil ? 8 : 0,
+                bottomSafeAreaMode: canvas == nil ? .none : surface.bottomSafeAreaMode,
+                bottomSafeAreaInset: activeWindowSafeAreaInsets.bottom
             ),
             scrollable: canvas == nil,
             onDismiss: dismiss,
@@ -141,7 +147,8 @@ private struct NudgeSheetView: View {
                             ),
                             onAction: { request in
                                 performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
-                            }
+                            },
+                            showBackground: !hostPaintsCanvasBackground
                         )
                         Spacer(minLength: 0)
                     }
@@ -150,6 +157,9 @@ private struct NudgeSheetView: View {
                     renderedContent.padding(surface.padding)
                 }
             },
+            cardBackground: hostPaintsCanvasBackground
+                ? canvas.map { AnyView(CampaignCanvasBackgroundView(paint: $0.background)) }
+                : nil,
             cardOverlay: surface.showCloseButton
                 ? AnyView(NudgeCloseButton(config: surface.closeButton, action: dismiss))
                 : nil
@@ -222,12 +232,13 @@ private struct NudgeDialogContainer: View {
                 }
             }
             .frame(width: width, height: height)
-            .padding(EdgeInsets(
-                top: insets.top,
-                leading: insets.left,
-                bottom: insets.bottom,
-                trailing: insets.right
-            ))
+            .padding(
+                EdgeInsets(
+                    top: insets.top,
+                    leading: insets.left,
+                    bottom: insets.bottom,
+                    trailing: insets.right
+                ))
         }
         .frame(width: viewportSize.width, height: viewportSize.height)
         .onPreferenceChange(DialogHeightKey.self) { contentHeight = $0 }
@@ -250,7 +261,8 @@ private struct NudgeDialogContainer: View {
                 runtimeViewportWidth: runtimeViewportWidth,
                 availableSize: availableSize,
                 onAction: { request in
-                    performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
+                    performCanvasAction(
+                        request, variables: presentation.variables, dismiss: dismiss)
                 }
             )
             if surface.showCloseButton {
@@ -258,6 +270,7 @@ private struct NudgeDialogContainer: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
+        .contentShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .environment(\.digiaVariables, presentation.variables)
     }
 
@@ -272,7 +285,8 @@ private struct NudgeDialogContainer: View {
                     .frame(width: width)
                     .background(
                         GeometryReader { geometry in
-                            Color.clear.preference(key: DialogHeightKey.self, value: geometry.size.height)
+                            Color.clear.preference(
+                                key: DialogHeightKey.self, value: geometry.size.height)
                         }
                     )
             }
@@ -284,6 +298,7 @@ private struct NudgeDialogContainer: View {
         }
         .background(backgroundColor)
         .clipShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
+        .contentShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .transition(.opacity)
     }
 

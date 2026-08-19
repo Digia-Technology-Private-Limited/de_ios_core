@@ -6,7 +6,10 @@ struct NudgeParser {
         return parseColumn(layout)
     }
 
-    private func parseColumn(_ json: [String: Any]) -> NudgeColumn {
+    // Not `private` — floater's `expanded.content` reuses this to parse the same
+    // widget-tree shape for its expanded state, matching Android's identical
+    // NudgeParser.parseColumn visibility widening for the same reason.
+    func parseColumn(_ json: [String: Any]) -> NudgeColumn {
         let props = json["props"] as? [String: Any] ?? [:]
         return NudgeColumn(
             crossAxisAlignment: crossAxis(props["crossAxisAlignment"] as? String ?? "start"),

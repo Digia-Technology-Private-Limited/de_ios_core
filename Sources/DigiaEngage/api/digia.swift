@@ -1,6 +1,6 @@
 import Foundation
-import UIKit
 import SwiftUI
+import UIKit
 
 @MainActor
 public enum Digia {
@@ -24,7 +24,8 @@ public enum Digia {
             afterScheme = raw[...]
         }
         let trimmed = afterScheme.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return trimmed == debugSettingsDeepLinkPath || trimmed.hasSuffix("/\(debugSettingsDeepLinkPath)")
+        return trimmed == debugSettingsDeepLinkPath
+            || trimmed.hasSuffix("/\(debugSettingsDeepLinkPath)")
     }
 
     /// Presents the SDK's debug-only settings screen. Trigger from the host's
@@ -118,6 +119,15 @@ public enum Digia {
         SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame
     }
 
+    /// The floater/PIP's current on-screen frame (root overlay's coordinate space),
+    /// or `nil` when none is showing. Same purpose as `debugBadgeFrame` — the PIP is
+    /// also a small floating region (not a full-screen overlay `hasActiveOverlay`
+    /// already covers), so a host's hit-testing needs the actual frame to tell a
+    /// touch on it apart from empty SwiftUI space elsewhere.
+    public static var floaterActiveRect: CGRect? {
+        SDKInstance.shared.floaterOrchestrator.activeRect
+    }
+
     /// Sets the authenticated user ID for analytics identity stitching.
     public static func setUserId(_ userId: String) {
         SDKInstance.shared.setUserId(userId)
@@ -159,8 +169,11 @@ public enum Digia {
     /// Native campaigns (nudge, inline, survey) are tracked automatically by the SDK.
     /// The JS layer fires each lifecycle event by its Engage matrix `eventName` with
     /// wire-keyed `props`; the SDK maps it to the matching rich Digia analytics event.
-    public static func captureAnalyticsEvent(campaignKey: String, eventName: String, props: [String: Any]) {
-        SDKInstance.shared.captureAnalyticsEvent(campaignKey: campaignKey, eventName: eventName, props: props)
+    public static func captureAnalyticsEvent(
+        campaignKey: String, eventName: String, props: [String: Any]
+    ) {
+        SDKInstance.shared.captureAnalyticsEvent(
+            campaignKey: campaignKey, eventName: eventName, props: props)
     }
 
     /// Reports the current screen name for screen-scoped analytics and CEP forwarding.
