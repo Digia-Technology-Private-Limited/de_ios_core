@@ -110,6 +110,9 @@ private struct NudgeSheetView: View {
     private var surface: NudgeSurface {
         canvas == nil ? authoredSurface : authoredSurface.scaled(naturalScale)
     }
+    private var hostPaintsCanvasBackground: Bool {
+        canvas != nil && surface.bottomSafeAreaMode == .insetContent
+    }
 
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
 
@@ -120,10 +123,13 @@ private struct NudgeSheetView: View {
                 background: canvas == nil ? (surface.backgroundColor ?? .white) : .clear,
                 scrimColor: surface.barrierColor ?? Color.black.opacity(0.4),
                 showHandle: surface.showHandle,
-                allowInteractiveDismiss: surface.draggable || surface.backdropDismissible,
+                allowBackdropDismiss: surface.backdropDismissible,
+                allowDragDismiss: surface.draggable,
                 heightCapFraction: canvas == nil ? 0.85 : 1,
                 handleOverlaysContent: canvas != nil,
-                bottomPadding: canvas == nil ? 8 : 0
+                bottomPadding: canvas == nil ? 8 : 0,
+                bottomSafeAreaMode: canvas == nil ? .none : surface.bottomSafeAreaMode,
+                bottomSafeAreaInset: activeWindowSafeAreaInsets.bottom
             ),
             scrollable: canvas == nil,
             onDismiss: dismiss,
@@ -141,7 +147,8 @@ private struct NudgeSheetView: View {
                             ),
                             onAction: { request in
                                 performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
-                            }
+                            },
+                            showBackground: !hostPaintsCanvasBackground
                         )
                         Spacer(minLength: 0)
                     }
@@ -150,6 +157,9 @@ private struct NudgeSheetView: View {
                     renderedContent.padding(surface.padding)
                 }
             },
+            cardBackground: hostPaintsCanvasBackground
+                ? canvas.map { AnyView(CampaignCanvasBackgroundView(paint: $0.background)) }
+                : nil,
             cardOverlay: surface.showCloseButton
                 ? AnyView(NudgeCloseButton(config: surface.closeButton, action: dismiss))
                 : nil
