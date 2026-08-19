@@ -33,7 +33,7 @@ struct FloaterOverlayView: View {
         if let state = orchestrator.state, !orchestrator.awaitingMedia {
             FloaterSessionView(state: state, orchestrator: orchestrator)
                 .id(state.token)
-                .ignoresSafeArea(.all, edges: orchestrator.surface == .expanded ? .all : [])
+                .ignoresSafeArea(.all)
         }
     }
 }
@@ -53,6 +53,25 @@ private func easeOutCubicCurve(duration: Double) -> Animation {
 }
 private func easeInCurve(duration: Double) -> Animation {
     .timingCurve(0.42, 0, 1, 1, duration: duration)
+}
+
+/// Real device safe-area insets, read from the active window. The expanded floater
+/// intentionally ignores safe areas so media can draw full-bleed; nested
+/// `GeometryReader.safeAreaInsets` therefore reports zero and cannot be used for
+/// chrome/content padding.
+@MainActor private var activeWindowSafeAreaInsets: EdgeInsets {
+    let insets =
+        UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .first(where: { $0.activationState == .foregroundActive })?
+        .windows.first(where: \.isKeyWindow)?
+        .safeAreaInsets ?? .zero
+    return EdgeInsets(
+        top: insets.top,
+        leading: insets.left,
+        bottom: insets.bottom,
+        trailing: insets.right
+    )
 }
 
 /// The collapsed chrome buttons' rects, in the SAME local coordinate space `activeRect`/
@@ -138,7 +157,7 @@ private struct FloaterSessionView: View {
     var body: some View {
         GeometryReader { geo in
             let screenSize = geo.size
-            let safe = geo.safeAreaInsets
+            let safe = activeWindowSafeAreaInsets
             let resting = collapsedRect(
                 config: config, screenSize: screenSize, safeInsets: safe,
                 dragFraction: orchestrator.dragFraction
@@ -755,7 +774,7 @@ private struct FloaterExpandedContentView: View {
             // bottom of the canvas always render vertically centered instead (matches the bug
             // found and fixed in Android's `ExpandedContent`, same underlying cause: no
             // chrome-band-aware inset was ever applied on either native platform).
-            let safe = geo.safeAreaInsets
+            let safe = activeWindowSafeAreaInsets
             let gap: CGFloat = 8
             let pillHeight = config.iconSize * 1.6
             let topInset = safe.top + config.controlsMargin.top + pillHeight + gap

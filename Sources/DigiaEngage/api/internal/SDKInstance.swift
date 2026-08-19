@@ -661,7 +661,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
 
         guard campaign.campaignType == "nudge" || campaign.campaignType == "survey"
-            || campaign.campaignType == "inline"
+            || campaign.campaignType == "inline" || campaign.campaignType == "floater"
         else {
             reporter.postFailed(
                 invocation.testInvocationId, code: .templateError,
