@@ -97,6 +97,10 @@ struct NudgeText: Equatable {
     let fontWeight: Int
     let color: Color
     let textAlignment: TextAlignment
+    let verticalAlignment: String
+    let sizingMode: String
+    let overflow: String
+    let maxLines: Int
     /// Block-level line height (unitless multiplier) for the whole text; nil = default.
     let lineHeight: CGFloat?
     /// Optional rich overlay; empty = render plain `text` with the base style.

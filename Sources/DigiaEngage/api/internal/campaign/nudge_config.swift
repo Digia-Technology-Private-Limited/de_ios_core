@@ -22,6 +22,16 @@ enum NudgeDisplayType: String, Equatable, Sendable {
     }
 }
 
+enum BottomSafeAreaMode: String, Equatable, Sendable {
+    case insetContent
+    case insetSurface
+    case none
+
+    static func from(_ value: String?) -> BottomSafeAreaMode {
+        BottomSafeAreaMode(rawValue: value ?? "") ?? .insetContent
+    }
+}
+
 struct NudgeCloseButtonConfig: Equatable {
     let marginTop: CGFloat
     let marginRight: CGFloat
@@ -30,6 +40,16 @@ struct NudgeCloseButtonConfig: Equatable {
     let iconSize: CGFloat
 
     var diameter: CGFloat { iconSize + 10 }
+
+    func scaled(_ factor: CGFloat) -> NudgeCloseButtonConfig {
+        NudgeCloseButtonConfig(
+            marginTop: marginTop * factor,
+            marginRight: marginRight * factor,
+            backgroundColor: backgroundColor,
+            iconColor: iconColor,
+            iconSize: iconSize * factor
+        )
+    }
 
     static let defaults = NudgeCloseButtonConfig(
         marginTop: 12,
@@ -92,16 +112,40 @@ struct NudgeSurface: Equatable {
     let draggable: Bool
     /// Dialog width as a fraction of the selected safe/full window area, 0…1.
     let widthFraction: CGFloat
+    /// Minimum horizontal viewport margin in authored logical pixels.
+    let minHorizontalMargin: CGFloat
     /// Keep dialog content inside system safe-area insets (dialog only).
     let useSafeArea: Bool
+    /// Bottom-system-area treatment for bottom sheets only.
+    let bottomSafeAreaMode: BottomSafeAreaMode
 
     var isBottomSheet: Bool { displayType == .bottomSheet }
+
+    func scaled(_ factor: CGFloat) -> NudgeSurface {
+        NudgeSurface(
+            displayType: displayType,
+            backgroundColor: backgroundColor,
+            barrierColor: barrierColor,
+            cornerRadius: cornerRadius * factor,
+            padding: padding * factor,
+            backdropDismissible: backdropDismissible,
+            showCloseButton: showCloseButton,
+            closeButton: closeButton.scaled(factor),
+            showHandle: showHandle,
+            draggable: draggable,
+            widthFraction: widthFraction,
+            minHorizontalMargin: minHorizontalMargin,
+            useSafeArea: useSafeArea,
+            bottomSafeAreaMode: bottomSafeAreaMode
+        )
+    }
 
     /// Decodes from the `container` object. Field names and defaults match
     /// Flutter's `NudgeParser._surface`.
     static func fromJson(_ json: [String: Any]?) -> NudgeSurface {
         let map = json ?? [:]
         let widthPct = map.double("widthPct", default: 86)
+        let decodedMargin = map.double("minHorizontalMargin", default: 24)
         return NudgeSurface(
             displayType: NudgeDisplayType.from(map["displayType"] as? String),
             backgroundColor: color(map.string("backgroundColor")),
@@ -115,9 +159,13 @@ struct NudgeSurface: Equatable {
             draggable: map.bool("draggable", default: true),
             // Stored as a 0…100 percentage; normalise to a 0…1 fraction.
             widthFraction: CGFloat(min(max(widthPct / 100, 0.3), 1.0)),
+            minHorizontalMargin: CGFloat(
+                decodedMargin.isFinite ? max(0, decodedMargin) : 24
+            ),
             useSafeArea: (map["useSafeArea"] as? NSNumber).map {
                 CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue
-            } ?? false
+            } ?? false,
+            bottomSafeAreaMode: BottomSafeAreaMode.from(map["bottomSafeAreaMode"] as? String)
         )
     }
 
@@ -132,6 +180,8 @@ struct NudgeSurface: Equatable {
 struct NudgeConfig: Equatable {
     let surface: NudgeSurface
     let layout: NudgeColumn
+    let canvas: CampaignCanvas?
+    let designWidth: CGFloat
     /// Dashboard-declared variable schemas (`templateConfig.variables`). Carries
     /// name, type, and fallbackValue for each declared variable; resolved against
     /// CEP trigger variables at render time via `buildVariableContext()`.
@@ -140,11 +190,35 @@ struct NudgeConfig: Equatable {
     /// Decodes a nudge `templateConfig` (`{ container, layout, variables }`).
     /// Returns nil when the content tree is missing — such a campaign has
     /// nothing to show.
-    static func fromJson(_ json: [String: Any]) -> NudgeConfig? {
-        guard let layout = NudgeParser().parse(json) else { return nil }
+    static func fromJson(_ json: [String: Any], designTokens: DesignTokenCatalog = .empty) -> NudgeConfig? {
+        let rawDesignWidth = CGFloat(json.double("designWidth", default: Double(defaultCampaignCanvasDesignWidth)))
+        let designWidth = rawDesignWidth.isFinite && rawDesignWidth > 0
+            ? rawDesignWidth : defaultCampaignCanvasDesignWidth
+        let parser = NudgeParser()
+        let canvas: CampaignCanvas?
+        let layout: NudgeColumn
+        if json.string("layoutMode") == "canvas" {
+            guard let rawCanvas = json["canvas"] as? [String: Any] else { return nil }
+            do { canvas = try CampaignCanvasParser(designTokens: designTokens).parse(rawCanvas) }
+            catch {
+                DigiaLog.warning("[NudgeConfig] rejected Canvas campaign: \(error.localizedDescription)")
+                return nil
+            }
+            layout = NudgeColumn(
+                crossAxisAlignment: .start,
+                mainAxisAlignment: .start,
+                children: []
+            )
+        } else {
+            guard let parsedLayout = parser.parse(json) else { return nil }
+            canvas = nil
+            layout = parsedLayout
+        }
         return NudgeConfig(
             surface: NudgeSurface.fromJson(json["container"] as? [String: Any]),
             layout: layout,
+            canvas: canvas,
+            designWidth: designWidth,
             variableSchemas: parseVariableSchemas(json)
         )
     }

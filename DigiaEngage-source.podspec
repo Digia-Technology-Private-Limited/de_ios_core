@@ -8,8 +8,9 @@
 #
 # Same pod NAME ('DigiaEngage') and version as the production DigiaEngage.podspec (the
 # FAT binary), so a consumer's `s.dependency 'DigiaEngage'` is satisfied by either spec.
-# It is selected explicitly via CocoaPods `:podspec =>` — NOT by pod name resolution —
-# so it never shadows the trunk/fat spec for anyone who doesn't opt in.
+# The local harness selects this file explicitly with CocoaPods `:path =>` — CocoaPods accepts a
+# podspec file as a path source and uses this directory as the development-pod root. This keeps
+# uncommitted working-tree edits visible and never shadows the trunk/fat spec for other consumers.
 #
 # Consumed by medihub-rn: link ios/core in local-packages.json and set
 # DIGIA_IOS_SDK_MODE=source (the default). scripts/localIosPods.js then points the
@@ -21,17 +22,19 @@
 
 Pod::Spec.new do |s|
   s.name             = 'DigiaEngage'
-  s.version          = '3.8.0'
+  s.version          = '3.9.0'
   s.summary          = 'Digia Engage iOS SDK — SDUI native rendering layer (local source build).'
   s.homepage         = 'https://github.com/Digia-Technology-Private-Limited/digia_engage_iOS'
   s.license          = { :type => 'BUSL-1.1', :file => 'LICENSE' }
   s.authors          = { 'Digia Engineering' => 'engg@digia.tech' }
 
-  # Only ever consumed as a LOCAL `:podspec =>` link, so `s.source` is never fetched;
-  # a valid git source is kept for `pod lib lint` hygiene.
+  # CocoaPods requires source metadata for linting and for direct `:podspec =>` consumers. The
+  # Medihub development path uses `:path => DigiaEngage-source.podspec`, so CocoaPods ignores this
+  # checkout source and compiles this directory directly. Keep the fallback local and deterministic
+  # for any tooling that evaluates the podspec outside that path-source workflow.
   s.source           = {
-    :git => 'https://github.com/Digia-Technology-Private-Limited/digia_engage_iOS.git',
-    :tag => s.version.to_s,
+    :git => "file://#{__dir__}",
+    :commit => `git -C #{__dir__} rev-parse HEAD`.strip,
   }
 
   s.ios.deployment_target = '15.0'

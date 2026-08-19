@@ -1,6 +1,6 @@
 import Foundation
-import UIKit
 import SwiftUI
+import UIKit
 
 @MainActor
 public enum Digia {
@@ -24,7 +24,8 @@ public enum Digia {
             afterScheme = raw[...]
         }
         let trimmed = afterScheme.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return trimmed == debugSettingsDeepLinkPath || trimmed.hasSuffix("/\(debugSettingsDeepLinkPath)")
+        return trimmed == debugSettingsDeepLinkPath
+            || trimmed.hasSuffix("/\(debugSettingsDeepLinkPath)")
     }
 
     /// Presents the SDK's debug-only settings screen. Trigger from the host's
@@ -77,15 +78,19 @@ public enum Digia {
         SDKInstance.shared.setOpenURLHandler(handler)
     }
 
-    /// RN-only: hand native the same getCampaigns response JS already fetched, so
+    /// RN-only: hand native the same campaign-bundle response JS already fetched, so
     /// native doesn't also fetch it. Call once after `initialize` when the config's
     /// `wrapperBinding` is `"react_native"`.
     ///
     /// No-ops below iOS 17 (see `initialize`) — this bypasses `initialize`'s own
     /// state guard, so it needs the same OS check independently.
-    public static func populateCampaigns(_ campaignsJson: String) {
+    public static func populateCampaignBundle(_ bundleJson: String) {
         guard #available(iOS 17, *) else { return }
-        SDKInstance.shared.populateCampaigns(campaignsJson)
+        SDKInstance.shared.populateCampaignBundle(bundleJson)
+    }
+
+    public static func setThemeMode(_ mode: DigiaThemeMode) {
+        SDKInstance.shared.setThemeMode(mode)
     }
 
     /// Silently dismisses any active nudge overlay without animation.
@@ -111,6 +116,15 @@ public enum Digia {
     /// space elsewhere.
     public static var debugBadgeFrame: CGRect? {
         SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame
+    }
+
+    /// The floater/PIP's current on-screen frame (root overlay's coordinate space),
+    /// or `nil` when none is showing. Same purpose as `debugBadgeFrame` — the PIP is
+    /// also a small floating region (not a full-screen overlay `hasActiveOverlay`
+    /// already covers), so a host's hit-testing needs the actual frame to tell a
+    /// touch on it apart from empty SwiftUI space elsewhere.
+    public static var floaterActiveRect: CGRect? {
+        SDKInstance.shared.floaterOrchestrator.activeRect
     }
 
     /// Sets the authenticated user ID for analytics identity stitching.
@@ -154,8 +168,11 @@ public enum Digia {
     /// Native campaigns (nudge, inline, survey) are tracked automatically by the SDK.
     /// The JS layer fires each lifecycle event by its Engage matrix `eventName` with
     /// wire-keyed `props`; the SDK maps it to the matching rich Digia analytics event.
-    public static func captureAnalyticsEvent(campaignKey: String, eventName: String, props: [String: Any]) {
-        SDKInstance.shared.captureAnalyticsEvent(campaignKey: campaignKey, eventName: eventName, props: props)
+    public static func captureAnalyticsEvent(
+        campaignKey: String, eventName: String, props: [String: Any]
+    ) {
+        SDKInstance.shared.captureAnalyticsEvent(
+            campaignKey: campaignKey, eventName: eventName, props: props)
     }
 
     /// Reports the current screen name for screen-scoped analytics and CEP forwarding.

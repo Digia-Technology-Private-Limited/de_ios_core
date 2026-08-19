@@ -41,15 +41,15 @@ private struct NudgeNodeView: View {
     var body: some View {
         Group {
             switch node {
-            case .text(let n): NudgeTextView(node: n)
-            case .image(let n): NudgeImageView(node: n)
-            case .button(let n): NudgeButtonView(node: n, onDismiss: onDismiss)
+            case .text(let n): NudgeTextView(node: n, canvasMode: false)
+            case .image(let n): NudgeImageView(node: n, canvasMode: false)
+            case .button(let n): NudgeButtonView(node: n, onDismiss: onDismiss, canvasMode: false)
             case .gap(let n): Spacer().frame(height: n.height)
             case .divider(let n): NudgeDividerView(node: n)
             case .progressBar(let n): NudgeProgressBarView(node: n)
-            case .lottie(let n): NudgeLottieView(node: n)
+            case .lottie(let n): NudgeLottieView(node: n, canvasMode: false)
             case .carousel(let n): NudgeCarouselView(node: n)
-            case .video(let n): NudgeVideoView(node: n)
+            case .video(let n): NudgeVideoView(node: n, canvasMode: false)
             }
         }
         .nudgeBox(node.box)
@@ -60,15 +60,21 @@ private struct NudgeNodeView: View {
 
 private struct NudgeTextView: View {
     let node: NudgeText
+    let canvasMode: Bool
     @Environment(\.digiaVariables) private var variables
 
     // Rendered via a TextKit-1 UITextView so it can carry per-run decoration
     // colour/thickness and a block-level line height (paragraph style) — neither
     // of which SwiftUI `Text` can express.
     var body: some View {
-        NudgeRichText(attributed: attributed, fillWidth: node.box.fillWidth)
+        NudgeRichText(
+            attributed: attributed,
+            fillWidth: canvasMode || node.box.fillWidth,
+            maxLines: node.maxLines,
+            overflow: node.overflow
+        )
             .frame(
-                maxWidth: node.box.fillWidth ? .infinity : nil,
+                maxWidth: (canvasMode || node.box.fillWidth) ? .infinity : nil,
                 alignment: node.textAlignment.frameAlignment)
     }
 
@@ -142,6 +148,7 @@ private struct NudgeTextView: View {
 
 private struct NudgeImageView: View {
     let node: NudgeImage
+    let canvasMode: Bool
     @Environment(\.digiaVariables) private var variables
 
     private var url: String { interpolate(node.url, context: variables) }
@@ -164,10 +171,33 @@ private struct NudgeImageView: View {
     private var content: some View {
         if url.isEmpty {
             nudgePlaceholder(label: "Image", height: node.box.fixedHeight ?? 120)
+        } else if canvasMode {
+            canvasImage
         } else if node.aspectRatio > 0 {
             aspectRatioImage
         } else {
             fixedImage
+        }
+    }
+
+    @ViewBuilder
+    private var canvasImage: some View {
+        GeometryReader { geometry in
+            switch node.fit {
+            case .contain:
+                image
+                    .scaledToFit()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+            case .cover:
+                image
+                    .scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+            case .fill:
+                image
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+            }
         }
     }
 
@@ -223,6 +253,7 @@ private struct NudgeImageView: View {
 private struct NudgeButtonView: View {
     let node: NudgeButton
     let onDismiss: () -> Void
+    let canvasMode: Bool
     @Environment(\.digiaVariables) private var variables
 
     private var filled: Bool { node.variant == .fill || node.variant == .elevated }
@@ -236,12 +267,20 @@ private struct NudgeButtonView: View {
                     ))
                 )
                 .foregroundStyle(filled ? node.textColor : node.background)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .frame(maxWidth: node.box.fillWidth ? .infinity : nil)
+                .lineLimit(canvasMode ? 1 : nil)
+                .truncationMode(.tail)
+                .padding(.horizontal, canvasMode ? 1 : 16)
+                .padding(.vertical, canvasMode ? 0 : 12)
+                .frame(
+                    maxWidth: (canvasMode || node.box.fillWidth) ? .infinity : nil,
+                    maxHeight: canvasMode ? .infinity : nil
+                )
         }
         .buttonStyle(.plain)
-        .frame(maxWidth: node.box.fillWidth ? .infinity : nil)
+        .frame(
+            maxWidth: (canvasMode || node.box.fillWidth) ? .infinity : nil,
+            maxHeight: canvasMode ? .infinity : nil
+        )
         .background(filled ? node.background : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: node.radius))
         .shadow(radius: node.variant == .elevated ? 3 : 0)
@@ -336,6 +375,7 @@ private struct NudgeProgressBarView: View {
 
 private struct NudgeLottieView: View {
     let node: NudgeLottie
+    let canvasMode: Bool
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
@@ -351,7 +391,11 @@ private struct NudgeLottieView: View {
                     lottie(url: url)
                 }
             }
-            .nudgeMediaFrame(aspectRatio: node.aspectRatio, height: node.height)
+            .modifier(CanvasMediaFrame(
+                canvasMode: canvasMode,
+                aspectRatio: node.aspectRatio,
+                height: node.height
+            ))
         }
     }
 
@@ -445,6 +489,7 @@ private enum VideoLoadState {
 
 private struct NudgeVideoView: View {
     let node: NudgeVideo
+    let canvasMode: Bool
     @Environment(\.digiaVariables) private var variables
     @State private var player: AVPlayer? = nil
     @State private var state: VideoLoadState = .loading
@@ -490,7 +535,11 @@ private struct NudgeVideoView: View {
                         EmptyView()
                     }
                 }
-                .nudgeMediaFrame(aspectRatio: node.aspectRatio, height: node.height)
+                .modifier(CanvasMediaFrame(
+                    canvasMode: canvasMode,
+                    aspectRatio: node.aspectRatio,
+                    height: node.height
+                ))
             }
         }
         .onAppear { setupPlayer() }
@@ -537,6 +586,21 @@ private struct NudgeVideoView: View {
         loopObserver = nil
         player = nil
         state = .loading
+    }
+}
+
+private struct CanvasMediaFrame: ViewModifier {
+    let canvasMode: Bool
+    let aspectRatio: CGFloat
+    let height: CGFloat
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if canvasMode {
+            content.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
+        } else {
+            content.nudgeMediaFrame(aspectRatio: aspectRatio, height: height)
+        }
     }
 }
 

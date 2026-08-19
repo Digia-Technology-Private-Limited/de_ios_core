@@ -5,8 +5,13 @@ struct DigiaBottomSheetConfig {
     var background: Color = .white
     var scrimColor: Color = Color.black.opacity(0.4)
     var showHandle: Bool = true
-    var allowInteractiveDismiss: Bool = true
+    var allowBackdropDismiss: Bool = true
+    var allowDragDismiss: Bool = true
     var heightCapFraction: CGFloat = 0.85
+    var handleOverlaysContent: Bool = false
+    var bottomPadding: CGFloat = 8
+    var bottomSafeAreaMode: BottomSafeAreaMode = .none
+    var bottomSafeAreaInset: CGFloat = 0
 }
 
 /// A bottom sheet whose card attaches flush to the screen edges (the system
@@ -17,6 +22,7 @@ struct DigiaBottomSheet<Content: View>: View {
     var scrollable: Bool = true
     let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
+    var cardBackground: AnyView? = nil
     var cardOverlay: AnyView? = nil
 
     @State private var contentHeight: CGFloat = 0
@@ -29,13 +35,17 @@ struct DigiaBottomSheet<Content: View>: View {
     var body: some View {
         GeometryReader { geo in
             let cap = geo.size.height * config.heightCapFraction
+            let surfaceBottomInset = config.bottomSafeAreaMode == .insetSurface
+                ? config.bottomSafeAreaInset
+                : 0
             ZStack(alignment: .bottom) {
                 config.scrimColor
                     .opacity(shown ? 1 : 0)
                     .contentShape(Rectangle())
-                    .onTapGesture { if config.allowInteractiveDismiss { close() } }
+                    .onTapGesture { if config.allowBackdropDismiss { close() } }
 
-                card(cap: cap)
+                card(cap: max(0, cap - surfaceBottomInset))
+                    .padding(.bottom, surfaceBottomInset)
                     .offset(y: shown ? max(dragOffset, 0) : geo.size.height)
                     .gesture(dragGesture)
             }
@@ -47,19 +57,19 @@ struct DigiaBottomSheet<Content: View>: View {
     }
 
     private func card(cap: CGFloat) -> some View {
-        let base = VStack(spacing: 0) {
-            if config.showHandle {
-                Capsule()
-                    .fill(Color(hex: "#E0E0E6") ?? Color.secondary.opacity(0.35))
-                    .frame(width: 36, height: 4)
-                    .padding(.top, 12)
-                    .padding(.bottom, 8)
-            }
-            sheetBody(cap: cap)
-        }
-        .padding(.bottom, 8)
+        let contentBottomInset = config.bottomSafeAreaMode == .insetContent
+            ? config.bottomSafeAreaInset
+            : 0
+        let base = cardContents(cap: cap)
+        .padding(.bottom, config.bottomPadding + contentBottomInset)
         .frame(maxWidth: .infinity)
-        .background(config.background)
+        .background {
+            if let cardBackground {
+                cardBackground
+            } else {
+                config.background
+            }
+        }
 
         // `UnevenRoundedRectangle`'s `.rect(topLeadingRadius:topTrailingRadius:)` needs
         // iOS 16; below that, round all four corners as the closest built-in equivalent.
@@ -73,6 +83,29 @@ struct DigiaBottomSheet<Content: View>: View {
             }
         }
         .overlay(alignment: .topTrailing) { cardOverlay }
+    }
+
+    @ViewBuilder
+    private func cardContents(cap: CGFloat) -> some View {
+        if config.handleOverlaysContent {
+            ZStack(alignment: .top) {
+                sheetBody(cap: cap)
+                if config.showHandle { handle.padding(.top, 12) }
+            }
+        } else {
+            VStack(spacing: 0) {
+                if config.showHandle {
+                    handle.padding(.top, 12).padding(.bottom, 8)
+                }
+                sheetBody(cap: cap)
+            }
+        }
+    }
+
+    private var handle: some View {
+        Capsule()
+            .fill(Color(hex: "#E0E0E6") ?? Color.secondary.opacity(0.35))
+            .frame(width: 36, height: 4)
     }
 
     @ViewBuilder
@@ -107,14 +140,14 @@ struct DigiaBottomSheet<Content: View>: View {
     private var dragGesture: some Gesture {
         DragGesture()
             .onChanged { value in
-                guard config.allowInteractiveDismiss else { return }
+                guard config.allowDragDismiss else { return }
                 dragOffset =
                     value.translation.height > 0
                     ? value.translation.height
                     : value.translation.height * 0.2
             }
             .onEnded { value in
-                guard config.allowInteractiveDismiss else { return }
+                guard config.allowDragDismiss else { return }
                 if value.translation.height > 120 || value.predictedEndTranslation.height > 280 {
                     close()
                 } else {

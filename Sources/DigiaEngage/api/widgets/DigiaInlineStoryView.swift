@@ -1019,6 +1019,25 @@ final class InlineStoryPlayerContainer: UIView {
         AVPlayerLayer.self
     }
 
+    // A raw video rendering surface, never itself interactive in either consumer
+    // (inline story or floater/PIP) — both render separate SwiftUI content above it
+    // for actual interaction. Set explicitly rather than relying on the SwiftUI
+    // `.allowsHitTesting(false)` modifier callers apply: that modifier's propagation
+    // across a `UIViewRepresentable` boundary proved unreliable elsewhere in this
+    // hosting stack (see `floater_overlay_view.swift`'s `FloaterSessionView` — the
+    // floater's own drag/tap gesture and its chrome buttons stopped receiving touches
+    // wherever this view's real, UIKit-default-`true` `isUserInteractionEnabled` won
+    // hit-testing priority over them instead).
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
     var playerLayer: AVPlayerLayer {
         layer as! AVPlayerLayer
     }

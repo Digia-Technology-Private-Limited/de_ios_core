@@ -15,7 +15,7 @@ enum DigiaEndpoints {
         _baseUrl = baseUrl ?? production
     }
 
-    static var campaigns: String { "\(_baseUrl)/api/v1/engage/sdk/getCampaigns" }
+    static var campaignBundle: String { "\(_baseUrl)/api/v1/engage/sdk/getCampaignBundle" }
     static var track: String { "\(_baseUrl)/api/v1/engage/sdk/track" }
     static var session: String { "\(_baseUrl)/api/v1/engage/sdk/session" }
     static var submission: String { "\(_baseUrl)/api/v1/engage/sdk/recordSubmission" }

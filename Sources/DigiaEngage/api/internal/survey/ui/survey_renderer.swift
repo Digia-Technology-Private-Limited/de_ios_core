@@ -157,7 +157,8 @@ private struct SurveySheet<Content: View>: View {
                 cornerRadius: CGFloat(sheet.cornerRadius),
                 background: background,
                 showHandle: sheet.showHandle,
-                allowInteractiveDismiss: sheet.draggable || sheet.backdropDismissible,
+                allowBackdropDismiss: sheet.backdropDismissible,
+                allowDragDismiss: sheet.draggable,
                 heightCapFraction: heightCapFraction
             ),
             scrollable: false,
@@ -195,6 +196,8 @@ private struct DialogContainer<Content: View>: View {
                             .fill(background)
                     )
                     .clipShape(RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius)))
+                    .contentShape(RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius)))
+                    .onTapGesture {}
                     .padding(16)
             }
             .task {
