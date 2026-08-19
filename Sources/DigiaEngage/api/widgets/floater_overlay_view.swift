@@ -38,6 +38,17 @@ struct FloaterOverlayView: View {
     }
 }
 
+@MainActor private var activeFloaterWindowSafeAreaInsets: EdgeInsets {
+    let insets = UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .filter { $0.activationState == .foregroundActive }
+        .flatMap(\.windows)
+        .map(\.safeAreaInsets)
+        .first(where: { $0.top > 0 || $0.bottom > 0 }) ?? .zero
+    return EdgeInsets(
+        top: insets.top, leading: insets.left, bottom: insets.bottom, trailing: insets.right)
+}
+
 /// `SpringDescription(mass: 1, stiffness: 210, damping: 24)` in the Flutter
 /// reference — `interpolatingSpring` takes these same physical units directly, so
 /// unlike the Android port this needs no dampingRatio conversion.
@@ -138,7 +149,10 @@ private struct FloaterSessionView: View {
     var body: some View {
         GeometryReader { geo in
             let screenSize = geo.size
-            let safe = geo.safeAreaInsets
+            // Expanded media is deliberately full-bleed, which makes this
+            // GeometryReader report zero safe-area insets. Keep the video edge-to-edge,
+            // but source the real window insets for chrome and canvas overlays.
+            let safe = expanded ? activeFloaterWindowSafeAreaInsets : geo.safeAreaInsets
             let resting = collapsedRect(
                 config: config, screenSize: screenSize, safeInsets: safe,
                 dragFraction: orchestrator.dragFraction
@@ -236,7 +250,7 @@ private struct FloaterSessionView: View {
                         FloaterScrimView(opacity: config.expanded.scrimOpacity)
                     }
                     if expanded, expandedContentVisible {
-                        FloaterExpandedContentView(state: state)
+                        FloaterExpandedContentView(state: state, safeAreaInsets: safe)
                     }
                     FloaterChromeView(
                         state: state, orchestrator: orchestrator, expanded: expanded,
@@ -743,6 +757,7 @@ private struct FloaterScrimView: View {
 /// `FloaterConfig.kt` exactly; there is no separate widget-tree content model here.
 private struct FloaterExpandedContentView: View {
     let state: ActiveFloaterState
+    let safeAreaInsets: EdgeInsets
 
     private var config: FloaterExpandedConfig { state.config.expanded }
 
@@ -755,11 +770,10 @@ private struct FloaterExpandedContentView: View {
             // bottom of the canvas always render vertically centered instead (matches the bug
             // found and fixed in Android's `ExpandedContent`, same underlying cause: no
             // chrome-band-aware inset was ever applied on either native platform).
-            let safe = geo.safeAreaInsets
             let gap: CGFloat = 8
             let pillHeight = config.iconSize * 1.6
-            let topInset = safe.top + config.controlsMargin.top + pillHeight + gap
-            let bottomInset = safe.bottom + gap + config.controlsMargin.bottom
+            let topInset = safeAreaInsets.top + config.controlsMargin.top + pillHeight + gap
+            let bottomInset = safeAreaInsets.bottom + gap + config.controlsMargin.bottom
             CampaignCanvasView(
                 canvas: config.canvas,
                 surface: floaterCanvasSurface,
