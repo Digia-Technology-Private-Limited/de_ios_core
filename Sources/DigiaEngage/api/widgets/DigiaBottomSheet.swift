@@ -83,6 +83,10 @@ struct DigiaBottomSheet<Content: View>: View {
             }
         }
         .overlay(alignment: .topTrailing) { cardOverlay }
+        // A fully transparent background contributes no hit-testable pixels in
+        // SwiftUI. Keep the whole sheet surface interactive so its drag gesture
+        // wins over the backdrop tap gesture even when nothing is painted here.
+        .contentShape(Rectangle())
     }
 
     @ViewBuilder

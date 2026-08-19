@@ -2,6 +2,16 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.10.1] - 2026-08-19
+
+### Improvements
+- Live campaign testing now supports floater (Picture-in-Picture) and guide campaigns, in addition to nudge, survey, and inline.
+
+### Bug Fixes
+- Fixed canvas bottom-sheet nudges (which use a transparent background) letting taps fall through to the backdrop instead of keeping the sheet interactive; drag-to-dismiss and content taps now work as expected.
+- Fixed Picture-in-Picture controls rendering behind the media in the collapsed window for some media types; the controls now stay above every media kind.
+- Fixed a Lottie element's shadow in canvas designs extending beyond its box; the shadow is now constrained to the element's shape.
+
 ## [3.10.0] - 2026-08-19
 
 ### New Features
