@@ -308,7 +308,7 @@ private struct CampaignCanvasTextView: View {
     var body: some View {
         CanvasRichText(
             attributed: attributed,
-            fillWidth: block.sizingMode != "hug",
+            fillWidth: block.sizingMode == "fixed",
             maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
             overflow: block.overflow,
             textAlignment: block.textAlign.uiTextAlignment,
