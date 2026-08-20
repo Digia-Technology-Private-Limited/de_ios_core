@@ -378,7 +378,7 @@ private struct CampaignCanvasTextView: View {
                 .paragraphStyle: paragraph,
             ]
             if let glyphShadow { attributes[.shadow] = glyphShadow }
-            if let spacing = typography?.letterSpacing ?? baseTypography.letterSpacing { attributes[.kern] = spacing }
+            if let spacing = typography?.letterSpacing ?? baseTypography.letterSpacing, spacing != 0 { attributes[.kern] = spacing }
             if let highlight = span.highlightColor { attributes[.backgroundColor] = UIColor(CampaignCanvasTheme.shared.color(highlight, isDark: isDark)) }
             switch span.decoration {
             case .underline: attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
