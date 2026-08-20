@@ -4,16 +4,16 @@ import SwiftUI
 /// or a deeplink — both gate on `DigiaDebugDetection`, so this never surfaces
 /// in production.
 ///
-/// Hosts the Engage Component Registry's "Sync" toggle and the "Digia bubble"
-/// visibility toggle; more debug controls can be added as rows here.
+/// Hosts live testing, capture or sync, and the Digia bubble controls.
 @MainActor
 public struct DigiaDebugSettingsView: View {
+    @ObservedObject private var instance = SDKInstance.shared
     @ObservedObject private var registry = SDKInstance.shared.componentRegistrySnapshot()
     @ObservedObject private var overlay = SDKInstance.shared.debugOverlayControllerSnapshot()
     @ObservedObject private var liveTest = SDKInstance.shared.liveTestServiceSnapshot()
     @State private var showRestartHint = false
     @State private var showSession = false
-    @State private var showDeviceNameEditor = false
+    @State private var showLiveTesting = false
 
     public init() {}
 
@@ -30,40 +30,54 @@ public struct DigiaDebugSettingsView: View {
             List {
                 Section {
                     SettingsToggleRow(
-                        title: "Sync",
-                        subtitle: "Syncs the SDK with the Dashboard.",
-                        onTap: { showSession = true },
+                        title: "Live testing",
+                        subtitle: liveTest.connectionState.label(
+                            enabled: liveTest.isEnabled,
+                            deviceName: liveTest.deviceName
+                        ),
+                        onTap: { showLiveTesting = true },
                         isOn: Binding(
-                            get: { registry.isEnabled },
-                            set: { onToggleSync($0) }
+                            get: { liveTest.isEnabled },
+                            set: { liveTest.setEnabled($0) }
                         )
                     )
                     .background(
-                        // .background(), not a sibling row: even a hidden row still
-                        // gets List's row background/padding, showing as a stray box.
+                        NavigationLink(
+                            destination: LiveTestingDetailsScreen(liveTest: liveTest),
+                            isActive: $showLiveTesting
+                        ) { EmptyView() }
+                        .hidden()
+                    )
+                    Group {
+                        if instance.isCaptureSupported {
+                            SettingsToggleRow(
+                                title: "Page & component capture",
+                                subtitle: "Discover components and capture pages for authoring.",
+                                onTap: { showSession = true },
+                                isOn: Binding(
+                                    get: { instance.captureModeEnabled },
+                                    set: { instance.setCaptureModeEnabled($0) }
+                                )
+                            )
+                        } else {
+                            SettingsToggleRow(
+                                title: "Sync",
+                                subtitle: "Syncs the SDK with the Dashboard.",
+                                onTap: { showSession = true },
+                                isOn: Binding(
+                                    get: { registry.isEnabled },
+                                    set: { onToggleSync($0) }
+                                )
+                            )
+                        }
+                    }
+                    .background(
                         NavigationLink(
                             destination: DigiaRecordedSessionScreen(),
                             isActive: $showSession
                         ) { EmptyView() }
                         .hidden()
                     )
-                    HStack {
-                        Text("Live test")
-                        Spacer()
-                        Text(liveTest.connectionState.label(deviceName: liveTest.deviceName))
-                            .foregroundColor(.secondary)
-                    }
-                    Button {
-                        showDeviceNameEditor = true
-                    } label: {
-                        HStack {
-                            Text("Device name")
-                            Spacer()
-                            Text(liveTest.deviceName ?? "Not set")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    .buttonStyle(.plain)
                     SettingsToggleRow(
                         title: "Digia bubble",
                         isOn: Binding(
@@ -84,9 +98,6 @@ public struct DigiaDebugSettingsView: View {
                     + "loaded before recording was turned on."
             )
         }
-        .sheet(isPresented: $showDeviceNameEditor) {
-            DeviceNameEditor(liveTest: liveTest)
-        }
     }
 
     private func onToggleSync(_ value: Bool) {
@@ -101,12 +112,64 @@ public struct DigiaDebugSettingsView: View {
 }
 
 extension LiveTestConnectionState {
-    func label(deviceName: String?) -> String {
+    func label(enabled: Bool, deviceName: String?) -> String {
+        guard enabled else { return "Off" }
         switch self {
         case .disconnected: return "Disconnected"
         case .connecting: return "Connecting…"
-        case .connected: return deviceName.map { "Connected as \($0)" } ?? "Connected"
-        case .error: return "Reconnecting…"
+        case .connected:
+            return deviceName.map { "Connected as \($0)" }
+                ?? "Connected — visible on the dashboard"
+        case .error: return "Connection error — retrying…"
+        }
+    }
+}
+
+@MainActor
+private struct LiveTestingDetailsScreen: View {
+    @ObservedObject var liveTest: LiveTestService
+    @State private var showDeviceNameEditor = false
+
+    var body: some View {
+        List {
+            SettingsToggleRow(
+                title: "Live testing",
+                subtitle: liveTest.connectionState.label(
+                    enabled: liveTest.isEnabled,
+                    deviceName: liveTest.deviceName
+                ),
+                isOn: Binding(
+                    get: { liveTest.isEnabled },
+                    set: { liveTest.setEnabled($0) }
+                )
+            )
+            Button {
+                showDeviceNameEditor = true
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Device name")
+                        Text(liveTest.deviceName ?? "Not set — using the device model")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "pencil")
+                }
+            }
+            .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Device ID")
+                Text(liveTest.deviceId ?? "")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .navigationTitle("Live testing")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showDeviceNameEditor) {
+            DeviceNameEditor(liveTest: liveTest)
         }
     }
 }

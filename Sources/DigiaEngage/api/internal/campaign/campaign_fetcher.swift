@@ -26,6 +26,7 @@ private struct URLSessionCampaignAPI: CampaignAPI {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue(config.apiKey, forHTTPHeaderField: "x-digia-project-id")
+        request.setValue("ios", forHTTPHeaderField: "X-Digia-Platform")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 10
         request.httpBody = Data("{}".utf8)
@@ -50,14 +51,14 @@ struct CampaignFetcher {
         guard (200...299).contains(response.statusCode) else {
             throw CampaignFetchError(category: .httpStatus, endpoint: endpoint, statusCode: response.statusCode, message: "Campaign bundle request failed: HTTP \(response.statusCode)", underlying: nil)
         }
-        do { return try Self.parse(response.data) }
+        do { return try Self.parse(response.data, devicePlatform: "ios") }
         catch let error as CampaignFetchError { throw error }
         catch {
             throw CampaignFetchError(category: .invalidResponse, endpoint: endpoint, statusCode: response.statusCode, message: "Invalid campaign bundle response: \(error.localizedDescription)", underlying: error)
         }
     }
 
-    static func parse(_ data: Data) throws -> CampaignBundle {
+    static func parse(_ data: Data, devicePlatform: String? = nil) throws -> CampaignBundle {
         let endpoint = DigiaEndpoints.campaignBundle
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw CampaignFetchError(category: .invalidResponse, endpoint: endpoint, statusCode: nil, message: "Campaign bundle response is not an object", underlying: nil)
@@ -79,6 +80,6 @@ struct CampaignFetcher {
             DigiaLog.warning("[CampaignFetcher] designTokens is not an object; using literals only")
             designTokens = nil
         }
-        return CampaignBundle.create(rawCampaigns: raw, designTokensJSON: designTokens)
+        return CampaignBundle.create(rawCampaigns: raw, designTokensJSON: designTokens, devicePlatform: devicePlatform)
     }
 }
