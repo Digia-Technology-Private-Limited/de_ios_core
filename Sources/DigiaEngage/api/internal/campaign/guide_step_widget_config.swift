@@ -222,7 +222,7 @@ struct GuideStepWidgetConfig: Equatable {
                 : color(overlayObj.string("color"), default: defaultOverlayColor),
             alpha: bounded(
                 isFlatSpotlight
-                    ? json.double("overlayOpacity", default: 0.7)
+                    ? 1
                     : overlayObj.double("alpha", default: 0.6),
                 lower: 0,
                 upper: 1,
