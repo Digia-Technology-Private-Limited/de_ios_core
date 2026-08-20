@@ -90,7 +90,10 @@ struct DigiaRecordedSessionScreen: View {
                             .foregroundColor(.secondary)
                     } else {
                         ForEach(instance.capturedPages) { page in
-                            Label(page.pageKey, systemImage: "checkmark.circle")
+                            HStack {
+                                TypeTag(type: "page")
+                                Text(page.pageKey)
+                            }
                         }
                     }
                 }
