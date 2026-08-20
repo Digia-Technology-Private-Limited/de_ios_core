@@ -43,7 +43,94 @@ struct CampaignCanvasView: View {
     }
 }
 
-private struct CampaignCanvasStage: View {
+/// Renders an authored Canvas inside a slot.
+///
+/// Deliberately separate from `CampaignCanvasView`. That view takes a
+/// `NudgeSurface` and branches on `isBottomSheet` / `cornerRadius`, and it fits
+/// the canvas against the available *screen* box — correct for an overlay and
+/// wrong here twice over: an inline card lives inside a scrolling list where the
+/// available height is unbounded, so fitting to the viewport hands back a
+/// screen-sized slice and shoves the host's own content off the page. It also
+/// caps the scale at `maxFloatingCanvasUpscale`, which would stop a card from
+/// filling the slot the developer sized for it.
+///
+/// The rule here comes entirely from width:
+///
+/// ```text
+/// inner  = slotWidth - margin.horizontal
+/// scale  = inner / designWidth
+/// height = canvas.height * scale
+/// ```
+///
+/// A card spans its design frame, so a horizontal margin cannot make the canvas
+/// narrower — it narrows the room the card has, and the whole surface scales
+/// down uniformly to fit, type included. Side margin therefore reads as "make
+/// this card smaller" rather than "inset it", which is why the authored default
+/// is zero and a new card fills its slot.
+struct InlineCampaignCanvasView: View {
+    let canvas: CampaignCanvas
+    let designWidth: CGFloat
+    let cornerRadius: CGFloat
+    let margin: InlineCanvasMargin
+    let onAction: (CampaignCanvasActionRequest) -> Void
+
+    @ObservedObject private var theme = CampaignCanvasTheme.shared
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        GeometryReader { proxy in
+            let inner = proxy.size.width - CGFloat(margin.horizontal)
+            // Divide by whichever is larger. Normally the card spans its frame
+            // and the two agree, but a payload whose `canvasWidth` exceeds its
+            // `designWidth` would otherwise be drawn wider than `inner` by
+            // exactly that ratio and spill out of the slot. Taking the max makes
+            // "never wider than the slot" a property of the layout rather than
+            // of the data, and it is a no-op in the normal case.
+            let frame = max(designWidth, canvas.width)
+            let designScale = (inner > 0 && frame > 0) ? inner / frame : 0
+            // Then shrink to fit whatever the parent actually offers. The bound
+            // comes from the PARENT, not the screen — that distinction is the
+            // whole reason this host exists. A height-constrained parent scales
+            // the card down by aspect ratio rather than letting it overflow.
+            let availableHeight = proxy.size.height - CGFloat(margin.vertical)
+            let desiredWidth = max(canvas.width * designScale, 1)
+            let desiredHeight = max(canvas.height * designScale, 1)
+            let scale = availableHeight > 0
+                ? designScale * min(1, inner / desiredWidth, availableHeight / desiredHeight)
+                : 0
+            CampaignCanvasStage(
+                canvas: canvas,
+                authoredCornerRadius: cornerRadius,
+                isDark: theme.isDark(colorScheme),
+                showBackground: true,
+                onAction: onAction
+            )
+            .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
+            .scaleEffect(scale, anchor: .topLeading)
+            .frame(
+                width: canvas.width * scale,
+                height: canvas.height * scale,
+                alignment: .topLeading
+            )
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius * scale, style: .continuous))
+            .padding(.leading, CGFloat(margin.left))
+            .padding(.trailing, CGFloat(margin.right))
+            .padding(.top, CGFloat(margin.top))
+            .padding(.bottom, CGFloat(margin.bottom))
+        }
+        // A slot has no intrinsic height of its own, so the card reports one:
+        // the authored aspect ratio in the design frame, plus its margins.
+        .aspectRatio(
+            designWidth > 0
+                ? (designWidth + CGFloat(margin.horizontal))
+                    / max(canvas.height + CGFloat(margin.vertical), 1)
+                : 1,
+            contentMode: .fit
+        )
+    }
+}
+
+struct CampaignCanvasStage: View {
     let canvas: CampaignCanvas
     let authoredCornerRadius: CGFloat
     let isDark: Bool

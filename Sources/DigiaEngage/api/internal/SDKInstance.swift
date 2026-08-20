@@ -557,6 +557,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             events.toCep(.impressed, payload: payload)
             events.toCep(.dismissed, payload: payload)
             return true
+        case .inlineCanvas(let cfg):
+            logVerbose("routeByCampaignKey INLINE CANVAS slotKey='\(cfg.slotKey)'")
+            inlineController.setCanvasConfig(cfg.slotKey, config: cfg)
+            inlineController.setCampaign(cfg.slotKey, payload: payload)
+            context.onInlineRouted(payload: payload)
+            return true
         case .story(let cfg):
             inlineController.setStoryConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
@@ -1019,6 +1025,47 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
     }
 
+    /// An element on an inline canvas was tapped.
+    ///
+    /// Reported through the nudge conversion events rather than an inline item
+    /// funnel: a canvas has no items to walk, and it converts on a widget's
+    /// action exactly as a nudge does. The dashboard reads the same `nudge`
+    /// block for both, so the two stay consistent by construction.
+    func emitInlineCanvasClick(
+        payload: CEPTriggerPayload,
+        elementId: String? = nil,
+        ctaLabel: String? = nil,
+        actionType: String? = nil,
+        actionUrl: String? = nil,
+        ctaRole: String? = nil
+    ) {
+        events.toDigia(
+            NudgeEvent.Clicked(
+                elementId: elementId,
+                ctaLabel: ctaLabel,
+                actionType: actionType,
+                actionUrl: actionUrl,
+                ctaRole: ctaRole,
+                timeToActionMs: dwellTracker.elapsedMs(payload.cepCampaignId)
+            ),
+            payload: payload
+        )
+    }
+
+    /// The author's Hide action removed an inline canvas from its slot.
+    ///
+    /// Bypasses the stickiness that keeps inline campaigns alive across
+    /// navigation: an author who put a close control on the card is asking for
+    /// exactly the opposite.
+    func dismissInlineCanvas(slotKey: String, payload: CEPTriggerPayload) {
+        inlineController.dismissCampaign(slotKey)
+        events.toBoth(
+            .dismissed,
+            NudgeEvent.Dismissed(dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId)),
+            payload: payload
+        )
+    }
+
     func markNudgeDismissed() {
         guard let nudge = controller.activeNudge else { return }
         controller.dismissNudge()
@@ -1187,6 +1234,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             viewed = BannerEvent.Viewed(slotKey: cfg.slotKey, screenName: _currentScreen)
         case .story(let cfg):
             viewed = StoriesEvent.Viewed(slotKey: cfg.slotKey, screenName: _currentScreen)
+        case .inlineCanvas(let cfg):
+            viewed = InlineCanvasEvent.Viewed(slotKey: cfg.slotKey, screenName: _currentScreen)
         default:
             return
         }

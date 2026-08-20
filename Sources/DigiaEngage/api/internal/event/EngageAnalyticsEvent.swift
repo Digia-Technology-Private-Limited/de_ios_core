@@ -413,6 +413,27 @@ enum CarouselEvent {
 
 // ── Inline: banner ──────────────────────────────────────────────────────────
 
+/// An inline canvas painted in its slot.
+///
+/// Only the impression is canvas-specific, because only it carries a `slot_key`.
+/// Clicks and dismissals go through the nudge events: a canvas converts on a
+/// widget's action exactly as a nudge does, and has no items to walk.
+enum InlineCanvasEvent {
+    struct Viewed: EngageAnalyticsEvent {
+        var slotKey: String?
+        var screenName: String?
+
+        var eventName: String { "Digia Experience Viewed" }
+        var properties: [String: Any] {
+            nonNull([
+                ("display_style", "canvas"),
+                ("slot_key", slotKey),
+                ("screen_name", screenName),
+            ])
+        }
+    }
+}
+
 enum BannerEvent {
     struct Viewed: EngageAnalyticsEvent {
         var slotKey: String?

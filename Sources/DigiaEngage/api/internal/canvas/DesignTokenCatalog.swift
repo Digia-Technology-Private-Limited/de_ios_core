@@ -27,9 +27,11 @@ struct DesignTokenCatalog {
         let dark = effective.isEmpty ? [:] : try themeColors(themes, theme: effective[1])
         var colors: [String: CampaignColor] = [:]
         for id in Set(light.keys).union(dark.keys) {
-            if let l = canonicalCampaignColorHex(unwrapLiteral(light[id])),
-               let d = canonicalCampaignColorHex(unwrapLiteral(dark[id])) {
-                colors[id] = CampaignColor(lightHex: l, darkHex: d)
+            let lightHex = canonicalCampaignColorHex(unwrapLiteral(light[id]))
+            let darkHex = canonicalCampaignColorHex(unwrapLiteral(dark[id]))
+            if let resolvedLight = lightHex ?? darkHex,
+               let resolvedDark = darkHex ?? lightHex {
+                colors[id] = CampaignColor(lightHex: resolvedLight, darkHex: resolvedDark)
             }
         }
         var typography: [String: CampaignTypography] = [:]
@@ -44,12 +46,12 @@ struct DesignTokenCatalog {
     func resolveColor(_ property: Any?) throws -> CampaignColor? {
         guard let value = unwrapLiteral(property), !(value is NSNull) else { return nil }
         if let map = value as? [String: Any] {
-            guard let token = exactToken(map) else { throw DesignTokenError.invalid("Invalid color design property") }
-            guard let color = colors[token] else { throw DesignTokenError.invalid("Unknown color token '\(token)'") }
-            return color
+            guard let token = map["token"] as? String, !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return nil
+            }
+            return colors[token]
         }
-        guard let hex = canonicalCampaignColorHex(value) else { throw DesignTokenError.invalid("Invalid color literal") }
-        return .literal(hex)
+        return canonicalCampaignColorHex(value).map(CampaignColor.literal)
     }
 
     func resolveTypography(_ property: Any?) throws -> CampaignTypography? {

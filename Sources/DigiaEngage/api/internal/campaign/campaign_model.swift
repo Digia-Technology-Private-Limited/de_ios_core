@@ -9,6 +9,10 @@ enum CampaignConfigModel: Equatable {
     case nudge(NudgeConfig)
     case inline(InlineCarouselConfig)
     case banner(InlineBannerConfig)
+    /// A free-form Canvas campaign in a slot — the only inline kind whose content
+    /// is authored rather than filled into a fixed shape, and so the only one
+    /// that reuses the shared Canvas renderer.
+    case inlineCanvas(InlineCanvasConfig)
     case story(InlineStoryConfig)
     case survey(SurveyConfigModel)
     case floater(FloaterConfig)
@@ -78,6 +82,12 @@ struct CampaignModel: Equatable {
             case "story":
                 guard let storyConfig = InlineStoryConfig.fromJson(templateConfig) else { return nil }
                 config = .story(storyConfig)
+            case "canvas":
+                guard let canvasConfig = InlineCanvasConfig.fromJson(
+                    templateConfig,
+                    designTokens: designTokens
+                ) else { return nil }
+                config = .inlineCanvas(canvasConfig)
             default:
                 guard let carouselConfig = InlineCarouselConfig.fromJson(templateConfig) else { return nil }
                 config = .inline(carouselConfig)

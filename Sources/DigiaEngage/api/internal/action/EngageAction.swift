@@ -76,7 +76,11 @@ struct EngageActionParser {
             return (text(from: data) ?? text(from: step)).map(EngageAction.copyToClipboard)
         case "Action.share", "share":
             return (text(from: data) ?? text(from: step)).map(EngageAction.share)
-        case "Action.hideBottomSheet", "Action.dismissDialog", "Action.dismiss", "dismiss", "hide": return .dismiss
+        // `Action.hideInline` is an inline canvas closing itself: there is no
+        // overlay to pop, so the host clears the slot for the session. Same
+        // authored intent as the overlay spellings, so the same action.
+        case "Action.hideBottomSheet", "Action.dismissDialog", "Action.hideInline",
+             "Action.dismiss", "dismiss", "hide": return .dismiss
         case "Action.next", "next": return .next
         case "Action.previous", "previous", "back", "prev": return .previous
         case "Action.requestReview", "requestReview", "request_review": return .requestReview

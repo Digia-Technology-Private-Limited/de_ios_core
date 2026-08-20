@@ -7,6 +7,7 @@ final class InlineCampaignController: ObservableObject {
     @Published private var carouselConfigs: [String: InlineCarouselConfig] = [:]
     @Published private var bannerConfigs: [String: InlineBannerConfig] = [:]
     @Published private var storyConfigs: [String: InlineStoryConfig] = [:]
+    @Published private var canvasConfigs: [String: InlineCanvasConfig] = [:]
 
     func getCampaign(_ placementKey: String) -> CEPTriggerPayload? {
         campaigns[placementKey]
@@ -24,6 +25,10 @@ final class InlineCampaignController: ObservableObject {
         bannerConfigs[placementKey]
     }
 
+    func getCanvasConfig(_ placementKey: String) -> InlineCanvasConfig? {
+        canvasConfigs[placementKey]
+    }
+
     func setCampaign(_ placementKey: String, payload: CEPTriggerPayload) {
         var next = campaigns
         next[placementKey] = payload
@@ -32,6 +37,7 @@ final class InlineCampaignController: ObservableObject {
 
     func setCarouselConfig(_ placementKey: String, config: InlineCarouselConfig) {
         bannerConfigs.removeValue(forKey: placementKey)
+        canvasConfigs.removeValue(forKey: placementKey)
         var next = carouselConfigs
         next[placementKey] = config
         carouselConfigs = next
@@ -39,6 +45,7 @@ final class InlineCampaignController: ObservableObject {
 
     func setStoryConfig(_ placementKey: String, config: InlineStoryConfig) {
         bannerConfigs.removeValue(forKey: placementKey)
+        canvasConfigs.removeValue(forKey: placementKey)
         var next = storyConfigs
         next[placementKey] = config
         storyConfigs = next
@@ -47,9 +54,19 @@ final class InlineCampaignController: ObservableObject {
     func setBannerConfig(_ placementKey: String, config: InlineBannerConfig) {
         carouselConfigs.removeValue(forKey: placementKey)
         storyConfigs.removeValue(forKey: placementKey)
+        canvasConfigs.removeValue(forKey: placementKey)
         var next = bannerConfigs
         next[placementKey] = config
         bannerConfigs = next
+    }
+
+    func setCanvasConfig(_ placementKey: String, config: InlineCanvasConfig) {
+        carouselConfigs.removeValue(forKey: placementKey)
+        storyConfigs.removeValue(forKey: placementKey)
+        bannerConfigs.removeValue(forKey: placementKey)
+        var next = canvasConfigs
+        next[placementKey] = config
+        canvasConfigs = next
     }
 
     func removeCampaign(_ campaignID: String) {
@@ -64,6 +81,7 @@ final class InlineCampaignController: ObservableObject {
             carouselConfigs.removeValue(forKey: key)
             bannerConfigs.removeValue(forKey: key)
             storyConfigs.removeValue(forKey: key)
+            canvasConfigs.removeValue(forKey: key)
         }
     }
 
@@ -72,6 +90,7 @@ final class InlineCampaignController: ObservableObject {
         carouselConfigs.removeValue(forKey: placementKey)
         bannerConfigs.removeValue(forKey: placementKey)
         storyConfigs.removeValue(forKey: placementKey)
+        canvasConfigs.removeValue(forKey: placementKey)
     }
 
     func clear() {
@@ -79,5 +98,6 @@ final class InlineCampaignController: ObservableObject {
         carouselConfigs.removeAll()
         bannerConfigs.removeAll()
         storyConfigs.removeAll()
+        canvasConfigs.removeAll()
     }
 }

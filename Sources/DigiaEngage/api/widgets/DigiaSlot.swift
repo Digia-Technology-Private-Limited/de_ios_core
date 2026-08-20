@@ -59,6 +59,8 @@ public struct DigiaSlot<Placeholder: View>: View {
             DigiaInlineBannerView(config: bannerConfig, payload: payload)
         } else if let storyConfig = inlineController.getStoryConfig(placementKey) {
             DigiaInlineStoryView(config: storyConfig, payload: payload)
+        } else if let canvasConfig = inlineController.getCanvasConfig(placementKey) {
+            DigiaInlineCanvasView(config: canvasConfig, payload: payload)
         } else {
             // No renderable config resolved for this slot — clean up. CEP already
             // saw Impressed + Dismissed at route time (syncTemplate semantics).
