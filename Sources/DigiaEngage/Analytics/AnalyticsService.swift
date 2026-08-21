@@ -194,10 +194,7 @@ final class AnalyticsService {
             apiKey: config.apiKey,
             identity: AnalyticsIdentityManager(),
             queue: AnalyticsQueue(),
-            staticContext: buildStaticContext(
-                wrapperBinding: config.wrapperBinding,
-                wrapperVersion: config.wrapperVersion
-            )
+            staticContext: buildStaticContext(config)
         )
     }
 
@@ -438,19 +435,11 @@ final class AnalyticsService {
         return fmt.string(from: Date())
     }
 
-    private static func buildStaticContext(
-        wrapperBinding: String?,
-        wrapperVersion: String?
-    ) -> [String: Any] {
+    private static func buildStaticContext(_ config: DigiaConfig) -> [String: Any] {
         let platform = "ios"
-        let binding = wrapperBinding ?? "native"
+        let binding = config.wrapperBinding ?? "native"
         var ctx: [String: Any] = [
-            "sdk_version": buildSdkVersion(
-                binding: binding,
-                platform: platform,
-                wrapperVersion: wrapperVersion,
-                core: DigiaSdkVersion.value
-            ),
+            "sdk_version": config.sdkVersionDescriptor,
             "sdk_platform": binding == "native" ? platform : binding,
             "device_platform": platform,
             "device_make": "Apple",
@@ -470,19 +459,4 @@ final class AnalyticsService {
         return ctx
     }
 
-    /// Builds the composite SDK descriptor (schema v1):
-    ///   `s=schema | b=binding | p=platform | [w=wrapper |] c=core`
-    /// The wrapper segment (`w`) is present only when a thin wrapper SDK
-    /// delegates to this engine (e.g. React Native).
-    private static func buildSdkVersion(
-        binding: String,
-        platform: String,
-        wrapperVersion: String?,
-        core: String
-    ) -> String {
-        var parts = ["s=1", "b=\(binding)", "p=\(platform)"]
-        if let w = wrapperVersion, !w.isEmpty { parts.append("w=\(w)") }
-        parts.append("c=\(core)")
-        return parts.joined(separator: "|")
-    }
 }
