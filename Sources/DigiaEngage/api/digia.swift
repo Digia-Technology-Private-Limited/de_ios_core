@@ -2,6 +2,18 @@ import Foundation
 import SwiftUI
 import UIKit
 
+func buildSdkVersion(
+    binding: String,
+    platform: String,
+    wrapperVersion: String?,
+    core: String
+) -> String {
+    var parts = ["s=1", "b=\(binding)", "p=\(platform)"]
+    if let w = wrapperVersion, !w.isEmpty { parts.append("w=\(w)") }
+    parts.append("c=\(core)")
+    return parts.joined(separator: "|")
+}
+
 @MainActor
 public enum Digia {
     /// Path suffix used to recognize the SDK's debug-settings deeplink. Digia
@@ -55,6 +67,16 @@ public enum Digia {
     public static func initialize(_ config: DigiaConfig) async throws {
         guard #available(iOS 17, *) else { return }
         try await SDKInstance.shared.initialize(config)
+    }
+
+    public static var sdkVersion: String? {
+        guard let config = SDKInstance.shared.config else { return nil }
+        return buildSdkVersion(
+            binding: config.wrapperBinding ?? "native",
+            platform: "ios",
+            wrapperVersion: config.wrapperVersion,
+            core: DigiaSdkVersion.value
+        )
     }
 
     /// No-ops below iOS 17 (see `initialize`).

@@ -27,7 +27,15 @@ private struct URLSessionCampaignAPI: CampaignAPI {
         request.httpMethod = "POST"
         request.setValue(config.apiKey, forHTTPHeaderField: "x-digia-project-id")
         request.setValue("ios", forHTTPHeaderField: "X-Digia-Platform")
-        request.setValue(config.sdkVersionDescriptor, forHTTPHeaderField: "x-digia-sdk-version")
+        request.setValue(
+            buildSdkVersion(
+                binding: config.wrapperBinding ?? "native",
+                platform: "ios",
+                wrapperVersion: config.wrapperVersion,
+                core: DigiaSdkVersion.value
+            ),
+            forHTTPHeaderField: "x-digia-sdk-version"
+        )
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 10
         request.httpBody = Data("{}".utf8)

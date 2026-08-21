@@ -28,14 +28,6 @@ public struct DigiaConfig: Sendable {
     public let wrapperVersion: String?
     public let actionHandlers: DigiaActionHandlers
 
-    /// Composite SDK identity sent to Digia services and analytics.
-    public var sdkVersionDescriptor: String {
-        var parts = ["s=1", "b=\(wrapperBinding ?? "native")", "p=ios"]
-        if let wrapperVersion, !wrapperVersion.isEmpty { parts.append("w=\(wrapperVersion)") }
-        parts.append("c=\(DigiaSdkVersion.value)")
-        return parts.joined(separator: "|")
-    }
-
     public init(
         apiKey: String,
         logLevel: DigiaLogLevel = .error,

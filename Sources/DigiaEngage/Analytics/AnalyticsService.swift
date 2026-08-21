@@ -194,7 +194,10 @@ final class AnalyticsService {
             apiKey: config.apiKey,
             identity: AnalyticsIdentityManager(),
             queue: AnalyticsQueue(),
-            staticContext: buildStaticContext(config)
+            staticContext: buildStaticContext(
+                wrapperBinding: config.wrapperBinding,
+                wrapperVersion: config.wrapperVersion
+            )
         )
     }
 
@@ -435,11 +438,19 @@ final class AnalyticsService {
         return fmt.string(from: Date())
     }
 
-    private static func buildStaticContext(_ config: DigiaConfig) -> [String: Any] {
+    private static func buildStaticContext(
+        wrapperBinding: String?,
+        wrapperVersion: String?
+    ) -> [String: Any] {
         let platform = "ios"
-        let binding = config.wrapperBinding ?? "native"
+        let binding = wrapperBinding ?? "native"
         var ctx: [String: Any] = [
-            "sdk_version": config.sdkVersionDescriptor,
+            "sdk_version": buildSdkVersion(
+                binding: binding,
+                platform: platform,
+                wrapperVersion: wrapperVersion,
+                core: DigiaSdkVersion.value
+            ),
             "sdk_platform": binding == "native" ? platform : binding,
             "device_platform": platform,
             "device_make": "Apple",
