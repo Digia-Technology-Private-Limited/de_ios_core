@@ -80,6 +80,14 @@ struct CampaignFetcher {
             DigiaLog.warning("[CampaignFetcher] designTokens is not an object; using literals only")
             designTokens = nil
         }
-        return CampaignBundle.create(rawCampaigns: raw, designTokensJSON: designTokens, devicePlatform: devicePlatform)
+        let renderer = GuideRenderer(
+            wireValue: (bundle["sdkConfig"] as? [String: Any])?["guideRenderer"] as? String
+        )
+        return CampaignBundle.create(
+            rawCampaigns: raw,
+            designTokensJSON: designTokens,
+            devicePlatform: devicePlatform,
+            guideRenderer: renderer
+        )
     }
 }

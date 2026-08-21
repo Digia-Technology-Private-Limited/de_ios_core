@@ -16,6 +16,13 @@ enum GuideActionType: String {
     }
 }
 
+struct GuideEdgeInsets: Equatable {
+    let top: Double
+    let right: Double
+    let bottom: Double
+    let left: Double
+}
+
 struct GuideAction: Equatable {
     let id: String
     let label: String
@@ -26,6 +33,8 @@ struct GuideAction: Equatable {
     let fontSize: Double
     let fontWeight: Int
     let cornerRadius: Double
+    let padding: GuideEdgeInsets
+    let margin: GuideEdgeInsets
     let actions: [EngageAction]
 }
 
@@ -62,7 +71,6 @@ struct OverlayConfig: Equatable {
     let visible: Bool          // false = tooltip, true = spotlight
     let color: String
     let alpha: Double
-    let dismissOnTap: Bool
     let entranceAnimation: String // "fade"|"none"
     let cutout: CutoutConfig
 }
@@ -92,6 +100,7 @@ struct GuideStepWidgetConfig: Equatable {
     let overlay: OverlayConfig
     let content: GuideContentConfig
     let actions: [GuideAction]
+    let outsideTapBehavior: String
     let layoutMode: String
     let canvas: CampaignCanvas?
 
@@ -110,76 +119,85 @@ struct GuideStepWidgetConfig: Equatable {
         designTokens: DesignTokenCatalog = .empty
     ) -> GuideStepWidgetConfig {
         let isFlatSpotlight = json.object("target")?.string("type") == "anchorless"
+            || json["calloutPosition"] != nil
+            || json["highlightShape"] != nil
+        let isFlatTooltip = json["placement"] != nil
+        let isFlat = isFlatSpotlight || isFlatTooltip
         let bubbleObj = json.object("bubble") ?? [:]
         let overlayObj = json.object("overlay") ?? [:]
         let contentObj = json.object("content") ?? [:]
 
         let arrowObj = bubbleObj.object("arrow") ?? [:]
         let calloutBackground = color(
-            json.string("calloutBackgroundColor"),
+            json.string(isFlatSpotlight ? "calloutBackgroundColor" : "backgroundColor"),
             default: "#FFFFFF"
         )
         let arrow = ArrowConfig(
-            visible: isFlatSpotlight
+            visible: isFlat
                 ? json.bool("showArrow", default: true)
                 : arrowObj.bool("visible", default: true),
-            preferredDirection: isFlatSpotlight
-                ? json.string("calloutPosition", default: "below")
+            preferredDirection: isFlat
+                ? json.string(isFlatSpotlight ? "calloutPosition" : "placement", default: "auto")
                 : arrowObj.string("preferred_direction", default: "auto"),
-            size: isFlatSpotlight
+            size: isFlat
                 ? json.int("arrowSize", default: 8)
                 : arrowObj.int("size", default: 10),
-            color: isFlatSpotlight
-                ? color(json.string("arrowColor"), default: calloutBackground)
+            color: isFlat
+                ? calloutBackground
                 : color(arrowObj.string("color"), default: defaultArrowColor)
         )
 
         let bubble = BubbleConfig(
-            backgroundColor: isFlatSpotlight
+            backgroundColor: isFlat
                 ? calloutBackground
                 : color(bubbleObj.string("background_color"), default: defaultBubbleBackground),
-            borderColor: isFlatSpotlight
-                ? color(json.string("calloutBorderColor"), default: "#00000000")
+            borderColor: isFlat
+                ? color(
+                    json.string(isFlatSpotlight ? "calloutBorderColor" : "borderColor"),
+                    default: "#00000000"
+                )
                 : color(bubbleObj.string("border_color"), default: "#00000000"),
             borderWidth: nonNegative(
-                isFlatSpotlight
-                    ? json.double("calloutBorderWidth", default: 0)
+                isFlat
+                    ? json.double(isFlatSpotlight ? "calloutBorderWidth" : "borderWidth", default: 0)
                     : bubbleObj.double("border_width", default: 0),
                 fallback: 0
             ),
             cornerRadius: nonNegative(
-                isFlatSpotlight
-                    ? json.double("calloutCornerRadius", default: 8)
+                isFlat
+                    ? json.double(isFlatSpotlight ? "calloutCornerRadius" : "cornerRadius", default: 8)
                     : bubbleObj.double("corner_radius", default: 12),
-                fallback: isFlatSpotlight ? 8 : 12
+                fallback: isFlat ? 8 : 12
             ),
             paddingHorizontal: nonNegative(
-                isFlatSpotlight
-                    ? json.double("calloutPadding", default: 12)
+                isFlat
+                    ? json.double(isFlatSpotlight ? "calloutPadding" : "padding", default: 12)
                     : bubbleObj.double("padding_horizontal", default: 16),
-                fallback: isFlatSpotlight ? 12 : 16
+                fallback: isFlat ? 12 : 16
             ),
             paddingVertical: nonNegative(
-                isFlatSpotlight
-                    ? json.double("calloutPadding", default: 12)
+                isFlat
+                    ? json.double(isFlatSpotlight ? "calloutPadding" : "padding", default: 12)
                     : bubbleObj.double("padding_vertical", default: 12),
                 fallback: 12
             ),
             maxWidthDp: positive(
-                isFlatSpotlight
-                    ? json.double("calloutMaxWidth", default: 280)
+                isFlat
+                    ? json.double(isFlatSpotlight ? "calloutMaxWidth" : "maxWidth", default: 280)
                     : bubbleObj.double("max_width", default: 280),
                 fallback: 280
             ),
             elevation: nonNegative(
-                isFlatSpotlight
-                    ? (json.bool("calloutShadow", default: true) ? 6 : 0)
+                isFlat
+                    ? (json.bool(isFlatSpotlight ? "calloutShadow" : "shadow", default: true) ? 8 : 0)
                     : bubbleObj.double("elevation", default: 6),
                 fallback: 6
             ),
             calloutGap: nonNegative(
                 isFlatSpotlight
-                    ? json.double("calloutGap", default: 8)
+                    ? json.double("calloutGap", default: 8) + (arrow.visible ? Double(arrow.size) : 0)
+                    : isFlatTooltip
+                        ? (arrow.visible ? Double(arrow.size) + 4 : 8)
                     : bubbleObj.double("callout_gap", default: 8),
                 fallback: 8
             ),
@@ -222,15 +240,12 @@ struct GuideStepWidgetConfig: Equatable {
                 : color(overlayObj.string("color"), default: defaultOverlayColor),
             alpha: bounded(
                 isFlatSpotlight
-                    ? 1
+                    ? json.double("overlayOpacity", default: 0.7)
                     : overlayObj.double("alpha", default: 0.6),
                 lower: 0,
                 upper: 1,
                 fallback: isFlatSpotlight ? 0.7 : 0.6
             ),
-            dismissOnTap: isFlatSpotlight
-                ? json.string("outsideTapBehavior", default: "next") != "nothing"
-                : overlayObj.bool("dismiss_on_tap", default: false),
             entranceAnimation: overlayObj.string("entrance_animation", default: "fade"),
             cutout: cutout
         )
@@ -269,11 +284,11 @@ struct GuideStepWidgetConfig: Equatable {
             let typeStr = obj.nonBlankString("action_type")
                 ?? obj.string("type", default: "dismiss")
             let actionType = GuideActionType.parse(typeStr)
-            let style = obj.string("style", default: "filled")
-            let isPrimary = style == "filled" || style == "primary"
+            let style = buttonStyle(obj.string("style", default: "fill"))
+            let isPrimary = style == "fill" || style == "elevated"
             let defaultBackground = isPrimary
-                ? color(json.string("buttonPrimaryBackgroundColor"), default: defaultButtonBackground)
-                : "#00000000"
+                ? color(json.string("buttonPrimaryBackgroundColor"), default: isFlat ? "#4945FF" : defaultButtonBackground)
+                : color(json.string("buttonGhostTextColor"), default: "#4945FF")
             let defaultText = color(
                 json.string(isPrimary ? "buttonPrimaryTextColor" : "buttonGhostTextColor"),
                 default: defaultButtonText
@@ -284,6 +299,15 @@ struct GuideStepWidgetConfig: Equatable {
             case "prev", "back", "previous": .previous
             case "open_url": obj.nonBlankString("url").map(EngageAction.openUrl) ?? .dismiss
             case "deep_link", "deeplink": obj.nonBlankString("url").map(EngageAction.openDeeplink) ?? .dismiss
+            case "copy": obj.nonBlankString("text").map(EngageAction.copyToClipboard) ?? .dismiss
+            case "share": obj.nonBlankString("text").map(EngageAction.share) ?? .dismiss
+            case "customkv": (obj["payload"] as? [String: Any]).flatMap { raw in
+                let payload = raw.reduce(into: [String: String]()) { result, entry in
+                    if let value = entry.value as? String { result[entry.key] = value }
+                }
+                return payload.isEmpty ? nil : .customKV(payload)
+            } ?? .dismiss
+            case "fire_event": obj.nonBlankString("event_name").map(EngageAction.fireEvent) ?? .dismiss
             default: .dismiss
             }
             actions.append(
@@ -292,17 +316,29 @@ struct GuideStepWidgetConfig: Equatable {
                     label: obj.string("label"),
                     style: style,
                     actionType: actionType,
-                    backgroundColor: obj.nonBlankString("background_color")
+                    backgroundColor: (obj.nonBlankString("backgroundColor")
+                        ?? obj.nonBlankString("background_color"))
                         .map { color($0, default: defaultButtonBackground) }
                         ?? defaultBackground,
-                    textColor: obj.nonBlankString("text_color")
+                    textColor: (obj.nonBlankString("textColor")
+                        ?? obj.nonBlankString("text_color"))
                         .map { color($0, default: defaultButtonText) }
                         ?? defaultText,
-                    fontSize: positive(obj.double("fontSize", default: 14), fallback: 14),
-                    fontWeight: DigiaFontWeight.value(obj["fontWeight"], default: 600),
+                    fontSize: positive(number(obj, "fontSize", "font_size", default: 13), fallback: 13),
+                    fontWeight: DigiaFontWeight.value(obj["fontWeight"] ?? obj["font_weight"], default: 600),
                     cornerRadius: nonNegative(
-                        obj.double("corner_radius", default: 8),
+                        number(obj, "cornerRadius", "corner_radius", default: 8),
                         fallback: 8
+                    ),
+                    padding: edges(
+                        obj["padding"],
+                        fallback: GuideEdgeInsets(top: 8, right: 12, bottom: 8, left: 12)
+                    ),
+                    margin: edges(
+                        obj["margin"],
+                        fallback: index == 0
+                            ? GuideEdgeInsets(top: 0, right: 0, bottom: 0, left: 0)
+                            : GuideEdgeInsets(top: 0, right: 0, bottom: 0, left: 8)
                     ),
                     actions: onClick.map { EngageActionParser().parse($0) } ?? [legacyAction]
                 )
@@ -320,6 +356,9 @@ struct GuideStepWidgetConfig: Equatable {
             overlay: overlay,
             content: content,
             actions: actions,
+            outsideTapBehavior: json["outsideTapBehavior"] != nil
+                ? json.string("outsideTapBehavior", default: "next")
+                : (overlayObj.bool("dismiss_on_tap", default: false) ? "next" : "nothing"),
             layoutMode: layoutMode,
             canvas: canvas
         )
@@ -345,6 +384,47 @@ struct GuideStepWidgetConfig: Equatable {
         fallback: Double
     ) -> Double {
         value.isFinite ? min(max(value, lower), upper) : fallback
+    }
+
+    private static func buttonStyle(_ value: String) -> String {
+        switch value.lowercased() {
+        case "outline", "secondary": "outline"
+        case "text", "ghost": "text"
+        case "elevated": "elevated"
+        default: "fill"
+        }
+    }
+
+    private static func number(
+        _ json: [String: Any],
+        _ first: String,
+        _ second: String,
+        default fallback: Double
+    ) -> Double {
+        if json[first] != nil { return json.double(first, default: fallback) }
+        return json.double(second, default: fallback)
+    }
+
+    private static func edges(_ value: Any?, fallback: GuideEdgeInsets) -> GuideEdgeInsets {
+        if let value = value as? NSNumber {
+            let side = spacing(value.doubleValue)
+            return GuideEdgeInsets(top: side, right: side, bottom: side, left: side)
+        }
+        if let value = value as? String, let number = Double(value) {
+            let side = spacing(number)
+            return GuideEdgeInsets(top: side, right: side, bottom: side, left: side)
+        }
+        guard let json = value as? [String: Any] else { return fallback }
+        return GuideEdgeInsets(
+            top: spacing(json.double("top", default: fallback.top)),
+            right: spacing(json.double("right", default: fallback.right)),
+            bottom: spacing(json.double("bottom", default: fallback.bottom)),
+            left: spacing(json.double("left", default: fallback.left))
+        )
+    }
+
+    private static func spacing(_ value: Double) -> Double {
+        value.isFinite ? min(max(value, 0), 64) : 0
     }
 
     private static func nestedText(

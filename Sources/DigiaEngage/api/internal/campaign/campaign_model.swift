@@ -251,7 +251,10 @@ struct CampaignModel: Equatable {
                 : defaultCampaignCanvasDesignWidth,
             widgetJsonForStep: { stepJson in
                 var widget = stepJson
-                widget["outsideTapBehavior"] = templateJson["outsideTapBehavior"]
+                widget["outsideTapBehavior"] = templateJson.string(
+                    "outsideTapBehavior",
+                    default: "next"
+                )
                 return widget
             }
         )

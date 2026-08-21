@@ -48,13 +48,13 @@ struct GuideOverlayView: View {
                         designWidth: state.campaign.guideConfig?.designWidth
                             ?? defaultCampaignCanvasDesignWidth,
                         anchorRect: anchorRect,
-                        safeAreaInsets: keyWindow?.safeAreaInsets ?? .zero,
                         cornerRadius: cornerRadius,
                         imageURL: imageURL,
                         nextImageURL: state.steps.indices.contains(state.stepIndex + 1)
                             ? state.steps[state.stepIndex + 1].target.anchorlessTarget?.imageURL
                             : nil,
                         onAdvance: { SDKInstance.shared.advanceGuide() },
+                        onOutsideTap: { SDKInstance.shared.advanceGuide(completesOnLast: false) },
                         onDismiss: { SDKInstance.shared.dismissGuide() }
                     )
                     .environment(\.digiaVariables, state.variableContext)
@@ -102,8 +102,15 @@ struct GuideOverlayView: View {
     private func resolve(_ target: GuideTarget, cornerRadius: CGFloat) -> GuideResolvedTarget {
         switch target {
         case let .registeredAnchor(anchorKey):
-            guard let rect = anchors.getRect(for: anchorKey) else { return .notReady }
-            guard rect.isFiniteAndPositive else { return .failed(.invalidGeometry) }
+            let rect: CGRect
+            switch anchors.resolution(for: anchorKey) {
+            case let .available(value):
+                rect = value
+            case .missing:
+                return .notReady
+            case .unavailable:
+                return .failed(.invalidGeometry)
+            }
             return .ready(
                 rect,
                 anchors.getCornerRadius(for: anchorKey),
@@ -141,11 +148,11 @@ private struct GuideStepOverlay: View {
     let totalSteps: Int
     let designWidth: CGFloat
     let anchorRect: CGRect
-    let safeAreaInsets: UIEdgeInsets
     let cornerRadius: CGFloat
     let imageURL: URL?
     let nextImageURL: URL?
     let onAdvance: () -> Void
+    let onOutsideTap: () -> Void
     let onDismiss: () -> Void
 
     @Environment(\.digiaVariables) private var variables
@@ -164,71 +171,42 @@ private struct GuideStepOverlay: View {
 
     var body: some View {
         GeometryReader { geo in
-            let safeBounds = CGRect(
-                x: safeAreaInsets.left,
-                y: safeAreaInsets.top,
-                width: max(0, geo.size.width - safeAreaInsets.left - safeAreaInsets.right),
-                height: max(0, geo.size.height - safeAreaInsets.top - safeAreaInsets.bottom)
-            )
+            let safeBounds = CGRect(origin: .zero, size: geo.size)
             let isAnchorless = imageURL != nil
             let isCanvas = config.canvas != nil && config.layoutMode == "canvas"
-            let arrowSize = isAnchorless || isCanvas ? CGFloat(config.bubble.arrow.size) : 10
+            let arrowSize = CGFloat(config.bubble.arrow.size)
             let arrowVisible = config.bubble.arrow.visible
-            let gap = isAnchorless || isCanvas
-                ? CGFloat(config.bubble.calloutGap)
-                : 24
-            let usesCanvasPlacement = isAnchorless || isCanvas
-            let paddedAnchor = isAnchorless
-                ? anchorRect
-                : anchorRect.insetBy(
+            let gap = CGFloat(config.bubble.calloutGap)
+            let paddedAnchor = isSpotlight && !isAnchorless
+                ? anchorRect.insetBy(
                     dx: -CGFloat(config.overlay.cutout.padding),
                     dy: -CGFloat(config.overlay.cutout.padding)
                 )
-            let placementAnchor = isAnchorless ? paddedAnchor : anchorRect
-            let placement = usesCanvasPlacement
-                ? resolvedPlacement(
-                    preferred: config.bubble.arrow.preferredDirection,
-                    anchor: placementAnchor,
-                    bubble: bubbleSize,
-                    screen: safeBounds,
-                    gap: gap
-                )
-                : resolvedClassicPlacement(
-                    preferred: config.bubble.arrow.preferredDirection,
-                    anchor: anchorRect,
-                    bubble: bubbleSize,
-                    screen: safeBounds
-                )
-            let bubbleOrigin = usesCanvasPlacement
-                ? calloutOrigin(
-                    placement: placement,
-                    anchor: placementAnchor,
-                    bubble: bubbleSize,
-                    screen: safeBounds,
-                    gap: gap
-                )
-                : classicBubbleOrigin(
-                    placement: placement,
-                    anchor: anchorRect,
-                    bubble: bubbleSize,
-                    screen: safeBounds,
-                    maxWidth: CGFloat(config.bubble.maxWidthDp)
-                )
-            let arrowPosition = usesCanvasPlacement
-                ? calloutArrowPosition(
-                    placement: placement,
-                    anchor: paddedAnchor,
-                    bubbleOrigin: bubbleOrigin,
-                    bubble: bubbleSize,
-                    cornerRadius: CGFloat(config.bubble.cornerRadius),
-                    arrowSize: arrowSize,
-                    screen: safeBounds
-                )
-                : classicArrowPosition(
-                    placement: placement,
-                    anchor: anchorRect,
-                    screen: safeBounds
-                )
+                : anchorRect
+            let placementAnchor = paddedAnchor
+            let placement = resolvedPlacement(
+                preferred: config.bubble.arrow.preferredDirection,
+                anchor: placementAnchor,
+                bubble: bubbleSize,
+                screen: safeBounds,
+                gap: gap
+            )
+            let bubbleOrigin = calloutOrigin(
+                placement: placement,
+                anchor: placementAnchor,
+                bubble: bubbleSize,
+                screen: safeBounds,
+                gap: gap
+            )
+            let arrowPosition = calloutArrowPosition(
+                placement: placement,
+                anchor: paddedAnchor,
+                bubbleOrigin: bubbleOrigin,
+                bubble: bubbleSize,
+                cornerRadius: CGFloat(config.bubble.cornerRadius),
+                arrowSize: arrowSize,
+                screen: safeBounds
+            )
 
             ZStack(alignment: .topLeading) {
                 // Background: spotlight scrim with cutout, or transparent tap-to-dismiss.
@@ -236,21 +214,25 @@ private struct GuideStepOverlay: View {
                     GuideSpotlightScrim(
                         anchorRect: anchorRect,
                         cutout: config.overlay.cutout,
-                        cornerRadius: cornerRadius,
+                        cornerRadius: imageURL == nil
+                            ? CGFloat(config.overlay.cutout.cornerRadius)
+                            : cornerRadius,
                         isAnchorless: isAnchorless,
                         color: guideColor(config.overlay.color, fallback: .black),
                         alpha: config.overlay.alpha
                     )
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        guard config.overlay.dismissOnTap else { return }
-                        if imageURL == nil { onDismiss() } else { onAdvance() }
+                        guard config.outsideTapBehavior == "next" else { return }
+                        onOutsideTap()
                     }
                     .ignoresSafeArea()
                 } else {
                     Color.clear
                         .contentShape(Rectangle())
-                        .onTapGesture { onDismiss() }
+                        .onTapGesture {
+                            if config.outsideTapBehavior == "next" { onOutsideTap() }
+                        }
                         .ignoresSafeArea()
                 }
 
@@ -262,7 +244,9 @@ private struct GuideStepOverlay: View {
                     .clipShape(
                         GuideCutoutShape(
                             shape: config.overlay.cutout.shape,
-                            cornerRadius: cornerRadius
+                            cornerRadius: imageURL == nil
+                                ? CGFloat(config.overlay.cutout.cornerRadius)
+                                : cornerRadius
                         )
                     )
                     .position(x: anchorRect.midX, y: anchorRect.midY)
@@ -271,7 +255,7 @@ private struct GuideStepOverlay: View {
                 positionedBubble(
                     viewportSize: geo.size,
                     origin: bubbleOrigin,
-                    isAnchorless: usesCanvasPlacement,
+                    fixedWidth: true,
                     canvasPointerDirection: isCanvas && arrowVisible ? placement.canvasPointerDirection : nil,
                     canvasPointerSize: isCanvas && arrowVisible ? arrowSize : 0,
                     canvasPointerCenter: isCanvas && arrowVisible
@@ -282,15 +266,13 @@ private struct GuideStepOverlay: View {
                 if arrowVisible && bubbleSize != .zero && !isCanvas {
                     GuideArrow(
                         direction: placement.arrowDirection,
-                        color: guideColor(config.bubble.arrow.color, fallback: bubbleBackground)
+                        color: guideColor(config.bubble.arrow.color, fallback: bubbleBackground),
+                        borderColor: guideColor(config.bubble.borderColor, fallback: .clear),
+                        borderWidth: CGFloat(config.bubble.borderWidth)
                     )
                         .frame(
-                            width: isAnchorless
-                                ? (placement.isVertical ? arrowSize * 2 : arrowSize)
-                                : 18,
-                            height: isAnchorless
-                                ? (placement.isVertical ? arrowSize : arrowSize * 2)
-                                : 10
+                            width: placement.isVertical ? arrowSize * 2 : arrowSize,
+                            height: placement.isVertical ? arrowSize : arrowSize * 2
                         )
                         .position(arrowPosition)
                         .allowsHitTesting(false)
@@ -336,7 +318,7 @@ private struct GuideStepOverlay: View {
             }
             guard step.advanceTrigger == "auto", let delayMs = step.autoDelayMs, delayMs > 0 else { return }
             try? await Task.sleep(nanoseconds: guideDelayNanoseconds(delayMs))
-            if !Task.isCancelled { onAdvance() }
+            if !Task.isCancelled { onOutsideTap() }
         }
     }
 
@@ -346,12 +328,12 @@ private struct GuideStepOverlay: View {
     private func positionedBubble(
         viewportSize: CGSize,
         origin: CGPoint,
-        isAnchorless: Bool,
+        fixedWidth: Bool,
         canvasPointerDirection: GuideCanvasPointerDirection?,
         canvasPointerSize: CGFloat,
         canvasPointerCenter: CGFloat?
     ) -> some View {
-        if isAnchorless {
+        if fixedWidth {
             let width = max(0, min(CGFloat(config.bubble.maxWidthDp), viewportSize.width - 32))
             bubble(
                 viewportSize: viewportSize,
@@ -457,7 +439,7 @@ private struct GuideStepOverlay: View {
                     .foregroundColor(guideColor(config.content.stepIndicator.color, fallback: .white.opacity(0.67)))
             }
             if !config.actions.isEmpty {
-                HStack(spacing: 8) {
+                HStack(spacing: 0) {
                     Spacer()
                     ForEach(Array(config.actions.enumerated()), id: \.offset) { _, action in
                         Button(action: { handleAction(action) }) {
@@ -469,22 +451,75 @@ private struct GuideStepOverlay: View {
                                         italic: false
                                     ))
                                 )
-                                .foregroundColor(guideColor(action.textColor, fallback: bubbleBackground))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .background(guideColor(action.backgroundColor, fallback: .white))
+                                .foregroundColor(
+                                    guideColor(
+                                        action.style == "fill" || action.style == "elevated"
+                                            ? action.textColor : action.backgroundColor,
+                                        fallback: bubbleBackground
+                                    )
+                                )
+                                .padding(
+                                    EdgeInsets(
+                                        top: action.padding.top,
+                                        leading: action.padding.left,
+                                        bottom: action.padding.bottom,
+                                        trailing: action.padding.right
+                                    )
+                                )
+                                .background(
+                                    action.style == "fill" || action.style == "elevated"
+                                        ? guideColor(action.backgroundColor, fallback: .white)
+                                        : .clear
+                                )
                                 .clipShape(RoundedRectangle(cornerRadius: CGFloat(action.cornerRadius)))
+                                .overlay {
+                                    if action.style == "outline" {
+                                        RoundedRectangle(cornerRadius: CGFloat(action.cornerRadius))
+                                            .stroke(
+                                                guideColor(action.backgroundColor, fallback: .clear),
+                                                lineWidth: 1.5
+                                            )
+                                    }
+                                }
+                                .shadow(radius: action.style == "elevated" ? 2 : 0)
                         }
+                        .buttonStyle(.plain)
+                        .padding(
+                            EdgeInsets(
+                                top: action.margin.top,
+                                leading: action.margin.left,
+                                bottom: action.margin.bottom,
+                                trailing: action.margin.right
+                            )
+                        )
                     }
                 }
-                .padding(.top, 4)
+                .padding(.top, 12)
             }
         }
         .padding(.horizontal, CGFloat(config.bubble.paddingHorizontal))
         .padding(.vertical, CGFloat(config.bubble.paddingVertical))
         .background(bubbleBackground)
         .clipShape(RoundedRectangle(cornerRadius: CGFloat(config.bubble.cornerRadius)))
-        .shadow(radius: CGFloat(config.bubble.elevation))
+        .overlay {
+            if config.bubble.borderWidth > 0 {
+                RoundedRectangle(cornerRadius: CGFloat(config.bubble.cornerRadius))
+                    .stroke(
+                        guideColor(config.bubble.borderColor, fallback: .clear),
+                        lineWidth: CGFloat(config.bubble.borderWidth)
+                    )
+            }
+        }
+        .shadow(
+            color: .black.opacity(config.bubble.elevation > 0 ? 0.15 : 0),
+            radius: config.bubble.elevation > 0 ? 12 : 0,
+            x: 0,
+            y: config.bubble.elevation > 0 ? 4 : 0
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if !isSpotlight, config.outsideTapBehavior == "next" { onOutsideTap() }
+        }
     }
 
     private func handleCanvasAction(_ request: CampaignCanvasActionRequest) {
@@ -518,6 +553,11 @@ private struct GuideStepOverlay: View {
             ctaLabel: interpolate(action.label, context: variables),
             action: reportedAction
         )
+        action.actions.forEach { rawAction in
+            if case .fireEvent(let eventName) = rawAction.resolved(with: variables) {
+                SDKInstance.shared.fireGuideEvent(eventName)
+            }
+        }
         Task {
             await SDKInstance.shared.executeActionFlow(
                 action.actions,
@@ -573,7 +613,6 @@ private func resolvedPlacement(
     screen: CGRect,
     gap: CGFloat
 ) -> CalloutPlacement {
-    let isAuto = preferred == "auto"
     let requested: CalloutPlacement = switch preferred {
     case "above", "top": .above
     case "below", "bottom": .below
@@ -587,66 +626,12 @@ private func resolvedPlacement(
     let fitsBelow = anchor.maxY + gap + bubble.height <= screen.maxY - margin
     let fitsLeft = anchor.minX - gap - bubble.width >= screen.minX + margin
     let fitsRight = anchor.maxX + gap + bubble.width <= screen.maxX - margin
-    if isAuto {
-        let candidates: [(CalloutPlacement, Bool)] = [
-            (.below, fitsBelow),
-            (.above, fitsAbove),
-            (.right, fitsRight),
-            (.left, fitsLeft),
-        ]
-        return candidates.first(where: { $0.1 })?.0 ?? .below
-    }
     switch requested {
     case .above: return fitsAbove || !fitsBelow ? .above : .below
     case .below: return fitsBelow || !fitsAbove ? .below : .above
     case .left: return fitsLeft || !fitsRight ? .left : .right
     case .right: return fitsRight || !fitsLeft ? .right : .left
     }
-}
-
-private func resolvedClassicPlacement(
-    preferred: String,
-    anchor: CGRect,
-    bubble: CGSize,
-    screen: CGRect
-) -> CalloutPlacement {
-    switch preferred {
-    case "top": return .below
-    case "bottom", "start", "end": return .above
-    default:
-        let spaceBelow = screen.maxY - anchor.maxY
-        return spaceBelow >= bubble.height + 24 || spaceBelow >= anchor.minY ? .below : .above
-    }
-}
-
-private func classicArrowPosition(
-    placement: CalloutPlacement,
-    anchor: CGRect,
-    screen: CGRect
-) -> CGPoint {
-    CGPoint(
-        x: min(max(anchor.midX, screen.minX + 17), screen.maxX - 17),
-        y: placement == .below ? anchor.maxY + 7 : anchor.minY - 7
-    )
-}
-
-private func classicBubbleOrigin(
-    placement: CalloutPlacement,
-    anchor: CGRect,
-    bubble: CGSize,
-    screen: CGRect,
-    maxWidth: CGFloat
-) -> CGPoint {
-    let centerX = min(
-        max(anchor.midX, screen.minX + maxWidth / 2 + 8),
-        screen.maxX - maxWidth / 2 - 8
-    )
-    return CGPoint(
-        x: centerX - bubble.width / 2,
-        y: placement == .below
-            ? anchor.maxY + 24
-            : anchor.minY - 24 - bubble.height
-    )
 }
 
 private func calloutOrigin(
@@ -688,7 +673,7 @@ private func calloutArrowPosition(
     arrowSize: CGFloat,
     screen: CGRect
 ) -> CGPoint {
-    let inset = max(cornerRadius, arrowSize)
+    let inset = cornerRadius + arrowSize + 2
     if placement.isVertical {
         let x = min(
             max(anchor.midX, bubbleOrigin.x + inset),
@@ -712,10 +697,12 @@ private func calloutArrowPosition(
 private struct GuideArrow: View {
     let direction: GuideArrowDirection
     let color: Color
+    let borderColor: Color
+    let borderWidth: CGFloat
 
     var body: some View {
         GeometryReader { geo in
-            Path { path in
+            let triangle = Path { path in
                 let w = geo.size.width
                 let h = geo.size.height
                 switch direction {
@@ -738,7 +725,10 @@ private struct GuideArrow: View {
                 }
                 path.closeSubpath()
             }
-            .fill(color)
+            triangle.fill(color)
+            if borderWidth > 0 {
+                triangle.stroke(borderColor, lineWidth: borderWidth)
+            }
         }
     }
 }
@@ -760,16 +750,7 @@ private struct GuideSpotlightScrim: View {
             let safeAlpha = alpha.isFinite ? min(max(alpha, 0), 1) : 0
             context.fill(Path(CGRect(origin: .zero, size: size)), with: .color(color.opacity(safeAlpha)))
             context.blendMode = .clear
-            let path = isAnchorless
-                ? shape.path(in: hole)
-                : (cutout.shape == "rect"
-                    ? Path(hole)
-                    : Path(
-                        roundedRect: hole,
-                            cornerRadius: cutout.shape == "circle"
-                            ? max(hole.width, hole.height) / 2
-                            : CGFloat(cutout.cornerRadius)
-                    ))
+            let path = shape.path(in: hole)
             context.fill(path, with: .color(.black))
             if cutout.glowWidth > 0 {
                 context.blendMode = .normal
@@ -826,11 +807,4 @@ private func guideDelayNanoseconds(_ milliseconds: Int) -> UInt64 {
 
 private func guideColor(_ hex: String, fallback: Color) -> Color {
     Color(hex: hex) ?? fallback
-}
-
-private extension CGRect {
-    var isFiniteAndPositive: Bool {
-        minX.isFinite && minY.isFinite && maxX.isFinite && maxY.isFinite
-            && width > 0 && height > 0
-    }
 }

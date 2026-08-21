@@ -6,6 +6,7 @@ enum EngageAction: Equatable {
     case copyToClipboard(String)
     case share(String)
     case customKV([String: String])
+    case fireEvent(String)
     case dismiss
     case next
     case previous
@@ -18,6 +19,7 @@ enum EngageAction: Equatable {
         case .copyToClipboard: "copy"
         case .share: "share"
         case .customKV: "customKV"
+        case .fireEvent: "fire_event"
         case .dismiss: "dismiss"
         case .next: "next"
         case .previous: "previous"
@@ -83,6 +85,10 @@ struct EngageActionParser {
         case "Action.customKV":
             guard let raw = data["payload"] as? [String: Any] else { return nil }
             return customKV(from: raw)
+        case "fire_event":
+            return (string(in: data, keys: ["event_name"])
+                ?? string(in: step, keys: ["event_name"]))
+                .map(EngageAction.fireEvent)
         default: return nil
         }
     }
