@@ -2,6 +2,10 @@ import Foundation
 import SwiftUI
 import UIKit
 
+/// Builds the composite SDK descriptor (schema v1):
+///   `s=schema | b=binding | p=platform | [w=wrapper |] c=core`
+/// The wrapper segment (`w`) is present only when a thin wrapper SDK
+/// delegates to this engine (e.g. React Native).
 func buildSdkVersion(
     binding: String,
     platform: String,
