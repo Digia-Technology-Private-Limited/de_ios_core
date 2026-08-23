@@ -137,13 +137,39 @@ struct CampaignCanvasStage: View {
     let showBackground: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
 
+    /// Where a tap that carries `Action.showStory` is routed.
+    ///
+    /// The element that fires it is usually a *sibling* of the story rail rather
+    /// than a descendant, so the rail can never hear the tap itself. The stage
+    /// owns every child, which makes it the one place that sees both.
+    @State private var storyOpenIndex: Int?
+
+    private func dispatch(_ request: CampaignCanvasActionRequest) {
+        for action in request.actions {
+            if case .showStory(let index) = action { storyOpenIndex = index }
+        }
+        // Forwarded whole, so the tap's analytics and any other actions on it
+        // behave exactly as they would anywhere else; the runner has no case for
+        // `showStory` and ignores it.
+        onAction(request)
+    }
+
+    /// The canvas's story rail, if it has one. At most one: the dashboard places
+    /// exactly one per campaign and forbids adding another.
+    private var story: CampaignCanvasWidget? {
+        canvas.children.lazy.compactMap { child -> CampaignCanvasWidget? in
+            guard case .widget(_, _, let widget) = child, case .story = widget else { return nil }
+            return widget
+        }.first
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             if showBackground {
                 CampaignCanvasPaintView(paint: canvas.background, isDark: isDark)
             }
             ForEach(canvas.children) { child in
-                CanvasChildView(child: child, isDark: isDark, onAction: onAction)
+                CanvasChildView(child: child, isDark: isDark, onAction: dispatch)
                     .frame(width: child.rect.width, height: child.rect.height, alignment: .topLeading)
                     .modifier(CanvasChildBoundsModifier(clips: child.clipsToAuthoredRect))
                     .allowsHitTesting(child.isHitTestable)
@@ -152,6 +178,27 @@ struct CampaignCanvasStage: View {
         }
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
         .clipShape(RoundedRectangle(cornerRadius: max(0, authoredCornerRadius)))
+        .fullScreenCover(isPresented: Binding(
+            get: { storyOpenIndex != nil && story != nil },
+            set: { if !$0 { storyOpenIndex = nil } }
+        )) {
+            if case .story(
+                _, let pages, _, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
+            ) = story, !pages.isEmpty {
+                CanvasStoryViewer(
+                    pages: pages,
+                    chrome: chrome,
+                    // Clamped rather than trusted: the authored number can outlive
+                    // the story it named if the author later deletes one.
+                    initialIndex: min(max(0, storyOpenIndex ?? 0), pages.count - 1),
+                    restartOnCompleted: restartOnCompleted,
+                    startMuted: startMuted,
+                    isDark: isDark,
+                    onAction: onAction,
+                    onDismiss: { storyOpenIndex = nil }
+                )
+            }
+        }
     }
 }
 
@@ -182,18 +229,23 @@ enum CampaignCanvasRendererRegistry {
         "video": { widget, dark, _ in guard case .video(let box, let source, let autoplay, let loop, let muted, let controls, let fit) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasVideoRenderer(box: box, source: source, autoplay: autoplay, loop: loop, muted: muted, showControls: controls, fit: fit, isDark: dark)) },
         "container": { widget, dark, _ in guard case .container(let fill, let radius, let border, let shadow) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasContainerRenderer(fill: fill, cornerRadius: radius, border: border, shadow: shadow, isDark: dark)) },
         "divider": { widget, dark, _ in guard case .divider(let box, let axis, let pattern, let cap, let inset, let dash, let color) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasDividerRenderer(box: box, axis: axis, pattern: pattern, strokeCap: cap, inset: inset, dashPattern: dash, color: color, isDark: dark)) },
+        "carousel": { widget, dark, onAction in guard case .carousel = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasCarouselRenderer(widget: widget, isDark: dark, onAction: onAction)) },
+        "story": { widget, dark, onAction in guard case .story = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasStoryRailRenderer(widget: widget, isDark: dark, onAction: onAction)) },
+        "storyProgress": { widget, dark, _ in guard case .storyProgress(_, let active, let track, let barHeight, let radius, let gap) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasStoryProgressRenderer(activeColor: active, trackColor: track, barHeight: barHeight, cornerRadius: radius, gap: gap, isDark: dark)) },
+        "storyClose": { widget, dark, _ in guard case .storyClose(_, let visible, let icon, let background) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasStoryChromeButton(kind: .close, visible: visible, iconColor: icon, backgroundColor: background, isDark: dark)) },
+        "storyMute": { widget, dark, _ in guard case .storyMute(_, let visible, let icon, let background) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasStoryChromeButton(kind: .mute, visible: visible, iconColor: icon, backgroundColor: background, isDark: dark)) },
     ]
 
     static func render(_ widget: CampaignCanvasWidget, isDark: Bool, onAction: @escaping (CampaignCanvasActionRequest) -> Void) -> AnyView {
         let key: String
-        switch widget { case .text: key = "text"; case .image: key = "image"; case .button: key = "button"; case .progress: key = "progress"; case .lottie: key = "lottie"; case .video: key = "video"; case .container: key = "container"; case .divider: key = "divider" }
+        switch widget { case .text: key = "text"; case .image: key = "image"; case .button: key = "button"; case .progress: key = "progress"; case .lottie: key = "lottie"; case .video: key = "video"; case .container: key = "container"; case .divider: key = "divider"; case .carousel: key = "carousel"; case .story: key = "story"; case .storyProgress: key = "storyProgress"; case .storyClose: key = "storyClose"; case .storyMute: key = "storyMute" }
         guard let renderer = renderers[key] else { preconditionFailure("Missing Campaign Canvas renderer for \(key)") }
         return renderer(widget, isDark, onAction)
     }
 
     static func hasRenderer(for widget: CampaignCanvasWidget) -> Bool {
         let key: String
-        switch widget { case .text: key = "text"; case .image: key = "image"; case .button: key = "button"; case .progress: key = "progress"; case .lottie: key = "lottie"; case .video: key = "video"; case .container: key = "container"; case .divider: key = "divider" }
+        switch widget { case .text: key = "text"; case .image: key = "image"; case .button: key = "button"; case .progress: key = "progress"; case .lottie: key = "lottie"; case .video: key = "video"; case .container: key = "container"; case .divider: key = "divider"; case .carousel: key = "carousel"; case .story: key = "story"; case .storyProgress: key = "storyProgress"; case .storyClose: key = "storyClose"; case .storyMute: key = "storyMute" }
         return renderers[key] != nil
     }
 }

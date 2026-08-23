@@ -114,7 +114,43 @@ enum CampaignCanvasDividerAxis: Equatable { case horizontal, vertical }
 enum CampaignCanvasDividerPattern: Equatable { case solid, dashed, dotted }
 enum CampaignCanvasStrokeCap: Equatable { case butt, round, square }
 
-enum CampaignCanvasWidget: Equatable {
+/// How a video rail card plays, mirroring the media story's thumbnail playback.
+struct CampaignCanvasStoryThumbnailPlayback: Equatable, Sendable {
+    var startTime: TimeInterval = 0
+    var fixedDuration = false
+    var duration: TimeInterval = 5
+}
+
+/// One story: its media, the canvas drawn over that media, and how long it shows.
+///
+/// A story is media with content on top — the image or video the author named
+/// fills the screen, and `canvas` is the overlay. The same division the media
+/// story has always made between an item's asset and its caption.
+struct CampaignCanvasStoryPage: Equatable, Sendable {
+    let thumbnailIsVideo: Bool
+    let thumbnailUrl: String
+    /// How the media fills its rail card.
+    let thumbnailFit: String
+    /// How the media fills the full screen — the media story's `boxFit`.
+    let pageFit: String
+    let thumbnailPlayback: CampaignCanvasStoryThumbnailPlayback
+    /// Already resolved against the rail's default duration.
+    let duration: TimeInterval
+    let canvas: CampaignCanvas
+}
+
+/// Whether video rail cards all play at once or take turns.
+enum CampaignCanvasStoryThumbnailPlaybackMode: Equatable, Sendable { case simultaneous, sequential }
+
+/// `Sendable` is declared rather than inferred, and has to be.
+///
+/// A carousel slide and a story page are themselves `CampaignCanvas`es, so this
+/// enum is now mutually recursive with `CampaignCanvasChild` — and Swift cannot
+/// *synthesise* a conformance across a cycle. Without these three explicit
+/// declarations the whole graph silently stops being `Sendable`, and the loss
+/// surfaces somewhere unrelated: a `PipConfig` captured into a `@MainActor` task
+/// starts failing as a data race, because it transitively holds a canvas.
+enum CampaignCanvasWidget: Equatable, Sendable {
     case text(box: CampaignCanvasBox, block: CampaignCanvasTextBlock, shadow: CampaignCanvasShadow?)
     case image(
         box: CampaignCanvasBox, source: CampaignCanvasMediaSource, fit: String,
@@ -137,6 +173,50 @@ enum CampaignCanvasWidget: Equatable {
     case video(box: CampaignCanvasBox, source: CampaignCanvasMediaSource, autoplay: Bool, loop: Bool, muted: Bool, showControls: Bool, fit: String)
     case container(fill: CampaignCanvasPaint, cornerRadius: CampaignCanvasCornerRadius, border: CampaignCanvasBorder?, shadow: CampaignCanvasShadow?)
     case divider(box: CampaignCanvasBox, axis: CampaignCanvasDividerAxis, pattern: CampaignCanvasDividerPattern, strokeCap: CampaignCanvasStrokeCap, inset: CGFloat, dashPattern: [CGFloat], color: CampaignColor)
+    /// A swipeable strip of nested Canvases, as one widget on a Canvas.
+    ///
+    /// The only widget whose content is itself a Canvas. That is what lets the
+    /// dashboard author a slide with the whole editor and the SDK render it with
+    /// the parser and renderer it already has, one level down.
+    ///
+    /// A slide is not sized by its own width/height; those are the authored page
+    /// box, and the runtime derives the real one from this widget's rect:
+    /// `slideWidth = rect.width × viewportFraction − itemSpacing`.
+    case carousel(
+        box: CampaignCanvasBox, slides: [CampaignCanvas],
+        viewportFraction: CGFloat, itemSpacing: CGFloat,
+        autoPlay: Bool, autoPlayInterval: TimeInterval, animationDuration: TimeInterval,
+        infiniteScroll: Bool, cornerRadius: CGFloat,
+        showIndicator: Bool, dotWidth: CGFloat, dotHeight: CGFloat, dotSpacing: CGFloat,
+        dotColor: CampaignColor?, activeDotColor: CampaignColor?, indicatorEffect: String
+    )
+    /// A rail of tappable stories that open a full-screen viewer.
+    ///
+    /// Two surfaces in one widget, which is what separates it from the carousel:
+    /// the rail is drawn inside this widget's rect, while the pages are presented
+    /// full screen. So a page's size comes from the screen, never from the rect.
+    case story(
+        box: CampaignCanvasBox, pages: [CampaignCanvasStoryPage],
+        // No card height: a card is as tall as this widget's own rect, which the
+        // canvas already carries. Duplicating it would let the two disagree.
+        cardAspectRatio: CGFloat, cardCornerRadius: CGFloat, cardSpacing: CGFloat,
+        showRail: Bool, thumbnailVideoPlayback: CampaignCanvasStoryThumbnailPlaybackMode,
+        restartOnCompleted: Bool, startMuted: Bool,
+        /// The chrome, as a canvas drawn over every story: a progress strip, a
+        /// close button and a mute button, on a transparent layer.
+        chrome: CampaignCanvas
+    )
+    /// The viewer's progress strip — one element whose rect is the whole strip,
+    /// divided by the story count at render time. No visibility flag: the strip
+    /// is how a viewer knows where they are.
+    case storyProgress(
+        box: CampaignCanvasBox, activeColor: CampaignColor?, trackColor: CampaignColor?,
+        barHeight: CGFloat, cornerRadius: CGFloat, gap: CGFloat
+    )
+    /// The viewer's close button. Hideable, but never deletable.
+    case storyClose(box: CampaignCanvasBox, visible: Bool, iconColor: CampaignColor?, backgroundColor: CampaignColor?)
+    /// The viewer's mute toggle. Optional: a story with no video has no use for it.
+    case storyMute(box: CampaignCanvasBox, visible: Bool, iconColor: CampaignColor?, backgroundColor: CampaignColor?)
 
     var box: CampaignCanvasBox {
         switch self {
@@ -144,14 +224,19 @@ enum CampaignCanvasWidget: Equatable {
              .button(let box, _, _, _, _, _, _, _, _, _),
              .progress(let box, _, _, _, _, _, _, _, _, _),
              .lottie(let box, _, _, _, _), .video(let box, _, _, _, _, _, _),
-             .divider(let box, _, _, _, _, _, _): box
+             .divider(let box, _, _, _, _, _, _),
+             .carousel(let box, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _),
+             .story(let box, _, _, _, _, _, _, _, _, _),
+             .storyProgress(let box, _, _, _, _, _),
+             .storyClose(let box, _, _, _),
+             .storyMute(let box, _, _, _): box
         case .container: .none
         }
     }
 }
 
 struct CampaignCanvasRect: Equatable { let x: CGFloat; let y: CGFloat; let width: CGFloat; let height: CGFloat }
-enum CampaignCanvasChild: Equatable, Identifiable {
+enum CampaignCanvasChild: Equatable, Identifiable, Sendable {
     case widget(id: String, rect: CampaignCanvasRect, widget: CampaignCanvasWidget)
     case tapRegion(id: String, rect: CampaignCanvasRect, actions: [EngageAction])
     var id: String { switch self { case .widget(let id, _, _), .tapRegion(let id, _, _): id } }
@@ -167,6 +252,12 @@ enum CampaignCanvasChild: Equatable, Identifiable {
     var isHitTestable: Bool {
         switch self {
         case .tapRegion: true
+        // A strip is swiped and a rail is scrolled and tapped, so both must take
+        // the pointer rather than pass it to whatever sits beneath them.
+        case .widget(_, _, .carousel): true
+        case .widget(_, _, .story(_, _, _, _, _, let showRail, _, _, _, _)): showRail
+        case .widget(_, _, .storyClose(_, let visible, _, _)): visible
+        case .widget(_, _, .storyMute(_, let visible, _, _)): visible
         case .widget(_, _, .text(_, let block, _)):
             block.spans.contains { !$0.actions.isEmpty }
         case .widget(_, _, .button(_, let label, _, _, _, _, _, _, let actions, _)):
@@ -178,7 +269,7 @@ enum CampaignCanvasChild: Equatable, Identifiable {
     }
 }
 
-struct CampaignCanvas: Equatable {
+struct CampaignCanvas: Equatable, Sendable {
     let version: Int; let width: CGFloat; let height: CGFloat
     let background: CampaignCanvasPaint; let children: [CampaignCanvasChild]
 }

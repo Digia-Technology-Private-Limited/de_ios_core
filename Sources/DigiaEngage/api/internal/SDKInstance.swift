@@ -85,6 +85,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     // coarse CEP channel (`toCep`) and Digia's rich analytics (`toDigia`).
     // Campaign id/type are resolved from the store inside the Digia sink.
     private let dwellTracker = DwellTracker()
+    /// The design tokens the current campaign bundle was parsed with.
+    ///
+    /// Held because live test parses a campaign that never came through the
+    /// bundle, and it has to resolve the same tokens the bundle's campaigns do.
+    private var campaignDesignTokens: DesignTokenCatalog = .empty
     private var events: EngageEventEmitter!
 
     private init() {
@@ -161,7 +166,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
         var campaigns: [CampaignModel] = []
         do {
-            campaigns = try await CampaignFetcher(config: config).fetch().campaigns
+            let bundle = try await CampaignFetcher(config: config).fetch()
+            campaigns = bundle.campaigns
+            campaignDesignTokens = bundle.designTokens
         } catch {
             // Campaign fetch failure must not block SDK readiness.
             logVerbose("CampaignFetcher failed: \(error)")
@@ -248,6 +255,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         do {
             let bundle = try CampaignFetcher.parse(Data(bundleJson.utf8))
             campaigns = bundle.campaigns
+            campaignDesignTokens = bundle.designTokens
             DigiaLog.warning(
                 "[SDKInstance] populateCampaignBundle parsed raw=\(bundle.rawCampaigns.count) accepted=\(campaigns.count)"
             )
@@ -670,7 +678,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
 
-        guard let campaign = CampaignModel.fromJson(campaignJson) else {
+        // With the bundle's catalog, exactly as the organic path parses. Parsing
+        // a live test against an empty one resolved every design token to nil,
+        // so a campaign styled with tokens arrived on the device with no colours
+        // and no type — the one place a marketer looks at it before shipping.
+        guard let campaign = CampaignModel.fromJson(campaignJson, designTokens: campaignDesignTokens)
+        else {
             reporter.postFailed(
                 invocation.testInvocationId, code: .templateError,
                 message: "campaign object could not be parsed into a renderable campaign"

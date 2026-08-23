@@ -81,3 +81,33 @@ struct InlineCanvasTests {
         ]
     }
 }
+
+/// One slot holds one campaign, whatever kind it is.
+///
+/// `DigiaSlot` resolves the kinds in a fixed order with carousel first, so a
+/// config left behind by a previous campaign in the same slot silently wins.
+@MainActor
+@Suite("Inline slot config exclusivity", .serialized)
+struct InlineSlotConfigExclusivityTests {
+    private let slot = "home_rail"
+
+    @Test("a story replaces a carousel in the same slot")
+    func storyReplacesCarousel() {
+        let controller = InlineCampaignController()
+        controller.setCarouselConfig(slot, config: InlineCarouselConfig(slotKey: slot, items: []))
+        controller.setStoryConfig(slot, config: InlineStoryConfig(slotKey: slot, items: []))
+
+        #expect(controller.getCarouselConfig(slot) == nil)
+        #expect(controller.getStoryConfig(slot) != nil)
+    }
+
+    @Test("a carousel replaces a story in the same slot")
+    func carouselReplacesStory() {
+        let controller = InlineCampaignController()
+        controller.setStoryConfig(slot, config: InlineStoryConfig(slotKey: slot, items: []))
+        controller.setCarouselConfig(slot, config: InlineCarouselConfig(slotKey: slot, items: []))
+
+        #expect(controller.getStoryConfig(slot) == nil)
+        #expect(controller.getCarouselConfig(slot) != nil)
+    }
+}

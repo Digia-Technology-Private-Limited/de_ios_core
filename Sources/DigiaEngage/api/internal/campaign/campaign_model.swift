@@ -82,7 +82,13 @@ struct CampaignModel: Equatable {
             case "story":
                 guard let storyConfig = InlineStoryConfig.fromJson(templateConfig) else { return nil }
                 config = .story(storyConfig)
-            case "canvas":
+            // `canvasCarousel` and `canvasStory` are inline canvases whose canvas
+            // contains one extra widget — the payloads are otherwise identical,
+            // and the strip or rail is drawn by that widget's renderer. So
+            // neither needs a campaign type of its own; the dashboard keeps the
+            // distinct subtypes only to guarantee the widget is present and
+            // undeletable.
+            case "canvas", "canvasCarousel", "canvasStory":
                 guard let canvasConfig = InlineCanvasConfig.fromJson(
                     templateConfig,
                     designTokens: designTokens

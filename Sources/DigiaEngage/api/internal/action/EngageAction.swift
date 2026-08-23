@@ -10,6 +10,13 @@ enum EngageAction: Equatable {
     case next
     case previous
     case requestReview
+    /// Open a canvas story's viewer at this 0-based index.
+    ///
+    /// The escape hatch for a story campaign whose rail is switched off: with
+    /// nothing on the card to tap, any element the author draws can open the
+    /// stories instead. Handled by the canvas stage rather than the shared
+    /// action runner — it is the only thing that knows which stories to open.
+    case showStory(Int)
 
     var analyticsType: String {
         switch self {
@@ -22,6 +29,7 @@ enum EngageAction: Equatable {
         case .next: "next"
         case .previous: "previous"
         case .requestReview: "request_review"
+        case .showStory: "show_story"
         }
     }
 
@@ -84,6 +92,10 @@ struct EngageActionParser {
         case "Action.next", "next": return .next
         case "Action.previous", "previous", "back", "prev": return .previous
         case "Action.requestReview", "requestReview", "request_review": return .requestReview
+        case "Action.showStory":
+            let raw = data["index"] ?? step["index"]
+            let index = (raw as? NSNumber)?.intValue ?? Int("\(raw ?? "")") ?? 0
+            return .showStory(max(0, index))
         case "Action.customKV":
             guard let raw = data["payload"] as? [String: Any] else { return nil }
             return customKV(from: raw)

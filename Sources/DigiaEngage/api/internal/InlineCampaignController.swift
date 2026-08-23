@@ -35,8 +35,14 @@ final class InlineCampaignController: ObservableObject {
         campaigns = next
     }
 
+    // Each setter clears every other kind for the slot: one slot holds one
+    // campaign, and `DigiaSlot` resolves the kinds in a fixed order. Carousel and
+    // story used not to clear each other, and since carousel is resolved first, a
+    // story routed into a slot that had held a carousel never appeared — the
+    // stale carousel kept winning.
     func setCarouselConfig(_ placementKey: String, config: InlineCarouselConfig) {
         bannerConfigs.removeValue(forKey: placementKey)
+        storyConfigs.removeValue(forKey: placementKey)
         canvasConfigs.removeValue(forKey: placementKey)
         var next = carouselConfigs
         next[placementKey] = config
@@ -45,6 +51,7 @@ final class InlineCampaignController: ObservableObject {
 
     func setStoryConfig(_ placementKey: String, config: InlineStoryConfig) {
         bannerConfigs.removeValue(forKey: placementKey)
+        carouselConfigs.removeValue(forKey: placementKey)
         canvasConfigs.removeValue(forKey: placementKey)
         var next = storyConfigs
         next[placementKey] = config

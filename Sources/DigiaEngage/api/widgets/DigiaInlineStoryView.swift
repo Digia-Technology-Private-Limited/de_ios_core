@@ -845,8 +845,15 @@ private struct FullScreenStoryItem: View {
     }
 }
 
+/// A story's still media, sized the way a story sizes it.
+///
+/// Not private: the canvas story draws the same stills, on its rail cards and
+/// behind its full-screen pages. Its own version used a bare
+/// `.aspectRatio(contentMode: .fill)`, which reports an ideal size larger than
+/// the box it was given — enough to grow the enclosing stack and push the
+/// story's chrome off the top of the screen.
 @MainActor
-private struct StoryRemoteImage: View {
+struct StoryRemoteImage: View {
     let urlString: String
     let fit: StoryMediaFit
 
