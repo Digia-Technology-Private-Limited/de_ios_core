@@ -38,6 +38,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// plain no-arg stored property the way `surveyOrchestrator` is. Mirrors
     /// `events`'s identical implicitly-unwrapped-var pattern below.
     var floaterOrchestrator: FloaterOrchestrator!
+    /// Holds the single active story floater. Its own orchestrator rather than a mode of
+    /// `floaterOrchestrator`: a PiP's whole design rests on owning an `AVPlayer` that
+    /// outlives its view, and a story floater has no media surface at all — its window is
+    /// a canvas and its story is a cover. `FloaterStoryOverlayView` draws it.
+    var floaterStoryOrchestrator: FloaterStoryOrchestrator!
     /// Wired to `floaterOrchestrator.setAppForegrounded` in `init()` — matches
     /// Android's `DigiaInstance.kt` `ProcessLifecycleOwner` `ON_START`/`ON_STOP`
     /// observer, pausing/resuming the floater's video when the app backgrounds.
@@ -123,6 +128,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             onStepDismissed: { [weak self] state in self?.emitFloaterStepDismissed(state) },
             onVisible: { [weak self] state in self?.reportFloaterImpression(state) }
         )
+        floaterStoryOrchestrator = FloaterStoryOrchestrator(
+            onDismissed: { [weak self] state, reason, metrics in
+                self?.emitFloaterStoryDismissed(state, reason, metrics)
+            },
+            onCompleted: { [weak self] state in self?.emitFloaterStoryCompleted(state) },
+            onStepViewed: { [weak self] state in self?.emitFloaterStoryStepViewed(state) },
+            onStepDismissed: { [weak self] state in self?.emitFloaterStoryStepDismissed(state) },
+            onVisible: { [weak self] state in self?.reportFloaterStoryImpression(state) }
+        )
 
         appBackgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
@@ -131,6 +145,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.floaterOrchestrator.setAppForegrounded(false)
+                self?.floaterStoryOrchestrator.setAppForegrounded(false)
             }
         }
         appForegroundObserver = NotificationCenter.default.addObserver(
@@ -140,6 +155,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.floaterOrchestrator.setAppForegrounded(true)
+                self?.floaterStoryOrchestrator.setAppForegrounded(true)
             }
         }
     }
@@ -344,6 +360,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         // is bound to the *exact* screen it appeared on, not `targetScreenNames`
         // generally, so it has its own `onScreenChanged` (see that method's kdoc).
         floaterOrchestrator.onScreenChanged(_currentScreen ?? "")
+        // Same contract for the story floater: it belongs to the screen it opened on.
+        floaterStoryOrchestrator.onScreenChanged(_currentScreen ?? "")
     }
 
     private func dismissForScreenChangeIfNeeded(
@@ -529,6 +547,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private func isModalCampaignActive() -> Bool {
         controller.activeNudge != nil || surveyOrchestrator.state != nil
             || floaterOrchestrator.surface == .expanded
+            // An open story is the story floater's expanded state: it fills the
+            // screen, so from here on it behaves like every other modal surface.
+            || floaterStoryOrchestrator.storyOpen
     }
 
     private func route(
@@ -623,7 +644,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 context.onDropped(.renderError, message: "another survey is already on screen")
             }
             return started
-        case .floater:
+        // Both floater subtypes route through the same gate — a collapsed window of
+        // either kind is the same third, non-blocking lane.
+        case .floater, .floaterStory:
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
                 return false
@@ -642,6 +665,35 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     .renderError,
                     message: "a nudge, survey, or expanded floater is already on screen")
                 return false
+            }
+            // One floater at a time across BOTH subtypes. Each orchestrator only knows
+            // about its own showing, so without this a PiP and a story window could
+            // float over each other — two draggable boxes competing for one corner.
+            let wantsStory = campaign.floaterStoryConfig != nil
+            let otherLaneBusy =
+                wantsStory ? floaterOrchestrator.state != nil : floaterStoryOrchestrator.state != nil
+            if otherLaneBusy {
+                lastCampaignDropReason = "another floater is already on screen"
+                logVerbose("floater campaign dropped: another floater is on screen: \(key)")
+                context.onDropped(.renderError, message: "another floater is already on screen")
+                return false
+            }
+            // Two template shapes under one campaign type, each with its own
+            // orchestrator — see `CampaignConfigModel.floaterStory`.
+            if wantsStory {
+                let started = floaterStoryOrchestrator.start(
+                    campaign, payload: payload, screenName: _currentScreen)
+                if !started {
+                    lastCampaignDropReason =
+                        floaterStoryOrchestrator.lastStartFailureReason
+                        ?? "story floater start failed"
+                    DigiaLog.warning(
+                        "[SDKInstance] Story floater campaign skipped: key=\(key) reason=\(floaterStoryOrchestrator.lastStartFailureReason ?? "unknown")"
+                    )
+                    context.onDropped(
+                        .renderError, message: "another floater is already on screen")
+                }
+                return started
             }
             let started = floaterOrchestrator.start(
                 campaign, payload: payload, screenName: _currentScreen)
@@ -743,6 +795,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
         if surveyOrchestrator.state?.payload.cepCampaignId == campaignID {
             surveyOrchestrator.dismiss()
+        }
+        if floaterStoryOrchestrator.state?.payload.cepCampaignId == campaignID {
+            floaterStoryOrchestrator.dismiss(.invalidated)
         }
         if floaterOrchestrator.state?.payload.cepCampaignId == campaignID {
             floaterOrchestrator.dismiss(.invalidated)
@@ -1222,6 +1277,101 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         floaterOrchestrator.dismiss(.ctaTaken)
     }
 
+    // MARK: - Story floater lifecycle
+    //
+    // Reported through the PiP's own event vocabulary rather than a parallel set. Both
+    // are `floater` campaigns and both answer the same questions — was the window seen,
+    // was it moved, was its content opened, how long was the user inside — so one schema
+    // keeps the dashboard's floater analytics reading both subtypes without a backend
+    // change. "Expanded" there means "the story was open".
+
+    private func reportFloaterStoryImpression(_ state: ActiveFloaterStoryState) {
+        dwellTracker.markViewed(state.payload.cepCampaignId)
+        if !isLiveTestCepId(state.payload.cepCampaignId) {
+            let campaignKey = state.payload.campaignKey
+            frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
+        }
+        events.toBoth(
+            .impressed, FloaterEvent.Viewed(screenName: _currentScreen), payload: state.payload)
+    }
+
+    private func emitFloaterStoryStepViewed(_ state: ActiveFloaterStoryState) {
+        events.toDigia(FloaterEvent.StepViewed(), payload: state.payload)
+    }
+
+    private func emitFloaterStoryStepDismissed(_ state: ActiveFloaterStoryState) {
+        events.toDigia(FloaterEvent.StepDismissed(), payload: state.payload)
+    }
+
+    private func emitFloaterStoryDismissed(
+        _ state: ActiveFloaterStoryState, _ reason: FloaterDismissReason,
+        _ metrics: FloaterMetrics
+    ) {
+        events.toBoth(
+            .dismissed,
+            FloaterEvent.Dismissed(
+                dismissReason: reason.wire,
+                dwellMs: dwellTracker.consumeDwellMs(state.payload.cepCampaignId),
+                moves: metrics.moves, expands: metrics.expands,
+                engagedMs: metrics.engagedMs, lastPosition: metrics.lastPosition
+            ),
+            payload: state.payload
+        )
+    }
+
+    private func emitFloaterStoryCompleted(_ state: ActiveFloaterStoryState) {
+        if !isLiveTestCepId(state.payload.cepCampaignId) {
+            let campaignKey = state.payload.campaignKey
+            frequencyManager?.recordCompleted(
+                campaignKey, campaignStore.find(campaignKey)?.frequency)
+        }
+        events.toDigia(FloaterEvent.Completed(), payload: state.payload)
+    }
+
+    /// SDK chrome taps on the window itself — opening the story, and the ×.
+    func reportFloaterStoryClicked(elementId: String, actionType: String, ctaRole: String) {
+        guard let state = floaterStoryOrchestrator.state else { return }
+        events.toDigia(
+            FloaterEvent.Clicked(
+                elementId: elementId, actionType: actionType,
+                // The window is the collapsed state; the story is the expanded one.
+                pipState: floaterStoryOrchestrator.storyOpen ? "expanded" : "collapsed",
+                ctaRole: ctaRole,
+                timeToActionMs: dwellTracker.elapsedMs(state.payload.cepCampaignId)
+            ),
+            payload: state.payload
+        )
+    }
+
+    /// Runs an authored action from the window's canvas or from inside a story.
+    ///
+    /// Unlike a PiP's expanded CTA, this does **not** end the showing on its own. A PiP's
+    /// canvas is the campaign's whole payload, so any action there is the end of it; a
+    /// story floater's window keeps standing after a tap unless the author wired Hide,
+    /// which the local executor's `dismiss` below handles.
+    func runFloaterStoryAction(
+        state: ActiveFloaterStoryState, request: CampaignCanvasActionRequest
+    ) {
+        let resolvedAction = request.actions.first?.resolved(with: state.variableContext)
+        events.toDigia(
+            FloaterEvent.StepClicked(
+                elementId: request.elementId, ctaLabel: request.label ?? "",
+                actionType: resolvedAction?.analyticsType,
+                actionUrl: resolvedAction?.analyticsURL,
+                timeToActionMs: dwellTracker.elapsedMs(state.payload.cepCampaignId)
+            ),
+            payload: state.payload
+        )
+        Task {
+            await executeActionFlow(
+                request.actions, variables: state.variableContext,
+                localActionExecutor: LocalActionExecutor(dismiss: { [weak self] in
+                    self?.floaterStoryOrchestrator.dismiss(.userClose)
+                })
+            )
+        }
+    }
+
     // MARK: - Inline slot lifecycle
     //
     // CEP is Impressed + Dismissed instantly at route time (syncTemplate
@@ -1529,6 +1679,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         surveyOrchestrator.dismiss()
         guideOrchestrator.dismiss()
         floaterOrchestrator.dispose()
+        floaterStoryOrchestrator.dispose()
         activeExternalGuide = nil
         events.clearImpressions()
         dwellTracker.clear()

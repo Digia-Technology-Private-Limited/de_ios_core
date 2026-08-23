@@ -61,6 +61,24 @@ struct CampaignCanvasParser {
         )
     }
 
+    /// Parses a standalone story block — pages and chrome, with no rail.
+    ///
+    /// The story-floater template carries its story beside the window canvas rather
+    /// than inside it (`FloaterStoryConfig`), but the block itself is the
+    /// `digia/canvasStory` widget's props minus the rail fields. Reading it through
+    /// the same parser keeps one definition of "a story" in the SDK: the rail-only
+    /// values fall back to their defaults and are never read, because nothing draws
+    /// a rail from this.
+    ///
+    /// Returns `nil` on the same terms `parseStory` does — no readable page, or no
+    /// chrome to close the viewer with.
+    func parseStandaloneStory(_ props: [String: Any]?) -> CampaignCanvasWidget? {
+        guard let props, let widget = try? parseStory(.none, props), case .story = widget else {
+            return nil
+        }
+        return widget
+    }
+
     /// Parses a story rail, its nested pages and the chrome layer over them.
     ///
     /// A story with no readable chrome would open with no way out, so it is

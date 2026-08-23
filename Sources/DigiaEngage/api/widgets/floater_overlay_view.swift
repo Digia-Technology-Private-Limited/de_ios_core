@@ -502,7 +502,10 @@ private struct FloaterSessionView: View {
     }
 }
 
-private struct FloaterCollapsedInteractionView: UIViewRepresentable {
+/// Shared with the story floater's own window (`floater_story_overlay_view.swift`) —
+/// the gesture contract is identical, and a second copy of a `UIPanGestureRecognizer`
+/// shield tuned this carefully is the last thing this SDK needs.
+struct FloaterCollapsedInteractionView: UIViewRepresentable {
     let activeRect: CGRect
     let draggable: Bool
     let tapExpands: Bool
@@ -625,7 +628,7 @@ private struct FloaterCollapsedInteractionView: UIViewRepresentable {
     }
 }
 
-private final class FloaterTouchShieldView: UIView {
+final class FloaterTouchShieldView: UIView {
     var activeRect: CGRect = .null
     // Chrome button pill rects (mute/expand/close) this shield must never resolve as
     // its own hit target for. Checked here, not just inside `handleTap`'s own
