@@ -346,7 +346,7 @@ struct GuideStepWidgetConfig: Equatable {
         }
 
         let layoutMode = json.string("layoutMode", default: "classic")
-        let canvas = isFlatSpotlight && layoutMode == "canvas"
+        let canvas = isFlat && layoutMode == "canvas"
             ? (json.object("canvas").flatMap {
                 try? CampaignCanvasParser(designTokens: designTokens).parse($0)
             })

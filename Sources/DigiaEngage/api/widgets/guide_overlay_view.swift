@@ -164,6 +164,7 @@ private struct GuideStepOverlay: View {
     private var config: GuideStepWidgetConfig { step.widgetConfig }
     private var isSpotlight: Bool { config.overlay.visible }
     private var isPresentationReady: Bool {
+        guard bubbleSize != .zero else { return false }
         guard imageURL != nil else { return true }
         let delayElapsed = (step.delayInMs ?? 0) <= 0 || delayElapsedForStep == stepIndex
         return imageLoaded && delayElapsed

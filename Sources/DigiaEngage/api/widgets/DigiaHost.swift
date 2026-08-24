@@ -19,6 +19,7 @@ public struct DigiaHost<Content: View>: View {
                 .onDisappear { SDKInstance.shared.onHostUnmounted() }
 
             GuideOverlayView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .zIndex(2)
 
             // Between guide and survey/nudge: lets a survey/nudge that starts
@@ -54,6 +55,7 @@ public struct DigiaHost<Content: View>: View {
             CaptureFlashView()
                 .zIndex(7)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
