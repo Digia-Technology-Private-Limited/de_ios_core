@@ -26,6 +26,13 @@ struct FloaterStoryOverlayView: View {
         if let state = orchestrator.state {
             FloaterStorySessionView(state: state, orchestrator: orchestrator)
                 .id(state.token)
+                // Full-bleed, so `geo.size` below is the device's screen and not whatever region
+                // the host app happened to give `DigiaHost`. The window is then placed inside the
+                // real safe area explicitly, from `activeFloaterWindowSafeAreaInsets`. Letting the
+                // container decide instead is what left a small window inset twice over — once by
+                // the host's own safe area and again by its margins — so it floated far further in
+                // from the top and bottom edges than the author had asked for.
+                .ignoresSafeArea()
         }
     }
 }
@@ -42,6 +49,12 @@ private func storyEaseOutCubic(duration: Double) -> Animation {
 private func storyEaseIn(duration: Double) -> Animation {
     .timingCurve(0.42, 0, 1, 1, duration: duration)
 }
+/// Flutter's `Curves.easeInOutQuart`, the curve `pip_renderer.dart` grows and collapses on — and
+/// the one the PiP's own expand already uses here. The story floater's hero shares it so the two
+/// floaters expand identically.
+private func storyEaseInOutQuart(duration: Double) -> Animation {
+    .timingCurve(0.77, 0, 0.175, 1, duration: duration)
+}
 
 @MainActor
 private struct FloaterStorySessionView: View {
@@ -55,28 +68,70 @@ private struct FloaterStorySessionView: View {
     @State private var settleResidual: CGSize = .zero
     @State private var flyOffsetFraction: CGSize = .zero
     @State private var alpha: Double = 1
+    /// 0 is "still the window", 1 is "full screen". One value for both directions, because the two
+    /// are the same journey — a collapse interrupted by a re-open resumes from where it had got to
+    /// rather than snapping back to the window first.
+    @State private var storyPhase: CGFloat = 0
+    /// Outlives `orchestrator.storyOpen`: the orchestrator flips that the instant the user closes,
+    /// but the cover has to stay presented until the collapse has finished running.
+    @State private var viewerMounted = false
+    /// How far the story's own content has faded up, once the cover is presented.
+    ///
+    /// Separate from `storyPhase` because on iOS the two do not overlap. The box growing and the
+    /// story fading are one continuous motion on Android, where the story is drawn *inside* the
+    /// growing box and clipped by it. That is not safely reproducible here: a `fullScreenCover`
+    /// lays its content out in safe-area coordinates, so an aperture clipped to a rect measured in
+    /// the overlay's screen coordinates would sit a status bar off — and the alternative, dropping
+    /// the cover and rendering inline, would take the viewer's own safe-area handling with it.
+    /// So the box grows, and the story fades up over it as it lands. No pop, and no clip to
+    /// misalign.
+    @State private var contentFade: CGFloat = 0
+    /// The screen the viewer fills, and the window's rect within it, captured from the layout so
+    /// the cover — which is presented outside this `GeometryReader` — can still run a hero.
+    @State private var coverScreenSize: CGSize = .zero
+    @State private var coverWindowRect: CGRect = .zero
 
     private var config: FloaterStoryConfig { state.config }
     private var isDark: Bool { canvasTheme.isDark(colorScheme) }
 
     var body: some View {
         GeometryReader { geo in
-            let screenSize = geo.size
-            let safe = geo.safeAreaInsets
+            // The device's screen and the device's insets, from the same window — never this
+            // reader's own numbers. A `GeometryReader` at the root of a hosting controller reports
+            // a size that has *already* had the safe area carved out of it; subtracting real
+            // insets from that again is what inset the window twice over, which on a small window
+            // is most of what you see.
+            let deviceGeometry = activeFloaterWindowGeometry
+            let screenSize = deviceGeometry.bounds.size
+            let safe = deviceGeometry.safeArea
+            // In the device's own coordinates, so it means the same thing wherever the host app
+            // put `DigiaHost`.
             let resting = storyWindowRect(
                 config: config, screenSize: screenSize, safeInsets: safe,
                 dragFraction: orchestrator.dragFraction
             )
             let delta = isDragging ? dragTranslation : settleResidual
+            // This reader's offset within the screen. Zero in the ordinary case — the view above
+            // is full-bleed — but subtracted rather than assumed, so a host that nests `DigiaHost`
+            // somewhere smaller still draws the window where the screen coordinates say it is
+            // rather than that much further in again.
+            let globalOrigin = geo.frame(in: .global).origin
             // Deliberately unclamped during an active drag — a fast flick can carry the
             // box past the safe area while the finger is still moving, the same
             // rubber-band feel the PiP has. `commitDrag` is what snaps it back.
-            let left = resting.minX + delta.width + flyOffsetFraction.width * resting.width
-            let top = resting.minY + delta.height + flyOffsetFraction.height * resting.height
-            let globalOrigin = geo.frame(in: .global).origin
+            let left = resting.minX - globalOrigin.x
+                + delta.width + flyOffsetFraction.width * resting.width
+            let top = resting.minY - globalOrigin.y
+                + delta.height + flyOffsetFraction.height * resting.height
+            let windowAlpha = floaterStoryWindowAlpha(
+                type: orchestrator.storyOpen ? config.behavior.expandTransition.type
+                                             : config.behavior.collapseTransition.type,
+                phase: storyPhase
+            )
             // `nil` while the story is open, for the same reason the window itself is not
             // drawn then: a host's `hitTest` trusts this rect to claim touches, and a rect
             // published for a window that is not on screen would claim them for nothing.
+            // (While the story is up, `Digia.hasActiveOverlay` is what claims the screen.)
             let publishedActiveRect: CGRect? =
                 orchestrator.storyOpen
                 ? nil
@@ -84,6 +139,11 @@ private struct FloaterStorySessionView: View {
                     x: left + globalOrigin.x, y: top + globalOrigin.y,
                     width: resting.width, height: resting.height
                 )
+            // The window's box in this reader's own space, which is what the shield below and the
+            // hero's growing box are both positioned in.
+            let localWindowRect = CGRect(
+                x: left, y: top, width: resting.width, height: resting.height
+            )
 
             // Nothing of the window is drawn while the story is open. `fullScreenCover`
             // already covers this view, so on iOS this is not the paint-order fix it is on
@@ -94,13 +154,35 @@ private struct FloaterStorySessionView: View {
             // each. The `@State` above stays put, so the window returns exactly where the
             // user left it.
             ZStack {
+                // ── the hero's growing box ──
+                //
+                // A plain rect travelling from the window to the screen, in the story's own
+                // colour. It carries no content, which is the point: the PiP hides its expanded
+                // tree for the length of the grow because content stretched across a changing box
+                // reads as a glitch, and a story — video, canvas stage, chrome — is far more of it
+                // than a nudge tree. First in the stack, so the window sits over it and can
+                // cross-fade out against it rather than vanishing.
+                if config.behavior.expandTransition.type == .hero
+                    || config.behavior.collapseTransition.type == .hero,
+                   storyPhase > 0, storyPhase < 1 {
+                    let heroRect = floaterStoryHeroRect(
+                        window: localWindowRect, screen: screenSize, phase: storyPhase
+                    )
+                    RoundedRectangle(
+                        cornerRadius: floaterStoryHeroCornerRadius(
+                            windowRadius: config.window.cornerRadiusDp, phase: storyPhase
+                        )
+                    )
+                    .fill(Color.black)
+                    .frame(width: heroRect.width, height: heroRect.height)
+                    .position(x: heroRect.midX, y: heroRect.midY)
+                }
+
                 // Drag-to-reposition and tap-to-open, through the PiP's own UIKit shield:
                 // a SwiftUI `DragGesture` re-evaluates this whole body on every touch-move
                 // and cannot keep pace with the finger.
                 if !orchestrator.storyOpen {
-                    let activeRect = CGRect(
-                        x: left, y: top, width: resting.width, height: resting.height
-                    )
+                    let activeRect = localWindowRect
                     FloaterCollapsedInteractionView(
                         activeRect: activeRect,
                         draggable: config.controls.draggable,
@@ -119,12 +201,15 @@ private struct FloaterStorySessionView: View {
                         onTap: openStory,
                         chromeButtonBounds: closeButtonRects(activeRect: activeRect)
                     )
-                    .frame(width: screenSize.width, height: screenSize.height)
+                    // Fills this reader rather than the device screen: the rect it hit-tests
+                    // against is in this reader's space, so the two have to be measured the same
+                    // way or a nested host would offset every touch.
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
 
-                if !orchestrator.storyOpen {
-                    windowBox
-                        .frame(width: resting.width, height: resting.height)
+                if windowAlpha > 0 {
+                    windowBox(width: resting.width)
+                        .frame(width: resting.width, height: resting.height, alignment: .topLeading)
                         .clipShape(RoundedRectangle(cornerRadius: config.window.cornerRadiusDp))
                         .shadow(
                             color: config.window.shadow ? Color.black.opacity(0.45) : .clear,
@@ -140,12 +225,21 @@ private struct FloaterStorySessionView: View {
                                     } ?? .white,
                                     lineWidth: config.window.borderWidthDp
                                 )
+                                // Decoration, never a target: a stroked `Shape` hit-tests
+                                // its own stroked path, so an authored border would quietly
+                                // eat the ring of touches around the window's edge instead
+                                // of letting them reach the shield that opens the story.
+                                .allowsHitTesting(false)
                         )
                         .overlay(alignment: .topTrailing) {
                             if config.controls.showClose { closeButton }
                         }
                         .position(x: left + resting.width / 2, y: top + resting.height / 2)
-                        .opacity(alpha)
+                        // The window's own entry/exit alpha, times how far the story has covered
+                        // it. Keyed on the phase rather than on `storyOpen` because a hero grows
+                        // *out of* this box: cutting it the instant the flag flips would leave the
+                        // story rising from a hole.
+                        .opacity(alpha * windowAlpha)
                 }
             }
             // Publishes this window's real on-screen frame so an RN/UIKit host's
@@ -158,6 +252,17 @@ private struct FloaterStorySessionView: View {
             .onChange(of: publishedActiveRect) { newRect in
                 orchestrator.activeRect = newRect
             }
+            .onAppear {
+                coverScreenSize = screenSize
+                coverWindowRect = publishedActiveRect ?? localWindowRect
+            }
+            .onChange(of: screenSize) { coverScreenSize = $0 }
+            .onChange(of: resting) { _ in
+                // Where the window is *drawn*, drag included — a hero has to start from the box the
+                // user tapped, not from where it would have been had they never moved it. In screen
+                // coordinates, because the cover it feeds is presented against the screen.
+                coverWindowRect = publishedActiveRect ?? localWindowRect
+            }
         }
         .onAppear {
             runEntryAnimation()
@@ -168,37 +273,171 @@ private struct FloaterStorySessionView: View {
             if closing { runExitAnimation() }
         }
         .onDisappear { orchestrator.activeRect = nil }
-        // The viewer is presented over everything, at full screen — the same cover a
-        // canvas story rail presents, with the same content.
+        .onChange(of: orchestrator.storyOpen) { open in runStoryTransition(opening: open) }
+        // The viewer is presented over everything, at full screen — the same cover a canvas story
+        // rail presents, with the same content.
+        //
+        // Presented on `viewerMounted` rather than on `orchestrator.storyOpen`, because the cover
+        // has to outlast the close by exactly the length of the collapse.
+        //
+        // `fullScreenCover` has one presentation of its own — a slide up from the bottom — and an
+        // author who chose `hero` would otherwise get both at once. It is suppressed by toggling
+        // `viewerMounted` inside a transaction with `disablesAnimations` set (see
+        // `runStoryTransition`), NOT by a `.transaction { }` modifier here: that modifier applies
+        // to this whole subtree, so it silently disabled the very `withAnimation` that drives the
+        // motion below and left every transition instant.
         .fullScreenCover(
             isPresented: Binding(
-                get: { orchestrator.storyOpen },
+                get: { viewerMounted },
                 set: { if !$0 { orchestrator.closeStory() } }
             )
         ) {
-            storyViewer
+            storyCover
         }
+    }
+
+    /// The story, transformed by however far the expand or collapse has got.
+    ///
+    /// The backdrop is the load-bearing part. A `fullScreenCover` paints its own opaque background,
+    /// and the viewer inside deliberately has no black plate of its own — its media backdrop is
+    /// what covers the screen. That is fine at rest and wrong for every frame before it: while the
+    /// content is scaled into the window's box, or still below the fold on a slide, the rest of the
+    /// screen is the cover's background, which in light mode is **white**. The whole screen flashed
+    /// white for the length of every transition.
+    ///
+    /// So the cover's background is cleared and the host app shows through instead, which is what a
+    /// hero wants anyway — the story visibly grows out of the window and over the app. Below 16.4
+    /// there is no way to clear it, so an explicit black plate stands in: darker than the app, but
+    /// the story's own colour rather than a white flash.
+    @ViewBuilder
+    private var storyCover: some View {
+        let transform = floaterStoryTransform(
+            type: orchestrator.storyOpen ? config.behavior.expandTransition.type
+                                         : config.behavior.collapseTransition.type,
+            phase: storyPhase,
+            screen: coverScreenSize
+        )
+        // A hero resolves to identity: by the time it has presented the viewer, the growing box
+        // has already finished the journey.
+        let content = storyViewer
+            .offset(y: transform.translationY)
+            .opacity(transform.alpha * contentFade)
+            // Deliberately NOT `.ignoresSafeArea()`. The viewer already decides that for itself,
+            // and the split matters: its media backdrop ignores the safe area so the artwork
+            // reaches the screen's edges, while the page canvas and the chrome over it stay inside
+            // it — which is the contract the dashboard authors against, where a page's box *is* the
+            // safe region. Ignoring it out here overrode that and pushed the author's content and
+            // the close button under the notch and home indicator.
+
+        if #available(iOS 16.4, *) {
+            content.presentationBackground(.clear)
+        } else {
+            ZStack {
+                Color.black.ignoresSafeArea()
+                content
+            }
+        }
+    }
+
+    /// Runs the expand or the collapse, and keeps the cover mounted for as long as it takes.
+    ///
+    /// The unmount is deferred by the collapse's own duration rather than driven by a completion
+    /// handler: `withAnimation`'s completion is not available on every OS this SDK supports, and a
+    /// timer that agrees with the animation it accompanies is simpler than one that has to be
+    /// cancelled. A re-open inside that window is safe — `viewerMounted` is already true and the
+    /// deferred close checks the orchestrator before acting.
+    private func runStoryTransition(opening: Bool) {
+        if opening {
+            let expand = config.behavior.expandTransition
+            if expand.isInstant {
+                storyPhase = 1
+                present(mounted: true)
+                return
+            }
+            withAnimation(storyEaseInOutQuart(duration: expand.duration)) { storyPhase = 1 }
+            if expand.type == .hero {
+                // The box grows, and the story is presented as it lands and fades up over it —
+                // rather than switching on fully formed, which reads as two events where the whole
+                // point of the motion is that they are one. The fade overlaps the last of the
+                // growth: it starts a little early and runs a little past, so the two motions
+                // share a moment instead of queueing.
+                let fadeLead = min(0.12, expand.duration * 0.35)
+                DispatchQueue.main.asyncAfter(deadline: .now() + expand.duration - fadeLead) {
+                    guard orchestrator.storyOpen else { return }
+                    contentFade = 0
+                    present(mounted: true)
+                    DispatchQueue.main.async {
+                        withAnimation(.easeOut(duration: fadeLead + 0.1)) { contentFade = 1 }
+                    }
+                }
+            } else {
+                // A slide moves the viewer itself, so it has to exist for the whole motion. The
+                // story is fully drawn the whole way — it is the story that travels.
+                contentFade = 1
+                present(mounted: true)
+            }
+            return
+        }
+        let collapse = config.behavior.collapseTransition
+        if collapse.isInstant {
+            storyPhase = 0
+            contentFade = 0
+            present(mounted: false)
+            return
+        }
+        // Mirror image of the expand: for a hero the story fades out and the box shrinks back to
+        // the window behind it; for a slide the viewer itself travels back down.
+        if collapse.type == .hero {
+            withAnimation(.easeIn(duration: min(0.12, collapse.duration * 0.35))) { contentFade = 0 }
+            present(mounted: false)
+        }
+        withAnimation(storyEaseInOutQuart(duration: collapse.duration)) { storyPhase = 0 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + collapse.duration) {
+            // Only if the user has not re-opened it in the meantime.
+            if !orchestrator.storyOpen { present(mounted: false) }
+        }
+    }
+
+    /// Mounts or unmounts the cover without the system's own presentation animation.
+    private func present(mounted: Bool) {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { viewerMounted = mounted }
     }
 
     /// The author's canvas, scaled to the window.
     ///
     /// Scaled rather than fitted: the window's box IS the canvas's box — the dashboard
-    /// derives the window's aspect ratio from it — so the two can only differ by the
+    /// derives the window's aspect ratio from it — so the two differ only by the
     /// uniform scale between design units and this device's points. Going through
     /// `CampaignCanvasView` instead would re-fit the canvas against the viewport, which
     /// is the screen rather than this window.
-    private var windowBox: some View {
-        CampaignCanvasStage(
+    ///
+    /// The width is passed in rather than read from `UIScreen`, and the post-scale
+    /// `.frame` is not optional. `scaleEffect` does not change a view's layout size, so
+    /// without that frame the stage lays out at its authored size and is *centred*
+    /// inside the window's box — which offsets every child's hit region from where it
+    /// is drawn, so taps on a button land next to it. This is the same three-modifier
+    /// idiom `CampaignCanvasView` uses, for the same reason.
+    private func windowBox(width: CGFloat) -> some View {
+        let scale = width / max(config.canvas.width, 1)
+        return CampaignCanvasStage(
             canvas: config.canvas,
             authoredCornerRadius: 0,
             isDark: isDark,
             showBackground: true,
-            onAction: runCanvasAction
+            onAction: runCanvasAction,
+            // Empty canvas falls through to the shield below, which opens the story;
+            // a button or tap region on the same canvas still takes its own touch,
+            // because children opt into hit testing individually.
+            backgroundTakesTouches: false
         )
         .frame(width: config.canvas.width, height: config.canvas.height, alignment: .topLeading)
-        .scaleEffect(
-            storyWindowWidth(screenWidth: UIScreen.main.bounds.width) / max(config.canvas.width, 1),
-            anchor: .topLeading
+        .scaleEffect(scale, anchor: .topLeading)
+        .frame(
+            width: config.canvas.width * scale,
+            height: config.canvas.height * scale,
+            alignment: .topLeading
         )
         .environment(\.digiaVariables, state.variableContext)
     }
@@ -386,10 +625,6 @@ private struct FloaterStorySessionView: View {
                 width: size, height: size
             )
         ]
-    }
-
-    private func storyWindowWidth(screenWidth: CGFloat) -> CGFloat {
-        screenWidth * config.window.widthFraction
     }
 }
 
