@@ -38,15 +38,48 @@ struct FloaterOverlayView: View {
     }
 }
 
-@MainActor private var activeFloaterWindowSafeAreaInsets: EdgeInsets {
-    let insets = UIApplication.shared.connectedScenes
+/// The device's real safe-area insets, read from the key `UIWindow` rather than from SwiftUI.
+///
+/// A `GeometryReader`'s own `safeAreaInsets` cannot be trusted for a floating window, because what
+/// it reports depends on how the *host app* embedded `DigiaHost` — inset inside a safe area, or
+/// full-bleed, or somewhere in between — and a full-bleed reader reports zero regardless. A window
+/// positioned from that lands under the notch in one app and inset twice over in another.
+///
+/// The window is the only thing on screen that has to be placed against the physical device rather
+/// than against its container, so it asks the device. Shared with the story floater, which had the
+/// same symptom for the same reason.
+@MainActor var activeFloaterWindowSafeAreaInsets: EdgeInsets {
+    activeFloaterWindowGeometry.safeArea
+}
+
+/// The device's screen box and its safe-area insets, taken from the same `UIWindow`.
+///
+/// Both together, deliberately. Reading the size from SwiftUI and the insets from UIKit is how the
+/// story floater ended up inset twice: a `GeometryReader` at the root of a hosting controller
+/// reports a size that has *already* had the safe area carved out of it, so subtracting real insets
+/// from that height again pushes a window far further in from the top and bottom than the author
+/// asked for — barely noticeable on a large window, glaring on a small one, where the gaps are most
+/// of what you see.
+///
+/// Taking both from the window makes the pair consistent by construction, whatever the host app did
+/// with `DigiaHost`.
+@MainActor var activeFloaterWindowGeometry: (bounds: CGRect, safeArea: EdgeInsets) {
+    let window = UIApplication.shared.connectedScenes
         .compactMap { $0 as? UIWindowScene }
         .filter { $0.activationState == .foregroundActive }
         .flatMap(\.windows)
-        .map(\.safeAreaInsets)
-        .first(where: { $0.top > 0 || $0.bottom > 0 }) ?? .zero
-    return EdgeInsets(
-        top: insets.top, leading: insets.left, bottom: insets.bottom, trailing: insets.right)
+        .first(where: { $0.safeAreaInsets.top > 0 || $0.safeAreaInsets.bottom > 0 })
+        ?? UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first
+    guard let window else { return (.zero, EdgeInsets()) }
+    let insets = window.safeAreaInsets
+    return (
+        window.bounds,
+        EdgeInsets(
+            top: insets.top, leading: insets.left, bottom: insets.bottom, trailing: insets.right)
+    )
 }
 
 /// `SpringDescription(mass: 1, stiffness: 210, damping: 24)` in the Flutter
@@ -502,7 +535,10 @@ private struct FloaterSessionView: View {
     }
 }
 
-private struct FloaterCollapsedInteractionView: UIViewRepresentable {
+/// Shared with the story floater's own window (`floater_story_overlay_view.swift`) —
+/// the gesture contract is identical, and a second copy of a `UIPanGestureRecognizer`
+/// shield tuned this carefully is the last thing this SDK needs.
+struct FloaterCollapsedInteractionView: UIViewRepresentable {
     let activeRect: CGRect
     let draggable: Bool
     let tapExpands: Bool
@@ -625,7 +661,7 @@ private struct FloaterCollapsedInteractionView: UIViewRepresentable {
     }
 }
 
-private final class FloaterTouchShieldView: UIView {
+final class FloaterTouchShieldView: UIView {
     var activeRect: CGRect = .null
     // Chrome button pill rects (mute/expand/close) this shield must never resolve as
     // its own hit target for. Checked here, not just inside `handleTap`'s own

@@ -603,6 +603,8 @@ enum FloaterEvent {
         let pipState: String
         let ctaRole: String
         var timeToActionMs: Int64?
+        var ctaLabel: String?
+        var actionUrl: String?
 
         var eventName: String { "Digia Experience Clicked" }
         var properties: [String: Any] {
@@ -611,6 +613,8 @@ enum FloaterEvent {
                 ("action_type", actionType),
                 ("pip_state", pipState),
                 ("cta_role", ctaRole),
+                ("cta_label", ctaLabel),
+                ("action_url", actionUrl),
                 ("time_to_action_ms", timeToActionMs),
             ])
         }
@@ -702,6 +706,6 @@ private func deepUnwrap(_ value: Any?) -> Any? {
     return deepUnwrap(child.value)
 }
 
-private extension Optional where Wrapped == TriggerContext {
-    func orEmpty() -> [String: Any] { self?.asProperties() ?? [:] }
+extension Optional where Wrapped == TriggerContext {
+    fileprivate func orEmpty() -> [String: Any] { self?.asProperties() ?? [:] }
 }

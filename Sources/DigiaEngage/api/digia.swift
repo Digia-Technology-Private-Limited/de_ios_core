@@ -103,11 +103,21 @@ public enum Digia {
     /// True when any overlay (toast, dialog, bottom sheet, anchored tooltip/spotlight)
     /// is currently active. Used by host views to decide whether to forward hit tests
     /// to the SwiftUI layer or pass them through to content below.
+    /// A story floater is the one campaign that is *sometimes* full screen: its window is a small
+    /// box (covered by `floaterActiveRect` instead), but the story it opens covers everything. So
+    /// this includes the open story and excludes the window, which is why the two properties are
+    /// not simply "is a floater showing".
+    ///
+    /// Leaving it out is not a degraded hit test but no hit test at all: the story is presented on
+    /// the host's own hosting controller, so a host that has not been told an overlay is active
+    /// claims only the window's old rect and every tap on the story — advance, close, mute — falls
+    /// through to the app behind it.
     public static var hasActiveOverlay: Bool {
         let ctrl = SDKInstance.shared.controller
         return ctrl.activeStoryOverlay != nil
             || ctrl.activeNudge != nil
             || SDKInstance.shared.surveyOrchestrator.state != nil
+            || SDKInstance.shared.floaterStoryOrchestrator.storyOpen
     }
 
     /// The debug bubble's current on-screen frame (root overlay's coordinate
@@ -118,13 +128,23 @@ public enum Digia {
         SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame
     }
 
-    /// The floater/PIP's current on-screen frame (root overlay's coordinate space),
-    /// or `nil` when none is showing. Same purpose as `debugBadgeFrame` — the PIP is
-    /// also a small floating region (not a full-screen overlay `hasActiveOverlay`
-    /// already covers), so a host's hit-testing needs the actual frame to tell a
-    /// touch on it apart from empty SwiftUI space elsewhere.
+    /// The floating window's current on-screen frame (root overlay's coordinate
+    /// space), or `nil` when none is showing. Same purpose as `debugBadgeFrame` — a
+    /// floater is a small floating region rather than the full-screen overlay
+    /// `hasActiveOverlay` already covers, so a host's hit-testing needs the actual
+    /// frame to tell a touch on it apart from empty SwiftUI space elsewhere.
+    ///
+    /// Covers **both** floater subtypes: a PiP's media window and a story floater's
+    /// canvas window are the same thing to a host — a small box that must take its
+    /// own touches. They have separate orchestrators (a PiP owns an `AVPlayer` that
+    /// a story window has no use for), and only one of them can ever be showing, so
+    /// this reads whichever it is. A story window missing from here is not a
+    /// degraded hit test but no hit test at all: RN's `hitTest` cannot tell a touch
+    /// on a region this small apart from empty SwiftUI space, so every tap on the
+    /// window fell straight through to the host's own content behind it.
     public static var floaterActiveRect: CGRect? {
         SDKInstance.shared.floaterOrchestrator.activeRect
+            ?? SDKInstance.shared.floaterStoryOrchestrator.activeRect
     }
 
     /// Sets the authenticated user ID for analytics identity stitching.

@@ -136,6 +136,19 @@ struct CampaignCanvasStage: View {
     let isDark: Bool
     let showBackground: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
+    /// Whether the canvas's own background absorbs touches that no child wanted.
+    ///
+    /// True everywhere but a story floater's window. Children already opt in and out
+    /// individually (`child.isHitTestable` below), so the background is the only thing
+    /// standing between "the author left this spot empty" and whatever is behind the
+    /// canvas — and for every other surface it *should* stand there: a tap on a
+    /// dialog's own background must not fall through to the barrier and dismiss it.
+    ///
+    /// A floating window is the one surface where falling through is the point. The
+    /// window sits on a drag/tap shield that opens the story, so empty canvas has to
+    /// reach it while a button or tap region on that same canvas still takes its own
+    /// touch.
+    var backgroundTakesTouches = true
 
     /// Where a tap that carries `Action.showStory` is routed.
     ///
@@ -167,6 +180,7 @@ struct CampaignCanvasStage: View {
         ZStack(alignment: .topLeading) {
             if showBackground {
                 CampaignCanvasPaintView(paint: canvas.background, isDark: isDark)
+                    .allowsHitTesting(backgroundTakesTouches)
             }
             ForEach(canvas.children) { child in
                 CanvasChildView(child: child, isDark: isDark, onAction: dispatch)
