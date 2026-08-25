@@ -42,6 +42,7 @@ struct GuideOverlayView: View {
                 case let .ready(anchorRect, cornerRadius, imageURL):
                     GuideStepOverlay(
                         step: step,
+                        campaignID: state.payload.cepCampaignId,
                         guideToken: state.token,
                         stepIndex: state.stepIndex,
                         totalSteps: state.steps.count,
@@ -136,6 +137,7 @@ private enum GuideResolvedTarget {
 
 private struct GuideStepOverlay: View {
     let step: GuideStepModel
+    let campaignID: String
     let guideToken: Int64
     let stepIndex: Int
     let totalSteps: Int
@@ -305,11 +307,7 @@ private struct GuideStepOverlay: View {
                     Color.clear
                         .contentShape(Rectangle())
                         .onTapGesture {
-                            if isFlat {
-                                if config.outsideTapBehavior == .next { onOutsideTap() }
-                            } else {
-                                onDismiss()
-                            }
+                            if config.outsideTapBehavior == .next { onOutsideTap() }
                         }
                         .ignoresSafeArea()
                 }
@@ -658,6 +656,7 @@ private struct GuideStepOverlay: View {
             await SDKInstance.shared.executeGuideActionFlow(
                 guideActions(request.actions),
                 variables: variables,
+                campaignID: campaignID,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: onDismiss,
                     next: onAdvance,
@@ -687,6 +686,7 @@ private struct GuideStepOverlay: View {
             await SDKInstance.shared.executeGuideActionFlow(
                 executableActions,
                 variables: variables,
+                campaignID: campaignID,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: onDismiss,
                     next: onAdvance,

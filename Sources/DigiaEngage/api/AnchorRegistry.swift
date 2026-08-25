@@ -329,13 +329,74 @@ private final class ActiveAnchorSampler: NSObject {
         let presentationRect = view.layer.presentation().map {
             $0.convert($0.bounds, to: destinationLayer)
         }
-        return AnchorGeometry.resolveActive(
-            modelRect: modelRect,
-            presentationRect: presentationRect,
+        let visible = isVisible(view)
+        let model = resolve(
+            rect: modelRect,
             viewport: window.bounds,
-            isAttached: true,
-            isVisible: isVisible(view)
+            isVisible: visible,
+            intersectsVisibleAncestors: intersectsVisibleAncestors(
+                view,
+                rect: modelRect,
+                window: window,
+                usePresentationLayers: false
+            )
         )
+        guard let presentationRect else { return model }
+        let presentation = resolve(
+            rect: presentationRect,
+            viewport: window.bounds,
+            isVisible: visible,
+            intersectsVisibleAncestors: intersectsVisibleAncestors(
+                view,
+                rect: presentationRect,
+                window: window,
+                usePresentationLayers: true
+            )
+        )
+        return presentation == .unavailable(.invalidGeometry) ? model : presentation
+    }
+
+    private static func resolve(
+        rect: CGRect,
+        viewport: CGRect,
+        isVisible: Bool,
+        intersectsVisibleAncestors: Bool
+    ) -> AnchorResolution {
+        guard intersectsVisibleAncestors else { return .unavailable(.outsideViewport) }
+        return AnchorGeometry.resolve(
+            rect: rect,
+            viewport: viewport,
+            isAttached: true,
+            isVisible: isVisible
+        )
+    }
+
+    private static func intersectsVisibleAncestors(
+        _ view: UIView,
+        rect: CGRect,
+        window: UIWindow,
+        usePresentationLayers: Bool
+    ) -> Bool {
+        var visibleRect = rect
+        var ancestor = view.superview
+        let destinationLayer = window.layer.presentation() ?? window.layer
+        while let current = ancestor {
+            let presentationLayer = usePresentationLayers ? current.layer.presentation() : nil
+            let bounds = presentationLayer?.bounds ?? current.bounds
+            guard bounds.isFiniteAndPositive else { return false }
+            if current.clipsToBounds {
+                let clipRect = if let presentationLayer {
+                    presentationLayer.convert(bounds, to: destinationLayer)
+                } else {
+                    current.convert(current.bounds, to: window)
+                }
+                visibleRect = visibleRect.intersection(clipRect)
+                guard visibleRect.isFiniteAndPositive else { return false }
+            }
+            if current === window { break }
+            ancestor = current.superview
+        }
+        return true
     }
 
     private static func isVisible(_ view: UIView) -> Bool {

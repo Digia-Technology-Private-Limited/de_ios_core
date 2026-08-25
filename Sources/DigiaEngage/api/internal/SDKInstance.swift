@@ -214,12 +214,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func executeGuideActionFlow(
         _ actions: [EngageAction],
         variables: VariableContext?,
+        campaignID: String,
         localActionExecutor: LocalActionExecutor
     ) async {
         let hostActionHandler: ((EngageAction) -> Bool)? = if guideHostActionHandler == nil {
             nil
         } else {
-            { [weak self] action in self?.handleGuideHostAction(action) ?? false }
+            { [weak self] action in
+                self?.handleGuideHostAction(action, campaignID: campaignID) ?? false
+            }
         }
         await actionExecutor.executeActionFlow(
             actions,
@@ -229,13 +232,14 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
     }
 
-    private func handleGuideHostAction(_ action: EngageAction) -> Bool {
+    private func handleGuideHostAction(_ action: EngageAction, campaignID: String) -> Bool {
         guard let guideHostActionHandler else { return false }
         switch action {
         case .openDeeplink(let url, let fallbackUrl):
-            return guideHostActionHandler("deepLink", url, fallbackUrl, nil)
+            return guideHostActionHandler("deepLink", url, fallbackUrl, nil, campaignID)
         case .openUrl(let url, let presentation):
-            return guideHostActionHandler("openURL", url, nil, presentation ?? "external")
+            return guideHostActionHandler(
+                "openURL", url, nil, presentation ?? "external", campaignID)
         default:
             return false
         }

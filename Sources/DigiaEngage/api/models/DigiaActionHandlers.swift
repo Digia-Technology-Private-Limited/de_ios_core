@@ -7,7 +7,8 @@ public typealias GuideHostActionHandler = @MainActor @Sendable (
     _ actionType: String,
     _ url: String,
     _ fallbackUrl: String?,
-    _ presentation: String?
+    _ presentation: String?,
+    _ campaignID: String
 ) -> Bool
 
 /// Optional host overrides for actions authored in Digia Engage.
