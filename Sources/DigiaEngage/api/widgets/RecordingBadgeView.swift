@@ -29,12 +29,16 @@ private struct DraggableBadge: View {
     @State private var offset: CGSize?
     @State private var dragStartOffset: CGSize?
     @State private var badgeSize: CGSize = .zero
+    @State private var snappedEdge: BadgeEdge = .leading
 
     var body: some View {
         GeometryReader { proxy in
             let current = offset ?? CGSize(width: Self.margin, height: proxy.safeAreaInsets.top + Self.defaultTopClearance)
 
-            BadgeContent()
+            BadgeContent(
+                onCapture: { SDKInstance.shared.captureCurrentPage() },
+                onSettings: { presentDebugSettings() }
+            )
                 .background(
                     GeometryReader { inner -> Color in
                         // .global matches the coordinate space a host's hitTest(_:with:)
@@ -42,14 +46,29 @@ private struct DraggableBadge: View {
                         // with real touches.
                         let globalFrame = inner.frame(in: .global)
                         DispatchQueue.main.async {
-                            badgeSize = inner.size
+                            if badgeSize != inner.size {
+                                badgeSize = inner.size
+                                let latest = offset ?? current
+                                let pinnedX = snappedEdge == .leading
+                                    ? Self.margin
+                                    : proxy.size.width - inner.size.width - Self.margin
+                                let minY = proxy.safeAreaInsets.top
+                                let maxY = max(
+                                    minY,
+                                    proxy.size.height - proxy.safeAreaInsets.bottom - inner.size.height
+                                )
+                                offset = CGSize(
+                                    width: min(max(0, pinnedX), max(0, proxy.size.width - inner.size.width)),
+                                    height: min(max(minY, latest.height), maxY)
+                                )
+                            }
                             SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = globalFrame
                         }
                         return Color.clear
                     }
                 )
                 .offset(x: current.width, y: current.height)
-                .gesture(
+                .highPriorityGesture(
                     DragGesture()
                         .onChanged { value in
                             let start = dragStartOffset ?? current
@@ -66,7 +85,9 @@ private struct DraggableBadge: View {
                             dragStartOffset = nil
                             let latest = offset ?? current
                             let center = proxy.size.width / 2
-                            let snappedX: CGFloat = (latest.width + badgeSize.width / 2) < center
+                            let leading = (latest.width + badgeSize.width / 2) < center
+                            snappedEdge = leading ? .leading : .trailing
+                            let snappedX: CGFloat = leading
                                 ? Self.margin
                                 : proxy.size.width - badgeSize.width - Self.margin
                             withAnimation(.easeOut(duration: 0.22)) {
@@ -74,14 +95,13 @@ private struct DraggableBadge: View {
                             }
                         }
                 )
-                .onTapGesture {
-                    presentDebugSettings()
-                }
                 .onDisappear {
                     SDKInstance.shared.debugOverlayControllerSnapshot().badgeFrame = nil
                 }
         }
     }
+
+    private enum BadgeEdge { case leading, trailing }
 
     private func presentDebugSettings() {
         guard let presenter = ViewControllerUtil.topViewController() else { return }
@@ -91,8 +111,12 @@ private struct DraggableBadge: View {
 
 @MainActor
 private struct BadgeContent: View {
+    let onCapture: () -> Void
+    let onSettings: () -> Void
+    @ObservedObject private var sdk = SDKInstance.shared
     @ObservedObject private var liveTest = SDKInstance.shared.liveTestServiceSnapshot()
     @State private var pulse = false
+    @State private var showCaptureStatus = false
 
     private var dotColor: Color? {
         switch liveTest.connectionState {
@@ -110,13 +134,28 @@ private struct BadgeContent: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text("Digia")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white)
+            if sdk.captureModeEnabled {
+                Button(action: onCapture) {
+                    Image(systemName: "camera")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                }
+                .accessibilityLabel("Capture current page")
+                Divider()
+                    .overlay(Color.white.opacity(0.3))
+                    .frame(height: 18)
+            }
+            Button(action: onSettings) {
+                Text("Digia")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+            }
             if let dotColor {
                 Circle()
                     .fill(dotColor)
                     .frame(width: 8, height: 8)
+                    .fixedSize()
                     .opacity(isPulsing ? (pulse ? 1 : 0.35) : 1)
             }
         }
@@ -124,6 +163,7 @@ private struct BadgeContent: View {
         .padding(.vertical, 6)
         .background(Color.black.opacity(0.87))
         .clipShape(RoundedRectangle(cornerRadius: 16))
+        .buttonStyle(.plain)
         // Started once, forever — never stopped/restarted per state (that's what
         // caused a real bug: a repeatForever animation doesn't reliably cancel on
         // a later plain reassignment, so the dot kept pulsing green after
@@ -133,6 +173,14 @@ private struct BadgeContent: View {
             withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true)) {
                 pulse = true
             }
+        }
+        .onChange(of: sdk.captureStatusMessage) { message in
+            showCaptureStatus = message != nil
+        }
+        .alert("Page & component capture", isPresented: $showCaptureStatus) {
+            Button("OK") { sdk.clearCaptureStatus() }
+        } message: {
+            Text(sdk.captureStatusMessage ?? "")
         }
     }
 }

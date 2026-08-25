@@ -118,6 +118,7 @@ public enum Digia {
             || ctrl.activeNudge != nil
             || SDKInstance.shared.surveyOrchestrator.state != nil
             || SDKInstance.shared.floaterStoryOrchestrator.storyOpen
+            || SDKInstance.shared.guideOrchestrator.state != nil
     }
 
     /// The debug bubble's current on-screen frame (root overlay's coordinate

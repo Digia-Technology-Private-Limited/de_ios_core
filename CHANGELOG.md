@@ -2,6 +2,16 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.11.0] - 2026-08-20
+
+### New Features
+- Added anchorless Canvas spotlight guides that target captured screen regions without host-registered anchor keys, and live testing.
+- React Native debug builds can now capture the current page and selected UI structure from the Digia debug settings and upload it for dashboard guide authoring; text, media, and other structural nodes are opt-in.
+
+### Bug Fixes
+- Fixed Canvas text using fit-to-text sizing measuring wider than its content, so text now keeps its authored width and alignment.
+- Fixed Canvas text ignoring its authored horizontal alignment; left-, center-, and right-aligned text now render as configured.
+
 ## [3.10.1] - 2026-08-19
 
 ### Improvements

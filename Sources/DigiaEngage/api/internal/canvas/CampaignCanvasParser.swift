@@ -416,7 +416,10 @@ struct CampaignCanvasParser {
     private func horizontalAlign(_ value: String) -> CampaignCanvasHorizontalAlign { switch value { case "center": .center; case "right": .right; default: .left } }
     private func verticalAlign(_ value: String) -> CampaignCanvasVerticalAlign { switch value { case "center": .center; case "bottom": .bottom; default: .top } }
     private func parseFit(_ value: String?) -> String { switch value { case "contain": "contain"; case "fill": "fill"; default: "cover" } }
-    private func propertyNumber(_ raw: Any?) -> Double? { designNumber(unwrapLiteral(raw)) }
+    private func propertyNumber(_ raw: Any?) -> Double? {
+        guard let value = designNumber(unwrapLiteral(raw)), value.isFinite else { return nil }
+        return value
+    }
     private func propertyObject(_ raw: Any?) -> [String: Any]? { unwrapLiteral(raw) as? [String: Any] }
     private func propertyArray(_ raw: Any?) -> [[String: Any]]? { unwrapLiteral(raw) as? [[String: Any]] }
     private func positive(_ value: Double, fallback: CGFloat) -> CGFloat { value.isFinite && value > 0 ? CGFloat(value) : fallback }

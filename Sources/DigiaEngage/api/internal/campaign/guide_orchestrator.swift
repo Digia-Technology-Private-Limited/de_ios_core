@@ -5,6 +5,9 @@ import Combine
 // (tooltip / spotlight) over the existing anchor + overlay primitives.
 
 struct ActiveGuideState: Equatable {
+    /// Monotonic identity for one guide presentation. Step transitions retain
+    /// it so asynchronous image work cannot dismiss a newer presentation.
+    let token: Int64
     let campaign: CampaignModel
     let stepIndex: Int
     /// The original trigger payload, retained so lifecycle events reuse the CEP's
@@ -28,25 +31,31 @@ struct ActiveGuideState: Equatable {
 @MainActor
 final class GuideOrchestrator: ObservableObject {
     @Published private(set) var state: ActiveGuideState?
+    private var tokenCounter: Int64 = 0
 
-    func start(_ campaign: CampaignModel, payload: CEPTriggerPayload) {
+    @discardableResult
+    func start(_ campaign: CampaignModel, payload: CEPTriggerPayload) -> Bool {
         guard campaign.campaignType == "guide",
               let guideConfig = campaign.guideConfig,
-              !guideConfig.steps.isEmpty
-        else { return }
-        state = ActiveGuideState(campaign: campaign, stepIndex: 0, payload: payload)
+              !guideConfig.steps.isEmpty,
+              state == nil
+        else { return false }
+        tokenCounter &+= 1
+        state = ActiveGuideState(token: tokenCounter, campaign: campaign, stepIndex: 0, payload: payload)
+        return true
     }
 
     func advance() {
         guard let current = state else { return }
         state = current.hasNext
-            ? ActiveGuideState(campaign: current.campaign, stepIndex: current.stepIndex + 1, payload: current.payload)
+            ? ActiveGuideState(token: current.token, campaign: current.campaign, stepIndex: current.stepIndex + 1, payload: current.payload)
             : nil
     }
 
     func previous() {
         guard let current = state, current.hasPrevious else { return }
         state = ActiveGuideState(
+            token: current.token,
             campaign: current.campaign,
             stepIndex: current.stepIndex - 1,
             payload: current.payload
