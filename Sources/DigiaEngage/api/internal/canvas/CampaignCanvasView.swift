@@ -60,6 +60,7 @@ struct GuideCanvasUnionSurface: View {
     let designWidth: CGFloat
     let viewportWidth: CGFloat
     let availableSize: CGSize
+    let resolvedScale: CGFloat?
     let cornerRadius: CGFloat
     let pointerDirection: GuideCanvasPointerDirection?
     let pointerSize: CGFloat
@@ -72,7 +73,7 @@ struct GuideCanvasUnionSurface: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var scale: CGFloat {
-        guideCanvasScale(
+        resolvedScale ?? guideCanvasScale(
             canvas: canvas,
             designWidth: designWidth,
             viewportWidth: viewportWidth,

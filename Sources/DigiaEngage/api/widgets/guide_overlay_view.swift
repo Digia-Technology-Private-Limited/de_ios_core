@@ -194,7 +194,22 @@ private struct GuideStepOverlay: View {
                 )
                 : anchorRect
             let placementAnchor = paddedAnchor
-            let placement = if isAnchorless {
+            let canvasPlacement: GuideCanvasPlacement? = if isCanvas && !isAnchorless, let canvas = config.canvas {
+                guideCanvasPlacement(
+                    canvas: canvas,
+                    preferred: config.bubble.arrow.preferredDirection,
+                    anchor: placementAnchor,
+                    bounds: safeBounds.insetBy(dx: 16, dy: 16),
+                    desiredScale: canvasScale,
+                    pointerSize: arrowVisible ? arrowSize : 0,
+                    gap: CGFloat(config.bubble.calloutGap)
+                )
+            } else {
+                nil
+            }
+            let placement = if let canvasPlacement {
+                canvasPlacement.side
+            } else if isAnchorless {
                 resolvedAnchorlessPlacement(
                     preferred: config.bubble.arrow.preferredDirection,
                     anchor: placementAnchor,
@@ -218,21 +233,25 @@ private struct GuideStepOverlay: View {
                     screen: safeBounds
                 )
             }
-            let bubbleOrigin = isAnchorless || isFlat
-                ? calloutOrigin(
+            let bubbleOrigin = if let canvasPlacement {
+                canvasPlacement.origin
+            } else if isAnchorless || isFlat {
+                calloutOrigin(
                     placement: placement,
                     anchor: placementAnchor,
                     bubble: bubbleSize,
                     screen: safeBounds,
                     gap: gap
                 )
-                : classicBubbleOrigin(
+            } else {
+                classicBubbleOrigin(
                     placement: placement,
                     anchor: anchorRect,
                     bubble: bubbleSize,
                     screen: safeBounds,
                     maxWidth: CGFloat(config.bubble.maxWidthDp)
                 )
+            }
             let arrowPosition = isAnchorless || isFlat
                 ? calloutArrowPosition(
                     placement: placement,
@@ -309,6 +328,7 @@ private struct GuideStepOverlay: View {
                     availableSize: safeBounds.size,
                     origin: bubbleOrigin,
                     fixedWidth: isAnchorless || isFlat,
+                    resolvedCanvasScale: canvasPlacement?.scale,
                     canvasPointerDirection: isCanvas && arrowVisible ? placement.canvasPointerDirection : nil,
                     canvasPointerSize: isCanvas && arrowVisible ? arrowSize : 0,
                     canvasPointerCenter: isCanvas && arrowVisible
@@ -389,6 +409,7 @@ private struct GuideStepOverlay: View {
         availableSize: CGSize,
         origin: CGPoint,
         fixedWidth: Bool,
+        resolvedCanvasScale: CGFloat?,
         canvasPointerDirection: GuideCanvasPointerDirection?,
         canvasPointerSize: CGFloat,
         canvasPointerCenter: CGFloat?
@@ -397,6 +418,7 @@ private struct GuideStepOverlay: View {
             bubble(
                 viewportSize: viewportSize,
                 availableSize: availableSize,
+                resolvedCanvasScale: resolvedCanvasScale,
                 canvasPointerDirection: canvasPointerDirection,
                 canvasPointerSize: canvasPointerSize,
                 canvasPointerCenter: canvasPointerCenter
@@ -412,6 +434,7 @@ private struct GuideStepOverlay: View {
             bubble(
                 viewportSize: viewportSize,
                 availableSize: availableSize,
+                resolvedCanvasScale: resolvedCanvasScale,
                 canvasPointerDirection: canvasPointerDirection,
                 canvasPointerSize: canvasPointerSize,
                 canvasPointerCenter: canvasPointerCenter
@@ -427,6 +450,7 @@ private struct GuideStepOverlay: View {
             bubble(
                 viewportSize: viewportSize,
                 availableSize: availableSize,
+                resolvedCanvasScale: resolvedCanvasScale,
                 canvasPointerDirection: canvasPointerDirection,
                 canvasPointerSize: canvasPointerSize,
                 canvasPointerCenter: canvasPointerCenter
@@ -453,6 +477,7 @@ private struct GuideStepOverlay: View {
     private func bubble(
         viewportSize: CGSize,
         availableSize: CGSize,
+        resolvedCanvasScale: CGFloat?,
         canvasPointerDirection: GuideCanvasPointerDirection? = nil,
         canvasPointerSize: CGFloat = 0,
         canvasPointerCenter: CGFloat? = nil
@@ -466,6 +491,7 @@ private struct GuideStepOverlay: View {
                     width: max(0, availableSize.width - 32),
                     height: max(0, availableSize.height - 32)
                 ),
+                resolvedScale: resolvedCanvasScale,
                 cornerRadius: CGFloat(config.bubble.cornerRadius),
                 pointerDirection: canvasPointerDirection,
                 pointerSize: canvasPointerSize,
@@ -673,6 +699,90 @@ private struct GuideStepOverlay: View {
         }
         return result
     }
+}
+
+private struct GuideCanvasPlacement {
+    let scale: CGFloat
+    let side: CalloutPlacement
+    let origin: CGPoint
+}
+
+private func guideCanvasPlacement(
+    canvas: CampaignCanvas,
+    preferred: String,
+    anchor: CGRect,
+    bounds: CGRect,
+    desiredScale: CGFloat,
+    pointerSize: CGFloat,
+    gap: CGFloat
+) -> GuideCanvasPlacement {
+    let requested: CalloutPlacement = switch preferred {
+    case "above", "top": .above
+    case "below", "bottom": .below
+    case "left", "start": .left
+    case "right", "end": .right
+    default: .below
+    }
+    let sides: [CalloutPlacement] = switch requested {
+    case .above: [.above, .below, .right, .left]
+    case .below: [.below, .above, .right, .left]
+    case .left: [.left, .right, .below, .above]
+    case .right: [.right, .left, .below, .above]
+    }
+    let candidates = sides.map { side in
+        let availablePrimary: CGFloat = switch side {
+        case .above: anchor.minY - bounds.minY
+        case .below: bounds.maxY - anchor.maxY
+        case .left: anchor.minX - bounds.minX
+        case .right: bounds.maxX - anchor.maxX
+        }
+        let primary = side.isVertical ? canvas.height : canvas.width
+        let cross = side.isVertical ? canvas.width : canvas.height
+        let availableCross = side.isVertical ? bounds.width : bounds.height
+        let scale = max(
+            0,
+            min(
+                desiredScale,
+                max(0, availablePrimary) / max(primary + pointerSize + gap, 1),
+                max(0, availableCross) / max(cross, 1)
+            )
+        )
+        return (side: side, scale: scale)
+    }
+    let firstCandidate = candidates.first ?? (side: .below, scale: 0)
+    let selected = candidates.first(where: { $0.scale >= desiredScale })
+        ?? candidates.dropFirst().reduce(firstCandidate) { best, candidate in
+            candidate.scale > best.scale ? candidate : best
+        }
+    let scale = selected.scale
+    let side = selected.side
+    let surfaceSize = CGSize(
+        width: (canvas.width + (side.isVertical ? 0 : pointerSize)) * scale,
+        height: (canvas.height + (side.isVertical ? pointerSize : 0)) * scale
+    )
+    let scaledGap = gap * scale
+    let rawOrigin: CGPoint = switch side {
+    case .above:
+        CGPoint(x: anchor.midX - surfaceSize.width / 2, y: anchor.minY - scaledGap - surfaceSize.height)
+    case .below:
+        CGPoint(x: anchor.midX - surfaceSize.width / 2, y: anchor.maxY + scaledGap)
+    case .left:
+        CGPoint(x: anchor.minX - scaledGap - surfaceSize.width, y: anchor.midY - surfaceSize.height / 2)
+    case .right:
+        CGPoint(x: anchor.maxX + scaledGap, y: anchor.midY - surfaceSize.height / 2)
+    }
+    let origin = if side.isVertical {
+        CGPoint(
+            x: min(max(rawOrigin.x, bounds.minX), max(bounds.minX, bounds.maxX - surfaceSize.width)),
+            y: rawOrigin.y
+        )
+    } else {
+        CGPoint(
+            x: rawOrigin.x,
+            y: min(max(rawOrigin.y, bounds.minY), max(bounds.minY, bounds.maxY - surfaceSize.height))
+        )
+    }
+    return GuideCanvasPlacement(scale: scale, side: side, origin: origin)
 }
 
 private extension GuideAction {
