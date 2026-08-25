@@ -19,12 +19,13 @@ export GH_EDITOR=true
 #   ./Scripts/release.sh 3.7.0
 #
 # This script intentionally performs external, irreversible actions: it commits
-# and pushes the three release files, pushes a git tag, creates a GitHub Release,
+# and pushes the release files, pushes a git tag, creates a GitHub Release,
 # uploads the fat XCFramework, and publishes the pod to CocoaPods trunk.
 
 readonly EXPECTED_BRANCH="main"
 readonly POD_NAME="DigiaEngage"
 readonly PODSPEC="DigiaEngage.podspec"
+readonly SOURCE_PODSPEC="DigiaEngage-source.podspec"
 readonly SDK_VERSION_FILE="Sources/DigiaEngage/SdkVersion.swift"
 readonly CHANGELOG="CHANGELOG.md"
 readonly BUILD_SCRIPT="Scripts/build-fat-xcframework.sh"
@@ -33,6 +34,7 @@ readonly ZIP_PATH="dist/DigiaEngage.xcframework.zip"
 readonly -a RELEASE_FILES=(
   "$CHANGELOG"
   "$PODSPEC"
+  "$SOURCE_PODSPEC"
   "$SDK_VERSION_FILE"
 )
 
@@ -83,6 +85,7 @@ Before running:
 The script commits only:
   CHANGELOG.md
   DigiaEngage.podspec
+  DigiaEngage-source.podspec
   Sources/DigiaEngage/SdkVersion.swift
 
 Dry-run mode:
@@ -338,7 +341,7 @@ extract_latest_released_version() {
 is_release_file() {
   local path=$1
   case "$path" in
-    "$CHANGELOG"|"$PODSPEC"|"$SDK_VERSION_FILE") return 0 ;;
+    "$CHANGELOG"|"$PODSPEC"|"$SOURCE_PODSPEC"|"$SDK_VERSION_FILE") return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -357,7 +360,7 @@ assert_no_unrelated_changes() {
   while IFS= read -r path; do
     [ -z "$path" ] && continue
     if ! is_release_file "$path"; then
-      fail "Tracked change '$path' is outside the three release files. Commit, stash, or restore it first."
+      fail "Tracked change '$path' is outside the release files. Commit, stash, or restore it first."
     fi
   done < <(git diff --name-only HEAD --)
 
@@ -391,7 +394,7 @@ assert_exact_release_changes() {
   done < <(git diff --name-only HEAD --)
 
   if [ "${#changed[@]}" -ne "${#RELEASE_FILES[@]}" ]; then
-    fail "Expected exactly three changed release files; found ${#changed[@]}: ${changed[*]:-(none)}."
+    fail "Expected exactly ${#RELEASE_FILES[@]} changed release files; found ${#changed[@]}: ${changed[*]:-(none)}."
   fi
 
   for path in "${changed[@]}"; do
@@ -399,7 +402,7 @@ assert_exact_release_changes() {
   done
   for path in "${RELEASE_FILES[@]}"; do
     if git diff --quiet HEAD -- "$path"; then
-      fail "Release file '$path' is unchanged from HEAD; every release must update all three files."
+      fail "Release file '$path' is unchanged from HEAD; every release must update all release files."
     fi
   done
 
@@ -413,7 +416,7 @@ assert_paths_are_exact_release_files() {
   local -a paths=("$@")
 
   if [ "${#paths[@]}" -ne "${#RELEASE_FILES[@]}" ]; then
-    fail "$description contains ${#paths[@]} files instead of exactly three: ${paths[*]:-(none)}."
+    fail "$description contains ${#paths[@]} files instead of exactly ${#RELEASE_FILES[@]}: ${paths[*]:-(none)}."
   fi
   for path in "${paths[@]}"; do
     is_release_file "$path" || fail "$description contains unauthorized file '$path'."
@@ -474,13 +477,13 @@ verify_dry_run_non_mutation() {
   [ "$current_status" = "$ORIGINAL_STATUS" ] || fail "Dry-run changed the real checkout's worktree status."
   [ "$current_head" = "$ORIGINAL_HEAD" ] || fail "Dry-run changed the real checkout's HEAD."
   [ "$current_refs" = "$ORIGINAL_REFS" ] || fail "Dry-run changed git refs in the real checkout."
-  [ "$current_hashes" = "$ORIGINAL_FILE_HASHES" ] || fail "Dry-run changed one of the three real release files."
+  [ "$current_hashes" = "$ORIGINAL_FILE_HASHES" ] || fail "Dry-run changed one of the real release files."
   [ "$current_index_hash" = "$ORIGINAL_INDEX_HASH" ] || fail "Dry-run changed the real checkout's git index."
 }
 
 validate_preflight() {
-  local command path remote_head remote_tag top_version current_pod current_sdk
-  local base_pod base_sdk base_changelog origin_url repo_hint pod_info remote_tags
+  local command path remote_head remote_tag top_version current_pod current_source_pod current_sdk
+  local base_pod base_source_pod base_sdk base_changelog origin_url repo_hint pod_info remote_tags
   local -a required_commands=(
     awk cat cp curl dirname env find gh git grep head ln mkdir mktemp nm pod rm
     ruby sed shasum swift tail true unzip xcodebuild xcodegen zip
@@ -508,27 +511,32 @@ validate_preflight() {
   assert_no_unrelated_changes
 
   git show "HEAD:$PODSPEC" > "$RUN_DIR/head-podspec"
+  git show "HEAD:$SOURCE_PODSPEC" > "$RUN_DIR/head-source-podspec"
   git show "HEAD:$SDK_VERSION_FILE" > "$RUN_DIR/head-sdk-version"
   git show "HEAD:$CHANGELOG" > "$RUN_DIR/head-changelog"
 
   base_pod=$(extract_podspec_version "$RUN_DIR/head-podspec")
+  base_source_pod=$(extract_podspec_version "$RUN_DIR/head-source-podspec")
   base_sdk=$(extract_sdk_version "$RUN_DIR/head-sdk-version")
   base_changelog=$(extract_latest_released_version "$RUN_DIR/head-changelog")
   [ -n "$base_pod" ] || fail "Could not read the podspec version from HEAD."
+  [ -n "$base_source_pod" ] || fail "Could not read the source podspec version from HEAD."
   [ -n "$base_sdk" ] || fail "Could not read the SDK version from HEAD."
   [ -n "$base_changelog" ] || fail "Could not read the latest released changelog version from HEAD."
-  if [ "$base_pod" != "$base_sdk" ] || [ "$base_pod" != "$base_changelog" ]; then
-    fail "HEAD versions are already inconsistent: podspec=$base_pod, SDK=$base_sdk, changelog=$base_changelog."
+  if [ "$base_pod" != "$base_source_pod" ] || [ "$base_pod" != "$base_sdk" ] || [ "$base_pod" != "$base_changelog" ]; then
+    fail "HEAD versions are already inconsistent: podspec=$base_pod, source-podspec=$base_source_pod, SDK=$base_sdk, changelog=$base_changelog."
   fi
   BASE_VERSION=$base_pod
   validate_semver "$BASE_VERSION" || fail "Current version '$BASE_VERSION' in HEAD is not valid semantic versioning."
   semver_is_greater "$VERSION" "$BASE_VERSION" || fail "New version $VERSION must be greater than current version $BASE_VERSION."
 
   current_pod=$(extract_podspec_version "$PODSPEC")
+  current_source_pod=$(extract_podspec_version "$SOURCE_PODSPEC")
   current_sdk=$(extract_sdk_version "$SDK_VERSION_FILE")
   top_version=$(extract_top_changelog_version "$CHANGELOG")
-  [ -n "$current_pod" ] && [ -n "$current_sdk" ] && [ -n "$top_version" ] || fail "Could not read all three working-tree versions."
+  [ -n "$current_pod" ] && [ -n "$current_source_pod" ] && [ -n "$current_sdk" ] && [ -n "$top_version" ] || fail "Could not read all working-tree versions."
   validate_pre_bump_version "Working podspec" "$current_pod"
+  validate_pre_bump_version "Working source podspec" "$current_source_pod"
   validate_pre_bump_version "Working SDK" "$current_sdk"
 
   case "$top_version" in
@@ -587,9 +595,10 @@ validate_preflight() {
 }
 
 bump_release_files() {
-  local podspec_pattern sdk_pattern podspec_count sdk_count
+  local podspec_pattern sdk_pattern podspec_count source_podspec_count sdk_count
   local top_heading top_version target_heading_count release_heading
   local staged_podspec="$RUN_DIR/bumped-podspec"
+  local staged_source_podspec="$RUN_DIR/bumped-source-podspec"
   local staged_sdk="$RUN_DIR/bumped-sdk-version"
   local staged_changelog="$RUN_DIR/bumped-changelog"
 
@@ -598,6 +607,8 @@ bump_release_files() {
 
   podspec_count=$(grep -Ec "$podspec_pattern" "$PODSPEC" || true)
   [ "$podspec_count" -eq 1 ] || fail "Expected exactly one s.version assignment in $PODSPEC; found $podspec_count."
+  source_podspec_count=$(grep -Ec "$podspec_pattern" "$SOURCE_PODSPEC" || true)
+  [ "$source_podspec_count" -eq 1 ] || fail "Expected exactly one s.version assignment in $SOURCE_PODSPEC; found $source_podspec_count."
   sdk_count=$(grep -Ec "$sdk_pattern" "$SDK_VERSION_FILE" || true)
   [ "$sdk_count" -eq 1 ] || fail "Expected exactly one DigiaSdkVersion value in $SDK_VERSION_FILE; found $sdk_count."
 
@@ -628,6 +639,13 @@ bump_release_files() {
   ' "$PODSPEC" > "$staged_podspec"
 
   awk -v version="$VERSION" '
+    /^[[:space:]]*s[.]version[[:space:]]*=/ {
+      sub(/\047[^\047]*\047/, "\047" version "\047")
+    }
+    { print }
+  ' "$SOURCE_PODSPEC" > "$staged_source_podspec"
+
+  awk -v version="$VERSION" '
     /^[[:space:]]*static let value[[:space:]]*=/ {
       sub(/"[^"]*"/, "\"" version "\"")
     }
@@ -648,6 +666,8 @@ bump_release_files() {
 
   [ "$(grep -Ec "^[[:space:]]*s\\.version[[:space:]]*=[[:space:]]*'$VERSION_REGEX'[[:space:]]*$" "$staged_podspec" || true)" -eq 1 ] \
     || fail "Failed to stage version $VERSION in $PODSPEC."
+  [ "$(grep -Ec "^[[:space:]]*s\\.version[[:space:]]*=[[:space:]]*'$VERSION_REGEX'[[:space:]]*$" "$staged_source_podspec" || true)" -eq 1 ] \
+    || fail "Failed to stage version $VERSION in $SOURCE_PODSPEC."
   [ "$(grep -Ec "^[[:space:]]*static let value[[:space:]]*=[[:space:]]*\"$VERSION_REGEX\"[[:space:]]*$" "$staged_sdk" || true)" -eq 1 ] \
     || fail "Failed to stage version $VERSION in $SDK_VERSION_FILE."
   [ "$(grep -Fxc "$release_heading" "$staged_changelog" || true)" -eq 1 ] \
@@ -657,6 +677,7 @@ bump_release_files() {
   fi
 
   cp "$staged_podspec" "$PODSPEC"
+  cp "$staged_source_podspec" "$SOURCE_PODSPEC"
   cp "$staged_sdk" "$SDK_VERSION_FILE"
   cp "$staged_changelog" "$CHANGELOG"
 }
@@ -685,7 +706,7 @@ create_release_notes() {
 }
 
 validate_podspec_metadata() {
-  local spec_name spec_version vendored_frameworks
+  local spec_name spec_version source_spec_name source_spec_version source_files vendored_frameworks
 
   pod ipc spec "$PODSPEC" > "$RUN_DIR/podspec.json"
   spec_name=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0]))["name"]' "$RUN_DIR/podspec.json")
@@ -697,18 +718,28 @@ validate_podspec_metadata() {
   [ "$spec_version" = "$VERSION" ] || fail "Parsed podspec version is '$spec_version', expected '$VERSION'."
   [[ "$PODSPEC_SOURCE_URL" == https://*"/$VERSION/$POD_NAME.xcframework.zip" ]] || fail "Podspec source URL does not point to the $VERSION XCFramework zip: $PODSPEC_SOURCE_URL"
   printf '%s\n' "$vendored_frameworks" | grep -Fxq "$POD_NAME.xcframework" || fail "Podspec does not vendor $POD_NAME.xcframework."
+
+  pod ipc spec "$SOURCE_PODSPEC" > "$RUN_DIR/source-podspec.json"
+  source_spec_name=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0]))["name"]' "$RUN_DIR/source-podspec.json")
+  source_spec_version=$(ruby -rjson -e 'puts JSON.parse(File.read(ARGV[0]))["version"]' "$RUN_DIR/source-podspec.json")
+  source_files=$(ruby -rjson -e 'puts Array(JSON.parse(File.read(ARGV[0]))["source_files"]).join("\n")' "$RUN_DIR/source-podspec.json")
+
+  [ "$source_spec_name" = "$POD_NAME" ] || fail "Source podspec name is '$source_spec_name', expected '$POD_NAME'."
+  [ "$source_spec_version" = "$VERSION" ] || fail "Parsed source podspec version is '$source_spec_version', expected '$VERSION'."
+  printf '%s\n' "$source_files" | grep -Fxq 'Sources/DigiaEngage/**/*.swift' || fail "Source podspec does not compile Sources/DigiaEngage/**/*.swift."
 }
 
 validate_release_versions() {
-  local pod_version sdk_version changelog_version expected_heading target_count unreleased_count
+  local pod_version source_pod_version sdk_version changelog_version expected_heading target_count unreleased_count
 
   bump_release_files
 
   pod_version=$(extract_podspec_version "$PODSPEC")
+  source_pod_version=$(extract_podspec_version "$SOURCE_PODSPEC")
   sdk_version=$(extract_sdk_version "$SDK_VERSION_FILE")
   changelog_version=$(extract_top_changelog_version "$CHANGELOG")
-  if [ "$pod_version" != "$VERSION" ] || [ "$sdk_version" != "$VERSION" ] || [ "$changelog_version" != "$VERSION" ]; then
-    fail "Release versions differ after bump: requested=$VERSION, podspec=$pod_version, SDK=$sdk_version, changelog=$changelog_version."
+  if [ "$pod_version" != "$VERSION" ] || [ "$source_pod_version" != "$VERSION" ] || [ "$sdk_version" != "$VERSION" ] || [ "$changelog_version" != "$VERSION" ]; then
+    fail "Release versions differ after bump: requested=$VERSION, podspec=$pod_version, source-podspec=$source_pod_version, SDK=$sdk_version, changelog=$changelog_version."
   fi
 
   expected_heading="## [$VERSION] - $(date +'%Y-%m-%d')"
@@ -824,7 +855,7 @@ commit_release_files() {
   git diff --cached --check
 
   if ! git diff --quiet --; then
-    fail "Unstaged tracked changes remain after staging the three release files."
+    fail "Unstaged tracked changes remain after staging the release files."
   fi
 
   git commit -m "chore: version bump to $VERSION"
@@ -1091,8 +1122,8 @@ main() {
 
   run_step \
     "Bump and cross-check release versions" \
-    "Fix the three release files, keeping only the requested version, then rerun ./Scripts/release.sh $VERSION." \
-    "podspec, SDK constant, and dated changelog all contain the same new version" \
+    "Fix the release files, keeping only the requested version, then rerun ./Scripts/release.sh $VERSION." \
+    "both podspecs, SDK constant, and dated changelog all contain the same new version" \
     validate_release_versions
 
   run_step \
