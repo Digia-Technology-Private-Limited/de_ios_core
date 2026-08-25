@@ -172,14 +172,12 @@ private struct GuideStepOverlay: View {
             let canvasScale = isCanvas
                 ? anchorlessDesignScale(hostWidth: geo.size.width, designWidth: designWidth) ?? 1
                 : 1
-            let safeBounds = isAnchorless
-                ? CGRect(
-                    x: safeAreaInsets.left,
-                    y: safeAreaInsets.top,
-                    width: max(0, geo.size.width - safeAreaInsets.left - safeAreaInsets.right),
-                    height: max(0, geo.size.height - safeAreaInsets.top - safeAreaInsets.bottom)
-                )
-                : CGRect(origin: .zero, size: geo.size)
+            let safeBounds = CGRect(
+                x: safeAreaInsets.left,
+                y: safeAreaInsets.top,
+                width: max(0, geo.size.width - safeAreaInsets.left - safeAreaInsets.right),
+                height: max(0, geo.size.height - safeAreaInsets.top - safeAreaInsets.bottom)
+            )
             let arrowSize = isAnchorless || isFlat
                 ? CGFloat(config.bubble.arrow.size)
                 : 10
@@ -308,6 +306,7 @@ private struct GuideStepOverlay: View {
 
                 positionedBubble(
                     viewportSize: geo.size,
+                    availableSize: safeBounds.size,
                     origin: bubbleOrigin,
                     fixedWidth: isAnchorless || isFlat,
                     canvasPointerDirection: isCanvas && arrowVisible ? placement.canvasPointerDirection : nil,
@@ -387,16 +386,32 @@ private struct GuideStepOverlay: View {
     @ViewBuilder
     private func positionedBubble(
         viewportSize: CGSize,
+        availableSize: CGSize,
         origin: CGPoint,
         fixedWidth: Bool,
         canvasPointerDirection: GuideCanvasPointerDirection?,
         canvasPointerSize: CGFloat,
         canvasPointerCenter: CGFloat?
     ) -> some View {
-        if fixedWidth {
-            let width = max(0, min(CGFloat(config.bubble.maxWidthDp), viewportSize.width - 32))
+        if config.canvas != nil && config.layoutMode == "canvas" {
             bubble(
                 viewportSize: viewportSize,
+                availableSize: availableSize,
+                canvasPointerDirection: canvasPointerDirection,
+                canvasPointerSize: canvasPointerSize,
+                canvasPointerCenter: canvasPointerCenter
+            )
+                .background(bubbleSizeReader)
+                .position(
+                    x: origin.x + bubbleSize.width / 2,
+                    y: origin.y + bubbleSize.height / 2
+                )
+                .opacity(bubbleSize == .zero ? 0 : 1)
+        } else if fixedWidth {
+            let width = max(0, min(CGFloat(config.bubble.maxWidthDp), availableSize.width - 32))
+            bubble(
+                viewportSize: viewportSize,
+                availableSize: availableSize,
                 canvasPointerDirection: canvasPointerDirection,
                 canvasPointerSize: canvasPointerSize,
                 canvasPointerCenter: canvasPointerCenter
@@ -411,6 +426,7 @@ private struct GuideStepOverlay: View {
         } else {
             bubble(
                 viewportSize: viewportSize,
+                availableSize: availableSize,
                 canvasPointerDirection: canvasPointerDirection,
                 canvasPointerSize: canvasPointerSize,
                 canvasPointerCenter: canvasPointerCenter
@@ -436,6 +452,7 @@ private struct GuideStepOverlay: View {
     @ViewBuilder
     private func bubble(
         viewportSize: CGSize,
+        availableSize: CGSize,
         canvasPointerDirection: GuideCanvasPointerDirection? = nil,
         canvasPointerSize: CGFloat = 0,
         canvasPointerCenter: CGFloat? = nil
@@ -446,8 +463,8 @@ private struct GuideStepOverlay: View {
                 designWidth: designWidth,
                 viewportWidth: viewportSize.width,
                 availableSize: CGSize(
-                    width: max(0, min(CGFloat(config.bubble.maxWidthDp), viewportSize.width - 32)),
-                    height: max(0, viewportSize.height - 32)
+                    width: max(0, availableSize.width - 32),
+                    height: max(0, availableSize.height - 32)
                 ),
                 cornerRadius: CGFloat(config.bubble.cornerRadius),
                 pointerDirection: canvasPointerDirection,

@@ -76,7 +76,9 @@ struct GuideCanvasUnionSurface: View {
             canvas: canvas,
             designWidth: designWidth,
             viewportWidth: viewportWidth,
-            availableSize: availableSize
+            availableSize: availableSize,
+            pointerDirection: pointerDirection,
+            pointerSize: pointerSize
         )
     }
 
@@ -119,7 +121,7 @@ struct GuideCanvasUnionSurface: View {
             CampaignCanvasPaintView(paint: canvas.background, isDark: isDark)
             CampaignCanvasStage(
                 canvas: canvas,
-                authoredCornerRadius: cornerRadius / max(scale, 0.001),
+                authoredCornerRadius: cornerRadius,
                 isDark: isDark,
                 showBackground: false,
                 onAction: onAction
@@ -140,14 +142,20 @@ private func guideCanvasScale(
     canvas: CampaignCanvas,
     designWidth: CGFloat,
     viewportWidth: CGFloat,
-    availableSize: CGSize
+    availableSize: CGSize,
+    pointerDirection: GuideCanvasPointerDirection?,
+    pointerSize: CGFloat
 ) -> CGFloat {
     guard let designScale = anchorlessDesignScale(
         hostWidth: viewportWidth,
         designWidth: designWidth
     ) else { return 0 }
-    let widthScale = max(0, availableSize.width) / max(canvas.width * designScale, 1)
-    let heightScale = max(0, availableSize.height) / max(canvas.height * designScale, 1)
+    let horizontal = pointerDirection == .left || pointerDirection == .right
+    let arrowSize = pointerDirection == nil ? 0 : max(0, pointerSize)
+    let authoredWidth = canvas.width + (horizontal ? arrowSize : 0)
+    let authoredHeight = canvas.height + (horizontal ? 0 : arrowSize)
+    let widthScale = max(0, availableSize.width) / max(authoredWidth * designScale, 1)
+    let heightScale = max(0, availableSize.height) / max(authoredHeight * designScale, 1)
     let fittedScale = designScale * min(1, widthScale, heightScale)
     return fittedScale.isFinite && fittedScale > 0 ? fittedScale : 0
 }
@@ -197,6 +205,9 @@ private struct GuideCanvasUnionShape: Shape {
             triangle.addLine(to: CGPoint(x: bodyRect.maxX, y: center + pointerSize))
         }
         triangle.closeSubpath()
+        if #available(iOS 17.0, *) {
+            return path.union(triangle)
+        }
         path.addPath(triangle)
         return path
     }
