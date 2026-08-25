@@ -819,6 +819,16 @@ private enum CalloutPlacement {
     case left
     case right
 
+    init(preferred: String) {
+        self = switch preferred {
+        case "above", "top": .above
+        case "below", "bottom": .below
+        case "left", "start": .left
+        case "right", "end": .right
+        default: .below
+        }
+    }
+
     var isVertical: Bool { self == .above || self == .below }
 
     var arrowDirection: GuideArrowDirection {
@@ -854,13 +864,7 @@ private func resolvedPlacement(
     screen: CGRect,
     gap: CGFloat
 ) -> CalloutPlacement {
-    let requested: CalloutPlacement = switch preferred {
-    case "above", "top": .above
-    case "below", "bottom": .below
-    case "left", "start": .left
-    case "right", "end": .right
-    default: .below
-    }
+    let requested = CalloutPlacement(preferred: preferred)
     guard bubble != .zero else { return requested }
     let margin: CGFloat = 16
     let fitsAbove = anchor.minY - gap - bubble.height >= screen.minY + margin
@@ -883,13 +887,7 @@ private func resolvedAnchorlessPlacement(
     gap: CGFloat
 ) -> CalloutPlacement {
     let isAuto = preferred == "auto"
-    let requested: CalloutPlacement = switch preferred {
-    case "above", "top": .above
-    case "below", "bottom": .below
-    case "left", "start": .left
-    case "right", "end": .right
-    default: .below
-    }
+    let requested = CalloutPlacement(preferred: preferred)
     guard bubble != .zero else { return requested }
     let margin: CGFloat = 16
     let fitsAbove = anchor.minY - gap - bubble.height >= screen.minY + margin

@@ -73,7 +73,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     private var activeAvailable: ((String) -> Void)?
     private var activeUnavailable: ((String, AnchorUnavailableReason) -> Void)?
     private var activeAnchorWasAvailable = false
-    private var displayLink: CADisplayLink?
+    private let activeViewSampler = ActiveAnchorSampler()
     private var readinessTask: Task<Void, Never>?
 
     private override init() {
@@ -90,8 +90,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         guard activeKey == key else { return }
         activeAnchorWasAvailable = false
         startReadinessTimeout(for: key)
-        sampleActiveAnchor()
-        startDisplayLinkIfNeeded()
+        startSampling(view: view, key: key)
     }
 
     public func register(key: String, rect: CGRect, cornerRadius: CGFloat = 0) {
@@ -104,6 +103,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         SDKInstance.shared.recordAnchorSeen(key)
         guard activeKey == key else { return }
         activeAnchorWasAvailable = false
+        activeViewSampler.stop()
         startReadinessTimeout(for: key)
         validateStaticRect(key: key)
     }
@@ -125,6 +125,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         cornerRadii.removeValue(forKey: key)
         version &+= 1
         if activeKey == key {
+            activeViewSampler.stop()
             if activeAnchorWasAvailable {
                 failActiveAnchor(key: key, reason: .detached)
             } else {
@@ -155,7 +156,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
 
     func resolution(for key: String) -> AnchorResolution {
         if let view = viewRegistry[key]?.value {
-            return resolve(view: view)
+            return ActiveAnchorSampler.resolve(view: view)
         }
         if viewRegistry[key] != nil {
             return .unavailable(.detached)
@@ -191,9 +192,8 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         activeAnchorWasAvailable = false
         startReadinessTimeout(for: key)
 
-        if viewRegistry[key] != nil {
-            sampleActiveAnchor()
-            startDisplayLinkIfNeeded()
+        if let view = viewRegistry[key]?.value {
+            startSampling(view: view, key: key)
         } else if rectRegistry[key] != nil {
             validateStaticRect(key: key)
         }
@@ -201,8 +201,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
 
     func stopTracking() {
         if let activeKey { trackedRects.removeValue(forKey: activeKey) }
-        displayLink?.invalidate()
-        displayLink = nil
+        activeViewSampler.stop()
         readinessTask?.cancel()
         readinessTask = nil
         activeKey = nil
@@ -220,25 +219,15 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         version &+= 1
     }
 
-    private func startDisplayLinkIfNeeded() {
-        guard displayLink == nil,
-              let activeKey,
-              viewRegistry[activeKey]?.value != nil
-        else { return }
-        let link = CADisplayLink(target: self, selector: #selector(sampleActiveAnchor))
-        link.add(to: .main, forMode: .common)
-        displayLink = link
+    private func startSampling(view: UIView, key: String) {
+        activeViewSampler.start(view: view) { [weak self] resolution in
+            guard self?.activeKey == key else { return }
+            self?.updateTrackedRect(for: key, resolution: resolution)
+        }
     }
 
-    @objc private func sampleActiveAnchor() {
-        guard let key = activeKey else { return }
-        guard let view = viewRegistry[key]?.value else {
-            if activeAnchorWasAvailable {
-                failActiveAnchor(key: key, reason: .detached)
-            }
-            return
-        }
-        switch resolve(view: view) {
+    private func updateTrackedRect(for key: String, resolution: AnchorResolution) {
+        switch resolution {
         case let .available(rect):
             markActiveAnchorAvailable()
             if trackedRects[key].map({ approximatelyEqual($0, rect) }) != true {
@@ -252,23 +241,6 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         case .missing:
             break
         }
-    }
-
-    private func resolve(view: UIView) -> AnchorResolution {
-        guard let window = view.window else { return .unavailable(.detached) }
-        let visible = isVisible(view)
-        let modelRect = view.convert(view.bounds, to: window)
-        let destinationLayer = window.layer.presentation() ?? window.layer
-        let presentationRect = view.layer.presentation().map {
-            $0.convert($0.bounds, to: destinationLayer)
-        }
-        return AnchorGeometry.resolveActive(
-            modelRect: modelRect,
-            presentationRect: presentationRect,
-            viewport: window.bounds,
-            isAttached: true,
-            isVisible: visible
-        )
     }
 
     private func validateStaticRect(key: String) {
@@ -310,7 +282,63 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         callback?(key, reason)
     }
 
-    private func isVisible(_ view: UIView) -> Bool {
+    private func approximatelyEqual(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        abs(lhs.origin.x - rhs.origin.x) < 0.05
+            && abs(lhs.origin.y - rhs.origin.y) < 0.05
+            && abs(lhs.size.width - rhs.size.width) < 0.05
+            && abs(lhs.size.height - rhs.size.height) < 0.05
+    }
+}
+
+@MainActor
+private final class ActiveAnchorSampler: NSObject {
+    private weak var view: UIView?
+    private var displayLink: CADisplayLink?
+    private var onSample: ((AnchorResolution) -> Void)?
+
+    func start(view: UIView, onSample: @escaping (AnchorResolution) -> Void) {
+        stop()
+        self.view = view
+        self.onSample = onSample
+        sample()
+        guard self.view != nil, self.onSample != nil else { return }
+        let link = CADisplayLink(target: self, selector: #selector(sample))
+        link.add(to: .main, forMode: .common)
+        displayLink = link
+    }
+
+    func stop() {
+        displayLink?.invalidate()
+        displayLink = nil
+        view = nil
+        onSample = nil
+    }
+
+    @objc private func sample() {
+        guard let view else {
+            onSample?(.unavailable(.detached))
+            return
+        }
+        onSample?(Self.resolve(view: view))
+    }
+
+    static func resolve(view: UIView) -> AnchorResolution {
+        guard let window = view.window else { return .unavailable(.detached) }
+        let modelRect = view.convert(view.bounds, to: window)
+        let destinationLayer = window.layer.presentation() ?? window.layer
+        let presentationRect = view.layer.presentation().map {
+            $0.convert($0.bounds, to: destinationLayer)
+        }
+        return AnchorGeometry.resolveActive(
+            modelRect: modelRect,
+            presentationRect: presentationRect,
+            viewport: window.bounds,
+            isAttached: true,
+            isVisible: isVisible(view)
+        )
+    }
+
+    private static func isVisible(_ view: UIView) -> Bool {
         var candidate: UIView? = view
         while let current = candidate {
             let opacity = current.layer.presentation()?.opacity ?? current.layer.opacity
@@ -318,13 +346,6 @@ public final class AnchorRegistry: NSObject, ObservableObject {
             candidate = current.superview
         }
         return true
-    }
-
-    private func approximatelyEqual(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
-        abs(lhs.origin.x - rhs.origin.x) < 0.05
-            && abs(lhs.origin.y - rhs.origin.y) < 0.05
-            && abs(lhs.size.width - rhs.size.width) < 0.05
-            && abs(lhs.size.height - rhs.size.height) < 0.05
     }
 }
 

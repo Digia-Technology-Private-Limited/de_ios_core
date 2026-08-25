@@ -216,17 +216,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         variables: VariableContext?,
         localActionExecutor: LocalActionExecutor
     ) async {
-        for action in actions {
-            let action = action.resolved(with: variables)
-            let hasGuideLinkHandler = guideHostActionHandler != nil && action.isLink
-            if handleGuideHostAction(action) { continue }
-            await actionExecutor.executeAction(
-                action,
-                variables: nil,
-                localActionExecutor: localActionExecutor,
-                allowLegacyHostActionHandler: !hasGuideLinkHandler
-            )
+        let hostActionHandler: ((EngageAction) -> Bool)? = if guideHostActionHandler == nil {
+            nil
+        } else {
+            { [weak self] action in self?.handleGuideHostAction(action) ?? false }
         }
+        await actionExecutor.executeActionFlow(
+            actions,
+            variables: variables,
+            localActionExecutor: localActionExecutor,
+            hostActionHandler: hostActionHandler
+        )
     }
 
     private func handleGuideHostAction(_ action: EngageAction) -> Bool {
@@ -838,6 +838,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 logNativeGuideStage("route", "result=dropped reason=frequency_capped campaign_key=\(key)")
                 return false
             }
+            if guideOrchestrator.state != nil, !guideConfig.steps.isEmpty { dismissGuide() }
             guard guideOrchestrator.start(campaign, payload: payload) else {
                 lastCampaignDropReason = "another guide is already on screen"
                 context.onDropped(.renderError, message: "another guide is already on screen")

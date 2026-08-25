@@ -172,13 +172,17 @@ final class EngageActionExecutor {
     func executeActionFlow(
         _ actions: [EngageAction],
         variables: VariableContext?,
-        localActionExecutor: LocalActionExecutor
+        localActionExecutor: LocalActionExecutor,
+        hostActionHandler: ((EngageAction) -> Bool)? = nil
     ) async {
         for action in actions {
+            let action = action.resolved(with: variables)
+            if hostActionHandler?(action) == true { continue }
             await executeAction(
                 action,
-                variables: variables,
-                localActionExecutor: localActionExecutor
+                variables: nil,
+                localActionExecutor: localActionExecutor,
+                allowLegacyHostActionHandler: hostActionHandler == nil || !action.isLink
             )
         }
     }
