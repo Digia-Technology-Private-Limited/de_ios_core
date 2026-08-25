@@ -4,10 +4,9 @@ import SwiftUI
 //
 // Deliberately much smaller than `FloaterOrchestrator`, and the reason is worth stating:
 // a PiP's whole design rests on owning an `AVPlayer` that outlives its view, because the
-// window grows into full screen without re-parenting the media. A story floater has no
-// such surface. Its window is a canvas and its story is a `fullScreenCover` — presented
-// over everything, torn down on its own. So there is nothing here to hoist out of the
-// view tree beyond the showing itself, and no media wait to hold the window back.
+// window grows into full screen without re-parenting the media. A story floater uses the
+// same visual idea for a different payload: its story viewer is mounted inside an
+// aperture that grows out of the floating canvas window, then shrinks back on close.
 //
 // Like the PiP's, it never takes the display lock: the window can sit on a screen for
 // minutes, and blocking every other campaign for that long is not acceptable.
@@ -36,9 +35,12 @@ struct ActiveFloaterStoryState: Equatable {
 final class FloaterStoryOrchestrator: ObservableObject {
     @Published private(set) var state: ActiveFloaterStoryState?
     @Published private(set) var dragFraction: FloaterFraction?
-    /// `true` while the story is open. The window stays mounted underneath — the viewer
-    /// is a cover over it, not a replacement for it — but the auto-dismiss clock stops.
+    /// `true` while the story is open. The window stays mounted underneath, and the
+    /// viewer is drawn inside a hero aperture over it, but the auto-dismiss clock stops.
     @Published private(set) var storyOpen = false
+    /// `true` while the full-screen story viewer is mounted, including the collapse
+    /// animation after `storyOpen` has flipped back to false.
+    @Published private(set) var storyOverlayActive = false
     /// `true` once dismissal has begun but the exit animation is still running. The view
     /// keeps rendering through this so the window can animate out; every other caller
     /// should treat the campaign as gone (see `isShowing`).
@@ -117,6 +119,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
         )
         dragFraction = nil
         storyOpen = false
+        storyOverlayActive = false
         closing = false
         obscured = false
         visible = false
@@ -150,6 +153,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
     func openStory() {
         guard let active = state, !closing, !storyOpen else { return }
         storyOpen = true
+        storyOverlayActive = true
         openCount += 1
         everOpened = true
         storyStartedAtMs = now()
@@ -172,6 +176,15 @@ final class FloaterStoryOrchestrator: ObservableObject {
         }
         onStepDismissed(active)
         restartAutoDismiss()
+    }
+
+    /// Keeps host hit-testing modal while the inline hero viewer is still on screen.
+    func setStoryOverlayActive(_ active: Bool) {
+        guard state != nil else {
+            storyOverlayActive = false
+            return
+        }
+        storyOverlayActive = active
     }
 
     /// Marks the window covered by a modal. The campaign lives; its timeout does not run
@@ -282,6 +295,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
         dragFraction = nil
         activeRect = nil
         storyOpen = false
+        storyOverlayActive = false
         closing = false
         obscured = false
         visible = false

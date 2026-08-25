@@ -39,22 +39,29 @@ struct CampaignCanvasParser {
             slides.append(parsed)
         }
         let fraction = CGFloat(propertyNumber(props["viewportFraction"]) ?? 0.88)
+        let itemSpacing = CGFloat(propertyNumber(props["itemSpacing"]) ?? 12)
+        let autoPlayIntervalMs = propertyNumber(props["autoPlayInterval"]) ?? 3000
+        let animationDurationMs = propertyNumber(props["animationDuration"]) ?? 700
+        let cornerRadius = CGFloat(propertyNumber(props["cornerRadius"]) ?? 12)
+        let dotWidth = CGFloat(propertyNumber(props["dotWidth"]) ?? 8)
+        let dotHeight = CGFloat(propertyNumber(props["dotHeight"]) ?? 8)
+        let dotSpacing = CGFloat(propertyNumber(props["dotSpacing"]) ?? 12)
         return .carousel(
             box: box,
             slides: slides,
             // A non-positive or over-unity fraction would make every slide vanish
             // or overflow the viewport; fall back rather than trust the payload.
-            viewportFraction: fraction > 0 && fraction <= 1 ? fraction : 0.88,
-            itemSpacing: CGFloat(propertyNumber(props["itemSpacing"]) ?? 12),
+            viewportFraction: fraction >= 0.1 && fraction <= 1 ? fraction : 0.88,
+            itemSpacing: itemSpacing >= 0 ? itemSpacing : 12,
             autoPlay: props["autoPlay"] as? Bool ?? true,
-            autoPlayInterval: (propertyNumber(props["autoPlayInterval"]) ?? 3000) / 1000,
-            animationDuration: (propertyNumber(props["animationDuration"]) ?? 700) / 1000,
+            autoPlayInterval: (autoPlayIntervalMs > 0 ? autoPlayIntervalMs : 3000) / 1000,
+            animationDuration: (animationDurationMs > 0 ? animationDurationMs : 700) / 1000,
             infiniteScroll: props["infiniteScroll"] as? Bool ?? true,
-            cornerRadius: CGFloat(propertyNumber(props["cornerRadius"]) ?? 12),
+            cornerRadius: cornerRadius >= 0 ? cornerRadius : 12,
             showIndicator: props["showIndicator"] as? Bool ?? true,
-            dotWidth: CGFloat(propertyNumber(props["dotWidth"]) ?? 8),
-            dotHeight: CGFloat(propertyNumber(props["dotHeight"]) ?? 8),
-            dotSpacing: CGFloat(propertyNumber(props["dotSpacing"]) ?? 12),
+            dotWidth: dotWidth > 0 ? dotWidth : 8,
+            dotHeight: dotHeight > 0 ? dotHeight : 8,
+            dotSpacing: dotSpacing >= 0 ? dotSpacing : 12,
             dotColor: try designTokens.resolveColor(props["dotColor"]),
             activeDotColor: try designTokens.resolveColor(props["activeDotColor"]),
             indicatorEffect: props["indicatorEffect"] as? String ?? "slide"

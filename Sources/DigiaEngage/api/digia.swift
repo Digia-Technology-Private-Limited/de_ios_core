@@ -104,20 +104,19 @@ public enum Digia {
     /// is currently active. Used by host views to decide whether to forward hit tests
     /// to the SwiftUI layer or pass them through to content below.
     /// A story floater is the one campaign that is *sometimes* full screen: its window is a small
-    /// box (covered by `floaterActiveRect` instead), but the story it opens covers everything. So
-    /// this includes the open story and excludes the window, which is why the two properties are
-    /// not simply "is a floater showing".
+    /// box (covered by `floaterActiveRect` instead), but the story viewer covers everything while
+    /// it is open or collapsing. So this includes the mounted story viewer and excludes the
+    /// collapsed window, which is why the two properties are not simply "is a floater showing".
     ///
-    /// Leaving it out is not a degraded hit test but no hit test at all: the story is presented on
-    /// the host's own hosting controller, so a host that has not been told an overlay is active
-    /// claims only the window's old rect and every tap on the story — advance, close, mute — falls
-    /// through to the app behind it.
+    /// Leaving it out is not a degraded hit test but no hit test at all: a host that has not been
+    /// told an overlay is active claims only the window's old rect and every tap on the story —
+    /// advance, close, mute — falls through to the app behind it.
     public static var hasActiveOverlay: Bool {
         let ctrl = SDKInstance.shared.controller
         return ctrl.activeStoryOverlay != nil
             || ctrl.activeNudge != nil
             || SDKInstance.shared.surveyOrchestrator.state != nil
-            || SDKInstance.shared.floaterStoryOrchestrator.storyOpen
+            || SDKInstance.shared.floaterStoryOrchestrator.storyOverlayActive
             || SDKInstance.shared.guideOrchestrator.state != nil
     }
 

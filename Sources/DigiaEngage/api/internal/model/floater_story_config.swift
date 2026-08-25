@@ -17,8 +17,7 @@ import SwiftUI
 //                border?{widthDp,color}, shadow, entryAnimation, exitAnimation }
 //   controls   { draggable, snapToEdge, showClose, iconSize, marginDp{t,r,b,l} }
 //   behavior   { onTap{type:"showStory"}, scope, onStoryEnd, autoDismissAfterMs,
-//                reshowOnReturn, pauseWhenObscured,
-//                expandTransition{type,durationMs}, collapseTransition{type,durationMs} }
+//                reshowOnReturn, pauseWhenObscured }
 //   canvas     <canvas>       // the window's content
 //   story      <story props>  // pages + chromeCanvas, as a canvasStory widget carries them
 //
@@ -116,27 +115,12 @@ struct FloaterStoryControlsConfig: Equatable {
 
 /// How the window becomes the full-screen story, and how it comes back.
 ///
-/// A separate vocabulary from `entryAnimation` / `exitAnimation`, and deliberately so: those
-/// describe the window arriving on and leaving the screen, which happens once per showing. This
-/// describes the window *becoming* the story and back, which the user may do repeatedly.
-///
-/// Two, on purpose. `hero` is the one that explains the format — the story grows out of the
-/// window's own box, so the small window reads as the thing that expanded rather than as something
-/// a full-screen view replaced. `slideUp` is the ordinary presentation, for a window whose content
-/// has nothing to do with the story's first page and would look wrong stretched into it.
-///
-/// There is no `none`: a zero duration already means "no motion" (see `FloaterStoryTransition
-/// .isInstant`), so a second spelling of the same thing would only be a second thing to keep in
-/// step with the other SDKs. An unknown value — including `fade`, `zoom` and `none`, which were
-/// offered briefly and withdrawn — falls back to `hero` rather than to no animation, so a campaign
-/// saved against that vocabulary still moves.
+/// SDK-owned rather than payload-authored: the dashboard no longer emits transition type or
+/// duration for `floaterStory`, and letting old payloads override it made Android and iOS drift.
+/// The story always uses `hero`, where the full-screen story is already mounted inside the small
+/// window's aperture before the aperture expands, then the same path reverses on collapse.
 enum FloaterStoryTransitionType: Equatable {
-    case slideUp
     case hero
-
-    static func from(_ value: String?) -> FloaterStoryTransitionType {
-        value == "slide_up" ? .slideUp : .hero
-    }
 }
 
 /// One direction of the window↔story transition.
@@ -147,16 +131,8 @@ struct FloaterStoryTransition: Equatable {
     /// True when there is nothing to animate — the story simply appears.
     var isInstant: Bool { duration <= 0 }
 
-    static func fromJson(_ json: [String: Any]?, defaultMs: Int) -> FloaterStoryTransition {
-        let j = json ?? [:]
-        // Clamped for the same reason the window's width is: a payload can be hand edited, and a
-        // multi-second expansion is indistinguishable from a hang.
-        let ms = min(max(j.int("durationMs", default: defaultMs), 0), 1200)
-        return FloaterStoryTransition(
-            type: FloaterStoryTransitionType.from(j.nonBlankString("type")),
-            duration: TimeInterval(ms) / 1000
-        )
-    }
+    static let sdkExpand = FloaterStoryTransition(type: .hero, duration: 0.32)
+    static let sdkCollapse = FloaterStoryTransition(type: .hero, duration: 0.24)
 }
 
 /// Lifecycle and interaction behaviour.
@@ -178,8 +154,8 @@ struct FloaterStoryBehaviorConfig: Equatable {
         let j = json ?? [:]
         return FloaterStoryBehaviorConfig(
             onStoryEnd: FloaterStoryEnd.from(j.nonBlankString("onStoryEnd")),
-            expandTransition: .fromJson(j.object("expandTransition"), defaultMs: 320),
-            collapseTransition: .fromJson(j.object("collapseTransition"), defaultMs: 240),
+            expandTransition: .sdkExpand,
+            collapseTransition: .sdkCollapse,
             autoDismissAfterMs: j.positiveInt("autoDismissAfterMs"),
             reshowOnReturn: j.bool("reshowOnReturn", default: false),
             pauseWhenObscured: j.bool("pauseWhenObscured", default: false)

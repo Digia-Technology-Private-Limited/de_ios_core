@@ -1141,7 +1141,7 @@ private enum FloaterIconGlyph {
     var pathData: String {
         switch self {
         case .close:
-            "M18.3,5.71L16.89,4.29L12,9.17L7.11,4.29L5.7,5.71L10.59,10.59L5.7,15.48L7.11,16.89L12,12L16.89,16.89L18.3,15.48L13.41,10.59z"
+            "M18.3,7.12L16.89,5.7L12,10.58L7.11,5.7L5.7,7.12L10.59,12L5.7,16.89L7.11,18.3L12,13.41L16.89,18.3L18.3,16.89L13.41,12z"
         case .fullscreen:
             "M15,3h6v6 M21,3l-7,7 M3,21l7,-7 M9,21H3v-6"
         case .fullscreenExit:

@@ -65,7 +65,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Holds the single active story floater. Its own orchestrator rather than a mode of
     /// `floaterOrchestrator`: a PiP's whole design rests on owning an `AVPlayer` that
     /// outlives its view, and a story floater has no media surface at all — its window is
-    /// a canvas and its story is a cover. `FloaterStoryOverlayView` draws it.
+    /// a canvas and its story is mounted by `FloaterStoryOverlayView`.
     var floaterStoryOrchestrator: FloaterStoryOrchestrator!
     /// Wired to `floaterOrchestrator.setAppForegrounded` in `init()` — matches
     /// Android's `DigiaInstance.kt` `ProcessLifecycleOwner` `ON_START`/`ON_STOP`
@@ -758,7 +758,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             || floaterOrchestrator.surface == .expanded
             // An open story is the story floater's expanded state: it fills the
             // screen, so from here on it behaves like every other modal surface.
-            || floaterStoryOrchestrator.storyOpen
+            || floaterStoryOrchestrator.storyOverlayActive
     }
 
     private func route(
@@ -772,6 +772,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         {
             lastCampaignDropReason =
                 "screen not targeted: currentScreen=\(_currentScreen ?? "<unset>") targetScreenNames=\(campaign.targetScreenNames)"
+            context.onDropped(
+                .noMatchingScreen,
+                message:
+                    "currentScreen=\(_currentScreen ?? "<unset>") targetScreenNames=\(campaign.targetScreenNames)"
+            )
             DigiaLog.warning(
                 "[SDKInstance] Campaign dropped — screen not targeted: "
                     + "campaignKey=\(key) currentScreen=\(_currentScreen ?? "<unset>") "

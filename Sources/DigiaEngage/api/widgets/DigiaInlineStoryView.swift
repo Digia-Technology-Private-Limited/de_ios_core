@@ -830,9 +830,12 @@ private struct InlineStoryOverlayContent: View {
 
     private func move(to index: Int) {
         currentIndex = index
-        if state.config.items[index].type != .video {
-            displayedIndex = index
-        }
+        // Navigation must be visible on the tap that changes it. Previously video pages waited
+        // for the new player's first frame before updating `displayedIndex`; when going back from
+        // page i to i-1 that left page i visible with reset timing, which looked like the current
+        // story restarted instead of moving to the previous story. The target video already draws
+        // its poster/thumbnail until the player is ready, so switch the visible page immediately.
+        displayedIndex = index
     }
 
     private func handleCTA(_ item: StoryItemConfig) {

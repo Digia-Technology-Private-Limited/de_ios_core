@@ -295,17 +295,24 @@ struct CanvasCarouselRenderer: View {
     private let indicatorGap: CGFloat = 8
     private let indicatorBottom: CGFloat = 2
 
-    @State private var page = 0
+    @State private var scrollPosition: Int?
     @State private var timer: Timer?
     /// True while the last page change came from the autoplay timer rather than the user's finger,
     /// which is the distinction the legacy carousel's `auto` flag draws.
     @State private var advancedAutomatically = false
+    @State private var isRecentering = false
+    @State private var lastReportedDisplayIndex: Int?
     @Environment(\.canvasInteractions) private var reportInteraction
+
+    private func realIndex(_ displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int {
+        guard loopEnabled else { return displayIndex }
+        return (((displayIndex - 1) % slideCount) + slideCount) % slideCount
+    }
 
     var body: some View {
         guard case .carousel(
             _, let slides, let viewportFraction, let itemSpacing,
-            let autoPlay, let autoPlayInterval, _,
+            let autoPlay, let autoPlayInterval, let animationDuration,
             let infiniteScroll, let cornerRadius,
             let showIndicator, let dotWidth, let dotHeight, let dotSpacing,
             let dotColor, let activeDotColor, _
@@ -320,49 +327,108 @@ struct CanvasCarouselRenderer: View {
                 let slideWidth = proxy.size.width * viewportFraction - itemSpacing
 
                 if stripHeight > 0 && slideWidth > 0 {
+                    let loopEnabled = infiniteScroll && slides.count > 1
+                    let displayCount = loopEnabled ? slides.count + 2 : slides.count
+                    let initialDisplayIndex = loopEnabled ? 1 : 0
+                    let activeIndex = realIndex(
+                        scrollPosition ?? initialDisplayIndex,
+                        slideCount: slides.count,
+                        loopEnabled: loopEnabled
+                    )
+
                     VStack(spacing: 0) {
-                        TabView(selection: $page) {
-                            ForEach(Array(slides.enumerated()), id: \.offset) { index, slide in
-                                ScaledCanvasStage(
-                                    canvas: slide,
-                                    width: slideWidth,
-                                    height: stripHeight,
-                                    cornerRadius: cornerRadius,
-                                    isDark: isDark,
-                                    // The slide an action came from travels with it, so the host
-                                    // can tell a tap on slide 3 from a tap on the card around it.
-                                    onAction: { request in
-                                        var stamped = request
-                                        stamped.step = CanvasStep(
-                                            kind: .carouselSlide, index: index, total: slides.count
+                        if #available(iOS 17, *) {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: itemSpacing) {
+                                    ForEach(0 ..< displayCount, id: \.self) { displayIndex in
+                                        let index = realIndex(
+                                            displayIndex,
+                                            slideCount: slides.count,
+                                            loopEnabled: loopEnabled
                                         )
-                                        onAction(stamped)
+                                        ScaledCanvasStage(
+                                            canvas: slides[index],
+                                            width: slideWidth,
+                                            height: stripHeight,
+                                            cornerRadius: cornerRadius,
+                                            isDark: isDark,
+                                            // The slide an action came from travels with it, so the
+                                            // host can tell a tap on slide 3 from a tap on the card
+                                            // around it.
+                                            onAction: { request in
+                                                var stamped = request
+                                                stamped.step = CanvasStep(
+                                                    kind: .carouselSlide,
+                                                    index: index,
+                                                    total: slides.count
+                                                )
+                                                onAction(stamped)
+                                            }
+                                        )
+                                        .id(displayIndex)
                                     }
-                                )
-                                .frame(maxWidth: .infinity)
-                                .tag(index)
+                                }
+                                .scrollTargetLayout()
                             }
-                        }
-                        .tabViewStyle(.page(indexDisplayMode: .never))
-                        .frame(height: stripHeight)
-                        // A `TabView`'s selection only changes once the swipe has settled, so this
-                        // reports the slide that came to rest rather than every slide dragged past.
-                        // It fires for the first slide on appear too, which is correct and matches
-                        // the legacy carousel: a slide the user never touched has still been seen.
-                        .onAppear {
-                            reportInteraction(
-                                .carouselSlideViewed(index: page, total: slides.count, auto: false)
+                            .contentMargins(
+                                .horizontal,
+                                max(0, (proxy.size.width - slideWidth) / 2),
+                                for: .scrollContent
                             )
-                        }
-                        .onChange(of: page) { newPage in
-                            reportInteraction(
-                                .carouselSlideViewed(
-                                    index: newPage,
-                                    total: slides.count,
+                            .scrollPosition(id: $scrollPosition)
+                            .scrollTargetBehavior(.viewAligned)
+                            .frame(height: stripHeight)
+                            // A slide is viewed when it comes to rest. The first visible slide is
+                            // reported on appear too, matching the legacy carousel.
+                            .onAppear {
+                                if scrollPosition == nil {
+                                    scrollPosition = initialDisplayIndex
+                                }
+                                reportSlide(
+                                    displayIndex: scrollPosition ?? initialDisplayIndex,
+                                    slideCount: slides.count,
+                                    loopEnabled: loopEnabled,
+                                    auto: false
+                                )
+                                startAutoPlay(
+                                    autoPlay: autoPlay,
+                                    autoPlayInterval: autoPlayInterval,
+                                    animationDuration: animationDuration,
+                                    displayCount: displayCount,
+                                    slideCount: slides.count,
+                                    loopEnabled: loopEnabled
+                                )
+                            }
+                            .onDisappear { stopAutoPlay() }
+                            .onChange(of: scrollPosition) { _, newValue in
+                                guard let displayIndex = newValue else { return }
+                                if isRecentering {
+                                    isRecentering = false
+                                    return
+                                }
+
+                                reportSlide(
+                                    displayIndex: displayIndex,
+                                    slideCount: slides.count,
+                                    loopEnabled: loopEnabled,
                                     auto: advancedAutomatically
                                 )
-                            )
-                            advancedAutomatically = false
+                                advancedAutomatically = false
+
+                                if loopEnabled, displayIndex == 0 || displayIndex == displayCount - 1 {
+                                    let target = displayIndex == 0 ? displayCount - 2 : 1
+                                    isRecentering = true
+                                    DispatchQueue.main.async {
+                                        var transaction = Transaction()
+                                        transaction.disablesAnimations = true
+                                        withTransaction(transaction) {
+                                            scrollPosition = target
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            EmptyView()
                         }
 
                         if showIndicator {
@@ -370,7 +436,7 @@ struct CanvasCarouselRenderer: View {
                                 ForEach(Array(slides.enumerated()), id: \.offset) { index, _ in
                                     Capsule()
                                         .fill(
-                                            index == page
+                                            index == activeIndex
                                                 ? canvasColor(activeDotColor, isDark, Color(red: 0.286, green: 0.271, blue: 1))
                                                 : canvasColor(dotColor, isDark, Color(white: 0.8))
                                         )
@@ -382,24 +448,58 @@ struct CanvasCarouselRenderer: View {
                             .padding(.bottom, indicatorBottom)
                         }
                     }
-                    .onAppear {
-                        guard autoPlay, slides.count > 1 else { return }
-                        timer = Timer.scheduledTimer(withTimeInterval: autoPlayInterval, repeats: true) { _ in
-                            Task { @MainActor in
-                                let next = page + 1
-                                // Flagged before the change, so the `onChange` it triggers knows
-                                // the slide arrived on a timer rather than under a finger.
-                                advancedAutomatically = true
-                                page = infiniteScroll
-                                    ? next % slides.count
-                                    : min(next, slides.count - 1)
-                            }
-                        }
-                    }
-                    .onDisappear { timer?.invalidate(); timer = nil }
                 }
             }
         )
+    }
+
+    private func reportSlide(
+        displayIndex: Int,
+        slideCount: Int,
+        loopEnabled: Bool,
+        auto: Bool
+    ) {
+        guard lastReportedDisplayIndex != displayIndex else { return }
+        lastReportedDisplayIndex = displayIndex
+        reportInteraction(
+            .carouselSlideViewed(
+                index: realIndex(displayIndex, slideCount: slideCount, loopEnabled: loopEnabled),
+                total: slideCount,
+                auto: auto
+            )
+        )
+    }
+
+    private func startAutoPlay(
+        autoPlay: Bool,
+        autoPlayInterval: TimeInterval,
+        animationDuration: TimeInterval,
+        displayCount: Int,
+        slideCount: Int,
+        loopEnabled: Bool
+    ) {
+        stopAutoPlay()
+        guard autoPlay, slideCount > 1 else { return }
+        let timer = Timer(timeInterval: autoPlayInterval, repeats: true) { _ in
+            Task { @MainActor in
+                let current = scrollPosition ?? (loopEnabled ? 1 : 0)
+                if !loopEnabled && current >= displayCount - 1 { return }
+                let next = min(current + 1, displayCount - 1)
+                // Flagged before the change, so the `onChange` it triggers knows
+                // the slide arrived on a timer rather than under a finger.
+                advancedAutomatically = true
+                withAnimation(.easeInOut(duration: animationDuration)) {
+                    scrollPosition = next
+                }
+            }
+        }
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func stopAutoPlay() {
+        timer?.invalidate()
+        timer = nil
     }
 }
 
@@ -495,6 +595,17 @@ struct CanvasStoryViewer: View {
     let isDark: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
     let onDismiss: () -> Void
+    /// The unsafe margins of the region this viewer was handed, when the caller
+    /// draws it somewhere that does not carve them out on its own.
+    ///
+    /// A `fullScreenCover` presents its content inside the safe area, so the
+    /// reader below already reports the safe region and these stay `.zero` —
+    /// that is the story rail's path. The floater's story is drawn inline in
+    /// `DigiaHost`'s full-bleed overlay layer instead, which is deliberately
+    /// `ignoresSafeArea()` so the collapsed window can sit anywhere on the
+    /// screen; nothing there insets this viewer, so the caller passes the
+    /// device's own insets and they are applied below.
+    var safeAreaInsets = EdgeInsets()
 
     @State private var index = 0
     @State private var progress: CGFloat = 0
@@ -518,6 +629,13 @@ struct CanvasStoryViewer: View {
 
     var body: some View {
         GeometryReader { proxy in
+            // The width the chrome and the page are scaled against: the reader
+            // minus any margin the caller declared unsafe. Zero on the presented
+            // path, where the reader is already the safe region, so that path
+            // scales exactly as it always did.
+            let contentWidth = max(
+                0, proxy.size.width - safeAreaInsets.leading - safeAreaInsets.trailing
+            )
             // No black plate in this stack: the media backdrop below is opaque
             // and already covers the screen. One here would sit *over* the
             // backdrop — a background draws behind its parent's content — and
@@ -537,7 +655,7 @@ struct CanvasStoryViewer: View {
 
                 // Both the overlay and the chrome are authored against the safe
                 // region, so both draw at the same scale and inside it.
-                let scale = page.canvas.width > 0 ? proxy.size.width / page.canvas.width : 1
+                let scale = page.canvas.width > 0 ? contentWidth / page.canvas.width : 1
                 // The page an action came from travels with it, so a CTA inside story 3 reports as
                 // a step click on story 3 rather than as an anonymous click on the card.
                 let pageAction: (CampaignCanvasActionRequest) -> Void = { request in
@@ -551,7 +669,7 @@ struct CanvasStoryViewer: View {
                     Spacer(minLength: 0)
                     ScaledCanvasStage(
                         canvas: page.canvas,
-                        width: proxy.size.width,
+                        width: contentWidth,
                         height: page.canvas.height * scale,
                         cornerRadius: 0,
                         isDark: isDark,
@@ -561,7 +679,7 @@ struct CanvasStoryViewer: View {
 
                 ScaledCanvasStage(
                     canvas: chrome,
-                    width: proxy.size.width,
+                    width: contentWidth,
                     height: chrome.height * scale,
                     cornerRadius: 0,
                     isDark: isDark,
@@ -582,6 +700,11 @@ struct CanvasStoryViewer: View {
                     CanvasStoryCallback(run: { toggleMute() })
                 )
             }
+            // Inside the safe region, and the backdrop below outside it. The
+            // padding is *inside* the frame that follows, so the stack is offered
+            // the reader minus these insets while the frame — and so the media
+            // behind it — still covers the whole reader.
+            .padding(safeAreaInsets)
             // The screen, and only the screen. Without this the stack takes its
             // size from its largest child, and a story's media is routinely
             // larger than the screen — a filling image reports an ideal size in
@@ -628,11 +751,17 @@ struct CanvasStoryViewer: View {
 
     /// Advances or rewinds, restarting the elapsed bar either way.
     private func step(_ delta: Int) {
-        // Restarting the current story before stepping back is the story
-        // convention: a tap on the left means "I missed that", and on the first
-        // story there is nothing behind to go to.
-        if delta < 0 && (progress > 0.15 || index == 0) { start(); return }
         let next = index + delta
+        // A tap on the left goes back a page, every single time. It used to
+        // restart the current page instead whenever more than 15% of it had
+        // elapsed — the "I missed that" convention — which in practice meant it
+        // never went back at all: a page runs for seconds, so all but the very
+        // first frames of a tap land past that threshold and the viewer just
+        // replayed the page the user was already on. Android's viewer has always
+        // done a plain `index - 1`, and this is now the same rule.
+        //
+        // The first page is the one exception, and only because there is nothing
+        // behind it: `next` goes negative and it restarts in place.
         if next < 0 { start(); return }
         if next >= pages.count {
             // Reaching the end is the completion, whether or not the story then restarts — and at
