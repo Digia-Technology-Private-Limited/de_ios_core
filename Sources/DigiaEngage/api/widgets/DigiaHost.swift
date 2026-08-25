@@ -42,6 +42,11 @@ public struct DigiaHost<Content: View>: View {
             FloaterOverlayView()
                 .zIndex(3)
 
+            // Beside it, at the same layer: the two floater subtypes are separate
+            // campaigns, and only one of them can ever be on screen at a time.
+            FloaterStoryOverlayView()
+                .zIndex(3)
+
             NudgeOverlayView()
                 .zIndex(5)
 

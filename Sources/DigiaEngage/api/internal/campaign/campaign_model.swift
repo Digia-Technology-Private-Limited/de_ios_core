@@ -16,6 +16,9 @@ enum CampaignConfigModel: Equatable {
     case story(InlineStoryConfig)
     case survey(SurveyConfigModel)
     case floater(FloaterConfig)
+    /// The floater family's second member: a small floating **canvas** window that opens
+    /// a full-screen story on tap. Shares the PiP's window vocabulary and none of its media.
+    case floaterStory(FloaterStoryConfig)
 }
 
 struct CampaignModel: Equatable {
@@ -53,6 +56,11 @@ struct CampaignModel: Equatable {
         return nil
     }
 
+    var floaterStoryConfig: FloaterStoryConfig? {
+        if case let .floaterStory(value) = config { return value }
+        return nil
+    }
+
     var floaterConfig: FloaterConfig? {
         if case let .floater(value) = config { return value }
         return nil
@@ -82,7 +90,13 @@ struct CampaignModel: Equatable {
             case "story":
                 guard let storyConfig = InlineStoryConfig.fromJson(templateConfig) else { return nil }
                 config = .story(storyConfig)
-            case "canvas":
+            // `canvasCarousel` and `canvasStory` are inline canvases whose canvas
+            // contains one extra widget — the payloads are otherwise identical,
+            // and the strip or rail is drawn by that widget's renderer. So
+            // neither needs a campaign type of its own; the dashboard keeps the
+            // distinct subtypes only to guarantee the widget is present and
+            // undeletable.
+            case "canvas", "canvasCarousel", "canvasStory":
                 guard let canvasConfig = InlineCanvasConfig.fromJson(
                     templateConfig,
                     designTokens: designTokens
@@ -96,10 +110,21 @@ struct CampaignModel: Equatable {
             guard let surveyConfig = parseSurveyConfig(json, fallbackId: id) else { return nil }
             config = .survey(surveyConfig)
         case "floater":
-            guard let templateConfig = json.object("templateConfig"),
-                  let floaterConfig = FloaterConfig.fromJson(templateConfig, designTokens: designTokens)
-            else { return nil }
-            config = .floater(floaterConfig)
+            guard let templateConfig = json.object("templateConfig") else { return nil }
+            // Two template shapes under one campaign type: `pip` is a media window,
+            // `floaterStory` a canvas window that opens a story — the same way `inline`
+            // carries `carousel` / `story` / `banner`.
+            if templateConfig.string("templateType", default: "pip") == "floaterStory" {
+                guard let storyConfig = FloaterStoryConfig.fromJson(
+                    templateConfig, designTokens: designTokens
+                ) else { return nil }
+                config = .floaterStory(storyConfig)
+            } else {
+                guard let floaterConfig = FloaterConfig.fromJson(
+                    templateConfig, designTokens: designTokens
+                ) else { return nil }
+                config = .floater(floaterConfig)
+            }
         default:
             // Any unknown type is skipped.
             return nil
