@@ -169,6 +169,9 @@ private struct GuideStepOverlay: View {
             let isAnchorless = imageURL != nil
             let isFlat = config.schema == .flat
             let isCanvas = config.canvas != nil && config.layoutMode == "canvas"
+            let canvasScale = isCanvas
+                ? anchorlessDesignScale(hostWidth: geo.size.width, designWidth: designWidth) ?? 1
+                : 1
             let safeBounds = isAnchorless
                 ? CGRect(
                     x: safeAreaInsets.left,
@@ -181,13 +184,15 @@ private struct GuideStepOverlay: View {
                 ? CGFloat(config.bubble.arrow.size)
                 : 10
             let arrowVisible = config.bubble.arrow.visible
-            let gap = isAnchorless || isFlat
+            let gap = isCanvas
+                ? CGFloat(config.bubble.calloutGap) * canvasScale
+                : isAnchorless || isFlat
                 ? CGFloat(config.bubble.calloutGap)
                 : 24
             let paddedAnchor = isFlat && isSpotlight && !isAnchorless
                 ? anchorRect.insetBy(
-                    dx: -CGFloat(config.overlay.cutout.padding),
-                    dy: -CGFloat(config.overlay.cutout.padding)
+                    dx: -CGFloat(config.overlay.cutout.padding) * canvasScale,
+                    dy: -CGFloat(config.overlay.cutout.padding) * canvasScale
                 )
                 : anchorRect
             let placementAnchor = paddedAnchor
@@ -253,10 +258,11 @@ private struct GuideStepOverlay: View {
                         anchorRect: anchorRect,
                         cutout: config.overlay.cutout,
                         cornerRadius: isFlat && !isAnchorless
-                            ? CGFloat(config.overlay.cutout.cornerRadius)
+                            ? CGFloat(config.overlay.cutout.cornerRadius) * canvasScale
                             : cornerRadius,
                         isAnchorless: isAnchorless,
                         usesFlatSchema: isFlat,
+                        geometryScale: canvasScale,
                         color: guideColor(config.overlay.color, fallback: .black),
                         alpha: config.overlay.alpha
                     )
@@ -599,7 +605,7 @@ private struct GuideStepOverlay: View {
         )
         Task {
             await SDKInstance.shared.executeGuideActionFlow(
-                request.actions,
+                guideActions(request.actions),
                 variables: variables,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: onDismiss,
@@ -922,11 +928,12 @@ private struct GuideSpotlightScrim: View {
     let cornerRadius: CGFloat
     let isAnchorless: Bool
     let usesFlatSchema: Bool
+    let geometryScale: CGFloat
     let color: Color
     let alpha: Double
 
     var body: some View {
-        let pad = isAnchorless ? 0 : CGFloat(cutout.padding)
+        let pad = isAnchorless ? 0 : CGFloat(cutout.padding) * geometryScale
         let hole = anchorRect.insetBy(dx: -pad, dy: -pad)
         let shape = GuideCutoutShape(shape: cutout.shape, cornerRadius: cornerRadius)
 
@@ -948,7 +955,7 @@ private struct GuideSpotlightScrim: View {
             if cutout.glowWidth > 0 {
                 context.blendMode = .normal
                 let glowWidth = cutout.glowWidth.isFinite
-                    ? min(max(CGFloat(cutout.glowWidth), 0), 48)
+                    ? min(max(CGFloat(cutout.glowWidth) * geometryScale, 0), 48)
                     : 0
                 let blurRadius = max(2, glowWidth * 1.5) / 2
                 var outside = Path(CGRect(origin: .zero, size: size))
