@@ -866,16 +866,56 @@ private func resolvedPlacement(
 ) -> CalloutPlacement {
     let requested = CalloutPlacement(preferred: preferred)
     guard bubble != .zero else { return requested }
-    let margin: CGFloat = 16
-    let fitsAbove = anchor.minY - gap - bubble.height >= screen.minY + margin
-    let fitsBelow = anchor.maxY + gap + bubble.height <= screen.maxY - margin
-    let fitsLeft = anchor.minX - gap - bubble.width >= screen.minX + margin
-    let fitsRight = anchor.maxX + gap + bubble.width <= screen.maxX - margin
+    let spaceAbove = anchor.minY - gap - screen.minY
+    let spaceBelow = screen.maxY - anchor.maxY - gap
+    let spaceLeft = anchor.minX - gap - screen.minX
+    let spaceRight = screen.maxX - anchor.maxX - gap
+
+    func resolve(
+        _ requested: CalloutPlacement,
+        space: CGFloat,
+        required: CGFloat,
+        opposite: CalloutPlacement,
+        oppositeSpace: CGFloat
+    ) -> CalloutPlacement {
+        if space >= required { return requested }
+        if oppositeSpace >= required { return opposite }
+        return oppositeSpace > space ? opposite : requested
+    }
+
     switch requested {
-    case .above: return fitsAbove || !fitsBelow ? .above : .below
-    case .below: return fitsBelow || !fitsAbove ? .below : .above
-    case .left: return fitsLeft || !fitsRight ? .left : .right
-    case .right: return fitsRight || !fitsLeft ? .right : .left
+    case .above:
+        return resolve(
+            .above,
+            space: spaceAbove,
+            required: bubble.height,
+            opposite: .below,
+            oppositeSpace: spaceBelow
+        )
+    case .below:
+        return resolve(
+            .below,
+            space: spaceBelow,
+            required: bubble.height,
+            opposite: .above,
+            oppositeSpace: spaceAbove
+        )
+    case .left:
+        return resolve(
+            .left,
+            space: spaceLeft,
+            required: bubble.width,
+            opposite: .right,
+            oppositeSpace: spaceRight
+        )
+    case .right:
+        return resolve(
+            .right,
+            space: spaceRight,
+            required: bubble.width,
+            opposite: .left,
+            oppositeSpace: spaceLeft
+        )
     }
 }
 
