@@ -223,6 +223,26 @@ func canvasStoryItem(
     )
 }
 
+func canvasStoryItem(_ page: CampaignCanvasStoryPage) -> StoryItemConfig {
+    let mediaType: StoryMediaType = page.thumbnailIsVideo ? .video : .image
+    let boxFit = StoryMediaFit.fromWireValue(page.pageFit, mediaType: mediaType)
+    let thumbnailBoxFit = StoryMediaFit.fromWireValue(page.thumbnailFit, mediaType: mediaType)
+    return StoryItemConfig(
+        type: mediaType,
+        url: page.thumbnailUrl,
+        duration: Int(max(page.duration, 0) * 1000),
+        thumbnailPlayback: StoryThumbnailPlaybackConfig(
+            startTimeMs: Int64(page.thumbnailPlayback.startTime * 1000),
+            durationMode: page.thumbnailPlayback.fixedDuration ? .fixed : .full,
+            durationMs: page.thumbnailPlayback.fixedDuration
+                ? Int64(page.thumbnailPlayback.duration * 1000)
+                : nil
+        ),
+        boxFit: boxFit,
+        thumbnailBoxFit: thumbnailBoxFit
+    )
+}
+
 /// The canvas wire's fit vocabulary as the media story's.
 func storyFit(_ contentMode: ContentMode) -> StoryMediaFit {
     contentMode == .fit ? .contain : .cover
@@ -363,7 +383,7 @@ struct CanvasStoryRailRenderer: View {
     var body: some View {
         guard case .story(
             _, let pages, let cardAspectRatio, let cardCornerRadius, let cardSpacing,
-            let showRail, _, let restartOnCompleted, let startMuted, let chrome
+            let showRail, let thumbnailVideoPlayback, let restartOnCompleted, let startMuted, let chrome
         ) = widget, !pages.isEmpty else { return AnyView(EmptyView()) }
 
 
@@ -377,18 +397,16 @@ struct CanvasStoryRailRenderer: View {
                     // follows from the authored ratio. Nothing reads a card-height
                     // property, because there isn't one.
                     let cardWidth = proxy.size.height * cardAspectRatio
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: cardSpacing) {
-                            ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
-                                CanvasStoryRailCard(
-                                    page: page,
-                                    width: cardWidth,
-                                    height: proxy.size.height,
-                                    cornerRadius: cardCornerRadius
-                                )
-                                .onTapGesture { openIndex = index }
-                            }
-                        }
+                    StoryThumbnailRailView(
+                        items: pages.map(canvasStoryItem),
+                        mode: thumbnailVideoPlayback.asInlineStoryMode,
+                        cardWidth: cardWidth,
+                        cardHeight: proxy.size.height,
+                        cardCornerRadius: cardCornerRadius,
+                        cardSpacing: cardSpacing,
+                        overlayOpen: openIndex != nil
+                    ) { index in
+                        openIndex = index
                     }
                 }
             }
@@ -411,26 +429,12 @@ struct CanvasStoryRailRenderer: View {
     }
 }
 
-private struct CanvasStoryRailCard: View {
-    let page: CampaignCanvasStoryPage
-    let width: CGFloat
-    let height: CGFloat
-    let cornerRadius: CGFloat
-
-    var body: some View {
-        // A card is its media and its corner radius, nothing else — the same as
-        // the media story's. An earlier version drew a ring around it, which no
-        // story rail in the product has.
-        CanvasStoryRailMedia(
-            url: page.thumbnailUrl,
-            isVideo: page.thumbnailIsVideo,
-            contentMode: canvasContentMode(page.thumbnailFit),
-            // The authored start of the thumbnail window, which is also the
-            // frame worth showing before the clip is ready.
-            posterFrameMs: Int64(page.thumbnailPlayback.startTime * 1000)
-        )
-        .frame(width: width, height: height)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+private extension CampaignCanvasStoryThumbnailPlaybackMode {
+    var asInlineStoryMode: ThumbnailVideoPlaybackMode {
+        switch self {
+        case .simultaneous: .simultaneous
+        case .sequential: .sequential
+        }
     }
 }
 
