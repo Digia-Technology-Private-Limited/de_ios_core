@@ -1295,13 +1295,18 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             .impressed, FloaterEvent.Viewed(screenName: _currentScreen), payload: state.payload)
     }
 
-    private func emitFloaterStoryStepViewed(_ state: ActiveFloaterStoryState) {
-        events.toDigia(FloaterEvent.StepViewed(), payload: state.payload)
-    }
+    /// Deliberately silent.
+    ///
+    /// The story's own viewer reports "Digia Step Viewed" per page, and the first of those fires as
+    /// the story opens — which is exactly the moment this used to fire its property-less version.
+    /// Emitting here as well would put two of the same event on the wire for one open, one of them
+    /// with no page to attribute it to. The orchestrator still calls this because the *lifecycle*
+    /// hook is real; only the reporting moved.
+    private func emitFloaterStoryStepViewed(_ state: ActiveFloaterStoryState) {}
 
-    private func emitFloaterStoryStepDismissed(_ state: ActiveFloaterStoryState) {
-        events.toDigia(FloaterEvent.StepDismissed(), payload: state.payload)
-    }
+    /// Silent for the same reason as `emitFloaterStoryStepViewed` — the viewer reports the close
+    /// with the page the viewer left on, which is the half that makes drop-off measurable.
+    private func emitFloaterStoryStepDismissed(_ state: ActiveFloaterStoryState) {}
 
     private func emitFloaterStoryDismissed(
         _ state: ActiveFloaterStoryState, _ reason: FloaterDismissReason,
@@ -1329,7 +1334,20 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     /// SDK chrome taps on the window itself — opening the story, and the ×.
-    func reportFloaterStoryClicked(elementId: String, actionType: String, ctaRole: String) {
+    /// A tap on the window — the campaign's own surface, so an experience-level click.
+    ///
+    /// Covers both the SDK's chrome (opening the story, the ×) and the author's own elements. The
+    /// window is not a step: a story floater's steps are the pages of the story it opens, so a
+    /// button drawn on the window is a click on the experience itself. Reporting it as a step click
+    /// put window taps and page taps in the same bucket, and left a campaign whose window carries a
+    /// CTA with no experience clicks at all.
+    func reportFloaterStoryClicked(
+        elementId: String,
+        actionType: String,
+        ctaRole: String,
+        ctaLabel: String? = nil,
+        actionUrl: String? = nil
+    ) {
         guard let state = floaterStoryOrchestrator.state else { return }
         events.toDigia(
             FloaterEvent.Clicked(
@@ -1337,7 +1355,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 // The window is the collapsed state; the story is the expanded one.
                 pipState: floaterStoryOrchestrator.storyOpen ? "expanded" : "collapsed",
                 ctaRole: ctaRole,
-                timeToActionMs: dwellTracker.elapsedMs(state.payload.cepCampaignId)
+                timeToActionMs: dwellTracker.elapsedMs(state.payload.cepCampaignId),
+                ctaLabel: ctaLabel,
+                actionUrl: actionUrl
             ),
             payload: state.payload
         )
@@ -1352,16 +1372,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func runFloaterStoryAction(
         state: ActiveFloaterStoryState, request: CampaignCanvasActionRequest
     ) {
-        let resolvedAction = request.actions.first?.resolved(with: state.variableContext)
-        events.toDigia(
-            FloaterEvent.StepClicked(
-                elementId: request.elementId, ctaLabel: request.label ?? "",
-                actionType: resolvedAction?.analyticsType,
-                actionUrl: resolvedAction?.analyticsURL,
-                timeToActionMs: dwellTracker.elapsedMs(state.payload.cepCampaignId)
-            ),
-            payload: state.payload
-        )
+        // Runs the action and nothing else. Which *event* a tap is belongs to the caller, because
+        // only it knows whether the tap came from the window or from a story page — and the two are
+        // different levels of the funnel, not two flavours of the same one.
         Task {
             await executeActionFlow(
                 request.actions, variables: state.variableContext,

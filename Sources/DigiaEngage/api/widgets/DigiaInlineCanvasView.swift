@@ -24,19 +24,64 @@ struct DigiaInlineCanvasView: View {
                 perform(request, variables: variables)
             }
         )
+        // Canvas widgets report what happened to them; this is where it becomes a campaign event.
+        //
+        // The widgets cannot do this themselves — a carousel has no idea which campaign it is part
+        // of, and shouldn't. Mapping here means a canvas carousel emits the *same* events the media
+        // carousel it replaces emits, so the two are comparable and a migration doesn't reset the
+        // funnel. Indices arrive 0-based and go out 1-based, which is the wire's convention.
+        .environment(\.canvasInteractions, CanvasInteractionReporter { interaction in
+            switch interaction {
+            case let .carouselSlideViewed(index, total, auto):
+                SDKInstance.shared.reportCarouselStepViewed(
+                    payload: payload, itemIndex: index + 1, itemTotal: total, auto: auto
+                )
+            case let .storyOpened(_, _):
+                SDKInstance.shared.reportStoryOpened(payload)
+            case let .storyPageViewed(index, total):
+                SDKInstance.shared.reportStoryStepViewed(
+                    payload, itemIndex: index + 1, itemTotal: total
+                )
+            case let .storyPageDismissed(index, _):
+                SDKInstance.shared.reportStoryStepDismissed(payload, itemIndex: index + 1)
+            case let .storyCompleted(total, timeToCompleteMs):
+                SDKInstance.shared.reportStoryCompleted(
+                    payload,
+                    itemTotal: total,
+                    timeToCompleteMs: timeToCompleteMs.map(Int64.init)
+                )
+            }
+        })
     }
 
     private func perform(_ request: CampaignCanvasActionRequest, variables: VariableContext?) {
         guard !request.actions.isEmpty else { return }
         let action = request.actions.first?.resolved(with: variables)
-        SDKInstance.shared.emitInlineCanvasClick(
-            payload: payload,
-            elementId: request.elementId,
-            ctaLabel: request.label,
-            actionType: action?.analyticsType,
-            actionUrl: action?.analyticsURL,
-            ctaRole: request.isPrimary ? "primary" : "secondary"
-        )
+        // A tap inside a slide or a page is a *step* click, matching what the legacy carousel and
+        // story report; a tap on the card itself stays a canvas click.
+        switch request.step?.kind {
+        case .carouselSlide:
+            SDKInstance.shared.reportCarouselStepClicked(
+                payload: payload, itemIndex: (request.step?.index ?? 0) + 1, action: action
+            )
+        case .storyPage:
+            SDKInstance.shared.reportStoryStepClicked(
+                payload,
+                itemIndex: (request.step?.index ?? 0) + 1,
+                ctaLabel: request.label,
+                actionType: action?.analyticsType,
+                actionUrl: action?.analyticsURL
+            )
+        case nil:
+            SDKInstance.shared.emitInlineCanvasClick(
+                payload: payload,
+                elementId: request.elementId,
+                ctaLabel: request.label,
+                actionType: action?.analyticsType,
+                actionUrl: action?.analyticsURL,
+                ctaRole: request.isPrimary ? "primary" : "secondary"
+            )
+        }
         // Hide means something slot-specific here: clear this slot for the
         // session. That deliberately bypasses the stickiness which otherwise
         // keeps an inline campaign alive across navigation.

@@ -447,6 +447,9 @@ private struct FloaterStorySessionView: View {
         if case .story(
             _, let pages, _, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
         ) = config.story {
+            // The floater keeps its own `FloaterEvent` vocabulary rather than the inline story's,
+            // so it maps only the one interaction that has no equivalent there: reaching the end.
+            // Everything else it already reports from the orchestrator.
             CanvasStoryViewer(
                 pages: pages,
                 chrome: chrome,
@@ -458,6 +461,39 @@ private struct FloaterStorySessionView: View {
                 onDismiss: { orchestrator.closeStory() }
             )
             .environment(\.digiaVariables, state.variableContext)
+            // Two vocabularies, and the split is by subject rather than by campaign type.
+            //
+            // `FloaterEvent` describes the *window's* life — it appeared, it was tapped, it was
+            // dragged, the showing ended. `StoriesEvent` describes the *story's* — which page is
+            // showing, which one the viewer left on, whether they reached the end. A story opened
+            // from a floating window is the same story a rail opens, so it reports the same way,
+            // and the two funnels stay comparable.
+            //
+            // The wire event names are unchanged by this: "Digia Step Viewed" already fired once
+            // when the story opened, and now fires once per page — the first of which is that same
+            // open. So this adds granularity rather than replacing a signal.
+            .environment(\.canvasInteractions, CanvasInteractionReporter { interaction in
+                let payload = state.payload
+                switch interaction {
+                case let .storyPageViewed(index, total):
+                    SDKInstance.shared.reportStoryStepViewed(
+                        payload, itemIndex: index + 1, itemTotal: total
+                    )
+                case let .storyPageDismissed(index, _):
+                    SDKInstance.shared.reportStoryStepDismissed(payload, itemIndex: index + 1)
+                case let .storyCompleted(total, ms):
+                    SDKInstance.shared.reportStoryCompleted(
+                        payload, itemTotal: total, timeToCompleteMs: ms.map(Int64.init)
+                    )
+                    // And the floater's own serving signal, which is what a
+                    // `stopOn: experienceCompleted` frequency rule retires on.
+                    SDKInstance.shared.floaterStoryOrchestrator.complete()
+                // The window's tap already reports the open as an experience click, so a second
+                // one here would double-count it.
+                case .storyOpened, .carouselSlideViewed:
+                    break
+                }
+            })
         }
     }
 
@@ -502,6 +538,35 @@ private struct FloaterStorySessionView: View {
     /// own canvas, and this campaign's window carries none — so a tap on the window is
     /// what opens the story instead.
     private func runCanvasAction(_ request: CampaignCanvasActionRequest) {
+        let action = request.actions.first?.resolved(with: state.variableContext)
+        // Which level of the funnel this tap belongs to, decided by where it came from.
+        //
+        // A story page is a *step*, so a CTA on one reports the way it does in an inline story,
+        // with the page it came from. The window is not a step — it is the campaign's only visible
+        // surface, the thing the whole showing consists of — so a button the author drew on it is
+        // a click on the experience itself, exactly like a tap on the window's empty canvas
+        // already was.
+        //
+        // Exactly one event either way. Emitting both, which is what happened when the action
+        // runner reported a step click of its own, put two identically-named "Digia Step Clicked"
+        // events on the wire for a single tap on a story page.
+        if let step = request.step, step.kind == .storyPage {
+            SDKInstance.shared.reportStoryStepClicked(
+                state.payload,
+                itemIndex: step.index + 1,
+                ctaLabel: request.label,
+                actionType: action?.analyticsType,
+                actionUrl: action?.analyticsURL
+            )
+        } else {
+            SDKInstance.shared.reportFloaterStoryClicked(
+                elementId: request.elementId,
+                actionType: action?.analyticsType ?? "",
+                ctaRole: request.isPrimary ? "primary" : "secondary",
+                ctaLabel: request.label,
+                actionUrl: action?.analyticsURL
+            )
+        }
         SDKInstance.shared.runFloaterStoryAction(state: state, request: request)
     }
 

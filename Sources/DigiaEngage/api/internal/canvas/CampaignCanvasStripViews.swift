@@ -277,6 +277,10 @@ struct CanvasCarouselRenderer: View {
 
     @State private var page = 0
     @State private var timer: Timer?
+    /// True while the last page change came from the autoplay timer rather than the user's finger,
+    /// which is the distinction the legacy carousel's `auto` flag draws.
+    @State private var advancedAutomatically = false
+    @Environment(\.canvasInteractions) private var reportInteraction
 
     var body: some View {
         guard case .carousel(
@@ -305,7 +309,15 @@ struct CanvasCarouselRenderer: View {
                                     height: stripHeight,
                                     cornerRadius: cornerRadius,
                                     isDark: isDark,
-                                    onAction: onAction
+                                    // The slide an action came from travels with it, so the host
+                                    // can tell a tap on slide 3 from a tap on the card around it.
+                                    onAction: { request in
+                                        var stamped = request
+                                        stamped.step = CanvasStep(
+                                            kind: .carouselSlide, index: index, total: slides.count
+                                        )
+                                        onAction(stamped)
+                                    }
                                 )
                                 .frame(maxWidth: .infinity)
                                 .tag(index)
@@ -313,6 +325,25 @@ struct CanvasCarouselRenderer: View {
                         }
                         .tabViewStyle(.page(indexDisplayMode: .never))
                         .frame(height: stripHeight)
+                        // A `TabView`'s selection only changes once the swipe has settled, so this
+                        // reports the slide that came to rest rather than every slide dragged past.
+                        // It fires for the first slide on appear too, which is correct and matches
+                        // the legacy carousel: a slide the user never touched has still been seen.
+                        .onAppear {
+                            reportInteraction(
+                                .carouselSlideViewed(index: page, total: slides.count, auto: false)
+                            )
+                        }
+                        .onChange(of: page) { newPage in
+                            reportInteraction(
+                                .carouselSlideViewed(
+                                    index: newPage,
+                                    total: slides.count,
+                                    auto: advancedAutomatically
+                                )
+                            )
+                            advancedAutomatically = false
+                        }
 
                         if showIndicator {
                             HStack(spacing: dotSpacing) {
@@ -336,6 +367,9 @@ struct CanvasCarouselRenderer: View {
                         timer = Timer.scheduledTimer(withTimeInterval: autoPlayInterval, repeats: true) { _ in
                             Task { @MainActor in
                                 let next = page + 1
+                                // Flagged before the change, so the `onChange` it triggers knows
+                                // the slide arrived on a timer rather than under a finger.
+                                advancedAutomatically = true
                                 page = infiniteScroll
                                     ? next % slides.count
                                     : min(next, slides.count - 1)
@@ -359,6 +393,7 @@ struct CanvasStoryRailRenderer: View {
     let onAction: (CampaignCanvasActionRequest) -> Void
 
     @State private var openIndex: Int?
+    @Environment(\.canvasInteractions) private var reportInteraction
 
     var body: some View {
         guard case .story(
@@ -406,6 +441,11 @@ struct CanvasStoryRailRenderer: View {
                     onAction: onAction,
                     onDismiss: { openIndex = nil }
                 )
+                .onAppear {
+                    reportInteraction(
+                        .storyOpened(index: openIndex ?? 0, total: pages.count)
+                    )
+                }
             }
         )
     }
@@ -462,6 +502,14 @@ struct CanvasStoryViewer: View {
     /// its authored one, which is also the fallback for an unplayable video.
     @State private var videoDuration: TimeInterval?
 
+    // ── analytics ──
+    //
+    // Reported from the viewer rather than the rail, because the rail cannot see any of it: a page
+    // advances on a timer, a tap or a video ending, and only this view knows which page is showing.
+    @Environment(\.canvasInteractions) private var reportInteraction
+    @State private var openedAt = Date()
+    @State private var completedReported = false
+
     private var page: CampaignCanvasStoryPage { pages[min(max(0, index), pages.count - 1)] }
 
     var body: some View {
@@ -486,6 +534,15 @@ struct CanvasStoryViewer: View {
                 // Both the overlay and the chrome are authored against the safe
                 // region, so both draw at the same scale and inside it.
                 let scale = page.canvas.width > 0 ? proxy.size.width / page.canvas.width : 1
+                // The page an action came from travels with it, so a CTA inside story 3 reports as
+                // a step click on story 3 rather than as an anonymous click on the card.
+                let pageAction: (CampaignCanvasActionRequest) -> Void = { request in
+                    var stamped = request
+                    stamped.step = CanvasStep(
+                        kind: .storyPage, index: index, total: pages.count
+                    )
+                    onAction(stamped)
+                }
                 VStack {
                     Spacer(minLength: 0)
                     ScaledCanvasStage(
@@ -494,7 +551,7 @@ struct CanvasStoryViewer: View {
                         height: page.canvas.height * scale,
                         cornerRadius: 0,
                         isDark: isDark,
-                        onAction: onAction
+                        onAction: pageAction
                     )
                 }
 
@@ -504,7 +561,7 @@ struct CanvasStoryViewer: View {
                     height: chrome.height * scale,
                     cornerRadius: 0,
                     isDark: isDark,
-                    onAction: onAction
+                    onAction: pageAction
                 )
                 .environment(
                     \.canvasStoryViewer,
@@ -515,7 +572,7 @@ struct CanvasStoryViewer: View {
                         muted: muted
                     )
                 )
-                .environment(\.canvasStoryClose, CanvasStoryCallback(run: onDismiss))
+                .environment(\.canvasStoryClose, CanvasStoryCallback(run: dismissWithReport))
                 .environment(
                     \.canvasStoryToggleMute,
                     CanvasStoryCallback(run: { toggleMute() })
@@ -555,7 +612,12 @@ struct CanvasStoryViewer: View {
         .onAppear {
             index = min(max(0, initialIndex), pages.count - 1)
             muted = startMuted
+            openedAt = Date()
+            reportInteraction(.storyPageViewed(index: index, total: pages.count))
             start()
+        }
+        .onChange(of: index) { newIndex in
+            reportInteraction(.storyPageViewed(index: newIndex, total: pages.count))
         }
         .onDisappear { stop() }
     }
@@ -569,11 +631,32 @@ struct CanvasStoryViewer: View {
         let next = index + delta
         if next < 0 { start(); return }
         if next >= pages.count {
+            // Reaching the end is the completion, whether or not the story then restarts — and at
+            // most once per showing, so a looping story does not report a completion per lap.
+            if !completedReported {
+                completedReported = true
+                reportInteraction(
+                    .storyCompleted(
+                        total: pages.count,
+                        timeToCompleteMs: Int(Date().timeIntervalSince(openedAt) * 1000)
+                    )
+                )
+            }
             if restartOnCompleted { index = 0; start() } else { onDismiss() }
             return
         }
         index = next
         start()
+    }
+
+    /// Closing before the end is a dismissal; closing *at* the end is the completion already
+    /// reported by `step`. Distinguishing them is what makes drop-off measurable — a viewer that
+    /// always reported a dismissal would show 100% abandonment.
+    private func dismissWithReport() {
+        if !completedReported {
+            reportInteraction(.storyPageDismissed(index: index, total: pages.count))
+        }
+        onDismiss()
     }
 
     private func pause() {

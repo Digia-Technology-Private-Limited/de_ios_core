@@ -277,4 +277,10 @@ struct CampaignCanvas: Equatable, Sendable {
 struct CampaignCanvasActionRequest: Equatable {
     let actions: [EngageAction]; let elementId: String
     var label: String? = nil; var isPrimary = false
+    /// The slide or page this came from, when it came from inside one.
+    ///
+    /// `nil` for an element on the card itself. A host reads it to tell "the card was clicked" from
+    /// "slide 3 was clicked", which is the difference between an inline-canvas click and the
+    /// step-level click the legacy carousel and story both report.
+    var step: CanvasStep? = nil
 }
