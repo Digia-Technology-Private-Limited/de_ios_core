@@ -96,9 +96,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// `DiagnosticsReporter` wired into `PluginRegistry`.
     private let diagnostics = DiagnosticsReporter(logger: { DigiaLog.warning($0) })
 
-    /// Installed by RN when JS guide rendering is selected. Nil routes guides
-    /// through the native orchestrator.
+    /// Set by the RN bridge. When non-nil the SDK is RN-driven: guides render in
+    /// JS, so on a guide trigger native only applies frequency capping and (if
+    /// allowed) invokes this hook to ask JS to render, instead of rendering the
+    /// guide natively. Nil in pure-native apps, where guides render natively.
     var onGuideRenderRequest: ((CEPTriggerPayload) -> Void)?
+    var guideHostActionHandler: GuideHostActionHandler?
 
     // Event system (mirrors Android): a fan-out emitter over two sinks — the
     // coarse CEP channel (`toCep`) and Digia's rich analytics (`toDigia`).
@@ -175,6 +178,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         CampaignCanvasTheme.shared.update(config.themeMode)
 
         if config.wrapperBinding == "react_native" {
+            // RN fetches campaigns itself (it needs the same response to render
+            // JS-side campaigns) and hands them to us via populateCampaignBundle() —
+            // fetching here too would duplicate the network call. sdkState stays
+            // .notInitialized until that call arrives.
             logVerbose("Skipping native campaign fetch — awaiting populateCampaignBundle() from RN")
             return
         }
@@ -186,6 +193,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             currentDesignTokens = bundle.designTokens
             guideRenderer = bundle.guideRenderer
         } catch {
+            // Campaign fetch failure must not block SDK readiness.
             logVerbose("CampaignFetcher failed: \(error)")
         }
         completeInitialization(campaigns)
@@ -201,6 +209,36 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             variables: variables,
             localActionExecutor: localActionExecutor
         )
+    }
+
+    func executeGuideActionFlow(
+        _ actions: [EngageAction],
+        variables: VariableContext?,
+        localActionExecutor: LocalActionExecutor
+    ) async {
+        for action in actions {
+            let action = action.resolved(with: variables)
+            let hasGuideLinkHandler = guideHostActionHandler != nil && action.isLink
+            if handleGuideHostAction(action) { continue }
+            await actionExecutor.executeAction(
+                action,
+                variables: nil,
+                localActionExecutor: localActionExecutor,
+                allowLegacyHostActionHandler: !hasGuideLinkHandler
+            )
+        }
+    }
+
+    private func handleGuideHostAction(_ action: EngageAction) -> Bool {
+        guard let guideHostActionHandler else { return false }
+        switch action {
+        case .openDeeplink(let url, let fallbackUrl):
+            return guideHostActionHandler("deepLink", url, fallbackUrl, nil)
+        case .openUrl(let url, let presentation):
+            return guideHostActionHandler("openURL", url, nil, presentation ?? "external")
+        default:
+            return false
+        }
     }
 
     func setCustomKVHandler(_ handler: CustomKVHandler?) {
@@ -779,8 +817,14 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         case .guide(let guideConfig):
             if !guideConfig.isAnchorless,
                config?.wrapperBinding == "react_native",
-               guideRenderer == .reactNative,
-               let renderViaJs = onGuideRenderRequest {
+               guideRenderer == .reactNative {
+                guard let renderViaJs = onGuideRenderRequest else {
+                    let message = "React Native guide renderer is not registered"
+                    lastCampaignDropReason = message
+                    context.onDropped(.renderError, message: message)
+                    logNativeGuideStage("route", "result=dropped reason=js_renderer_missing campaign_key=\(key)")
+                    return false
+                }
                 if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                     lastCampaignDropReason = "frequency capped"
                     return false
@@ -791,26 +835,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             }
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
-                return false
-            }
-            if let anchorKey = guideConfig.steps.first?.target.anchorKey,
-               case let .unavailable(reason) = AnchorRegistry.shared.resolution(for: anchorKey) {
-                lastCampaignDropReason = "anchor unavailable: \(reason.rawValue)"
-                DigiaLog.verbose(
-                    "[NativeGuide] stage=guide_trigger_drop anchor_key=\(anchorKey) reason=\(reason.rawValue)"
-                )
-                context.onDropped(.renderError, message: "anchor unavailable: \(reason.rawValue)")
+                logNativeGuideStage("route", "result=dropped reason=frequency_capped campaign_key=\(key)")
                 return false
             }
             guard guideOrchestrator.start(campaign, payload: payload) else {
                 lastCampaignDropReason = "another guide is already on screen"
                 context.onDropped(.renderError, message: "another guide is already on screen")
+                logNativeGuideStage("route", "result=dropped reason=guide_active campaign_key=\(key)")
                 return false
             }
             guideCompletionFired = false
-            DigiaLog.verbose(
-                "[NativeGuide] stage=guide_trigger_accept campaign_key=\(key)"
-            )
+            logNativeGuideStage("route", "result=accepted campaign_key=\(key)")
             return true
         case .nudge(let nudgeConfig):
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
@@ -1554,21 +1589,28 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
         AnchorRegistry.shared.track(
             key: anchorKey,
-            waitForRegistration: state.stepIndex == 0
-        ) { [weak self] unavailableKey, reason in
-            guard let self,
-                  let current = self.guideOrchestrator.state,
-                  current.currentStep?.target.anchorKey == unavailableKey
-            else { return }
-            DigiaLog.verbose(
-                "[NativeGuide] stage=guide_anchor_drop anchor_key=\(unavailableKey) reason=\(reason.rawValue)"
-            )
-            self.reportGuideRenderFailure(
-                .invalidGeometry,
-                guideToken: current.token,
-                stepIndex: current.stepIndex
-            )
-        }
+            onAvailable: { [weak self] availableKey in
+                self?.logNativeGuideStage(
+                    "anchor",
+                    "result=ready anchor_key=\(availableKey) step_index=\(state.stepIndex + 1)"
+                )
+            },
+            onUnavailable: { [weak self] unavailableKey, reason in
+                guard let self,
+                      let current = self.guideOrchestrator.state,
+                      current.currentStep?.target.anchorKey == unavailableKey
+                else { return }
+                self.logNativeGuideStage(
+                    "anchor",
+                    "result=dropped anchor_key=\(unavailableKey) reason=\(reason.rawValue)"
+                )
+                self.reportGuideRenderFailure(
+                    .invalidGeometry,
+                    guideToken: current.token,
+                    stepIndex: current.stepIndex
+                )
+            }
+        )
     }
 
     func dismissGuide() {
@@ -1576,7 +1618,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let payload = state.payload
         let total = state.steps.count
         let elapsed = dwellTracker.consumeDwellMs(payload.cepCampaignId)
-        if !guideCompletionFired, total > 1 {
+        let isAnchorless = state.currentStep?.target.anchorlessTarget != nil
+        if guideCompletionFired, isAnchorless, total > 1 {
+            events.toCep(.clicked(), payload: payload)
+        } else if !guideCompletionFired, total > 1 {
             events.toDigia(
                 GuideEvent.StepDismissed(itemIndex: state.stepIndex + 1),
                 payload: payload
@@ -1611,6 +1656,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func reportGuideShown() {
         guard let state = guideOrchestrator.state else { return }
+        if state.currentStep?.target.anchorKey != nil {
+            logNativeGuideStage(
+                "render",
+                "result=shown campaign_key=\(state.payload.campaignKey) step_index=\(state.stepIndex + 1)"
+            )
+        }
         let payload = state.payload
         let total = state.steps.count
         if state.stepIndex == 0, dwellTracker.elapsedMs(payload.cepCampaignId) == nil {
@@ -1631,7 +1682,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 payload: payload
             )
         }
-        if total > 1 {
+        if total > 1 || state.currentStep?.target.anchorlessTarget != nil {
             events.toDigia(
                 GuideEvent.StepViewed(
                     itemIndex: state.stepIndex + 1,
@@ -1653,7 +1704,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
               (guideToken == nil || guideToken == state.token),
               (stepIndex == nil || stepIndex == state.stepIndex)
         else { return }
-        if isDebugBuild {
+        if state.currentStep?.target.anchorKey != nil {
+            logNativeGuideStage(
+                "render",
+                "result=failed campaign_key=\(state.payload.campaignKey) reason=\(failure?.rawValue ?? "image_load")"
+            )
+        }
+        if isDebugBuild, state.currentStep?.target.anchorKey == nil {
             DigiaLog.warning(
                 "[Anchorless] render failed: \(failure?.rawValue ?? "image load failed")"
                     + " step=\(state.stepIndex + 1)",
@@ -1719,10 +1776,18 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
         events.toDigia(
             GuideEvent.Completed(
-                itemTotal: state.steps.count
+                itemTotal: state.steps.count,
+                timeToCompleteMs: state.currentStep?.target.anchorlessTarget == nil
+                    ? nil
+                    : dwellTracker.elapsedMs(state.payload.cepCampaignId)
             ),
             payload: state.payload
         )
+    }
+
+    private func logNativeGuideStage(_ stage: String, _ details: String) {
+        guard config?.wrapperBinding == "react_native" else { return }
+        DigiaLog.verbose("guide_native_stage=\(stage) \(details)")
     }
 
     /// Public analytics entry point for JS-rendered RN campaigns (guides). The JS
@@ -1751,7 +1816,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             || eventName == "Digia Experience Completed"
         {
             if let payloadID = props["payload_id"] as? String,
-               activeExternalGuide?.payload.cepCampaignId == payloadID {
+                activeExternalGuide?.payload.cepCampaignId == payloadID
+            {
                 activeExternalGuide = nil
             }
         }
@@ -1869,6 +1935,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         font = DigiaFont()
         currentDesignTokens = .empty
         guideRenderer = .reactNative
+        guideHostActionHandler = nil
         campaignStore.clear()
         controller.dismissNudge()
         controller.dismissStoryOverlay()

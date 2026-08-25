@@ -3,6 +3,12 @@ import Foundation
 public typealias CustomKVHandler = @MainActor @Sendable ([String: String]) throws -> Void
 public typealias DeepLinkHandler = @MainActor @Sendable (String) throws -> Void
 public typealias OpenURLHandler = @MainActor @Sendable (String) throws -> Void
+public typealias GuideHostActionHandler = @MainActor @Sendable (
+    _ actionType: String,
+    _ url: String,
+    _ fallbackUrl: String?,
+    _ presentation: String?
+) -> Bool
 
 /// Optional host overrides for actions authored in Digia Engage.
 public struct DigiaActionHandlers: Sendable {

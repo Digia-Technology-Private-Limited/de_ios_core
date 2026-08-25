@@ -16,6 +16,16 @@ enum GuideActionType: String {
     }
 }
 
+enum GuideWidgetSchema: Equatable {
+    case nested
+    case flat
+}
+
+enum GuideOutsideTapBehavior: String, Equatable {
+    case next
+    case nothing
+}
+
 struct GuideEdgeInsets: Equatable {
     let top: Double
     let right: Double
@@ -36,6 +46,7 @@ struct GuideAction: Equatable {
     let padding: GuideEdgeInsets
     let margin: GuideEdgeInsets
     let actions: [EngageAction]
+    let fireEventName: String?
 }
 
 struct ArrowConfig: Equatable {
@@ -71,6 +82,7 @@ struct OverlayConfig: Equatable {
     let visible: Bool          // false = tooltip, true = spotlight
     let color: String
     let alpha: Double
+    let dismissOnTap: Bool
     let entranceAnimation: String // "fade"|"none"
     let cutout: CutoutConfig
 }
@@ -96,11 +108,12 @@ struct GuideContentConfig: Equatable {
 }
 
 struct GuideStepWidgetConfig: Equatable {
+    let schema: GuideWidgetSchema
     let bubble: BubbleConfig
     let overlay: OverlayConfig
     let content: GuideContentConfig
     let actions: [GuideAction]
-    let outsideTapBehavior: String
+    let outsideTapBehavior: GuideOutsideTapBehavior
     let layoutMode: String
     let canvas: CampaignCanvas?
 
@@ -116,13 +129,21 @@ struct GuideStepWidgetConfig: Equatable {
 
     static func fromJson(
         _ json: [String: Any],
+        schema: GuideWidgetSchema? = nil,
+        displayStyle: String? = nil,
         designTokens: DesignTokenCatalog = .empty
     ) -> GuideStepWidgetConfig {
-        let isFlatSpotlight = json.object("target")?.string("type") == "anchorless"
-            || json["calloutPosition"] != nil
-            || json["highlightShape"] != nil
-        let isFlatTooltip = json["placement"] != nil
-        let isFlat = isFlatSpotlight || isFlatTooltip
+        let schema = schema ?? inferredSchema(json)
+        let isFlat = schema == .flat
+        let isFlatSpotlight = isFlat && (
+            displayStyle == "spotlight"
+                || json.object("target")?.string("type") == "anchorless"
+                || json["calloutPosition"] != nil
+                || json["highlightShape"] != nil
+        )
+        let isFlatTooltip = isFlat && !isFlatSpotlight
+        let layoutMode = json.string("layoutMode", default: "classic")
+        let usesCanvas = isFlat && layoutMode == "canvas"
         let bubbleObj = json.object("bubble") ?? [:]
         let overlayObj = json.object("overlay") ?? [:]
         let contentObj = json.object("content") ?? [:]
@@ -137,7 +158,7 @@ struct GuideStepWidgetConfig: Equatable {
                 ? json.bool("showArrow", default: true)
                 : arrowObj.bool("visible", default: true),
             preferredDirection: isFlat
-                ? json.string(isFlatSpotlight ? "calloutPosition" : "placement", default: "auto")
+                ? json.string(isFlatSpotlight ? "calloutPosition" : "placement", default: "bottom")
                 : arrowObj.string("preferred_direction", default: "auto"),
             size: isFlat
                 ? json.int("arrowSize", default: 8)
@@ -195,9 +216,12 @@ struct GuideStepWidgetConfig: Equatable {
             ),
             calloutGap: nonNegative(
                 isFlatSpotlight
-                    ? json.double("calloutGap", default: 8) + (arrow.visible ? Double(arrow.size) : 0)
+                    ? json.double("calloutGap", default: 8)
+                        + (arrow.visible && !usesCanvas ? Double(arrow.size) : 0)
                     : isFlatTooltip
-                        ? (arrow.visible ? Double(arrow.size) + 4 : 8)
+                        ? (usesCanvas
+                            ? json.double("gap", default: 12)
+                            : (arrow.visible ? Double(arrow.size) + 4 : 8))
                     : bubbleObj.double("callout_gap", default: 8),
                 fallback: 8
             ),
@@ -246,6 +270,7 @@ struct GuideStepWidgetConfig: Equatable {
                 upper: 1,
                 fallback: isFlatSpotlight ? 0.7 : 0.6
             ),
+            dismissOnTap: overlayObj.bool("dismiss_on_tap", default: false),
             entranceAnimation: overlayObj.string("entrance_animation", default: "fade"),
             cutout: cutout
         )
@@ -255,14 +280,46 @@ struct GuideStepWidgetConfig: Equatable {
         let mediaObj = contentObj.object("media")
         let stepIndObj = contentObj.object("step_indicator") ?? [:]
 
-        let title = nestedText(titleObj, defaultWeight: 700, defaultSize: 16,
-                               defaultColor: defaultTitleColor)
-            ?? flatText(json, key: "title", defaultWeight: 700, defaultSize: 16,
-                        defaultColor: defaultTitleColor)
-        let body = nestedText(bodyObj, defaultWeight: 400, defaultSize: 14,
-                              defaultColor: defaultBodyColor)
-            ?? flatText(json, key: "body", defaultWeight: 400, defaultSize: 14,
-                        defaultColor: defaultBodyColor)
+        let title = isFlat
+            ? flatText(
+                json,
+                key: "title",
+                defaultWeight: 700,
+                defaultSize: 15,
+                defaultColor: "#111111"
+            )
+            : (nestedText(
+                titleObj,
+                defaultWeight: 700,
+                defaultSize: 16,
+                defaultColor: defaultTitleColor
+            ) ?? flatText(
+                json,
+                key: "title",
+                defaultWeight: 700,
+                defaultSize: 16,
+                defaultColor: defaultTitleColor
+            ))
+        let body = isFlat
+            ? flatText(
+                json,
+                key: "body",
+                defaultWeight: 400,
+                defaultSize: 13,
+                defaultColor: "#444444"
+            )
+            : (nestedText(
+                bodyObj,
+                defaultWeight: 400,
+                defaultSize: 14,
+                defaultColor: defaultBodyColor
+            ) ?? flatText(
+                json,
+                key: "body",
+                defaultWeight: 400,
+                defaultSize: 14,
+                defaultColor: defaultBodyColor
+            ))
 
         let content = GuideContentConfig(
             title: title,
@@ -284,31 +341,58 @@ struct GuideStepWidgetConfig: Equatable {
             let typeStr = obj.nonBlankString("action_type")
                 ?? obj.string("type", default: "dismiss")
             let actionType = GuideActionType.parse(typeStr)
-            let style = buttonStyle(obj.string("style", default: "fill"))
-            let isPrimary = style == "fill" || style == "elevated"
+            let style = isFlat
+                ? buttonStyle(obj.string("style", default: "fill"))
+                : obj.string("style", default: "filled")
+            let isPrimary = isFlat
+                ? style == "fill" || style == "elevated"
+                : style == "filled" || style == "primary"
             let defaultBackground = isPrimary
                 ? color(json.string("buttonPrimaryBackgroundColor"), default: isFlat ? "#4945FF" : defaultButtonBackground)
                 : color(json.string("buttonGhostTextColor"), default: "#4945FF")
             let defaultText = color(
                 json.string(isPrimary ? "buttonPrimaryTextColor" : "buttonGhostTextColor"),
-                default: defaultButtonText
+                default: isFlat ? "#FFFFFF" : defaultButtonText
             )
             let onClick = obj.object("onClick")
-            let legacyAction: EngageAction = switch typeStr.lowercased() {
-            case "next": .next
-            case "prev", "back", "previous": .previous
-            case "open_url": obj.nonBlankString("url").map(EngageAction.openUrl) ?? .dismiss
-            case "deep_link", "deeplink": obj.nonBlankString("url").map(EngageAction.openDeeplink) ?? .dismiss
-            case "copy": obj.nonBlankString("text").map(EngageAction.copyToClipboard) ?? .dismiss
-            case "share": obj.nonBlankString("text").map(EngageAction.share) ?? .dismiss
-            case "customkv": (obj["payload"] as? [String: Any]).flatMap { raw in
+            let canonicalActions = onClick.map { EngageActionParser().parse($0) } ?? []
+            let legacyActions: [EngageAction] = switch typeStr.lowercased() {
+            case "next": [.next]
+            case "prev", "back", "previous": [.previous]
+            case "open_url": legacyLinkActions(
+                obj.nonBlankString("url").map {
+                    .openUrl(
+                        $0,
+                        presentation: obj.nonBlankString("presentation") == "in_app"
+                            || obj.nonBlankString("launchMode") == "inAppBrowser"
+                            ? "in_app"
+                            : nil
+                    )
+                },
+                dismissAfterward: isFlat
+            )
+            case "deep_link", "deeplink": legacyLinkActions(
+                obj.nonBlankString("url").map {
+                    .openDeeplink(
+                        $0,
+                        fallbackUrl: obj.nonBlankString("fallbackUrl")
+                            ?? obj.nonBlankString("fallback_url")
+                    )
+                },
+                dismissAfterward: isFlat
+            )
+            case "copy" where isFlat:
+                [obj.nonBlankString("text").map(EngageAction.copyToClipboard) ?? .dismiss]
+            case "share" where isFlat:
+                [obj.nonBlankString("text").map(EngageAction.share) ?? .dismiss]
+            case "customkv" where isFlat: (obj["payload"] as? [String: Any]).flatMap { raw in
                 let payload = raw.reduce(into: [String: String]()) { result, entry in
                     if let value = entry.value as? String { result[entry.key] = value }
                 }
                 return payload.isEmpty ? nil : .customKV(payload)
-            } ?? .dismiss
-            case "fire_event": obj.nonBlankString("event_name").map(EngageAction.fireEvent) ?? .dismiss
-            default: .dismiss
+            }.map { [$0] } ?? [.dismiss]
+            case "fire_event" where isFlat: []
+            default: [.dismiss]
             }
             actions.append(
                 GuideAction(
@@ -316,52 +400,81 @@ struct GuideStepWidgetConfig: Equatable {
                     label: obj.string("label"),
                     style: style,
                     actionType: actionType,
-                    backgroundColor: (obj.nonBlankString("backgroundColor")
-                        ?? obj.nonBlankString("background_color"))
+                    backgroundColor: (isFlat
+                        ? obj.nonBlankString("backgroundColor")
+                        : obj.nonBlankString("background_color"))
                         .map { color($0, default: defaultButtonBackground) }
                         ?? defaultBackground,
-                    textColor: (obj.nonBlankString("textColor")
-                        ?? obj.nonBlankString("text_color"))
+                    textColor: (isFlat
+                        ? obj.nonBlankString("textColor")
+                        : obj.nonBlankString("text_color"))
                         .map { color($0, default: defaultButtonText) }
                         ?? defaultText,
-                    fontSize: positive(number(obj, "fontSize", "font_size", default: 13), fallback: 13),
-                    fontWeight: DigiaFontWeight.value(obj["fontWeight"] ?? obj["font_weight"], default: 600),
+                    fontSize: positive(
+                        number(obj, "fontSize", "font_size", default: isFlat ? 13 : 14),
+                        fallback: isFlat ? 13 : 14
+                    ),
+                    fontWeight: DigiaFontWeight.value(obj["fontWeight"], default: 600),
                     cornerRadius: nonNegative(
-                        number(obj, "cornerRadius", "corner_radius", default: 8),
+                        isFlat
+                            ? number(obj, "cornerRadius", "corner_radius", default: 8)
+                            : obj.double("corner_radius", default: 8),
                         fallback: 8
                     ),
-                    padding: edges(
-                        obj["padding"],
-                        fallback: GuideEdgeInsets(top: 8, right: 12, bottom: 8, left: 12)
-                    ),
-                    margin: edges(
-                        obj["margin"],
-                        fallback: index == 0
-                            ? GuideEdgeInsets(top: 0, right: 0, bottom: 0, left: 0)
-                            : GuideEdgeInsets(top: 0, right: 0, bottom: 0, left: 8)
-                    ),
-                    actions: onClick.map { EngageActionParser().parse($0) } ?? [legacyAction]
+                    padding: isFlat
+                        ? edges(
+                            obj["padding"],
+                            fallback: GuideEdgeInsets(top: 8, right: 12, bottom: 8, left: 12)
+                        )
+                        : GuideEdgeInsets(top: 6, right: 12, bottom: 6, left: 12),
+                    margin: isFlat
+                        ? edges(
+                            obj["margin"],
+                            fallback: index == 0
+                                ? GuideEdgeInsets(top: 0, right: 0, bottom: 0, left: 0)
+                                : GuideEdgeInsets(top: 0, right: 0, bottom: 0, left: 8)
+                        )
+                        : GuideEdgeInsets(top: 0, right: 0, bottom: 0, left: 0),
+                    actions: canonicalActions.isEmpty ? legacyActions : canonicalActions,
+                    fireEventName: isFlat && canonicalActions.isEmpty
+                        && typeStr.lowercased() == "fire_event"
+                        ? obj.nonBlankString("event_name")
+                        : nil
                 )
             )
         }
 
-        let layoutMode = json.string("layoutMode", default: "classic")
         let canvas = isFlat && layoutMode == "canvas"
             ? (json.object("canvas").flatMap {
                 try? CampaignCanvasParser(designTokens: designTokens).parse($0)
             })
             : nil
         return GuideStepWidgetConfig(
+            schema: schema,
             bubble: bubble,
             overlay: overlay,
             content: content,
             actions: actions,
-            outsideTapBehavior: json["outsideTapBehavior"] != nil
-                ? json.string("outsideTapBehavior", default: "next")
-                : (overlayObj.bool("dismiss_on_tap", default: false) ? "next" : "nothing"),
+            outsideTapBehavior: GuideOutsideTapBehavior(
+                rawValue: json.string("outsideTapBehavior", default: "next")
+            ) ?? .next,
             layoutMode: layoutMode,
             canvas: canvas
         )
+    }
+
+    private static func inferredSchema(_ json: [String: Any]) -> GuideWidgetSchema {
+        json["bubble"] != nil || json["overlay"] != nil || json["content"] != nil
+            ? .nested
+            : .flat
+    }
+
+    private static func legacyLinkActions(
+        _ action: EngageAction?,
+        dismissAfterward: Bool
+    ) -> [EngageAction] {
+        guard let action else { return [.dismiss] }
+        return dismissAfterward ? [action, .dismiss] : [action]
     }
 
     private static func color(_ value: String?, default fallback: String) -> String {

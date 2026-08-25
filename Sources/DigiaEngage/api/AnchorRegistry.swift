@@ -70,7 +70,9 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     private var trackedRects: [String: CGRect] = [:]
     private var cornerRadii: [String: CGFloat] = [:]
     private var activeKey: String?
+    private var activeAvailable: ((String) -> Void)?
     private var activeUnavailable: ((String, AnchorUnavailableReason) -> Void)?
+    private var activeAnchorWasAvailable = false
     private var displayLink: CADisplayLink?
     private var readinessTask: Task<Void, Never>?
 
@@ -86,22 +88,23 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         version &+= 1
         SDKInstance.shared.recordAnchorSeen(key)
         guard activeKey == key else { return }
-        readinessTask?.cancel()
-        readinessTask = nil
+        activeAnchorWasAvailable = false
+        startReadinessTimeout(for: key)
         sampleActiveAnchor()
         startDisplayLinkIfNeeded()
     }
 
     public func register(key: String, rect: CGRect, cornerRadius: CGFloat = 0) {
         rectRegistry[key] = rect
+        guard viewRegistry[key]?.value == nil else { return }
         viewRegistry.removeValue(forKey: key)
         trackedRects.removeValue(forKey: key)
         cornerRadii[key] = cornerRadius
         version &+= 1
         SDKInstance.shared.recordAnchorSeen(key)
         guard activeKey == key else { return }
-        readinessTask?.cancel()
-        readinessTask = nil
+        activeAnchorWasAvailable = false
+        startReadinessTimeout(for: key)
         validateStaticRect(key: key)
     }
 
@@ -122,7 +125,11 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         cornerRadii.removeValue(forKey: key)
         version &+= 1
         if activeKey == key {
-            failActiveAnchor(key: key, reason: .detached)
+            if activeAnchorWasAvailable {
+                failActiveAnchor(key: key, reason: .detached)
+            } else {
+                startReadinessTimeout(for: key)
+            }
         }
     }
 
@@ -165,48 +172,43 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         )
     }
 
+    func availableRect(for key: String) -> CGRect? {
+        if let rect = trackedRects[key] { return rect }
+        guard case let .available(rect) = resolution(for: key) else { return nil }
+        return rect
+    }
+
     func track(
         key: String?,
-        waitForRegistration: Bool,
+        onAvailable: @escaping (String) -> Void,
         onUnavailable: @escaping (String, AnchorUnavailableReason) -> Void
     ) {
         stopTracking()
         guard let key else { return }
         activeKey = key
+        activeAvailable = onAvailable
         activeUnavailable = onUnavailable
-        DigiaLog.verbose("[NativeGuide] stage=anchor_track_start anchor_key=\(key)")
+        activeAnchorWasAvailable = false
+        startReadinessTimeout(for: key)
 
         if viewRegistry[key] != nil {
             sampleActiveAnchor()
             startDisplayLinkIfNeeded()
         } else if rectRegistry[key] != nil {
             validateStaticRect(key: key)
-        } else if waitForRegistration {
-            readinessTask = Task { [weak self] in
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                guard !Task.isCancelled, let self, self.activeKey == key else { return }
-                self.failActiveAnchor(key: key, reason: .notReadyTimeout)
-            }
-        } else {
-            failActiveAnchor(key: key, reason: .detached)
         }
     }
 
     func stopTracking() {
-        if let activeKey {
-            DigiaLog.verbose("[NativeGuide] stage=anchor_track_stop anchor_key=\(activeKey)")
-            trackedRects.removeValue(forKey: activeKey)
-        }
+        if let activeKey { trackedRects.removeValue(forKey: activeKey) }
         displayLink?.invalidate()
         displayLink = nil
         readinessTask?.cancel()
         readinessTask = nil
         activeKey = nil
+        activeAvailable = nil
         activeUnavailable = nil
-    }
-
-    func sampleActiveAnchorForTesting() {
-        sampleActiveAnchor()
+        activeAnchorWasAvailable = false
     }
 
     func resetForTesting() {
@@ -221,7 +223,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     private func startDisplayLinkIfNeeded() {
         guard displayLink == nil,
               let activeKey,
-              viewRegistry[activeKey]?.value?.window != nil
+              viewRegistry[activeKey]?.value != nil
         else { return }
         let link = CADisplayLink(target: self, selector: #selector(sampleActiveAnchor))
         link.add(to: .main, forMode: .common)
@@ -231,17 +233,22 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     @objc private func sampleActiveAnchor() {
         guard let key = activeKey else { return }
         guard let view = viewRegistry[key]?.value else {
-            failActiveAnchor(key: key, reason: .detached)
+            if activeAnchorWasAvailable {
+                failActiveAnchor(key: key, reason: .detached)
+            }
             return
         }
         switch resolve(view: view) {
         case let .available(rect):
+            markActiveAnchorAvailable()
             if trackedRects[key].map({ approximatelyEqual($0, rect) }) != true {
                 trackedRects[key] = rect
                 version &+= 1
             }
         case let .unavailable(reason):
-            failActiveAnchor(key: key, reason: reason)
+            if activeAnchorWasAvailable {
+                failActiveAnchor(key: key, reason: reason)
+            }
         case .missing:
             break
         }
@@ -267,20 +274,38 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     private func validateStaticRect(key: String) {
         switch resolution(for: key) {
         case .available:
-            break
+            markActiveAnchorAvailable()
         case let .unavailable(reason):
-            failActiveAnchor(key: key, reason: reason)
+            if activeAnchorWasAvailable {
+                failActiveAnchor(key: key, reason: reason)
+            }
         case .missing:
-            failActiveAnchor(key: key, reason: .detached)
+            break
         }
+    }
+
+    private func startReadinessTimeout(for key: String) {
+        guard readinessTask == nil else { return }
+        readinessTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard !Task.isCancelled, let self, self.activeKey == key,
+                  !self.activeAnchorWasAvailable
+            else { return }
+            self.failActiveAnchor(key: key, reason: .notReadyTimeout)
+        }
+    }
+
+    private func markActiveAnchorAvailable() {
+        guard !activeAnchorWasAvailable else { return }
+        activeAnchorWasAvailable = true
+        readinessTask?.cancel()
+        readinessTask = nil
+        if let activeKey { activeAvailable?(activeKey) }
     }
 
     private func failActiveAnchor(key: String, reason: AnchorUnavailableReason) {
         guard activeKey == key else { return }
         let callback = activeUnavailable
-        DigiaLog.verbose(
-            "[NativeGuide] stage=anchor_track_drop anchor_key=\(key) reason=\(reason.rawValue)"
-        )
         stopTracking()
         callback?(key, reason)
     }

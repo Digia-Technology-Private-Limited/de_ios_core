@@ -165,6 +165,11 @@ public enum Digia {
         SDKInstance.shared.onGuideRenderRequest = callback
     }
 
+    /// RN-only host-action hook for native-rendered guides.
+    public static func setGuideHostActionHandler(_ handler: GuideHostActionHandler?) {
+        SDKInstance.shared.guideHostActionHandler = handler
+    }
+
     /// Records an analytics event for JS-rendered campaigns (guides / tooltips / spotlights).
     /// Native campaigns (nudge, inline, survey) are tracked automatically by the SDK.
     /// The JS layer fires each lifecycle event by its Engage matrix `eventName` with
