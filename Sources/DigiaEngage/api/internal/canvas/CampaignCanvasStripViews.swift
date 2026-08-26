@@ -75,25 +75,39 @@ struct CampaignCanvasRemoteMedia: View {
     }
 }
 
-/// A rail card's media: a still, or a muted looping clip.
-///
-/// Looping is the rail convention: a card that stopped on its last frame would
-/// read as broken next to the ones still playing. Its player is self-contained
-/// because nothing outside the card depends on where it is.
-struct CanvasStoryRailMedia: View {
+/// Cached, poster-backed media for canvas story surfaces.
+struct CanvasStoryCachedMedia: View {
     let url: String
     let isVideo: Bool
     let contentMode: ContentMode
+    var autoplay = true
+    var loop = true
+    var muted = true
+    var showControls = false
     /// Where in the clip the card's poster frame is taken from.
     var posterFrameMs: Int64 = 0
 
     @StateObject private var playback: StoryVideoPlayback
+    @State private var controllerReady = false
 
-    init(url: String, isVideo: Bool, contentMode: ContentMode, posterFrameMs: Int64 = 0) {
+    init(
+        url: String,
+        isVideo: Bool,
+        contentMode: ContentMode,
+        posterFrameMs: Int64 = 0,
+        autoplay: Bool = true,
+        loop: Bool = true,
+        muted: Bool = true,
+        showControls: Bool = false
+    ) {
         self.url = url
         self.isVideo = isVideo
         self.contentMode = contentMode
         self.posterFrameMs = posterFrameMs
+        self.autoplay = autoplay
+        self.loop = loop
+        self.muted = muted
+        self.showControls = showControls
         _playback = StateObject(wrappedValue: StoryVideoPlayback(
             urlString: url,
             purpose: .thumbnail(
@@ -118,17 +132,25 @@ struct CanvasStoryRailMedia: View {
                     StoryPosterImage(image: poster, fit: storyFit(contentMode))
                 }
                 if let player = playback.player {
-                    InlineStoryPlayerLayer(
-                        player: player,
-                        gravity: storyFit(contentMode).videoGravity,
-                        // Required, not optional. `revealPlayerIfReady` waits on
-                        // `playerLayerReady`, and this callback is the only thing
-                        // that ever sets it — so a layer built without it stays
-                        // at `showPlayerLayer == false` for ever. The clip loads,
-                        // seeks and plays; it is simply never made visible.
-                        onReadyForDisplay: playback.playerLayerDidBecomeReady
-                    )
-                    .opacity(playback.showPlayerLayer ? 1 : 0)
+                    if showControls {
+                        CanvasPlayerController(
+                            player: player,
+                            controls: true,
+                            gravity: storyFit(contentMode).videoGravity,
+                            onReadyForDisplay: {
+                                controllerReady = true
+                                playback.playerLayerDidBecomeReady()
+                            }
+                        )
+                        .opacity(controllerReady ? 1 : 0)
+                    } else {
+                        InlineStoryPlayerLayer(
+                            player: player,
+                            gravity: storyFit(contentMode).videoGravity,
+                            onReadyForDisplay: playback.playerLayerDidBecomeReady
+                        )
+                        .opacity(playback.showPlayerLayer ? 1 : 0)
+                    }
                 }
             } else {
                 CampaignCanvasRemoteMedia(url: url, contentMode: contentMode)
@@ -137,14 +159,14 @@ struct CanvasStoryRailMedia: View {
         .onAppear {
             guard isVideo else { return }
             playback.update(
-                // A rail card loops silently until it is tapped: it has no
-                // progress of its own to drive and no turn to wait for.
                 state: StoryVideoPlaybackState(
                     demand: .playback(.scheduled),
-                    active: true,
-                    muted: true,
-                    repeatWindow: true,
-                    restartGeneration: 0
+                    active: autoplay,
+                    muted: muted,
+                    repeatWindow: loop,
+                    restartGeneration: 0,
+                    rewindOnEnd: loop,
+                    repeatWhenInactive: showControls
                 ),
                 events: StoryVideoPlaybackEvents()
             )

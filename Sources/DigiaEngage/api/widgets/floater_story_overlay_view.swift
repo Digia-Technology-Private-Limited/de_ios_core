@@ -347,6 +347,7 @@ private struct FloaterStorySessionView: View {
             alignment: .topLeading
         )
         .environment(\.digiaVariables, state.variableContext)
+        .environment(\.canvasVideoUsesStoryPlayback, true)
     }
 
     /// The story itself.
