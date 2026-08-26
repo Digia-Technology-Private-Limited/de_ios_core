@@ -683,26 +683,39 @@ private struct CampaignCanvasTextView: View {
     var centerVertically = false
     @Environment(\.digiaVariables) private var variables
 
-    var body: some View {
-        CanvasRichText(
-            attributed: attributed,
-            fillWidth: block.sizingMode == "fixed",
-            maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
-            overflow: block.overflow,
-            textAlignment: block.textAlign.uiTextAlignment,
-            onSpan: { span in
-                onAction(
-                    CampaignCanvasActionRequest(
-                        actions: span.actions, elementId: canvasTextSpanElementID, label: span.text)
-                )
-            },
-            spans: block.spans,
-            drawingOutsets: glyphShadowOutsets,
-            allowGlyphOverflow: centerVertically
-        )
-        .frame(
-            maxWidth: .infinity, maxHeight: .infinity,
-            alignment: centerVertically ? block.centeredVerticallyAlignment : block.alignment)
+    @ViewBuilder var body: some View {
+        if centerVertically
+            && block.spans.allSatisfy({ $0.actions.isEmpty && $0.decorationThickness == nil })
+        {
+            CanvasButtonLabel(
+                attributed: attributed,
+                maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
+                overflow: block.overflow,
+                textAlignment: block.textAlign.uiTextAlignment
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            CanvasRichText(
+                attributed: attributed,
+                fillWidth: block.sizingMode == "fixed",
+                maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
+                overflow: block.overflow,
+                textAlignment: block.textAlign.uiTextAlignment,
+                onSpan: { span in
+                    onAction(
+                        CampaignCanvasActionRequest(
+                            actions: span.actions, elementId: canvasTextSpanElementID,
+                            label: span.text)
+                    )
+                },
+                spans: block.spans,
+                drawingOutsets: glyphShadowOutsets,
+                allowGlyphOverflow: centerVertically
+            )
+            .frame(
+                maxWidth: .infinity, maxHeight: .infinity,
+                alignment: centerVertically ? block.centeredVerticallyAlignment : block.alignment)
+        }
     }
 
     private var glyphShadow: NSShadow? {
@@ -881,6 +894,27 @@ private struct CanvasRichText: UIViewRepresentable {
         let width = proposal.width ?? UIView.layoutFittingExpandedSize.width
         let fit = uiView.logicalSizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
         return CGSize(width: fillWidth ? width : ceil(fit.width), height: ceil(fit.height))
+    }
+}
+
+private struct CanvasButtonLabel: UIViewRepresentable {
+    let attributed: NSAttributedString
+    let maxLines: Int
+    let overflow: String
+    let textAlignment: NSTextAlignment
+
+    func makeUIView(context: Context) -> UILabel {
+        let label = UILabel()
+        label.backgroundColor = .clear
+        label.clipsToBounds = false
+        return label
+    }
+
+    func updateUIView(_ label: UILabel, context: Context) {
+        label.attributedText = attributed
+        label.textAlignment = textAlignment
+        label.numberOfLines = max(0, maxLines)
+        label.lineBreakMode = overflow == "ellipsis" ? .byTruncatingTail : .byClipping
     }
 }
 
