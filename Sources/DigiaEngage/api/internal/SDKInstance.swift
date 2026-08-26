@@ -885,7 +885,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         case .guide(let guideConfig):
             if !guideConfig.isAnchorless,
                config?.wrapperBinding == "react_native",
-               guideRenderer == .reactNative {
+               guideRenderer == .reactNative,
+               guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
+            {
                 if context.liveTestGuideRequest != nil {
                     guard onLiveTestGuideRenderRequest != nil else {
                         let message = "React Native live-test guide renderer is not registered"
@@ -1086,8 +1088,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
 
         let guideRequest: LiveTestGuideRenderRequest?
-        if campaign.guideConfig != nil, guideRenderer == .reactNative,
-           config?.wrapperBinding == "react_native" {
+        if let guideConfig = campaign.guideConfig, guideRenderer == .reactNative,
+           config?.wrapperBinding == "react_native",
+           guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
+        {
             guard let campaignData = try? JSONSerialization.data(withJSONObject: campaignJson),
                   let variablesData = try? JSONSerialization.data(withJSONObject: coercedVariables),
                   let campaignJsonString = String(data: campaignData, encoding: .utf8),

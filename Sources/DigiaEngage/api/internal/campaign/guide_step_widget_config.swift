@@ -160,9 +160,15 @@ struct GuideStepWidgetConfig: Equatable {
             preferredDirection: isFlat
                 ? json.string(isFlatSpotlight ? "calloutPosition" : "placement", default: "bottom")
                 : arrowObj.string("preferred_direction", default: "auto"),
-            size: isFlat
-                ? json.int("arrowSize", default: 8)
-                : arrowObj.int("size", default: 10),
+            size: min(
+                40,
+                max(
+                    0,
+                    isFlat
+                        ? json.int("arrowSize", default: 8)
+                        : arrowObj.int("size", default: 10)
+                )
+            ),
             color: isFlat
                 ? calloutBackground
                 : color(arrowObj.string("color"), default: defaultArrowColor)
