@@ -4,7 +4,10 @@ struct CampaignCanvasParser {
     let designTokens: DesignTokenCatalog
     init(designTokens: DesignTokenCatalog = .empty) { self.designTokens = designTokens }
 
-    private var widgetParsers: [String: (CampaignCanvasBox, [String: Any]) throws -> CampaignCanvasWidget] {
+    /// Optional: a carousel with no readable slides, or a story with no readable
+    /// pages or chrome, has nothing to draw. Dropping the widget is the right
+    /// failure — the campaign renders without it rather than as a broken strip.
+    private var widgetParsers: [String: (CampaignCanvasBox, [String: Any]) throws -> CampaignCanvasWidget?] {
         [
             "digia/text": parseText,
             "digia/image": parseImage,
@@ -14,7 +17,154 @@ struct CampaignCanvasParser {
             "digia/videoPlayer": parseVideo,
             "digia/canvasContainer": parseContainer,
             "digia/styledHorizontalDivider": parseDivider,
+            "digia/canvasCarousel": parseCarousel,
+            "digia/canvasStory": parseStory,
+            "digia/storyProgress": parseStoryProgress,
+            "digia/storyClose": parseStoryClose,
+            "digia/storyMute": parseStoryMute,
         ]
+    }
+
+    /// Parses a carousel and its nested slides.
+    ///
+    /// All-or-nothing: rendering the slides that happened to parse would give the
+    /// marketer a carousel quietly missing one, with no signal that anything went
+    /// wrong. Slides recurse through `parse`, so a nested carousel is possible in
+    /// principle and simply never authored.
+    private func parseCarousel(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget? {
+        guard let raw = props["slides"] as? [[String: Any]], !raw.isEmpty else { return nil }
+        var slides: [CampaignCanvas] = []
+        for slide in raw {
+            guard let parsed = try? parse(slide) else { return nil }
+            slides.append(parsed)
+        }
+        let fraction = CGFloat(propertyNumber(props["viewportFraction"]) ?? 0.88)
+        let itemSpacing = CGFloat(propertyNumber(props["itemSpacing"]) ?? 12)
+        let autoPlayIntervalMs = propertyNumber(props["autoPlayInterval"]) ?? 3000
+        let animationDurationMs = propertyNumber(props["animationDuration"]) ?? 700
+        let cornerRadius = CGFloat(propertyNumber(props["cornerRadius"]) ?? 12)
+        let dotWidth = CGFloat(propertyNumber(props["dotWidth"]) ?? 8)
+        let dotHeight = CGFloat(propertyNumber(props["dotHeight"]) ?? 8)
+        let dotSpacing = CGFloat(propertyNumber(props["dotSpacing"]) ?? 12)
+        return .carousel(
+            box: box,
+            slides: slides,
+            // A non-positive or over-unity fraction would make every slide vanish
+            // or overflow the viewport; fall back rather than trust the payload.
+            viewportFraction: fraction >= 0.1 && fraction <= 1 ? fraction : 0.88,
+            itemSpacing: itemSpacing >= 0 ? itemSpacing : 12,
+            autoPlay: props["autoPlay"] as? Bool ?? true,
+            autoPlayInterval: (autoPlayIntervalMs > 0 ? autoPlayIntervalMs : 3000) / 1000,
+            animationDuration: (animationDurationMs > 0 ? animationDurationMs : 700) / 1000,
+            infiniteScroll: props["infiniteScroll"] as? Bool ?? true,
+            cornerRadius: cornerRadius >= 0 ? cornerRadius : 12,
+            showIndicator: props["showIndicator"] as? Bool ?? true,
+            dotWidth: dotWidth > 0 ? dotWidth : 8,
+            dotHeight: dotHeight > 0 ? dotHeight : 8,
+            dotSpacing: dotSpacing >= 0 ? dotSpacing : 12,
+            dotColor: try designTokens.resolveColor(props["dotColor"]),
+            activeDotColor: try designTokens.resolveColor(props["activeDotColor"]),
+            indicatorEffect: props["indicatorEffect"] as? String ?? "slide"
+        )
+    }
+
+    /// Parses a standalone story block — pages and chrome, with no rail.
+    ///
+    /// The story-floater template carries its story beside the window canvas rather
+    /// than inside it (`FloaterStoryConfig`), but the block itself is the
+    /// `digia/canvasStory` widget's props minus the rail fields. Reading it through
+    /// the same parser keeps one definition of "a story" in the SDK: the rail-only
+    /// values fall back to their defaults and are never read, because nothing draws
+    /// a rail from this.
+    ///
+    /// Returns `nil` on the same terms `parseStory` does — no readable page, or no
+    /// chrome to close the viewer with.
+    func parseStandaloneStory(_ props: [String: Any]?) -> CampaignCanvasWidget? {
+        guard let props, let widget = try? parseStory(.none, props), case .story = widget else {
+            return nil
+        }
+        return widget
+    }
+
+    /// Parses a story rail, its nested pages and the chrome layer over them.
+    ///
+    /// A story with no readable chrome would open with no way out, so it is
+    /// rejected the way an unreadable page is.
+    private func parseStory(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget? {
+        guard let rawPages = props["pages"] as? [[String: Any]], !rawPages.isEmpty else { return nil }
+        // Resolved once: a page that sets no duration of its own inherits this,
+        // exactly as a media story item does.
+        let fallbackSeconds = max(0.1, propertyNumber(props["defaultDurationSeconds"]) ?? 5)
+
+        var pages: [CampaignCanvasStoryPage] = []
+        for page in rawPages {
+            guard let canvasJSON = propertyObject(page["canvas"]),
+                  let canvas = try? parse(canvasJSON) else { return nil }
+            let playback = propertyObject(page["thumbnailPlayback"]) ?? [:]
+            let seconds = propertyNumber(page["durationSeconds"]) ?? 0
+            pages.append(
+                CampaignCanvasStoryPage(
+                    thumbnailIsVideo: page["thumbnailType"] as? String == "video",
+                    thumbnailUrl: page["thumbnailUrl"] as? String ?? "",
+                    thumbnailFit: page["thumbnailFit"] as? String ?? "cover",
+                    pageFit: page["pageFit"] as? String ?? "cover",
+                    thumbnailPlayback: CampaignCanvasStoryThumbnailPlayback(
+                        startTime: max(0, (propertyNumber(playback["startTimeMs"]) ?? 0) / 1000),
+                        fixedDuration: playback["durationMode"] as? String == "fixed",
+                        duration: max(0.001, (propertyNumber(playback["durationMs"]) ?? 5000) / 1000)
+                    ),
+                    duration: seconds > 0 ? seconds : fallbackSeconds,
+                    canvas: canvas
+                )
+            )
+        }
+
+        guard let chromeJSON = propertyObject(props["chromeCanvas"]),
+              let chrome = try? parse(chromeJSON) else { return nil }
+        let cardRatio = CGFloat(propertyNumber(props["cardAspectRatio"]) ?? 0.72)
+        return .story(
+            box: box,
+            pages: pages,
+            cardAspectRatio: cardRatio > 0 ? cardRatio : 0.72,
+            cardCornerRadius: CGFloat(propertyNumber(props["cardCornerRadius"]) ?? 12),
+            cardSpacing: CGFloat(propertyNumber(props["cardSpacing"]) ?? 12),
+            showRail: props["showRail"] as? Bool ?? true,
+            thumbnailVideoPlayback: props["thumbnailVideoPlayback"] as? String == "sequential"
+                ? .sequential
+                : .simultaneous,
+            restartOnCompleted: props["restartOnCompleted"] as? Bool ?? false,
+            startMuted: props["startMuted"] as? Bool ?? true,
+            chrome: chrome
+        )
+    }
+
+    private func parseStoryProgress(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget? {
+        .storyProgress(
+            box: box,
+            activeColor: try designTokens.resolveColor(props["activeColor"]),
+            trackColor: try designTokens.resolveColor(props["trackColor"]),
+            barHeight: CGFloat(propertyNumber(props["barHeight"]) ?? 3),
+            cornerRadius: CGFloat(propertyNumber(props["cornerRadius"]) ?? 2),
+            gap: CGFloat(propertyNumber(props["gap"]) ?? 4)
+        )
+    }
+
+    private func parseStoryClose(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget? {
+        .storyClose(
+            box: box,
+            visible: props["visible"] as? Bool ?? true,
+            iconColor: try designTokens.resolveColor(props["iconColor"]),
+            backgroundColor: try designTokens.resolveColor(props["backgroundColor"])
+        )
+    }
+
+    private func parseStoryMute(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget? {
+        .storyMute(
+            box: box,
+            visible: props["visible"] as? Bool ?? true,
+            iconColor: try designTokens.resolveColor(props["iconColor"]),
+            backgroundColor: try designTokens.resolveColor(props["backgroundColor"])
+        )
     }
 
     func parse(_ json: [String: Any]) throws -> CampaignCanvas {

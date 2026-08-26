@@ -212,16 +212,30 @@ final class StoryVideoPlayback: ObservableObject {
         requestedPriority = priority
         loadTask = Task { @MainActor [weak self] in
             do {
-                let cachedURL = try await DigiaVideoFileCache.shared.localURL(
-                    for: remoteURL,
-                    priority: priority
-                )
+                let assetURL: URL
+                if needsPlayer,
+                   let cachedURL = await DigiaVideoFileCache.shared.cachedURL(for: remoteURL) {
+                    assetURL = cachedURL
+                } else if needsPlayer {
+                    assetURL = remoteURL
+                    Task {
+                        _ = try? await DigiaVideoFileCache.shared.localURL(
+                            for: remoteURL,
+                            priority: priority
+                        )
+                    }
+                } else {
+                    assetURL = try await DigiaVideoFileCache.shared.localURL(
+                        for: remoteURL,
+                        priority: priority
+                    )
+                }
                 guard let self,
                       !Task.isCancelled,
                       self.loadGeneration == generation else { return }
                 self.loadTask = nil
                 self.requestedPriority = nil
-                let asset = AVURLAsset(url: cachedURL)
+                let asset = AVURLAsset(url: assetURL)
                 self.localAsset = asset
                 self.preparePoster(from: asset)
                 if self.state.demand.needsPlayer {
@@ -233,6 +247,21 @@ final class StoryVideoPlayback: ObservableObject {
                       self.loadGeneration == generation else { return }
                 self.loadTask = nil
                 self.requestedPriority = nil
+                if needsPlayer {
+                    let asset = AVURLAsset(url: remoteURL)
+                    self.localAsset = asset
+                    self.preparePoster(from: asset)
+                    if self.state.demand.needsPlayer {
+                        self.installPlayer(asset: asset)
+                    }
+                    Task {
+                        _ = try? await DigiaVideoFileCache.shared.localURL(
+                            for: remoteURL,
+                            priority: priority
+                        )
+                    }
+                    return
+                }
                 self.handleTerminalFailure()
             }
         }
