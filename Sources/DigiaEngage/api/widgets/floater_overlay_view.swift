@@ -38,15 +38,48 @@ struct FloaterOverlayView: View {
     }
 }
 
-@MainActor private var activeFloaterWindowSafeAreaInsets: EdgeInsets {
-    let insets = UIApplication.shared.connectedScenes
+/// The device's real safe-area insets, read from the key `UIWindow` rather than from SwiftUI.
+///
+/// A `GeometryReader`'s own `safeAreaInsets` cannot be trusted for a floating window, because what
+/// it reports depends on how the *host app* embedded `DigiaHost` — inset inside a safe area, or
+/// full-bleed, or somewhere in between — and a full-bleed reader reports zero regardless. A window
+/// positioned from that lands under the notch in one app and inset twice over in another.
+///
+/// The window is the only thing on screen that has to be placed against the physical device rather
+/// than against its container, so it asks the device. Shared with the story floater, which had the
+/// same symptom for the same reason.
+@MainActor var activeFloaterWindowSafeAreaInsets: EdgeInsets {
+    activeFloaterWindowGeometry.safeArea
+}
+
+/// The device's screen box and its safe-area insets, taken from the same `UIWindow`.
+///
+/// Both together, deliberately. Reading the size from SwiftUI and the insets from UIKit is how the
+/// story floater ended up inset twice: a `GeometryReader` at the root of a hosting controller
+/// reports a size that has *already* had the safe area carved out of it, so subtracting real insets
+/// from that height again pushes a window far further in from the top and bottom than the author
+/// asked for — barely noticeable on a large window, glaring on a small one, where the gaps are most
+/// of what you see.
+///
+/// Taking both from the window makes the pair consistent by construction, whatever the host app did
+/// with `DigiaHost`.
+@MainActor var activeFloaterWindowGeometry: (bounds: CGRect, safeArea: EdgeInsets) {
+    let window = UIApplication.shared.connectedScenes
         .compactMap { $0 as? UIWindowScene }
         .filter { $0.activationState == .foregroundActive }
         .flatMap(\.windows)
-        .map(\.safeAreaInsets)
-        .first(where: { $0.top > 0 || $0.bottom > 0 }) ?? .zero
-    return EdgeInsets(
-        top: insets.top, leading: insets.left, bottom: insets.bottom, trailing: insets.right)
+        .first(where: { $0.safeAreaInsets.top > 0 || $0.safeAreaInsets.bottom > 0 })
+        ?? UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .first
+    guard let window else { return (.zero, EdgeInsets()) }
+    let insets = window.safeAreaInsets
+    return (
+        window.bounds,
+        EdgeInsets(
+            top: insets.top, leading: insets.left, bottom: insets.bottom, trailing: insets.right)
+    )
 }
 
 /// `SpringDescription(mass: 1, stiffness: 210, damping: 24)` in the Flutter
@@ -502,7 +535,10 @@ private struct FloaterSessionView: View {
     }
 }
 
-private struct FloaterCollapsedInteractionView: UIViewRepresentable {
+/// Shared with the story floater's own window (`floater_story_overlay_view.swift`) —
+/// the gesture contract is identical, and a second copy of a `UIPanGestureRecognizer`
+/// shield tuned this carefully is the last thing this SDK needs.
+struct FloaterCollapsedInteractionView: UIViewRepresentable {
     let activeRect: CGRect
     let draggable: Bool
     let tapExpands: Bool
@@ -625,7 +661,7 @@ private struct FloaterCollapsedInteractionView: UIViewRepresentable {
     }
 }
 
-private final class FloaterTouchShieldView: UIView {
+final class FloaterTouchShieldView: UIView {
     var activeRect: CGRect = .null
     // Chrome button pill rects (mute/expand/close) this shield must never resolve as
     // its own hit target for. Checked here, not just inside `handleTap`'s own
@@ -1084,7 +1120,7 @@ private struct FloaterChromeIcon: View {
 /// The floater's chrome glyphs, ported byte-for-byte from Android core's own
 /// `drawable/ic_*.xml` vectors (`android:pathData`) so both platforms render the
 /// identical shape rather than each platform's closest built-in equivalent.
-private enum FloaterIconGlyph {
+enum FloaterIconGlyph {
     case close, fullscreen, fullscreenExit, volumeUp, volumeOff, play, pause
 
     /// fullscreen/fullscreenExit are authored as open stroked polylines (matching
@@ -1105,7 +1141,7 @@ private enum FloaterIconGlyph {
     var pathData: String {
         switch self {
         case .close:
-            "M18.3,5.71L16.89,4.29L12,9.17L7.11,4.29L5.7,5.71L10.59,10.59L5.7,15.48L7.11,16.89L12,12L16.89,16.89L18.3,15.48L13.41,10.59z"
+            "M18.3,7.12L16.89,5.7L12,10.58L7.11,5.7L5.7,7.12L10.59,12L5.7,16.89L7.11,18.3L12,13.41L16.89,18.3L18.3,16.89L13.41,12z"
         case .fullscreen:
             "M15,3h6v6 M21,3l-7,7 M3,21l7,-7 M9,21H3v-6"
         case .fullscreenExit:
@@ -1145,7 +1181,7 @@ private enum FloaterIconGlyph {
 /// way `Rectangle`/`Circle` do — a raw `Path` alone is sized to its 24x24 source
 /// viewport and won't rescale to a `.frame(...)` on its own; only cheap geometry
 /// (an affine transform), not any string parsing, happens per render here.
-private struct FloaterVectorIcon: Shape {
+struct FloaterVectorIcon: Shape {
     let glyph: FloaterIconGlyph
     private let viewBox: CGFloat = 24
 

@@ -14,15 +14,15 @@
 #
 # Consumed by medihub-rn: link ios/core in local-packages.json and set
 # DIGIA_IOS_SDK_MODE=source (the default). scripts/localIosPods.js then points the
-# Podfile at THIS spec via `:podspec =>`. Switch DIGIA_IOS_SDK_MODE=fat to use the
+# Podfile at THIS spec via `:path =>`. Switch DIGIA_IOS_SDK_MODE=fat to use the
 # locally-built DigiaEngage.xcframework (DigiaEngage.podspec) for final testing.
 #
-# NOT for release/trunk — that is DigiaEngage.podspec (the fat binary). Because the
+# NOT published to trunk — that is DigiaEngage.podspec (the fat binary). Because the
 # deps are NOT baked in here, a consumer must let Lottie/SDWebImage* resolve as pods.
 
 Pod::Spec.new do |s|
   s.name             = 'DigiaEngage'
-  s.version          = '3.9.0'
+  s.version          = '3.12.0'
   s.summary          = 'Digia Engage iOS SDK — SDUI native rendering layer (local source build).'
   s.homepage         = 'https://github.com/Digia-Technology-Private-Limited/digia_engage_iOS'
   s.license          = { :type => 'BUSL-1.1', :file => 'LICENSE' }

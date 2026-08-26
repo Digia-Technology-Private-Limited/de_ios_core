@@ -36,9 +36,23 @@ struct CampaignCanvasContractTests {
         ])
 
         #expect(try catalog.resolveColor(["token": "accent"]) == CampaignColor(lightHex: "#FF123456", darkHex: "#FF123456"))
-        #expect(throws: DesignTokenError.self) { try catalog.resolveColor(["token": "missing"]) }
-        #expect(throws: DesignTokenError.self) { try catalog.resolveColor(["token": "accent", "value": "#fff"]) }
+        #expect(try catalog.resolveColor(["token": "missing"]) == nil)
+        #expect(try catalog.resolveColor(["token": "accent", "value": "#fff"]) == CampaignColor(lightHex: "#FF123456", darkHex: "#FF123456"))
+        #expect(try catalog.resolveColor(["token": ""]) == nil)
         #expect(throws: DesignTokenError.self) { try catalog.resolveTypography(["token": "body", "fontSize": 16]) }
+    }
+
+    @Test("a token defined for only one theme reuses that color for both variants")
+    func oneThemeValue() throws {
+        let catalog = try DesignTokenCatalog.fromJson([
+            "supportedThemes": ["light", "dark"],
+            "themes": [
+                "light": ["colors": [["id": "accent", "value": "#112233"]]],
+                "dark": ["colors": [["id": "accent", "value": ""]]],
+            ],
+        ])
+
+        #expect(try catalog.resolveColor(["token": "accent"]) == CampaignColor(lightHex: "#FF112233", darkHex: "#FF112233"))
     }
 
     @Test("v2 parser expands normalized rects and preserves typed widget properties")
@@ -116,7 +130,7 @@ struct CampaignCanvasContractTests {
         }
     }
 
-    @Test("bundle envelopes require campaigns and isolate malformed Canvas siblings")
+    @Test("bundle envelopes require campaigns and keep campaigns with malformed Canvas colors")
     func bundleIsolation() throws {
         let response: [String: Any] = [
             "data": ["response": [
@@ -131,7 +145,7 @@ struct CampaignCanvasContractTests {
         let bundle = try CampaignFetcher.parse(data)
 
         #expect(bundle.rawCampaigns.count == 2)
-        #expect(bundle.campaigns.map(\.campaignKey) == ["valid"])
+        #expect(bundle.campaigns.map(\.campaignKey) == ["valid", "invalid"])
         #expect(try CampaignFetcher.parse(Data(#"{"response":{"campaigns":[]}}"#.utf8)).campaigns.isEmpty)
         #expect(try CampaignFetcher.parse(Data(#"{"campaigns":[]}"#.utf8)).campaigns.isEmpty)
         #expect(throws: CampaignFetchError.self) { try CampaignFetcher.parse(Data("[]".utf8)) }
@@ -146,6 +160,50 @@ struct CampaignCanvasContractTests {
         )
 
         #expect(bundle.campaigns.map(\.campaignKey) == ["literal"])
+    }
+
+    @Test("reset shadow color falls back without dropping the campaign")
+    func resetShadowColorFallsBack() throws {
+        let parsed = CampaignModel.fromJson(
+            [
+                "id": "shadow-reset",
+                "campaignKey": "shadow-reset",
+                "campaignType": "nudge",
+                "templateConfig": [
+                    "layoutMode": "canvas",
+                    "canvas": [
+                        "version": 2,
+                        "canvasWidth": 360,
+                        "canvasHeight": 100,
+                        "background": ["type": "solid", "color": "#fff"],
+                        "children": [[
+                            "kind": "widget",
+                            "id": "container",
+                            "rect": ["x": 0, "y": 0, "width": 1, "height": 1],
+                            "widget": [
+                                "type": "digia/canvasContainer",
+                                "props": [
+                                    "fill": ["type": "solid", "color": "#fff"],
+                                    "shadow": ["color": "", "blur": 12, "spread": 3, "offsetY": 4],
+                                ],
+                            ],
+                        ]],
+                    ],
+                ],
+            ],
+            designTokens: .empty
+        )
+
+        guard case .nudge(let config) = parsed?.config else {
+            Issue.record("Expected parsed canvas container")
+            return
+        }
+        #expect(config.canvas?.children.count == 1)
+        guard case .widget(_, _, .container(_, _, _, let shadow)) = config.canvas?.children.first else {
+            Issue.record("Expected parsed canvas container")
+            return
+        }
+        #expect(shadow?.color == .literal("#FF000000"))
     }
 
     @Test("all supported widgets keep authored v2 values and have one renderer")
