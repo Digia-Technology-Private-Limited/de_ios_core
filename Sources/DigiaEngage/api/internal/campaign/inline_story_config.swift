@@ -49,11 +49,10 @@ struct StoryItemConfig: Equatable {
                 json.object("thumbnailPlayback")
             ),
             thumbnail: StoryThumbnailConfig.fromJson(json.object("thumbnail")),
-            boxFit: json.string("boxFit", default: "cover") == "fill"
-                ? .fill
-                : StoryMediaFit.fromWireValue(
-                    json.string("boxFit", default: "cover"), mediaType: mediaType
-                ),
+            boxFit: StoryMediaFit.fromWireValue(
+                json.string("boxFit", default: "cover"),
+                mediaType: mediaType
+            ),
             thumbnailBoxFit: StoryMediaFit.fromWireValue(
                 json.string("thumbnailBoxFit", default: "cover"),
                 mediaType: mediaType
