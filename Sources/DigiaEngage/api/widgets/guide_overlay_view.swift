@@ -342,13 +342,16 @@ private struct GuideStepOverlay: View {
                 )
 
                 if arrowVisible && bubbleSize != .zero && !isCanvas {
-                    GuideArrow(
-                        direction: placement.arrowDirection,
-                        color: guideColor(config.bubble.arrow.color, fallback: bubbleBackground),
-                        borderColor: guideColor(config.bubble.borderColor, fallback: .clear),
-                        borderWidth: isFlat ? CGFloat(config.bubble.borderWidth) : 0
-                    )
-                        .frame(
+                    let borderWidth = isFlat ? CGFloat(config.bubble.borderWidth) : 0
+                    let usesRNClassicArrow = isFlat && !isAnchorless
+                    let triangleInset = (borderWidth * (sqrt(2) - 1)).rounded()
+                    let outerSize = arrowSize + triangleInset
+                    let frameSize = if usesRNClassicArrow {
+                        placement.isVertical
+                            ? CGSize(width: outerSize * 2, height: outerSize + borderWidth)
+                            : CGSize(width: outerSize + borderWidth, height: outerSize * 2)
+                    } else {
+                        CGSize(
                             width: isAnchorless || isFlat
                                 ? (placement.isVertical ? arrowSize * 2 : arrowSize)
                                 : 18,
@@ -356,8 +359,38 @@ private struct GuideStepOverlay: View {
                                 ? (placement.isVertical ? arrowSize : arrowSize * 2)
                                 : 10
                         )
-                        .position(arrowPosition)
-                        .offset(x: arrowOffset.width, y: arrowOffset.height)
+                    }
+                    let finalArrowPosition = if usesRNClassicArrow {
+                        switch placement {
+                        case .above:
+                            CGPoint(
+                                x: arrowPosition.x,
+                                y: bubbleOrigin.y + bubbleSize.height + (outerSize - borderWidth) / 2
+                            )
+                        case .below:
+                            CGPoint(x: arrowPosition.x, y: bubbleOrigin.y + (borderWidth - outerSize) / 2)
+                        case .left:
+                            CGPoint(
+                                x: bubbleOrigin.x + bubbleSize.width + (outerSize - borderWidth) / 2,
+                                y: arrowPosition.y
+                            )
+                        case .right:
+                            CGPoint(x: bubbleOrigin.x + (borderWidth - outerSize) / 2, y: arrowPosition.y)
+                        }
+                    } else {
+                        CGPoint(
+                            x: arrowPosition.x + arrowOffset.width,
+                            y: arrowPosition.y + arrowOffset.height
+                        )
+                    }
+                    GuideArrow(
+                        direction: placement.arrowDirection,
+                        color: guideColor(config.bubble.arrow.color, fallback: bubbleBackground),
+                        borderColor: guideColor(config.bubble.borderColor, fallback: .clear),
+                        borderWidth: borderWidth
+                    )
+                        .frame(width: frameSize.width, height: frameSize.height)
+                        .position(finalArrowPosition)
                         .allowsHitTesting(false)
                 }
             }
@@ -1070,60 +1103,60 @@ private struct GuideArrow: View {
 
     var body: some View {
         GeometryReader { geo in
-            let triangle = Path { path in
+            let overlap = borderWidth
+            let outerSize = direction == .up || direction == .down
+                ? geo.size.height - overlap
+                : geo.size.width - overlap
+            let inset = (borderWidth * (sqrt(2) - 1)).rounded()
+            let innerSize = outerSize - inset
+            let outerTriangle = Path { path in
                 let w = geo.size.width
                 let h = geo.size.height
                 switch direction {
                 case .up:
                     path.move(to: CGPoint(x: w / 2, y: 0))
-                    path.addLine(to: CGPoint(x: w, y: h))
-                    path.addLine(to: CGPoint(x: 0, y: h))
+                    path.addLine(to: CGPoint(x: w, y: outerSize))
+                    path.addLine(to: CGPoint(x: 0, y: outerSize))
                 case .down:
-                    path.move(to: CGPoint(x: 0, y: 0))
-                    path.addLine(to: CGPoint(x: w, y: 0))
-                    path.addLine(to: CGPoint(x: w / 2, y: h))
+                    path.move(to: CGPoint(x: 0, y: overlap))
+                    path.addLine(to: CGPoint(x: w, y: overlap))
+                    path.addLine(to: CGPoint(x: w / 2, y: overlap + outerSize))
                 case .left:
                     path.move(to: CGPoint(x: 0, y: h / 2))
-                    path.addLine(to: CGPoint(x: w, y: 0))
-                    path.addLine(to: CGPoint(x: w, y: h))
+                    path.addLine(to: CGPoint(x: outerSize, y: 0))
+                    path.addLine(to: CGPoint(x: outerSize, y: h))
                 case .right:
-                    path.move(to: CGPoint(x: w, y: h / 2))
-                    path.addLine(to: CGPoint(x: 0, y: h))
-                    path.addLine(to: CGPoint(x: 0, y: 0))
+                    path.move(to: CGPoint(x: overlap + outerSize, y: h / 2))
+                    path.addLine(to: CGPoint(x: overlap, y: h))
+                    path.addLine(to: CGPoint(x: overlap, y: 0))
                 }
                 path.closeSubpath()
             }
             let innerTriangle = Path { path in
                 let w = geo.size.width
                 let h = geo.size.height
-                let inset = borderWidth * (sqrt(2) - 1)
-                let tipInset = borderWidth + inset
                 switch direction {
                 case .up:
-                    path.move(to: CGPoint(x: w / 2, y: tipInset))
+                    path.move(to: CGPoint(x: w / 2, y: overlap + inset))
                     path.addLine(to: CGPoint(x: w - inset, y: h))
                     path.addLine(to: CGPoint(x: inset, y: h))
                 case .down:
                     path.move(to: CGPoint(x: inset, y: 0))
                     path.addLine(to: CGPoint(x: w - inset, y: 0))
-                    path.addLine(to: CGPoint(x: w / 2, y: h - tipInset))
+                    path.addLine(to: CGPoint(x: w / 2, y: innerSize))
                 case .left:
-                    path.move(to: CGPoint(x: tipInset, y: h / 2))
+                    path.move(to: CGPoint(x: overlap + inset, y: h / 2))
                     path.addLine(to: CGPoint(x: w, y: inset))
                     path.addLine(to: CGPoint(x: w, y: h - inset))
                 case .right:
                     path.move(to: CGPoint(x: 0, y: inset))
-                    path.addLine(to: CGPoint(x: w - tipInset, y: h / 2))
+                    path.addLine(to: CGPoint(x: innerSize, y: h / 2))
                     path.addLine(to: CGPoint(x: 0, y: h - inset))
                 }
                 path.closeSubpath()
             }
-            if borderWidth > 0 {
-                triangle.fill(borderColor)
-                innerTriangle.fill(color)
-            } else {
-                triangle.fill(color)
-            }
+            outerTriangle.fill(borderWidth > 0 ? borderColor : color)
+            if borderWidth > 0 { innerTriangle.fill(color) }
         }
     }
 }
