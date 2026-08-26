@@ -898,6 +898,7 @@ private final class CanvasRichTextContainerView: UIView {
         super.init(frame: .zero)
         backgroundColor = .clear
         clipsToBounds = false
+        textView.clipsToBounds = false
         textView.textContainerInset = .zero
         addSubview(textView)
     }
