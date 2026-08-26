@@ -680,6 +680,7 @@ private struct CampaignCanvasTextView: View {
     let onAction: (CampaignCanvasActionRequest) -> Void
     var colorOverride: UIColor? = nil
     var shadow: CampaignCanvasShadow? = nil
+    var centerVertically = false
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
@@ -757,16 +758,20 @@ private struct CampaignCanvasTextView: View {
                 colorOverride ?? span.color.map {
                     UIColor(CampaignCanvasTheme.shared.color($0, isDark: isDark))
                 } ?? baseColor
+            let font = SDKInstance.shared.font.resolve(
+                size: Double(typography?.fontSize ?? baseTypography.fontSize ?? 16),
+                weight: typography?.fontWeight ?? baseTypography.fontWeight ?? 400,
+                italic: span.italic,
+                fallbackFamily: typography?.fontFamily ?? baseTypography.fontFamily
+            )
             var attributes: [NSAttributedString.Key: Any] = [
-                .font: SDKInstance.shared.font.resolve(
-                    size: Double(typography?.fontSize ?? baseTypography.fontSize ?? 16),
-                    weight: typography?.fontWeight ?? baseTypography.fontWeight ?? 400,
-                    italic: span.italic,
-                    fallbackFamily: typography?.fontFamily ?? baseTypography.fontFamily
-                ),
+                .font: font,
                 .foregroundColor: color,
                 .paragraphStyle: paragraph,
             ]
+            if centerVertically, let lineHeight = baseTypography.lineHeight {
+                attributes[.baselineOffset] = (lineHeight - font.lineHeight) / 2
+            }
             if let glyphShadow { attributes[.shadow] = glyphShadow }
             if let spacing = typography?.letterSpacing ?? baseTypography.letterSpacing, spacing != 0
             {
@@ -1107,7 +1112,8 @@ private struct CanvasButtonRenderer: View {
         ZStack {
             CampaignCanvasPaintView(paint: effectiveFill, isDark: isDark)
             CampaignCanvasTextView(
-                block: label, isDark: isDark, onAction: onAction, colorOverride: destructiveColor)
+                block: label, isDark: isDark, onAction: onAction,
+                colorOverride: destructiveColor, centerVertically: true)
         }.contentShape(CampaignCanvasRoundedShape(radius: cornerRadius))
     }
     private var effectiveFill: CampaignCanvasPaint {

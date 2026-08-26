@@ -2112,6 +2112,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
         let payload = state.payload
         let total = state.steps.count
+        if isLiveTestCepId(payload.cepCampaignId) {
+            liveTestContexts[payload.cepCampaignId]?.reportShown()
+        }
         if state.stepIndex == 0, dwellTracker.elapsedMs(payload.cepCampaignId) == nil {
             dwellTracker.markViewed(payload.cepCampaignId)
             if !isLiveTestCepId(payload.cepCampaignId) {
