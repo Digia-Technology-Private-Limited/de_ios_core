@@ -616,8 +616,7 @@ struct CanvasStoryViewer: View {
     @State private var paused = false
     @State private var ticker: Timer?
     @State private var player: AVPlayer?
-    /// Set once the clip reports a real duration; until then the story runs on
-    /// its authored one, which is also the fallback for an unplayable video.
+    /// Set once the clip is ready; failed videos use the authored duration.
     @State private var videoDuration: TimeInterval?
 
     // ── analytics ──
@@ -848,13 +847,15 @@ struct CanvasStoryViewer: View {
         ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             Task { @MainActor in
                 guard !paused else { return }
-                if let player, let duration = player.currentItem?.duration.seconds,
+                if let player, player.currentItem?.status == .readyToPlay,
+                   let duration = player.currentItem?.duration.seconds,
                    duration.isFinite, duration > 0 {
                     // The clip's own length wins once it is known, so a story
                     // ends when the video does rather than on a guess.
                     videoDuration = duration
                     progress = CGFloat(player.currentTime().seconds / duration)
-                } else {
+                } else if !current.thumbnailIsVideo
+                            || player?.currentItem?.status == .failed {
                     progress += CGFloat(interval / max(0.1, current.duration))
                 }
                 if progress >= 1 { step(1) }
