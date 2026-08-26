@@ -558,6 +558,11 @@ private extension CampaignCanvasStoryThumbnailPlaybackMode {
 /// player's volume rather than rebuilding it. The first version ran a single
 /// timer regardless of the media, so a 30-second clip was cut off after the
 /// story's authored 5 and a hold did nothing.
+private struct CanvasStoryMediaKey: Hashable {
+    let index: Int
+    let generation: Int
+}
+
 struct CanvasStoryViewer: View {
     let pages: [CampaignCanvasStoryPage]
     let chrome: CampaignCanvas
@@ -588,6 +593,7 @@ struct CanvasStoryViewer: View {
     @State private var paused = false
     @State private var ticker: Timer?
     @State private var playbackGeneration = 0
+    @State private var displayedMediaKey = CanvasStoryMediaKey(index: 0, generation: 0)
 
     // ── analytics ──
     //
@@ -598,6 +604,15 @@ struct CanvasStoryViewer: View {
     @State private var completedReported = false
 
     private var page: CampaignCanvasStoryPage { pages[min(max(0, index), pages.count - 1)] }
+    private var currentMediaKey: CanvasStoryMediaKey {
+        CanvasStoryMediaKey(index: index, generation: playbackGeneration)
+    }
+
+    private var renderedMediaKeys: [CanvasStoryMediaKey] {
+        displayedMediaKey == currentMediaKey
+            ? [currentMediaKey]
+            : [displayedMediaKey, currentMediaKey]
+    }
 
     var body: some View {
         GeometryReader { proxy in
@@ -699,22 +714,42 @@ struct CanvasStoryViewer: View {
             // story's media is the screen.
             .background {
                 CanvasStoryMediaBackdrop {
-                    if !page.thumbnailUrl.isEmpty {
-                        if page.thumbnailIsVideo {
-                            InlineStoryVideoView(
-                                item: canvasStoryItem(page),
-                                active: !paused,
-                                muted: muted,
-                                onProgress: { progress = CGFloat($0) },
-                                onEnded: { step(1) },
-                                onFailed: { startAuthoredTimer() }
-                            )
-                            .id(playbackGeneration)
-                        } else if !page.thumbnailIsVideo {
-                            CampaignCanvasRemoteMedia(
-                                url: page.thumbnailUrl,
-                                contentMode: canvasContentMode(page.pageFit)
-                            )
+                    ZStack {
+                        ForEach(renderedMediaKeys, id: \.self) { mediaKey in
+                            let mediaPage = pages[mediaKey.index]
+                            if mediaPage.thumbnailIsVideo, !mediaPage.thumbnailUrl.isEmpty {
+                                InlineStoryVideoView(
+                                    item: canvasStoryItem(mediaPage),
+                                    active: mediaKey == currentMediaKey && !paused,
+                                    muted: muted,
+                                    onReadyForDisplay: {
+                                        guard mediaKey == currentMediaKey else { return }
+                                        displayedMediaKey = mediaKey
+                                    },
+                                    onProgress: {
+                                        guard mediaKey == currentMediaKey,
+                                              mediaKey == displayedMediaKey else { return }
+                                        progress = CGFloat($0)
+                                    },
+                                    onEnded: {
+                                        guard mediaKey == currentMediaKey else { return }
+                                        step(1)
+                                    },
+                                    onFailed: {
+                                        guard mediaKey == currentMediaKey else { return }
+                                        displayedMediaKey = mediaKey
+                                        startAuthoredTimer()
+                                    }
+                                )
+                                .id(mediaKey)
+                                .opacity(mediaKey == displayedMediaKey ? 1 : 0)
+                            } else if !mediaPage.thumbnailUrl.isEmpty {
+                                CampaignCanvasRemoteMedia(
+                                    url: mediaPage.thumbnailUrl,
+                                    contentMode: canvasContentMode(mediaPage.pageFit)
+                                )
+                                .opacity(mediaKey == displayedMediaKey ? 1 : 0)
+                            }
                         }
                     }
                 }
@@ -726,7 +761,7 @@ struct CanvasStoryViewer: View {
             muted = startMuted
             openedAt = Date()
             reportInteraction(.storyPageViewed(index: index, total: pages.count))
-            start()
+            start(retainingDisplayedMedia: false)
         }
         .onChange(of: index) { newIndex in
             reportInteraction(.storyPageViewed(index: newIndex, total: pages.count))
@@ -796,13 +831,16 @@ struct CanvasStoryViewer: View {
         ticker = nil
     }
 
-    private func start() {
+    private func start(retainingDisplayedMedia: Bool = true) {
         stop()
         progress = 0
         paused = false
         playbackGeneration += 1
 
         let current = page
+        if !retainingDisplayedMedia || !current.thumbnailIsVideo || current.thumbnailUrl.isEmpty {
+            displayedMediaKey = currentMediaKey
+        }
         if current.thumbnailIsVideo, !current.thumbnailUrl.isEmpty { return }
 
         startAuthoredTimer()
@@ -811,10 +849,12 @@ struct CanvasStoryViewer: View {
     private func startAuthoredTimer() {
         ticker?.invalidate()
         let current = page
+        let mediaKey = currentMediaKey
 
         let interval = 1.0 / 30.0
         ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             Task { @MainActor in
+                guard mediaKey == currentMediaKey else { return }
                 guard !paused else { return }
                 progress += CGFloat(interval / max(0.1, current.duration))
                 if progress >= 1 { step(1) }
