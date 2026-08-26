@@ -110,9 +110,15 @@ public enum Digia {
     ///
     /// No-ops below iOS 17 (see `initialize`) — this bypasses `initialize`'s own
     /// state guard, so it needs the same OS check independently.
-    public static func populateCampaignBundle(_ bundleJson: String) {
+    public static func populateCampaignBundle(
+        _ bundleJson: String,
+        guideRenderer: String? = nil
+    ) {
         guard #available(iOS 17, *) else { return }
-        SDKInstance.shared.populateCampaignBundle(bundleJson)
+        SDKInstance.shared.populateCampaignBundle(
+            bundleJson,
+            guideRenderer: guideRenderer.map(GuideRenderer.init(wireValue:))
+        )
     }
 
     public static func setThemeMode(_ mode: DigiaThemeMode) {

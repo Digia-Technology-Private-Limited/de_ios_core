@@ -333,13 +333,16 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// RN-only entrypoint: JS already fetched campaigns for its own rendering needs,
     /// so it hands the raw campaign-bundle response here instead of native re-fetching.
     /// Called once after `initialize` when `wrapperBinding == "react_native"`.
-    func populateCampaignBundle(_ bundleJson: String) {
+    func populateCampaignBundle(
+        _ bundleJson: String,
+        guideRenderer resolvedGuideRenderer: GuideRenderer? = nil
+    ) {
         var campaigns: [CampaignModel] = []
         do {
             let bundle = try CampaignFetcher.parse(Data(bundleJson.utf8), devicePlatform: "ios")
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
-            guideRenderer = bundle.guideRenderer
+            guideRenderer = resolvedGuideRenderer ?? bundle.guideRenderer
             DigiaLog.warning(
                 "[SDKInstance] populateCampaignBundle parsed raw=\(bundle.rawCampaigns.count) accepted=\(campaigns.count)"
             )
