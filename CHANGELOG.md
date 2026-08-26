@@ -2,6 +2,13 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.12.1] - 2026-08-27
+
+### Bug Fixes
+- Fixed several canvas story video playback issues: each frame now keeps its poster image until the video is ready and waits for playback to actually begin before advancing (so a frame no longer flashes blank or skips ahead), a frame whose video can't load degrades gracefully instead of stalling the story, and inline and floating canvas stories now share one video playback pipeline for consistent behavior.
+- Fixed canvas story videos ignoring the "fill" content-fit setting and cover-cropping instead; "fill" videos now fill the frame.
+- Fixed full-screen canvas stories opened from a floating window not respecting the device safe area; their content now insets correctly.
+
 ## [3.12.0] - 2026-08-26
 
 ### New Features
