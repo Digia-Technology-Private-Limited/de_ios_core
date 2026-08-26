@@ -75,34 +75,6 @@ struct CampaignCanvasRemoteMedia: View {
     }
 }
 
-/// A looping, chrome-free video for a story card or a story's full-screen media.
-///
-/// `AVPlayer` rather than the canvas video widget's renderer: that one is a
-/// configurable player with controls and progress reporting, and a story's media
-/// is neither — it plays, it loops, and the viewer's own mute button owns its
-/// audio.
-/// A chrome-free surface for a player the caller owns.
-///
-/// The viewer holds the `AVPlayer` rather than this view, because playback is
-/// what drives the story's progress bar, its pause and its advance — a player
-/// created down here would be invisible to all three.
-struct CanvasStoryVideoView: View {
-    let player: AVPlayer
-    let contentMode: ContentMode
-
-    var body: some View {
-        // The media story's player surface: a plain `AVPlayerLayer` in a view
-        // that lays it out and never takes a touch. This used to be an
-        // `AVPlayerViewController`, which brings a whole view controller and an
-        // interactive view per card — `InlineStoryPlayerContainer` documents at
-        // length why an interactive video surface breaks the chrome above it.
-        InlineStoryPlayerLayer(
-            player: player,
-            gravity: contentMode == .fit ? .resizeAspect : .resizeAspectFill
-        )
-    }
-}
-
 /// A rail card's media: a still, or a muted looping clip.
 ///
 /// Looping is the rail convention: a card that stopped on its last frame would
@@ -615,9 +587,7 @@ struct CanvasStoryViewer: View {
     @State private var muted = true
     @State private var paused = false
     @State private var ticker: Timer?
-    @State private var player: AVPlayer?
-    /// Set once the clip is ready; failed videos use the authored duration.
-    @State private var videoDuration: TimeInterval?
+    @State private var playbackGeneration = 0
 
     // ── analytics ──
     //
@@ -730,11 +700,16 @@ struct CanvasStoryViewer: View {
             .background {
                 CanvasStoryMediaBackdrop {
                     if !page.thumbnailUrl.isEmpty {
-                        if page.thumbnailIsVideo, let player {
-                            CanvasStoryVideoView(
-                                player: player,
-                                contentMode: canvasContentMode(page.pageFit)
+                        if page.thumbnailIsVideo {
+                            InlineStoryVideoView(
+                                item: canvasStoryItem(page),
+                                active: !paused,
+                                muted: muted,
+                                onProgress: { progress = CGFloat($0) },
+                                onEnded: { step(1) },
+                                onFailed: { startAuthoredTimer() }
                             )
+                            .id(playbackGeneration)
                         } else if !page.thumbnailIsVideo {
                             CampaignCanvasRemoteMedia(
                                 url: page.thumbnailUrl,
@@ -805,59 +780,43 @@ struct CanvasStoryViewer: View {
     private func pause() {
         guard !paused else { return }
         paused = true
-        player?.pause()
     }
 
     private func resume() {
         guard paused else { return }
         paused = false
-        player?.play()
     }
 
     private func toggleMute() {
         muted.toggle()
-        // Volume on the live player rather than a rebuild, which is what made
-        // muting restart the clip from zero.
-        player?.isMuted = muted
     }
 
     private func stop() {
         ticker?.invalidate()
         ticker = nil
-        player?.pause()
-        player = nil
-        videoDuration = nil
     }
 
     private func start() {
         stop()
         progress = 0
         paused = false
+        playbackGeneration += 1
 
         let current = page
-        if current.thumbnailIsVideo, !current.thumbnailUrl.isEmpty,
-           let url = URL(string: current.thumbnailUrl) {
-            let item = AVPlayer(url: url)
-            item.isMuted = muted
-            item.play()
-            player = item
-        }
+        if current.thumbnailIsVideo, !current.thumbnailUrl.isEmpty { return }
+
+        startAuthoredTimer()
+    }
+
+    private func startAuthoredTimer() {
+        ticker?.invalidate()
+        let current = page
 
         let interval = 1.0 / 30.0
         ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             Task { @MainActor in
                 guard !paused else { return }
-                if let player, player.currentItem?.status == .readyToPlay,
-                   let duration = player.currentItem?.duration.seconds,
-                   duration.isFinite, duration > 0 {
-                    // The clip's own length wins once it is known, so a story
-                    // ends when the video does rather than on a guess.
-                    videoDuration = duration
-                    progress = CGFloat(player.currentTime().seconds / duration)
-                } else if !current.thumbnailIsVideo || player == nil
-                            || player?.currentItem?.status == .failed {
-                    progress += CGFloat(interval / max(0.1, current.duration))
-                }
+                progress += CGFloat(interval / max(0.1, current.duration))
                 if progress >= 1 { step(1) }
             }
         }
