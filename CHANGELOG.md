@@ -2,6 +2,15 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.12.0] - 2026-08-26
+
+### New Features
+- Added story floater campaigns: a small floating canvas window — draggable, edge-snapping, and dismissible — that opens a full-screen story when tapped, animating between the collapsed window and the expanded story, with safe-area handling.
+- Canvas-designed content can now render inline in a placement slot — a free-form canvas, a canvas carousel, or a canvas story (with progress bars and tap-to-advance, close, and mute controls) — drawn by the shared canvas renderer alongside the existing inline banner, carousel, and story types.
+
+### Improvements
+- The SDK now sends a version descriptor to Digia when fetching campaigns, so the backend can serve content the installed SDK supports, and exposes the SDK version through the new `Digia.sdkVersion` property.
+
 ## [3.11.0] - 2026-08-20
 
 ### New Features
