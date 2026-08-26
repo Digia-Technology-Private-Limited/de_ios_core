@@ -690,6 +690,7 @@ private struct CampaignCanvasTextView: View {
             maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
             overflow: block.overflow,
             textAlignment: block.textAlign.uiTextAlignment,
+            centerVertically: centerVertically,
             onSpan: { span in
                 onAction(
                     CampaignCanvasActionRequest(
@@ -813,6 +814,7 @@ private struct CanvasRichText: UIViewRepresentable {
     let maxLines: Int
     let overflow: String
     let textAlignment: NSTextAlignment
+    let centerVertically: Bool
     let onSpan: (CampaignCanvasTextSpan) -> Void
     var spans: [CampaignCanvasTextSpan] = []
     var drawingOutsets: UIEdgeInsets = .zero
@@ -854,6 +856,7 @@ private struct CanvasRichText: UIViewRepresentable {
         context.coordinator.spans = spans
         context.coordinator.onSpan = onSpan
         let textView = view.textView
+        view.centerVertically = centerVertically
         view.drawingOutsets = drawingOutsets
         textView.textStorage.setAttributedString(attributed)
         textView.textAlignment = textAlignment
@@ -878,12 +881,13 @@ private struct CanvasRichText: UIViewRepresentable {
     ) -> CGSize? {
         let width = proposal.width ?? UIView.layoutFittingExpandedSize.width
         let fit = uiView.logicalSizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        return CGSize(width: fillWidth ? width : ceil(fit.width), height: ceil(fit.height))
+        return CGSize(width: fillWidth ? width : ceil(fit.width), height: centerVertically ? min(ceil(fit.height), proposal.height ?? .greatestFiniteMagnitude) : ceil(fit.height))
     }
 }
 
 private final class CanvasRichTextContainerView: UIView {
     let textView: UITextView
+    var centerVertically = false
     var drawingOutsets: UIEdgeInsets = .zero {
         didSet {
             guard drawingOutsets != oldValue else { return }
@@ -908,13 +912,16 @@ private final class CanvasRichTextContainerView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        let verticalOverflow = centerVertically
+            ? max(0, logicalSizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height - bounds.height) / 2
+            : 0
         // Expand only the UIKit drawing surface. The matching text-container
         // insets keep glyph layout unchanged while making room for shadow bleed.
         textView.frame = CGRect(
             x: -drawingOutsets.left,
-            y: -drawingOutsets.top,
+            y: -drawingOutsets.top - verticalOverflow,
             width: bounds.width + drawingOutsets.left + drawingOutsets.right,
-            height: bounds.height + drawingOutsets.top + drawingOutsets.bottom
+            height: bounds.height + drawingOutsets.top + drawingOutsets.bottom + verticalOverflow * 2
         )
     }
 
