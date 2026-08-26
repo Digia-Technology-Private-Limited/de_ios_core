@@ -470,19 +470,4 @@ final class AnalyticsService {
         return ctx
     }
 
-    /// Builds the composite SDK descriptor (schema v1):
-    ///   `s=schema | b=binding | p=platform | [w=wrapper |] c=core`
-    /// The wrapper segment (`w`) is present only when a thin wrapper SDK
-    /// delegates to this engine (e.g. React Native).
-    private static func buildSdkVersion(
-        binding: String,
-        platform: String,
-        wrapperVersion: String?,
-        core: String
-    ) -> String {
-        var parts = ["s=1", "b=\(binding)", "p=\(platform)"]
-        if let w = wrapperVersion, !w.isEmpty { parts.append("w=\(w)") }
-        parts.append("c=\(core)")
-        return parts.joined(separator: "|")
-    }
 }
