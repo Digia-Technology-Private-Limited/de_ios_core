@@ -2263,18 +2263,25 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         default:
             break
         }
-        if eventName == "Digia Experience Dismissed"
-            || eventName == "Digia Experience Completed"
+        let payloadID = props["payload_id"] as? String
+        let externalPayload = activeExternalGuide?.payload
+        let payload = externalPayload?.cepCampaignId == payloadID
+            ? externalPayload
+            : nil
+        events.toDigia(
+            event,
+            payload: payload ?? CEPTriggerPayload(
+                cepCampaignId: campaign?.id ?? campaignKey,
+                campaignKey: campaignKey,
+                cepMetadata: [:]
+            )
+        )
+        if (eventName == "Digia Experience Dismissed"
+            || eventName == "Digia Experience Completed")
+            && activeExternalGuide?.payload.cepCampaignId == payloadID
         {
-            if let payloadID = props["payload_id"] as? String,
-                activeExternalGuide?.payload.cepCampaignId == payloadID
-            {
-                activeExternalGuide = nil
-            }
+            activeExternalGuide = nil
         }
-        let payload = CEPTriggerPayload(
-            cepCampaignId: campaign?.id ?? campaignKey, campaignKey: campaignKey, cepMetadata: [:])
-        events.toDigia(event, payload: payload)
     }
 
     private func guideEventFor(eventName: String, props: [String: Any]) -> EngageAnalyticsEvent? {
