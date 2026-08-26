@@ -601,16 +601,8 @@ struct CanvasStoryViewer: View {
     /// Whether to draw the authored page and chrome layers over the media backdrop.
     /// Floater stories suppress these while their media aperture is moving.
     var showsOverlays = true
-    /// The unsafe margins of the region this viewer was handed, when the caller
-    /// draws it somewhere that does not carve them out on its own.
-    ///
-    /// A `fullScreenCover` presents its content inside the safe area, so the
-    /// reader below already reports the safe region and these stay `.zero` —
-    /// that is the story rail's path. The floater's story is drawn inline in
-    /// `DigiaHost`'s full-bleed overlay layer instead, which is deliberately
-    /// `ignoresSafeArea()` so the collapsed window can sit anywhere on the
-    /// screen; nothing there insets this viewer, so the caller passes the
-    /// device's own insets and they are applied below.
+    /// Physical safe-area insets supplied by the full-bleed host. Media fills
+    /// the screen while authored page and chrome content stay inside these margins.
     var safeAreaInsets = EdgeInsets()
 
     @State private var index = 0
@@ -642,10 +634,8 @@ struct CanvasStoryViewer: View {
 
     var body: some View {
         GeometryReader { proxy in
-            // The width the chrome and the page are scaled against: the reader
-            // minus any margin the caller declared unsafe. Zero on the presented
-            // path, where the reader is already the safe region, so that path
-            // scales exactly as it always did.
+            // The width the chrome and page are scaled against: the full-bleed
+            // reader minus the device's unsafe margins.
             let contentWidth = max(
                 0, proxy.size.width - safeAreaInsets.leading - safeAreaInsets.trailing
             )

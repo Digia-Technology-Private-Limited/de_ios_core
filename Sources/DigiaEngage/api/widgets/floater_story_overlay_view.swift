@@ -352,11 +352,8 @@ private struct FloaterStorySessionView: View {
 
     /// The story itself.
     ///
-    /// `safeAreaInsets` is passed in rather than left to the viewer, because this one is drawn
-    /// inline in `DigiaHost`'s `ignoresSafeArea()` overlay layer instead of being presented in a
-    /// `fullScreenCover` like the rail's. A presented viewer is laid out inside the safe area for
-    /// free; this one is handed the whole screen, so without these its chrome sits under the
-    /// status bar and its bottom-anchored page runs under the home indicator.
+    /// Every story host uses full-bleed bounds and supplies the device insets so media can cover
+    /// the screen while authored chrome and page content remain inside the safe area.
     @ViewBuilder
     private func storyViewer(safeAreaInsets: EdgeInsets, showsOverlays: Bool) -> some View {
         if case .story(
