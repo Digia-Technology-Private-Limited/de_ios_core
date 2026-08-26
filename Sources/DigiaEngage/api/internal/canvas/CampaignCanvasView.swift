@@ -440,8 +440,10 @@ struct CampaignCanvasStage: View {
                     startMuted: startMuted,
                     isDark: isDark,
                     onAction: onAction,
-                    onDismiss: { storyOpenIndex = nil }
+                    onDismiss: { storyOpenIndex = nil },
+                    safeAreaInsets: activeFloaterWindowSafeAreaInsets
                 )
+                .ignoresSafeArea()
             }
         }
     }

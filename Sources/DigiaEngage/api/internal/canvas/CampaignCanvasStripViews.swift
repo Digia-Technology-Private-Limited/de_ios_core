@@ -553,8 +553,10 @@ struct CanvasStoryRailRenderer: View {
                     startMuted: startMuted,
                     isDark: isDark,
                     onAction: onAction,
-                    onDismiss: { openIndex = nil }
+                    onDismiss: { openIndex = nil },
+                    safeAreaInsets: activeFloaterWindowSafeAreaInsets
                 )
+                .ignoresSafeArea()
                 .onAppear {
                     reportInteraction(
                         .storyOpened(index: openIndex ?? 0, total: pages.count)
