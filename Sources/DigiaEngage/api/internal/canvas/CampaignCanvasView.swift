@@ -1,16 +1,17 @@
-@_implementationOnly import SDWebImageSwiftUI
 import AVFoundation
 import AVKit
-@_implementationOnly import Lottie
 import SwiftUI
 import UIKit
+
+@_implementationOnly import Lottie
+@_implementationOnly import SDWebImageSwiftUI
 
 private let maxFloatingCanvasUpscale: CGFloat = 1.15
 private let canvasTextSpanElementID = "canvas_text_span"
 
 internal func anchorlessDesignScale(hostWidth: CGFloat, designWidth: CGFloat) -> CGFloat? {
     guard hostWidth.isFinite, hostWidth > 0,
-          designWidth.isFinite, designWidth > 0
+        designWidth.isFinite, designWidth > 0
     else { return nil }
     let scale = hostWidth / designWidth
     guard scale.isFinite, scale > 0 else { return nil }
@@ -35,7 +36,8 @@ struct CampaignCanvasView: View {
     private var scale: CGFloat {
         let naturalWidth = max(canvas.width * designScale, 1)
         let naturalHeight = max(canvas.height * designScale, 1)
-        return designScale * min(1, availableSize.width / naturalWidth, availableSize.height / naturalHeight)
+        return designScale
+            * min(1, availableSize.width / naturalWidth, availableSize.height / naturalHeight)
     }
 
     var body: some View {
@@ -68,7 +70,7 @@ struct CampaignCanvasView: View {
 /// ```text
 /// inner  = slotWidth - margin.horizontal
 /// scale  = inner / designWidth
-/// height = canvas.height * scale
+/// height = canvas.height * scale + margin.vertical
 /// ```
 ///
 /// A card spans its design frame, so a horizontal margin cannot make the canvas
@@ -76,6 +78,15 @@ struct CampaignCanvasView: View {
 /// down uniformly to fit, type included. Side margin therefore reads as "make
 /// this card smaller" rather than "inset it", which is why the authored default
 /// is zero and a new card fills its slot.
+///
+/// Height is *reported*, never *consumed*, which is why `InlineCanvasCardLayout`
+/// exists instead of an `aspectRatio(contentMode: .fit)`. The host measures this
+/// card to size the slot around it, so a rule that also read the offered height
+/// would close a loop: a re-triggered campaign lands in a slot still sized for
+/// whatever was there before, aspect-fit trades width away to fit that stale
+/// box, and the host then measures the narrower card and keeps the stale height.
+/// The result is a smaller card that is perfectly self-consistent and never
+/// recovers until the screen remounts.
 struct InlineCampaignCanvasView: View {
     let canvas: CampaignCanvas
     let designWidth: CGFloat
@@ -86,27 +97,27 @@ struct InlineCampaignCanvasView: View {
     @ObservedObject private var theme = CampaignCanvasTheme.shared
     @Environment(\.colorScheme) private var colorScheme
 
+    private var designFrame: CGFloat { max(designWidth, canvas.width) }
+
     var body: some View {
+        // `Layout` needs iOS 16. Unreachable below it in practice: `Digia`
+        // initialization no-ops before iOS 17, so no campaign ever reaches a
+        // slot on an older OS — the same gate the inline carousel renderer uses.
+        if #available(iOS 16, *) {
+            InlineCanvasCardLayout(
+                canvasHeight: canvas.height,
+                designFrame: designFrame,
+                margin: margin
+            ) {
+                card
+            }
+        }
+    }
+
+    private var card: some View {
         GeometryReader { proxy in
             let inner = proxy.size.width - CGFloat(margin.horizontal)
-            // Divide by whichever is larger. Normally the card spans its frame
-            // and the two agree, but a payload whose `canvasWidth` exceeds its
-            // `designWidth` would otherwise be drawn wider than `inner` by
-            // exactly that ratio and spill out of the slot. Taking the max makes
-            // "never wider than the slot" a property of the layout rather than
-            // of the data, and it is a no-op in the normal case.
-            let frame = max(designWidth, canvas.width)
-            let designScale = (inner > 0 && frame > 0) ? inner / frame : 0
-            // Then shrink to fit whatever the parent actually offers. The bound
-            // comes from the PARENT, not the screen — that distinction is the
-            // whole reason this host exists. A height-constrained parent scales
-            // the card down by aspect ratio rather than letting it overflow.
-            let availableHeight = proxy.size.height - CGFloat(margin.vertical)
-            let desiredWidth = max(canvas.width * designScale, 1)
-            let desiredHeight = max(canvas.height * designScale, 1)
-            let scale = availableHeight > 0
-                ? designScale * min(1, inner / desiredWidth, availableHeight / desiredHeight)
-                : 0
+            let scale = (inner > 0 && designFrame > 0) ? inner / designFrame : 0
             CampaignCanvasStage(
                 canvas: canvas,
                 authoredCornerRadius: cornerRadius,
@@ -127,15 +138,59 @@ struct InlineCampaignCanvasView: View {
             .padding(.top, CGFloat(margin.top))
             .padding(.bottom, CGFloat(margin.bottom))
         }
-        // A slot has no intrinsic height of its own, so the card reports one:
-        // the authored aspect ratio in the design frame, plus its margins.
-        .aspectRatio(
-            designWidth > 0
-                ? (designWidth + CGFloat(margin.horizontal))
-                    / max(canvas.height + CGFloat(margin.vertical), 1)
-                : 1,
-            contentMode: .fit
+    }
+}
+
+/// Sizes an inline canvas card from the offered *width* alone.
+///
+/// A slot has no intrinsic height of its own, so the card reports one — and a
+/// container that reported a height derived from the height it was offered would
+/// let a stale slot size pin the card at that size forever. Taking only
+/// `proposal.width` makes the reported height a pure function of the width,
+/// so a re-trigger into a stale slot corrects itself on the next pass instead of
+/// settling into a smaller card. Mirrors `InlineCarouselImageLayout`.
+@available(iOS 16, *)
+private struct InlineCanvasCardLayout: Layout {
+    let canvasHeight: CGFloat
+    let designFrame: CGFloat
+    let margin: InlineCanvasMargin
+
+    func sizeThatFits(
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) -> CGSize {
+        let width = resolvedWidth(proposal)
+        return CGSize(width: width, height: height(forWidth: width))
+    }
+
+    func placeSubviews(
+        in bounds: CGRect,
+        proposal: ProposedViewSize,
+        subviews: Subviews,
+        cache: inout ()
+    ) {
+        subviews.first?.place(
+            at: bounds.origin,
+            anchor: .topLeading,
+            proposal: ProposedViewSize(width: bounds.width, height: bounds.height)
         )
+    }
+
+    /// An unspecified or infinite width proposal is a question about the card's
+    /// *ideal* size, and the honest answer is the size it was authored at —
+    /// answering 0 there would report a card with no height at all.
+    private func resolvedWidth(_ proposal: ProposedViewSize) -> CGFloat {
+        guard let width = proposal.width, width.isFinite else {
+            return designFrame + CGFloat(margin.horizontal)
+        }
+        return width
+    }
+
+    private func height(forWidth width: CGFloat) -> CGFloat {
+        let inner = width - CGFloat(margin.horizontal)
+        guard inner > 0, designFrame > 0 else { return CGFloat(margin.vertical) }
+        return canvasHeight * (inner / designFrame) + CGFloat(margin.vertical)
     }
 }
 
@@ -229,10 +284,12 @@ private func guideCanvasScale(
     viewportWidth: CGFloat,
     availableSize: CGSize
 ) -> CGFloat {
-    guard let designScale = anchorlessDesignScale(
-        hostWidth: viewportWidth,
-        designWidth: designWidth
-    ) else { return 0 }
+    guard
+        let designScale = anchorlessDesignScale(
+            hostWidth: viewportWidth,
+            designWidth: designWidth
+        )
+    else { return 0 }
     let widthScale = max(0, availableSize.width) / max(canvas.width * designScale, 1)
     let heightScale = max(0, availableSize.height) / max(canvas.height * designScale, 1)
     let fittedScale = designScale * min(1, widthScale, heightScale)
@@ -343,7 +400,9 @@ struct CampaignCanvasStage: View {
             }
             ForEach(canvas.children) { child in
                 CanvasChildView(child: child, isDark: isDark, onAction: dispatch)
-                    .frame(width: child.rect.width, height: child.rect.height, alignment: .topLeading)
+                    .frame(
+                        width: child.rect.width, height: child.rect.height, alignment: .topLeading
+                    )
                     .modifier(CanvasChildBoundsModifier(clips: child.clipsToAuthoredRect))
                     .allowsHitTesting(child.isHitTestable)
                     .offset(x: child.rect.x, y: child.rect.y)
@@ -351,10 +410,12 @@ struct CampaignCanvasStage: View {
         }
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
         .clipShape(RoundedRectangle(cornerRadius: max(0, authoredCornerRadius)))
-        .fullScreenCover(isPresented: Binding(
-            get: { storyOpenIndex != nil && story != nil },
-            set: { if !$0 { storyOpenIndex = nil } }
-        )) {
+        .fullScreenCover(
+            isPresented: Binding(
+                get: { storyOpenIndex != nil && story != nil },
+                set: { if !$0 { storyOpenIndex = nil } }
+            )
+        ) {
             if case .story(
                 _, let pages, _, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
             ) = story, !pages.isEmpty {
@@ -381,7 +442,8 @@ private struct CanvasChildView: View {
     let onAction: (CampaignCanvasActionRequest) -> Void
     var body: some View {
         switch child {
-        case .widget(_, _, let widget): CampaignCanvasRendererRegistry.render(widget, isDark: isDark, onAction: onAction)
+        case .widget(_, _, let widget):
+            CampaignCanvasRendererRegistry.render(widget, isDark: isDark, onAction: onAction)
         case .tapRegion(let id, _, let actions):
             Color.clear.contentShape(Rectangle()).onTapGesture {
                 onAction(CampaignCanvasActionRequest(actions: actions, elementId: id))
@@ -392,39 +454,182 @@ private struct CanvasChildView: View {
 
 @MainActor
 enum CampaignCanvasRendererRegistry {
-    typealias Renderer = (CampaignCanvasWidget, Bool, @escaping (CampaignCanvasActionRequest) -> Void) -> AnyView
+    typealias Renderer = (
+        CampaignCanvasWidget, Bool, @escaping (CampaignCanvasActionRequest) -> Void
+    ) -> AnyView
     private static let renderers: [String: Renderer] = [
-        "text": { widget, dark, action in guard case .text(let box, let block, let shadow) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasTextRenderer(box: box, block: block, shadow: shadow, isDark: dark, onAction: action)) },
-        "image": { widget, dark, action in guard case .image(let box, let source, let fit, let x, let y, let scale, let tint) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasImageRenderer(box: box, source: source, fit: fit, positionX: x, positionY: y, scale: scale, tint: tint, isDark: dark)) },
-        "button": { widget, dark, action in guard case .button(let box, let label, let radius, let style, let shadow, let primary, let destructive, let apply, let actions, let confirm) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasButtonRenderer(box: box, label: label, cornerRadius: radius, style: style, shadow: shadow, isPrimary: primary, isDestructive: destructive, applyDestructiveStyling: apply, actions: actions, confirm: confirm, isDark: dark, onAction: action)) },
-        "progress": { widget, dark, _ in guard case .progress(let box, let mode, let percent, let start, let current, let end, let indicator, let track, let radius, let animation) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasProgressRenderer(box: box, valueMode: mode, percent: percent, rangeStart: start, rangeCurrent: current, rangeEnd: end, indicator: indicator, track: track, cornerRadius: radius, animateOnAppear: animation, isDark: dark)) },
-        "lottie": { widget, dark, _ in guard case .lottie(let box, let source, let autoplay, let loop, let fit) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasLottieRenderer(box: box, source: source, autoplay: autoplay, loop: loop, fit: fit, isDark: dark)) },
-        "video": { widget, dark, _ in guard case .video(let box, let source, let autoplay, let loop, let muted, let controls, let fit) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasVideoRenderer(box: box, source: source, autoplay: autoplay, loop: loop, muted: muted, showControls: controls, fit: fit, isDark: dark)) },
-        "container": { widget, dark, _ in guard case .container(let fill, let radius, let border, let shadow) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasContainerRenderer(fill: fill, cornerRadius: radius, border: border, shadow: shadow, isDark: dark)) },
-        "divider": { widget, dark, _ in guard case .divider(let box, let axis, let pattern, let cap, let inset, let dash, let color) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasDividerRenderer(box: box, axis: axis, pattern: pattern, strokeCap: cap, inset: inset, dashPattern: dash, color: color, isDark: dark)) },
-        "carousel": { widget, dark, onAction in guard case .carousel = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasCarouselRenderer(widget: widget, isDark: dark, onAction: onAction)) },
-        "story": { widget, dark, onAction in guard case .story = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasStoryRailRenderer(widget: widget, isDark: dark, onAction: onAction)) },
-        "storyProgress": { widget, dark, _ in guard case .storyProgress(_, let active, let track, let barHeight, let radius, let gap) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasStoryProgressRenderer(activeColor: active, trackColor: track, barHeight: barHeight, cornerRadius: radius, gap: gap, isDark: dark)) },
-        "storyClose": { widget, dark, _ in guard case .storyClose(_, let visible, let icon, let background) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasStoryChromeButton(kind: .close, visible: visible, iconColor: icon, backgroundColor: background, isDark: dark)) },
-        "storyMute": { widget, dark, _ in guard case .storyMute(_, let visible, let icon, let background) = widget else { return AnyView(EmptyView()) }; return AnyView(CanvasStoryChromeButton(kind: .mute, visible: visible, iconColor: icon, backgroundColor: background, isDark: dark)) },
+        "text": { widget, dark, action in
+            guard case .text(let box, let block, let shadow) = widget else {
+                return AnyView(EmptyView())
+            }
+            return AnyView(
+                CanvasTextRenderer(
+                    box: box, block: block, shadow: shadow, isDark: dark, onAction: action))
+        },
+        "image": { widget, dark, action in
+            guard
+                case .image(let box, let source, let fit, let x, let y, let scale, let tint) =
+                    widget
+            else { return AnyView(EmptyView()) }
+            return AnyView(
+                CanvasImageRenderer(
+                    box: box, source: source, fit: fit, positionX: x, positionY: y, scale: scale,
+                    tint: tint, isDark: dark))
+        },
+        "button": { widget, dark, action in
+            guard
+                case .button(
+                    let box, let label, let radius, let style, let shadow, let primary,
+                    let destructive, let apply, let actions, let confirm) = widget
+            else { return AnyView(EmptyView()) }
+            return AnyView(
+                CanvasButtonRenderer(
+                    box: box, label: label, cornerRadius: radius, style: style, shadow: shadow,
+                    isPrimary: primary, isDestructive: destructive, applyDestructiveStyling: apply,
+                    actions: actions, confirm: confirm, isDark: dark, onAction: action))
+        },
+        "progress": { widget, dark, _ in
+            guard
+                case .progress(
+                    let box, let mode, let percent, let start, let current, let end, let indicator,
+                    let track, let radius, let animation) = widget
+            else { return AnyView(EmptyView()) }
+            return AnyView(
+                CanvasProgressRenderer(
+                    box: box, valueMode: mode, percent: percent, rangeStart: start,
+                    rangeCurrent: current, rangeEnd: end, indicator: indicator, track: track,
+                    cornerRadius: radius, animateOnAppear: animation, isDark: dark))
+        },
+        "lottie": { widget, dark, _ in
+            guard case .lottie(let box, let source, let autoplay, let loop, let fit) = widget else {
+                return AnyView(EmptyView())
+            }
+            return AnyView(
+                CanvasLottieRenderer(
+                    box: box, source: source, autoplay: autoplay, loop: loop, fit: fit, isDark: dark
+                ))
+        },
+        "video": { widget, dark, _ in
+            guard
+                case .video(
+                    let box, let source, let autoplay, let loop, let muted, let controls, let fit) =
+                    widget
+            else { return AnyView(EmptyView()) }
+            return AnyView(
+                CanvasVideoRenderer(
+                    box: box, source: source, autoplay: autoplay, loop: loop, muted: muted,
+                    showControls: controls, fit: fit, isDark: dark))
+        },
+        "container": { widget, dark, _ in
+            guard case .container(let fill, let radius, let border, let shadow) = widget else {
+                return AnyView(EmptyView())
+            }
+            return AnyView(
+                CanvasContainerRenderer(
+                    fill: fill, cornerRadius: radius, border: border, shadow: shadow, isDark: dark))
+        },
+        "divider": { widget, dark, _ in
+            guard
+                case .divider(
+                    let box, let axis, let pattern, let cap, let inset, let dash, let color) =
+                    widget
+            else { return AnyView(EmptyView()) }
+            return AnyView(
+                CanvasDividerRenderer(
+                    box: box, axis: axis, pattern: pattern, strokeCap: cap, inset: inset,
+                    dashPattern: dash, color: color, isDark: dark))
+        },
+        "carousel": { widget, dark, onAction in
+            guard case .carousel = widget else { return AnyView(EmptyView()) }
+            return AnyView(CanvasCarouselRenderer(widget: widget, isDark: dark, onAction: onAction))
+        },
+        "story": { widget, dark, onAction in
+            guard case .story = widget else { return AnyView(EmptyView()) }
+            return AnyView(
+                CanvasStoryRailRenderer(widget: widget, isDark: dark, onAction: onAction))
+        },
+        "storyProgress": { widget, dark, _ in
+            guard
+                case .storyProgress(_, let active, let track, let barHeight, let radius, let gap) =
+                    widget
+            else { return AnyView(EmptyView()) }
+            return AnyView(
+                CanvasStoryProgressRenderer(
+                    activeColor: active, trackColor: track, barHeight: barHeight,
+                    cornerRadius: radius, gap: gap, isDark: dark))
+        },
+        "storyClose": { widget, dark, _ in
+            guard case .storyClose(_, let visible, let icon, let background) = widget else {
+                return AnyView(EmptyView())
+            }
+            return AnyView(
+                CanvasStoryChromeButton(
+                    kind: .close, visible: visible, iconColor: icon, backgroundColor: background,
+                    isDark: dark))
+        },
+        "storyMute": { widget, dark, _ in
+            guard case .storyMute(_, let visible, let icon, let background) = widget else {
+                return AnyView(EmptyView())
+            }
+            return AnyView(
+                CanvasStoryChromeButton(
+                    kind: .mute, visible: visible, iconColor: icon, backgroundColor: background,
+                    isDark: dark))
+        },
     ]
 
-    static func render(_ widget: CampaignCanvasWidget, isDark: Bool, onAction: @escaping (CampaignCanvasActionRequest) -> Void) -> AnyView {
+    static func render(
+        _ widget: CampaignCanvasWidget, isDark: Bool,
+        onAction: @escaping (CampaignCanvasActionRequest) -> Void
+    ) -> AnyView {
         let key: String
-        switch widget { case .text: key = "text"; case .image: key = "image"; case .button: key = "button"; case .progress: key = "progress"; case .lottie: key = "lottie"; case .video: key = "video"; case .container: key = "container"; case .divider: key = "divider"; case .carousel: key = "carousel"; case .story: key = "story"; case .storyProgress: key = "storyProgress"; case .storyClose: key = "storyClose"; case .storyMute: key = "storyMute" }
-        guard let renderer = renderers[key] else { preconditionFailure("Missing Campaign Canvas renderer for \(key)") }
+        switch widget {
+        case .text: key = "text"
+        case .image: key = "image"
+        case .button: key = "button"
+        case .progress: key = "progress"
+        case .lottie: key = "lottie"
+        case .video: key = "video"
+        case .container: key = "container"
+        case .divider: key = "divider"
+        case .carousel: key = "carousel"
+        case .story: key = "story"
+        case .storyProgress: key = "storyProgress"
+        case .storyClose: key = "storyClose"
+        case .storyMute: key = "storyMute"
+        }
+        guard let renderer = renderers[key] else {
+            preconditionFailure("Missing Campaign Canvas renderer for \(key)")
+        }
         return renderer(widget, isDark, onAction)
     }
 
     static func hasRenderer(for widget: CampaignCanvasWidget) -> Bool {
         let key: String
-        switch widget { case .text: key = "text"; case .image: key = "image"; case .button: key = "button"; case .progress: key = "progress"; case .lottie: key = "lottie"; case .video: key = "video"; case .container: key = "container"; case .divider: key = "divider"; case .carousel: key = "carousel"; case .story: key = "story"; case .storyProgress: key = "storyProgress"; case .storyClose: key = "storyClose"; case .storyMute: key = "storyMute" }
+        switch widget {
+        case .text: key = "text"
+        case .image: key = "image"
+        case .button: key = "button"
+        case .progress: key = "progress"
+        case .lottie: key = "lottie"
+        case .video: key = "video"
+        case .container: key = "container"
+        case .divider: key = "divider"
+        case .carousel: key = "carousel"
+        case .story: key = "story"
+        case .storyProgress: key = "storyProgress"
+        case .storyClose: key = "storyClose"
+        case .storyMute: key = "storyMute"
+        }
         return renderers[key] != nil
     }
 }
 
 private struct CanvasTextRenderer: View {
-    let box: CampaignCanvasBox; let block: CampaignCanvasTextBlock; let shadow: CampaignCanvasShadow?; let isDark: Bool
+    let box: CampaignCanvasBox
+    let block: CampaignCanvasTextBlock
+    let shadow: CampaignCanvasShadow?
+    let isDark: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
     private var contentShadow: CampaignCanvasShadow? {
         box.hasVisibleSurface(isDark: isDark) ? nil : box.shadow
@@ -438,21 +643,28 @@ private struct CanvasTextRenderer: View {
     var body: some View {
         ZStack {
             if contentShadow != nil {
-                CanvasAlphaContentShadow(shadow: contentShadow, isDark: isDark, includeContent: false) {
-                    CampaignCanvasBoxView(box: boxWithoutContentShadow, isDark: isDark, clipsContent: false) {
+                CanvasAlphaContentShadow(
+                    shadow: contentShadow, isDark: isDark, includeContent: false
+                ) {
+                    CampaignCanvasBoxView(
+                        box: boxWithoutContentShadow, isDark: isDark, clipsContent: false
+                    ) {
                         CampaignCanvasTextView(block: block, isDark: isDark, onAction: onAction)
                     }
                 }
             }
-            CampaignCanvasBoxView(box: boxWithoutContentShadow, isDark: isDark, clipsContent: false) {
-                CampaignCanvasTextView(block: block, isDark: isDark, onAction: onAction, shadow: shadow)
+            CampaignCanvasBoxView(box: boxWithoutContentShadow, isDark: isDark, clipsContent: false)
+            {
+                CampaignCanvasTextView(
+                    block: block, isDark: isDark, onAction: onAction, shadow: shadow)
             }
         }
     }
 }
 
 private struct CampaignCanvasTextView: View {
-    let block: CampaignCanvasTextBlock; let isDark: Bool
+    let block: CampaignCanvasTextBlock
+    let isDark: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
     var colorOverride: UIColor? = nil
     var shadow: CampaignCanvasShadow? = nil
@@ -465,7 +677,12 @@ private struct CampaignCanvasTextView: View {
             maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
             overflow: block.overflow,
             textAlignment: block.textAlign.uiTextAlignment,
-            onSpan: { span in onAction(CampaignCanvasActionRequest(actions: span.actions, elementId: canvasTextSpanElementID, label: span.text)) },
+            onSpan: { span in
+                onAction(
+                    CampaignCanvasActionRequest(
+                        actions: span.actions, elementId: canvasTextSpanElementID, label: span.text)
+                )
+            },
             spans: block.spans,
             drawingOutsets: glyphShadowOutsets
         )
@@ -474,7 +691,8 @@ private struct CampaignCanvasTextView: View {
 
     private var glyphShadow: NSShadow? {
         guard let shadow,
-              shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0 else {
+            shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0
+        else {
             return nil
         }
         let value = NSShadow()
@@ -494,7 +712,8 @@ private struct CampaignCanvasTextView: View {
 
     private var glyphShadowOutsets: UIEdgeInsets {
         guard let shadow,
-              shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0 else {
+            shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0
+        else {
             return .zero
         }
         let extent = max(shadow.blur * 2 + shadow.spread, glyphShadowBlurRadius * 2)
@@ -509,7 +728,10 @@ private struct CampaignCanvasTextView: View {
     private var attributed: NSAttributedString {
         let first = block.spans.first
         let baseTypography = first?.typography ?? CampaignTypography()
-        let baseColor = colorOverride ?? first?.color.map { UIColor(CampaignCanvasTheme.shared.color($0, isDark: isDark)) } ?? .label
+        let baseColor =
+            colorOverride ?? first?.color.map {
+                UIColor(CampaignCanvasTheme.shared.color($0, isDark: isDark))
+            } ?? .label
         let result = NSMutableAttributedString()
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = block.textAlign.uiTextAlignment
@@ -519,7 +741,10 @@ private struct CampaignCanvasTextView: View {
         }
         for (index, span) in block.spans.enumerated() {
             let typography = span.typography
-            let color = colorOverride ?? span.color.map { UIColor(CampaignCanvasTheme.shared.color($0, isDark: isDark)) } ?? baseColor
+            let color =
+                colorOverride ?? span.color.map {
+                    UIColor(CampaignCanvasTheme.shared.color($0, isDark: isDark))
+                } ?? baseColor
             var attributes: [NSAttributedString.Key: Any] = [
                 .font: SDKInstance.shared.font.resolve(
                     size: Double(typography?.fontSize ?? baseTypography.fontSize ?? 16),
@@ -531,68 +756,109 @@ private struct CampaignCanvasTextView: View {
                 .paragraphStyle: paragraph,
             ]
             if let glyphShadow { attributes[.shadow] = glyphShadow }
-            if let spacing = typography?.letterSpacing ?? baseTypography.letterSpacing, spacing != 0 { attributes[.kern] = spacing }
-            if let highlight = span.highlightColor { attributes[.backgroundColor] = UIColor(CampaignCanvasTheme.shared.color(highlight, isDark: isDark)) }
+            if let spacing = typography?.letterSpacing ?? baseTypography.letterSpacing, spacing != 0
+            {
+                attributes[.kern] = spacing
+            }
+            if let highlight = span.highlightColor {
+                attributes[.backgroundColor] = UIColor(
+                    CampaignCanvasTheme.shared.color(highlight, isDark: isDark))
+            }
             switch span.decoration {
             case .underline: attributes[.underlineStyle] = NSUnderlineStyle.single.rawValue
             case .lineThrough: attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
             case .none: break
             }
             if let decorationColor = span.decorationColor {
-                let value = UIColor(CampaignCanvasTheme.shared.color(decorationColor, isDark: isDark))
-                attributes[span.decoration == .lineThrough ? .strikethroughColor : .underlineColor] = value
+                let value = UIColor(
+                    CampaignCanvasTheme.shared.color(decorationColor, isDark: isDark))
+                attributes[
+                    span.decoration == .lineThrough ? .strikethroughColor : .underlineColor] = value
                 attributes[.digiaDecorationColor] = value
             }
-            if let thickness = span.decorationThickness { attributes[.digiaDecorationThickness] = thickness }
-            if !span.actions.isEmpty { attributes[.link] = URL(string: "digia-canvas://span/\(index)")! }
-            result.append(NSAttributedString(string: interpolate(span.text, context: variables), attributes: attributes))
+            if let thickness = span.decorationThickness {
+                attributes[.digiaDecorationThickness] = thickness
+            }
+            if !span.actions.isEmpty {
+                attributes[.link] = URL(string: "digia-canvas://span/\(index)")!
+            }
+            result.append(
+                NSAttributedString(
+                    string: interpolate(span.text, context: variables), attributes: attributes))
         }
         return result
     }
 }
 
 private struct CanvasRichText: UIViewRepresentable {
-    let attributed: NSAttributedString; let fillWidth: Bool; let maxLines: Int; let overflow: String
-    let textAlignment: NSTextAlignment; let onSpan: (CampaignCanvasTextSpan) -> Void
-    var spans: [CampaignCanvasTextSpan] = []; var drawingOutsets: UIEdgeInsets = .zero
+    let attributed: NSAttributedString
+    let fillWidth: Bool
+    let maxLines: Int
+    let overflow: String
+    let textAlignment: NSTextAlignment
+    let onSpan: (CampaignCanvasTextSpan) -> Void
+    var spans: [CampaignCanvasTextSpan] = []
+    var drawingOutsets: UIEdgeInsets = .zero
 
     final class Coordinator: NSObject, UITextViewDelegate {
-        var spans: [CampaignCanvasTextSpan] = []; var onSpan: ((CampaignCanvasTextSpan) -> Void)?
-        func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
-            guard URL.scheme == "digia-canvas", let index = Int(URL.lastPathComponent), spans.indices.contains(index) else { return false }
-            onSpan?(spans[index]); return false
+        var spans: [CampaignCanvasTextSpan] = []
+        var onSpan: ((CampaignCanvasTextSpan) -> Void)?
+        func textView(
+            _ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange,
+            interaction: UITextItemInteraction
+        ) -> Bool {
+            guard URL.scheme == "digia-canvas", let index = Int(URL.lastPathComponent),
+                spans.indices.contains(index)
+            else { return false }
+            onSpan?(spans[index])
+            return false
         }
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
     func makeUIView(context: Context) -> CanvasRichTextContainerView {
-        let storage = NSTextStorage(); let manager = DigiaDecorationLayoutManager(); let container = NSTextContainer(size: .zero)
-        container.lineFragmentPadding = 0; container.widthTracksTextView = true
-        manager.addTextContainer(container); storage.addLayoutManager(manager)
+        let storage = NSTextStorage()
+        let manager = DigiaDecorationLayoutManager()
+        let container = NSTextContainer(size: .zero)
+        container.lineFragmentPadding = 0
+        container.widthTracksTextView = true
+        manager.addTextContainer(container)
+        storage.addLayoutManager(manager)
         let value = CanvasRichTextContainerView(textContainer: container)
         let textView = value.textView
-        textView.delegate = context.coordinator; textView.isEditable = false; textView.isScrollEnabled = false
+        textView.delegate = context.coordinator
+        textView.isEditable = false
+        textView.isScrollEnabled = false
         textView.backgroundColor = .clear
         value.setContentHuggingPriority(.required, for: .vertical)
         value.setContentHuggingPriority(fillWidth ? .defaultLow : .required, for: .horizontal)
         return value
     }
     func updateUIView(_ view: CanvasRichTextContainerView, context: Context) {
-        context.coordinator.spans = spans; context.coordinator.onSpan = onSpan
+        context.coordinator.spans = spans
+        context.coordinator.onSpan = onSpan
         let textView = view.textView
         view.drawingOutsets = drawingOutsets
-        textView.textStorage.setAttributedString(attributed); textView.textAlignment = textAlignment
+        textView.textStorage.setAttributedString(attributed)
+        textView.textAlignment = textAlignment
         textView.textContainer.maximumNumberOfLines = max(0, maxLines)
-        textView.textContainer.lineBreakMode = overflow == "ellipsis" ? .byTruncatingTail : .byClipping
+        textView.textContainer.lineBreakMode =
+            overflow == "ellipsis" ? .byTruncatingTail : .byClipping
         let hasActions = !spans.allSatisfy { $0.actions.isEmpty }
         textView.isSelectable = hasActions
         textView.isUserInteractionEnabled = hasActions
-        textView.invalidateIntrinsicContentSize(); view.invalidateIntrinsicContentSize()
+        textView.invalidateIntrinsicContentSize()
+        view.invalidateIntrinsicContentSize()
     }
     static func dismantleUIView(_ view: CanvasRichTextContainerView, coordinator: Coordinator) {
-        view.textView.delegate = nil; view.textView.isSelectable = false; coordinator.onSpan = nil; coordinator.spans = []
+        view.textView.delegate = nil
+        view.textView.isSelectable = false
+        coordinator.onSpan = nil
+        coordinator.spans = []
     }
     @available(iOS 16, *)
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: CanvasRichTextContainerView, context: Context) -> CGSize? {
+    func sizeThatFits(
+        _ proposal: ProposedViewSize, uiView: CanvasRichTextContainerView, context: Context
+    ) -> CGSize? {
         let width = proposal.width ?? UIView.layoutFittingExpandedSize.width
         let fit = uiView.logicalSizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
         return CGSize(width: fillWidth ? width : ceil(fit.width), height: ceil(fit.height))
@@ -644,8 +910,10 @@ private final class CanvasRichTextContainerView: UIView {
 
     func logicalSizeThatFits(_ size: CGSize) -> CGSize {
         let expanded = CGSize(
-            width: size.width.isFinite ? size.width + drawingOutsets.left + drawingOutsets.right : size.width,
-            height: size.height.isFinite ? size.height + drawingOutsets.top + drawingOutsets.bottom : size.height
+            width: size.width.isFinite
+                ? size.width + drawingOutsets.left + drawingOutsets.right : size.width,
+            height: size.height.isFinite
+                ? size.height + drawingOutsets.top + drawingOutsets.bottom : size.height
         )
         return logicalSize(from: textView.sizeThatFits(expanded))
     }
@@ -663,8 +931,14 @@ private final class CanvasRichTextContainerView: UIView {
 }
 
 private struct CanvasImageRenderer: View {
-    let box: CampaignCanvasBox; let source: CampaignCanvasMediaSource; let fit: String
-    let positionX: CGFloat; let positionY: CGFloat; let scale: CGFloat; let tint: CampaignColor?; let isDark: Bool
+    let box: CampaignCanvasBox
+    let source: CampaignCanvasMediaSource
+    let fit: String
+    let positionX: CGFloat
+    let positionY: CGFloat
+    let scale: CGFloat
+    let tint: CampaignColor?
+    let isDark: Bool
     private var contentShadow: CampaignCanvasShadow? {
         box.hasVisibleSurface(isDark: isDark) ? nil : box.shadow
     }
@@ -677,14 +951,19 @@ private struct CanvasImageRenderer: View {
     var body: some View {
         CanvasAlphaContentShadow(shadow: contentShadow, isDark: isDark) {
             CampaignCanvasBoxView(box: boxWithoutContentShadow, isDark: isDark) {
-                FocalCanvasImage(source: source, isDark: isDark, fit: fit, x: positionX, y: positionY, scale: scale, tint: tint, failureLabel: "Image")
+                FocalCanvasImage(
+                    source: source, isDark: isDark, fit: fit, x: positionX, y: positionY,
+                    scale: scale, tint: tint, failureLabel: "Image")
             }
         }
     }
 }
 
 private struct CanvasAlphaContentShadow<Content: View>: View {
-    let shadow: CampaignCanvasShadow?; let isDark: Bool; let includeContent: Bool; let content: Content
+    let shadow: CampaignCanvasShadow?
+    let isDark: Bool
+    let includeContent: Bool
+    let content: Content
 
     init(
         shadow: CampaignCanvasShadow?,
@@ -700,7 +979,8 @@ private struct CanvasAlphaContentShadow<Content: View>: View {
 
     @ViewBuilder var body: some View {
         if let shadow,
-           shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0 {
+            shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0
+        {
             if includeContent {
                 shadowedContent(shadow)
             } else {
@@ -729,27 +1009,31 @@ private struct CanvasAlphaContentShadow<Content: View>: View {
     }
 }
 
-private extension CampaignCanvasBox {
+extension CampaignCanvasBox {
     @MainActor
-    func hasVisibleSurface(isDark: Bool) -> Bool {
+    fileprivate func hasVisibleSurface(isDark: Bool) -> Bool {
         let hasFill: Bool
         switch fill {
         case .solid(let color):
-            hasFill = UIColor(CampaignCanvasTheme.shared.color(color, isDark: isDark)).cgColor.alpha > 0
+            hasFill =
+                UIColor(CampaignCanvasTheme.shared.color(color, isDark: isDark)).cgColor.alpha > 0
         case .none:
             hasFill = false
         default:
             hasFill = true
         }
-        let hasBorder = border.map {
-            $0.width > 0 && UIColor(CampaignCanvasTheme.shared.color($0.color, isDark: isDark)).cgColor.alpha > 0
-        } ?? false
+        let hasBorder =
+            border.map {
+                $0.width > 0
+                    && UIColor(CampaignCanvasTheme.shared.color($0.color, isDark: isDark)).cgColor
+                        .alpha > 0
+            } ?? false
         return hasFill || hasBorder
     }
 }
 
-private extension CampaignCanvasShadow {
-    var nativeContentBlurRadius: CGFloat {
+extension CampaignCanvasShadow {
+    fileprivate var nativeContentBlurRadius: CGFloat {
         // SwiftUI consumes a Gaussian radius here. NSShadow's text path uses a
         // diameter-like value, but doubling this radius makes image halos too soft.
         let sigma = blur > 0 ? blur * 0.57735 + 0.5 : 0
@@ -758,38 +1042,60 @@ private extension CampaignCanvasShadow {
 }
 
 private struct CanvasButtonRenderer: View {
-    let box: CampaignCanvasBox; let label: CampaignCanvasTextBlock; let cornerRadius: CampaignCanvasCornerRadius
-    let style: CampaignCanvasButtonStyle; let shadow: CampaignCanvasShadow?
-    let isPrimary: Bool; let isDestructive: Bool; let applyDestructiveStyling: Bool
-    let actions: [EngageAction]; let confirm: CampaignCanvasConfirmDialog; let isDark: Bool
+    let box: CampaignCanvasBox
+    let label: CampaignCanvasTextBlock
+    let cornerRadius: CampaignCanvasCornerRadius
+    let style: CampaignCanvasButtonStyle
+    let shadow: CampaignCanvasShadow?
+    let isPrimary: Bool
+    let isDestructive: Bool
+    let applyDestructiveStyling: Bool
+    let actions: [EngageAction]
+    let confirm: CampaignCanvasConfirmDialog
+    let isDark: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
     @State private var confirming = false
     private let danger = CampaignColor.literal("#FFD92D20")
     var body: some View {
         ZStack {
-            if let shadow { CampaignCanvasShadowView(shadow: shadow, cornerRadius: cornerRadius, isDark: isDark, outsideOnly: true) }
+            if let shadow {
+                CampaignCanvasShadowView(
+                    shadow: shadow, cornerRadius: cornerRadius, isDark: isDark, outsideOnly: true)
+            }
             CampaignCanvasBoxView(box: box, isDark: isDark) {
                 Group {
                     if actions.isEmpty {
                         buttonContent
                     } else {
-                        Button { if isDestructive { confirming = true } else { emit() } } label: { buttonContent }
-                            .buttonStyle(CanvasPressedButtonStyle())
+                        Button {
+                            if isDestructive { confirming = true } else { emit() }
+                        } label: {
+                            buttonContent
+                        }
+                        .buttonStyle(CanvasPressedButtonStyle())
                     }
                 }
                 .clipShape(CampaignCanvasRoundedShape(radius: cornerRadius))
-                .overlay(outline.map { CampaignCanvasRoundedShape(radius: cornerRadius).strokeBorder(CampaignCanvasTheme.shared.color($0.color, isDark: isDark), lineWidth: $0.width) })
+                .overlay(
+                    outline.map {
+                        CampaignCanvasRoundedShape(radius: cornerRadius).strokeBorder(
+                            CampaignCanvasTheme.shared.color($0.color, isDark: isDark),
+                            lineWidth: $0.width)
+                    })
             }
         }
         .alert(confirm.title ?? "", isPresented: $confirming) {
             Button(confirm.cancelLabel, role: .cancel) {}
             Button(confirm.confirmLabel, role: isDestructive ? .destructive : nil) { emit() }
-        } message: { if let message = confirm.message { Text(message) } }
+        } message: {
+            if let message = confirm.message { Text(message) }
+        }
     }
     private var buttonContent: some View {
         ZStack {
             CampaignCanvasPaintView(paint: effectiveFill, isDark: isDark)
-            CampaignCanvasTextView(block: label, isDark: isDark, onAction: onAction, colorOverride: destructiveColor)
+            CampaignCanvasTextView(
+                block: label, isDark: isDark, onAction: onAction, colorOverride: destructiveColor)
         }.contentShape(CampaignCanvasRoundedShape(radius: cornerRadius))
     }
     private var effectiveFill: CampaignCanvasPaint {
@@ -798,23 +1104,41 @@ private struct CanvasButtonRenderer: View {
     private var isFilled: Bool { if case .fill = style { true } else { false } }
     private var destructiveColor: UIColor? {
         guard isDestructive && applyDestructiveStyling else { return nil }
-        return UIColor(isFilled ? Color.white : CampaignCanvasTheme.shared.color(danger, isDark: isDark))
+        return UIColor(
+            isFilled ? Color.white : CampaignCanvasTheme.shared.color(danger, isDark: isDark))
     }
-    private var outline: CampaignCanvasBorder? { if case .outline(_, let outline) = style { outline } else { nil } }
-    private func emit() { onAction(CampaignCanvasActionRequest(actions: actions, elementId: isPrimary ? "cta_primary" : "cta_secondary", label: label.plainText, isPrimary: isPrimary)) }
+    private var outline: CampaignCanvasBorder? {
+        if case .outline(_, let outline) = style { outline } else { nil }
+    }
+    private func emit() {
+        onAction(
+            CampaignCanvasActionRequest(
+                actions: actions, elementId: isPrimary ? "cta_primary" : "cta_secondary",
+                label: label.plainText, isPrimary: isPrimary))
+    }
 }
 
 private struct CanvasPressedButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View { configuration.label.opacity(configuration.isPressed ? 0.78 : 1) }
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.opacity(configuration.isPressed ? 0.78 : 1)
+    }
 }
 
 private struct CanvasProgressRenderer: View {
-    let box: CampaignCanvasBox; let valueMode: CampaignCanvasProgressValueMode
-    let percent: String; let rangeStart: String; let rangeCurrent: String; let rangeEnd: String
-    let indicator: CampaignCanvasPaint; let track: CampaignCanvasPaint; let cornerRadius: CampaignCanvasCornerRadius
-    let animateOnAppear: CampaignCanvasAppearAnimation; let isDark: Bool
+    let box: CampaignCanvasBox
+    let valueMode: CampaignCanvasProgressValueMode
+    let percent: String
+    let rangeStart: String
+    let rangeCurrent: String
+    let rangeEnd: String
+    let indicator: CampaignCanvasPaint
+    let track: CampaignCanvasPaint
+    let cornerRadius: CampaignCanvasCornerRadius
+    let animateOnAppear: CampaignCanvasAppearAnimation
+    let isDark: Bool
     @Environment(\.digiaVariables) private var variables
-    @State private var displayed: CGFloat = 0; @State private var appeared = false
+    @State private var displayed: CGFloat = 0
+    @State private var appeared = false
     private var target: CGFloat {
         let raw: Double
         switch valueMode {
@@ -832,22 +1156,38 @@ private struct CanvasProgressRenderer: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     CampaignCanvasPaintView(paint: track, isDark: isDark)
-                    CampaignCanvasPaintView(paint: indicator, isDark: isDark).frame(width: geometry.size.width * displayed)
+                    CampaignCanvasPaintView(paint: indicator, isDark: isDark).frame(
+                        width: geometry.size.width * displayed)
                 }.clipShape(CampaignCanvasRoundedShape(radius: cornerRadius))
             }
         }
         .onAppear {
             if animateOnAppear.enabled {
-                withAnimation(.easeOut(duration: Double(animateOnAppear.durationMs) / 1000)) { displayed = target }
-            } else { displayed = target }
+                withAnimation(.easeOut(duration: Double(animateOnAppear.durationMs) / 1000)) {
+                    displayed = target
+                }
+            } else {
+                displayed = target
+            }
             appeared = true
         }
-        .onChange(of: target) { value in if appeared { var transaction = Transaction(); transaction.disablesAnimations = true; withTransaction(transaction) { displayed = value } } }
+        .onChange(of: target) { value in
+            if appeared {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { displayed = value }
+            }
+        }
     }
 }
 
 private struct CanvasLottieRenderer: View {
-    let box: CampaignCanvasBox; let source: CampaignCanvasMediaSource; let autoplay: Bool; let loop: Bool; let fit: String; let isDark: Bool
+    let box: CampaignCanvasBox
+    let source: CampaignCanvasMediaSource
+    let autoplay: Bool
+    let loop: Bool
+    let fit: String
+    let isDark: Bool
     @Environment(\.digiaVariables) private var variables
     private var boxWithoutShadow: CampaignCanvasBox {
         var value = box
@@ -867,12 +1207,16 @@ private struct CanvasLottieRenderer: View {
             CampaignCanvasBoxView(box: boxWithoutShadow, isDark: isDark) {
                 let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
                 let resolved = interpolate(raw, context: variables)
-                if resolved.isEmpty { CanvasPlaceholder(label: "Lottie") }
-                else if let url = URL(string: resolved) {
-                    CanvasRemoteLottie(url: url, placeholder: source.placeholder, autoplay: autoplay, loop: loop, fit: fit)
-                        .id(resolved)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
+                if resolved.isEmpty {
+                    CanvasPlaceholder(label: "Lottie")
+                } else if let url = URL(string: resolved) {
+                    CanvasRemoteLottie(
+                        url: url, placeholder: source.placeholder, autoplay: autoplay, loop: loop,
+                        fit: fit
+                    )
+                    .id(resolved)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
                 } else {
                     CanvasPlaceholder(label: "Lottie")
                 }
@@ -882,7 +1226,11 @@ private struct CanvasLottieRenderer: View {
 }
 
 private struct CanvasRemoteLottie: View {
-    let url: URL; let placeholder: ImagePlaceholder?; let autoplay: Bool; let loop: Bool; let fit: String
+    let url: URL
+    let placeholder: ImagePlaceholder?
+    let autoplay: Bool
+    let loop: Bool
+    let fit: String
     @State private var failed = false
     var body: some View {
         Group {
@@ -898,8 +1246,11 @@ private struct CanvasRemoteLottie: View {
     private var lottie: LottieView<CanvasLottiePlaceholder> {
         LottieView {
             do {
-                if url.pathExtension.lowercased() == "lottie" { return try await DotLottieFile.loadedFrom(url: url).animationSource }
-                guard let source = await LottieAnimation.loadedFrom(url: url)?.animationSource else {
+                if url.pathExtension.lowercased() == "lottie" {
+                    return try await DotLottieFile.loadedFrom(url: url).animationSource
+                }
+                guard let source = await LottieAnimation.loadedFrom(url: url)?.animationSource
+                else {
                     failed = true
                     return nil
                 }
@@ -915,96 +1266,198 @@ private struct CanvasRemoteLottie: View {
 }
 
 private struct CanvasLottiePlaceholder: View {
-    let failed: Bool; let placeholder: ImagePlaceholder?; let fit: String
+    let failed: Bool
+    let placeholder: ImagePlaceholder?
+    let fit: String
     var body: some View {
-        if failed { CanvasPlaceholder(label: "Lottie") }
-        else { BlurHashPlaceholderView(placeholder: placeholder, contentMode: fit == "contain" ? .fit : .fill) }
+        if failed {
+            CanvasPlaceholder(label: "Lottie")
+        } else {
+            BlurHashPlaceholderView(
+                placeholder: placeholder, contentMode: fit == "contain" ? .fit : .fill)
+        }
     }
 }
 
 private struct CanvasVideoRenderer: View {
-    let box: CampaignCanvasBox; let source: CampaignCanvasMediaSource; let autoplay: Bool; let loop: Bool
-    let muted: Bool; let showControls: Bool; let fit: String; let isDark: Bool
+    let box: CampaignCanvasBox
+    let source: CampaignCanvasMediaSource
+    let autoplay: Bool
+    let loop: Bool
+    let muted: Bool
+    let showControls: Bool
+    let fit: String
+    let isDark: Bool
     @Environment(\.digiaVariables) private var variables
-    @State private var player: AVPlayer?; @State private var observer: NSObjectProtocol?
-    private var url: String { interpolate(CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark), context: variables) }
+    @State private var player: AVPlayer?
+    @State private var observer: NSObjectProtocol?
+    private var url: String {
+        interpolate(CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark), context: variables)
+    }
     var body: some View {
         CampaignCanvasBoxView(box: box, isDark: isDark) {
             if !url.isEmpty {
-                ZStack { Color.black; if let player { CanvasPlayerController(player: player, controls: showControls, gravity: fit == "contain" ? .resizeAspect : .resizeAspectFill) } }
+                ZStack {
+                    Color.black
+                    if let player {
+                        CanvasPlayerController(
+                            player: player, controls: showControls,
+                            gravity: fit == "contain" ? .resizeAspect : .resizeAspectFill)
+                    }
+                }
             }
         }
         .onAppear { setup() }
-        .onChange(of: url) { _ in teardown(); setup() }
+        .onChange(of: url) { _ in
+            teardown()
+            setup()
+        }
         .onDisappear { teardown() }
     }
     private func setup() {
         guard player == nil, let parsed = URL(string: url), !url.isEmpty else { return }
-        let item = AVPlayerItem(url: parsed); let value = AVPlayer(playerItem: item); value.isMuted = muted; player = value
-        if loop { observer = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { _ in value.seek(to: .zero); value.play() } }
+        let item = AVPlayerItem(url: parsed)
+        let value = AVPlayer(playerItem: item)
+        value.isMuted = muted
+        player = value
+        if loop {
+            observer = NotificationCenter.default.addObserver(
+                forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+            ) { _ in
+                value.seek(to: .zero)
+                value.play()
+            }
+        }
         if autoplay { value.play() }
     }
-    private func teardown() { player?.pause(); player = nil; if let observer { NotificationCenter.default.removeObserver(observer) }; observer = nil }
+    private func teardown() {
+        player?.pause()
+        player = nil
+        if let observer { NotificationCenter.default.removeObserver(observer) }
+        observer = nil
+    }
 }
 
 private struct CanvasPlayerController: UIViewControllerRepresentable {
-    let player: AVPlayer; let controls: Bool; let gravity: AVLayerVideoGravity
-    func makeUIViewController(context: Context) -> AVPlayerViewController { let value = AVPlayerViewController(); value.player = player; value.showsPlaybackControls = controls; value.videoGravity = gravity; return value }
-    func updateUIViewController(_ value: AVPlayerViewController, context: Context) { value.player = player; value.showsPlaybackControls = controls; value.videoGravity = gravity }
+    let player: AVPlayer
+    let controls: Bool
+    let gravity: AVLayerVideoGravity
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let value = AVPlayerViewController()
+        value.player = player
+        value.showsPlaybackControls = controls
+        value.videoGravity = gravity
+        return value
+    }
+    func updateUIViewController(_ value: AVPlayerViewController, context: Context) {
+        value.player = player
+        value.showsPlaybackControls = controls
+        value.videoGravity = gravity
+    }
 }
 
 private struct CanvasContainerRenderer: View {
-    let fill: CampaignCanvasPaint; let cornerRadius: CampaignCanvasCornerRadius
-    let border: CampaignCanvasBorder?; let shadow: CampaignCanvasShadow?; let isDark: Bool
+    let fill: CampaignCanvasPaint
+    let cornerRadius: CampaignCanvasCornerRadius
+    let border: CampaignCanvasBorder?
+    let shadow: CampaignCanvasShadow?
+    let isDark: Bool
     var body: some View {
         ZStack {
-            if let shadow { CampaignCanvasShadowView(shadow: shadow, cornerRadius: cornerRadius, isDark: isDark) }
+            if let shadow {
+                CampaignCanvasShadowView(shadow: shadow, cornerRadius: cornerRadius, isDark: isDark)
+            }
             CampaignCanvasPaintView(paint: fill, isDark: isDark)
                 .clipShape(CampaignCanvasRoundedShape(radius: cornerRadius))
-                .overlay(border.map { CampaignCanvasRoundedShape(radius: cornerRadius).strokeBorder(CampaignCanvasTheme.shared.color($0.color, isDark: isDark), lineWidth: $0.width) })
+                .overlay(
+                    border.map {
+                        CampaignCanvasRoundedShape(radius: cornerRadius).strokeBorder(
+                            CampaignCanvasTheme.shared.color($0.color, isDark: isDark),
+                            lineWidth: $0.width)
+                    })
         }
     }
 }
 
 private struct CanvasDividerRenderer: View {
-    let box: CampaignCanvasBox; let axis: CampaignCanvasDividerAxis; let pattern: CampaignCanvasDividerPattern
-    let strokeCap: CampaignCanvasStrokeCap; let inset: CGFloat; let dashPattern: [CGFloat]; let color: CampaignColor; let isDark: Bool
+    let box: CampaignCanvasBox
+    let axis: CampaignCanvasDividerAxis
+    let pattern: CampaignCanvasDividerPattern
+    let strokeCap: CampaignCanvasStrokeCap
+    let inset: CGFloat
+    let dashPattern: [CGFloat]
+    let color: CampaignColor
+    let isDark: Bool
     var body: some View {
         CampaignCanvasBoxView(box: box, isDark: isDark) {
             Canvas { context, size in
                 let horizontal = axis == .horizontal
-                var path = Path(); path.move(to: horizontal ? CGPoint(x: inset, y: size.height / 2) : CGPoint(x: size.width / 2, y: inset)); path.addLine(to: horizontal ? CGPoint(x: size.width - inset, y: size.height / 2) : CGPoint(x: size.width / 2, y: size.height - inset))
+                var path = Path()
+                path.move(
+                    to: horizontal
+                        ? CGPoint(x: inset, y: size.height / 2)
+                        : CGPoint(x: size.width / 2, y: inset))
+                path.addLine(
+                    to: horizontal
+                        ? CGPoint(x: size.width - inset, y: size.height / 2)
+                        : CGPoint(x: size.width / 2, y: size.height - inset))
                 let thickness = horizontal ? size.height : size.width
-                let dash: [CGFloat] = pattern == .solid ? [] : (pattern == .dotted ? [0, max(thickness, dashPattern.dropFirst().first ?? 4)] : dashPattern)
-                context.stroke(path, with: .color(CampaignCanvasTheme.shared.color(color, isDark: isDark)), style: StrokeStyle(lineWidth: thickness, lineCap: strokeCap.lineCap, dash: dash))
+                let dash: [CGFloat] =
+                    pattern == .solid
+                    ? []
+                    : (pattern == .dotted
+                        ? [0, max(thickness, dashPattern.dropFirst().first ?? 4)] : dashPattern)
+                context.stroke(
+                    path, with: .color(CampaignCanvasTheme.shared.color(color, isDark: isDark)),
+                    style: StrokeStyle(lineWidth: thickness, lineCap: strokeCap.lineCap, dash: dash)
+                )
             }
         }
     }
 }
 
 private struct CampaignCanvasBoxView<Content: View>: View {
-    let box: CampaignCanvasBox; let isDark: Bool; var clipsContent = true; @ViewBuilder let content: () -> Content
+    let box: CampaignCanvasBox
+    let isDark: Bool
+    var clipsContent = true
+    @ViewBuilder let content: () -> Content
     var body: some View {
         ZStack {
-            if let shadow = box.shadow { CampaignCanvasShadowView(shadow: shadow, cornerRadius: box.cornerRadius, isDark: isDark) }
-            Group {
-                if clipsContent { contentLayer.clipShape(CampaignCanvasRoundedShape(radius: box.cornerRadius)) }
-                else { contentLayer }
+            if let shadow = box.shadow {
+                CampaignCanvasShadowView(
+                    shadow: shadow, cornerRadius: box.cornerRadius, isDark: isDark)
             }
-            .overlay(box.border.map { CampaignCanvasRoundedShape(radius: box.cornerRadius).strokeBorder(CampaignCanvasTheme.shared.color($0.color, isDark: isDark), lineWidth: $0.width) })
+            Group {
+                if clipsContent {
+                    contentLayer.clipShape(CampaignCanvasRoundedShape(radius: box.cornerRadius))
+                } else {
+                    contentLayer
+                }
+            }
+            .overlay(
+                box.border.map {
+                    CampaignCanvasRoundedShape(radius: box.cornerRadius).strokeBorder(
+                        CampaignCanvasTheme.shared.color($0.color, isDark: isDark),
+                        lineWidth: $0.width)
+                })
         }
     }
     private var contentLayer: some View {
         ZStack {
             CampaignCanvasPaintView(paint: box.fill, isDark: isDark)
                 .clipShape(CampaignCanvasRoundedShape(radius: box.cornerRadius))
-            content().padding(EdgeInsets(top: box.padding.top, leading: box.padding.left, bottom: box.padding.bottom, trailing: box.padding.right))
+            content().padding(
+                EdgeInsets(
+                    top: box.padding.top, leading: box.padding.left, bottom: box.padding.bottom,
+                    trailing: box.padding.right))
         }
     }
 }
 
 private struct CampaignCanvasShadowView: View {
-    let shadow: CampaignCanvasShadow; let cornerRadius: CampaignCanvasCornerRadius; let isDark: Bool
+    let shadow: CampaignCanvasShadow
+    let cornerRadius: CampaignCanvasCornerRadius
+    let isDark: Bool
     var outsideOnly = false
     @ViewBuilder
     var body: some View {
@@ -1042,12 +1495,17 @@ struct CampaignCanvasBackgroundView: View {
 }
 
 struct CampaignCanvasPaintView: View {
-    let paint: CampaignCanvasPaint; let isDark: Bool
+    let paint: CampaignCanvasPaint
+    let isDark: Bool
     var body: some View {
         switch paint {
         case .solid(let color): CampaignCanvasTheme.shared.color(color, isDark: isDark)
-        case .gradient(let type, let angle, let x, let y, let radius, let start, let end, let stops): CampaignCanvasGradientView(type: type, angle: angle, centerX: x, centerY: y, radius: radius, start: start, end: end, stops: stops, isDark: isDark)
-        case .image(let source, let x, let y, let scale): FocalCanvasImage(source: source, isDark: isDark, fit: "cover", x: x, y: y, scale: scale)
+        case .gradient(let type, let angle, let x, let y, let radius, let start, let end, let stops):
+            CampaignCanvasGradientView(
+                type: type, angle: angle, centerX: x, centerY: y, radius: radius, start: start,
+                end: end, stops: stops, isDark: isDark)
+        case .image(let source, let x, let y, let scale):
+            FocalCanvasImage(source: source, isDark: isDark, fit: "cover", x: x, y: y, scale: scale)
         case .none: Color.clear
         }
     }
@@ -1058,51 +1516,101 @@ enum GuideCanvasPointerDirection: Equatable {
 }
 
 private struct CampaignCanvasGradientView: View {
-    let type: CampaignCanvasGradientType; let angle: CGFloat; let centerX: CGFloat; let centerY: CGFloat
-    let radius: CGFloat; let start: CGFloat; let end: CGFloat; let stops: [CampaignCanvasGradientStop]; let isDark: Bool
+    let type: CampaignCanvasGradientType
+    let angle: CGFloat
+    let centerX: CGFloat
+    let centerY: CGFloat
+    let radius: CGFloat
+    let start: CGFloat
+    let end: CGFloat
+    let stops: [CampaignCanvasGradientStop]
+    let isDark: Bool
     var body: some View {
-        if stops.isEmpty { Color.clear }
-        else if stops.count == 1 { CampaignCanvasTheme.shared.color(stops[0].color, isDark: isDark) }
-        else {
+        if stops.isEmpty {
+            Color.clear
+        } else if stops.count == 1 {
+            CampaignCanvasTheme.shared.color(stops[0].color, isDark: isDark)
+        } else {
             GeometryReader { geometry in
                 switch type {
                 case .linear:
                     Canvas { context, size in
-                        let radians = angle * .pi / 180; let direction = CGVector(dx: sin(radians), dy: -cos(radians)); let extent = abs(direction.dx) * size.width + abs(direction.dy) * size.height; let center = CGPoint(x: size.width / 2, y: size.height / 2); let delta = CGPoint(x: direction.dx * extent / 2, y: direction.dy * extent / 2)
-                        context.fill(Path(CGRect(origin: .zero, size: size)), with: .linearGradient(Gradient(stops: gradientStops), startPoint: CGPoint(x: center.x - delta.x, y: center.y - delta.y), endPoint: CGPoint(x: center.x + delta.x, y: center.y + delta.y)))
+                        let radians = angle * .pi / 180
+                        let direction = CGVector(dx: sin(radians), dy: -cos(radians))
+                        let extent =
+                            abs(direction.dx) * size.width + abs(direction.dy) * size.height
+                        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+                        let delta = CGPoint(
+                            x: direction.dx * extent / 2, y: direction.dy * extent / 2)
+                        context.fill(
+                            Path(CGRect(origin: .zero, size: size)),
+                            with: .linearGradient(
+                                Gradient(stops: gradientStops),
+                                startPoint: CGPoint(x: center.x - delta.x, y: center.y - delta.y),
+                                endPoint: CGPoint(x: center.x + delta.x, y: center.y + delta.y)))
                     }
                 case .radial:
-                    RadialGradient(gradient: Gradient(stops: gradientStops), center: UnitPoint(x: centerX, y: centerY), startRadius: 0, endRadius: min(geometry.size.width, geometry.size.height) * radius)
+                    RadialGradient(
+                        gradient: Gradient(stops: gradientStops),
+                        center: UnitPoint(x: centerX, y: centerY), startRadius: 0,
+                        endRadius: min(geometry.size.width, geometry.size.height) * radius)
                 case .sweep:
-                    AngularGradient(gradient: Gradient(stops: gradientStops), center: UnitPoint(x: centerX, y: centerY), startAngle: .degrees(start - 90), endAngle: .degrees(end - 90))
+                    AngularGradient(
+                        gradient: Gradient(stops: gradientStops),
+                        center: UnitPoint(x: centerX, y: centerY), startAngle: .degrees(start - 90),
+                        endAngle: .degrees(end - 90))
                 }
             }
         }
     }
-    private var gradientStops: [Gradient.Stop] { stops.map { .init(color: CampaignCanvasTheme.shared.color($0.color, isDark: isDark), location: $0.offset) } }
+    private var gradientStops: [Gradient.Stop] {
+        stops.map {
+            .init(
+                color: CampaignCanvasTheme.shared.color($0.color, isDark: isDark),
+                location: $0.offset)
+        }
+    }
 }
 
 private struct FocalCanvasImage: View {
-    let source: CampaignCanvasMediaSource; let isDark: Bool; let fit: String
-    let x: CGFloat; let y: CGFloat; let scale: CGFloat; var tint: CampaignColor? = nil; var failureLabel: String? = nil
+    let source: CampaignCanvasMediaSource
+    let isDark: Bool
+    let fit: String
+    let x: CGFloat
+    let y: CGFloat
+    let scale: CGFloat
+    var tint: CampaignColor? = nil
+    var failureLabel: String? = nil
     @Environment(\.digiaVariables) private var variables
     @State private var failedURL: String?
     var body: some View {
-        let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark); let resolved = interpolate(raw, context: variables)
-        if resolved.isEmpty || failedURL == resolved { if let failureLabel { CanvasPlaceholder(label: failureLabel) } }
-        else if URL(string: resolved) == nil { if let failureLabel { CanvasPlaceholder(label: failureLabel) } }
-        else {
+        let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
+        let resolved = interpolate(raw, context: variables)
+        if resolved.isEmpty || failedURL == resolved {
+            if let failureLabel { CanvasPlaceholder(label: failureLabel) }
+        } else if URL(string: resolved) == nil {
+            if let failureLabel { CanvasPlaceholder(label: failureLabel) }
+        } else {
             GeometryReader { geometry in
                 WebImage(url: URL(string: resolved)) { image in
                     image.resizable().renderingMode(tint == nil ? .original : .template)
                 } placeholder: {
-                    BlurHashPlaceholderView(placeholder: source.placeholder, contentMode: fit == "contain" ? .fit : .fill)
+                    BlurHashPlaceholderView(
+                        placeholder: source.placeholder,
+                        contentMode: fit == "contain" ? .fit : .fill)
                 }
                 .onFailure { _ in failedURL = resolved }
                 .modifier(CanvasImageFit(fit: fit))
-                .foregroundStyle(tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) } ?? .clear)
-                .frame(width: geometry.size.width, height: geometry.size.height, alignment: focalAlignment(x: x, y: y))
-                .scaleEffect(max(0.1, scale), anchor: UnitPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1)))
+                .foregroundStyle(
+                    tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) } ?? .clear
+                )
+                .frame(
+                    width: geometry.size.width, height: geometry.size.height,
+                    alignment: focalAlignment(x: x, y: y)
+                )
+                .scaleEffect(
+                    max(0.1, scale), anchor: UnitPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+                )
                 .clipped()
             }
             .onChange(of: resolved) { _ in failedURL = nil }
@@ -1112,7 +1620,13 @@ private struct FocalCanvasImage: View {
 
 private struct CanvasImageFit: ViewModifier {
     let fit: String
-    @ViewBuilder func body(content: Content) -> some View { switch fit { case "contain": content.scaledToFit(); case "fill": content; default: content.scaledToFill() } }
+    @ViewBuilder func body(content: Content) -> some View {
+        switch fit {
+        case "contain": content.scaledToFit()
+        case "fill": content
+        default: content.scaledToFill()
+        }
+    }
 }
 
 private struct CampaignCanvasRoundedShape: InsettableShape {
@@ -1136,13 +1650,21 @@ private struct CampaignCanvasRoundedShape: InsettableShape {
         var path = Path()
         path.move(to: CGPoint(x: rect.minX + topLeft, y: rect.minY))
         path.addLine(to: CGPoint(x: rect.maxX - topRight, y: rect.minY))
-        path.addQuadCurve(to: CGPoint(x: rect.maxX, y: rect.minY + topRight), control: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX, y: rect.minY + topRight),
+            control: CGPoint(x: rect.maxX, y: rect.minY))
         path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - bottomRight))
-        path.addQuadCurve(to: CGPoint(x: rect.maxX - bottomRight, y: rect.maxY), control: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.maxX - bottomRight, y: rect.maxY),
+            control: CGPoint(x: rect.maxX, y: rect.maxY))
         path.addLine(to: CGPoint(x: rect.minX + bottomLeft, y: rect.maxY))
-        path.addQuadCurve(to: CGPoint(x: rect.minX, y: rect.maxY - bottomLeft), control: CGPoint(x: rect.minX, y: rect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX, y: rect.maxY - bottomLeft),
+            control: CGPoint(x: rect.minX, y: rect.maxY))
         path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + topLeft))
-        path.addQuadCurve(to: CGPoint(x: rect.minX + topLeft, y: rect.minY), control: CGPoint(x: rect.minX, y: rect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: rect.minX + topLeft, y: rect.minY),
+            control: CGPoint(x: rect.minX, y: rect.minY))
         path.closeSubpath()
         return path
     }
@@ -1150,24 +1672,59 @@ private struct CampaignCanvasRoundedShape: InsettableShape {
 
 private struct CanvasChildBoundsModifier: ViewModifier {
     let clips: Bool
-    @ViewBuilder func body(content: Content) -> some View { if clips { content.clipped() } else { content } }
+    @ViewBuilder func body(content: Content) -> some View {
+        if clips { content.clipped() } else { content }
+    }
 }
 
 private struct CanvasPlaceholder: View {
     let label: String
-    var body: some View { ZStack { RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#F1F1F5") ?? Color(.systemGray6)); Text(label).font(.system(size: 11)).foregroundStyle(Color(hex: "#9A9AAD") ?? .secondary) } }
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#F1F1F5") ?? Color(.systemGray6))
+            Text(label).font(.system(size: 11)).foregroundStyle(Color(hex: "#9A9AAD") ?? .secondary)
+        }
+    }
 }
 
-private extension CampaignCanvasHorizontalAlign {
-    var uiTextAlignment: NSTextAlignment { switch self { case .left: .left; case .center: .center; case .right: .right } }
+extension CampaignCanvasHorizontalAlign {
+    fileprivate var uiTextAlignment: NSTextAlignment {
+        switch self {
+        case .left: .left
+        case .center: .center
+        case .right: .right
+        }
+    }
 }
-private extension CampaignCanvasTextBlock {
-    var alignment: Alignment {
-        let horizontal: HorizontalAlignment = horizontalAlign == .left ? .leading : (horizontalAlign == .right ? .trailing : .center)
-        let vertical: VerticalAlignment = verticalAlign == .top ? .top : (verticalAlign == .bottom ? .bottom : .center)
+extension CampaignCanvasTextBlock {
+    fileprivate var alignment: Alignment {
+        let horizontal: HorizontalAlignment =
+            horizontalAlign == .left ? .leading : (horizontalAlign == .right ? .trailing : .center)
+        let vertical: VerticalAlignment =
+            verticalAlign == .top ? .top : (verticalAlign == .bottom ? .bottom : .center)
         return Alignment(horizontal: horizontal, vertical: vertical)
     }
 }
-private extension CampaignCanvasStrokeCap { var lineCap: CGLineCap { switch self { case .butt: .butt; case .round: .round; case .square: .square } } }
-private extension String { var uiContentMode: UIView.ContentMode { switch self { case "contain": .scaleAspectFit; case "fill": .scaleToFill; default: .scaleAspectFill } } }
-private func focalAlignment(x: CGFloat, y: CGFloat) -> Alignment { Alignment(horizontal: x < 0.34 ? .leading : (x > 0.66 ? .trailing : .center), vertical: y < 0.34 ? .top : (y > 0.66 ? .bottom : .center)) }
+extension CampaignCanvasStrokeCap {
+    fileprivate var lineCap: CGLineCap {
+        switch self {
+        case .butt: .butt
+        case .round: .round
+        case .square: .square
+        }
+    }
+}
+extension String {
+    fileprivate var uiContentMode: UIView.ContentMode {
+        switch self {
+        case "contain": .scaleAspectFit
+        case "fill": .scaleToFill
+        default: .scaleAspectFill
+        }
+    }
+}
+private func focalAlignment(x: CGFloat, y: CGFloat) -> Alignment {
+    Alignment(
+        horizontal: x < 0.34 ? .leading : (x > 0.66 ? .trailing : .center),
+        vertical: y < 0.34 ? .top : (y > 0.66 ? .bottom : .center))
+}
