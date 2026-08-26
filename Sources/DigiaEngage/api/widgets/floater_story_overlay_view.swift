@@ -74,6 +74,9 @@ private struct FloaterStorySessionView: View {
     /// Outlives `orchestrator.storyOpen`: the orchestrator flips that the instant the user closes,
     /// but the viewer has to stay mounted until the collapse has finished running.
     @State private var viewerMounted = false
+    /// Shows the story page/chrome only after the hero aperture has reached full screen.
+    @State private var storyContentVisible = false
+    @State private var storyContentRevealToken = 0
 
     private var config: FloaterStoryConfig { state.config }
     private var isDark: Bool { canvasTheme.isDark(colorScheme) }
@@ -217,14 +220,11 @@ private struct FloaterStorySessionView: View {
 
                     ZStack(alignment: .topLeading) {
                         Color.black
-                        storyViewer(safeAreaInsets: safe)
-                            .frame(width: screenSize.width, height: screenSize.height)
-                            .opacity(
-                                floaterStoryContentAlpha(
-                                    type: activeTransition.type,
-                                    phase: storyPhase
-                                )
-                            )
+                        if storyContentVisible {
+                            storyViewer(safeAreaInsets: safe)
+                                .frame(width: screenSize.width, height: screenSize.height)
+                                .transition(.identity)
+                        }
                     }
                     .frame(width: heroRect.width, height: heroRect.height, alignment: .topLeading)
                     .clipShape(RoundedRectangle(cornerRadius: heroRadius))
@@ -266,18 +266,28 @@ private struct FloaterStorySessionView: View {
     /// cancelled. A re-open inside that window is safe — `viewerMounted` is already true and the
     /// deferred close checks the orchestrator before acting.
     private func runStoryTransition(opening: Bool) {
+        storyContentRevealToken += 1
+        let revealToken = storyContentRevealToken
         if opening {
             let expand = config.behavior.expandTransition
             viewerMounted = true
             orchestrator.setStoryOverlayActive(true)
+            storyContentVisible = false
             if expand.isInstant {
                 storyPhase = 1
+                storyContentVisible = true
                 return
             }
             withAnimation(storyEaseInOutQuart(duration: expand.duration)) { storyPhase = 1 }
+            DispatchQueue.main.asyncAfter(deadline: .now() + expand.duration) {
+                if storyContentRevealToken == revealToken, orchestrator.storyOpen {
+                    storyContentVisible = true
+                }
+            }
             return
         }
         let collapse = config.behavior.collapseTransition
+        storyContentVisible = false
         if collapse.isInstant {
             storyPhase = 0
             viewerMounted = false
