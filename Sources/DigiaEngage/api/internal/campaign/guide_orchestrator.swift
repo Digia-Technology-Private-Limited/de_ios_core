@@ -65,6 +65,16 @@ final class GuideOrchestrator: ObservableObject {
         )
     }
 
+    func move(to stepIndex: Int) {
+        guard let current = state, current.steps.indices.contains(stepIndex) else { return }
+        state = ActiveGuideState(
+            token: current.token,
+            campaign: current.campaign,
+            stepIndex: stepIndex,
+            payload: current.payload
+        )
+    }
+
     func dismiss() {
         state = nil
     }

@@ -8,6 +8,26 @@ struct LiveTestInvocation {
     let variables: [String: Any]
 }
 
+/// Transient Guide payload delivered to the React Native live-test renderer.
+public struct LiveTestGuideRenderRequest {
+    public let testInvocationId: String
+    public let cepCampaignId: String
+    public let campaignJson: String
+    public let variablesJson: String
+
+    init(
+        testInvocationId: String,
+        cepCampaignId: String,
+        campaignJson: String,
+        variablesJson: String
+    ) {
+        self.testInvocationId = testInvocationId
+        self.cepCampaignId = cepCampaignId
+        self.campaignJson = campaignJson
+        self.variablesJson = variablesJson
+    }
+}
+
 /// Failure codes from the backend's ACK table; `wireValue` is what's sent on the wire.
 enum LiveTestFailureCode: String {
     case campaignNotFound = "campaign_not_found"
@@ -31,10 +51,10 @@ enum LiveTestConnectionState: Equatable {
 final class LiveTestContext {
     let testInvocationId: String
     private let reporter: LiveTestAckReporter
-    private let onTerminal: () -> Void
+    private let onTerminal: (_ shown: Bool) -> Void
     private var terminalReported = false
 
-    init(testInvocationId: String, reporter: LiveTestAckReporter, onTerminal: @escaping () -> Void) {
+    init(testInvocationId: String, reporter: LiveTestAckReporter, onTerminal: @escaping (Bool) -> Void) {
         self.testInvocationId = testInvocationId
         self.reporter = reporter
         self.onTerminal = onTerminal
@@ -44,13 +64,13 @@ final class LiveTestContext {
         guard !terminalReported else { return }
         terminalReported = true
         reporter.postShown(testInvocationId)
-        onTerminal()
+        onTerminal(true)
     }
 
     func reportFailed(_ code: LiveTestFailureCode, message: String? = nil) {
         guard !terminalReported else { return }
         terminalReported = true
         reporter.postFailed(testInvocationId, code: code, message: message)
-        onTerminal()
+        onTerminal(false)
     }
 }

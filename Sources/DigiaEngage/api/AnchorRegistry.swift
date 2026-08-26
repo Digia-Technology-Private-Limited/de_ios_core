@@ -154,6 +154,25 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         getRect(for: key)
     }
 
+    func isRegistered(_ key: String) -> Bool {
+        viewRegistry[key]?.value?.window != nil || rectRegistry[key] != nil
+    }
+
+    @discardableResult
+    func scrollToVisible(_ key: String) -> Bool {
+        guard let view = viewRegistry[key]?.value else { return false }
+        var ancestor = view.superview
+        while let current = ancestor {
+            if let scrollView = current as? UIScrollView {
+                scrollView.scrollRectToVisible(view.convert(view.bounds, to: scrollView), animated: false)
+                scrollView.layoutIfNeeded()
+                if case .available = resolution(for: key) { return true }
+            }
+            ancestor = current.superview
+        }
+        return false
+    }
+
     func resolution(for key: String) -> AnchorResolution {
         if let view = viewRegistry[key]?.value {
             return ActiveAnchorSampler.resolve(view: view)
