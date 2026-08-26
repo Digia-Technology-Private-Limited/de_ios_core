@@ -75,53 +75,39 @@ struct CampaignCanvasRemoteMedia: View {
     }
 }
 
-/// A looping, chrome-free video for a story card or a story's full-screen media.
-///
-/// `AVPlayer` rather than the canvas video widget's renderer: that one is a
-/// configurable player with controls and progress reporting, and a story's media
-/// is neither — it plays, it loops, and the viewer's own mute button owns its
-/// audio.
-/// A chrome-free surface for a player the caller owns.
-///
-/// The viewer holds the `AVPlayer` rather than this view, because playback is
-/// what drives the story's progress bar, its pause and its advance — a player
-/// created down here would be invisible to all three.
-struct CanvasStoryVideoView: View {
-    let player: AVPlayer
-    let contentMode: ContentMode
-
-    var body: some View {
-        // The media story's player surface: a plain `AVPlayerLayer` in a view
-        // that lays it out and never takes a touch. This used to be an
-        // `AVPlayerViewController`, which brings a whole view controller and an
-        // interactive view per card — `InlineStoryPlayerContainer` documents at
-        // length why an interactive video surface breaks the chrome above it.
-        InlineStoryPlayerLayer(
-            player: player,
-            gravity: contentMode == .fit ? .resizeAspect : .resizeAspectFill
-        )
-    }
-}
-
-/// A rail card's media: a still, or a muted looping clip.
-///
-/// Looping is the rail convention: a card that stopped on its last frame would
-/// read as broken next to the ones still playing. Its player is self-contained
-/// because nothing outside the card depends on where it is.
-struct CanvasStoryRailMedia: View {
+/// Cached, poster-backed media for canvas story surfaces.
+struct CanvasStoryCachedMedia: View {
     let url: String
     let isVideo: Bool
     let contentMode: ContentMode
+    var autoplay = true
+    var loop = true
+    var muted = true
+    var showControls = false
     /// Where in the clip the card's poster frame is taken from.
     var posterFrameMs: Int64 = 0
 
     @StateObject private var playback: StoryVideoPlayback
+    @State private var controllerReady = false
 
-    init(url: String, isVideo: Bool, contentMode: ContentMode, posterFrameMs: Int64 = 0) {
+    init(
+        url: String,
+        isVideo: Bool,
+        contentMode: ContentMode,
+        posterFrameMs: Int64 = 0,
+        autoplay: Bool = true,
+        loop: Bool = true,
+        muted: Bool = true,
+        showControls: Bool = false
+    ) {
         self.url = url
         self.isVideo = isVideo
         self.contentMode = contentMode
         self.posterFrameMs = posterFrameMs
+        self.autoplay = autoplay
+        self.loop = loop
+        self.muted = muted
+        self.showControls = showControls
         _playback = StateObject(wrappedValue: StoryVideoPlayback(
             urlString: url,
             purpose: .thumbnail(
@@ -146,17 +132,25 @@ struct CanvasStoryRailMedia: View {
                     StoryPosterImage(image: poster, fit: storyFit(contentMode))
                 }
                 if let player = playback.player {
-                    InlineStoryPlayerLayer(
-                        player: player,
-                        gravity: storyFit(contentMode).videoGravity,
-                        // Required, not optional. `revealPlayerIfReady` waits on
-                        // `playerLayerReady`, and this callback is the only thing
-                        // that ever sets it — so a layer built without it stays
-                        // at `showPlayerLayer == false` for ever. The clip loads,
-                        // seeks and plays; it is simply never made visible.
-                        onReadyForDisplay: playback.playerLayerDidBecomeReady
-                    )
-                    .opacity(playback.showPlayerLayer ? 1 : 0)
+                    if showControls {
+                        CanvasPlayerController(
+                            player: player,
+                            controls: true,
+                            gravity: storyFit(contentMode).videoGravity,
+                            onReadyForDisplay: {
+                                controllerReady = true
+                                playback.playerLayerDidBecomeReady()
+                            }
+                        )
+                        .opacity(controllerReady ? 1 : 0)
+                    } else {
+                        InlineStoryPlayerLayer(
+                            player: player,
+                            gravity: storyFit(contentMode).videoGravity,
+                            onReadyForDisplay: playback.playerLayerDidBecomeReady
+                        )
+                        .opacity(playback.showPlayerLayer ? 1 : 0)
+                    }
                 }
             } else {
                 CampaignCanvasRemoteMedia(url: url, contentMode: contentMode)
@@ -165,14 +159,14 @@ struct CanvasStoryRailMedia: View {
         .onAppear {
             guard isVideo else { return }
             playback.update(
-                // A rail card loops silently until it is tapped: it has no
-                // progress of its own to drive and no turn to wait for.
                 state: StoryVideoPlaybackState(
                     demand: .playback(.scheduled),
-                    active: true,
-                    muted: true,
-                    repeatWindow: true,
-                    restartGeneration: 0
+                    active: autoplay,
+                    muted: muted,
+                    repeatWindow: loop,
+                    restartGeneration: 0,
+                    rewindOnEnd: loop,
+                    repeatWhenInactive: showControls
                 ),
                 events: StoryVideoPlaybackEvents()
             )
@@ -225,7 +219,9 @@ func canvasStoryItem(
 
 func canvasStoryItem(_ page: CampaignCanvasStoryPage) -> StoryItemConfig {
     let mediaType: StoryMediaType = page.thumbnailIsVideo ? .video : .image
-    let boxFit = StoryMediaFit.fromWireValue(page.pageFit, mediaType: mediaType)
+    let boxFit: StoryMediaFit = page.pageFit == "fill"
+        ? .fill
+        : StoryMediaFit.fromWireValue(page.pageFit, mediaType: mediaType)
     let thumbnailBoxFit = StoryMediaFit.fromWireValue(page.thumbnailFit, mediaType: mediaType)
     return StoryItemConfig(
         type: mediaType,
@@ -557,8 +553,10 @@ struct CanvasStoryRailRenderer: View {
                     startMuted: startMuted,
                     isDark: isDark,
                     onAction: onAction,
-                    onDismiss: { openIndex = nil }
+                    onDismiss: { openIndex = nil },
+                    safeAreaInsets: activeFloaterWindowSafeAreaInsets
                 )
+                .ignoresSafeArea()
                 .onAppear {
                     reportInteraction(
                         .storyOpened(index: openIndex ?? 0, total: pages.count)
@@ -586,6 +584,11 @@ private extension CampaignCanvasStoryThumbnailPlaybackMode {
 /// player's volume rather than rebuilding it. The first version ran a single
 /// timer regardless of the media, so a 30-second clip was cut off after the
 /// story's authored 5 and a hold did nothing.
+private struct CanvasStoryMediaKey: Hashable {
+    let index: Int
+    let generation: Int
+}
+
 struct CanvasStoryViewer: View {
     let pages: [CampaignCanvasStoryPage]
     let chrome: CampaignCanvas
@@ -598,16 +601,8 @@ struct CanvasStoryViewer: View {
     /// Whether to draw the authored page and chrome layers over the media backdrop.
     /// Floater stories suppress these while their media aperture is moving.
     var showsOverlays = true
-    /// The unsafe margins of the region this viewer was handed, when the caller
-    /// draws it somewhere that does not carve them out on its own.
-    ///
-    /// A `fullScreenCover` presents its content inside the safe area, so the
-    /// reader below already reports the safe region and these stay `.zero` —
-    /// that is the story rail's path. The floater's story is drawn inline in
-    /// `DigiaHost`'s full-bleed overlay layer instead, which is deliberately
-    /// `ignoresSafeArea()` so the collapsed window can sit anywhere on the
-    /// screen; nothing there insets this viewer, so the caller passes the
-    /// device's own insets and they are applied below.
+    /// Physical safe-area insets supplied by the full-bleed host. Media fills
+    /// the screen while authored page and chrome content stay inside these margins.
     var safeAreaInsets = EdgeInsets()
 
     @State private var index = 0
@@ -615,10 +610,8 @@ struct CanvasStoryViewer: View {
     @State private var muted = true
     @State private var paused = false
     @State private var ticker: Timer?
-    @State private var player: AVPlayer?
-    /// Set once the clip reports a real duration; until then the story runs on
-    /// its authored one, which is also the fallback for an unplayable video.
-    @State private var videoDuration: TimeInterval?
+    @State private var playbackGeneration = 0
+    @State private var displayedMediaKey = CanvasStoryMediaKey(index: 0, generation: 0)
 
     // ── analytics ──
     //
@@ -629,13 +622,20 @@ struct CanvasStoryViewer: View {
     @State private var completedReported = false
 
     private var page: CampaignCanvasStoryPage { pages[min(max(0, index), pages.count - 1)] }
+    private var currentMediaKey: CanvasStoryMediaKey {
+        CanvasStoryMediaKey(index: index, generation: playbackGeneration)
+    }
+
+    private var renderedMediaKeys: [CanvasStoryMediaKey] {
+        displayedMediaKey == currentMediaKey
+            ? [currentMediaKey]
+            : [displayedMediaKey, currentMediaKey]
+    }
 
     var body: some View {
         GeometryReader { proxy in
-            // The width the chrome and the page are scaled against: the reader
-            // minus any margin the caller declared unsafe. Zero on the presented
-            // path, where the reader is already the safe region, so that path
-            // scales exactly as it always did.
+            // The width the chrome and page are scaled against: the full-bleed
+            // reader minus the device's unsafe margins.
             let contentWidth = max(
                 0, proxy.size.width - safeAreaInsets.leading - safeAreaInsets.trailing
             )
@@ -730,17 +730,42 @@ struct CanvasStoryViewer: View {
             // story's media is the screen.
             .background {
                 CanvasStoryMediaBackdrop {
-                    if !page.thumbnailUrl.isEmpty {
-                        if page.thumbnailIsVideo, let player {
-                            CanvasStoryVideoView(
-                                player: player,
-                                contentMode: canvasContentMode(page.pageFit)
-                            )
-                        } else if !page.thumbnailIsVideo {
-                            CampaignCanvasRemoteMedia(
-                                url: page.thumbnailUrl,
-                                contentMode: canvasContentMode(page.pageFit)
-                            )
+                    ZStack {
+                        ForEach(renderedMediaKeys, id: \.self) { mediaKey in
+                            let mediaPage = pages[mediaKey.index]
+                            if mediaPage.thumbnailIsVideo, !mediaPage.thumbnailUrl.isEmpty {
+                                InlineStoryVideoView(
+                                    item: canvasStoryItem(mediaPage),
+                                    active: mediaKey == currentMediaKey && !paused,
+                                    muted: muted,
+                                    onReadyForDisplay: {
+                                        guard mediaKey == currentMediaKey else { return }
+                                        displayedMediaKey = mediaKey
+                                    },
+                                    onProgress: {
+                                        guard mediaKey == currentMediaKey,
+                                              mediaKey == displayedMediaKey else { return }
+                                        progress = CGFloat($0)
+                                    },
+                                    onEnded: {
+                                        guard mediaKey == currentMediaKey else { return }
+                                        step(1)
+                                    },
+                                    onFailed: {
+                                        guard mediaKey == currentMediaKey else { return }
+                                        displayedMediaKey = mediaKey
+                                        startAuthoredTimer()
+                                    }
+                                )
+                                .id(mediaKey)
+                                .opacity(mediaKey == displayedMediaKey ? 1 : 0)
+                            } else if !mediaPage.thumbnailUrl.isEmpty {
+                                CampaignCanvasRemoteMedia(
+                                    url: mediaPage.thumbnailUrl,
+                                    contentMode: canvasContentMode(mediaPage.pageFit)
+                                )
+                                .opacity(mediaKey == displayedMediaKey ? 1 : 0)
+                            }
                         }
                     }
                 }
@@ -752,7 +777,7 @@ struct CanvasStoryViewer: View {
             muted = startMuted
             openedAt = Date()
             reportInteraction(.storyPageViewed(index: index, total: pages.count))
-            start()
+            start(retainingDisplayedMedia: false)
         }
         .onChange(of: index) { newIndex in
             reportInteraction(.storyPageViewed(index: newIndex, total: pages.count))
@@ -806,57 +831,48 @@ struct CanvasStoryViewer: View {
     private func pause() {
         guard !paused else { return }
         paused = true
-        player?.pause()
     }
 
     private func resume() {
         guard paused else { return }
         paused = false
-        player?.play()
     }
 
     private func toggleMute() {
         muted.toggle()
-        // Volume on the live player rather than a rebuild, which is what made
-        // muting restart the clip from zero.
-        player?.isMuted = muted
     }
 
     private func stop() {
         ticker?.invalidate()
         ticker = nil
-        player?.pause()
-        player = nil
-        videoDuration = nil
     }
 
-    private func start() {
+    private func start(retainingDisplayedMedia: Bool = true) {
         stop()
         progress = 0
         paused = false
+        playbackGeneration += 1
 
         let current = page
-        if current.thumbnailIsVideo, !current.thumbnailUrl.isEmpty,
-           let url = URL(string: current.thumbnailUrl) {
-            let item = AVPlayer(url: url)
-            item.isMuted = muted
-            item.play()
-            player = item
+        if !retainingDisplayedMedia || !current.thumbnailIsVideo || current.thumbnailUrl.isEmpty {
+            displayedMediaKey = currentMediaKey
         }
+        if current.thumbnailIsVideo, !current.thumbnailUrl.isEmpty { return }
+
+        startAuthoredTimer()
+    }
+
+    private func startAuthoredTimer() {
+        ticker?.invalidate()
+        let current = page
+        let mediaKey = currentMediaKey
 
         let interval = 1.0 / 30.0
         ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             Task { @MainActor in
+                guard mediaKey == currentMediaKey else { return }
                 guard !paused else { return }
-                if let player, let duration = player.currentItem?.duration.seconds,
-                   duration.isFinite, duration > 0 {
-                    // The clip's own length wins once it is known, so a story
-                    // ends when the video does rather than on a guess.
-                    videoDuration = duration
-                    progress = CGFloat(player.currentTime().seconds / duration)
-                } else {
-                    progress += CGFloat(interval / max(0.1, current.duration))
-                }
+                progress += CGFloat(interval / max(0.1, current.duration))
                 if progress >= 1 { step(1) }
             }
         }

@@ -26,6 +26,8 @@ struct StoryVideoPlaybackState: Equatable {
     let muted: Bool
     let repeatWindow: Bool
     let restartGeneration: Int
+    var rewindOnEnd = true
+    var repeatWhenInactive = false
 }
 
 struct StoryVideoPlaybackEvents {
@@ -373,16 +375,20 @@ final class StoryVideoPlayback: ObservableObject {
             events.onEnded()
             return
         }
-        if state.active, state.repeatWindow {
+        if (state.active || state.repeatWhenInactive), state.repeatWindow {
             seekToStart(retryAtZero: true, hideCurrentFrame: false) { [weak self] in
-                guard let self, self.state.active, self.applicationActive else { return }
+                guard let self,
+                      self.state.active || self.state.repeatWhenInactive,
+                      self.applicationActive else { return }
                 self.completionHandled = false
                 self.player?.play()
             }
         } else {
             // Sequential handoff must not wait for a platform seek callback.
             events.onEnded()
-            seekToStart(retryAtZero: true, hideCurrentFrame: false)
+            if state.rewindOnEnd {
+                seekToStart(retryAtZero: true, hideCurrentFrame: false)
+            }
         }
     }
 
