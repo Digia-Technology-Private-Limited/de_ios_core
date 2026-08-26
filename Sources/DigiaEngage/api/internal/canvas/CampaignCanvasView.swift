@@ -697,9 +697,12 @@ private struct CampaignCanvasTextView: View {
                 )
             },
             spans: block.spans,
-            drawingOutsets: glyphShadowOutsets
+            drawingOutsets: glyphShadowOutsets,
+            allowGlyphOverflow: centerVertically
         )
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: block.alignment)
+        .frame(
+            maxWidth: .infinity, maxHeight: .infinity,
+            alignment: centerVertically ? block.centeredVerticallyAlignment : block.alignment)
     }
 
     private var glyphShadow: NSShadow? {
@@ -769,9 +772,6 @@ private struct CampaignCanvasTextView: View {
                 .foregroundColor: color,
                 .paragraphStyle: paragraph,
             ]
-            if centerVertically, let lineHeight = baseTypography.lineHeight {
-                attributes[.baselineOffset] = (lineHeight - font.lineHeight) / 2
-            }
             if let glyphShadow { attributes[.shadow] = glyphShadow }
             if let spacing = typography?.letterSpacing ?? baseTypography.letterSpacing, spacing != 0
             {
@@ -816,6 +816,7 @@ private struct CanvasRichText: UIViewRepresentable {
     let onSpan: (CampaignCanvasTextSpan) -> Void
     var spans: [CampaignCanvasTextSpan] = []
     var drawingOutsets: UIEdgeInsets = .zero
+    var allowGlyphOverflow = false
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var spans: [CampaignCanvasTextSpan] = []
@@ -855,6 +856,7 @@ private struct CanvasRichText: UIViewRepresentable {
         context.coordinator.onSpan = onSpan
         let textView = view.textView
         view.drawingOutsets = drawingOutsets
+        textView.clipsToBounds = !allowGlyphOverflow
         textView.textStorage.setAttributedString(attributed)
         textView.textAlignment = textAlignment
         textView.textContainer.maximumNumberOfLines = max(0, maxLines)
@@ -898,7 +900,6 @@ private final class CanvasRichTextContainerView: UIView {
         super.init(frame: .zero)
         backgroundColor = .clear
         clipsToBounds = false
-        textView.clipsToBounds = false
         textView.textContainerInset = .zero
         addSubview(textView)
     }
@@ -1722,6 +1723,9 @@ extension CampaignCanvasTextBlock {
         let vertical: VerticalAlignment =
             verticalAlign == .top ? .top : (verticalAlign == .bottom ? .bottom : .center)
         return Alignment(horizontal: horizontal, vertical: vertical)
+    }
+    fileprivate var centeredVerticallyAlignment: Alignment {
+        Alignment(horizontal: alignment.horizontal, vertical: .center)
     }
 }
 extension CampaignCanvasStrokeCap {
