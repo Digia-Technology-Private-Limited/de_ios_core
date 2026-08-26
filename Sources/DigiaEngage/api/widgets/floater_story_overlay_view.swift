@@ -407,13 +407,13 @@ private struct FloaterStorySessionView: View {
             )
             orchestrator.dismiss(.userClose)
         } label: {
-            Image(systemName: "xmark")
-                .font(.system(size: config.controls.iconSize, weight: .semibold))
-                .foregroundColor(.white)
+            FloaterVectorIcon(glyph: .close)
+                .fill(Color.white)
                 .frame(
-                    width: config.controls.iconSize * 1.6,
-                    height: config.controls.iconSize * 1.6
+                    width: config.controls.iconSize,
+                    height: config.controls.iconSize
                 )
+                .padding(config.controls.iconSize * 0.3)
                 .background(Color.black.opacity(0.55))
                 .clipShape(Circle())
         }

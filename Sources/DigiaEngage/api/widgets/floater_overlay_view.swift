@@ -1120,7 +1120,7 @@ private struct FloaterChromeIcon: View {
 /// The floater's chrome glyphs, ported byte-for-byte from Android core's own
 /// `drawable/ic_*.xml` vectors (`android:pathData`) so both platforms render the
 /// identical shape rather than each platform's closest built-in equivalent.
-private enum FloaterIconGlyph {
+enum FloaterIconGlyph {
     case close, fullscreen, fullscreenExit, volumeUp, volumeOff, play, pause
 
     /// fullscreen/fullscreenExit are authored as open stroked polylines (matching
@@ -1181,7 +1181,7 @@ private enum FloaterIconGlyph {
 /// way `Rectangle`/`Circle` do — a raw `Path` alone is sized to its 24x24 source
 /// viewport and won't rescale to a `.frame(...)` on its own; only cheap geometry
 /// (an affine transform), not any string parsing, happens per render here.
-private struct FloaterVectorIcon: Shape {
+struct FloaterVectorIcon: Shape {
     let glyph: FloaterIconGlyph
     private let viewBox: CGFloat = 24
 
