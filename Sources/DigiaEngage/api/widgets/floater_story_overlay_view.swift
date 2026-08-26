@@ -74,9 +74,9 @@ private struct FloaterStorySessionView: View {
     /// Outlives `orchestrator.storyOpen`: the orchestrator flips that the instant the user closes,
     /// but the viewer has to stay mounted until the collapse has finished running.
     @State private var viewerMounted = false
-    /// Shows the story page/chrome only after the hero aperture has reached full screen.
-    @State private var storyContentVisible = false
-    @State private var storyContentRevealToken = 0
+    /// The page overlay and full-screen chrome appear only after the media aperture has landed.
+    @State private var storyOverlaysVisible = false
+    @State private var storyOverlayRevealToken = 0
 
     private var config: FloaterStoryConfig { state.config }
     private var isDark: Bool { canvasTheme.isDark(colorScheme) }
@@ -114,6 +114,10 @@ private struct FloaterStorySessionView: View {
                 ? config.behavior.expandTransition
                 : config.behavior.collapseTransition
             let windowAlpha = floaterStoryWindowAlpha(
+                type: activeTransition.type,
+                phase: storyPhase
+            )
+            let heroAlpha = floaterStoryHeroAlpha(
                 type: activeTransition.type,
                 phase: storyPhase
             )
@@ -220,15 +224,17 @@ private struct FloaterStorySessionView: View {
 
                     ZStack(alignment: .topLeading) {
                         Color.black
-                        if storyContentVisible {
-                            storyViewer(safeAreaInsets: safe)
-                                .frame(width: screenSize.width, height: screenSize.height)
-                                .transition(.identity)
-                        }
+                        storyViewer(
+                            safeAreaInsets: safe,
+                            showsOverlays: storyOverlaysVisible
+                        )
+                        .frame(width: screenSize.width, height: screenSize.height)
+                        .transition(.identity)
                     }
                     .frame(width: heroRect.width, height: heroRect.height, alignment: .topLeading)
                     .clipShape(RoundedRectangle(cornerRadius: heroRadius))
                     .position(x: heroRect.midX, y: heroRect.midY)
+                    .opacity(heroAlpha)
                     .zIndex(2)
                 }
             }
@@ -266,28 +272,28 @@ private struct FloaterStorySessionView: View {
     /// cancelled. A re-open inside that window is safe — `viewerMounted` is already true and the
     /// deferred close checks the orchestrator before acting.
     private func runStoryTransition(opening: Bool) {
-        storyContentRevealToken += 1
-        let revealToken = storyContentRevealToken
+        storyOverlayRevealToken += 1
+        let revealToken = storyOverlayRevealToken
         if opening {
             let expand = config.behavior.expandTransition
             viewerMounted = true
             orchestrator.setStoryOverlayActive(true)
-            storyContentVisible = false
+            storyOverlaysVisible = false
             if expand.isInstant {
                 storyPhase = 1
-                storyContentVisible = true
+                storyOverlaysVisible = true
                 return
             }
             withAnimation(storyEaseInOutQuart(duration: expand.duration)) { storyPhase = 1 }
             DispatchQueue.main.asyncAfter(deadline: .now() + expand.duration) {
-                if storyContentRevealToken == revealToken, orchestrator.storyOpen {
-                    storyContentVisible = true
+                if storyOverlayRevealToken == revealToken, orchestrator.storyOpen {
+                    storyOverlaysVisible = true
                 }
             }
             return
         }
         let collapse = config.behavior.collapseTransition
-        storyContentVisible = false
+        storyOverlaysVisible = false
         if collapse.isInstant {
             storyPhase = 0
             viewerMounted = false
@@ -351,7 +357,7 @@ private struct FloaterStorySessionView: View {
     /// free; this one is handed the whole screen, so without these its chrome sits under the
     /// status bar and its bottom-anchored page runs under the home indicator.
     @ViewBuilder
-    private func storyViewer(safeAreaInsets: EdgeInsets) -> some View {
+    private func storyViewer(safeAreaInsets: EdgeInsets, showsOverlays: Bool) -> some View {
         if case .story(
             _, let pages, _, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
         ) = config.story {
@@ -367,6 +373,7 @@ private struct FloaterStorySessionView: View {
                 isDark: isDark,
                 onAction: runCanvasAction,
                 onDismiss: { orchestrator.closeStory() },
+                showsOverlays: showsOverlays,
                 safeAreaInsets: safeAreaInsets
             )
             .environment(\.digiaVariables, state.variableContext)

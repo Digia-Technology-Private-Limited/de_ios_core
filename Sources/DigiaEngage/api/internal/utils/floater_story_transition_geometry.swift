@@ -2,15 +2,18 @@ import SwiftUI
 
 /// The geometry behind the window↔story transition.
 ///
-/// `hero` grows a *box* from the window's rect to the full screen — `floaterStoryHeroRect`.
-/// The box is an aperture that grows first; the story UI itself is mounted only after the
-/// aperture has reached full screen.
+/// `hero` grows a *box* from the window's rect to the full screen — `floaterStoryHeroRect` — and
+/// the story is drawn inside it, at its final full-screen size the whole way. The box is an
+/// aperture widening onto the story UI; the content is visible immediately inside the collapsed
+/// aperture, then the aperture grows to the screen.
 ///
 /// Two earlier shapes were wrong and are worth naming, because both are the obvious thing to try.
 /// Scaling a presented viewer re-renders a video, a canvas stage and a chrome layer on every frame
 /// — that stutters — and *stretches* all three on the way, the exact glitch the PiP's own comment
-/// warns about. The viewer therefore is not transformed with the box; it appears only after the
-/// hero has landed.
+/// warns about. Withholding the story until the box lands avoids that transform, but exposes the
+/// aperture's black backing during both expand and collapse. Keeping a full-size media surface
+/// behind the aperture avoids both problems: nothing is scaled, and nothing waits. Full-screen
+/// overlays are added only after the aperture lands.
 ///
 /// Both are driven by one phase, 0 = the window, 1 = full screen. The Android SDK's
 /// `FloaterStoryTransitionGeometry.kt` is the same arithmetic; the two are meant to stay in step.
@@ -42,14 +45,27 @@ func floaterStoryHeroCornerRadius(windowRadius: CGFloat, phase: CGFloat) -> CGFl
     windowRadius * (1 - min(max(phase, 0), 1))
 }
 
+/// How opaque the story media aperture is at `phase`.
+///
+/// It reaches full opacity before the floating canvas begins fading. In reverse, the canvas is
+/// therefore fully visible before the aperture disappears, so unmounting the viewer cannot cause
+/// a final-frame snap.
+func floaterStoryHeroAlpha(type: FloaterStoryTransitionType, phase: CGFloat) -> CGFloat {
+    let t = min(max(phase, 0), 1)
+    switch type {
+    case .hero:
+        return min(max(t * 4, 0), 1)
+    }
+}
+
 /// How opaque the small window is at `phase`.
 ///
-/// Fades it out over the first half, while the growing box — which starts on exactly the same rect
-/// — takes over from it.
+/// It remains fully visible until the story media aperture is opaque, then fades during the next
+/// quarter of the transition. The reverse order produces a continuous collapse handoff.
 func floaterStoryWindowAlpha(type: FloaterStoryTransitionType, phase: CGFloat) -> CGFloat {
     let t = min(max(phase, 0), 1)
     switch type {
     case .hero:
-        return min(max(1 - t * 2, 0), 1)
+        return min(max((0.5 - t) * 4, 0), 1)
     }
 }

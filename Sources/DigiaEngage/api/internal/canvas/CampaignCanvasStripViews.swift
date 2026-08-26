@@ -595,6 +595,9 @@ struct CanvasStoryViewer: View {
     let isDark: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
     let onDismiss: () -> Void
+    /// Whether to draw the authored page and chrome layers over the media backdrop.
+    /// Floater stories suppress these while their media aperture is moving.
+    var showsOverlays = true
     /// The unsafe margins of the region this viewer was handed, when the caller
     /// draws it somewhere that does not carve them out on its own.
     ///
@@ -652,6 +655,8 @@ struct CanvasStoryViewer: View {
                         .onChanged { _ in pause() }
                         .onEnded { _ in resume() }
                 )
+                .allowsHitTesting(showsOverlays)
+                .accessibilityHidden(!showsOverlays)
 
                 // Both the overlay and the chrome are authored against the safe
                 // region, so both draw at the same scale and inside it.
@@ -676,6 +681,9 @@ struct CanvasStoryViewer: View {
                         onAction: pageAction
                     )
                 }
+                .opacity(showsOverlays ? 1 : 0)
+                .allowsHitTesting(showsOverlays)
+                .accessibilityHidden(!showsOverlays)
 
                 ScaledCanvasStage(
                     canvas: chrome,
@@ -699,6 +707,9 @@ struct CanvasStoryViewer: View {
                     \.canvasStoryToggleMute,
                     CanvasStoryCallback(run: { toggleMute() })
                 )
+                .opacity(showsOverlays ? 1 : 0)
+                .allowsHitTesting(showsOverlays)
+                .accessibilityHidden(!showsOverlays)
             }
             // Inside the safe region, and the backdrop below outside it. The
             // padding is *inside* the frame that follows, so the stack is offered
