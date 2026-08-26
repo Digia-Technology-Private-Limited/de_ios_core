@@ -854,7 +854,7 @@ struct CanvasStoryViewer: View {
                     // ends when the video does rather than on a guess.
                     videoDuration = duration
                     progress = CGFloat(player.currentTime().seconds / duration)
-                } else if !current.thumbnailIsVideo
+                } else if !current.thumbnailIsVideo || player == nil
                             || player?.currentItem?.status == .failed {
                     progress += CGFloat(interval / max(0.1, current.duration))
                 }
