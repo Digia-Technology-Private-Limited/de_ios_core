@@ -219,7 +219,9 @@ func canvasStoryItem(
 
 func canvasStoryItem(_ page: CampaignCanvasStoryPage) -> StoryItemConfig {
     let mediaType: StoryMediaType = page.thumbnailIsVideo ? .video : .image
-    let boxFit = StoryMediaFit.fromWireValue(page.pageFit, mediaType: mediaType)
+    let boxFit: StoryMediaFit = page.pageFit == "fill"
+        ? .fill
+        : StoryMediaFit.fromWireValue(page.pageFit, mediaType: mediaType)
     let thumbnailBoxFit = StoryMediaFit.fromWireValue(page.thumbnailFit, mediaType: mediaType)
     return StoryItemConfig(
         type: mediaType,
