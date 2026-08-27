@@ -243,8 +243,11 @@ private struct GuideStepOverlay: View {
                     )
                     .contentShape(Rectangle())
                     .onTapGesture {
-                        guard config.overlay.dismissOnTap else { return }
-                        if imageURL == nil { onDismiss() } else { onAdvance() }
+                        if isAnchorless {
+                            if config.outsideTapBehavior == .next { onAdvance() }
+                        } else if config.overlay.dismissOnTap {
+                            onDismiss()
+                        }
                     }
                     .ignoresSafeArea()
                 } else {
