@@ -16,6 +16,11 @@ enum GuideActionType: String {
     }
 }
 
+enum GuideOutsideTapBehavior: String, Equatable {
+    case next
+    case nothing
+}
+
 struct GuideAction: Equatable {
     let id: String
     let label: String
@@ -92,6 +97,7 @@ struct GuideStepWidgetConfig: Equatable {
     let overlay: OverlayConfig
     let content: GuideContentConfig
     let actions: [GuideAction]
+    let outsideTapBehavior: GuideOutsideTapBehavior
     let layoutMode: String
     let canvas: CampaignCanvas?
 
@@ -320,6 +326,9 @@ struct GuideStepWidgetConfig: Equatable {
             overlay: overlay,
             content: content,
             actions: actions,
+            outsideTapBehavior: GuideOutsideTapBehavior(
+                rawValue: json.string("outsideTapBehavior", default: "next")
+            ) ?? .next,
             layoutMode: layoutMode,
             canvas: canvas
         )
