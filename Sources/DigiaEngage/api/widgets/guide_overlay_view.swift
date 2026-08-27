@@ -295,7 +295,7 @@ private struct GuideStepOverlay: View {
                     .contentShape(Rectangle())
                     .onTapGesture {
                         if isAnchorless {
-                            if config.overlay.dismissOnTap { onAdvance() }
+                            if config.outsideTapBehavior == .next { onAdvance() }
                         } else if isFlat {
                             if config.outsideTapBehavior == .next { onOutsideTap() }
                         } else if config.overlay.dismissOnTap {
