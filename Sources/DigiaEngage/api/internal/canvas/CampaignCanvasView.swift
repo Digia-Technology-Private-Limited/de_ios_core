@@ -9,6 +9,17 @@ import UIKit
 private let maxFloatingCanvasUpscale: CGFloat = 1.15
 private let canvasTextSpanElementID = "canvas_text_span"
 
+private struct CanvasVideoUsesStoryPlaybackKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var canvasVideoUsesStoryPlayback: Bool {
+        get { self[CanvasVideoUsesStoryPlaybackKey.self] }
+        set { self[CanvasVideoUsesStoryPlaybackKey.self] = newValue }
+    }
+}
+
 internal func anchorlessDesignScale(hostWidth: CGFloat, designWidth: CGFloat) -> CGFloat? {
     guard hostWidth.isFinite, hostWidth > 0,
         designWidth.isFinite, designWidth > 0
@@ -441,8 +452,10 @@ struct CampaignCanvasStage: View {
                     startMuted: startMuted,
                     isDark: isDark,
                     onAction: onAction,
-                    onDismiss: { storyOpenIndex = nil }
+                    onDismiss: { storyOpenIndex = nil },
+                    safeAreaInsets: activeFloaterWindowSafeAreaInsets
                 )
+                .ignoresSafeArea()
             }
         }
     }
@@ -1315,6 +1328,7 @@ private struct CanvasVideoRenderer: View {
     let fit: String
     let isDark: Bool
     @Environment(\.digiaVariables) private var variables
+    @Environment(\.canvasVideoUsesStoryPlayback) private var usesStoryPlayback
     @State private var player: AVPlayer?
     @State private var observer: NSObjectProtocol?
     private var url: String {
@@ -1323,12 +1337,25 @@ private struct CanvasVideoRenderer: View {
     var body: some View {
         CampaignCanvasBoxView(box: box, isDark: isDark) {
             if !url.isEmpty {
-                ZStack {
-                    Color.black
-                    if let player {
-                        CanvasPlayerController(
-                            player: player, controls: showControls,
-                            gravity: fit == "contain" ? .resizeAspect : .resizeAspectFill)
+                if usesStoryPlayback {
+                    CanvasStoryCachedMedia(
+                        url: url,
+                        isVideo: true,
+                        contentMode: fit == "contain" ? .fit : .fill,
+                        autoplay: autoplay,
+                        loop: loop,
+                        muted: muted,
+                        showControls: showControls
+                    )
+                    .id(url)
+                } else {
+                    ZStack {
+                        Color.black
+                        if let player {
+                            CanvasPlayerController(
+                                player: player, controls: showControls,
+                                gravity: fit == "contain" ? .resizeAspect : .resizeAspectFill)
+                        }
                     }
                 }
             }
@@ -1341,6 +1368,7 @@ private struct CanvasVideoRenderer: View {
         .onDisappear { teardown() }
     }
     private func setup() {
+        guard !usesStoryPlayback else { return }
         guard player == nil, let parsed = URL(string: url), !url.isEmpty else { return }
         let item = AVPlayerItem(url: parsed)
         let value = AVPlayer(playerItem: item)
@@ -1364,21 +1392,41 @@ private struct CanvasVideoRenderer: View {
     }
 }
 
-private struct CanvasPlayerController: UIViewControllerRepresentable {
+struct CanvasPlayerController: UIViewControllerRepresentable {
     let player: AVPlayer
     let controls: Bool
     let gravity: AVLayerVideoGravity
+    var onReadyForDisplay: () -> Void = {}
+
+    final class Coordinator {
+        var readyObservation: NSKeyValueObservation?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeUIViewController(context: Context) -> AVPlayerViewController {
         let value = AVPlayerViewController()
         value.player = player
         value.showsPlaybackControls = controls
         value.videoGravity = gravity
+        context.coordinator.readyObservation = value.observe(
+            \.isReadyForDisplay, options: [.initial, .new]
+        ) { controller, _ in
+            guard controller.isReadyForDisplay else { return }
+            Task { @MainActor in onReadyForDisplay() }
+        }
         return value
     }
     func updateUIViewController(_ value: AVPlayerViewController, context: Context) {
         value.player = player
         value.showsPlaybackControls = controls
         value.videoGravity = gravity
+    }
+
+    static func dismantleUIViewController(_ value: AVPlayerViewController, coordinator: Coordinator) {
+        coordinator.readyObservation?.invalidate()
+        coordinator.readyObservation = nil
+        value.player = nil
     }
 }
 

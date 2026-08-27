@@ -926,7 +926,7 @@ struct StoryRemoteImage: View {
 }
 
 @MainActor
-private struct InlineStoryVideoView: View {
+struct InlineStoryVideoView: View {
     let item: StoryItemConfig
     var active: Bool = true
     let muted: Bool
@@ -934,6 +934,7 @@ private struct InlineStoryVideoView: View {
     var onProgress: (@MainActor @Sendable (Double) -> Void)?
     var onEnded: (@MainActor @Sendable () -> Void)?
     var onBuffering: (@MainActor @Sendable (Bool) -> Void)?
+    var onFailed: (@MainActor @Sendable () -> Void)?
 
     @StateObject private var playback: StoryVideoPlayback
 
@@ -944,7 +945,8 @@ private struct InlineStoryVideoView: View {
         onReadyForDisplay: (@MainActor @Sendable () -> Void)? = nil,
         onProgress: (@MainActor @Sendable (Double) -> Void)? = nil,
         onEnded: (@MainActor @Sendable () -> Void)? = nil,
-        onBuffering: (@MainActor @Sendable (Bool) -> Void)? = nil
+        onBuffering: (@MainActor @Sendable (Bool) -> Void)? = nil,
+        onFailed: (@MainActor @Sendable () -> Void)? = nil
     ) {
         self.item = item
         self.active = active
@@ -953,6 +955,7 @@ private struct InlineStoryVideoView: View {
         self.onProgress = onProgress
         self.onEnded = onEnded
         self.onBuffering = onBuffering
+        self.onFailed = onFailed
         _playback = StateObject(wrappedValue: StoryVideoPlayback(
             urlString: item.url,
             purpose: .fullScreen(item)
@@ -993,8 +996,10 @@ private struct InlineStoryVideoView: View {
                 onProgress: { onProgress?($0) },
                 onEnded: { onEnded?() },
                 onBuffering: { onBuffering?($0) },
-                // A broken full-screen item advances rather than trapping the viewer.
-                onFailed: { onEnded?() }
+                // A broken full-screen item advances unless its caller provides a fallback clock.
+                onFailed: {
+                    if let onFailed { onFailed() } else { onEnded?() }
+                }
             )
         )
     }
