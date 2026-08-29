@@ -27,6 +27,16 @@ public struct DigiaConfig: Sendable {
     public let wrapperBinding: String?
     public let wrapperVersion: String?
     public let actionHandlers: DigiaActionHandlers
+    /// Whether the floating Digia debug bubble is shown by default in
+    /// debug-eligible builds. When `false` the bubble is hidden by default, but
+    /// the debug settings screen stays reachable via the debug-settings deep
+    /// link, from which the bubble can be re-enabled. A per-device toggle
+    /// flipped in debug settings overrides this default once set. Has no effect
+    /// in release/App-Store builds, where debug tools never show.
+    ///
+    /// Named `showDebugTools` (not `showsDebugTools`) for cross-stack uniformity
+    /// with the Android/Flutter/RN SDKs.
+    public let showDebugTools: Bool
 
     public init(
         apiKey: String,
@@ -37,7 +47,8 @@ public struct DigiaConfig: Sendable {
         analyticsConfig: AnalyticsConfig = AnalyticsConfig(),
         wrapperBinding: String? = nil,
         wrapperVersion: String? = nil,
-        actionHandlers: DigiaActionHandlers = DigiaActionHandlers()
+        actionHandlers: DigiaActionHandlers = DigiaActionHandlers(),
+        showDebugTools: Bool = true
     ) {
         self.apiKey = apiKey
         self.logLevel = logLevel
@@ -48,6 +59,7 @@ public struct DigiaConfig: Sendable {
         self.wrapperBinding = wrapperBinding
         self.wrapperVersion = wrapperVersion
         self.actionHandlers = actionHandlers
+        self.showDebugTools = showDebugTools
     }
 }
 
@@ -61,5 +73,6 @@ extension DigiaConfig: Equatable {
             && lhs.analyticsConfig == rhs.analyticsConfig
             && lhs.wrapperBinding == rhs.wrapperBinding
             && lhs.wrapperVersion == rhs.wrapperVersion
+            && lhs.showDebugTools == rhs.showDebugTools
     }
 }

@@ -125,6 +125,7 @@ struct ComponentRegistryServiceTests {
     @Test("turning recording on shows the debug bubble automatically")
     func enablingRecordingShowsBubble() async throws {
         let overlay = DigiaDebugOverlayController(defaults: makeDefaults())
+        overlay.applyConfigDefault(false)
         let (service, _) = makeService(debugOverlay: overlay)
         #expect(!overlay.isVisible)
 
