@@ -122,14 +122,6 @@ public enum Digia {
         SDKInstance.shared.populateCampaignBundle(bundleJson)
     }
 
-    public static func populateCampaignBundle(_ bundleJson: String, guideRenderer: String) {
-        guard #available(iOS 17, *) else { return }
-        SDKInstance.shared.populateCampaignBundle(
-            bundleJson,
-            guideRenderer: GuideRenderer(wireValue: guideRenderer)
-        )
-    }
-
     public static func setThemeMode(_ mode: DigiaThemeMode) {
         SDKInstance.shared.setThemeMode(mode)
     }
@@ -217,7 +209,7 @@ public enum Digia {
         SDKInstance.shared.clearAllInlineContent()
     }
 
-    /// Registers the React Native bridge callback used by the `react_native` guide renderer.
+    /// Registers the React Native bridge callback for Classic Guides.
     public static func setOnGuideRenderRequest(_ callback: ((CEPTriggerPayload) -> Void)?) {
         SDKInstance.shared.onGuideRenderRequest = callback
     }

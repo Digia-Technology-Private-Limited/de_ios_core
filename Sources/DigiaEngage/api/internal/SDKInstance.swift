@@ -52,7 +52,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Held because live test parses a campaign that never came through the
     /// bundle, and it has to resolve the same tokens the bundle's campaigns do.
     private var currentDesignTokens = DesignTokenCatalog.empty
-    private var guideRenderer = GuideRenderer.reactNative
 
     let campaignStore = CampaignStore()
     let controller = DigiaOverlayController()
@@ -213,7 +212,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             let bundle = try await CampaignFetcher(config: config).fetch()
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
-            guideRenderer = bundle.guideRenderer
         } catch {
             // Campaign fetch failure must not block SDK readiness.
             logVerbose("CampaignFetcher failed: \(error)")
@@ -333,16 +331,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// RN-only entrypoint: JS already fetched campaigns for its own rendering needs,
     /// so it hands the raw campaign-bundle response here instead of native re-fetching.
     /// Called once after `initialize` when `wrapperBinding == "react_native"`.
-    func populateCampaignBundle(
-        _ bundleJson: String,
-        guideRenderer resolvedGuideRenderer: GuideRenderer? = nil
-    ) {
+    func populateCampaignBundle(_ bundleJson: String) {
         var campaigns: [CampaignModel] = []
         do {
             let bundle = try CampaignFetcher.parse(Data(bundleJson.utf8), devicePlatform: "ios")
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
-            guideRenderer = resolvedGuideRenderer ?? bundle.guideRenderer
             DigiaLog.warning(
                 "[SDKInstance] populateCampaignBundle parsed raw=\(bundle.rawCampaigns.count) accepted=\(campaigns.count)"
             )
@@ -888,7 +882,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         case .guide(let guideConfig):
             if !guideConfig.isAnchorless,
                config?.wrapperBinding == "react_native",
-               guideRenderer == .reactNative,
                guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
             {
                 if context.liveTestGuideRequest != nil {
@@ -919,6 +912,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
                 logNativeGuideStage("route", "result=dropped reason=frequency_capped campaign_key=\(key)")
+                return false
+            }
+            guard guideConfig.steps.allSatisfy({ $0.widgetConfig.canvas != nil }) else {
+                let message = "campaign has no valid Canvas guide content"
+                lastCampaignDropReason = message
+                context.onDropped(.renderError, message: message)
+                DigiaLog.warning("[Guide] \(message)")
                 return false
             }
             if guideOrchestrator.state != nil, !guideConfig.steps.isEmpty { dismissGuide() }
@@ -1091,7 +1091,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
 
         let guideRequest: LiveTestGuideRenderRequest?
-        if let guideConfig = campaign.guideConfig, guideRenderer == .reactNative,
+        if let guideConfig = campaign.guideConfig,
            config?.wrapperBinding == "react_native",
            guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
         {
@@ -1143,14 +1143,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
         if !accepted {
             cleanUpLiveTestState(false)
-        } else if campaign.guideConfig?.isAnchorless == false {
+            return
+        }
+        if campaign.guideConfig?.isAnchorless == false {
             verifyFirstLiveTestGuideAnchorAfterLayout(
                 campaign: campaign,
                 payload: payload,
                 testContext: testContext,
                 guideRequest: guideRequest
             )
-        } else if campaign.guideConfig?.isAnchorless == true {
+        }
+        if campaign.guideConfig != nil, guideRequest == nil {
             let seconds = Self.liveTestNoMatchTimeoutSeconds
             let graceNanoseconds = seconds * 1_000_000_000
             let maxDelayMs = (UInt64.max - graceNanoseconds) / 1_000_000
@@ -1166,7 +1169,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 else { return }
                 context.reportFailed(
                     .renderError,
-                    message: "Anchorless Spotlight host did not render within \(seconds)s"
+                    message: "Guide host did not render within \(seconds)s"
                 )
                 if self.guideOrchestrator.state?.payload.cepCampaignId == cepCampaignId {
                     self.guideOrchestrator.dismiss()
@@ -2214,11 +2217,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
     }
 
-    func fireGuideEvent(_ eventName: String) {
-        guard let state = guideOrchestrator.state else { return }
-        events.toCep(.clicked(elementID: eventName), payload: state.payload)
-    }
-
     private func reportGuideCompletedIfNeeded(_ state: ActiveGuideState) {
         guard !guideCompletionFired else { return }
         guideCompletionFired = true
@@ -2395,7 +2393,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         isHostMounted = false
         font = DigiaFont()
         currentDesignTokens = .empty
-        guideRenderer = .reactNative
         onLiveTestGuideRenderRequest = nil
         guideHostActionHandler = nil
         campaignStore.clear()

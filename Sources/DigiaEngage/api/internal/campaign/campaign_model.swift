@@ -340,7 +340,6 @@ struct CampaignModel: Equatable {
             }
             let widgetConfig = GuideStepWidgetConfig.fromJson(
                 widgetJson,
-                schema: displayStyle == nil ? .nested : .flat,
                 displayStyle: displayStyle,
                 designTokens: designTokens
             )
