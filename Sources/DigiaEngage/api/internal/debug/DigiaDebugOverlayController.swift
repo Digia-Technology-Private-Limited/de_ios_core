@@ -25,17 +25,7 @@ final class DigiaDebugOverlayController: ObservableObject {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        // No persisted toggle yet → default visible; `applyConfigDefault` may
-        // lower this once `DigiaConfig.showDebugTools` is known at initialize.
-        self.isVisible = (defaults.object(forKey: Self.keyVisible) as? Bool) ?? true
-    }
-
-    /// Applies `DigiaConfig.showDebugTools` as the default visibility. A
-    /// per-device toggle previously persisted via `setVisible` wins over the
-    /// config default, so this is a no-op once the user has flipped the toggle.
-    func applyConfigDefault(_ visible: Bool) {
-        guard defaults.object(forKey: Self.keyVisible) == nil else { return }
-        isVisible = visible
+        self.isVisible = defaults.bool(forKey: Self.keyVisible)
     }
 
     /// Flips the persisted bubble-visibility toggle. Called from
