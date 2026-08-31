@@ -29,6 +29,7 @@ final class AnalyticsService {
     let queue: AnalyticsQueue
     private let staticContext: [String: Any]
     private let sender: any AnalyticsSender
+    private let requestHeaders: [String: String]
 
     private var flushTimer: Timer?
     /// Non-nil for the whole lifetime of a scheduled backoff wait (including
@@ -67,7 +68,8 @@ final class AnalyticsService {
         identity: AnalyticsIdentityManager,
         queue: AnalyticsQueue,
         staticContext: [String: Any],
-        sender: any AnalyticsSender = URLSessionAnalyticsSender()
+        sender: any AnalyticsSender = URLSessionAnalyticsSender(),
+        requestHeaders: [String: String] = [:]
     ) {
         self.config = config
         self.apiKey = apiKey
@@ -75,6 +77,7 @@ final class AnalyticsService {
         self.queue = queue
         self.staticContext = staticContext
         self.sender = sender
+        self.requestHeaders = requestHeaders
 
         identity.initialize(sessionTimeoutMs: config.sessionTimeoutMs)
         identity.onSessionRotated = { [weak self] in
@@ -176,7 +179,7 @@ final class AnalyticsService {
     // MARK: - Factory
 
     @MainActor
-    static func create(config: DigiaConfig) -> AnalyticsService? {
+    static func create(config: DigiaConfig, requestHeaders: [String: String]) -> AnalyticsService? {
         let ac = config.analyticsConfig
         guard ac.enabled else {
             DigiaLog.log(
@@ -197,8 +200,17 @@ final class AnalyticsService {
             staticContext: buildStaticContext(
                 wrapperBinding: config.wrapperBinding,
                 wrapperVersion: config.wrapperVersion
-            )
+            ),
+            requestHeaders: requestHeaders
         )
+    }
+
+    private var jsonHeaders: [String: String] {
+        requestHeaders.merging([
+            "Content-Type": "application/json",
+            "x-digia-project-id": apiKey,
+            "x-digia-device-id": identity.anonymousId,
+        ]) { _, value in value }
     }
 
     // MARK: - Session
@@ -215,7 +227,7 @@ final class AnalyticsService {
         let status = try? await sender.post(
             url: DigiaEndpoints.session,
             body: data,
-            headers: ["Content-Type": "application/json", "X-Digia-Project-Id": apiKey]
+            headers: jsonHeaders
         )
         DigiaLog.log(
             "session reported: HTTP \(status ?? -1) sessionId=\(identity.sessionId) anonymousId=\(identity.anonymousId)",
@@ -310,11 +322,7 @@ final class AnalyticsService {
             let statusCode = try await sender.post(
                 url: DigiaEndpoints.track,
                 body: body,
-                headers: [
-                    "Content-Type": "application/json",
-                    "X-Digia-Project-Id": apiKey,
-                    "X-Digia-Device-Id": identity.anonymousId,
-                ]
+                headers: jsonHeaders
             )
             DigiaLog.log("dispatchPending: HTTP \(statusCode)", tag: "DigiaAnalytics")
 

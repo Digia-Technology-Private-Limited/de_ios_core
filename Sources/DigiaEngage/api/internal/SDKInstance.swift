@@ -11,6 +11,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let payload: CEPTriggerPayload
     }
 
+    private(set) var requestHeaders: [String: String] = [:]
     @Published private(set) var config: DigiaConfig?
     @Published private(set) var sdkState: SDKState = .notInitialized
     @Published private(set) var isHostMounted = false
@@ -193,6 +194,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         self.config = config
         DigiaLog.configure(config.logLevel)
         DigiaEndpoints.configure(config)
+        requestHeaders = SDKRequestHeaders.make(
+            config: config, deviceId: AnalyticsIdentityManager().resolveAnonymousId()
+        )
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
 
         font = DigiaFont(fontFamily: config.fontFamily)
@@ -209,7 +213,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
         var campaigns: [CampaignModel] = []
         do {
-            let bundle = try await CampaignFetcher(config: config).fetch()
+            let bundle = try await CampaignFetcher(requestHeaders: requestHeaders).fetch()
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
         } catch {
@@ -289,7 +293,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
         sdkState = .ready
         if analyticsService == nil, let config {
-            analyticsService = AnalyticsService.create(config: config)
+            analyticsService = AnalyticsService.create(config: config, requestHeaders: requestHeaders)
         }
         if let config, let analyticsService {
             componentRegistry.configure(
@@ -304,6 +308,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             }
             liveTestService.configure(
                 config: config,
+                requestHeaders: requestHeaders,
                 deviceId: analyticsService.identity.anonymousId,
                 isDebugBuild: isDebugBuild,
                 onCampaignTest: { [weak self] invocation in self?.handleLiveTestCampaign(invocation)
@@ -2388,6 +2393,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         analyticsService = nil
         frequencyManager = nil
         config = nil
+        requestHeaders = [:]
         hostActionExecutor.clearHandlers()
         sdkState = .notInitialized
         isHostMounted = false

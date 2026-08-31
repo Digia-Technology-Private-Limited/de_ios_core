@@ -15,7 +15,7 @@ struct CampaignAPIResponse { let statusCode: Int; let data: Data }
 protocol CampaignAPI { func fetchCampaignBundle() async throws -> CampaignAPIResponse }
 
 private struct URLSessionCampaignAPI: CampaignAPI {
-    let config: DigiaConfig
+    let requestHeaders: [String: String]
     let session: URLSession
 
     func fetchCampaignBundle() async throws -> CampaignAPIResponse {
@@ -25,17 +25,7 @@ private struct URLSessionCampaignAPI: CampaignAPI {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.setValue(config.apiKey, forHTTPHeaderField: "x-digia-project-id")
-        request.setValue("ios", forHTTPHeaderField: "X-Digia-Platform")
-        request.setValue(
-            buildSdkVersion(
-                binding: config.wrapperBinding ?? "native",
-                platform: "ios",
-                wrapperVersion: config.wrapperVersion,
-                core: DigiaSdkVersion.value
-            ),
-            forHTTPHeaderField: "x-digia-sdk-version"
-        )
+        for (key, value) in requestHeaders { request.setValue(value, forHTTPHeaderField: key) }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 10
         request.httpBody = Data("{}".utf8)
@@ -50,7 +40,7 @@ private struct URLSessionCampaignAPI: CampaignAPI {
 
 struct CampaignFetcher {
     let api: any CampaignAPI
-    init(config: DigiaConfig, session: URLSession = .shared) { api = URLSessionCampaignAPI(config: config, session: session) }
+    init(requestHeaders: [String: String], session: URLSession = .shared) { api = URLSessionCampaignAPI(requestHeaders: requestHeaders, session: session) }
     init(api: any CampaignAPI) { self.api = api }
 
     func fetch() async throws -> CampaignBundle {
