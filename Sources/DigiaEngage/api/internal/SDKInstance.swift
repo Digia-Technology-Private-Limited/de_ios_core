@@ -1308,6 +1308,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func reportNudgeImpression() {
         guard let nudge = controller.activeNudge else { return }
+        controller.startNudgeAutoDismiss()
         dwellTracker.markViewed(nudge.payload.cepCampaignId)
         // Bump frequency on "Digia Experience Viewed" (the moment the nudge shows).
         if !isLiveTestCepId(nudge.payload.cepCampaignId) {

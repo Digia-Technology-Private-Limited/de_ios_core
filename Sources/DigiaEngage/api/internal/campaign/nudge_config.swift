@@ -126,6 +126,7 @@ struct NudgeSurface: Equatable {
     let bottomSafeAreaMode: BottomSafeAreaMode
     /// Full-screen system-area treatment, applied to all window edges.
     var safeAreaMode: BottomSafeAreaMode = .insetContent
+    var autoDismissAfterMs: Int = 0
 
     var isBottomSheet: Bool { displayType == .bottomSheet }
     var isFullScreen: Bool { displayType == .fullScreen }
@@ -146,7 +147,8 @@ struct NudgeSurface: Equatable {
             minHorizontalMargin: minHorizontalMargin,
             useSafeArea: useSafeArea,
             bottomSafeAreaMode: bottomSafeAreaMode,
-            safeAreaMode: safeAreaMode
+            safeAreaMode: safeAreaMode,
+            autoDismissAfterMs: autoDismissAfterMs
         )
     }
 
@@ -176,7 +178,8 @@ struct NudgeSurface: Equatable {
                 CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue
             } ?? false,
             bottomSafeAreaMode: BottomSafeAreaMode.from(map["bottomSafeAreaMode"] as? String),
-            safeAreaMode: BottomSafeAreaMode.from(map["safeAreaMode"] as? String)
+            safeAreaMode: BottomSafeAreaMode.from(map["safeAreaMode"] as? String),
+            autoDismissAfterMs: min(map.positiveInt("autoDismissAfterMs") ?? 0, Int(Int32.max))
         )
     }
 
