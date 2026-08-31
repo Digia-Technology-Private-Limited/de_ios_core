@@ -164,9 +164,16 @@ private struct NudgeSheetView: View {
             cardBackground: hostPaintsCanvasBackground
                 ? canvas.map { AnyView(CampaignCanvasBackgroundView(paint: $0.background)) }
                 : nil,
-            cardOverlay: surface.showCloseButton
+            cardOverlay: surface.showCloseButton && surface.closeButton.placement == nil
                 ? AnyView(NudgeCloseButton(config: surface.closeButton, action: dismiss))
-                : nil
+                : nil,
+            viewportOverlay: canvas != nil && surface.showCloseButton && surface.closeButton.placement != nil
+                ? { bounds, viewport in
+                    AnyView(CanvasNudgeCloseOverlay(
+                        config: surface.closeButton, container: bounds, viewport: viewport,
+                        safeAreaInsets: activeWindowSafeAreaInsets, isBottomSheet: true, action: dismiss
+                    ))
+                } : nil
         )
         // The cover presents this content once per nudge, so `onAppear` is the
         // impression signal (Impressed → CEP + Digia "Viewed").
@@ -245,6 +252,16 @@ private struct NudgeDialogContainer: View {
                 ))
         }
         .frame(width: viewportSize.width, height: viewportSize.height)
+        .overlayPreferenceValue(NudgeCloseContainerBoundsKey.self) { anchor in
+            if let anchor, surface.showCloseButton, surface.closeButton.placement != nil {
+                GeometryReader { geometry in
+                    CanvasNudgeCloseOverlay(
+                        config: surface.closeButton, container: geometry[anchor], viewport: viewportSize,
+                        safeAreaInsets: safeAreaInsets, isBottomSheet: false, action: dismiss
+                    )
+                }
+            }
+        }
         .onPreferenceChange(DialogHeightKey.self) { contentHeight = $0 }
         // Fires once per presentation: the `.id(nudge.id)` on the container gives
         // each nudge a fresh view identity, so `onAppear` runs once.
@@ -269,13 +286,16 @@ private struct NudgeDialogContainer: View {
                         request, variables: presentation.variables, dismiss: dismiss)
                 }
             )
-            if surface.showCloseButton {
+            if surface.showCloseButton && surface.closeButton.placement == nil {
                 NudgeCloseButton(config: surface.closeButton, action: dismiss)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .contentShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .environment(\.digiaVariables, presentation.variables)
+        .anchorPreference(key: NudgeCloseContainerBoundsKey.self, value: .bounds) {
+            surface.closeButton.placement == nil ? nil : $0
+        }
     }
 
     /// Mirrors Flutter's `_DialogFrame`: centred, width-constrained, fully

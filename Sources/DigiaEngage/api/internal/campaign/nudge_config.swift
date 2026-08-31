@@ -38,11 +38,15 @@ struct NudgeCloseButtonConfig: Equatable {
     let backgroundColor: Color
     let iconColor: Color
     let iconSize: CGFloat
+    var placement: NudgeCloseButtonPlacement? = nil
+    var backgroundToken: CampaignColor? = nil
+    var iconToken: CampaignColor? = nil
 
     var diameter: CGFloat { iconSize + 10 }
 
     func scaled(_ factor: CGFloat) -> NudgeCloseButtonConfig {
-        NudgeCloseButtonConfig(
+        if placement != nil { return self }
+        return NudgeCloseButtonConfig(
             marginTop: marginTop * factor,
             marginRight: marginRight * factor,
             backgroundColor: backgroundColor,
@@ -59,9 +63,14 @@ struct NudgeCloseButtonConfig: Equatable {
         iconSize: 16
     )
 
-    static func fromJson(_ json: [String: Any]?) -> NudgeCloseButtonConfig {
+    static func fromJson(
+        _ json: [String: Any]?, canvasMode: Bool = false,
+        designTokens: DesignTokenCatalog = .empty
+    ) -> NudgeCloseButtonConfig {
         let map = json ?? [:]
         let defaults = NudgeCloseButtonConfig.defaults
+        let placement = canvasMode
+            ? NudgeCloseButtonPlacement.fromJson(map["placement"] as? [String: Any]) : nil
         return NudgeCloseButtonConfig(
             marginTop: nonNegative(
                 map.double("marginTop", default: Double(defaults.marginTop)),
@@ -76,7 +85,10 @@ struct NudgeCloseButtonConfig: Equatable {
             iconSize: nonNegative(
                 map.double("iconSize", default: Double(defaults.iconSize)),
                 fallback: defaults.iconSize
-            )
+            ),
+            placement: placement,
+            backgroundToken: placement == nil ? nil : try? designTokens.resolveColor(map["backgroundColor"]),
+            iconToken: placement == nil ? nil : try? designTokens.resolveColor(map["iconColor"])
         )
     }
 
@@ -104,7 +116,7 @@ struct NudgeSurface: Equatable {
     let backdropDismissible: Bool
     /// Render an "×" close affordance on the surface.
     let showCloseButton: Bool
-    /// Visual configuration for the fixed cross close affordance.
+    /// Visual configuration and optional canvas placement for the close affordance.
     let closeButton: NudgeCloseButtonConfig
     /// Show the drag-handle pill at the top of the sheet (bottom sheet only).
     let showHandle: Bool
@@ -142,7 +154,10 @@ struct NudgeSurface: Equatable {
 
     /// Decodes from the `container` object. Field names and defaults match
     /// Flutter's `NudgeParser._surface`.
-    static func fromJson(_ json: [String: Any]?) -> NudgeSurface {
+    static func fromJson(
+        _ json: [String: Any]?, canvasMode: Bool = false,
+        designTokens: DesignTokenCatalog = .empty
+    ) -> NudgeSurface {
         let map = json ?? [:]
         let widthPct = map.double("widthPct", default: 86)
         let decodedMargin = map.double("minHorizontalMargin", default: 24)
@@ -154,7 +169,9 @@ struct NudgeSurface: Equatable {
             padding: CGFloat(map.double("padding", default: 20)),
             backdropDismissible: map.bool("backdropDismissible", default: true),
             showCloseButton: map.bool("showCloseButton", default: false),
-            closeButton: NudgeCloseButtonConfig.fromJson(map["closeButton"] as? [String: Any]),
+            closeButton: NudgeCloseButtonConfig.fromJson(
+                map["closeButton"] as? [String: Any], canvasMode: canvasMode, designTokens: designTokens
+            ),
             showHandle: map.bool("showHandle", default: true),
             draggable: map.bool("draggable", default: true),
             // Stored as a 0…100 percentage; normalise to a 0…1 fraction.
@@ -215,7 +232,9 @@ struct NudgeConfig: Equatable {
             layout = parsedLayout
         }
         return NudgeConfig(
-            surface: NudgeSurface.fromJson(json["container"] as? [String: Any]),
+            surface: NudgeSurface.fromJson(
+                json["container"] as? [String: Any], canvasMode: canvas != nil, designTokens: designTokens
+            ),
             layout: layout,
             canvas: canvas,
             designWidth: designWidth,
