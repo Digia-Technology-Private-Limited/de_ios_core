@@ -38,16 +38,6 @@ enum BottomSafeAreaMode: String, Equatable, Sendable {
     }
 }
 
-enum NudgeSafeAreaMode: String, Equatable, Sendable {
-    case insetContent
-    case insetSurface
-    case none
-
-    static func from(_ value: String?) -> NudgeSafeAreaMode {
-        NudgeSafeAreaMode(rawValue: value ?? "") ?? .insetContent
-    }
-}
-
 struct NudgeCloseButtonConfig: Equatable {
     let marginTop: CGFloat
     let marginRight: CGFloat
@@ -135,7 +125,7 @@ struct NudgeSurface: Equatable {
     /// Bottom-system-area treatment for bottom sheets only.
     let bottomSafeAreaMode: BottomSafeAreaMode
     /// Full-screen system-area treatment, applied to all window edges.
-    var safeAreaMode: NudgeSafeAreaMode = .insetContent
+    var safeAreaMode: BottomSafeAreaMode = .insetContent
 
     var isBottomSheet: Bool { displayType == .bottomSheet }
     var isFullScreen: Bool { displayType == .fullScreen }
@@ -186,7 +176,7 @@ struct NudgeSurface: Equatable {
                 CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue
             } ?? false,
             bottomSafeAreaMode: BottomSafeAreaMode.from(map["bottomSafeAreaMode"] as? String),
-            safeAreaMode: NudgeSafeAreaMode.from(map["safeAreaMode"] as? String)
+            safeAreaMode: BottomSafeAreaMode.from(map["safeAreaMode"] as? String)
         )
     }
 
