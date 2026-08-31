@@ -6,11 +6,16 @@ import SwiftUI
 enum NudgeDisplayType: String, Equatable, Sendable {
     case bottomSheet
     case dialog
+    case fullScreen
 
     /// Decoded from the `container.displayType` wire value (default
-    /// `bottom_sheet`); only the literal `dialog` selects the dialog frame.
+    /// `bottom_sheet`). Existing unknown values retain the bottom-sheet fallback.
     static func from(_ value: String?) -> NudgeDisplayType {
-        value == "dialog" ? .dialog : .bottomSheet
+        switch value {
+        case "dialog": return .dialog
+        case "full_screen": return .fullScreen
+        default: return .bottomSheet
+        }
     }
 
     /// Analytics `display_style` value carried alongside nudge events.
@@ -18,6 +23,7 @@ enum NudgeDisplayType: String, Equatable, Sendable {
         switch self {
         case .bottomSheet: return "bottom_sheet"
         case .dialog: return "dialog"
+        case .fullScreen: return "full_screen"
         }
     }
 }
@@ -130,8 +136,12 @@ struct NudgeSurface: Equatable {
     let useSafeArea: Bool
     /// Bottom-system-area treatment for bottom sheets only.
     let bottomSafeAreaMode: BottomSafeAreaMode
+    /// Full-screen system-area treatment, applied to all window edges.
+    var safeAreaMode: BottomSafeAreaMode = .insetContent
+    var autoDismissAfterMs: Int = 0
 
     var isBottomSheet: Bool { displayType == .bottomSheet }
+    var isFullScreen: Bool { displayType == .fullScreen }
 
     func scaled(_ factor: CGFloat) -> NudgeSurface {
         NudgeSurface(
@@ -148,7 +158,9 @@ struct NudgeSurface: Equatable {
             widthFraction: widthFraction,
             minHorizontalMargin: minHorizontalMargin,
             useSafeArea: useSafeArea,
-            bottomSafeAreaMode: bottomSafeAreaMode
+            bottomSafeAreaMode: bottomSafeAreaMode,
+            safeAreaMode: safeAreaMode,
+            autoDismissAfterMs: autoDismissAfterMs
         )
     }
 
@@ -182,7 +194,9 @@ struct NudgeSurface: Equatable {
             useSafeArea: (map["useSafeArea"] as? NSNumber).map {
                 CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue
             } ?? false,
-            bottomSafeAreaMode: BottomSafeAreaMode.from(map["bottomSafeAreaMode"] as? String)
+            bottomSafeAreaMode: BottomSafeAreaMode.from(map["bottomSafeAreaMode"] as? String),
+            safeAreaMode: BottomSafeAreaMode.from(map["safeAreaMode"] as? String),
+            autoDismissAfterMs: min(map.positiveInt("autoDismissAfterMs") ?? 0, Int(Int32.max))
         )
     }
 
@@ -227,6 +241,10 @@ struct NudgeConfig: Equatable {
                 children: []
             )
         } else {
+            guard NudgeDisplayType.from((json["container"] as? [String: Any])?["displayType"] as? String) != .fullScreen else {
+                DigiaLog.warning("[NudgeConfig] rejected Full Screen nudge without Canvas layout")
+                return nil
+            }
             guard let parsedLayout = parser.parse(json) else { return nil }
             canvas = nil
             layout = parsedLayout
