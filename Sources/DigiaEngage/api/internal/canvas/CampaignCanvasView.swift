@@ -45,6 +45,12 @@ struct CampaignCanvasView: View {
         return surface.isBottomSheet || surface.isFullScreen ? base : min(base, maxFloatingCanvasUpscale)
     }
     var fittedScale: CGFloat {
+        if surface.isFullScreen {
+            // Fill the content viewport uniformly; its centered, clipped parent
+            // crops overflow without changing the authored composition.
+            return max(availableSize.width / max(canvas.width, 1),
+                       availableSize.height / max(canvas.height, 1))
+        }
         let naturalWidth = max(canvas.width * designScale, 1)
         let naturalHeight = max(canvas.height * designScale, 1)
         return designScale
