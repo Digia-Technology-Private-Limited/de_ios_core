@@ -53,6 +53,13 @@ public enum Digia {
             DigiaLog.warning("[Digia] presentDebugSettings() ignored — not a debug build.")
             return
         }
+        // The same link can reach here twice — the SDK opens the screen from its
+        // own deeplink handling, and a host that still routes the link itself
+        // calls in as well. Presenting a second time would only earn a UIKit
+        // "already presenting" warning, so treat the screen as already open.
+        guard !(presenter.presentedViewController is UIHostingController<DigiaDebugSettingsView>) else {
+            return
+        }
         let host = UIHostingController(rootView: DigiaDebugSettingsView())
         presenter.present(host, animated: true)
     }

@@ -195,6 +195,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         DigiaLog.configure(config.logLevel)
         DigiaEndpoints.configure(config)
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
+        // Config default for the debug bubble; an explicit per-device toggle
+        // persisted by DigiaDebugOverlayController wins over it.
+        debugOverlayController.applyConfigDefault(config.showDebugTools)
 
         font = DigiaFont(fontFamily: config.fontFamily)
         CampaignCanvasTheme.shared.update(config.themeMode)
