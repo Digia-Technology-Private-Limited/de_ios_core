@@ -33,6 +33,7 @@ final class LiveTestService: ObservableObject {
 
     func configure(
         config: DigiaConfig,
+        requestHeaders: [String: String],
         deviceId: String,
         isDebugBuild: Bool,
         onCampaignTest: @escaping (LiveTestInvocation) -> Void
@@ -47,6 +48,7 @@ final class LiveTestService: ObservableObject {
         let sseClient = LiveTestSSEClient(
             config: { config },
             deviceId: { deviceId },
+            requestHeaders: requestHeaders,
             deviceName: { [weak self] in self?.deviceName },
             onEvent: { event in
                 if case .campaignTest(let invocation) = event { onCampaignTest(invocation) }

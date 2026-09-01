@@ -209,7 +209,7 @@ struct CampaignCanvasParser {
     }
 
     private func parseBackground(_ json: [String: Any]?) throws -> CampaignCanvasPaint {
-        let paint = try parsePaint(json, allowImage: true)
+        let paint = try parsePaint(json, allowImage: true, imageScaleLimit: 10)
         return paint == .none ? .solid(.literal("#FFFFFFFF")) : paint
     }
 
@@ -348,7 +348,11 @@ struct CampaignCanvasParser {
         return CampaignCanvasBox(fill: fill, padding: parseInsets(json["padding"]), cornerRadius: parseCornerRadius(json["cornerRadius"], fallback: 0), border: try parseBorder(propertyObject(json["border"])), shadow: try parseShadow(propertyObject(json["shadow"])))
     }
 
-    private func parsePaint(_ json: [String: Any]?, allowImage: Bool) throws -> CampaignCanvasPaint {
+    private func parsePaint(
+        _ json: [String: Any]?,
+        allowImage: Bool,
+        imageScaleLimit: Double = 4
+    ) throws -> CampaignCanvasPaint {
         guard let json else { return .none }
         switch json["type"] as? String {
         case "solid": return try designTokens.resolveColor(json["color"]).map(CampaignCanvasPaint.solid) ?? .none
@@ -364,7 +368,7 @@ struct CampaignCanvasParser {
                 stops: try parseStops(propertyArray(json["stops"]))
             )
         case "image" where allowImage:
-            return .image(source: parseMediaSource(json["source"]), positionX: clamp(propertyNumber(json["positionX"]) ?? 0.5, 0, 1), positionY: clamp(propertyNumber(json["positionY"]) ?? 0.5, 0, 1), scale: clamp(propertyNumber(json["scale"]) ?? 1, 0.1, 4))
+            return .image(source: parseMediaSource(json["source"]), positionX: clamp(propertyNumber(json["positionX"]) ?? 0.5, 0, 1), positionY: clamp(propertyNumber(json["positionY"]) ?? 0.5, 0, 1), scale: clamp(propertyNumber(json["scale"]) ?? 1, 0.1, imageScaleLimit))
         default: return .none
         }
     }

@@ -11,6 +11,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let payload: CEPTriggerPayload
     }
 
+    private(set) var requestHeaders: [String: String] = [:]
     @Published private(set) var config: DigiaConfig?
     @Published private(set) var sdkState: SDKState = .notInitialized
     @Published private(set) var isHostMounted = false
@@ -135,7 +136,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 ?? false
         }
         hostActionExecutor.setLegacyActionHandler { [weak self] actionType, url in
-            guard let self, let payload = controller.activeNudge?.payload else { return false }
+            guard let self,
+                  let payload = guideOrchestrator.state?.payload ?? controller.activeNudge?.payload
+            else { return false }
             return controller.onAction?(actionType, url, payload) ?? false
         }
         floaterOrchestrator = FloaterOrchestrator(
@@ -147,6 +150,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             onStepDismissed: { [weak self] state in self?.emitFloaterStepDismissed(state) },
             onVisible: { [weak self] state in self?.reportFloaterImpression(state) }
         )
+        guideOrchestrator.onStateChanged = { [weak self] state in
+            self?.guideStateDidChange(state)
+        }
         floaterStoryOrchestrator = FloaterStoryOrchestrator(
             onDismissed: { [weak self] state, reason, metrics in
                 self?.emitFloaterStoryDismissed(state, reason, metrics)
@@ -185,6 +191,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         self.config = config
         DigiaLog.configure(config.logLevel)
         DigiaEndpoints.configure(config)
+        requestHeaders = SDKRequestHeaders.make(
+            config: config, deviceId: AnalyticsIdentityManager().resolveAnonymousId()
+        )
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
 
         font = DigiaFont(fontFamily: config.fontFamily)
@@ -201,7 +210,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
         var campaigns: [CampaignModel] = []
         do {
-            let bundle = try await CampaignFetcher(config: config).fetch()
+            let bundle = try await CampaignFetcher(requestHeaders: requestHeaders).fetch()
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
         } catch {
@@ -247,7 +256,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
         sdkState = .ready
         if analyticsService == nil, let config {
-            analyticsService = AnalyticsService.create(config: config)
+            analyticsService = AnalyticsService.create(config: config, requestHeaders: requestHeaders)
         }
         if let config, let analyticsService {
             componentRegistry.configure(
@@ -262,6 +271,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             }
             liveTestService.configure(
                 config: config,
+                requestHeaders: requestHeaders,
                 deviceId: analyticsService.identity.anonymousId,
                 isDebugBuild: isDebugBuild,
                 onCampaignTest: { [weak self] invocation in self?.handleLiveTestCampaign(invocation)
@@ -543,13 +553,23 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         if let guide = guideOrchestrator.state {
             if let pageKey = guide.steps.first?.target.anchorlessTarget?.pageKey,
                pageKey != _currentScreen {
+                liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
+                    .noMatchingScreen,
+                    message: "screen changed before the Guide was shown"
+                )
                 dismissGuide()
             } else {
                 dismissForScreenChangeIfNeeded(
                     campaignKey: guide.campaign.campaignKey,
                     campaignType: "guide",
                     campaign: guide.campaign,
-                    dismiss: { dismissGuide() }
+                    dismiss: {
+                        self.liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
+                            .noMatchingScreen,
+                            message: "screen changed before the Guide was shown"
+                        )
+                        self.dismissGuide()
+                    }
                 )
             }
         }
@@ -782,6 +802,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     + "campaignKey=\(key) currentScreen=\(_currentScreen ?? "<unset>") "
                     + "targetScreenNames=\(campaign.targetScreenNames)"
             )
+            context.onDropped(.noMatchingScreen, message: "screen not targeted")
             return false
         }
 
@@ -812,10 +833,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             context.onInlineRouted(payload: payload)
             return true
         case .guide(let guideConfig):
-            if !guideConfig.isAnchorless, let renderViaJs = onGuideRenderRequest {
-                // RN: native owns capping, JS owns rendering. Gate here; the
-                // counter is bumped later on the guide's "Digia Experience
-                // Viewed" event (see captureAnalyticsEvent).
+            if !guideConfig.isAnchorless,
+               config?.wrapperBinding == "react_native",
+               guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
+            {
+                guard let renderViaJs = onGuideRenderRequest else {
+                    let message = "React Native guide renderer is not registered"
+                    lastCampaignDropReason = message
+                    context.onDropped(.renderError, message: message)
+                    logNativeGuideStage("route", "result=dropped reason=js_renderer_missing campaign_key=\(key)")
+                    return false
+                }
                 if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                     lastCampaignDropReason = "frequency capped"
                     return false
@@ -824,16 +852,27 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 renderViaJs(payload)
                 return true
             }
-            if guideConfig.isAnchorless,
-               context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
+            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
+                lastCampaignDropReason = "frequency capped"
+                logNativeGuideStage("route", "result=dropped reason=frequency_capped campaign_key=\(key)")
                 return false
             }
+            guard guideConfig.steps.allSatisfy({ $0.widgetConfig.canvas != nil }) else {
+                let message = "campaign has no valid Canvas guide content"
+                lastCampaignDropReason = message
+                context.onDropped(.renderError, message: message)
+                DigiaLog.warning("[Guide] \(message)")
+                return false
+            }
+            if guideOrchestrator.state != nil, !guideConfig.steps.isEmpty { dismissGuide() }
             guard guideOrchestrator.start(campaign, payload: payload) else {
                 lastCampaignDropReason = "another guide is already on screen"
                 context.onDropped(.renderError, message: "another guide is already on screen")
+                logNativeGuideStage("route", "result=dropped reason=guide_active campaign_key=\(key)")
                 return false
             }
             guideCompletionFired = false
+            logNativeGuideStage("route", "result=accepted campaign_key=\(key)")
             return true
         case .nudge(let nudgeConfig):
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
@@ -983,6 +1022,19 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
 
+        if let guideConfig = campaign.guideConfig,
+           guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
+        {
+            reporter.postFailed(
+                invocation.testInvocationId,
+                code: .templateError,
+                message: "Classic Guides cannot be tested on a device"
+            )
+            return
+        }
+
+        if campaign.guideConfig != nil { replaceActiveLiveTestGuide() }
+
         let coercedVariables = invocation.variables.mapValues { "\($0)" }
         let cepCampaignId = liveTestCepId(invocation.testInvocationId)
         let payload = CEPTriggerPayload(
@@ -1007,10 +1059,22 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         liveTestCampaigns[cepCampaignId] = campaign
 
         let accepted = route(
-            campaign, payload: payload, context: LiveTestRoutingContext(testContext: testContext))
+            campaign,
+            payload: payload,
+            context: LiveTestRoutingContext(testContext: testContext)
+        )
         if !accepted {
             cleanUpLiveTestState()
-        } else if campaign.guideConfig?.isAnchorless == true {
+            return
+        }
+        if campaign.guideConfig?.isAnchorless == false {
+            verifyFirstLiveTestGuideAnchorAfterLayout(
+                campaign: campaign,
+                payload: payload,
+                testContext: testContext
+            )
+        }
+        if campaign.guideConfig != nil {
             let seconds = Self.liveTestNoMatchTimeoutSeconds
             let graceNanoseconds = seconds * 1_000_000_000
             let maxDelayMs = (UInt64.max - graceNanoseconds) / 1_000_000
@@ -1026,13 +1090,55 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 else { return }
                 context.reportFailed(
                     .renderError,
-                    message: "Anchorless Spotlight host did not render within \(seconds)s"
+                    message: "Guide host did not render within \(seconds)s"
                 )
                 if self.guideOrchestrator.state?.payload.cepCampaignId == cepCampaignId {
                     self.guideOrchestrator.dismiss()
                     self.guideCompletionFired = false
                 }
             }
+        }
+    }
+
+    private func verifyFirstLiveTestGuideAnchorAfterLayout(
+        campaign: CampaignModel,
+        payload: CEPTriggerPayload,
+        testContext: LiveTestContext
+    ) {
+        guard let anchorKey = campaign.guideConfig?.steps.first?.target.anchorKey else { return }
+        Task { [weak self] in
+            await LiveTestFrameWaiter().wait()
+            guard let self else { return }
+            guard self.guideOrchestrator.state?.payload.cepCampaignId == payload.cepCampaignId
+            else { return }
+            if AnchorRegistry.shared.isRegistered(anchorKey) {
+                if case .unavailable(.outsideViewport) = AnchorRegistry.shared.resolution(
+                    for: anchorKey
+                ) {
+                    AnchorRegistry.shared.scrollToVisible(anchorKey)
+                }
+                if case .available = AnchorRegistry.shared.resolution(for: anchorKey) {
+                    return
+                }
+            }
+            testContext.reportFailed(
+                .noMatchingScreen,
+                message: "anchor '\(anchorKey)' is not on screen"
+            )
+            self.guideOrchestrator.dismissIfActive(payloadId: payload.cepCampaignId)
+            self.guideCompletionFired = false
+        }
+    }
+
+    private func replaceActiveLiveTestGuide() {
+        if let state = guideOrchestrator.state,
+           isLiveTestCepId(state.payload.cepCampaignId) {
+            liveTestContexts[state.payload.cepCampaignId]?.reportFailed(
+                .renderError,
+                message: "replaced by a newer live-test invocation"
+            )
+            guideOrchestrator.dismissIfActive(payloadId: state.payload.cepCampaignId)
+            guideCompletionFired = false
         }
     }
 
@@ -1053,7 +1159,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             floaterOrchestrator.dismiss(.invalidated)
         }
         inlineController.removeCampaign(campaignID)
-        guideOrchestrator.dismissIfActive(campaignKey: campaignID)
+        guideOrchestrator.dismissIfActive(payloadId: campaignID)
         // Forget the impression mark so a re-trigger impresses to Digia afresh.
         events.resetImpression(campaignID)
     }
@@ -1760,14 +1866,46 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     // MARK: - Guide lifecycle
 
+    private func guideStateDidChange(_ state: ActiveGuideState?) {
+        guard let state, let anchorKey = state.currentStep?.target.anchorKey else {
+            AnchorRegistry.shared.stopTracking()
+            return
+        }
+        AnchorRegistry.shared.track(
+            key: anchorKey,
+            onAvailable: { [weak self] availableKey in
+                self?.logNativeGuideStage(
+                    "anchor",
+                    "result=ready anchor_key=\(availableKey) step_index=\(state.stepIndex + 1)"
+                )
+            },
+            onUnavailable: { [weak self] unavailableKey, reason in
+                guard let self,
+                      let current = self.guideOrchestrator.state,
+                      current.currentStep?.target.anchorKey == unavailableKey
+                else { return }
+                self.logNativeGuideStage(
+                    "anchor",
+                    "result=dropped anchor_key=\(unavailableKey) reason=\(reason.rawValue)"
+                )
+                self.reportGuideRenderFailure(
+                    .invalidGeometry,
+                    guideToken: current.token,
+                    stepIndex: current.stepIndex
+                )
+            }
+        )
+    }
+
     func dismissGuide() {
         guard let state = guideOrchestrator.state else { return }
         let payload = state.payload
         let total = state.steps.count
         let elapsed = dwellTracker.consumeDwellMs(payload.cepCampaignId)
-        if guideCompletionFired, total > 1 {
+        let isAnchorless = state.currentStep?.target.anchorlessTarget != nil
+        if guideCompletionFired, isAnchorless, total > 1 {
             events.toCep(.clicked(), payload: payload)
-        } else if total > 1 {
+        } else if !guideCompletionFired, total > 1 {
             events.toDigia(
                 GuideEvent.StepDismissed(itemIndex: state.stepIndex + 1),
                 payload: payload
@@ -1786,24 +1924,73 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         guideCompletionFired = false
     }
 
-    func advanceGuide() {
+    func advanceGuide(completesOnLast: Bool = true) {
         guard let state = guideOrchestrator.state else { return }
         if state.hasNext {
-            guideOrchestrator.advance()
+            if isLiveTestCepId(state.payload.cepCampaignId),
+               let nextIndex = availableGuideStepIndex(in: state, after: state.stepIndex) {
+                guideOrchestrator.move(to: nextIndex)
+            } else if !isLiveTestCepId(state.payload.cepCampaignId) {
+                guideOrchestrator.advance()
+            } else {
+                dismissGuide()
+            }
         } else {
-            if state.steps.count > 1 { reportGuideCompletedIfNeeded(state) }
+            if completesOnLast, state.steps.count > 1 { reportGuideCompletedIfNeeded(state) }
             dismissGuide()
         }
     }
 
     func previousGuide() {
-        guideOrchestrator.previous()
+        guard let state = guideOrchestrator.state else { return }
+        if isLiveTestCepId(state.payload.cepCampaignId),
+           let previousIndex = availableGuideStepIndex(in: state, before: state.stepIndex) {
+            guideOrchestrator.move(to: previousIndex)
+        } else if !isLiveTestCepId(state.payload.cepCampaignId) {
+            guideOrchestrator.previous()
+        }
+    }
+
+    private func availableGuideStepIndex(
+        in state: ActiveGuideState,
+        after stepIndex: Int
+    ) -> Int? {
+        state.steps.indices.first {
+            $0 > stepIndex && isGuideStepAvailable(state.steps[$0])
+        }
+    }
+
+    private func availableGuideStepIndex(
+        in state: ActiveGuideState,
+        before stepIndex: Int
+    ) -> Int? {
+        state.steps.indices.reversed().first {
+            $0 < stepIndex && isGuideStepAvailable(state.steps[$0])
+        }
+    }
+
+    private func isGuideStepAvailable(_ step: GuideStepModel) -> Bool {
+        guard let anchorKey = step.target.anchorKey else { return true }
+        if case .unavailable(.outsideViewport) = AnchorRegistry.shared.resolution(for: anchorKey) {
+            AnchorRegistry.shared.scrollToVisible(anchorKey)
+        }
+        if case .available = AnchorRegistry.shared.resolution(for: anchorKey) { return true }
+        return false
     }
 
     func reportGuideShown() {
         guard let state = guideOrchestrator.state else { return }
+        if state.currentStep?.target.anchorKey != nil {
+            logNativeGuideStage(
+                "render",
+                "result=shown campaign_key=\(state.payload.campaignKey) step_index=\(state.stepIndex + 1)"
+            )
+        }
         let payload = state.payload
         let total = state.steps.count
+        if isLiveTestCepId(payload.cepCampaignId) {
+            liveTestContexts[payload.cepCampaignId]?.reportShown()
+        }
         if state.stepIndex == 0, dwellTracker.elapsedMs(payload.cepCampaignId) == nil {
             dwellTracker.markViewed(payload.cepCampaignId)
             if !isLiveTestCepId(payload.cepCampaignId) {
@@ -1822,15 +2009,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 payload: payload
             )
         }
-        events.toDigia(
-            GuideEvent.StepViewed(
-                itemIndex: state.stepIndex + 1,
-                itemTotal: total,
-                anchorKey: state.currentStep?.target.anchorKey,
-                displayStyle: state.currentStep?.displayStyle
-            ),
-            payload: payload
-        )
+        if total > 1 || state.currentStep?.target.anchorlessTarget != nil {
+            events.toDigia(
+                GuideEvent.StepViewed(
+                    itemIndex: state.stepIndex + 1,
+                    itemTotal: total,
+                    anchorKey: state.currentStep?.target.anchorKey,
+                    displayStyle: state.currentStep?.displayStyle
+                ),
+                payload: payload
+            )
+        }
     }
 
     func reportGuideRenderFailure(
@@ -1842,7 +2031,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
               (guideToken == nil || guideToken == state.token),
               (stepIndex == nil || stepIndex == state.stepIndex)
         else { return }
-        if isDebugBuild {
+        if state.currentStep?.target.anchorKey != nil {
+            logNativeGuideStage(
+                "render",
+                "result=failed campaign_key=\(state.payload.campaignKey) reason=\(failure?.rawValue ?? "image_load")"
+            )
+        }
+        if isDebugBuild, state.currentStep?.target.anchorKey == nil {
             DigiaLog.warning(
                 "[Anchorless] render failed: \(failure?.rawValue ?? "image load failed")"
                     + " step=\(state.stepIndex + 1)",
@@ -1904,10 +2099,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         events.toDigia(
             GuideEvent.Completed(
                 itemTotal: state.steps.count,
-                timeToCompleteMs: dwellTracker.elapsedMs(state.payload.cepCampaignId)
+                timeToCompleteMs: state.currentStep?.target.anchorlessTarget == nil
+                    ? nil
+                    : dwellTracker.elapsedMs(state.payload.cepCampaignId)
             ),
             payload: state.payload
         )
+    }
+
+    private func logNativeGuideStage(_ stage: String, _ details: String) {
+        guard config?.wrapperBinding == "react_native" else { return }
+        DigiaLog.verbose("guide_native_stage=\(stage) \(details)")
     }
 
     /// Public analytics entry point for JS-rendered RN campaigns (guides). The JS
@@ -1932,18 +2134,25 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         default:
             break
         }
-        if eventName == "Digia Experience Dismissed"
-            || eventName == "Digia Experience Completed"
+        let payloadID = props["payload_id"] as? String
+        let externalPayload = activeExternalGuide?.payload
+        let payload = externalPayload?.cepCampaignId == payloadID
+            ? externalPayload
+            : nil
+        events.toDigia(
+            event,
+            payload: payload ?? CEPTriggerPayload(
+                cepCampaignId: campaign?.id ?? campaignKey,
+                campaignKey: campaignKey,
+                cepMetadata: [:]
+            )
+        )
+        if (eventName == "Digia Experience Dismissed"
+            || eventName == "Digia Experience Completed")
+            && activeExternalGuide?.payload.cepCampaignId == payloadID
         {
-            if let payloadID = props["payload_id"] as? String,
-                activeExternalGuide?.payload.cepCampaignId == payloadID
-            {
-                activeExternalGuide = nil
-            }
+            activeExternalGuide = nil
         }
-        let payload = CEPTriggerPayload(
-            cepCampaignId: campaign?.id ?? campaignKey, campaignKey: campaignKey, cepMetadata: [:])
-        events.toDigia(event, payload: payload)
     }
 
     private func guideEventFor(eventName: String, props: [String: Any]) -> EngageAnalyticsEvent? {
@@ -2049,6 +2258,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         analyticsService = nil
         frequencyManager = nil
         config = nil
+        requestHeaders = [:]
         hostActionExecutor.clearHandlers()
         sdkState = .notInitialized
         isHostMounted = false
@@ -2060,6 +2270,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         inlineController.clear()
         surveyOrchestrator.dismiss()
         guideOrchestrator.dismiss()
+        AnchorRegistry.shared.resetForTesting()
         floaterOrchestrator.dispose()
         floaterStoryOrchestrator.dispose()
         activeExternalGuide = nil
@@ -2073,6 +2284,28 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         liveTestCampaigns.removeAll()
     }
 
+}
+
+@MainActor
+private final class LiveTestFrameWaiter: NSObject {
+    private var continuation: CheckedContinuation<Void, Never>?
+    private var displayLink: CADisplayLink?
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            let displayLink = CADisplayLink(target: self, selector: #selector(frameDidRender))
+            displayLink.add(to: .main, forMode: .common)
+            self.displayLink = displayLink
+        }
+    }
+
+    @objc private func frameDidRender() {
+        displayLink?.invalidate()
+        displayLink = nil
+        continuation?.resume()
+        continuation = nil
+    }
 }
 
 struct CaptureDebugPage: Identifiable {

@@ -223,6 +223,7 @@ struct GuideCanvasUnionSurface: View {
     let designWidth: CGFloat
     let viewportWidth: CGFloat
     let availableSize: CGSize
+    let resolvedScale: CGFloat?
     let cornerRadius: CGFloat
     let pointerDirection: GuideCanvasPointerDirection?
     let pointerSize: CGFloat
@@ -235,11 +236,13 @@ struct GuideCanvasUnionSurface: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var scale: CGFloat {
-        guideCanvasScale(
+        resolvedScale ?? guideCanvasScale(
             canvas: canvas,
             designWidth: designWidth,
             viewportWidth: viewportWidth,
-            availableSize: availableSize
+            availableSize: availableSize,
+            pointerDirection: pointerDirection,
+            pointerSize: pointerSize
         )
     }
 
@@ -282,7 +285,7 @@ struct GuideCanvasUnionSurface: View {
             CampaignCanvasPaintView(paint: canvas.background, isDark: isDark)
             CampaignCanvasStage(
                 canvas: canvas,
-                authoredCornerRadius: cornerRadius / max(scale, 0.001),
+                authoredCornerRadius: cornerRadius,
                 isDark: isDark,
                 showBackground: false,
                 onAction: onAction
@@ -303,7 +306,9 @@ private func guideCanvasScale(
     canvas: CampaignCanvas,
     designWidth: CGFloat,
     viewportWidth: CGFloat,
-    availableSize: CGSize
+    availableSize: CGSize,
+    pointerDirection: GuideCanvasPointerDirection?,
+    pointerSize: CGFloat
 ) -> CGFloat {
     guard
         let designScale = anchorlessDesignScale(
@@ -311,8 +316,12 @@ private func guideCanvasScale(
             designWidth: designWidth
         )
     else { return 0 }
-    let widthScale = max(0, availableSize.width) / max(canvas.width * designScale, 1)
-    let heightScale = max(0, availableSize.height) / max(canvas.height * designScale, 1)
+    let horizontal = pointerDirection == .left || pointerDirection == .right
+    let arrowSize = pointerDirection == nil ? 0 : max(0, pointerSize)
+    let authoredWidth = canvas.width + (horizontal ? arrowSize : 0)
+    let authoredHeight = canvas.height + (horizontal ? 0 : arrowSize)
+    let widthScale = max(0, availableSize.width) / max(authoredWidth * designScale, 1)
+    let heightScale = max(0, availableSize.height) / max(authoredHeight * designScale, 1)
     let fittedScale = designScale * min(1, widthScale, heightScale)
     return fittedScale.isFinite && fittedScale > 0 ? fittedScale : 0
 }
@@ -332,8 +341,10 @@ private struct GuideCanvasUnionShape: Shape {
             width: bodySize.width,
             height: bodySize.height
         )
-        var path = Path(roundedRect: bodyRect, cornerRadius: min(cornerRadius, bodyRect.height / 2))
-        guard let pointerDirection, pointerSize > 0 else { return path }
+        let radius = min(max(0, cornerRadius), min(bodyRect.width, bodyRect.height) / 2)
+        guard let pointerDirection, pointerSize > 0 else {
+            return Path(roundedRect: bodyRect, cornerRadius: radius)
+        }
 
         let crossExtent = horizontal ? bodyRect.height : bodyRect.width
         let clearance = min(crossExtent / 2, max(pointerSize, cornerRadius + pointerSize))
@@ -342,28 +353,110 @@ private struct GuideCanvasUnionShape: Shape {
             max(requested, (horizontal ? bodyRect.minY : bodyRect.minX) + clearance),
             (horizontal ? bodyRect.maxY : bodyRect.maxX) - clearance
         )
-        var triangle = Path()
+        var path = Path()
         switch pointerDirection {
         case .up:
-            triangle.move(to: CGPoint(x: center - pointerSize, y: bodyRect.minY))
-            triangle.addLine(to: CGPoint(x: center, y: 0))
-            triangle.addLine(to: CGPoint(x: center + pointerSize, y: bodyRect.minY))
+            path.move(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY))
+            path.addLine(to: CGPoint(x: center - pointerSize, y: bodyRect.minY))
+            path.addLine(to: CGPoint(x: center, y: bodyRect.minY - pointerSize))
+            path.addLine(to: CGPoint(x: center + pointerSize, y: bodyRect.minY))
+            path.addLine(to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY))
+            addRightAndBottomEdges(to: &path, bodyRect: bodyRect, radius: radius)
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: bodyRect.minY + radius))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.minY)
+            )
         case .down:
-            triangle.move(to: CGPoint(x: center - pointerSize, y: bodyRect.maxY))
-            triangle.addLine(to: CGPoint(x: center, y: bodyRect.maxY + pointerSize))
-            triangle.addLine(to: CGPoint(x: center + pointerSize, y: bodyRect.maxY))
+            path.move(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY))
+            addTopAndRightEdges(to: &path, bodyRect: bodyRect, radius: radius)
+            path.addLine(to: CGPoint(x: center + pointerSize, y: bodyRect.maxY))
+            path.addLine(to: CGPoint(x: center, y: bodyRect.maxY + pointerSize))
+            path.addLine(to: CGPoint(x: center - pointerSize, y: bodyRect.maxY))
+            path.addLine(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX, y: bodyRect.maxY - radius),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.maxY)
+            )
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: bodyRect.minY + radius))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.minY)
+            )
         case .left:
-            triangle.move(to: CGPoint(x: bodyRect.minX, y: center - pointerSize))
-            triangle.addLine(to: CGPoint(x: 0, y: center))
-            triangle.addLine(to: CGPoint(x: bodyRect.minX, y: center + pointerSize))
+            path.move(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY))
+            addTopAndRightEdges(to: &path, bodyRect: bodyRect, radius: radius)
+            path.addLine(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX, y: bodyRect.maxY - radius),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.maxY)
+            )
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: center + pointerSize))
+            path.addLine(to: CGPoint(x: bodyRect.minX - pointerSize, y: center))
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: center - pointerSize))
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: bodyRect.minY + radius))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.minY)
+            )
         case .right:
-            triangle.move(to: CGPoint(x: bodyRect.maxX, y: center - pointerSize))
-            triangle.addLine(to: CGPoint(x: bodyRect.maxX + pointerSize, y: center))
-            triangle.addLine(to: CGPoint(x: bodyRect.maxX, y: center + pointerSize))
+            path.move(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY))
+            path.addLine(to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.maxX, y: bodyRect.minY + radius),
+                control: CGPoint(x: bodyRect.maxX, y: bodyRect.minY)
+            )
+            path.addLine(to: CGPoint(x: bodyRect.maxX, y: center - pointerSize))
+            path.addLine(to: CGPoint(x: bodyRect.maxX + pointerSize, y: center))
+            path.addLine(to: CGPoint(x: bodyRect.maxX, y: center + pointerSize))
+            path.addLine(to: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY - radius))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.maxY),
+                control: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY)
+            )
+            path.addLine(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX, y: bodyRect.maxY - radius),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.maxY)
+            )
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: bodyRect.minY + radius))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.minY)
+            )
         }
-        triangle.closeSubpath()
-        path.addPath(triangle)
+        path.closeSubpath()
         return path
+    }
+
+    private func addTopAndRightEdges(to path: inout Path, bodyRect: CGRect, radius: CGFloat) {
+        path.addLine(to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: bodyRect.maxX, y: bodyRect.minY + radius),
+            control: CGPoint(x: bodyRect.maxX, y: bodyRect.minY)
+        )
+        path.addLine(to: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.maxY),
+            control: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY)
+        )
+    }
+
+    private func addRightAndBottomEdges(to path: inout Path, bodyRect: CGRect, radius: CGFloat) {
+        path.addQuadCurve(
+            to: CGPoint(x: bodyRect.maxX, y: bodyRect.minY + radius),
+            control: CGPoint(x: bodyRect.maxX, y: bodyRect.minY)
+        )
+        path.addLine(to: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.maxY),
+            control: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY)
+        )
+        path.addLine(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: bodyRect.minX, y: bodyRect.maxY - radius),
+            control: CGPoint(x: bodyRect.minX, y: bodyRect.maxY)
+        )
     }
 }
 
@@ -691,6 +784,7 @@ private struct CampaignCanvasTextView: View {
     let onAction: (CampaignCanvasActionRequest) -> Void
     var colorOverride: UIColor? = nil
     var shadow: CampaignCanvasShadow? = nil
+    var centerVertically = false
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
@@ -700,6 +794,7 @@ private struct CampaignCanvasTextView: View {
             maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
             overflow: block.overflow,
             textAlignment: block.textAlign.uiTextAlignment,
+            centerVertically: centerVertically,
             onSpan: { span in
                 onAction(
                     CampaignCanvasActionRequest(
@@ -768,16 +863,20 @@ private struct CampaignCanvasTextView: View {
                 colorOverride ?? span.color.map {
                     UIColor(CampaignCanvasTheme.shared.color($0, isDark: isDark))
                 } ?? baseColor
+            let font = SDKInstance.shared.font.resolve(
+                size: Double(typography?.fontSize ?? baseTypography.fontSize ?? 16),
+                weight: typography?.fontWeight ?? baseTypography.fontWeight ?? 400,
+                italic: span.italic,
+                fallbackFamily: typography?.fontFamily ?? baseTypography.fontFamily
+            )
             var attributes: [NSAttributedString.Key: Any] = [
-                .font: SDKInstance.shared.font.resolve(
-                    size: Double(typography?.fontSize ?? baseTypography.fontSize ?? 16),
-                    weight: typography?.fontWeight ?? baseTypography.fontWeight ?? 400,
-                    italic: span.italic,
-                    fallbackFamily: typography?.fontFamily ?? baseTypography.fontFamily
-                ),
+                .font: font,
                 .foregroundColor: color,
                 .paragraphStyle: paragraph,
             ]
+            if centerVertically, let lineHeight = baseTypography.lineHeight {
+                attributes[.baselineOffset] = max(0, lineHeight - font.lineHeight)
+            }
             if let glyphShadow { attributes[.shadow] = glyphShadow }
             if let spacing = typography?.letterSpacing ?? baseTypography.letterSpacing, spacing != 0
             {
@@ -819,6 +918,7 @@ private struct CanvasRichText: UIViewRepresentable {
     let maxLines: Int
     let overflow: String
     let textAlignment: NSTextAlignment
+    let centerVertically: Bool
     let onSpan: (CampaignCanvasTextSpan) -> Void
     var spans: [CampaignCanvasTextSpan] = []
     var drawingOutsets: UIEdgeInsets = .zero
@@ -860,6 +960,7 @@ private struct CanvasRichText: UIViewRepresentable {
         context.coordinator.spans = spans
         context.coordinator.onSpan = onSpan
         let textView = view.textView
+        view.centerVertically = centerVertically
         view.drawingOutsets = drawingOutsets
         textView.textStorage.setAttributedString(attributed)
         textView.textAlignment = textAlignment
@@ -884,12 +985,13 @@ private struct CanvasRichText: UIViewRepresentable {
     ) -> CGSize? {
         let width = proposal.width ?? UIView.layoutFittingExpandedSize.width
         let fit = uiView.logicalSizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        return CGSize(width: fillWidth ? width : ceil(fit.width), height: ceil(fit.height))
+        return CGSize(width: fillWidth ? width : ceil(fit.width), height: centerVertically ? min(ceil(fit.height), proposal.height ?? .greatestFiniteMagnitude) : ceil(fit.height))
     }
 }
 
 private final class CanvasRichTextContainerView: UIView {
     let textView: UITextView
+    var centerVertically = false
     var drawingOutsets: UIEdgeInsets = .zero {
         didSet {
             guard drawingOutsets != oldValue else { return }
@@ -904,6 +1006,7 @@ private final class CanvasRichTextContainerView: UIView {
         super.init(frame: .zero)
         backgroundColor = .clear
         clipsToBounds = false
+        textView.clipsToBounds = false
         textView.textContainerInset = .zero
         addSubview(textView)
     }
@@ -913,13 +1016,16 @@ private final class CanvasRichTextContainerView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        let verticalOverflow = centerVertically
+            ? max(0, logicalSizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height - bounds.height) / 2
+            : 0
         // Expand only the UIKit drawing surface. The matching text-container
         // insets keep glyph layout unchanged while making room for shadow bleed.
         textView.frame = CGRect(
             x: -drawingOutsets.left,
-            y: -drawingOutsets.top,
+            y: -drawingOutsets.top - verticalOverflow,
             width: bounds.width + drawingOutsets.left + drawingOutsets.right,
-            height: bounds.height + drawingOutsets.top + drawingOutsets.bottom
+            height: bounds.height + drawingOutsets.top + drawingOutsets.bottom + verticalOverflow * 2
         )
     }
 
@@ -1118,7 +1224,8 @@ private struct CanvasButtonRenderer: View {
         ZStack {
             CampaignCanvasPaintView(paint: effectiveFill, isDark: isDark)
             CampaignCanvasTextView(
-                block: label, isDark: isDark, onAction: onAction, colorOverride: destructiveColor)
+                block: label, isDark: isDark, onAction: onAction,
+                colorOverride: destructiveColor, centerVertically: true)
         }.contentShape(CampaignCanvasRoundedShape(radius: cornerRadius))
     }
     private var effectiveFill: CampaignCanvasPaint {

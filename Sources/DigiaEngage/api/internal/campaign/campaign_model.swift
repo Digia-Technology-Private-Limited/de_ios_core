@@ -286,7 +286,10 @@ struct CampaignModel: Equatable {
                 : defaultCampaignCanvasDesignWidth,
             widgetJsonForStep: { stepJson in
                 var widget = stepJson
-                widget["outsideTapBehavior"] = templateJson["outsideTapBehavior"]
+                widget["outsideTapBehavior"] = templateJson.string(
+                    "outsideTapBehavior",
+                    default: "next"
+                )
                 return widget
             }
         )
@@ -329,8 +332,15 @@ struct CampaignModel: Equatable {
                 continue
             }
             guard let widgetJson = widgetJsonForStep(stepJson) else { continue }
+            if displayStyle != nil {
+                let outsideTapBehavior = widgetJson.string("outsideTapBehavior", default: "next")
+                guard outsideTapBehavior == "next" || outsideTapBehavior == "nothing" else {
+                    return nil
+                }
+            }
             let widgetConfig = GuideStepWidgetConfig.fromJson(
                 widgetJson,
+                displayStyle: displayStyle,
                 designTokens: designTokens
             )
             if case .anchorless = target {
@@ -351,7 +361,7 @@ struct CampaignModel: Equatable {
                     widgetConfig: widgetConfig,
                     advanceTrigger: stepJson.string("advanceTrigger", default: "tap"),
                     autoDelayMs: stepJson["autoDelayMs"] != nil ? stepJson.int("autoDelayMs", default: 0) : nil,
-                    delayInMs: target.anchorlessTarget != nil && stepJson["delayInMs"] != nil
+                    delayInMs: displayStyle != nil && stepJson["delayInMs"] != nil
                         ? stepJson.int("delayInMs", default: 0)
                         : nil
                 )

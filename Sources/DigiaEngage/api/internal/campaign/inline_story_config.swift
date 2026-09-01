@@ -74,8 +74,8 @@ struct StoryItemConfig: Equatable {
         let type = ctaAction?.string("type", default: "dismiss") ?? "dismiss"
         let url = ctaAction?.nonBlankString("url")
         return switch type {
-        case "deepLink": [url.map(EngageAction.openDeeplink), .dismiss].compactMap { $0 }
-        case "openUrl": [url.map(EngageAction.openUrl), .dismiss].compactMap { $0 }
+        case "deepLink": [url.map { .openDeeplink($0) }, .dismiss].compactMap { $0 }
+        case "openUrl": [url.map { .openUrl($0) }, .dismiss].compactMap { $0 }
         default: [.dismiss]
         }
     }
