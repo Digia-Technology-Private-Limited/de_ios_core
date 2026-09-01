@@ -35,7 +35,8 @@ struct DigiaBottomSheet<Content: View>: View {
     var body: some View {
         GeometryReader { geo in
             let cap = geo.size.height * config.heightCapFraction
-            let surfaceBottomInset = config.bottomSafeAreaMode == .insetSurface
+            let surfaceBottomInset =
+                config.bottomSafeAreaMode == .insetSurface
                 ? config.bottomSafeAreaInset
                 : 0
             ZStack(alignment: .bottom) {
@@ -51,32 +52,35 @@ struct DigiaBottomSheet<Content: View>: View {
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
         }
-        .ignoresSafeArea()
+        .ignoresSafeArea(.container)
         .onPreferenceChange(SheetHeightKey.self) { contentHeight = $0 }
         .onAppear { withAnimation(animation) { shown = true } }
     }
 
     private func card(cap: CGFloat) -> some View {
-        let contentBottomInset = config.bottomSafeAreaMode == .insetContent
+        let contentBottomInset =
+            config.bottomSafeAreaMode == .insetContent
             ? config.bottomSafeAreaInset
             : 0
         let base = cardContents(cap: cap)
-        .padding(.bottom, config.bottomPadding + contentBottomInset)
-        .frame(maxWidth: .infinity)
-        .background {
-            if let cardBackground {
-                cardBackground
-            } else {
-                config.background
+            .padding(.bottom, config.bottomPadding + contentBottomInset)
+            .frame(maxWidth: .infinity)
+            .background {
+                if let cardBackground {
+                    cardBackground
+                } else {
+                    config.background
+                }
             }
-        }
 
         // `UnevenRoundedRectangle`'s `.rect(topLeadingRadius:topTrailingRadius:)` needs
         // iOS 16; below that, round all four corners as the closest built-in equivalent.
         return Group {
             if #available(iOS 16, *) {
                 base.clipShape(
-                    .rect(topLeadingRadius: config.cornerRadius, topTrailingRadius: config.cornerRadius)
+                    .rect(
+                        topLeadingRadius: config.cornerRadius,
+                        topTrailingRadius: config.cornerRadius)
                 )
             } else {
                 base.clipShape(RoundedRectangle(cornerRadius: config.cornerRadius))
