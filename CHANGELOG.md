@@ -2,6 +2,19 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.13.0] - 2026-09-01
+
+### New Features
+- Anchored guides now render natively on iOS. A guide step can attach to a host UI element registered through the anchor API; the SDK draws the spotlight and callout natively and keeps them locked to the anchor as the screen scrolls or relayouts, scrolls the anchor into view when it is off screen, chooses the best callout side for the available space, and hides the step gracefully when its anchor cannot be shown.
+- Canvas-designed nudges can now present full screen, covering the whole surface with safe-area handling.
+- Canvas nudges support a selectable close-button placement — inside or outside the surface, positioned by corner and edge with a configurable offset and gap, and with configurable icon and background color.
+- Canvas nudges can now auto-dismiss after a configurable delay.
+- Added `Digia.requestHeaders`, exposing the identifying metadata headers the SDK sends with its network requests, so a host can attach the same headers to its own Digia-related requests.
+
+### Bug Fixes
+- Canvas text now renders correctly: button labels stay centered and fully visible instead of being clipped, mis-aligned, or wrongly constrained, and text glyphs are no longer clipped at their edges.
+- Guide dismissal and completion events now carry the guide's campaign payload to CEP plugins instead of empty metadata.
+
 ## [3.12.2] - 2026-09-01
 
 ### Improvements
