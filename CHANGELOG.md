@@ -2,6 +2,15 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.12.2] - 2026-09-01
+
+### Improvements
+- The debug tools (debug settings screen, Component Registry, live campaign testing, and on-screen debug bubble) now activate on TestFlight builds, in addition to development-provisioned builds. App Store builds remain unaffected.
+
+### Bug Fixes
+- Bottom sheets now respect the on-screen keyboard, so a keyboard no longer covers an input field inside a nudge or survey bottom sheet.
+- Anchorless spotlight guides now honor their configured tap-outside behavior — advancing to the next step or doing nothing — instead of falling back to the anchored-guide dismiss-on-tap behavior.
+
 ## [3.12.1] - 2026-08-27
 
 ### Bug Fixes
