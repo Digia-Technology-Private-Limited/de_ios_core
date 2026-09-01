@@ -44,7 +44,8 @@ final class DigiaOverlayController: ObservableObject {
     /// Starts on appearance and stays owned by this nudge when child views appear.
     func startNudgeAutoDismiss() {
         guard nudgeAutoDismissTask == nil, let nudge = activeNudge,
-              nudge.config.canvas != nil else { return }
+              nudge.config.canvas != nil,
+              nudge.config.surface.isFullScreen else { return }
         let afterMs = nudge.config.surface.autoDismissAfterMs
         guard afterMs > 0 else { return }
         let nanoseconds = UInt64(afterMs) * 1_000_000
