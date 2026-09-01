@@ -331,8 +331,10 @@ private struct GuideCanvasUnionShape: Shape {
             width: bodySize.width,
             height: bodySize.height
         )
-        var path = Path(roundedRect: bodyRect, cornerRadius: min(cornerRadius, bodyRect.height / 2))
-        guard let pointerDirection, pointerSize > 0 else { return path }
+        let radius = min(max(0, cornerRadius), min(bodyRect.width, bodyRect.height) / 2)
+        guard let pointerDirection, pointerSize > 0 else {
+            return Path(roundedRect: bodyRect, cornerRadius: radius)
+        }
 
         let crossExtent = horizontal ? bodyRect.height : bodyRect.width
         let clearance = min(crossExtent / 2, max(pointerSize, cornerRadius + pointerSize))
@@ -341,31 +343,110 @@ private struct GuideCanvasUnionShape: Shape {
             max(requested, (horizontal ? bodyRect.minY : bodyRect.minX) + clearance),
             (horizontal ? bodyRect.maxY : bodyRect.maxX) - clearance
         )
-        var triangle = Path()
+        var path = Path()
         switch pointerDirection {
         case .up:
-            triangle.move(to: CGPoint(x: center - pointerSize, y: bodyRect.minY))
-            triangle.addLine(to: CGPoint(x: center, y: 0))
-            triangle.addLine(to: CGPoint(x: center + pointerSize, y: bodyRect.minY))
+            path.move(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY))
+            path.addLine(to: CGPoint(x: center - pointerSize, y: bodyRect.minY))
+            path.addLine(to: CGPoint(x: center, y: bodyRect.minY - pointerSize))
+            path.addLine(to: CGPoint(x: center + pointerSize, y: bodyRect.minY))
+            path.addLine(to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY))
+            addRightAndBottomEdges(to: &path, bodyRect: bodyRect, radius: radius)
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: bodyRect.minY + radius))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.minY)
+            )
         case .down:
-            triangle.move(to: CGPoint(x: center - pointerSize, y: bodyRect.maxY))
-            triangle.addLine(to: CGPoint(x: center, y: bodyRect.maxY + pointerSize))
-            triangle.addLine(to: CGPoint(x: center + pointerSize, y: bodyRect.maxY))
+            path.move(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY))
+            addTopAndRightEdges(to: &path, bodyRect: bodyRect, radius: radius)
+            path.addLine(to: CGPoint(x: center + pointerSize, y: bodyRect.maxY))
+            path.addLine(to: CGPoint(x: center, y: bodyRect.maxY + pointerSize))
+            path.addLine(to: CGPoint(x: center - pointerSize, y: bodyRect.maxY))
+            path.addLine(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX, y: bodyRect.maxY - radius),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.maxY)
+            )
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: bodyRect.minY + radius))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.minY)
+            )
         case .left:
-            triangle.move(to: CGPoint(x: bodyRect.minX, y: center - pointerSize))
-            triangle.addLine(to: CGPoint(x: 0, y: center))
-            triangle.addLine(to: CGPoint(x: bodyRect.minX, y: center + pointerSize))
+            path.move(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY))
+            addTopAndRightEdges(to: &path, bodyRect: bodyRect, radius: radius)
+            path.addLine(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX, y: bodyRect.maxY - radius),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.maxY)
+            )
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: center + pointerSize))
+            path.addLine(to: CGPoint(x: bodyRect.minX - pointerSize, y: center))
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: center - pointerSize))
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: bodyRect.minY + radius))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.minY)
+            )
         case .right:
-            triangle.move(to: CGPoint(x: bodyRect.maxX, y: center - pointerSize))
-            triangle.addLine(to: CGPoint(x: bodyRect.maxX + pointerSize, y: center))
-            triangle.addLine(to: CGPoint(x: bodyRect.maxX, y: center + pointerSize))
+            path.move(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY))
+            path.addLine(to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.maxX, y: bodyRect.minY + radius),
+                control: CGPoint(x: bodyRect.maxX, y: bodyRect.minY)
+            )
+            path.addLine(to: CGPoint(x: bodyRect.maxX, y: center - pointerSize))
+            path.addLine(to: CGPoint(x: bodyRect.maxX + pointerSize, y: center))
+            path.addLine(to: CGPoint(x: bodyRect.maxX, y: center + pointerSize))
+            path.addLine(to: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY - radius))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.maxY),
+                control: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY)
+            )
+            path.addLine(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX, y: bodyRect.maxY - radius),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.maxY)
+            )
+            path.addLine(to: CGPoint(x: bodyRect.minX, y: bodyRect.minY + radius))
+            path.addQuadCurve(
+                to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.minY),
+                control: CGPoint(x: bodyRect.minX, y: bodyRect.minY)
+            )
         }
-        triangle.closeSubpath()
-        if #available(iOS 17.0, *) {
-            return path.union(triangle)
-        }
-        path.addPath(triangle)
+        path.closeSubpath()
         return path
+    }
+
+    private func addTopAndRightEdges(to path: inout Path, bodyRect: CGRect, radius: CGFloat) {
+        path.addLine(to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.minY))
+        path.addQuadCurve(
+            to: CGPoint(x: bodyRect.maxX, y: bodyRect.minY + radius),
+            control: CGPoint(x: bodyRect.maxX, y: bodyRect.minY)
+        )
+        path.addLine(to: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.maxY),
+            control: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY)
+        )
+    }
+
+    private func addRightAndBottomEdges(to path: inout Path, bodyRect: CGRect, radius: CGFloat) {
+        path.addQuadCurve(
+            to: CGPoint(x: bodyRect.maxX, y: bodyRect.minY + radius),
+            control: CGPoint(x: bodyRect.maxX, y: bodyRect.minY)
+        )
+        path.addLine(to: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY - radius))
+        path.addQuadCurve(
+            to: CGPoint(x: bodyRect.maxX - radius, y: bodyRect.maxY),
+            control: CGPoint(x: bodyRect.maxX, y: bodyRect.maxY)
+        )
+        path.addLine(to: CGPoint(x: bodyRect.minX + radius, y: bodyRect.maxY))
+        path.addQuadCurve(
+            to: CGPoint(x: bodyRect.minX, y: bodyRect.maxY - radius),
+            control: CGPoint(x: bodyRect.minX, y: bodyRect.maxY)
+        )
     }
 }
 
