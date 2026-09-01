@@ -176,7 +176,7 @@ private struct NudgeFullScreenView: View {
                         .padding(safeInsets)
                     } else if surface.showCloseButton {
                         NudgeCloseButton(
-                            config: safeCloseButton(scale: canvasView.fittedScale, bounds: safeSize),
+                            config: safeCloseButton(bounds: safeSize),
                             action: dismiss
                         )
                         .frame(width: safeSize.width, height: safeSize.height, alignment: .topTrailing)
@@ -195,8 +195,8 @@ private struct NudgeFullScreenView: View {
         .onAppear { SDKInstance.shared.reportNudgeImpression() }
     }
 
-    private func safeCloseButton(scale: CGFloat, bounds: CGSize) -> NudgeCloseButtonConfig {
-        let close = surface.closeButton.scaled(scale)
+    private func safeCloseButton(bounds: CGSize) -> NudgeCloseButtonConfig {
+        let close = surface.closeButton
         let touchSize = max(close.diameter, 44)
         return NudgeCloseButtonConfig(
             marginTop: min(close.marginTop, max(0, bounds.height - touchSize)),
