@@ -9,7 +9,13 @@ struct InlineStoryOverlayState: Equatable {
 
 @MainActor
 final class DigiaOverlayController: ObservableObject {
-    @Published private(set) var activeNudge: DigiaNudgePresentation?
+    @Published private(set) var activeNudge: DigiaNudgePresentation? {
+        didSet {
+            nudgeAutoDismissTask?.cancel()
+            nudgeAutoDismissTask = nil
+        }
+    }
+    private var nudgeAutoDismissTask: Task<Void, Never>?
     @Published private(set) var activeStoryOverlay: InlineStoryOverlayState?
 
     var onAction: ((_ actionType: String, _ url: String, _ payload: CEPTriggerPayload) -> Bool)?
@@ -33,6 +39,22 @@ final class DigiaOverlayController: ObservableObject {
     /// Used when the JS bundle reloads so a stale overlay doesn't persist.
     func forceNudgeDismiss() {
         activeNudge = nil
+    }
+
+    /// Starts on appearance and stays owned by this nudge when child views appear.
+    func startNudgeAutoDismiss() {
+        guard nudgeAutoDismissTask == nil, let nudge = activeNudge,
+              nudge.config.canvas != nil,
+              nudge.config.surface.isFullScreen else { return }
+        let afterMs = nudge.config.surface.autoDismissAfterMs
+        guard afterMs > 0 else { return }
+        let nanoseconds = UInt64(afterMs) * 1_000_000
+        nudgeAutoDismissTask = Task { [weak self] in
+            do { try await Task.sleep(nanoseconds: nanoseconds) }
+            catch { return }
+            guard !Task.isCancelled, self?.activeNudge?.id == nudge.id else { return }
+            SDKInstance.shared.markNudgeDismissed()
+        }
     }
 
     func showStoryOverlay(config: InlineStoryConfig, initialIndex: Int, payload: CEPTriggerPayload)

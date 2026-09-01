@@ -42,9 +42,15 @@ struct CampaignCanvasView: View {
 
     private var designScale: CGFloat {
         let base = (runtimeViewportWidth ?? availableSize.width) / max(designWidth, 1)
-        return surface.isBottomSheet ? base : min(base, maxFloatingCanvasUpscale)
+        return surface.isBottomSheet || surface.isFullScreen ? base : min(base, maxFloatingCanvasUpscale)
     }
-    private var scale: CGFloat {
+    var fittedScale: CGFloat {
+        if surface.isFullScreen {
+            // Fill the content viewport uniformly; its centered, clipped parent
+            // crops overflow without changing the authored composition.
+            return max(availableSize.width / max(canvas.width, 1),
+                       availableSize.height / max(canvas.height, 1))
+        }
         let naturalWidth = max(canvas.width * designScale, 1)
         let naturalHeight = max(canvas.height * designScale, 1)
         return designScale
@@ -54,14 +60,18 @@ struct CampaignCanvasView: View {
     var body: some View {
         CampaignCanvasStage(
             canvas: canvas,
-            authoredCornerRadius: surface.cornerRadius / max(designScale, 0.001),
+            authoredCornerRadius: surface.isFullScreen ? 0 : surface.cornerRadius / max(designScale, 0.001),
             isDark: theme.isDark(colorScheme),
             showBackground: showBackground,
             onAction: onAction
         )
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
-        .scaleEffect(scale, anchor: .topLeading)
-        .frame(width: canvas.width * scale, height: canvas.height * scale, alignment: .topLeading)
+        .scaleEffect(fittedScale, anchor: surface.isFullScreen ? .center : .topLeading)
+        .frame(
+            width: canvas.width * fittedScale,
+            height: canvas.height * fittedScale,
+            alignment: surface.isFullScreen ? .center : .topLeading
+        )
     }
 }
 
