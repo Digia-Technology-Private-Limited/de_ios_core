@@ -51,13 +51,13 @@ struct NudgeCloseButtonConfig: Equatable {
     var diameter: CGFloat { iconSize + 10 }
 
     func scaled(_ factor: CGFloat) -> NudgeCloseButtonConfig {
+        if placement != nil { return self }
         return NudgeCloseButtonConfig(
             marginTop: marginTop * factor,
             marginRight: marginRight * factor,
             backgroundColor: backgroundColor,
             iconColor: iconColor,
             iconSize: iconSize * factor,
-            placement: placement?.scaled(factor),
             backgroundToken: backgroundToken,
             iconToken: iconToken
         )

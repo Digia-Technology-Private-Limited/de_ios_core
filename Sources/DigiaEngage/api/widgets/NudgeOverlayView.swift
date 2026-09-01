@@ -203,7 +203,9 @@ private struct NudgeFullScreenView: View {
             marginRight: min(close.marginRight, max(0, bounds.width - touchSize)),
             backgroundColor: close.backgroundColor,
             iconColor: close.iconColor,
-            iconSize: close.iconSize
+            iconSize: close.iconSize,
+            backgroundToken: close.backgroundToken,
+            iconToken: close.iconToken
         )
     }
 }
