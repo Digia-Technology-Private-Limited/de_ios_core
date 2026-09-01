@@ -208,8 +208,8 @@ final class AnalyticsService {
     private var jsonHeaders: [String: String] {
         requestHeaders.merging([
             "Content-Type": "application/json",
-            "x-digia-project-id": apiKey,
-            "x-digia-device-id": identity.anonymousId,
+            "X-Digia-Project-Id": apiKey,
+            "X-Digia-Device-Id": identity.anonymousId,
         ]) { _, value in value }
     }
 
