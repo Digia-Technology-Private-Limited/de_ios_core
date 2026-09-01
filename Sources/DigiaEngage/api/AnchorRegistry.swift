@@ -173,7 +173,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
 
     public func getCornerRadius(for key: String) -> CGFloat {
         if activeKey == key, let trackedCornerRadius { return trackedCornerRadius }
-        preferredViewBox(for: key)?.cornerRadius ?? cornerRadii[key] ?? 0
+        return preferredViewBox(for: key)?.cornerRadius ?? cornerRadii[key] ?? 0
     }
 
     public func find(_ key: String) -> CGRect? {
