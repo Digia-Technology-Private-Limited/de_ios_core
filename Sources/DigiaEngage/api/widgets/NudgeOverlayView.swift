@@ -166,15 +166,14 @@ private struct NudgeFullScreenView: View {
                     if surface.showCloseButton && surface.closeButton.placement != nil {
                         CanvasNudgeCloseOverlay(
                             config: surface.closeButton.scaled(canvasView.fittedScale),
-                            container: CGRect(
-                                x: safe.left, y: safe.top,
-                                width: safeSize.width, height: safeSize.height
-                            ),
-                            viewport: geometry.size,
-                            safeAreaInsets: safe,
+                            container: CGRect(origin: .zero, size: safeSize),
+                            viewport: safeSize,
+                            safeAreaInsets: .zero,
                             isBottomSheet: false,
                             action: dismiss
                         )
+                        .frame(width: safeSize.width, height: safeSize.height)
+                        .padding(safeInsets)
                     } else if surface.showCloseButton {
                         NudgeCloseButton(
                             config: safeCloseButton(scale: canvasView.fittedScale, bounds: safeSize),
@@ -274,10 +273,9 @@ private struct NudgeSheetView: View {
             cardBackground: hostPaintsCanvasBackground
                 ? canvas.map { AnyView(CampaignCanvasBackgroundView(paint: $0.background)) }
                 : nil,
-            cardOverlay: surface.showCloseButton && surface.closeButton.placement == nil
-                ? AnyView(NudgeCloseButton(config: surface.closeButton, action: dismiss))
-                : nil,
-            viewportOverlay: canvas != nil && surface.showCloseButton && surface.closeButton.placement != nil
+            cardOverlay: cardCloseButton,
+            viewportOverlay: canvas != nil && surface.showCloseButton
+                && surface.closeButton.placement?.mode == .outside
                 ? { bounds, viewport in
                     AnyView(CanvasNudgeCloseOverlay(
                         config: surface.closeButton, container: bounds, viewport: viewport,
@@ -288,6 +286,26 @@ private struct NudgeSheetView: View {
         // The cover presents this content once per nudge, so `onAppear` is the
         // impression signal (Impressed → CEP + Digia "Viewed").
         .onAppear { SDKInstance.shared.reportNudgeImpression() }
+    }
+
+    private var cardCloseButton: AnyView? {
+        guard surface.showCloseButton else { return nil }
+        guard surface.closeButton.placement?.mode != .outside else { return nil }
+        guard surface.closeButton.placement != nil else {
+            return AnyView(NudgeCloseButton(config: surface.closeButton, action: dismiss))
+        }
+        return AnyView(
+            GeometryReader { geometry in
+                CanvasNudgeCloseOverlay(
+                    config: surface.closeButton,
+                    container: CGRect(origin: .zero, size: geometry.size),
+                    viewport: geometry.size,
+                    safeAreaInsets: .zero,
+                    isBottomSheet: true,
+                    action: dismiss
+                )
+            }
+        )
     }
 
     /// The typed content column, rendered with the trigger variables in scope so
@@ -368,7 +386,9 @@ private struct NudgeDialogContainer: View {
         }
         .frame(width: viewportSize.width, height: viewportSize.height)
         .overlayPreferenceValue(NudgeCloseContainerBoundsKey.self) { anchor in
-            if let anchor, surface.showCloseButton, surface.closeButton.placement != nil {
+            if let anchor, surface.showCloseButton,
+               surface.closeButton.placement?.mode == .outside
+            {
                 GeometryReader { geometry in
                     CanvasNudgeCloseOverlay(
                         config: closeButton, container: geometry[anchor], viewport: viewportSize,
@@ -401,7 +421,18 @@ private struct NudgeDialogContainer: View {
                         request, variables: presentation.variables, dismiss: dismiss)
                 }
             )
-            if surface.showCloseButton && surface.closeButton.placement == nil {
+            if surface.showCloseButton, surface.closeButton.placement?.mode == .inside {
+                GeometryReader { geometry in
+                    CanvasNudgeCloseOverlay(
+                        config: surface.closeButton,
+                        container: CGRect(origin: .zero, size: geometry.size),
+                        viewport: geometry.size,
+                        safeAreaInsets: .zero,
+                        isBottomSheet: false,
+                        action: dismiss
+                    )
+                }
+            } else if surface.showCloseButton && surface.closeButton.placement == nil {
                 NudgeCloseButton(config: surface.closeButton, action: dismiss)
             }
         }
@@ -409,7 +440,7 @@ private struct NudgeDialogContainer: View {
         .contentShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .environment(\.digiaVariables, presentation.variables)
         .anchorPreference(key: NudgeCloseContainerBoundsKey.self, value: .bounds) {
-            surface.closeButton.placement == nil ? nil : $0
+            surface.closeButton.placement?.mode == .outside ? $0 : nil
         }
     }
 
@@ -471,33 +502,74 @@ private struct DialogHeightKey: PreferenceKey {
 }
 
 /// Fixed cross visual with an inward-expanding, platform-minimum hit target.
-private struct NudgeCloseButton: View {
+struct NudgeCloseButton: View {
     let config: NudgeCloseButtonConfig
     let action: () -> Void
+    var layout: NudgeCloseButtonPlacement.Layout? = nil
+
+    @ObservedObject private var theme = CampaignCanvasTheme.shared
+    @Environment(\.colorScheme) private var colorScheme
 
     private var touchSize: CGFloat { max(config.diameter, 44) }
 
+    private func color(_ token: CampaignColor?, fallback: Color) -> Color {
+        guard let token else { return fallback }
+        return theme.color(token, isDark: theme.isDark(colorScheme))
+    }
+
+    @ViewBuilder
     var body: some View {
+        if let layout {
+            button(
+                circleSize: layout.circle.width,
+                touchSize: layout.touch.size,
+                alignment: .topLeading,
+                circleOffset: CGSize(
+                    width: layout.circle.minX - layout.touch.minX,
+                    height: layout.circle.minY - layout.touch.minY
+                )
+            )
+            .offset(x: layout.touch.minX, y: layout.touch.minY)
+        } else {
+            button(
+                circleSize: config.diameter,
+                touchSize: CGSize(width: touchSize, height: touchSize),
+                alignment: .topTrailing,
+                circleOffset: .zero
+            )
+            .padding(.top, config.marginTop)
+            .padding(.trailing, config.marginRight)
+        }
+    }
+
+    private func button(
+        circleSize: CGFloat,
+        touchSize: CGSize,
+        alignment: Alignment,
+        circleOffset: CGSize
+    ) -> some View {
         Button(action: action) {
-            ZStack(alignment: .topTrailing) {
+            ZStack(alignment: alignment) {
                 Color.clear
                 ZStack {
-                    Circle().fill(config.backgroundColor)
+                    Circle().fill(color(config.backgroundToken, fallback: config.backgroundColor))
                     if config.iconSize > 0 {
                         Image(systemName: "xmark")
-                            .font(.system(size: config.iconSize, weight: .regular))
+                            .font(.system(
+                                size: min(config.iconSize, max(1, circleSize - 10)),
+                                weight: .regular
+                            ))
                             .imageScale(.small)
-                            .foregroundStyle(config.iconColor)
+                            .foregroundStyle(color(config.iconToken, fallback: config.iconColor))
                     }
                 }
-                .frame(width: config.diameter, height: config.diameter)
+                .frame(width: circleSize, height: circleSize)
+                .offset(x: circleOffset.width, y: circleOffset.height)
             }
-            .frame(width: touchSize, height: touchSize, alignment: .topTrailing)
+            .frame(width: touchSize.width, height: touchSize.height, alignment: alignment)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close")
-        .padding(.top, config.marginTop)
-        .padding(.trailing, config.marginRight)
     }
 }

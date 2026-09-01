@@ -95,8 +95,8 @@ struct NudgeCloseButtonConfig: Equatable {
                 fallback: defaults.iconSize
             ),
             placement: placement,
-            backgroundToken: placement == nil ? nil : try? designTokens.resolveColor(map["backgroundColor"]),
-            iconToken: placement == nil ? nil : try? designTokens.resolveColor(map["iconColor"])
+            backgroundToken: canvasMode ? try? designTokens.resolveColor(map["backgroundColor"]) : nil,
+            iconToken: canvasMode ? try? designTokens.resolveColor(map["iconColor"]) : nil
         )
     }
 
