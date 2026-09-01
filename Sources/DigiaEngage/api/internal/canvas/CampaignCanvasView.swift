@@ -66,8 +66,12 @@ struct CampaignCanvasView: View {
             onAction: onAction
         )
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
-        .scaleEffect(fittedScale, anchor: .topLeading)
-        .frame(width: canvas.width * fittedScale, height: canvas.height * fittedScale, alignment: .topLeading)
+        .scaleEffect(fittedScale, anchor: surface.isFullScreen ? .center : .topLeading)
+        .frame(
+            width: canvas.width * fittedScale,
+            height: canvas.height * fittedScale,
+            alignment: surface.isFullScreen ? .center : .topLeading
+        )
     }
 }
 
