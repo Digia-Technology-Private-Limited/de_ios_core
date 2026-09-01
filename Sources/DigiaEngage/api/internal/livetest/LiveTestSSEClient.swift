@@ -91,7 +91,7 @@ final class LiveTestSSEClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(
             requestHeaders["x-digia-sdk-version"],
-            forHTTPHeaderField: "X-Digia-Sdk-Version"
+            forHTTPHeaderField: "x-digia-sdk-version"
         )
         request.setValue(
             requestHeaders["X-Digia-Sdk-Environment"],
