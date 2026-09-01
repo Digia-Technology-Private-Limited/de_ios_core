@@ -1,8 +1,8 @@
 import Foundation
 
 enum EngageAction: Equatable {
-    case openUrl(String, presentation: String? = nil)
-    case openDeeplink(String, fallbackUrl: String? = nil)
+    case openUrl(String)
+    case openDeeplink(String)
     case copyToClipboard(String)
     case share(String)
     case customKV([String: String])
@@ -35,27 +35,15 @@ enum EngageAction: Equatable {
 
     var analyticsURL: String? {
         switch self {
-        case .openUrl(let url, _), .openDeeplink(let url, _): url
+        case .openUrl(let url), .openDeeplink(let url): url
         default: nil
-        }
-    }
-
-    var isLink: Bool {
-        switch self {
-        case .openUrl, .openDeeplink: true
-        default: false
         }
     }
 
     func resolved(with context: VariableContext?) -> EngageAction {
         switch self {
-        case .openUrl(let value, let presentation):
-            .openUrl(interpolate(value, context: context), presentation: presentation)
-        case .openDeeplink(let value, let fallbackUrl):
-            .openDeeplink(
-                interpolate(value, context: context),
-                fallbackUrl: fallbackUrl.map { interpolate($0, context: context) }
-            )
+        case .openUrl(let value): .openUrl(interpolate(value, context: context))
+        case .openDeeplink(let value): .openDeeplink(interpolate(value, context: context))
         case .copyToClipboard(let value): .copyToClipboard(interpolate(value, context: context))
         case .share(let value): .share(interpolate(value, context: context))
         case .customKV(let payload):
@@ -84,40 +72,14 @@ struct EngageActionParser {
             let launchMode = string(in: data, keys: ["launchMode", "launch_mode"])
                 ?? string(in: step, keys: ["launchMode", "launch_mode"])
                 ?? ""
-            if ["externalApplication", "inAppBrowser"].contains(launchMode) {
-                return .openUrl(
-                    url,
-                    presentation: launchMode == "inAppBrowser" ? "in_app" : nil
-                )
-            }
-            return .openDeeplink(
-                url,
-                fallbackUrl: string(in: data, keys: ["fallbackUrl", "fallback_url"])
-                    ?? string(in: step, keys: ["fallbackUrl", "fallback_url"])
-            )
+            return ["externalApplication", "inAppBrowser"].contains(launchMode)
+                ? .openUrl(url) : .openDeeplink(url)
         case "open_url":
-            guard let url = string(in: data, keys: ["url"])
-                ?? string(in: step, keys: ["url"])
-            else { return nil }
-            let launchMode = string(in: data, keys: ["launchMode", "launch_mode"])
-                ?? string(in: step, keys: ["launchMode", "launch_mode"])
-            let presentation = string(in: data, keys: ["presentation"])
-                ?? string(in: step, keys: ["presentation"])
-            return .openUrl(
-                url,
-                presentation: presentation == "in_app" || launchMode == "inAppBrowser"
-                    ? "in_app"
-                    : nil
-            )
+            return (string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]))
+                .map(EngageAction.openUrl)
         case "deep_link":
-            guard let url = string(in: data, keys: ["url"])
-                ?? string(in: step, keys: ["url"])
-            else { return nil }
-            return .openDeeplink(
-                url,
-                fallbackUrl: string(in: data, keys: ["fallbackUrl", "fallback_url"])
-                    ?? string(in: step, keys: ["fallbackUrl", "fallback_url"])
-            )
+            return (string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]))
+                .map(EngageAction.openDeeplink)
         case "Action.copyToClipBoard", "copy":
             return (text(from: data) ?? text(from: step)).map(EngageAction.copyToClipboard)
         case "Action.share", "share":

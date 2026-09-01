@@ -398,10 +398,9 @@ private struct GuideStepOverlay: View {
             elementId: request.elementId
         )
         Task {
-            await SDKInstance.shared.executeGuideActionFlow(
+            await SDKInstance.shared.executeActionFlow(
                 guideActions(request.actions),
                 variables: variables,
-                campaignID: campaignID,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: {
                         guard SDKInstance.shared.guideOrchestrator.state?.token == guideToken else { return }
@@ -424,12 +423,21 @@ private struct GuideStepOverlay: View {
         var result: [EngageAction] = []
         for (index, action) in actions.enumerated() {
             result.append(action)
-            if action.isLink, actions.indices.contains(index + 1), actions[index + 1] == .dismiss {
+            if isLinkAction(action), actions.indices.contains(index + 1), actions[index + 1] == .dismiss {
                 continue
             }
-            if action.isLink { result.append(.dismiss) }
+            if isLinkAction(action) { result.append(.dismiss) }
         }
         return result
+    }
+
+    private func isLinkAction(_ action: EngageAction) -> Bool {
+        switch action {
+        case .openUrl, .openDeeplink:
+            return true
+        default:
+            return false
+        }
     }
 }
 

@@ -109,7 +109,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// allowed) invokes this hook to ask JS to render, instead of rendering the
     /// guide natively. Nil in pure-native apps, where guides render natively.
     var onGuideRenderRequest: ((CEPTriggerPayload) -> Void)?
-    var guideHostActionHandler: GuideHostActionHandler?
 
     // Event system (mirrors Android): a fan-out emitter over two sinks — the
     // coarse CEP channel (`toCep`) and Digia's rich analytics (`toDigia`).
@@ -227,40 +226,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             variables: variables,
             localActionExecutor: localActionExecutor
         )
-    }
-
-    func executeGuideActionFlow(
-        _ actions: [EngageAction],
-        variables: VariableContext?,
-        campaignID: String,
-        localActionExecutor: LocalActionExecutor
-    ) async {
-        let hostActionHandler: ((EngageAction) -> Bool)? = if guideHostActionHandler == nil {
-            nil
-        } else {
-            { [weak self] action in
-                self?.handleGuideHostAction(action, campaignID: campaignID) ?? false
-            }
-        }
-        await actionExecutor.executeActionFlow(
-            actions,
-            variables: variables,
-            localActionExecutor: localActionExecutor,
-            hostActionHandler: hostActionHandler
-        )
-    }
-
-    private func handleGuideHostAction(_ action: EngageAction, campaignID: String) -> Bool {
-        guard let guideHostActionHandler else { return false }
-        switch action {
-        case .openDeeplink(let url, let fallbackUrl):
-            return guideHostActionHandler("deepLink", url, fallbackUrl, nil, campaignID)
-        case .openUrl(let url, let presentation):
-            return guideHostActionHandler(
-                "openURL", url, nil, presentation ?? "external", campaignID)
-        default:
-            return false
-        }
     }
 
     func setCustomKVHandler(_ handler: CustomKVHandler?) {
@@ -2292,7 +2257,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         isHostMounted = false
         font = DigiaFont()
         currentDesignTokens = .empty
-        guideHostActionHandler = nil
         campaignStore.clear()
         controller.dismissNudge()
         controller.dismissStoryOverlay()
