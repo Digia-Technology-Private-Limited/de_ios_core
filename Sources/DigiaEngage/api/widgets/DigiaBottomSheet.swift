@@ -24,6 +24,8 @@ struct DigiaBottomSheet<Content: View>: View {
     @ViewBuilder let content: () -> Content
     var cardBackground: AnyView? = nil
     var cardOverlay: AnyView? = nil
+    /// Optional interactive chrome in viewport space, outside the card's clip.
+    var viewportOverlay: ((CGRect, CGSize) -> AnyView)? = nil
 
     @State private var contentHeight: CGFloat = 0
     @State private var shown = false
@@ -46,11 +48,20 @@ struct DigiaBottomSheet<Content: View>: View {
                     .onTapGesture { if config.allowBackdropDismiss { close() } }
 
                 card(cap: max(0, cap - surfaceBottomInset))
+                    .anchorPreference(key: NudgeCloseContainerBoundsKey.self, value: .bounds) {
+                        viewportOverlay == nil ? nil : $0
+                    }
                     .padding(.bottom, surfaceBottomInset)
                     .offset(y: shown ? max(dragOffset, 0) : geo.size.height)
                     .gesture(dragGesture)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
+            .overlayPreferenceValue(NudgeCloseContainerBoundsKey.self) { anchor in
+                if let anchor, let viewportOverlay {
+                    viewportOverlay(geo[anchor], geo.size)
+                        .opacity(shown ? 1 : 0)
+                }
+            }
         }
         .ignoresSafeArea(.container)
         .onPreferenceChange(SheetHeightKey.self) { contentHeight = $0 }
