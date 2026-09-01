@@ -65,9 +65,10 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     /// Bumped whenever anchors change so observing views re-resolve their target.
     @Published public private(set) var version = 0
 
-    private var viewRegistry: [String: WeakBox] = [:]
+    private var viewRegistry: [String: [WeakBox]] = [:]
     private var rectRegistry: [String: CGRect] = [:]
     private var trackedRects: [String: CGRect] = [:]
+    private var trackedCornerRadius: CGFloat?
     private var cornerRadii: [String: CGFloat] = [:]
     private var activeKey: String?
     private var activeAvailable: ((String) -> Void)?
@@ -81,23 +82,25 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     }
 
     public func register(key: String, view: UIView, cornerRadius: CGFloat = 0) {
-        viewRegistry[key] = WeakBox(view)
+        viewRegistry[key] = viewRegistry[key, default: []]
+            .filter { $0.value != nil && $0.value !== view } + [WeakBox(view, cornerRadius)]
         rectRegistry.removeValue(forKey: key)
         trackedRects.removeValue(forKey: key)
-        cornerRadii[key] = cornerRadius
+        if activeKey == key { trackedCornerRadius = nil }
+        cornerRadii.removeValue(forKey: key)
         version &+= 1
         SDKInstance.shared.recordAnchorSeen(key)
         guard activeKey == key else { return }
-        activeAnchorWasAvailable = false
-        startReadinessTimeout(for: key)
-        startSampling(view: view, key: key)
+        if !activeAnchorWasAvailable { startReadinessTimeout(for: key) }
+        startSampling(key: key)
     }
 
     public func register(key: String, rect: CGRect, cornerRadius: CGFloat = 0) {
-        rectRegistry[key] = rect
-        guard viewRegistry[key]?.value == nil else { return }
+        guard viewRegistry[key]?.contains(where: { $0.value != nil }) != true else { return }
         viewRegistry.removeValue(forKey: key)
+        rectRegistry[key] = rect
         trackedRects.removeValue(forKey: key)
+        if activeKey == key { trackedCornerRadius = nil }
         cornerRadii[key] = cornerRadius
         version &+= 1
         SDKInstance.shared.recordAnchorSeen(key)
@@ -113,8 +116,30 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     }
 
     public func unregister(key: String, view: UIView) {
-        guard viewRegistry[key]?.value === view else { return }
-        remove(key: key)
+        guard let views = viewRegistry[key], views.contains(where: { $0.value === view }) else {
+            return
+        }
+        let remaining = views.filter { $0.value != nil && $0.value !== view }
+        if remaining.isEmpty {
+            viewRegistry.removeValue(forKey: key)
+            rectRegistry.removeValue(forKey: key)
+            cornerRadii.removeValue(forKey: key)
+        } else {
+            viewRegistry[key] = remaining
+        }
+        trackedRects.removeValue(forKey: key)
+        version &+= 1
+        guard activeKey == key else { return }
+        if remaining.isEmpty {
+            activeViewSampler.stop()
+            if activeAnchorWasAvailable {
+                failActiveAnchor(key: key, reason: .detached)
+            } else {
+                startReadinessTimeout(for: key)
+            }
+        } else {
+            startSampling(key: key)
+        }
     }
 
     private func remove(key: String) {
@@ -135,19 +160,20 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     }
 
     public func getView(for key: String) -> UIView? {
-        viewRegistry[key]?.value
+        preferredViewBox(for: key)?.value
     }
 
     public func getRect(for key: String) -> CGRect? {
         if let rect = trackedRects[key] { return rect }
-        if let view = viewRegistry[key]?.value {
+        if let view = getView(for: key) {
             return view.window.map { view.convert(view.bounds, to: $0) }
         }
         return rectRegistry[key]
     }
 
     public func getCornerRadius(for key: String) -> CGFloat {
-        cornerRadii[key] ?? 0
+        if activeKey == key, let trackedCornerRadius { return trackedCornerRadius }
+        preferredViewBox(for: key)?.cornerRadius ?? cornerRadii[key] ?? 0
     }
 
     public func find(_ key: String) -> CGRect? {
@@ -155,30 +181,54 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     }
 
     func isRegistered(_ key: String) -> Bool {
-        viewRegistry[key]?.value?.window != nil || rectRegistry[key] != nil
+        viewRegistry[key]?.contains(where: { $0.value?.window != nil }) == true
+            || rectRegistry[key] != nil
     }
 
     @discardableResult
     func scrollToVisible(_ key: String) -> Bool {
-        guard let view = viewRegistry[key]?.value else { return false }
-        var ancestor = view.superview
-        while let current = ancestor {
-            if let scrollView = current as? UIScrollView {
-                scrollView.scrollRectToVisible(view.convert(view.bounds, to: scrollView), animated: false)
-                scrollView.layoutIfNeeded()
-                if case .available = resolution(for: key) { return true }
+        for view in viewRegistry[key]?.compactMap(\.value) ?? [] {
+            switch ActiveAnchorSampler.resolve(view: view) {
+            case .available, .unavailable(.outsideViewport):
+                break
+            case .missing, .unavailable:
+                continue
             }
-            ancestor = current.superview
+            var ancestor = view.superview
+            while let current = ancestor {
+                if let scrollView = current as? UIScrollView {
+                    scrollView.scrollRectToVisible(
+                        view.convert(view.bounds, to: scrollView),
+                        animated: false
+                    )
+                    scrollView.layoutIfNeeded()
+                    if case .available = ActiveAnchorSampler.resolve(view: view) { return true }
+                }
+                ancestor = current.superview
+            }
         }
         return false
     }
 
+    private func preferredViewBox(for key: String) -> WeakBox? {
+        let boxes = viewRegistry[key]?.filter { $0.value != nil } ?? []
+        return boxes.first {
+            guard let view = $0.value else { return false }
+            if case .available = ActiveAnchorSampler.resolve(view: view) { return true }
+            return false
+        } ?? boxes.first
+    }
+
     func resolution(for key: String) -> AnchorResolution {
-        if let view = viewRegistry[key]?.value {
-            return ActiveAnchorSampler.resolve(view: view)
-        }
-        if viewRegistry[key] != nil {
-            return .unavailable(.detached)
+        if let views = viewRegistry[key] {
+            var unavailable: AnchorResolution = .unavailable(.detached)
+            for box in views {
+                guard let view = box.value else { continue }
+                let resolution = ActiveAnchorSampler.resolve(view: view)
+                if case .available = resolution { return resolution }
+                unavailable = resolution
+            }
+            return unavailable
         }
         guard let rect = rectRegistry[key] else { return .missing }
         guard let window = ViewControllerUtil.keyWindow() else {
@@ -211,8 +261,8 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         activeAnchorWasAvailable = false
         startReadinessTimeout(for: key)
 
-        if let view = viewRegistry[key]?.value {
-            startSampling(view: view, key: key)
+        if viewRegistry[key]?.isEmpty == false {
+            startSampling(key: key)
         } else if rectRegistry[key] != nil {
             validateStaticRect(key: key)
         }
@@ -227,6 +277,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         activeAvailable = nil
         activeUnavailable = nil
         activeAnchorWasAvailable = false
+        trackedCornerRadius = nil
     }
 
     func resetForTesting() {
@@ -238,8 +289,10 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         version &+= 1
     }
 
-    private func startSampling(view: UIView, key: String) {
-        activeViewSampler.start(view: view) { [weak self] resolution in
+    private func startSampling(key: String) {
+        activeViewSampler.start(resolve: { [weak self] in
+            self?.resolution(for: key) ?? .missing
+        }) { [weak self] resolution in
             guard self?.activeKey == key else { return }
             self?.updateTrackedRect(for: key, resolution: resolution)
         }
@@ -249,7 +302,14 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         switch resolution {
         case let .available(rect):
             markActiveAnchorAvailable()
-            if trackedRects[key].map({ approximatelyEqual($0, rect) }) != true {
+            let cornerRadius = preferredViewBox(for: key)?.cornerRadius ?? cornerRadii[key] ?? 0
+            let cornerRadiusChanged = trackedCornerRadius.map {
+                abs($0 - cornerRadius) >= 0.05
+            } ?? true
+            trackedCornerRadius = cornerRadius
+            if trackedRects[key].map({ approximatelyEqual($0, rect) }) != true
+                || cornerRadiusChanged
+            {
                 trackedRects[key] = rect
                 version &+= 1
             }
@@ -311,16 +371,19 @@ public final class AnchorRegistry: NSObject, ObservableObject {
 
 @MainActor
 private final class ActiveAnchorSampler: NSObject {
-    private weak var view: UIView?
+    private var resolve: (() -> AnchorResolution)?
     private var displayLink: CADisplayLink?
     private var onSample: ((AnchorResolution) -> Void)?
 
-    func start(view: UIView, onSample: @escaping (AnchorResolution) -> Void) {
+    func start(
+        resolve: @escaping () -> AnchorResolution,
+        onSample: @escaping (AnchorResolution) -> Void
+    ) {
         stop()
-        self.view = view
+        self.resolve = resolve
         self.onSample = onSample
         sample()
-        guard self.view != nil, self.onSample != nil else { return }
+        guard self.resolve != nil, self.onSample != nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(sample))
         link.add(to: .main, forMode: .common)
         displayLink = link
@@ -329,16 +392,12 @@ private final class ActiveAnchorSampler: NSObject {
     func stop() {
         displayLink?.invalidate()
         displayLink = nil
-        view = nil
+        resolve = nil
         onSample = nil
     }
 
     @objc private func sample() {
-        guard let view else {
-            onSample?(.unavailable(.detached))
-            return
-        }
-        onSample?(Self.resolve(view: view))
+        onSample?(resolve?() ?? .unavailable(.detached))
     }
 
     static func resolve(view: UIView) -> AnchorResolution {
@@ -431,9 +490,11 @@ private final class ActiveAnchorSampler: NSObject {
 
 private final class WeakBox {
     weak var value: UIView?
+    let cornerRadius: CGFloat
 
-    init(_ value: UIView) {
+    init(_ value: UIView, _ cornerRadius: CGFloat) {
         self.value = value
+        self.cornerRadius = cornerRadius
     }
 }
 
