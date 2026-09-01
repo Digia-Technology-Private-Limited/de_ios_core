@@ -84,20 +84,12 @@ final class HostActionExecutor {
     private var openURLHandler: OpenURLHandler?
     private var legacyActionHandler: (String, String) -> Bool = { _, _ in false }
     private let openURL: (String) -> Void
-    private let canOpenURL: (String) -> Bool
 
-    init(
-        openURL: @escaping (String) -> Void = {
-            guard let url = URL(string: $0) else { return }
-            UIApplication.shared.open(url)
-        },
-        canOpenURL: @escaping (String) -> Bool = {
-            guard let url = URL(string: $0) else { return false }
-            return UIApplication.shared.canOpenURL(url)
-        }
-    ) {
+    init(openURL: @escaping (String) -> Void = {
+        guard let url = URL(string: $0) else { return }
+        UIApplication.shared.open(url)
+    }) {
         self.openURL = openURL
-        self.canOpenURL = canOpenURL
     }
 
     func configure(_ handlers: DigiaActionHandlers) {
@@ -129,24 +121,20 @@ final class HostActionExecutor {
     }
 
     @discardableResult
-    func execute(_ action: EngageAction, allowLegacyHandler: Bool = true) throws -> Bool {
+    func execute(_ action: EngageAction) throws -> Bool {
         switch action {
         case .customKV(let payload):
             try customKVHandler?(payload)
-        case .openDeeplink(let url, let fallbackUrl):
+        case .openDeeplink(let url):
             if let deepLinkHandler {
                 try deepLinkHandler(url)
-            } else if !allowLegacyHandler || !legacyActionHandler("deep_link", url) {
-                if fallbackUrl == nil || canOpenURL(url) {
-                    openURL(url)
-                } else if let fallbackUrl, canOpenURL(fallbackUrl) {
-                    openURL(fallbackUrl)
-                }
+            } else if !legacyActionHandler("deep_link", url) {
+                openURL(url)
             }
-        case .openUrl(let url, _):
+        case .openUrl(let url):
             if let openURLHandler {
                 try openURLHandler(url)
-            } else if !allowLegacyHandler || !legacyActionHandler("open_url", url) {
+            } else if !legacyActionHandler("open_url", url) {
                 openURL(url)
             }
         default:
@@ -172,17 +160,13 @@ final class EngageActionExecutor {
     func executeActionFlow(
         _ actions: [EngageAction],
         variables: VariableContext?,
-        localActionExecutor: LocalActionExecutor,
-        hostActionHandler: ((EngageAction) -> Bool)? = nil
+        localActionExecutor: LocalActionExecutor
     ) async {
         for action in actions {
-            let action = action.resolved(with: variables)
-            if hostActionHandler?(action) == true { continue }
             await executeAction(
                 action,
-                variables: nil,
-                localActionExecutor: localActionExecutor,
-                allowLegacyHostActionHandler: hostActionHandler == nil || !action.isLink
+                variables: variables,
+                localActionExecutor: localActionExecutor
             )
         }
     }
@@ -190,17 +174,13 @@ final class EngageActionExecutor {
     func executeAction(
         _ action: EngageAction,
         variables: VariableContext?,
-        localActionExecutor: LocalActionExecutor,
-        allowLegacyHostActionHandler: Bool = true
+        localActionExecutor: LocalActionExecutor
     ) async {
         do {
             let action = action.resolved(with: variables)
             if localActionExecutor.execute(action) { return }
             if globalActionExecutor.execute(action) { return }
-            try hostActionExecutor.execute(
-                action,
-                allowLegacyHandler: allowLegacyHostActionHandler
-            )
+            try hostActionExecutor.execute(action)
         } catch {
             DigiaLog.error("Action step failed: \(error.localizedDescription)")
         }
