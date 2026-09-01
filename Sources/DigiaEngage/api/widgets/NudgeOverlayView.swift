@@ -165,7 +165,7 @@ private struct NudgeFullScreenView: View {
 
                     if surface.showCloseButton && surface.closeButton.placement != nil {
                         CanvasNudgeCloseOverlay(
-                            config: surface.closeButton,
+                            config: surface.closeButton.scaled(canvasView.fittedScale),
                             container: CGRect(
                                 x: safe.left, y: safe.top,
                                 width: safeSize.width, height: safeSize.height
@@ -319,6 +319,11 @@ private struct NudgeDialogContainer: View {
         let insets = surface.useSafeArea ? safeAreaInsets : .zero
         let width = max(1, viewportSize.width - insets.left - insets.right)
         let height = max(1, viewportSize.height - insets.top - insets.bottom)
+        let closeButton = presentation.config.canvas == nil
+            ? surface.closeButton
+            : surface.closeButton.scaled(
+                min(width / max(presentation.config.designWidth, 1), 1.15)
+            )
 
         ZStack {
             scrimColor
@@ -366,7 +371,7 @@ private struct NudgeDialogContainer: View {
             if let anchor, surface.showCloseButton, surface.closeButton.placement != nil {
                 GeometryReader { geometry in
                     CanvasNudgeCloseOverlay(
-                        config: surface.closeButton, container: geometry[anchor], viewport: viewportSize,
+                        config: closeButton, container: geometry[anchor], viewport: viewportSize,
                         safeAreaInsets: safeAreaInsets, isBottomSheet: false, action: dismiss
                     )
                 }

@@ -2,7 +2,7 @@ import Foundation
 import CoreFoundation
 import CoreGraphics
 
-/// Canvas-only placement. Distances are runtime points, independent of artwork scaling.
+/// Canvas-only placement. Distances use authored canvas units and scale with the surface.
 struct NudgeCloseButtonPlacement: Equatable {
     enum Mode: String { case inside, outside }
     enum Horizontal: String { case left, center, right }
@@ -39,6 +39,18 @@ struct NudgeCloseButtonPlacement: Equatable {
     struct Layout {
         let circle: CGRect
         let touch: CGRect
+    }
+
+    func scaled(_ factor: CGFloat) -> Self {
+        let scale = factor.isFinite ? max(0, factor) : 1
+        return Self(
+            mode: mode,
+            horizontal: horizontal,
+            vertical: vertical,
+            offsetX: offsetX * scale,
+            offsetY: offsetY * scale,
+            gap: gap * scale
+        )
     }
 
     /// Resolve against the fitted card, then keep the entire hit region on screen.
