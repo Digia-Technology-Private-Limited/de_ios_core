@@ -216,41 +216,6 @@ public enum Digia {
         SDKInstance.shared.onGuideRenderRequest = callback
     }
 
-    /// Registers the separate React Native callback for transient live-test Guides.
-    public static func setOnLiveTestGuideRenderRequest(
-        _ callback: ((LiveTestGuideRenderRequest) -> Void)?
-    ) {
-        SDKInstance.shared.onLiveTestGuideRenderRequest = callback
-    }
-
-    /// Registers the React Native callback that cancels a transient Guide.
-    public static func setOnLiveTestGuideCancelRequest(_ callback: ((String) -> Void)?) {
-        SDKInstance.shared.onLiveTestGuideCancelRequest = callback
-    }
-
-    /// Completes a React Native live-test Guide after its first frame is visible.
-    public static func reportLiveTestGuideShown(_ cepCampaignId: String) {
-        SDKInstance.shared.reportLiveTestGuideShown(cepCampaignId)
-    }
-
-    /// Releases native ownership after a React Native live-test Guide ends.
-    public static func endLiveTestGuide(_ cepCampaignId: String) {
-        SDKInstance.shared.endLiveTestGuide(cepCampaignId)
-    }
-
-    /// Completes a failed React Native live-test Guide without emitting production analytics.
-    public static func reportLiveTestGuideFailed(
-        _ cepCampaignId: String,
-        code: String,
-        message: String? = nil
-    ) {
-        SDKInstance.shared.reportLiveTestGuideFailed(
-            cepCampaignId,
-            code: code,
-            message: message
-        )
-    }
-
     /// Requests immediate scrolling for a mounted Guide anchor.
     public static func scrollGuideAnchorIntoView(_ anchorKey: String) {
         AnchorRegistry.shared.scrollToVisible(anchorKey)

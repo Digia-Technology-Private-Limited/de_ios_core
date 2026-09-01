@@ -110,8 +110,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// allowed) invokes this hook to ask JS to render, instead of rendering the
     /// guide natively. Nil in pure-native apps, where guides render natively.
     var onGuideRenderRequest: ((CEPTriggerPayload) -> Void)?
-    var onLiveTestGuideRenderRequest: ((LiveTestGuideRenderRequest) -> Void)?
-    var onLiveTestGuideCancelRequest: ((String) -> Void)?
     var guideHostActionHandler: GuideHostActionHandler?
 
     // Event system (mirrors Android): a fan-out emitter over two sinks — the
@@ -618,15 +616,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 campaign: guide.campaign
             ) {
                 activeExternalGuide = nil
-                if isLiveTestCepId(guide.payload.cepCampaignId) {
-                    onLiveTestGuideCancelRequest?(guide.payload.cepCampaignId)
-                    liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
-                        .noMatchingScreen,
-                        message: "screen changed before the Guide was shown"
-                    )
-                } else {
-                    events.toCep(.dismissed, payload: guide.payload)
-                }
+                events.toCep(.dismissed, payload: guide.payload)
             }
         }
 
@@ -740,7 +730,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// branches on which one this is.
     @MainActor
     private protocol RoutingContext {
-        var liveTestGuideRequest: LiveTestGuideRenderRequest? { get }
         func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool
         func onInlineRouted(payload: CEPTriggerPayload)
         func onDropped(_ code: LiveTestFailureCode, message: String)
@@ -748,7 +737,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     @MainActor
     private struct OrganicRoutingContext: RoutingContext {
-        let liveTestGuideRequest: LiveTestGuideRenderRequest? = nil
         let frequencyManager: FrequencyManager?
         let events: EngageEventEmitter
 
@@ -784,15 +772,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     @MainActor
     private final class LiveTestRoutingContext: RoutingContext {
-        let liveTestGuideRequest: LiveTestGuideRenderRequest?
         private let testContext: LiveTestContext
 
-        init(
-            testContext: LiveTestContext,
-            liveTestGuideRequest: LiveTestGuideRenderRequest? = nil
-        ) {
+        init(testContext: LiveTestContext) {
             self.testContext = testContext
-            self.liveTestGuideRequest = liveTestGuideRequest
         }
 
         func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool { false }
@@ -889,16 +872,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                config?.wrapperBinding == "react_native",
                guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
             {
-                if context.liveTestGuideRequest != nil {
-                    guard onLiveTestGuideRenderRequest != nil else {
-                        let message = "React Native live-test guide renderer is not registered"
-                        lastCampaignDropReason = message
-                        context.onDropped(.renderError, message: message)
-                        return false
-                    }
-                    activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
-                    return true
-                }
                 guard let renderViaJs = onGuideRenderRequest else {
                     let message = "React Native guide renderer is not registered"
                     lastCampaignDropReason = message
@@ -1084,6 +1057,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return
         }
 
+        if let guideConfig = campaign.guideConfig,
+           guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
+        {
+            reporter.postFailed(
+                invocation.testInvocationId,
+                code: .templateError,
+                message: "Classic Guides cannot be tested on a device"
+            )
+            return
+        }
+
         if campaign.guideConfig != nil { replaceActiveLiveTestGuide() }
 
         let coercedVariables = invocation.variables.mapValues { "\($0)" }
@@ -1095,38 +1079,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             variables: coercedVariables
         )
 
-        let guideRequest: LiveTestGuideRenderRequest?
-        if let guideConfig = campaign.guideConfig,
-           config?.wrapperBinding == "react_native",
-           guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
-        {
-            guard let campaignData = try? JSONSerialization.data(withJSONObject: campaignJson),
-                  let variablesData = try? JSONSerialization.data(withJSONObject: coercedVariables),
-                  let campaignJsonString = String(data: campaignData, encoding: .utf8),
-                  let variablesJsonString = String(data: variablesData, encoding: .utf8)
-            else {
-                reporter.postFailed(
-                    invocation.testInvocationId, code: .templateError,
-                    message: "live-test Guide payload could not be serialized"
-                )
-                return
-            }
-            guideRequest = LiveTestGuideRenderRequest(
-                testInvocationId: invocation.testInvocationId,
-                cepCampaignId: cepCampaignId,
-                campaignJson: campaignJsonString,
-                variablesJson: variablesJsonString
-            )
-        } else {
-            guideRequest = nil
-        }
-
-        let cleanUpLiveTestState: (Bool) -> Void = { [weak self] shown in
+        let cleanUpLiveTestState: () -> Void = { [weak self] in
             self?.liveTestContexts.removeValue(forKey: cepCampaignId)
             self?.liveTestCampaigns.removeValue(forKey: cepCampaignId)
-            if !shown, self?.activeExternalGuide?.payload.cepCampaignId == cepCampaignId {
-                self?.activeExternalGuide = nil
-            }
             self?.events.resetImpression(cepCampaignId)
         }
 
@@ -1141,24 +1096,20 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let accepted = route(
             campaign,
             payload: payload,
-            context: LiveTestRoutingContext(
-                testContext: testContext,
-                liveTestGuideRequest: guideRequest
-            )
+            context: LiveTestRoutingContext(testContext: testContext)
         )
         if !accepted {
-            cleanUpLiveTestState(false)
+            cleanUpLiveTestState()
             return
         }
         if campaign.guideConfig?.isAnchorless == false {
             verifyFirstLiveTestGuideAnchorAfterLayout(
                 campaign: campaign,
                 payload: payload,
-                testContext: testContext,
-                guideRequest: guideRequest
+                testContext: testContext
             )
         }
-        if campaign.guideConfig != nil, guideRequest == nil {
+        if campaign.guideConfig != nil {
             let seconds = Self.liveTestNoMatchTimeoutSeconds
             let graceNanoseconds = seconds * 1_000_000_000
             let maxDelayMs = (UInt64.max - graceNanoseconds) / 1_000_000
@@ -1187,19 +1138,14 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private func verifyFirstLiveTestGuideAnchorAfterLayout(
         campaign: CampaignModel,
         payload: CEPTriggerPayload,
-        testContext: LiveTestContext,
-        guideRequest: LiveTestGuideRenderRequest?
+        testContext: LiveTestContext
     ) {
         guard let anchorKey = campaign.guideConfig?.steps.first?.target.anchorKey else { return }
         Task { [weak self] in
             await LiveTestFrameWaiter().wait()
             guard let self else { return }
-            let isCurrentGuide = if guideRequest == nil {
-                self.guideOrchestrator.state?.payload.cepCampaignId == payload.cepCampaignId
-            } else {
-                self.activeExternalGuide?.payload.cepCampaignId == payload.cepCampaignId
-            }
-            guard isCurrentGuide else { return }
+            guard self.guideOrchestrator.state?.payload.cepCampaignId == payload.cepCampaignId
+            else { return }
             if AnchorRegistry.shared.isRegistered(anchorKey) {
                 if case .unavailable(.outsideViewport) = AnchorRegistry.shared.resolution(
                     for: anchorKey
@@ -1207,17 +1153,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     AnchorRegistry.shared.scrollToVisible(anchorKey)
                 }
                 if case .available = AnchorRegistry.shared.resolution(for: anchorKey) {
-                    if let guideRequest {
-                        guard let renderLiveTestViaJs = self.onLiveTestGuideRenderRequest else {
-                            self.reportLiveTestGuideFailed(
-                                payload.cepCampaignId,
-                                code: LiveTestFailureCode.renderError.wireValue,
-                                message: "React Native live-test guide renderer is not registered"
-                            )
-                            return
-                        }
-                        renderLiveTestViaJs(guideRequest)
-                    }
                     return
                 }
             }
@@ -1227,19 +1162,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             )
             self.guideOrchestrator.dismissIfActive(payloadId: payload.cepCampaignId)
             self.guideCompletionFired = false
-            if self.activeExternalGuide?.payload.cepCampaignId == payload.cepCampaignId {
-                self.activeExternalGuide = nil
-            }
-        }
-    }
-
-    func reportLiveTestGuideShown(_ cepCampaignId: String) {
-        liveTestContexts[cepCampaignId]?.reportShown()
-    }
-
-    func endLiveTestGuide(_ cepCampaignId: String) {
-        if activeExternalGuide?.payload.cepCampaignId == cepCampaignId {
-            activeExternalGuide = nil
         }
     }
 
@@ -1252,29 +1174,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             )
             guideOrchestrator.dismissIfActive(payloadId: state.payload.cepCampaignId)
             guideCompletionFired = false
-        }
-        if let guide = activeExternalGuide,
-           isLiveTestCepId(guide.payload.cepCampaignId) {
-            onLiveTestGuideCancelRequest?(guide.payload.cepCampaignId)
-            liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
-                .renderError,
-                message: "replaced by a newer live-test invocation"
-            )
-            activeExternalGuide = nil
-        }
-    }
-
-    func reportLiveTestGuideFailed(
-        _ cepCampaignId: String,
-        code: String,
-        message: String?
-    ) {
-        liveTestContexts[cepCampaignId]?.reportFailed(
-            LiveTestFailureCode(rawValue: code) ?? .renderError,
-            message: message
-        )
-        if activeExternalGuide?.payload.cepCampaignId == cepCampaignId {
-            activeExternalGuide = nil
         }
     }
 
@@ -2399,7 +2298,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         isHostMounted = false
         font = DigiaFont()
         currentDesignTokens = .empty
-        onLiveTestGuideRenderRequest = nil
         guideHostActionHandler = nil
         campaignStore.clear()
         controller.dismissNudge()
