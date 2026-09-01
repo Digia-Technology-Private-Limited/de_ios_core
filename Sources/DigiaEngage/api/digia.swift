@@ -209,7 +209,10 @@ public enum Digia {
         SDKInstance.shared.clearAllInlineContent()
     }
 
-    /// Registers the React Native bridge callback for Classic Guides.
+    /// Registers the RN render hook. When set, guides are treated as JS-rendered:
+    /// on a guide trigger the SDK applies frequency capping and, if allowed, invokes
+    /// this callback (with the trigger payload) to ask JS to render — it does not
+    /// render the guide natively. Used only by the React Native bridge.
     public static func setOnGuideRenderRequest(_ callback: ((CEPTriggerPayload) -> Void)?) {
         SDKInstance.shared.onGuideRenderRequest = callback
     }
