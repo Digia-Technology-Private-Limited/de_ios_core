@@ -11,6 +11,8 @@ enum LiveTestSseEvent {
 /// `URLSession.bytes(for:)`; framing is handled by `SSEFrameParser`.
 @MainActor
 final class LiveTestSSEClient {
+    private let config: () -> DigiaConfig
+    private let deviceId: () -> String
     private let requestHeaders: [String: String]
     private let deviceName: () -> String?
     private let onEvent: (LiveTestSseEvent) -> Void
@@ -25,12 +27,16 @@ final class LiveTestSSEClient {
     var isRunning: Bool { !stopped }
 
     init(
+        config: @escaping () -> DigiaConfig,
+        deviceId: @escaping () -> String,
         requestHeaders: [String: String],
         deviceName: @escaping () -> String?,
         onEvent: @escaping (LiveTestSseEvent) -> Void,
         onConnectionStateChanged: @escaping (LiveTestConnectionState) -> Void,
         session: URLSession? = nil
     ) {
+        self.config = config
+        self.deviceId = deviceId
         self.requestHeaders = requestHeaders
         self.deviceName = deviceName
         self.onEvent = onEvent
@@ -72,6 +78,7 @@ final class LiveTestSSEClient {
 
     private func runConnection() async {
         guard !stopped else { return }
+        let cfg = config()
         guard let url = URL(string: DigiaEndpoints.liveTestConnect) else {
             handleDisconnect("invalid live test URL")
             return
@@ -82,10 +89,29 @@ final class LiveTestSSEClient {
         let body = deviceName().map { ["deviceName": $0] } ?? [:]
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        for (key, value) in requestHeaders { request.setValue(value, forHTTPHeaderField: key) }
+        request.setValue(
+            requestHeaders["x-digia-sdk-version"],
+            forHTTPHeaderField: "X-Digia-Sdk-Version"
+        )
+        request.setValue(
+            requestHeaders["X-Digia-Sdk-Environment"],
+            forHTTPHeaderField: "X-Digia-Sdk-Environment"
+        )
+        request.setValue(
+            requestHeaders["X-Digia-Os-Version"],
+            forHTTPHeaderField: "X-Digia-Os-Version"
+        )
+        request.setValue(requestHeaders["x-app-version"], forHTTPHeaderField: "x-app-version")
+        request.setValue(requestHeaders["x-app-build-number"], forHTTPHeaderField: "x-app-build-number")
+        request.setValue(requestHeaders["x-app-package-name"], forHTTPHeaderField: "x-app-package-name")
+        request.setValue(cfg.apiKey, forHTTPHeaderField: "X-Digia-Project-Id")
+        request.setValue(deviceId(), forHTTPHeaderField: "X-Digia-Device-Id")
         // Always 'debug' — this client only ever runs in a debug build.
         request.setValue("debug", forHTTPHeaderField: "X-Digia-Environment")
+        request.setValue("ios", forHTTPHeaderField: "X-Digia-Platform")
         request.setValue(DigiaSdkVersion.value, forHTTPHeaderField: "X-Digia-Version")
+        request.setValue("Apple", forHTTPHeaderField: "X-Digia-Device-Make")
+        request.setValue(Self.deviceModel(), forHTTPHeaderField: "X-Digia-Device-Model")
 
         do {
             let (bytes, response) = try await session.bytes(for: request)
@@ -163,6 +189,14 @@ final class LiveTestSSEClient {
             try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
             guard let self, !self.stopped else { return }
             self.connect()
+        }
+    }
+
+    private static func deviceModel() -> String {
+        var sysInfo = utsname()
+        uname(&sysInfo)
+        return withUnsafePointer(to: &sysInfo.machine) {
+            $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(cString: $0) }
         }
     }
 }

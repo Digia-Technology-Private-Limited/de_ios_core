@@ -18,9 +18,9 @@ enum SDKRequestHeaders {
                 wrapperVersion: config.wrapperVersion,
                 core: DigiaSdkVersion.value
             ),
-            "x-digia-sdk-environment": config.environment == .sandbox ? "sandbox" : "production",
+            "X-Digia-Sdk-Environment": config.environment == .sandbox ? "sandbox" : "production",
             "X-Digia-Device-Make": "Apple",
-            "x-digia-os-version": "iOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
+            "X-Digia-Os-Version": "iOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
         ]
         let optional: [String: String?] = [
             "X-Digia-Device-Model": model,

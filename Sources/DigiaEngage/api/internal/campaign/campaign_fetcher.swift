@@ -25,13 +25,7 @@ private struct URLSessionCampaignAPI: CampaignAPI {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        for (key, value) in requestHeaders where key != "X-Digia-Project-Id" {
-            request.setValue(value, forHTTPHeaderField: key)
-        }
-        request.setValue(
-            requestHeaders["X-Digia-Project-Id"],
-            forHTTPHeaderField: "x-digia-project-id"
-        )
+        for (key, value) in requestHeaders { request.setValue(value, forHTTPHeaderField: key) }
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.timeoutInterval = 10
         request.httpBody = Data("{}".utf8)
