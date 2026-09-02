@@ -1,8 +1,29 @@
 import Foundation
 
+private extension CampaignTimerUnit {
+    var defaultLabel: String {
+        switch self {
+        case .days: "Days"
+        case .hours: "Hrs"
+        case .minutes: "Min"
+        case .seconds: "Sec"
+        }
+    }
+}
+
 struct CampaignCanvasParser {
     let designTokens: DesignTokenCatalog
-    init(designTokens: DesignTokenCatalog = .empty) { self.designTokens = designTokens }
+    let strictWidgets: Bool
+    let allowTimer: Bool
+    init(
+        designTokens: DesignTokenCatalog = .empty,
+        strictWidgets: Bool = false,
+        allowTimer: Bool = false
+    ) {
+        self.designTokens = designTokens
+        self.strictWidgets = strictWidgets
+        self.allowTimer = allowTimer
+    }
 
     /// Optional: a carousel with no readable slides, or a story with no readable
     /// pages or chrome, has nothing to draw. Dropping the widget is the right
@@ -22,6 +43,7 @@ struct CampaignCanvasParser {
             "digia/storyProgress": parseStoryProgress,
             "digia/storyClose": parseStoryClose,
             "digia/storyMute": parseStoryMute,
+            "digia/timer": parseTimer,
         ]
     }
 
@@ -35,7 +57,7 @@ struct CampaignCanvasParser {
         guard let raw = props["slides"] as? [[String: Any]], !raw.isEmpty else { return nil }
         var slides: [CampaignCanvas] = []
         for slide in raw {
-            guard let parsed = try? parse(slide) else { return nil }
+            guard let parsed = parseNested(slide) else { return nil }
             slides.append(parsed)
         }
         let fraction = CGFloat(propertyNumber(props["viewportFraction"]) ?? 0.88)
@@ -99,7 +121,7 @@ struct CampaignCanvasParser {
         var pages: [CampaignCanvasStoryPage] = []
         for page in rawPages {
             guard let canvasJSON = propertyObject(page["canvas"]),
-                  let canvas = try? parse(canvasJSON) else { return nil }
+                  let canvas = parseNested(canvasJSON) else { return nil }
             let playback = propertyObject(page["thumbnailPlayback"]) ?? [:]
             let seconds = propertyNumber(page["durationSeconds"]) ?? 0
             pages.append(
@@ -120,7 +142,7 @@ struct CampaignCanvasParser {
         }
 
         guard let chromeJSON = propertyObject(props["chromeCanvas"]),
-              let chrome = try? parse(chromeJSON) else { return nil }
+              let chrome = parseNested(chromeJSON) else { return nil }
         let cardRatio = CGFloat(propertyNumber(props["cardAspectRatio"]) ?? 0.72)
         return .story(
             box: box,
@@ -189,8 +211,12 @@ struct CampaignCanvasParser {
             case "widget":
                 if let widget = try parseWidget(child["widget"] as? [String: Any]) {
                     children.append(.widget(id: id, rect: rect, widget: widget))
+                } else if strictWidgets {
+                    throw DesignTokenError.invalid("Unsupported Canvas widget")
                 }
-            default: continue
+            default:
+                if strictWidgets { throw DesignTokenError.invalid("Unsupported Canvas child kind") }
+                continue
             }
         }
         return CampaignCanvas(
@@ -201,11 +227,94 @@ struct CampaignCanvasParser {
     }
 
     private func parseWidget(_ json: [String: Any]?) throws -> CampaignCanvasWidget? {
-        guard let json, let type = json["type"] as? String, let parser = widgetParsers[type] else { return nil }
+        guard let json, let type = json["type"] as? String else { return nil }
+        if type == "digia/timer" && !allowTimer {
+            throw DesignTokenError.invalid("Timer widget is not allowed on this surface")
+        }
+        guard let parser = widgetParsers[type] else { return nil }
         let props = propertyObject(json["props"]) ?? [:]
         var box = type == "digia/canvasContainer" ? .none : try parseBox(propertyObject(json["containerProps"]))
         if type == "digia/button" { box.shadow = nil }
         return try parser(box, props)
+    }
+
+    private func parseNested(_ json: [String: Any]) -> CampaignCanvas? {
+        try? CampaignCanvasParser(
+            designTokens: designTokens,
+            strictWidgets: strictWidgets,
+            allowTimer: false
+        ).parse(json)
+    }
+
+    private func parseTimer(
+        _ box: CampaignCanvasBox,
+        _ props: [String: Any]
+    ) throws -> CampaignCanvasWidget? {
+        guard !props.keys.contains("sourceId"), !props.keys.contains("urgentDigitColor") else { return nil }
+        let preset = props["preset"] as? String ?? "unitBoxes"
+        guard preset == "text" || preset == "unitBoxes" else { return nil }
+        let unitJSON = propertyObject(props["units"]) ?? [:]
+        let labelJSON = propertyObject(props["labels"]) ?? [:]
+        var units: [CampaignTimerUnit: CampaignTimerUnitVisibility] = [:]
+        var labels: [CampaignTimerUnit: String] = [:]
+        for unit in CampaignTimerUnit.allCases {
+            let raw = unitJSON[unit.rawValue] ?? (unit == .days ? "autoHide" : true)
+            switch raw {
+            case let value as String where value == "autoHide": units[unit] = .autoHide
+            case let value as Bool: units[unit] = value ? .show : .hide
+            default: return nil
+            }
+            labels[unit] = labelJSON[unit.rawValue] as? String ?? unit.defaultLabel
+        }
+        guard units.values.contains(where: { $0 != .hide }) else { return nil }
+        let shared = try parseTimerStyle(props, fallback: nil)
+        let rawOverrides = propertyObject(props["unitOverrides"]) ?? [:]
+        var overrides: [CampaignTimerUnit: CampaignCanvasTimerUnitStyle] = [:]
+        for (key, raw) in rawOverrides {
+            guard let unit = CampaignTimerUnit(rawValue: key), let value = propertyObject(raw) else { return nil }
+            overrides[unit] = try parseTimerStyle(value, fallback: shared)
+        }
+        return .timer(
+            box: box,
+            preset: preset,
+            separator: props["separator"] as? String ?? ":",
+            units: units,
+            labels: labels,
+            style: shared,
+            unitOverrides: overrides
+        )
+    }
+
+    private func parseTimerStyle(
+        _ json: [String: Any],
+        fallback: CampaignCanvasTimerUnitStyle?
+    ) throws -> CampaignCanvasTimerUnitStyle {
+        let digitTypography = fallback?.digitTypography ?? CampaignTypography(
+            fontFamily: nil, fontSize: 20, fontWeight: 700, lineHeight: nil, letterSpacing: nil
+        )
+        let labelTypography = fallback?.labelTypography ?? CampaignTypography(
+            fontFamily: nil, fontSize: 10, fontWeight: 400, lineHeight: nil, letterSpacing: nil
+        )
+        return CampaignCanvasTimerUnitStyle(
+            digitTypography: json["digitTypography"] != nil
+                ? try designTokens.resolveTypography(json["digitTypography"]) ?? digitTypography
+                : digitTypography,
+            digitColor: json["digitColor"] != nil
+                ? try designTokens.resolveColor(json["digitColor"]) ?? fallback?.digitColor ?? .literal("#FFFFFFFF")
+                : fallback?.digitColor ?? .literal("#FFFFFFFF"),
+            labelTypography: json["labelTypography"] != nil
+                ? try designTokens.resolveTypography(json["labelTypography"]) ?? labelTypography
+                : labelTypography,
+            labelColor: json["labelColor"] != nil
+                ? try designTokens.resolveColor(json["labelColor"]) ?? fallback?.labelColor ?? .literal("#FFB9C6DA")
+                : fallback?.labelColor ?? .literal("#FFB9C6DA"),
+            boxFill: json["boxFill"] != nil
+                ? try parsePaint(propertyObject(json["boxFill"]), allowImage: false)
+                : fallback?.boxFill ?? .none,
+            cornerRadius: json["cornerRadius"] != nil
+                ? parseCornerRadius(json["cornerRadius"], fallback: 6)
+                : fallback?.cornerRadius ?? parseCornerRadius(nil, fallback: 6)
+        )
     }
 
     private func parseBackground(_ json: [String: Any]?) throws -> CampaignCanvasPaint {

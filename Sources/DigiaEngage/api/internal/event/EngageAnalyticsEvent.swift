@@ -43,10 +43,37 @@ struct TriggerContext: Equatable {
 protocol EngageAnalyticsEvent {
     var eventName: String { get }
     var properties: [String: Any] { get }
+    var occurredAtEpochMs: Int64? { get }
 }
 
 extension EngageAnalyticsEvent {
     var properties: [String: Any] { [:] }
+    var occurredAtEpochMs: Int64? { nil }
+}
+
+struct TimerEventContext: Equatable {
+    let state: String
+    let secondsRemaining: Int64
+    let deadlineSource: String
+    let correctedNowMs: Int64
+
+    var properties: [String: Any] {
+        nonNull([
+            ("state", state),
+            ("seconds_remaining", remainingBucket),
+            ("deadline_source", deadlineSource),
+        ])
+    }
+
+    private var remainingBucket: String {
+        if secondsRemaining <= 0 { return "expired" }
+        if secondsRemaining > 86_400 { return ">24h" }
+            if secondsRemaining >= 21_600 { return "24-6h" }
+            if secondsRemaining >= 3_600 { return "6-1h" }
+            if secondsRemaining >= 900 { return "60-15m" }
+            if secondsRemaining >= 300 { return "15-5m" }
+        return "<5m"
+    }
 }
 
 // ── Nudge (bottom_sheet / dialog; distinguished by displayStyle) ─────────────
@@ -73,6 +100,7 @@ enum NudgeEvent {
         var actionUrl: String?
         var ctaRole: String?
         var timeToActionMs: Int64?
+        var timer: TimerEventContext? = nil
 
         var eventName: String { "Digia Experience Clicked" }
         var properties: [String: Any] {
@@ -83,15 +111,20 @@ enum NudgeEvent {
                 ("action_url", actionUrl),
                 ("cta_role", ctaRole),
                 ("time_to_action_ms", timeToActionMs),
-            ])
+            ]).merging(timer?.properties ?? [:]) { current, _ in current }
         }
+        var occurredAtEpochMs: Int64? { timer?.correctedNowMs }
     }
 
     struct Dismissed: EngageAnalyticsEvent {
         var dwellMs: Int64?
+        var timer: TimerEventContext? = nil
 
         var eventName: String { "Digia Experience Dismissed" }
-        var properties: [String: Any] { nonNull([("dwell_ms", dwellMs)]) }
+        var properties: [String: Any] {
+            nonNull([("dwell_ms", dwellMs)]).merging(timer?.properties ?? [:]) { current, _ in current }
+        }
+        var occurredAtEpochMs: Int64? { timer?.correctedNowMs }
     }
 }
 
@@ -422,6 +455,7 @@ enum InlineCanvasEvent {
     struct Viewed: EngageAnalyticsEvent {
         var slotKey: String?
         var screenName: String?
+        var timer: TimerEventContext? = nil
 
         var eventName: String { "Digia Experience Viewed" }
         var properties: [String: Any] {
@@ -429,8 +463,9 @@ enum InlineCanvasEvent {
                 ("display_style", "canvas"),
                 ("slot_key", slotKey),
                 ("screen_name", screenName),
-            ])
+            ]).merging(timer?.properties ?? [:]) { current, _ in current }
         }
+        var occurredAtEpochMs: Int64? { timer?.correctedNowMs }
     }
 }
 

@@ -9,6 +9,17 @@ import UIKit
 private let maxFloatingCanvasUpscale: CGFloat = 1.15
 private let canvasTextSpanElementID = "canvas_text_span"
 
+private struct TimerRemainingSecondsKey: EnvironmentKey {
+    static let defaultValue: Int64? = nil
+}
+
+extension EnvironmentValues {
+    var timerRemainingSeconds: Int64? {
+        get { self[TimerRemainingSecondsKey.self] }
+        set { self[TimerRemainingSecondsKey.self] = newValue }
+    }
+}
+
 private struct CanvasVideoUsesStoryPlaybackKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -692,6 +703,10 @@ enum CampaignCanvasRendererRegistry {
                     kind: .mute, visible: visible, iconColor: icon, backgroundColor: background,
                     isDark: dark))
         },
+        "timer": { widget, dark, _ in
+            guard case .timer = widget else { return AnyView(EmptyView()) }
+            return AnyView(CanvasTimerRenderer(widget: widget, isDark: dark))
+        },
     ]
 
     static func render(
@@ -713,6 +728,7 @@ enum CampaignCanvasRendererRegistry {
         case .storyProgress: key = "storyProgress"
         case .storyClose: key = "storyClose"
         case .storyMute: key = "storyMute"
+        case .timer: key = "timer"
         }
         guard let renderer = renderers[key] else {
             preconditionFailure("Missing Campaign Canvas renderer for \(key)")
@@ -736,8 +752,110 @@ enum CampaignCanvasRendererRegistry {
         case .storyProgress: key = "storyProgress"
         case .storyClose: key = "storyClose"
         case .storyMute: key = "storyMute"
+        case .timer: key = "timer"
         }
         return renderers[key] != nil
+    }
+}
+
+private struct CanvasTimerRenderer: View {
+    let widget: CampaignCanvasWidget
+    let isDark: Bool
+    @Environment(\.timerRemainingSeconds) private var remainingSeconds
+
+    var body: some View {
+        if case .timer(
+            _, let preset, let separator, let units, let labels, let sharedStyle, let overrides
+        ) = widget, let remainingSeconds {
+            let values = timerUnitValues(remainingSeconds: remainingSeconds, visibility: units)
+            HStack(spacing: 4) {
+                ForEach(Array(values.enumerated()), id: \.element.0) { index, value in
+                    if index > 0 && preset == "text" {
+                        Text(separator)
+                            .foregroundStyle(color((overrides[value.0] ?? sharedStyle).digitColor))
+                    }
+                    unitView(
+                        value: value.1,
+                        label: labels[value.0] ?? "",
+                        style: overrides[value.0] ?? sharedStyle,
+                        boxed: preset == "unitBoxes"
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Countdown timer")
+        }
+    }
+
+    @ViewBuilder
+    private func unitView(
+        value: Int64,
+        label: String,
+        style: CampaignCanvasTimerUnitStyle,
+        boxed: Bool
+    ) -> some View {
+        let content = VStack(spacing: 1) {
+            Text(String(format: "%02lld", value))
+                .font(font(style.digitTypography, fallbackSize: 16, fallbackWeight: 400))
+                .foregroundStyle(color(style.digitColor))
+                .monospacedDigit()
+                .lineLimit(1)
+            Text(label)
+                .font(font(style.labelTypography, fallbackSize: 10, fallbackWeight: 400))
+                .foregroundStyle(color(style.labelColor))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+
+        if boxed {
+            CampaignCanvasBoxView(
+                box: CampaignCanvasBox(
+                    fill: style.boxFill,
+                    cornerRadius: style.cornerRadius
+                ),
+                isDark: isDark
+            ) { content }
+        } else { content }
+    }
+
+    private func color(_ value: CampaignColor?) -> Color {
+        value.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) } ?? .primary
+    }
+
+    private func font(
+        _ typography: CampaignTypography?,
+        fallbackSize: CGFloat,
+        fallbackWeight: Int
+    ) -> Font {
+        Font(SDKInstance.shared.font.resolve(
+            size: Double(typography?.fontSize ?? fallbackSize),
+            weight: typography?.fontWeight ?? fallbackWeight,
+            italic: false,
+            fallbackFamily: typography?.fontFamily
+        ))
+    }
+}
+
+func timerUnitValues(
+    remainingSeconds: Int64,
+    visibility: [CampaignTimerUnit: CampaignTimerUnitVisibility]
+) -> [(CampaignTimerUnit, Int64)] {
+    let factors: [(CampaignTimerUnit, Int64)] = [
+        (.days, 86_400), (.hours, 3_600), (.minutes, 60), (.seconds, 1)
+    ]
+    let configured = factors.filter { visibility[$0.0] != .hide }
+    guard let smallest = configured.last?.1 else { return [] }
+    let safe = max(0, remainingSeconds)
+    let rounded = ((safe + smallest - 1) / smallest) * smallest
+    let values = configured.enumerated().map { index, entry -> (CampaignTimerUnit, Int64) in
+        let higher = index > 0 ? configured[index - 1].1 : Int64.max
+        let value = index == 0 ? rounded / entry.1 : (rounded % higher) / entry.1
+        return (entry.0, value)
+    }
+    return values.filter { unit, value in
+        visibility[unit] != .autoHide || value > 0 || values.count == 1
     }
 }
 

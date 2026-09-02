@@ -303,7 +303,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     func populateCampaignBundle(_ bundleJson: String) {
         var campaigns: [CampaignModel] = []
         do {
-            let bundle = try CampaignFetcher.parse(Data(bundleJson.utf8), devicePlatform: "ios")
+            let bundle = try CampaignFetcher.parse(
+                Data(bundleJson.utf8),
+                devicePlatform: "ios",
+                acceptBridgedServerTime: true
+            )
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
             DigiaLog.warning(
@@ -1463,7 +1467,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         ctaLabel: String? = nil,
         actionType: String? = nil,
         actionUrl: String? = nil,
-        ctaRole: String? = nil
+        ctaRole: String? = nil,
+        timerContext: TimerEventContext? = nil
     ) {
         events.toDigia(
             NudgeEvent.Clicked(
@@ -1472,7 +1477,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 actionType: actionType,
                 actionUrl: actionUrl,
                 ctaRole: ctaRole,
-                timeToActionMs: dwellTracker.elapsedMs(payload.cepCampaignId)
+                timeToActionMs: dwellTracker.elapsedMs(payload.cepCampaignId),
+                timer: timerContext
             ),
             payload: payload
         )
@@ -1483,11 +1489,18 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Bypasses the stickiness that keeps inline campaigns alive across
     /// navigation: an author who put a close control on the card is asking for
     /// exactly the opposite.
-    func dismissInlineCanvas(slotKey: String, payload: CEPTriggerPayload) {
+    func dismissInlineCanvas(
+        slotKey: String,
+        payload: CEPTriggerPayload,
+        timerContext: TimerEventContext? = nil
+    ) {
         inlineController.dismissCampaign(slotKey)
         events.toBoth(
             .dismissed,
-            NudgeEvent.Dismissed(dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId)),
+            NudgeEvent.Dismissed(
+                dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId),
+                timer: timerContext
+            ),
             payload: payload
         )
     }
@@ -1759,6 +1772,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func reportSlotFirstRender(_ payload: CEPTriggerPayload) {
         guard let campaign = findCampaign(payload) else { return }
+        var timerRuntime: StatefulTimerConfig?
+        var timerState: ResolvedTimerCanvas?
+        if case .inlineCanvas(let cfg) = campaign.config, let runtime = cfg.statefulTimer {
+            guard let resolved = runtime.resolve(payload.variables), resolved.canvas != nil else { return }
+            timerRuntime = runtime
+            timerState = resolved
+        }
         let viewed: EngageAnalyticsEvent
         switch campaign.config {
         case .inline(let cfg):
@@ -1769,11 +1789,42 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         case .story(let cfg):
             viewed = StoriesEvent.Viewed(slotKey: cfg.slotKey, screenName: _currentScreen)
         case .inlineCanvas(let cfg):
-            viewed = InlineCanvasEvent.Viewed(slotKey: cfg.slotKey, screenName: _currentScreen)
+            viewed = InlineCanvasEvent.Viewed(
+                slotKey: cfg.slotKey,
+                screenName: _currentScreen,
+                timer: timerState.map {
+                    $0.analyticsContext(nowMs: timerRuntime!.timeAnchor.nowMs())
+                }
+            )
         default:
             return
         }
-        events.digiaImpressionOnce(payload: payload, event: viewed)
+        if let resolved = timerState {
+            events.digiaTimerStateImpressionOnce(
+                payload: payload,
+                stateID: resolved.stateID,
+                event: viewed
+            )
+        } else {
+            events.digiaImpressionOnce(payload: payload, event: viewed)
+        }
+    }
+
+    func reportInlineTimerStateRender(
+        payload: CEPTriggerPayload,
+        config: InlineCanvasConfig,
+        resolved: ResolvedTimerCanvas
+    ) {
+        guard let runtime = config.statefulTimer else { return }
+        events.digiaTimerStateImpressionOnce(
+            payload: payload,
+            stateID: resolved.stateID,
+            event: InlineCanvasEvent.Viewed(
+                slotKey: config.slotKey,
+                screenName: _currentScreen,
+                timer: resolved.analyticsContext(nowMs: runtime.timeAnchor.nowMs())
+            )
+        )
     }
 
     /// A carousel item scrolled into view. `auto` = autoplay advance vs manual swipe.

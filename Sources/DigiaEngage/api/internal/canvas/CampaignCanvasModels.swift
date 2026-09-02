@@ -114,6 +114,19 @@ enum CampaignCanvasDividerAxis: Equatable { case horizontal, vertical }
 enum CampaignCanvasDividerPattern: Equatable { case solid, dashed, dotted }
 enum CampaignCanvasStrokeCap: Equatable { case butt, round, square }
 
+enum CampaignTimerUnit: String, CaseIterable, Equatable, Sendable {
+    case days, hours, minutes, seconds
+}
+enum CampaignTimerUnitVisibility: Equatable, Sendable { case show, hide, autoHide }
+struct CampaignCanvasTimerUnitStyle: Equatable, Sendable {
+    let digitTypography: CampaignTypography?
+    let digitColor: CampaignColor?
+    let labelTypography: CampaignTypography?
+    let labelColor: CampaignColor?
+    let boxFill: CampaignCanvasPaint
+    let cornerRadius: CampaignCanvasCornerRadius
+}
+
 /// How a video rail card plays, mirroring the media story's thumbnail playback.
 struct CampaignCanvasStoryThumbnailPlayback: Equatable, Sendable {
     var startTime: TimeInterval = 0
@@ -217,6 +230,15 @@ enum CampaignCanvasWidget: Equatable, Sendable {
     case storyClose(box: CampaignCanvasBox, visible: Bool, iconColor: CampaignColor?, backgroundColor: CampaignColor?)
     /// The viewer's mute toggle. Optional: a story with no video has no use for it.
     case storyMute(box: CampaignCanvasBox, visible: Bool, iconColor: CampaignColor?, backgroundColor: CampaignColor?)
+    case timer(
+        box: CampaignCanvasBox,
+        preset: String,
+        separator: String,
+        units: [CampaignTimerUnit: CampaignTimerUnitVisibility],
+        labels: [CampaignTimerUnit: String],
+        style: CampaignCanvasTimerUnitStyle,
+        unitOverrides: [CampaignTimerUnit: CampaignCanvasTimerUnitStyle]
+    )
 
     var box: CampaignCanvasBox {
         switch self {
@@ -230,6 +252,7 @@ enum CampaignCanvasWidget: Equatable, Sendable {
              .storyProgress(let box, _, _, _, _, _),
              .storyClose(let box, _, _, _),
              .storyMute(let box, _, _, _): box
+        case .timer(let box, _, _, _, _, _, _): box
         case .container: .none
         }
     }
