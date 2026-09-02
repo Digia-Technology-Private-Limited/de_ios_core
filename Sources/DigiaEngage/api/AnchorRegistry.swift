@@ -131,12 +131,8 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         version &+= 1
         guard activeKey == key else { return }
         if remaining.isEmpty {
-            activeViewSampler.stop()
-            if activeAnchorWasAvailable {
-                failActiveAnchor(key: key, reason: .detached)
-            } else {
-                startReadinessTimeout(for: key)
-            }
+            activeAnchorWasAvailable = false
+            startReadinessTimeout(for: key, failureReason: .detached)
         } else {
             startSampling(key: key)
         }
@@ -150,12 +146,8 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         cornerRadii.removeValue(forKey: key)
         version &+= 1
         if activeKey == key {
-            activeViewSampler.stop()
-            if activeAnchorWasAvailable {
-                failActiveAnchor(key: key, reason: .detached)
-            } else {
-                startReadinessTimeout(for: key)
-            }
+            activeAnchorWasAvailable = false
+            startReadinessTimeout(for: key, failureReason: .detached)
         }
     }
 
@@ -313,12 +305,15 @@ public final class AnchorRegistry: NSObject, ObservableObject {
                 trackedRects[key] = rect
                 version &+= 1
             }
+        case .unavailable(.detached), .missing:
+            if activeAnchorWasAvailable {
+                activeAnchorWasAvailable = false
+                startReadinessTimeout(for: key, failureReason: .detached)
+            }
         case let .unavailable(reason):
             if activeAnchorWasAvailable {
                 failActiveAnchor(key: key, reason: reason)
             }
-        case .missing:
-            break
         }
     }
 
@@ -335,14 +330,17 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         }
     }
 
-    private func startReadinessTimeout(for key: String) {
+    private func startReadinessTimeout(
+        for key: String,
+        failureReason: AnchorUnavailableReason = .notReadyTimeout
+    ) {
         guard readinessTask == nil else { return }
         readinessTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             guard !Task.isCancelled, let self, self.activeKey == key,
                   !self.activeAnchorWasAvailable
             else { return }
-            self.failActiveAnchor(key: key, reason: .notReadyTimeout)
+            self.failActiveAnchor(key: key, reason: failureReason)
         }
     }
 
