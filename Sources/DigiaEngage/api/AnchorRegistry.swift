@@ -305,14 +305,14 @@ public final class AnchorRegistry: NSObject, ObservableObject {
                 trackedRects[key] = rect
                 version &+= 1
             }
-        case let .unavailable(reason):
-            if activeAnchorWasAvailable {
-                failActiveAnchor(key: key, reason: reason)
-            }
-        case .missing:
+        case .unavailable(.detached), .missing:
             if activeAnchorWasAvailable {
                 activeAnchorWasAvailable = false
                 startReadinessTimeout(for: key, failureReason: .detached)
+            }
+        case let .unavailable(reason):
+            if activeAnchorWasAvailable {
+                failActiveAnchor(key: key, reason: reason)
             }
         }
     }
