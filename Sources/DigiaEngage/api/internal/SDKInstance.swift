@@ -211,7 +211,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
         var campaigns: [CampaignModel] = []
         do {
-            let bundle = try await CampaignFetcher(requestHeaders: requestHeaders).fetch()
+            let bundle = try await CampaignFetcher(
+                requestHeaders: requestHeaders,
+                diagnostics: diagnostics
+            ).fetch()
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
         } catch {
@@ -306,7 +309,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             let bundle = try CampaignFetcher.parse(
                 Data(bundleJson.utf8),
                 devicePlatform: "ios",
-                acceptBridgedServerTime: true
+                acceptBridgedServerTime: true,
+                diagnostics: diagnostics
             )
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
@@ -828,6 +832,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return true
         case .inlineCanvas(let cfg):
             logVerbose("routeByCampaignKey INLINE CANVAS slotKey='\(cfg.slotKey)'")
+            if let runtime = cfg.statefulTimer, runtime.resolve(payload.variables) == nil {
+                let reason = "inline timer campaign has invalid runtime variables"
+                lastCampaignDropReason = reason
+                DigiaLog.warning("[SDKInstance] Campaign dropped — \(reason): key=\(key)")
+                diagnostics.reportHealthEvent(
+                    "campaign_skipped_unsupported",
+                    params: ["campaign_key": key, "reason": reason]
+                )
+                context.onDropped(.templateError, message: reason)
+                return false
+            }
             inlineController.setCanvasConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             context.onInlineRouted(payload: payload)
@@ -1003,7 +1018,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         guard let campaign = CampaignModel.fromJson(
             campaignJson,
             designTokens: currentDesignTokens,
-            devicePlatform: "ios"
+            devicePlatform: "ios",
+            diagnostics: diagnostics
         ) else {
             reporter.postFailed(
                 invocation.testInvocationId, code: .templateError,

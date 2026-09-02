@@ -104,7 +104,7 @@ struct StatefulTimerConfig: Equatable {
               stateful.int("version", default: -1) == 1,
               let sources = stateful["sources"] as? [[String: Any]], sources.count == 1,
               let source = sources.first,
-              source.nonBlankString("id") != nil,
+              let sourceID = source.nonBlankString("id"),
               source["kind"] as? String == "timer",
               source["mode"] as? String == "countdown",
               let deadline = parseSource(source.object("deadline"), variableSchemas: variableSchemas)
@@ -147,10 +147,16 @@ struct StatefulTimerConfig: Equatable {
             guard (index == rawRules.count - 1) == (whenJSON == nil) else { return nil }
             let state: TimerCampaignState?
             if let whenJSON {
-                guard whenJSON.count == 1,
+                guard (1...2).contains(whenJSON.count),
                       let rawState = whenJSON["is"] as? String,
                       let parsed = TimerCampaignState(rawValue: rawState)
                 else { return nil }
+                if whenJSON.count == 2 && whenJSON["sourceId"] == nil { return nil }
+                if let rawSourceID = whenJSON["sourceId"] {
+                    guard let ruleSourceID = rawSourceID as? String,
+                          ruleSourceID == sourceID
+                    else { return nil }
+                }
                 state = parsed
             } else { state = nil }
             guard state == expectedStates[index] else { return nil }

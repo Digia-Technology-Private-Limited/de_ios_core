@@ -1,5 +1,10 @@
 import SwiftUI
 
+private struct TimerRenderIdentity: Equatable {
+    let campaignID: String
+    let stateID: String?
+}
+
 /// Hosts an authored Canvas inside a `DigiaSlot`.
 ///
 /// Thin by design: `InlineCampaignCanvasView` owns the sizing rule, and this
@@ -35,7 +40,10 @@ struct DigiaInlineCanvasView: View {
                 .id(resolved.stateID)
             }
         }
-        .task(id: resolved?.stateID) {
+        .task(id: TimerRenderIdentity(
+            campaignID: payload.cepCampaignId,
+            stateID: resolved?.stateID
+        )) {
             if let resolved, resolved.canvas != nil {
                 SDKInstance.shared.reportInlineTimerStateRender(
                     payload: payload,

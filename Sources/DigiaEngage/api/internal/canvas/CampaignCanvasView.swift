@@ -799,14 +799,14 @@ private struct CanvasTimerRenderer: View {
             Text(String(format: "%02lld", value))
                 .font(font(style.digitTypography, fallbackSize: 16, fallbackWeight: 400))
                 .tracking(style.digitTypography?.letterSpacing ?? 0)
-                .frame(height: style.digitTypography?.lineHeight)
+                .frame(height: timerLineHeight(style.digitTypography, fallbackSize: 16))
                 .foregroundStyle(color(style.digitColor))
                 .monospacedDigit()
                 .lineLimit(1)
             Text(label)
                 .font(font(style.labelTypography, fallbackSize: 10, fallbackWeight: 400))
                 .tracking(style.labelTypography?.letterSpacing ?? 0)
-                .frame(height: style.labelTypography?.lineHeight)
+                .frame(height: timerLineHeight(style.labelTypography, fallbackSize: 10))
                 .foregroundStyle(color(style.labelColor))
                 .lineLimit(1)
         }
@@ -840,6 +840,11 @@ private struct CanvasTimerRenderer: View {
             fallbackFamily: typography?.fontFamily
         ))
     }
+}
+
+func timerLineHeight(_ typography: CampaignTypography?, fallbackSize: CGFloat) -> CGFloat? {
+    guard let lineHeight = typography?.lineHeight else { return nil }
+    return lineHeight <= 4 ? lineHeight * (typography?.fontSize ?? fallbackSize) : lineHeight
 }
 
 func timerUnitValues(

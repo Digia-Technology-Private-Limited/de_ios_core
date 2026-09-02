@@ -55,8 +55,19 @@ private struct URLSessionCampaignAPI: CampaignAPI {
 
 struct CampaignFetcher {
     let api: any CampaignAPI
-    init(requestHeaders: [String: String], session: URLSession = .shared) { api = URLSessionCampaignAPI(requestHeaders: requestHeaders, session: session) }
-    init(api: any CampaignAPI) { self.api = api }
+    let diagnostics: DiagnosticsReporter?
+    init(
+        requestHeaders: [String: String],
+        session: URLSession = .shared,
+        diagnostics: DiagnosticsReporter? = nil
+    ) {
+        api = URLSessionCampaignAPI(requestHeaders: requestHeaders, session: session)
+        self.diagnostics = diagnostics
+    }
+    init(api: any CampaignAPI, diagnostics: DiagnosticsReporter? = nil) {
+        self.api = api
+        self.diagnostics = diagnostics
+    }
 
     func fetch() async throws -> CampaignBundle {
         let endpoint = DigiaEndpoints.campaignBundle
@@ -69,7 +80,12 @@ struct CampaignFetcher {
             let serverTime = response.headers.first {
                 $0.key.caseInsensitiveCompare("X-Digia-Server-Time-Ms") == .orderedSame
             }.flatMap { Int64($0.value) }
-            return try Self.parse(response.data, devicePlatform: "ios", serverTimeMs: serverTime)
+            return try Self.parse(
+                response.data,
+                devicePlatform: "ios",
+                serverTimeMs: serverTime,
+                diagnostics: diagnostics
+            )
         }
         catch let error as CampaignFetchError { throw error }
         catch {
@@ -81,7 +97,8 @@ struct CampaignFetcher {
         _ data: Data,
         devicePlatform: String? = nil,
         serverTimeMs: Int64? = nil,
-        acceptBridgedServerTime: Bool = false
+        acceptBridgedServerTime: Bool = false,
+        diagnostics: DiagnosticsReporter? = nil
     ) throws -> CampaignBundle {
         let endpoint = DigiaEndpoints.campaignBundle
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -110,7 +127,8 @@ struct CampaignFetcher {
             devicePlatform: devicePlatform,
             serverTimeMs: serverTimeMs ?? (acceptBridgedServerTime
                 ? (root["serverTimeMs"] as? NSNumber)?.int64Value
-                : nil)
+                : nil),
+            diagnostics: diagnostics
         )
     }
 }

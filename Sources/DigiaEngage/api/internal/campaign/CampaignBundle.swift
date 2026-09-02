@@ -9,7 +9,8 @@ struct CampaignBundle {
         rawCampaigns: [[String: Any]],
         designTokensJSON: [String: Any]?,
         devicePlatform: String? = nil,
-        serverTimeMs: Int64? = nil
+        serverTimeMs: Int64? = nil,
+        diagnostics: DiagnosticsReporter? = nil
     ) -> CampaignBundle {
         let catalog: DesignTokenCatalog
         do { catalog = try designTokensJSON.map(DesignTokenCatalog.fromJson) ?? .empty }
@@ -23,7 +24,8 @@ struct CampaignBundle {
                 json,
                 designTokens: catalog,
                 devicePlatform: devicePlatform,
-                timeAnchor: timeAnchor
+                timeAnchor: timeAnchor,
+                diagnostics: diagnostics
             ) { return campaign }
             DigiaLog.warning("[CampaignBundle] skipping malformed campaign at index \(index)")
             return nil
