@@ -18,17 +18,18 @@ struct DigiaInlineCanvasView: View {
             schemas: config.variableSchemas,
             cepVars: payload.variables
         )
-        let resolved = config.statefulTimer?.resolve(payload.variables)
+        let timerRuntime = config.statefulTimer
+        let resolved = timerRuntime?.resolve(payload.variables)
         Group {
-            if config.statefulTimer == nil {
+            if timerRuntime == nil {
                 canvas(config.canvas, remainingSeconds: nil, variables: variables, timerContext: nil)
-            } else if let resolved, let selectedCanvas = resolved.canvas {
+            } else if let timerRuntime, let resolved, let selectedCanvas = resolved.canvas {
                 canvas(
                     selectedCanvas,
                     remainingSeconds: resolved.remainingSeconds,
                     variables: variables,
                     timerContext: resolved.analyticsContext(
-                        nowMs: config.statefulTimer!.timeAnchor.nowMs()
+                        nowMs: timerRuntime.timeAnchor.nowMs()
                     )
                 )
                 .id(resolved.stateID)
