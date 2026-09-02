@@ -48,6 +48,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private var screenUpdateRevision = 0
     private var captureInFlight = false
     private var guideCompletionFired = false
+    private var lastReportedGuideStep: (token: Int64, index: Int)?
     /// The design tokens the current campaign bundle was parsed with.
     ///
     /// Held because live test parses a campaign that never came through the
@@ -1980,6 +1981,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func reportGuideShown() {
         guard let state = guideOrchestrator.state else { return }
+        let stepWasReported = lastReportedGuideStep.map {
+            $0.token == state.token && $0.index == state.stepIndex
+        } ?? false
         if state.currentStep?.target.anchorKey != nil {
             logNativeGuideStage(
                 "render",
@@ -2009,7 +2013,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 payload: payload
             )
         }
-        if total > 1 || state.currentStep?.target.anchorlessTarget != nil {
+        if !stepWasReported && (total > 1 || state.currentStep?.target.anchorlessTarget != nil) {
+            lastReportedGuideStep = (state.token, state.stepIndex)
             events.toDigia(
                 GuideEvent.StepViewed(
                     itemIndex: state.stepIndex + 1,
