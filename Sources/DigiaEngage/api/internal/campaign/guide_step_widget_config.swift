@@ -72,10 +72,14 @@ struct GuideStepWidgetConfig: Equatable {
             glowColor: color(json.string("highlightGlowColor"), default: "#00000000"),
             glowWidth: nonNegative(json.double("highlightGlowWidth", default: 0), fallback: 0)
         )
+        let overlayColor = color(json.string("overlayColor"), default: "#000000")
         let overlay = OverlayConfig(
             visible: isSpotlight,
-            color: color(json.string("overlayColor"), default: "#000000"),
-            alpha: bounded(json.double("overlayOpacity", default: 0.7), lower: 0, upper: 1, fallback: 0.7),
+            color: overlayColor,
+            alpha: json["overlayOpacity"] == nil
+                && overlayColor.trimmingCharacters(in: CharacterSet.alphanumerics.inverted).count == 8
+                ? 1
+                : bounded(json.double("overlayOpacity", default: 0.7), lower: 0, upper: 1, fallback: 0.7),
             cutout: cutout
         )
         let canvas = layoutMode == "canvas"
