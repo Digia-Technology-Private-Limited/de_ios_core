@@ -297,13 +297,17 @@ struct CampaignCanvasParser {
         )
         return CampaignCanvasTimerUnitStyle(
             digitTypography: json["digitTypography"] != nil
-                ? try designTokens.resolveTypography(json["digitTypography"]) ?? digitTypography
+                ? try designTokens.resolveTypography(
+                    json["digitTypography"], fallbackOnMissingToken: true
+                ) ?? digitTypography
                 : digitTypography,
             digitColor: json["digitColor"] != nil
                 ? try designTokens.resolveColor(json["digitColor"]) ?? fallback?.digitColor ?? .literal("#FFFFFFFF")
                 : fallback?.digitColor ?? .literal("#FFFFFFFF"),
             labelTypography: json["labelTypography"] != nil
-                ? try designTokens.resolveTypography(json["labelTypography"]) ?? labelTypography
+                ? try designTokens.resolveTypography(
+                    json["labelTypography"], fallbackOnMissingToken: true
+                ) ?? labelTypography
                 : labelTypography,
             labelColor: json["labelColor"] != nil
                 ? try designTokens.resolveColor(json["labelColor"]) ?? fallback?.labelColor ?? .literal("#FFB9C6DA")

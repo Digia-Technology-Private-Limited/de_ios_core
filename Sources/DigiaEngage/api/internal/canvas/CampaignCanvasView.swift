@@ -798,11 +798,15 @@ private struct CanvasTimerRenderer: View {
         let content = VStack(spacing: 1) {
             Text(String(format: "%02lld", value))
                 .font(font(style.digitTypography, fallbackSize: 16, fallbackWeight: 400))
+                .tracking(style.digitTypography?.letterSpacing ?? 0)
+                .frame(height: style.digitTypography?.lineHeight)
                 .foregroundStyle(color(style.digitColor))
                 .monospacedDigit()
                 .lineLimit(1)
             Text(label)
                 .font(font(style.labelTypography, fallbackSize: 10, fallbackWeight: 400))
+                .tracking(style.labelTypography?.letterSpacing ?? 0)
+                .frame(height: style.labelTypography?.lineHeight)
                 .foregroundStyle(color(style.labelColor))
                 .lineLimit(1)
         }

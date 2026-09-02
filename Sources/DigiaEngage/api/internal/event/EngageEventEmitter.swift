@@ -91,7 +91,7 @@ final class EngageEventEmitter {
 
     /// `cepCampaignId`s that have already fired a Digia first-engagement click.
     private var digiaClicked: Set<String> = []
-    private var timerImpressedStates: Set<String> = []
+    private var timerImpressedStateByCampaign: [String: String] = [:]
 
     init(cep: CepPluginSink, digia: DigiaAnalyticsSink, onLiveTestShown: ((String) -> Void)? = nil) {
         self.realSink = RealEventSink(cep: cep, digia: digia)
@@ -127,9 +127,8 @@ final class EngageEventEmitter {
         stateID: String,
         event: EngageAnalyticsEvent
     ) {
-        guard timerImpressedStates.insert("\(payload.cepCampaignId):\(stateID)").inserted else {
-            return
-        }
+        guard timerImpressedStateByCampaign[payload.cepCampaignId] != stateID else { return }
+        timerImpressedStateByCampaign[payload.cepCampaignId] = stateID
         sink(for: payload).onFirstImpression(payload: payload, event: event)
     }
 
@@ -145,13 +144,13 @@ final class EngageEventEmitter {
     func resetImpression(_ cepCampaignId: String) {
         digiaImpressed.remove(cepCampaignId)
         digiaClicked.remove(cepCampaignId)
-        timerImpressedStates = timerImpressedStates.filter { !$0.hasPrefix("\(cepCampaignId):") }
+        timerImpressedStateByCampaign.removeValue(forKey: cepCampaignId)
     }
 
     /// Forgets every impression + first-click mark.
     func clearImpressions() {
         digiaImpressed.removeAll()
         digiaClicked.removeAll()
-        timerImpressedStates.removeAll()
+        timerImpressedStateByCampaign.removeAll()
     }
 }
