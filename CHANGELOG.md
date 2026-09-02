@@ -2,6 +2,12 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.13.1] - 2026-09-02
+
+### Bug Fixes
+- Anchored guides now tolerate a brief detachment or remount of their target view — such as when the host rebuilds or recycles the anchored view — waiting for the anchor to reappear instead of dismissing the guide step immediately.
+- The guide spotlight overlay now honors an alpha value embedded in its configured color, instead of always dimming at the default opacity.
+
 ## [3.13.0] - 2026-09-01
 
 ### New Features
