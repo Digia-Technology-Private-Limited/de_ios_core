@@ -51,7 +51,7 @@ private struct SurveySession: View {
                     background: background,
                     onDismiss: { finish(completed: false) },
                     content: {
-                        SurveyBody(
+                        SurveyPanelContent(
                             vm: vm,
                             survey: survey,
                             accent: accent,
@@ -70,7 +70,7 @@ private struct SurveySession: View {
                 background: background,
                 onDismiss: { finish(completed: false) }
             ) {
-                SurveyBody(
+                SurveyPanelContent(
                     vm: vm,
                     survey: survey,
                     accent: accent,
@@ -130,6 +130,39 @@ private struct SurveySession: View {
 }
 
 // MARK: - Containers
+
+@MainActor
+private struct SurveyPanelContent: View {
+    @ObservedObject var vm: SurveyViewModel
+    let survey: SurveyConfigModel
+    let accent: Color
+    let onClose: () -> Void
+    let onCompletedClose: () -> Void
+    let showCloseButton: Bool
+
+    var body: some View {
+        if let canvasSurvey = survey.canvasSurvey {
+            CanvasSurveyPanel(
+                vm: vm,
+                survey: survey,
+                canvasSurvey: canvasSurvey,
+                accent: accent,
+                onClose: onClose,
+                onCompletedClose: onCompletedClose,
+                showCloseButton: showCloseButton
+            )
+        } else {
+            SurveyBody(
+                vm: vm,
+                survey: survey,
+                accent: accent,
+                onClose: onClose,
+                onCompletedClose: onCompletedClose,
+                showCloseButton: showCloseButton
+            )
+        }
+    }
+}
 
 /// Maps the survey's `BottomSheetProps` onto the shared `DigiaBottomSheet`. The
 /// survey body manages its own internal scrolling (`ContentSizedScrollView`), so

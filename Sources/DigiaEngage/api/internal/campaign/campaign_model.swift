@@ -116,7 +116,11 @@ struct CampaignModel: Equatable {
                 config = .inline(carouselConfig)
             }
         case "survey":
-            guard let surveyConfig = parseSurveyConfig(selectedJson, fallbackId: id) else { return nil }
+            guard let surveyConfig = parseSurveyConfig(
+                selectedJson,
+                fallbackId: id,
+                designTokens: designTokens
+            ) else { return nil }
             config = .survey(surveyConfig)
         case "floater":
             guard let templateConfig = selectedJson.object("templateConfig") else { return nil }
@@ -196,7 +200,11 @@ struct CampaignModel: Equatable {
 
     // ── survey parsing ────────────────────────────────────────────────────────
 
-    private static func parseSurveyConfig(_ json: [String: Any], fallbackId: String) -> SurveyConfigModel? {
+    private static func parseSurveyConfig(
+        _ json: [String: Any],
+        fallbackId: String,
+        designTokens: DesignTokenCatalog
+    ) -> SurveyConfigModel? {
         let raw: [String: Any]?
         if let survey = json["surveyConfig"] as? [String: Any] {
             raw = survey
@@ -207,6 +215,13 @@ struct CampaignModel: Equatable {
             raw = nil
         }
         guard let raw, let converted = surveyJSONObject(raw) else { return nil }
+        if raw.string("layoutMode") == "canvas" {
+            return CanvasSurveyConfigParser.from(
+                converted,
+                fallbackId: fallbackId,
+                designTokens: designTokens
+            )
+        }
         return SurveyConfigModel.from(converted, fallbackId: fallbackId)
     }
 

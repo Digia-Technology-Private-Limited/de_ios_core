@@ -713,6 +713,7 @@ struct SurveyConfigModel: Equatable {
     let theme: SurveyTheme
     let uiTemplateId: String?
     let timeDelayMs: Int
+    let canvasSurvey: CanvasSurveyConfig?
 
     /// O(1) block lookup keyed by block id.
     var blocksById: [String: SurveyBlock] {
@@ -776,7 +777,8 @@ struct SurveyConfigModel: Equatable {
             settings: SurveySettings.from(SurveyParse.object(json["settings"])),
             theme: SurveyTheme.from(SurveyParse.object(json["theme"])),
             uiTemplateId: uiTemplateId,
-            timeDelayMs: timeDelayMs
+            timeDelayMs: timeDelayMs,
+            canvasSurvey: nil
         )
     }
 }
@@ -874,7 +876,6 @@ enum SurveyParse {
         case "single_select", "single_choice", "single": return .singleSelect
         case "multi_select", "multiple_select", "multiple_choice", "multi", "multiple": return .multiSelect
         case "rating", "star", "likert_scale": return .rating
-        // gauge / slider variants render with the numeric grid for now.
         case "nps", "nps_gauge", "nps_slider": return .nps
         case "nps_emoji": return .npsEmoji
         case "nps_smiley": return .npsSmiley
