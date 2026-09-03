@@ -139,8 +139,7 @@ final class AnalyticsService {
             campaignId: campaignId,
             campaignKey: payload.campaignKey,
             campaignType: campaignType,
-            properties: event.properties,
-            occurredAtEpochMs: event.occurredAtEpochMs
+            properties: event.properties
         )
     }
 
@@ -243,8 +242,7 @@ final class AnalyticsService {
         campaignId: String?,
         campaignKey: String?,
         campaignType: String?,
-        properties: [String: Any] = [:],
-        occurredAtEpochMs: Int64? = nil
+        properties: [String: Any] = [:]
     ) {
         let eventId = UUID().uuidString
         identity.captureEventTime()
@@ -255,7 +253,7 @@ final class AnalyticsService {
         var payloadMap: [String: Any] = [
             "event_id": eventId,
             "event_name": eventName,
-            "occurred_at": occurredAtEpochMs.map(isoTimestamp) ?? isoNow(),
+            "occurred_at": isoNow(),
             "anonymous_id": identity.anonymousId,
             "session_id": identity.sessionId,
         ]
@@ -446,12 +444,6 @@ final class AnalyticsService {
         let fmt = ISO8601DateFormatter()
         fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return fmt.string(from: Date())
-    }
-
-    private func isoTimestamp(_ epochMs: Int64) -> String {
-        let fmt = ISO8601DateFormatter()
-        fmt.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return fmt.string(from: Date(timeIntervalSince1970: Double(epochMs) / 1_000))
     }
 
     private static func buildStaticContext(

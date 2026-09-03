@@ -55,19 +55,8 @@ private struct URLSessionCampaignAPI: CampaignAPI {
 
 struct CampaignFetcher {
     let api: any CampaignAPI
-    let diagnostics: DiagnosticsReporter?
-    init(
-        requestHeaders: [String: String],
-        session: URLSession = .shared,
-        diagnostics: DiagnosticsReporter? = nil
-    ) {
-        api = URLSessionCampaignAPI(requestHeaders: requestHeaders, session: session)
-        self.diagnostics = diagnostics
-    }
-    init(api: any CampaignAPI, diagnostics: DiagnosticsReporter? = nil) {
-        self.api = api
-        self.diagnostics = diagnostics
-    }
+    init(requestHeaders: [String: String], session: URLSession = .shared) { api = URLSessionCampaignAPI(requestHeaders: requestHeaders, session: session) }
+    init(api: any CampaignAPI) { self.api = api }
 
     func fetch() async throws -> CampaignBundle {
         let endpoint = DigiaEndpoints.campaignBundle
@@ -83,8 +72,7 @@ struct CampaignFetcher {
             return try Self.parse(
                 response.data,
                 devicePlatform: "ios",
-                serverTimeMs: serverTime,
-                diagnostics: diagnostics
+                serverTimeMs: serverTime
             )
         }
         catch let error as CampaignFetchError { throw error }
@@ -97,8 +85,7 @@ struct CampaignFetcher {
         _ data: Data,
         devicePlatform: String? = nil,
         serverTimeMs: Int64? = nil,
-        acceptBridgedServerTime: Bool = false,
-        diagnostics: DiagnosticsReporter? = nil
+        acceptBridgedServerTime: Bool = false
     ) throws -> CampaignBundle {
         let endpoint = DigiaEndpoints.campaignBundle
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -127,8 +114,7 @@ struct CampaignFetcher {
             devicePlatform: devicePlatform,
             serverTimeMs: serverTimeMs ?? (acceptBridgedServerTime
                 ? (root["serverTimeMs"] as? NSNumber)?.int64Value
-                : nil),
-            diagnostics: diagnostics
+                : nil)
         )
     }
 }

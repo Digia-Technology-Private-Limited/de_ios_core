@@ -13,17 +13,7 @@ private extension CampaignTimerUnit {
 
 struct CampaignCanvasParser {
     let designTokens: DesignTokenCatalog
-    let strictWidgets: Bool
-    let allowTimer: Bool
-    init(
-        designTokens: DesignTokenCatalog = .empty,
-        strictWidgets: Bool = false,
-        allowTimer: Bool = false
-    ) {
-        self.designTokens = designTokens
-        self.strictWidgets = strictWidgets
-        self.allowTimer = allowTimer
-    }
+    init(designTokens: DesignTokenCatalog = .empty) { self.designTokens = designTokens }
 
     /// Optional: a carousel with no readable slides, or a story with no readable
     /// pages or chrome, has nothing to draw. Dropping the widget is the right
@@ -57,7 +47,7 @@ struct CampaignCanvasParser {
         guard let raw = props["slides"] as? [[String: Any]], !raw.isEmpty else { return nil }
         var slides: [CampaignCanvas] = []
         for slide in raw {
-            guard let parsed = parseNested(slide) else { return nil }
+            guard let parsed = try? parse(slide) else { return nil }
             slides.append(parsed)
         }
         let fraction = CGFloat(propertyNumber(props["viewportFraction"]) ?? 0.88)
@@ -121,7 +111,7 @@ struct CampaignCanvasParser {
         var pages: [CampaignCanvasStoryPage] = []
         for page in rawPages {
             guard let canvasJSON = propertyObject(page["canvas"]),
-                  let canvas = parseNested(canvasJSON) else { return nil }
+                  let canvas = try? parse(canvasJSON) else { return nil }
             let playback = propertyObject(page["thumbnailPlayback"]) ?? [:]
             let seconds = propertyNumber(page["durationSeconds"]) ?? 0
             pages.append(
@@ -142,7 +132,7 @@ struct CampaignCanvasParser {
         }
 
         guard let chromeJSON = propertyObject(props["chromeCanvas"]),
-              let chrome = parseNested(chromeJSON) else { return nil }
+              let chrome = try? parse(chromeJSON) else { return nil }
         let cardRatio = CGFloat(propertyNumber(props["cardAspectRatio"]) ?? 0.72)
         return .story(
             box: box,
@@ -211,12 +201,8 @@ struct CampaignCanvasParser {
             case "widget":
                 if let widget = try parseWidget(child["widget"] as? [String: Any]) {
                     children.append(.widget(id: id, rect: rect, widget: widget))
-                } else if strictWidgets {
-                    throw DesignTokenError.invalid("Unsupported Canvas widget")
                 }
-            default:
-                if strictWidgets { throw DesignTokenError.invalid("Unsupported Canvas child kind") }
-                continue
+            default: continue
             }
         }
         return CampaignCanvas(
@@ -227,30 +213,17 @@ struct CampaignCanvasParser {
     }
 
     private func parseWidget(_ json: [String: Any]?) throws -> CampaignCanvasWidget? {
-        guard let json, let type = json["type"] as? String else { return nil }
-        if type == "digia/timer" && !allowTimer {
-            throw DesignTokenError.invalid("Timer widget is not allowed on this surface")
-        }
-        guard let parser = widgetParsers[type] else { return nil }
+        guard let json, let type = json["type"] as? String, let parser = widgetParsers[type] else { return nil }
         let props = propertyObject(json["props"]) ?? [:]
         var box = type == "digia/canvasContainer" ? .none : try parseBox(propertyObject(json["containerProps"]))
         if type == "digia/button" { box.shadow = nil }
         return try parser(box, props)
     }
 
-    private func parseNested(_ json: [String: Any]) -> CampaignCanvas? {
-        try? CampaignCanvasParser(
-            designTokens: designTokens,
-            strictWidgets: strictWidgets,
-            allowTimer: false
-        ).parse(json)
-    }
-
     private func parseTimer(
         _ box: CampaignCanvasBox,
         _ props: [String: Any]
     ) throws -> CampaignCanvasWidget? {
-        guard !props.keys.contains("sourceId"), !props.keys.contains("urgentDigitColor") else { return nil }
         let preset = props["preset"] as? String ?? "unitBoxes"
         guard preset == "text" || preset == "unitBoxes" else { return nil }
         let unitJSON = propertyObject(props["units"]) ?? [:]
@@ -296,22 +269,10 @@ struct CampaignCanvasParser {
             fontFamily: nil, fontSize: 10, fontWeight: 400, lineHeight: nil, letterSpacing: nil
         )
         return CampaignCanvasTimerUnitStyle(
-            digitTypography: json["digitTypography"] != nil
-                ? try designTokens.resolveTypography(
-                    json["digitTypography"], fallbackOnMissingToken: true
-                ) ?? digitTypography
-                : digitTypography,
-            digitColor: json["digitColor"] != nil
-                ? try designTokens.resolveColor(json["digitColor"]) ?? fallback?.digitColor ?? .literal("#FFFFFFFF")
-                : fallback?.digitColor ?? .literal("#FFFFFFFF"),
-            labelTypography: json["labelTypography"] != nil
-                ? try designTokens.resolveTypography(
-                    json["labelTypography"], fallbackOnMissingToken: true
-                ) ?? labelTypography
-                : labelTypography,
-            labelColor: json["labelColor"] != nil
-                ? try designTokens.resolveColor(json["labelColor"]) ?? fallback?.labelColor ?? .literal("#FFB9C6DA")
-                : fallback?.labelColor ?? .literal("#FFB9C6DA"),
+            digitTypography: (try? designTokens.resolveTypography(json["digitTypography"])) ?? digitTypography,
+            digitColor: try designTokens.resolveColor(json["digitColor"]) ?? fallback?.digitColor ?? .literal("#FFFFFFFF"),
+            labelTypography: (try? designTokens.resolveTypography(json["labelTypography"])) ?? labelTypography,
+            labelColor: try designTokens.resolveColor(json["labelColor"]) ?? fallback?.labelColor ?? .literal("#FFB9C6DA"),
             boxFill: json["boxFill"] != nil
                 ? try parsePaint(propertyObject(json["boxFill"]), allowImage: false)
                 : fallback?.boxFill ?? .none,

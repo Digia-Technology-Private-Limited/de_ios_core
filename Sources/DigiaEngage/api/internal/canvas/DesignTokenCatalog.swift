@@ -54,19 +54,12 @@ struct DesignTokenCatalog {
         return canonicalCampaignColorHex(value).map(CampaignColor.literal)
     }
 
-    func resolveTypography(
-        _ property: Any?,
-        fallbackOnMissingToken: Bool = false
-    ) throws -> CampaignTypography? {
+    func resolveTypography(_ property: Any?) throws -> CampaignTypography? {
         guard let value = unwrapLiteral(property), !(value is NSNull) else { return nil }
         guard let map = value as? [String: Any] else { throw DesignTokenError.invalid("Invalid typography property") }
         if let token = exactToken(map) {
-            if let result = typography[token] { return result }
-            guard fallbackOnMissingToken else {
-                throw DesignTokenError.invalid("Unknown typography token '\(token)'")
-            }
-            DigiaLog.warning("Unknown typography token '\(token)'; using the default typography")
-            return nil
+            guard let result = typography[token] else { throw DesignTokenError.invalid("Unknown typography token '\(token)'") }
+            return result
         }
         if map["token"] != nil { throw DesignTokenError.invalid("Ambiguous typography property") }
         return Self.parseTypography(map)

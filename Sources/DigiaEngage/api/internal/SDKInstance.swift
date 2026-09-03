@@ -212,10 +212,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
         var campaigns: [CampaignModel] = []
         do {
-            let bundle = try await CampaignFetcher(
-                requestHeaders: requestHeaders,
-                diagnostics: diagnostics
-            ).fetch()
+            let bundle = try await CampaignFetcher(requestHeaders: requestHeaders).fetch()
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
             currentTimeAnchor = bundle.timeAnchor
@@ -312,8 +309,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             let bundle = try CampaignFetcher.parse(
                 Data(bundleJson.utf8),
                 devicePlatform: "ios",
-                acceptBridgedServerTime: true,
-                diagnostics: diagnostics
+                acceptBridgedServerTime: true
             )
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
@@ -840,11 +836,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             if let runtime = cfg.statefulTimer, runtime.resolve(payload.variables) == nil {
                 let reason = "inline timer campaign has invalid runtime variables"
                 lastCampaignDropReason = reason
-                DigiaLog.warning("[SDKInstance] Campaign dropped — \(reason): key=\(key)")
-                diagnostics.reportHealthEvent(
-                    "campaign_skipped_unsupported",
-                    params: ["campaign_key": key, "reason": reason]
-                )
+                DigiaLog.warning("campaign_skipped_unsupported: \(reason): key=\(key)")
                 context.onDropped(.templateError, message: reason)
                 return false
             }
@@ -1024,8 +1016,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             campaignJson,
             designTokens: currentDesignTokens,
             devicePlatform: "ios",
-            timeAnchor: currentTimeAnchor,
-            diagnostics: diagnostics
+            timeAnchor: currentTimeAnchor
         ) else {
             reporter.postFailed(
                 invocation.testInvocationId, code: .templateError,
@@ -1516,6 +1507,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         payload: CEPTriggerPayload,
         timerContext: TimerEventContext? = nil
     ) {
+        if timerContext != nil, inlineController.getCampaign(slotKey) != payload { return }
         inlineController.dismissCampaign(slotKey)
         events.toBoth(
             .dismissed,
@@ -1794,18 +1786,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func reportSlotFirstRender(_ payload: CEPTriggerPayload) {
         guard let campaign = findCampaign(payload) else { return }
-        var timerRuntime: StatefulTimerConfig?
         var timerState: ResolvedTimerCanvas?
         if case .inlineCanvas(let cfg) = campaign.config, let runtime = cfg.statefulTimer {
             guard let resolved = runtime.resolve(payload.variables), resolved.canvas != nil else { return }
-            timerRuntime = runtime
             timerState = resolved
         }
-        let timerContext: TimerEventContext? = if let runtime = timerRuntime, let resolved = timerState {
-            resolved.analyticsContext(nowMs: runtime.timeAnchor.nowMs())
-        } else {
-            nil
-        }
+        let timerContext = timerState?.analyticsContext
         let viewed: EngageAnalyticsEvent
         switch campaign.config {
         case .inline(let cfg):
@@ -1840,14 +1826,14 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         config: InlineCanvasConfig,
         resolved: ResolvedTimerCanvas
     ) {
-        guard let runtime = config.statefulTimer else { return }
+        guard config.statefulTimer != nil else { return }
         events.digiaTimerStateImpressionOnce(
             payload: payload,
             stateID: resolved.stateID,
             event: InlineCanvasEvent.Viewed(
                 slotKey: config.slotKey,
                 screenName: _currentScreen,
-                timer: resolved.analyticsContext(nowMs: runtime.timeAnchor.nowMs())
+                timer: resolved.analyticsContext
             )
         )
     }

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 private struct TimerRenderIdentity: Equatable {
     let campaignID: String
@@ -14,7 +15,7 @@ private struct TimerRenderIdentity: Equatable {
 struct DigiaInlineCanvasView: View {
     let config: InlineCanvasConfig
     let payload: CEPTriggerPayload
-    @Environment(\.scenePhase) private var scenePhase
+    @State private var applicationActive = UIApplication.shared.applicationState == .active
     @State private var tick: UInt64 = 0
 
     var body: some View {
@@ -28,14 +29,12 @@ struct DigiaInlineCanvasView: View {
         Group {
             if timerRuntime == nil {
                 canvas(config.canvas, remainingSeconds: nil, variables: variables, timerContext: nil)
-            } else if let timerRuntime, let resolved, let selectedCanvas = resolved.canvas {
+            } else if let resolved, let selectedCanvas = resolved.canvas {
                 canvas(
                     selectedCanvas,
                     remainingSeconds: resolved.remainingSeconds,
                     variables: variables,
-                    timerContext: resolved.analyticsContext(
-                        nowMs: timerRuntime.timeAnchor.nowMs()
-                    )
+                    timerContext: resolved.analyticsContext
                 )
                 .id(resolved.stateID)
             }
@@ -52,8 +51,17 @@ struct DigiaInlineCanvasView: View {
                 )
             }
         }
-        .task(id: "\(scenePhase)-\(payload.cepCampaignId)") {
-            guard let runtime = config.statefulTimer, scenePhase == .active else { return }
+        .onAppear {
+            applicationActive = UIApplication.shared.applicationState == .active
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            applicationActive = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            applicationActive = false
+        }
+        .task(id: "\(applicationActive)-\(payload.cepCampaignId)") {
+            guard let runtime = config.statefulTimer, applicationActive else { return }
             while !Task.isCancelled {
                 tick &+= 1
                 let now = runtime.timeAnchor.nowMs()

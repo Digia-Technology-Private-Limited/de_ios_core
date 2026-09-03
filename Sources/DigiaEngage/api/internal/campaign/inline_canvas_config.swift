@@ -5,7 +5,8 @@ struct TrustedTimeAnchor: Equatable {
     let systemUptime: TimeInterval
 
     static func capture(_ serverEpochMs: Int64?) -> TrustedTimeAnchor? {
-        guard let serverEpochMs, serverEpochMs > 0 else { return nil }
+        // Match the four-digit years supported by timer instants.
+        guard let serverEpochMs, (1...253_402_300_799_999).contains(serverEpochMs) else { return nil }
         return TrustedTimeAnchor(
             serverEpochMs: serverEpochMs,
             systemUptime: ProcessInfo.processInfo.systemUptime
@@ -49,12 +50,11 @@ struct ResolvedTimerCanvas: Equatable {
     let remainingSeconds: Int64
     let deadlineSource: String
 
-    func analyticsContext(nowMs: Int64) -> TimerEventContext {
+    var analyticsContext: TimerEventContext {
         TimerEventContext(
             state: stateID,
             secondsRemaining: remainingSeconds,
-            deadlineSource: deadlineSource,
-            correctedNowMs: nowMs
+            deadlineSource: deadlineSource
         )
     }
 }
@@ -72,18 +72,19 @@ struct StatefulTimerConfig: Equatable {
         if startsAt != nil && (startsAtMs == nil || startsAtMs! >= deadlineMs) { return nil }
         let now = timeAnchor.nowMs()
         let remainingMs = deadlineMs - now
+        let remainingSeconds = (max(0, remainingMs) + 999) / 1_000
         let state: TimerCampaignState
         if let startsAtMs, now < startsAtMs { state = .teaser }
         else if now >= deadlineMs { state = .ended }
-        else if let urgentBelowSeconds, remainingMs <= urgentBelowSeconds * 1_000 { state = .urgent }
+        else if let urgentBelowSeconds, remainingSeconds <= urgentBelowSeconds { state = .urgent }
         else { state = .running }
-        guard let rule = rules.first(where: { $0.state == state }) ?? rules.last(where: { $0.state == nil })
+        guard let rule = rules.first(where: { $0.state == nil || $0.state == state })
         else { return nil }
         return ResolvedTimerCanvas(
             stateID: rule.id,
             state: state,
             canvas: rule.canvas,
-            remainingSeconds: (max(0, remainingMs) + 999) / 1_000,
+            remainingSeconds: remainingSeconds,
             deadlineSource: deadline.sourceName
         )
     }
@@ -134,10 +135,7 @@ struct StatefulTimerConfig: Equatable {
             if raw["canvas"] == nil || raw["canvas"] is NSNull { canvas = nil }
             else {
                 guard let rawCanvas = raw.object("canvas"),
-                      let parsed = try? CampaignCanvasParser(
-                        designTokens: designTokens,
-                        allowTimer: true
-                      ).parse(rawCanvas)
+                      let parsed = try? CampaignCanvasParser(designTokens: designTokens).parse(rawCanvas)
                 else { return nil }
                 canvas = parsed
             }
@@ -177,7 +175,20 @@ private func parseOffsetInstantMs(_ raw: String) -> Int64? {
         formatter.formatOptions = [.withInternetDateTime]
         return formatter.date(from: raw)
     }()
-    return date.map { Int64($0.timeIntervalSince1970 * 1_000) }
+    guard let date else { return nil }
+    var offsetSeconds = 0
+    if !raw.hasSuffix("Z") {
+        let offset = raw.suffix(6)
+        guard let hours = Int(offset.dropFirst().prefix(2)), hours <= 23,
+              let minutes = Int(offset.suffix(2)), minutes <= 59 else { return nil }
+        offsetSeconds = (hours * 3_600 + minutes * 60) * (offset.first == "-" ? -1 : 1)
+    }
+    guard let timeZone = TimeZone(secondsFromGMT: offsetSeconds) else { return nil }
+    formatter.timeZone = timeZone
+    formatter.formatOptions = [.withInternetDateTime]
+    // ISO8601DateFormatter normalizes invalid dates such as February 31.
+    guard formatter.string(from: date).prefix(19) == raw.prefix(19) else { return nil }
+    return Int64(date.timeIntervalSince1970 * 1_000)
 }
 
 /// Space between an inline card and the edges of its slot, in logical pixels.

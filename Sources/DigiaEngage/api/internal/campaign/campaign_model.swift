@@ -70,8 +70,7 @@ struct CampaignModel: Equatable {
         _ json: [String: Any],
         designTokens: DesignTokenCatalog = .empty,
         devicePlatform: String? = nil,
-        timeAnchor: TrustedTimeAnchor? = nil,
-        diagnostics: DiagnosticsReporter? = nil
+        timeAnchor: TrustedTimeAnchor? = nil
     ) -> CampaignModel? {
         guard let selectedJson = selectForDevice(json, devicePlatform: devicePlatform) else { return nil }
         guard let id = selectedJson.nonBlankString("id") ?? selectedJson.nonBlankString("_id") else { return nil }
@@ -100,22 +99,12 @@ struct CampaignModel: Equatable {
                     templateConfig,
                     designTokens: designTokens,
                     timeAnchor: timeAnchor
-                ) else {
-                    return rejectUnsupportedStatefulCampaign(
-                        campaignKey: campaignKey,
-                        reason: "invalid inline timer stateful config",
-                        diagnostics: diagnostics
-                    )
-                }
-                guard var canvasConfig = InlineCanvasConfig.fromStatefulJson(
+                ), var canvasConfig = InlineCanvasConfig.fromStatefulJson(
                     templateConfig,
                     stateful: stateful
                 ) else {
-                    return rejectUnsupportedStatefulCampaign(
-                        campaignKey: campaignKey,
-                        reason: "invalid inline timer templateConfig",
-                        diagnostics: diagnostics
-                    )
+                    DigiaLog.warning("campaign_skipped_unsupported: invalid inline timer config: key=\(campaignKey)")
+                    return nil
                 }
                 canvasConfig.variableSchemas = schemas
                 config = .inlineCanvas(canvasConfig)
@@ -176,19 +165,6 @@ struct CampaignModel: Equatable {
             targetScreenNames: targetScreenNames,
             frequency: FrequencyPolicy.fromJson(selectedJson.object("frequency"))
         )
-    }
-
-    private static func rejectUnsupportedStatefulCampaign(
-        campaignKey: String,
-        reason: String,
-        diagnostics: DiagnosticsReporter?
-    ) -> CampaignModel? {
-        DigiaLog.warning("[CampaignModel] campaign_skipped_unsupported: \(reason)")
-        diagnostics?.reportHealthEvent(
-            "campaign_skipped_unsupported",
-            params: ["campaign_key": campaignKey, "reason": reason]
-        )
-        return nil
     }
 
     private static func selectForDevice(
