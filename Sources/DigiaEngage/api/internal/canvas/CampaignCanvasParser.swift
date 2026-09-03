@@ -238,17 +238,31 @@ struct CampaignCanvasParser {
     private func parseSpans(_ raw: [[String: Any]]?) throws -> [CampaignCanvasTextSpan] {
         try (raw ?? []).compactMap { span in
             guard let text = span["text"] as? String, !text.isEmpty else { return nil }
+            let style = propertyObject(span["style"]) ?? [:]
+            let composite = try designTokens.resolveTypography(span["typography"])
+            let typography = CampaignTypography(
+                fontFamily: nonBlankString(firstPresent(span["fontFamily"], style["fontFamily"])) ?? composite?.fontFamily,
+                fontSize: propertyNumber(firstPresent(span["fontSize"], style["fontSize"])).map { CGFloat($0) } ?? composite?.fontSize,
+                fontWeight: fontWeight(firstPresent(span["fontWeight"], style["fontWeight"])) ?? composite?.fontWeight,
+                lineHeight: propertyNumber(firstPresent(span["lineHeight"], style["lineHeight"])).map { CGFloat($0) } ?? composite?.lineHeight,
+                letterSpacing: propertyNumber(firstPresent(span["letterSpacing"], style["letterSpacing"])).map { CGFloat($0) } ?? composite?.letterSpacing
+            )
             return CampaignCanvasTextSpan(
                 text: text,
-                typography: try designTokens.resolveTypography(span["typography"]),
-                color: try designTokens.resolveColor(span["color"]),
-                highlightColor: try designTokens.resolveColor(span["highlightColor"]),
-                italic: span["italic"] as? Bool ?? false,
+                typography: typography.isEmpty ? nil : typography,
+                color: try designTokens.resolveColor(firstPresent(span["color"], span["textColor"], style["color"], style["textColor"])),
+                highlightColor: try designTokens.resolveColor(firstPresent(span["highlightColor"], style["highlightColor"])),
+                italic: (span["italic"] as? Bool ?? false) || ((style["fontStyle"] as? String) == "italic"),
                 decoration: {
-                    switch span["decoration"] as? String { case "underline": .underline; case "lineThrough": .lineThrough; default: .none }
+                    switch rawString(firstPresent(style["decoration"], span["decoration"]), fallback: "none") {
+                    case "underline": .underline
+                    case "lineThrough", "line-through": .lineThrough
+                    default: .none
+                    }
                 }(),
-                decorationColor: try designTokens.resolveColor(span["decorationColor"]),
-                decorationThickness: propertyNumber(span["decorationThickness"]).map { CGFloat($0) },
+                decorationColor: try designTokens.resolveColor(firstPresent(span["decorationColor"], style["decorationColor"])),
+                decorationThickness: propertyNumber(firstPresent(span["decorationThickness"], style["decorationThickness"]))
+                    .map { min(max(CGFloat($0), 1), 8) },
                 actions: EngageActionParser().parse(span["onClick"] as? [String: Any])
             )
         }
@@ -438,6 +452,30 @@ struct CampaignCanvasParser {
         default: fallback
         }
     }
+    private func nonBlankString(_ raw: Any?) -> String? {
+        guard let value = unwrapLiteral(raw), !(value is NSNull) else { return nil }
+        let text = String(describing: value).trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+    private func fontWeight(_ raw: Any?) -> Int? {
+        guard let value = unwrapLiteral(raw), !(value is NSNull) else { return nil }
+        if let string = value as? String, string.lowercased().hasPrefix("w") {
+            return DigiaFontWeight.optional(String(string.dropFirst()))
+        }
+        return DigiaFontWeight.optional(value)
+    }
+    private func firstPresent(_ values: Any?...) -> Any? {
+        values.first { value in
+            guard let value else { return false }
+            return !(value is NSNull)
+        } ?? nil
+    }
 }
 
 private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
+
+private extension CampaignTypography {
+    var isEmpty: Bool {
+        fontFamily == nil && fontSize == nil && fontWeight == nil && lineHeight == nil && letterSpacing == nil
+    }
+}

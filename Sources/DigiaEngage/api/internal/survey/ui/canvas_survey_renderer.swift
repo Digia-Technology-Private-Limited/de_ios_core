@@ -363,23 +363,32 @@ private struct CanvasSurveyButtonHost: View {
     let enabled: Bool
     let accent: Color
     let onClick: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        let fill = Color(hex: host.fillHex) ?? accent
-        let foreground = Color(hex: host.colorHex) ?? Color.white
-        Button(action: onClick) {
-            Text(text)
-                .font(surveyFont(size: host.fontSize, weight: 600))
-                .foregroundColor(enabled ? foreground : foreground.opacity(0.55))
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: host.cornerRadius)
-                        .fill(enabled ? fill : fill.opacity(0.35))
-                )
+        if let button = host.button, enabled {
+            CampaignCanvasRendererRegistry.render(
+                button,
+                isDark: CampaignCanvasTheme.shared.isDark(colorScheme),
+                onAction: { _ in onClick() }
+            )
+        } else {
+            let fill = Color(hex: host.fillHex) ?? accent
+            let foreground = Color(hex: host.colorHex) ?? Color.white
+            Button(action: onClick) {
+                Text(text)
+                    .font(surveyFont(size: host.fontSize, weight: 600))
+                    .foregroundColor(enabled ? foreground : foreground.opacity(0.55))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: host.cornerRadius)
+                            .fill(enabled ? fill : fill.opacity(0.35))
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(!enabled)
         }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
     }
 }
 
@@ -390,8 +399,12 @@ private struct CanvasSurveyDismissHost: View {
     var body: some View {
         Button(action: onClose) {
             Image(systemName: "xmark")
-                .font(surveyFont(size: host.fontSize, weight: 600))
-                .foregroundColor(Color(hex: host.colorHex) ?? SurveyTokens.textTertiary)
+                .font(surveyFont(size: host.iconSize > 0 ? host.iconSize : host.fontSize, weight: 600))
+                .foregroundColor(
+                    host.iconColorHex.flatMap(Color.init(hex:))
+                        ?? Color(hex: host.colorHex)
+                        ?? SurveyTokens.textTertiary
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .buttonStyle(.plain)

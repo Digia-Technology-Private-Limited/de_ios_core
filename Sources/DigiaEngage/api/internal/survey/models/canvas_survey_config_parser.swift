@@ -24,12 +24,6 @@ extension SurveyBlockType {
 }
 
 enum CanvasSurveyConfigParser {
-    private struct ParsedCanvasDocument {
-        let canvas: CampaignCanvas
-        let hosts: [CanvasSurveyHostElement]
-        let managedHosts: [CanvasSurveyManagedHostElement]
-    }
-
     private enum SceneKind {
         case question
         case content
@@ -63,6 +57,7 @@ enum CanvasSurveyConfigParser {
         let rootNodeIdRaw = SurveyParse.nonBlank(flow["rootNodeId"])
         let rootNodeId = (rootNodeIdRaw.map { id in nodes.contains { $0.id == id } } == true)
             ? rootNodeIdRaw : nodes.first?.id
+        let rootSceneId = nodes.first { $0.id == rootNodeId }?.blockId
         let name = SurveyParse.firstNonEmptyOptional(
             SurveyParse.string(json["name"]),
             SurveyParse.string(json["surveyName"]),
@@ -90,7 +85,9 @@ enum CanvasSurveyConfigParser {
                     scenesArr,
                     root: json,
                     designTokens: designTokens,
-                    fallbackDesignWidth: designWidth(json)
+                    fallbackDesignWidth: designWidth(json),
+                    rootSceneId: rootSceneId,
+                    canNavigateBackFromRoot: welcome != nil
                 )
             )
         )
@@ -175,7 +172,7 @@ enum CanvasSurveyConfigParser {
         guard let style = input.flatMap({ SurveyParse.object($0["style"]) }) else { return nil }
         return ElementStyle(
             size: max(0, SurveyParse.double(style["fontSize"]) ?? 0),
-            weight: SurveyParse.fontWeight(SurveyParse.string(style["fontWeight"])),
+            weight: fontWeight(style["fontWeight"], default: 400),
             align: .left,
             colorHex: colorHex(style["textColor"], designTokens: designTokens, fallback: "#FF18181B")
         )
@@ -390,7 +387,7 @@ enum CanvasSurveyConfigParser {
 
     private static func designWidth(_ json: [String: JSONValue]) -> CGFloat {
         let display = SurveyParse.object(json["display"]) ?? [:]
-        let sharedCanvas = documentCanvas(SurveyParse.object(json["sharedUi"]))
+        let sharedCanvas = CanvasSurveyDocumentParser.documentCanvas(SurveyParse.object(json["sharedUi"]))
         let width = SurveyParse.double(display["designWidth"])
             ?? SurveyParse.double(json["designWidth"])
             ?? sharedCanvas.flatMap { SurveyParse.double($0["canvasWidth"]) }
@@ -402,34 +399,41 @@ enum CanvasSurveyConfigParser {
         _ scenes: [JSONValue],
         root: [String: JSONValue],
         designTokens: DesignTokenCatalog,
-        fallbackDesignWidth: CGFloat
+        fallbackDesignWidth: CGFloat,
+        rootSceneId: String?,
+        canNavigateBackFromRoot: Bool
     ) -> [String: CanvasSurveySceneDocument] {
-        let sharedCanvas = parseCanvasDocument(
+        let documentParser = CanvasSurveyDocumentParser(designTokens: designTokens)
+        let overlay = CanvasSurveySharedUiOverlay()
+        let sharedCanvas = documentParser.parse(
             SurveyParse.object(root["sharedUi"]),
-            designTokens: designTokens,
             fallbackDesignWidth: fallbackDesignWidth
         )
         var documents: [String: CanvasSurveySceneDocument] = [:]
         for value in scenes {
             guard let scene = SurveyParse.object(value),
                   let id = SurveyParse.nonBlank(scene["id"]) else { continue }
-            let canvas = parseCanvasDocument(
+            let canvas = documentParser.parse(
                 SurveyParse.object(scene["canvas"]),
-                designTokens: designTokens,
                 fallbackDesignWidth: fallbackDesignWidth
             )
-            let sceneShared = parseCanvasDocument(
-                SurveyParse.object(scene["sharedUi"]),
-                designTokens: designTokens,
-                fallbackDesignWidth: canvas.canvas.width,
-                fallback: sharedCanvas
+            let kind = canvasSceneKind(sceneKind(SurveyParse.string(scene["kind"]) ?? "question"))
+            let composed = overlay.apply(
+                overrideDocument: SurveyParse.object(scene["sharedUi"]),
+                master: sharedCanvas,
+                body: canvas,
+                fallbackDesignWidth: fallbackDesignWidth,
+                isWelcome: false,
+                sceneKind: kind,
+                isRootScene: id == rootSceneId,
+                canNavigateBackFromRoot: canNavigateBackFromRoot
             )
             documents[id] = CanvasSurveySceneDocument(
-                kind: canvasSceneKind(sceneKind(SurveyParse.string(scene["kind"]) ?? "question")),
-                canvas: canvas.canvas,
-                sharedUi: sceneShared.canvas,
-                canvasHosts: canvas.hosts,
-                sharedUiHosts: sceneShared.managedHosts
+                kind: kind,
+                canvas: composed.canvas,
+                sharedUi: composed.sharedUi,
+                canvasHosts: composed.canvasHosts,
+                sharedUiHosts: composed.sharedUiHosts
             )
         }
         return documents
@@ -442,258 +446,25 @@ enum CanvasSurveyConfigParser {
         guard let welcome = SurveyParse.object(json["welcome"]),
               SurveyParse.bool(welcome["enabled"]) ?? false else { return nil }
         let fallbackDesignWidth = designWidth(json)
-        let sharedCanvas = parseCanvasDocument(
+        let documentParser = CanvasSurveyDocumentParser(designTokens: designTokens)
+        let sharedCanvas = documentParser.parse(
             SurveyParse.object(json["sharedUi"]),
-            designTokens: designTokens,
             fallbackDesignWidth: fallbackDesignWidth
         )
-        let canvas = parseCanvasDocument(
+        let canvas = documentParser.parse(
             SurveyParse.object(welcome["canvas"]),
-            designTokens: designTokens,
             fallbackDesignWidth: fallbackDesignWidth
         )
-        let welcomeShared = parseCanvasDocument(
-            SurveyParse.object(welcome["sharedUi"]),
-            designTokens: designTokens,
-            fallbackDesignWidth: canvas.canvas.width,
-            fallback: sharedCanvas
+        return CanvasSurveySharedUiOverlay().apply(
+            overrideDocument: SurveyParse.object(welcome["sharedUi"]),
+            master: sharedCanvas,
+            body: canvas,
+            fallbackDesignWidth: fallbackDesignWidth,
+            isWelcome: true,
+            sceneKind: nil,
+            isRootScene: false,
+            canNavigateBackFromRoot: false
         )
-        return CanvasSurveyDocument(
-            canvas: canvas.canvas,
-            sharedUi: welcomeShared.canvas,
-            canvasHosts: canvas.hosts,
-            sharedUiHosts: welcomeShared.managedHosts
-        )
-    }
-
-    private static func parseCanvasDocument(
-        _ document: [String: JSONValue]?,
-        designTokens: DesignTokenCatalog,
-        fallbackDesignWidth: CGFloat,
-        fallback: ParsedCanvasDocument? = nil
-    ) -> ParsedCanvasDocument {
-        guard let canvasJson = documentCanvas(document) else {
-            return fallback ?? emptyDocument(fallbackDesignWidth: fallbackDesignWidth)
-        }
-        if let fallback, isSparseSharedUiOverride(canvasJson) {
-            return materializedSharedUiOverride(
-                canvasJson,
-                fallback: fallback,
-                fallbackDesignWidth: fallbackDesignWidth
-            )
-        }
-        var normalized = jsonObject(canvasJson)
-        normalized["version"] = normalized["version"] ?? 2
-        normalized["canvasWidth"] = normalized["canvasWidth"] ?? fallbackDesignWidth
-        normalized["canvasHeight"] = normalized["canvasHeight"] ?? 420
-        normalized["children"] = normalized["children"] ?? []
-        guard let canvas = try? CampaignCanvasParser(designTokens: designTokens).parse(normalized) else {
-            return fallback ?? emptyDocument(fallbackDesignWidth: fallbackDesignWidth)
-        }
-        let children = SurveyParse.array(canvasJson["children"]) ?? []
-        let hosts = hostElements(children, canvasWidth: canvas.width, canvasHeight: canvas.height, designTokens: designTokens)
-        return ParsedCanvasDocument(
-            canvas: canvas,
-            hosts: hosts,
-            managedHosts: hosts.compactMap {
-                if case .managed(let host) = $0 { return host }
-                return nil
-            }
-        )
-    }
-
-    private static func isSparseSharedUiOverride(_ canvas: [String: JSONValue]) -> Bool {
-        guard let children = SurveyParse.array(canvas["children"]) else { return false }
-        return children.allSatisfy { value in
-            guard let child = SurveyParse.object(value) else { return false }
-            return child["kind"] == nil && child["element"] == nil && child["widget"] == nil
-        }
-    }
-
-    private static func materializedSharedUiOverride(
-        _ canvas: [String: JSONValue],
-        fallback: ParsedCanvasDocument,
-        fallbackDesignWidth: CGFloat
-    ) -> ParsedCanvasDocument {
-        let width = CGFloat(
-            SurveyParse.double(canvas["canvasWidth"])
-                ?? Double(fallback.canvas.width > 0 ? fallback.canvas.width : fallbackDesignWidth)
-        )
-        let height = CGFloat(
-            SurveyParse.double(canvas["canvasHeight"])
-                ?? Double(fallback.canvas.height > 0 ? fallback.canvas.height : 420)
-        )
-        let overrides = sharedUiRectOverrides(
-            SurveyParse.array(canvas["children"]) ?? [],
-            canvasWidth: width,
-            canvasHeight: height
-        )
-        let ids = Set(overrides.keys)
-        let children = fallback.canvas.children.compactMap { child -> CampaignCanvasChild? in
-            guard ids.contains(child.id) else { return nil }
-            return replaceRect(on: child, rect: overrides[child.id] ?? child.rect)
-        }
-        let hosts = fallback.hosts.compactMap { host -> CanvasSurveyHostElement? in
-            guard ids.contains(host.id) else { return nil }
-            return replaceRect(on: host, rect: overrides[host.id] ?? host.rect)
-        }
-        return ParsedCanvasDocument(
-            canvas: CampaignCanvas(
-                version: 2,
-                width: width > 0 ? width : 360,
-                height: height > 0 ? height : 420,
-                background: fallback.canvas.background,
-                children: children
-            ),
-            hosts: hosts,
-            managedHosts: hosts.compactMap {
-                if case .managed(let host) = $0 { return host }
-                return nil
-            }
-        )
-    }
-
-    private static func sharedUiRectOverrides(
-        _ children: [JSONValue],
-        canvasWidth: CGFloat,
-        canvasHeight: CGFloat
-    ) -> [String: CampaignCanvasRect] {
-        var overrides: [String: CampaignCanvasRect] = [:]
-        for value in children {
-            guard let child = SurveyParse.object(value),
-                  let id = SurveyParse.nonBlank(child["id"]),
-                  let rectJson = SurveyParse.object(child["rect"]) else { continue }
-            overrides[id] = CampaignCanvasRect(
-                x: CGFloat(SurveyParse.double(rectJson["x"]) ?? 0) * canvasWidth,
-                y: CGFloat(SurveyParse.double(rectJson["y"]) ?? 0) * canvasHeight,
-                width: max(0, CGFloat(SurveyParse.double(rectJson["width"]) ?? 0) * canvasWidth),
-                height: max(0, CGFloat(SurveyParse.double(rectJson["height"]) ?? 0) * canvasHeight)
-            )
-        }
-        return overrides
-    }
-
-    private static func replaceRect(
-        on child: CampaignCanvasChild,
-        rect: CampaignCanvasRect
-    ) -> CampaignCanvasChild {
-        switch child {
-        case .widget(let id, _, let widget):
-            return .widget(id: id, rect: rect, widget: widget)
-        case .tapRegion(let id, _, let actions):
-            return .tapRegion(id: id, rect: rect, actions: actions)
-        }
-    }
-
-    private static func replaceRect(
-        on host: CanvasSurveyHostElement,
-        rect: CampaignCanvasRect
-    ) -> CanvasSurveyHostElement {
-        switch host {
-        case .answer(let host):
-            return .answer(CanvasSurveyAnswerHostElement(id: host.id, rect: rect))
-        case .managed(let host):
-            return .managed(replaceRect(on: host, rect: rect))
-        }
-    }
-
-    private static func replaceRect(
-        on host: CanvasSurveyManagedHostElement,
-        rect: CampaignCanvasRect
-    ) -> CanvasSurveyManagedHostElement {
-        CanvasSurveyManagedHostElement(
-            id: host.id,
-            rect: rect,
-            role: host.role,
-            visible: host.visible,
-            label: host.label,
-            doneLabel: host.doneLabel,
-            colorHex: host.colorHex,
-            fillHex: host.fillHex,
-            trackColorHex: host.trackColorHex,
-            borderColorHex: host.borderColorHex,
-            borderWidth: host.borderWidth,
-            cornerRadius: host.cornerRadius,
-            fontSize: host.fontSize,
-            gap: host.gap,
-            padding: host.padding,
-            progressStyle: host.progressStyle
-        )
-    }
-
-    private static func documentCanvas(_ document: [String: JSONValue]?) -> [String: JSONValue]? {
-        guard let document else { return nil }
-        if let canvas = SurveyParse.object(document["canvas"]) { return canvas }
-        if document["children"] != nil ||
-            document["canvasWidth"] != nil ||
-            document["canvasHeight"] != nil ||
-            document["version"] != nil {
-            return document
-        }
-        return nil
-    }
-
-    private static func emptyDocument(fallbackDesignWidth: CGFloat) -> ParsedCanvasDocument {
-        let width = fallbackDesignWidth > 0 ? fallbackDesignWidth : 360
-        return ParsedCanvasDocument(
-            canvas: CampaignCanvas(
-                version: 2,
-                width: width,
-                height: 420,
-                background: .solid(.literal("#FFFFFFFF")),
-                children: []
-            ),
-            hosts: [],
-            managedHosts: []
-        )
-    }
-
-    private static func hostElements(
-        _ children: [JSONValue],
-        canvasWidth: CGFloat,
-        canvasHeight: CGFloat,
-        designTokens: DesignTokenCatalog
-    ) -> [CanvasSurveyHostElement] {
-        children.compactMap { value in
-            guard let child = SurveyParse.object(value),
-                  SurveyParse.string(child["kind"]) == "hostElement",
-                  let element = SurveyParse.object(child["element"]),
-                  let rectJson = SurveyParse.object(child["rect"]) else { return nil }
-            let id = SurveyParse.string(child["id"]) ?? ""
-            let rect = CampaignCanvasRect(
-                x: CGFloat(SurveyParse.double(rectJson["x"]) ?? 0) * canvasWidth,
-                y: CGFloat(SurveyParse.double(rectJson["y"]) ?? 0) * canvasHeight,
-                width: max(0, CGFloat(SurveyParse.double(rectJson["width"]) ?? 0) * canvasWidth),
-                height: max(0, CGFloat(SurveyParse.double(rectJson["height"]) ?? 0) * canvasHeight)
-            )
-            switch SurveyParse.string(element["type"]) {
-            case "canvasSurvey.answerInput":
-                return .answer(CanvasSurveyAnswerHostElement(id: id, rect: rect))
-            case "canvasSurvey.managed":
-                guard let props = SurveyParse.object(element["props"]),
-                      let role = managedRole(SurveyParse.string(props["role"])) else { return nil }
-                return .managed(CanvasSurveyManagedHostElement(
-                    id: id,
-                    rect: rect,
-                    role: role,
-                    visible: SurveyParse.bool(props["visible"]) ?? true,
-                    label: SurveyParse.string(props["label"]) ?? "",
-                    doneLabel: SurveyParse.string(props["doneLabel"]) ?? "",
-                    colorHex: colorHex(props["color"], designTokens: designTokens, fallback: "#FF18181B"),
-                    fillHex: colorHex(props["fill"], designTokens: designTokens, fallback: "#FFF4F4F5"),
-                    trackColorHex: colorHex(props["trackColor"], designTokens: designTokens, fallback: "#FFE5E7EB"),
-                    borderColorHex: colorHex(props["borderColor"], designTokens: designTokens, fallback: "#00000000"),
-                    borderWidth: CGFloat(max(0, SurveyParse.double(props["borderWidth"]) ?? 0)),
-                    cornerRadius: CGFloat(max(0, SurveyParse.double(props["cornerRadius"]) ?? 999)),
-                    fontSize: CGFloat(min(64, max(8, SurveyParse.double(props["fontSize"]) ?? 14))),
-                    gap: CGFloat(min(64, max(0, SurveyParse.double(props["gap"]) ?? 4))),
-                    padding: CGFloat(min(64, max(0, SurveyParse.double(props["padding"]) ?? 6))),
-                    progressStyle: SurveyParse.string(props["progressStyle"]) ?? "segmented"
-                ))
-            default:
-                return nil
-            }
-        }
     }
 
     private static func sceneKind(_ value: String?) -> SceneKind {
@@ -712,18 +483,6 @@ enum CanvasSurveyConfigParser {
         }
     }
 
-    private static func managedRole(_ role: String?) -> CanvasSurveyManagedRole? {
-        switch role {
-        case "progress": return .progress
-        case "pageCount": return .pageCount
-        case "timer": return .timer
-        case "primaryNavigation": return .primaryNavigation
-        case "backNavigation": return .backNavigation
-        case "dismiss": return .dismiss
-        default: return nil
-        }
-    }
-
     private static func colorHex(
         _ value: JSONValue?,
         designTokens: DesignTokenCatalog,
@@ -732,6 +491,18 @@ enum CanvasSurveyConfigParser {
         (try? designTokens.resolveColor(jsonAny(value)))?.lightHex
             ?? canonicalCampaignColorHex(unwrapLiteral(jsonAny(value)))
             ?? fallback
+    }
+
+    private static func fontWeight(_ value: JSONValue?, default fallback: Int) -> Int {
+        optionalFontWeight(jsonAny(value)) ?? fallback
+    }
+
+    private static func optionalFontWeight(_ raw: Any?) -> Int? {
+        guard let value = unwrapLiteral(raw), !(value is NSNull) else { return nil }
+        if let string = value as? String, string.lowercased().hasPrefix("w") {
+            return DigiaFontWeight.optional(String(string.dropFirst()))
+        }
+        return DigiaFontWeight.optional(value)
     }
 
     private static func normalise(_ value: String?) -> String? {
