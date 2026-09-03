@@ -1801,6 +1801,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             timerRuntime = runtime
             timerState = resolved
         }
+        let timerContext: TimerEventContext? = if let runtime = timerRuntime, let resolved = timerState {
+            resolved.analyticsContext(nowMs: runtime.timeAnchor.nowMs())
+        } else {
+            nil
+        }
         let viewed: EngageAnalyticsEvent
         switch campaign.config {
         case .inline(let cfg):
@@ -1814,9 +1819,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             viewed = InlineCanvasEvent.Viewed(
                 slotKey: cfg.slotKey,
                 screenName: _currentScreen,
-                timer: timerState.map {
-                    $0.analyticsContext(nowMs: timerRuntime!.timeAnchor.nowMs())
-                }
+                timer: timerContext
             )
         default:
             return
