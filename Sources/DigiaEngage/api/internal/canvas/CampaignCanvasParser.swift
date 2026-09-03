@@ -1,5 +1,16 @@
 import Foundation
 
+private extension CampaignTimerUnit {
+    var defaultLabel: String {
+        switch self {
+        case .days: "Days"
+        case .hours: "Hrs"
+        case .minutes: "Min"
+        case .seconds: "Sec"
+        }
+    }
+}
+
 struct CampaignCanvasParser {
     let designTokens: DesignTokenCatalog
     init(designTokens: DesignTokenCatalog = .empty) { self.designTokens = designTokens }
@@ -22,6 +33,7 @@ struct CampaignCanvasParser {
             "digia/storyProgress": parseStoryProgress,
             "digia/storyClose": parseStoryClose,
             "digia/storyMute": parseStoryMute,
+            "digia/timer": parseTimer,
         ]
     }
 
@@ -206,6 +218,83 @@ struct CampaignCanvasParser {
         var box = type == "digia/canvasContainer" ? .none : try parseBox(propertyObject(json["containerProps"]))
         if type == "digia/button" { box.shadow = nil }
         return try parser(box, props)
+    }
+
+    private func parseTimer(
+        _ box: CampaignCanvasBox,
+        _ props: [String: Any]
+    ) throws -> CampaignCanvasWidget? {
+        let preset = props["preset"] as? String ?? "unitBoxes"
+        guard preset == "text" || preset == "unitBoxes" else { return nil }
+        let unitJSON = propertyObject(props["units"]) ?? [:]
+        let labelJSON = propertyObject(props["labels"]) ?? [:]
+        var units: [CampaignTimerUnit: CampaignTimerUnitVisibility] = [:]
+        var labels: [CampaignTimerUnit: String] = [:]
+        for unit in CampaignTimerUnit.allCases {
+            let raw = unitJSON[unit.rawValue] ?? (unit == .days ? "autoHide" : true)
+            switch raw {
+            case let value as String where value == "autoHide": units[unit] = .autoHide
+            case let value as Bool: units[unit] = value ? .show : .hide
+            default: return nil
+            }
+            labels[unit] = labelJSON[unit.rawValue] as? String ?? unit.defaultLabel
+        }
+        guard units.values.contains(where: { $0 != .hide }) else { return nil }
+        let shared = try parseTimerStyle(props, fallback: nil)
+        let rawOverrides = propertyObject(props["unitOverrides"]) ?? [:]
+        var overrides: [CampaignTimerUnit: CampaignCanvasTimerUnitStyle] = [:]
+        for (key, raw) in rawOverrides {
+            guard let unit = CampaignTimerUnit(rawValue: key) else { continue }
+            guard let value = propertyObject(raw) else { return nil }
+            overrides[unit] = try parseTimerStyle(value, fallback: shared)
+        }
+        return .timer(
+            box: box,
+            preset: preset,
+            separator: props["separator"] as? String ?? ":",
+            units: units,
+            labels: labels,
+            style: shared,
+            unitOverrides: overrides
+        )
+    }
+
+    private func parseTimerStyle(
+        _ json: [String: Any],
+        fallback: CampaignCanvasTimerUnitStyle?
+    ) throws -> CampaignCanvasTimerUnitStyle {
+        let digitTypography = fallback?.digitTypography ?? CampaignTypography(
+            fontFamily: nil, fontSize: 20, fontWeight: 700, lineHeight: nil, letterSpacing: nil
+        )
+        let labelTypography = fallback?.labelTypography ?? CampaignTypography(
+            fontFamily: nil, fontSize: 10, fontWeight: 400, lineHeight: nil, letterSpacing: nil
+        )
+        return CampaignCanvasTimerUnitStyle(
+            digitTypography: parseTimerTypography(json["digitTypography"], fallback: digitTypography),
+            digitColor: try designTokens.resolveColor(json["digitColor"]) ?? fallback?.digitColor ?? .literal("#FFFFFFFF"),
+            labelTypography: parseTimerTypography(json["labelTypography"], fallback: labelTypography),
+            labelColor: try designTokens.resolveColor(json["labelColor"]) ?? fallback?.labelColor ?? .literal("#FFB9C6DA"),
+            boxFill: json["boxFill"] != nil
+                ? try parsePaint(propertyObject(json["boxFill"]), allowImage: false)
+                : fallback?.boxFill ?? .none,
+            cornerRadius: json["cornerRadius"] != nil
+                ? parseCornerRadius(json["cornerRadius"], fallback: 6)
+                : fallback?.cornerRadius ?? parseCornerRadius(nil, fallback: 6)
+        )
+    }
+
+    private func parseTimerTypography(_ raw: Any?, fallback: CampaignTypography) -> CampaignTypography {
+        var typography = (try? designTokens.resolveTypography(raw)) ?? fallback
+        if let size = typography.fontSize, !size.isFinite || size <= 0 {
+            typography.fontSize = fallback.fontSize
+        }
+        if let height = typography.lineHeight, !height.isFinite || height <= 0 {
+            typography.lineHeight = fallback.lineHeight
+        }
+        if let spacing = typography.letterSpacing, !spacing.isFinite {
+            typography.letterSpacing = fallback.letterSpacing
+        }
+        return typography
     }
 
     private func parseBackground(_ json: [String: Any]?) throws -> CampaignCanvasPaint {
