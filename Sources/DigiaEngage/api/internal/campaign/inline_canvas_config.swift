@@ -116,7 +116,6 @@ struct StatefulTimerConfig: Equatable {
             guard let parsed = parseSource(source.object("startsAt"), variableSchemas: variableSchemas) else { return nil }
             startsAt = parsed
         }
-        guard startsAt == nil || startsAt?.sourceName == deadline.sourceName else { return nil }
         if case .fixed(let start)? = startsAt,
            case .fixed(let end) = deadline,
            start >= end { return nil }

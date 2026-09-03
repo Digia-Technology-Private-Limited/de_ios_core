@@ -3,6 +3,7 @@ import Foundation
 struct CampaignBundle {
     let rawCampaigns: [[String: Any]]
     let designTokens: DesignTokenCatalog
+    let timeAnchor: TrustedTimeAnchor?
     let campaigns: [CampaignModel]
 
     static func create(
@@ -33,6 +34,7 @@ struct CampaignBundle {
         return CampaignBundle(
             rawCampaigns: rawCampaigns,
             designTokens: catalog,
+            timeAnchor: timeAnchor,
             campaigns: campaigns
         )
     }

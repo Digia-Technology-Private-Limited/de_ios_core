@@ -54,6 +54,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Held because live test parses a campaign that never came through the
     /// bundle, and it has to resolve the same tokens the bundle's campaigns do.
     private var currentDesignTokens = DesignTokenCatalog.empty
+    private var currentTimeAnchor: TrustedTimeAnchor?
 
     let campaignStore = CampaignStore()
     let controller = DigiaOverlayController()
@@ -217,8 +218,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             ).fetch()
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
+            currentTimeAnchor = bundle.timeAnchor
         } catch {
             // Campaign fetch failure must not block SDK readiness.
+            currentTimeAnchor = nil
             logVerbose("CampaignFetcher failed: \(error)")
         }
         completeInitialization(campaigns)
@@ -314,10 +317,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             )
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
+            currentTimeAnchor = bundle.timeAnchor
             DigiaLog.warning(
                 "[SDKInstance] populateCampaignBundle parsed raw=\(bundle.rawCampaigns.count) accepted=\(campaigns.count)"
             )
         } catch {
+            currentTimeAnchor = nil
             DigiaLog.warning(
                 "[SDKInstance] populateCampaignBundle failed: \(error.localizedDescription)")
         }
@@ -1019,6 +1024,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             campaignJson,
             designTokens: currentDesignTokens,
             devicePlatform: "ios",
+            timeAnchor: currentTimeAnchor,
             diagnostics: diagnostics
         ) else {
             reporter.postFailed(
@@ -2336,6 +2342,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         isHostMounted = false
         font = DigiaFont()
         currentDesignTokens = .empty
+        currentTimeAnchor = nil
         campaignStore.clear()
         controller.dismissNudge()
         controller.dismissStoryOverlay()
