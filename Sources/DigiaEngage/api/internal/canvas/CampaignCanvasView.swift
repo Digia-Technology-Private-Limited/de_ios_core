@@ -768,19 +768,25 @@ private struct CanvasTimerRenderer: View {
             _, let preset, let separator, let units, let labels, let sharedStyle, let overrides
         ) = widget, let remainingSeconds {
             let values = timerUnitValues(remainingSeconds: remainingSeconds, visibility: units)
-            HStack(spacing: 4) {
-                ForEach(Array(values.enumerated()), id: \.element.0) { index, value in
-                    if index > 0 && preset == "text" {
-                        Text(separator)
-                            .foregroundStyle(color((overrides[value.0] ?? sharedStyle).digitColor))
+            GeometryReader { geometry in
+                let unitCount = max(1, CampaignTimerUnit.allCases.filter { units[$0] != .hide }.count)
+                let boxWidth = max(0, (geometry.size.width - CGFloat(unitCount - 1) * 4) / CGFloat(unitCount))
+                HStack(spacing: 4) {
+                    ForEach(Array(values.enumerated()), id: \.element.0) { index, value in
+                        if index > 0 && preset == "text" {
+                            Text(separator)
+                                .foregroundStyle(color((overrides[value.0] ?? sharedStyle).digitColor))
+                        }
+                        unitView(
+                            value: value.1,
+                            label: labels[value.0] ?? "",
+                            style: overrides[value.0] ?? sharedStyle,
+                            boxed: preset == "unitBoxes"
+                        )
+                        .frame(width: preset == "unitBoxes" ? boxWidth : nil)
                     }
-                    unitView(
-                        value: value.1,
-                        label: labels[value.0] ?? "",
-                        style: overrides[value.0] ?? sharedStyle,
-                        boxed: preset == "unitBoxes"
-                    )
                 }
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .accessibilityElement(children: .ignore)
@@ -844,7 +850,8 @@ private struct CanvasTimerRenderer: View {
 
 func timerLineHeight(_ typography: CampaignTypography?, fallbackSize: CGFloat) -> CGFloat? {
     guard let lineHeight = typography?.lineHeight else { return nil }
-    return lineHeight <= 4 ? lineHeight * (typography?.fontSize ?? fallbackSize) : lineHeight
+    let height = lineHeight <= 4 ? lineHeight * (typography?.fontSize ?? fallbackSize) : lineHeight
+    return height.isFinite && height > 0 ? height : nil
 }
 
 func timerUnitValues(

@@ -244,7 +244,8 @@ struct CampaignCanvasParser {
         let rawOverrides = propertyObject(props["unitOverrides"]) ?? [:]
         var overrides: [CampaignTimerUnit: CampaignCanvasTimerUnitStyle] = [:]
         for (key, raw) in rawOverrides {
-            guard let unit = CampaignTimerUnit(rawValue: key), let value = propertyObject(raw) else { return nil }
+            guard let unit = CampaignTimerUnit(rawValue: key) else { continue }
+            guard let value = propertyObject(raw) else { return nil }
             overrides[unit] = try parseTimerStyle(value, fallback: shared)
         }
         return .timer(
@@ -269,9 +270,9 @@ struct CampaignCanvasParser {
             fontFamily: nil, fontSize: 10, fontWeight: 400, lineHeight: nil, letterSpacing: nil
         )
         return CampaignCanvasTimerUnitStyle(
-            digitTypography: (try? designTokens.resolveTypography(json["digitTypography"])) ?? digitTypography,
+            digitTypography: parseTimerTypography(json["digitTypography"], fallback: digitTypography),
             digitColor: try designTokens.resolveColor(json["digitColor"]) ?? fallback?.digitColor ?? .literal("#FFFFFFFF"),
-            labelTypography: (try? designTokens.resolveTypography(json["labelTypography"])) ?? labelTypography,
+            labelTypography: parseTimerTypography(json["labelTypography"], fallback: labelTypography),
             labelColor: try designTokens.resolveColor(json["labelColor"]) ?? fallback?.labelColor ?? .literal("#FFB9C6DA"),
             boxFill: json["boxFill"] != nil
                 ? try parsePaint(propertyObject(json["boxFill"]), allowImage: false)
@@ -280,6 +281,20 @@ struct CampaignCanvasParser {
                 ? parseCornerRadius(json["cornerRadius"], fallback: 6)
                 : fallback?.cornerRadius ?? parseCornerRadius(nil, fallback: 6)
         )
+    }
+
+    private func parseTimerTypography(_ raw: Any?, fallback: CampaignTypography) -> CampaignTypography {
+        var typography = (try? designTokens.resolveTypography(raw)) ?? fallback
+        if let size = typography.fontSize, !size.isFinite || size <= 0 {
+            typography.fontSize = fallback.fontSize
+        }
+        if let height = typography.lineHeight, !height.isFinite || height <= 0 {
+            typography.lineHeight = fallback.lineHeight
+        }
+        if let spacing = typography.letterSpacing, !spacing.isFinite {
+            typography.letterSpacing = fallback.letterSpacing
+        }
+        return typography
     }
 
     private func parseBackground(_ json: [String: Any]?) throws -> CampaignCanvasPaint {

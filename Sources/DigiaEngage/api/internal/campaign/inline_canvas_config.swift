@@ -2,20 +2,22 @@ import Foundation
 
 struct TrustedTimeAnchor: Equatable {
     let serverEpochMs: Int64
-    let systemUptime: TimeInterval
+    let continuousNanoseconds: UInt64
 
     static func capture(_ serverEpochMs: Int64?) -> TrustedTimeAnchor? {
         // Match the four-digit years supported by timer instants.
         guard let serverEpochMs, (1...253_402_300_799_999).contains(serverEpochMs) else { return nil }
         return TrustedTimeAnchor(
             serverEpochMs: serverEpochMs,
-            systemUptime: ProcessInfo.processInfo.systemUptime
+            // Includes device sleep without following wall-clock changes.
+            continuousNanoseconds: clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
         )
     }
 
     func nowMs() -> Int64 {
-        let elapsed = max(0, ProcessInfo.processInfo.systemUptime - systemUptime)
-        return serverEpochMs + Int64(elapsed * 1_000)
+        let now = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+        let elapsed = (max(now, continuousNanoseconds) - continuousNanoseconds) / 1_000_000
+        return serverEpochMs + Int64(elapsed)
     }
 }
 
