@@ -99,8 +99,7 @@ struct CampaignModel: Equatable {
                 guard let stateful = StatefulTimerConfig.fromJson(
                     templateConfig,
                     designTokens: designTokens,
-                    timeAnchor: timeAnchor,
-                    variableSchemas: schemas
+                    timeAnchor: timeAnchor
                 ) else {
                     return rejectUnsupportedStatefulCampaign(
                         campaignKey: campaignKey,

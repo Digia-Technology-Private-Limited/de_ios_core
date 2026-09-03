@@ -20,11 +20,6 @@ struct TrustedTimeAnchor: Equatable {
 
 enum TimerCampaignState: String, Equatable { case teaser, running, urgent, ended }
 
-private struct TimerNodeIDs: Equatable {
-    let child: String
-    let widget: String
-}
-
 enum TimerInstantSource: Equatable {
     case fixed(Int64)
     case fromVariable(String)
@@ -96,30 +91,24 @@ struct StatefulTimerConfig: Equatable {
     static func fromJson(
         _ json: [String: Any],
         designTokens: DesignTokenCatalog,
-        timeAnchor: TrustedTimeAnchor?,
-        variableSchemas: [VariableSchema]
+        timeAnchor: TrustedTimeAnchor?
     ) -> StatefulTimerConfig? {
         guard let timeAnchor,
               let stateful = json.object("stateful"),
               stateful.int("version", default: -1) == 1,
               let sources = stateful["sources"] as? [[String: Any]], sources.count == 1,
               let source = sources.first,
-              let sourceID = source.nonBlankString("id"),
               source["kind"] as? String == "timer",
               source["mode"] as? String == "countdown",
-              let deadline = parseSource(source.object("deadline"), variableSchemas: variableSchemas)
+              let deadline = parseSource(source.object("deadline"))
         else { return nil }
 
         let startsAt: TimerInstantSource?
         if source["startsAt"] == nil || source["startsAt"] is NSNull { startsAt = nil }
         else {
-            guard let parsed = parseSource(source.object("startsAt"), variableSchemas: variableSchemas) else { return nil }
+            guard let parsed = parseSource(source.object("startsAt")) else { return nil }
             startsAt = parsed
         }
-        if case .fixed(let start)? = startsAt,
-           case .fixed(let end) = deadline,
-           start >= end { return nil }
-
         let urgent: Int64?
         if source["urgentBelowSeconds"] == nil || source["urgentBelowSeconds"] is NSNull {
             urgent = nil
@@ -131,66 +120,31 @@ struct StatefulTimerConfig: Equatable {
         }
 
         guard let rawRules = stateful["rules"] as? [[String: Any]], !rawRules.isEmpty else { return nil }
-        var expectedStates: [TimerCampaignState?] = []
-        if startsAt != nil { expectedStates.append(.teaser) }
-        expectedStates.append(.running)
-        if urgent != nil { expectedStates.append(.urgent) }
-        expectedStates.append(nil)
-        guard rawRules.count == expectedStates.count else { return nil }
         var rules: [StatefulTimerRule] = []
-        var sharedHeight: CGFloat?
-        var ruleIDs: Set<String> = []
-        var runningTimerIDs: TimerNodeIDs?
-        for (index, raw) in rawRules.enumerated() {
+        for raw in rawRules {
             let whenJSON = raw.object("when")
-            guard (index == rawRules.count - 1) == (whenJSON == nil) else { return nil }
             let state: TimerCampaignState?
             if let whenJSON {
-                guard (1...2).contains(whenJSON.count),
-                      let rawState = whenJSON["is"] as? String,
+                guard let rawState = whenJSON["is"] as? String,
                       let parsed = TimerCampaignState(rawValue: rawState)
-                else { return nil }
-                if whenJSON.count == 2 && whenJSON["sourceId"] == nil { return nil }
-                if let rawSourceID = whenJSON["sourceId"] {
-                    guard let ruleSourceID = rawSourceID as? String,
-                          ruleSourceID == sourceID
-                    else { return nil }
-                }
+                else { continue }
                 state = parsed
             } else { state = nil }
-            guard state == expectedStates[index] else { return nil }
-            if state == .teaser && startsAt == nil { return nil }
-            if state == .urgent && urgent == nil { return nil }
-            let allowTimer = state == .running || state == .urgent
             let canvas: CampaignCanvas?
-            if raw["canvas"] is NSNull { canvas = nil }
+            if raw["canvas"] == nil || raw["canvas"] is NSNull { canvas = nil }
             else {
                 guard let rawCanvas = raw.object("canvas"),
-                      let timerIDs = timerNodeIDs(rawCanvas), timerIDs.count <= 1,
-                      allowTimer || timerIDs.isEmpty,
                       let parsed = try? CampaignCanvasParser(
                         designTokens: designTokens,
-                        strictWidgets: true,
-                        allowTimer: allowTimer
+                        allowTimer: true
                       ).parse(rawCanvas)
                 else { return nil }
-                if state == .running, let ids = timerIDs.first { runningTimerIDs = ids }
-                if state == .urgent, let ids = timerIDs.first,
-                   let runningTimerIDs, ids != runningTimerIDs { return nil }
-                let timerCount = parsed.children.filter { child in
-                    guard case .widget(_, _, .timer) = child else { return false }
-                    return true
-                }.count
-                guard timerCount <= 1, allowTimer || timerCount == 0 else { return nil }
-                if let sharedHeight, abs(sharedHeight - parsed.height) > 0.01 { return nil }
-                sharedHeight = parsed.height
                 canvas = parsed
             }
             guard let id = raw.nonBlankString("id") else { return nil }
-            guard id == (state?.rawValue ?? TimerCampaignState.ended.rawValue) else { return nil }
-            guard ruleIDs.insert(id).inserted else { return nil }
             rules.append(StatefulTimerRule(id: id, state: state, canvas: canvas))
         }
+        guard rules.contains(where: { $0.state == nil }) else { return nil }
         return StatefulTimerConfig(
             timeAnchor: timeAnchor,
             startsAt: startsAt,
@@ -200,35 +154,14 @@ struct StatefulTimerConfig: Equatable {
         )
     }
 
-    private static func timerNodeIDs(_ canvas: [String: Any]) -> [TimerNodeIDs]? {
-        guard let children = canvas["children"] as? [[String: Any]] else { return [] }
-        var result: [TimerNodeIDs] = []
-        for child in children {
-            guard child["kind"] as? String == "widget",
-                  let widget = child["widget"] as? [String: Any],
-                  widget["type"] as? String == "digia/timer"
-            else { continue }
-            guard let childID = child.nonBlankString("id"),
-                  let widgetID = widget.nonBlankString("id")
-            else { return nil }
-            result.append(TimerNodeIDs(child: childID, widget: widgetID))
-        }
-        return result
-    }
-
-    private static func parseSource(
-        _ json: [String: Any]?,
-        variableSchemas: [VariableSchema]
-    ) -> TimerInstantSource? {
+    private static func parseSource(_ json: [String: Any]?) -> TimerInstantSource? {
         guard let json, let source = json["source"] as? String else { return nil }
         switch source {
         case "fixed":
             guard let at = json["at"] as? String, let value = parseOffsetInstantMs(at) else { return nil }
             return .fixed(value)
         case "fromVariable":
-            guard let token = json.nonBlankString("token"),
-                  variableSchemas.contains(where: { $0.name == token && $0.type == "string" })
-            else { return nil }
+            guard let token = json.nonBlankString("token") else { return nil }
             return .fromVariable(token)
         default: return nil
         }
