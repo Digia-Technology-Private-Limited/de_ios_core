@@ -1035,6 +1035,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
 
         if campaign.guideConfig != nil { replaceActiveLiveTestGuide() }
+        if campaign.floaterConfig != nil || campaign.floaterStoryConfig != nil {
+            replaceActiveLiveTestFloater()
+        }
 
         let coercedVariables = invocation.variables.mapValues { "\($0)" }
         let cepCampaignId = liveTestCepId(invocation.testInvocationId)
@@ -1140,6 +1143,25 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             )
             guideOrchestrator.dismissIfActive(payloadId: state.payload.cepCampaignId)
             guideCompletionFired = false
+        }
+    }
+
+    private func replaceActiveLiveTestFloater() {
+        if let state = floaterOrchestrator.state,
+           isLiveTestCepId(state.payload.cepCampaignId) {
+            liveTestContexts[state.payload.cepCampaignId]?.reportFailed(
+                .renderError,
+                message: "replaced by a newer live-test invocation"
+            )
+            floaterOrchestrator.dismiss(.superseded)
+        }
+        if let state = floaterStoryOrchestrator.state,
+           isLiveTestCepId(state.payload.cepCampaignId) {
+            liveTestContexts[state.payload.cepCampaignId]?.reportFailed(
+                .renderError,
+                message: "replaced by a newer live-test invocation"
+            )
+            floaterStoryOrchestrator.dismiss(.superseded)
         }
     }
 
