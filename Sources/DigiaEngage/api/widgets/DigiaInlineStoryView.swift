@@ -42,6 +42,7 @@ struct DigiaInlineStoryView: View {
             overlayOpen: overlayController.activeStoryOverlay != nil
         ) { index in
             SDKInstance.shared.reportStoryOpened(payload)
+            SDKInstance.shared.reportClassicStoryOpened(payload)
             SDKInstance.shared.controller.showStoryOverlay(
                 config: config,
                 initialIndex: index,

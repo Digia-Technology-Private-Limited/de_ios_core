@@ -473,6 +473,123 @@ struct DigiaEngageTests {
         #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.cepCampaignId == "bridge-event")
         #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.campaignKey == "welcome_survey")
     }
+
+    @Test("classic inline exceptions do not turn item or canvas engagement into coarse clicks")
+    func classicInlineClicksStaySeparateFromRichAnalytics() {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let payload = CEPTriggerPayload(
+            cepCampaignId: "inline", campaignKey: "inline",
+            cepMetadata: ["renderedLifecycle": "true"])
+
+        SDKInstance.shared.reportStoryOpened(payload)
+        SDKInstance.shared.reportStoryStepClicked(
+            payload, itemIndex: 1, ctaLabel: "Continue", actionType: "openUrl", actionUrl: nil)
+        SDKInstance.shared.reportCarouselStepClicked(payload: payload, itemIndex: 1, action: nil)
+        SDKInstance.shared.reportBannerClicked(payload: payload, action: nil)
+        SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: "secondary", isPrimary: false)
+        #expect(plugin.events.isEmpty)
+
+        SDKInstance.shared.reportClassicStoryOpened(payload)
+        SDKInstance.shared.reportClassicCarouselContainerClicked(payload)
+        SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: "primary", isPrimary: true)
+        #expect(plugin.events.map(\.0) == [
+            .clicked(elementID: "story_thumbnail"),
+            .clicked(elementID: "carousel_container"),
+            .clicked(elementID: "primary"),
+        ])
+        #expect(plugin.events.allSatisfy { $0.1 == payload })
+
+        let legacy = CEPTriggerPayload(cepCampaignId: "legacy", campaignKey: "legacy", cepMetadata: [:])
+        SDKInstance.shared.reportClassicStoryOpened(legacy)
+        SDKInstance.shared.reportClassicCarouselContainerClicked(legacy)
+        #expect(plugin.events.count == 3)
+
+        SDKInstance.shared.reportBannerClicked(payload: legacy, action: nil)
+        #expect(plugin.events.count == 4)
+        #expect(plugin.events.last?.0 == .clicked(elementID: "banner"))
+        #expect(plugin.events.last?.1 == legacy)
+        let disabled = CEPTriggerPayload(
+            cepCampaignId: "disabled", campaignKey: "legacy",
+            cepMetadata: ["renderedLifecycle": "false"])
+        SDKInstance.shared.reportBannerClicked(payload: disabled, action: nil)
+        #expect(plugin.events.count == 5)
+        #expect(plugin.events.last?.0 == .clicked(elementID: "banner"))
+        #expect(plugin.events.last?.1 == disabled)
+    }
+
+    @Test("survey automatic engagement and completion do not emit its physical Start click")
+    func surveyStartClickIsSeparateFromAutomaticEngagement() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let campaign = try #require(targetedSurveyCampaign())
+        let config = try #require(campaign.surveyConfig)
+        let payload = CEPTriggerPayload(
+            cepCampaignId: "survey", campaignKey: campaign.campaignKey,
+            cepMetadata: ["renderedLifecycle": "true"])
+        #expect(SDKInstance.shared.surveyOrchestrator.start(payload: payload, config: config))
+
+        SDKInstance.shared.reportSurveyWelcomeStart()
+        SDKInstance.shared.reportSurveyQuestionSkipped(nodeId: "node-1", itemIndex: 1)
+        SDKInstance.shared.reportSurveyCompleted(response: [:])
+        #expect(plugin.events.isEmpty)
+
+        SDKInstance.shared.reportSurveyStartClicked()
+        #expect(plugin.events.map(\.0) == [.clicked(elementID: "welcome_start")])
+        #expect(plugin.events.first?.1 == payload)
+    }
+
+    @Test("classic nudge CTA clicks use the parsed primary marker, not button style", arguments: ["bottom_sheet", "dialog"])
+    func classicNudgeCTAClicks(displayType: String) throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let config = try #require(NudgeConfig.fromJson([
+            "container": ["displayType": displayType],
+            "layout": [
+                "type": "digia/column", "props": [:],
+                "children": [
+                    ["type": "digia/button", "props": ["variant": "fill"]],
+                    ["type": "digia/button", "props": ["variant": "fill", "isPrimary": false]],
+                    ["type": "digia/button", "props": ["variant": "text", "isPrimary": true]],
+                ],
+            ],
+        ]))
+        let payload = CEPTriggerPayload(
+            cepCampaignId: "nudge", campaignKey: "nudge",
+            cepMetadata: ["renderedLifecycle": "true"])
+        SDKInstance.shared.controller.showNudge(
+            DigiaNudgePresentation(config: config, payload: payload, variables: nil))
+
+        SDKInstance.shared.reportPrimaryCTAClick(elementId: "secondary", isPrimary: false)
+        #expect(plugin.events.isEmpty)
+        let buttons = config.layout.children.compactMap { node -> NudgeButton? in
+            if case .button(let button) = node { return button }
+            return nil
+        }
+        #expect(buttons.map(\.isPrimary) == [false, false, true])
+        for button in buttons {
+            SDKInstance.shared.reportPrimaryCTAClick(elementId: "cta_primary", isPrimary: button.isPrimary)
+        }
+        #expect(plugin.events.map(\.0) == [.clicked(elementID: "cta_primary")])
+
+        let canvasConfig = try #require(NudgeConfig.fromJson([
+            "container": ["displayType": displayType],
+            "layoutMode": "canvas",
+            "canvas": ["version": 2, "canvasWidth": 360, "canvasHeight": 180, "children": []],
+        ]))
+        SDKInstance.shared.controller.showNudge(
+            DigiaNudgePresentation(config: canvasConfig, payload: payload, variables: nil))
+        SDKInstance.shared.reportPrimaryCTAClick(elementId: "secondary", isPrimary: false)
+        #expect(plugin.events.count == 1)
+        SDKInstance.shared.reportPrimaryCTAClick(elementId: "primary", isPrimary: true)
+        #expect(plugin.events.map(\.0) == [.clicked(elementID: "cta_primary"), .clicked(elementID: "primary")])
+    }
 }
 
 @Suite("EngageActionParser")

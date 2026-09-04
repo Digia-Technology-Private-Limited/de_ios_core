@@ -114,11 +114,23 @@ final class EngageEventEmitter {
     }
 
     /// Records `event` (a campaign "Viewed") to Digia the first time its campaign
-    /// renders, deduped by `cepCampaignId`. CEP is impressed separately and
-    /// instantly at route time.
+    /// renders, deduped by `cepCampaignId`. Opted-in CEPs share this same dedup.
     func digiaImpressionOnce(payload: CEPTriggerPayload, event: EngageAnalyticsEvent) {
         guard digiaImpressed.insert(payload.cepCampaignId).inserted else { return }
+        if payload.usesRenderedLifecycle {
+            toCep(.impressed, payload: payload)
+        }
         sink(for: payload).onFirstImpression(payload: payload, event: event)
+    }
+
+    func inlineRemoved(_ payload: CEPTriggerPayload) {
+        guard payload.usesRenderedLifecycle else { return }
+        toCep(.dismissed, payload: payload)
+    }
+
+    func clicked(payload: CEPTriggerPayload, elementId: String) {
+        guard payload.usesRenderedLifecycle else { return }
+        toCep(.clicked(elementID: elementId), payload: payload)
     }
 
     /// Records `event` (an experience-level "Clicked") to Digia the first time the

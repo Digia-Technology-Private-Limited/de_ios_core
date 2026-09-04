@@ -18,14 +18,16 @@ public struct CEPTriggerPayload: Sendable, Equatable {
     public let campaignKey: String
 
     /// Any additional metadata the CEP passes through (e.g. template name, UTM
-    /// params, segment label). Core does not interpret these — forwarded as-is
-    /// in lifecycle events.
+    /// params, segment label). `renderedLifecycle: "true"` opts into presentation
+    /// callbacks; `campaignSurface` restricts delivery to `inline` or `overlay`.
     public let cepMetadata: [String: String]
 
     /// Optional runtime variables to interpolate into the campaign config, e.g.
     /// `["user_name": "Priya", "offer_value": "20%"]`. Keys must match variable
     /// placeholders declared in the Digia dashboard.
     public let variables: [String: String]?
+
+    var usesRenderedLifecycle: Bool { cepMetadata["renderedLifecycle"] == "true" }
 
     public init(
         cepCampaignId: String,

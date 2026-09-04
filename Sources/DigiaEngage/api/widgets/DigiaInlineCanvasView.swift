@@ -55,6 +55,11 @@ struct DigiaInlineCanvasView: View {
     }
 
     private func perform(_ request: CampaignCanvasActionRequest, variables: VariableContext?) {
+        defer {
+            SDKInstance.shared.reportPrimaryCTAClick(
+                payload: payload, elementId: request.elementId, isPrimary: request.isPrimary
+            )
+        }
         guard !request.actions.isEmpty else { return }
         let action = request.actions.first?.resolved(with: variables)
         // A tap inside a slide or a page is a *step* click, matching what the legacy carousel and

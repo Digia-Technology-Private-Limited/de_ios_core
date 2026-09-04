@@ -316,6 +316,7 @@ private struct SurveyBody: View {
                 // The welcome "Start" tap is the survey's start-engagement signal
                 // ("Digia Experience Clicked" / welcome_start).
                 SDKInstance.shared.reportSurveyWelcomeStart()
+                SDKInstance.shared.reportSurveyStartClicked()
                 welcomeDone = true
             } label: {
                 Text(cta.startLabel)
@@ -479,6 +480,7 @@ private struct SurveyBody: View {
         case .welcome:
             Button {
                 SDKInstance.shared.reportSurveyWelcomeStart()
+                SDKInstance.shared.reportSurveyStartClicked()
                 vm.advance()
             } label: {
                 Text(cta.startLabel)
