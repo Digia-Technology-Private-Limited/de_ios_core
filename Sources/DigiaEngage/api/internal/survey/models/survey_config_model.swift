@@ -473,22 +473,26 @@ struct DialogProps: Equatable {
     let width: DialogWidthPreset
     let customWidth: Int
     let cornerRadius: Int
+    let backdropColorHex: String
     let backdropOpacity: Double
     let backdropDismissible: Bool
     let showCloseButton: Bool
 
     static let `default` = DialogProps(
         width: .medium, customWidth: 0, cornerRadius: 20,
-        backdropOpacity: 0.4, backdropDismissible: true, showCloseButton: true
+        backdropColorHex: "#66000000", backdropOpacity: 0.4,
+        backdropDismissible: true, showCloseButton: true
     )
 
     static func from(_ json: [String: JSONValue]?) -> DialogProps {
         guard let json else { return .default }
         let opacity = max(0, min(1, SurveyParse.double(json["backdropOpacity"]) ?? 0.4))
+        let backdropColor = SurveyParse.string(json["backdropColor"]) ?? surveyBackdropHex(opacity: opacity)
         return DialogProps(
             width: SurveyParse.dialogWidth(SurveyParse.string(json["width"])),
             customWidth: SurveyParse.int(json["customWidth"]) ?? 0,
             cornerRadius: SurveyParse.int(json["cornerRadius"]) ?? 20,
+            backdropColorHex: backdropColor,
             backdropOpacity: opacity,
             backdropDismissible: SurveyParse.bool(json["backdropDismissible"]) ?? true,
             showCloseButton: SurveyParse.bool(json["showCloseButton"]) ?? true
@@ -501,26 +505,41 @@ struct BottomSheetProps: Equatable {
     /// Viewport-height %. Used only when heightMode == .custom.
     let customHeight: Int
     let cornerRadius: Int
+    let backdropColorHex: String
+    let backdropOpacity: Double
     let showHandle: Bool
     let draggable: Bool
     let backdropDismissible: Bool
+    let showCloseButton: Bool
 
     static let `default` = BottomSheetProps(
         heightMode: .wrap, customHeight: 0, cornerRadius: 20,
-        showHandle: true, draggable: true, backdropDismissible: true
+        backdropColorHex: "#66000000", backdropOpacity: 0.4,
+        showHandle: true, draggable: true,
+        backdropDismissible: true, showCloseButton: true
     )
 
     static func from(_ json: [String: JSONValue]?) -> BottomSheetProps {
         guard let json else { return .default }
+        let opacity = max(0, min(1, SurveyParse.double(json["backdropOpacity"]) ?? 0.4))
+        let backdropColor = SurveyParse.string(json["backdropColor"]) ?? surveyBackdropHex(opacity: opacity)
         return BottomSheetProps(
             heightMode: SurveyParse.sheetHeight(SurveyParse.string(json["heightMode"])),
             customHeight: SurveyParse.int(json["customHeight"]) ?? 0,
             cornerRadius: SurveyParse.int(json["cornerRadius"]) ?? 20,
+            backdropColorHex: backdropColor,
+            backdropOpacity: opacity,
             showHandle: SurveyParse.bool(json["showHandle"]) ?? true,
             draggable: SurveyParse.bool(json["draggable"]) ?? true,
-            backdropDismissible: SurveyParse.bool(json["backdropDismissible"]) ?? true
+            backdropDismissible: SurveyParse.bool(json["backdropDismissible"]) ?? true,
+            showCloseButton: SurveyParse.bool(json["showCloseButton"]) ?? true
         )
     }
+}
+
+private func surveyBackdropHex(opacity: Double) -> String {
+    let alpha = Int(round(max(0, min(1, opacity)) * 255))
+    return String(format: "#%02X000000", alpha)
 }
 
 struct SurveyDisplay: Equatable {
@@ -530,8 +549,8 @@ struct SurveyDisplay: Equatable {
 
     var dismissible: Bool {
         switch type {
-        case .dialog: return dialog.backdropDismissible
-        case .bottomSheet: return bottomSheet.backdropDismissible || bottomSheet.draggable
+        case .dialog: return dialog.backdropDismissible || dialog.showCloseButton
+        case .bottomSheet: return bottomSheet.backdropDismissible || bottomSheet.draggable || bottomSheet.showCloseButton
         }
     }
 

@@ -123,7 +123,7 @@ struct CanvasSurveyPanel: View {
             primary()
         } else if request.actions.contains(.previous) {
             previous()
-        } else if request.actions.contains(.dismiss), survey.settings.display.dismissible {
+        } else if request.actions.contains(.dismiss) {
             onClose()
         }
     }
@@ -379,7 +379,7 @@ private struct CanvasSurveyManagedHostView: View {
                     )
                 }
             case .dismiss:
-                if showCloseButton && survey.settings.display.dismissible {
+                if showCloseButton {
                     CanvasSurveyDismissHost(host: host, onClose: onClose, onCanvasAction: onCanvasAction)
                 }
             }

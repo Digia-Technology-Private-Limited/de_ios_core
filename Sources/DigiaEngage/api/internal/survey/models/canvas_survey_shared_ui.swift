@@ -3,37 +3,43 @@ import Foundation
 struct CanvasSurveySharedUiOverlay {
     func apply(
         overrideDocument: [String: JSONValue]?,
+        override: ParsedCanvasSurveyDocument?,
         master: ParsedCanvasSurveyDocument,
         body: ParsedCanvasSurveyDocument,
         fallbackDesignWidth: CGFloat,
-        isWelcome: Bool,
-        sceneKind: CanvasSurveySceneKind?,
         isRootScene: Bool,
         canNavigateBackFromRoot: Bool
     ) -> CanvasSurveyDocument {
+        let hostSource = override.flatMap { $0.managedHosts.isEmpty ? nil : $0 } ?? master
+        let overlayCanvas = overrideHasBackground(overrideDocument) ? (override?.canvas ?? master.canvas) : master.canvas
         let canvasJson = CanvasSurveyDocumentParser.documentCanvas(overrideDocument)
+        let sparseOverrides = canvasJson.flatMap {
+            sparseRectOverrides($0, fallbackDesignWidth: fallbackDesignWidth)
+        }
         let rectOverrides: [String: CampaignCanvasRect]
         if let canvasJson,
+           let sparseOverrides,
            isSameCanvasSpace(canvasJson, body: body.canvas, fallbackDesignWidth: fallbackDesignWidth),
-           let parsedOverrides = sparseRectOverrides(canvasJson, fallbackDesignWidth: fallbackDesignWidth) {
-            rectOverrides = parsedOverrides
+           !sparseOverrides.isEmpty {
+            rectOverrides = sparseOverrides
         } else {
             rectOverrides = [:]
         }
-        let backNavigation = master.managedHosts.first { $0.role == .backNavigation }
-        let hosts = master.managedHosts.compactMap { host -> CanvasSurveyManagedHostElement? in
-            guard shouldInclude(
-                host,
-                isWelcome: isWelcome,
-                sceneKind: sceneKind,
-                isRootScene: isRootScene,
-                canNavigateBackFromRoot: canNavigateBackFromRoot
-            ) else { return nil }
+        let allowedHostIds = override?.managedHosts.isEmpty != false ? sparseOverrides.map { Set($0.keys) } : nil
+        let backNavigation = hostSource.managedHosts.first { $0.role == .backNavigation }
+        let hosts = hostSource.managedHosts.compactMap { host -> CanvasSurveyManagedHostElement? in
+            guard host.visible else { return nil }
+            if let allowedHostIds, !allowedHostIds.contains(host.id) {
+                return nil
+            }
+            if host.role == .backNavigation && isRootScene && !canNavigateBackFromRoot {
+                return nil
+            }
             return replaceRect(
                 on: host,
                 rect: effectiveRect(
                     host: host,
-                    sourceCanvas: master.canvas,
+                    sourceCanvas: hostSource.canvas,
                     targetCanvas: body.canvas,
                     backNavigation: backNavigation,
                     override: rectOverrides[host.id],
@@ -44,27 +50,15 @@ struct CanvasSurveySharedUiOverlay {
         }
         return CanvasSurveyDocument(
             canvas: body.canvas,
-            sharedUi: emptyOverlay(masterCanvas: master.canvas, bodyCanvas: body.canvas),
+            sharedUi: emptyOverlay(masterCanvas: overlayCanvas, bodyCanvas: body.canvas),
             canvasHosts: body.hosts,
             sharedUiHosts: hosts
         )
     }
 
-    private func shouldInclude(
-        _ host: CanvasSurveyManagedHostElement,
-        isWelcome: Bool,
-        sceneKind: CanvasSurveySceneKind?,
-        isRootScene: Bool,
-        canNavigateBackFromRoot: Bool
-    ) -> Bool {
-        if isWelcome || sceneKind == .result {
-            return host.visible && host.role == .dismiss
-        }
-        if !host.visible { return false }
-        if host.role == .backNavigation && isRootScene && !canNavigateBackFromRoot {
-            return false
-        }
-        return true
+    private func overrideHasBackground(_ document: [String: JSONValue]?) -> Bool {
+        guard let canvas = CanvasSurveyDocumentParser.documentCanvas(document) else { return false }
+        return SurveyParse.object(canvas["background"]) != nil
     }
 
     private func effectiveRect(

@@ -74,7 +74,7 @@ enum CanvasSurveyConfigParser {
             blocks: blocks,
             nodes: nodes,
             rootNodeId: rootNodeId,
-            settings: settings(json),
+            settings: settings(json, designTokens: designTokens),
             theme: SurveyTheme.from(SurveyParse.object(json["theme"])),
             uiTemplateId: SurveyParse.nonBlank(json["uiTemplateId"]),
             timeDelayMs: max(0, min(10_000, SurveyParse.int(json["timeDelayMs"]) ?? 0)),
@@ -335,7 +335,10 @@ enum CanvasSurveyConfigParser {
         }
     }
 
-    private static func settings(_ json: [String: JSONValue]) -> SurveySettings {
+    private static func settings(
+        _ json: [String: JSONValue],
+        designTokens: DesignTokenCatalog
+    ) -> SurveySettings {
         let behavior = SurveyParse.object(json["behavior"]) ?? [:]
         return SurveySettings(
             pagination: PaginationSettings(
@@ -356,31 +359,45 @@ enum CanvasSurveyConfigParser {
                 warningAtSeconds: max(0, SurveyParse.int(behavior["timerWarningSeconds"]) ?? 0),
                 autoPauseBetweenBlocks: false
             ),
-            display: display(json)
+            display: display(json, designTokens: designTokens)
         )
     }
 
-    private static func display(_ json: [String: JSONValue]) -> SurveyDisplay {
+    private static func display(
+        _ json: [String: JSONValue],
+        designTokens: DesignTokenCatalog
+    ) -> SurveyDisplay {
         let display = SurveyParse.object(json["display"]) ?? [:]
         let cornerRadius = SurveyParse.int(display["cornerRadius"]) ?? 20
+        let backdropOpacity = canvasBackdropOpacity(display, designTokens: designTokens)
+        let backdropColorHex = canvasBackdropColorHex(
+            display,
+            opacity: backdropOpacity,
+            designTokens: designTokens
+        )
         let backdropDismissible = SurveyParse.bool(display["backdropDismissible"]) ?? true
+        let showCloseButton = SurveyParse.bool(display["showCloseButton"]) ?? true
         return SurveyDisplay(
             type: SurveyParse.displayType(SurveyParse.string(display["type"])),
             dialog: DialogProps(
                 width: .medium,
                 customWidth: 0,
                 cornerRadius: cornerRadius,
-                backdropOpacity: 0.4,
+                backdropColorHex: backdropColorHex,
+                backdropOpacity: backdropOpacity,
                 backdropDismissible: backdropDismissible,
-                showCloseButton: SurveyParse.bool(display["showCloseButton"]) ?? true
+                showCloseButton: showCloseButton
             ),
             bottomSheet: BottomSheetProps(
                 heightMode: .wrap,
                 customHeight: 0,
                 cornerRadius: cornerRadius,
+                backdropColorHex: backdropColorHex,
+                backdropOpacity: backdropOpacity,
                 showHandle: SurveyParse.bool(display["showHandle"]) ?? true,
                 draggable: SurveyParse.bool(display["dragDismissible"]) ?? true,
-                backdropDismissible: backdropDismissible
+                backdropDismissible: backdropDismissible,
+                showCloseButton: showCloseButton
             )
         )
     }
@@ -418,14 +435,17 @@ enum CanvasSurveyConfigParser {
                 SurveyParse.object(scene["canvas"]),
                 fallbackDesignWidth: fallbackDesignWidth
             )
+            let sharedUiOverride = SurveyParse.object(scene["sharedUi"])
+            let parsedSharedUiOverride = sharedUiOverride.map {
+                documentParser.parse($0, fallbackDesignWidth: fallbackDesignWidth)
+            }
             let kind = canvasSceneKind(sceneKind(SurveyParse.string(scene["kind"]) ?? "question"))
             let composed = overlay.apply(
-                overrideDocument: SurveyParse.object(scene["sharedUi"]),
+                overrideDocument: sharedUiOverride,
+                override: parsedSharedUiOverride,
                 master: sharedCanvas,
                 body: canvas,
                 fallbackDesignWidth: fallbackDesignWidth,
-                isWelcome: false,
-                sceneKind: kind,
                 isRootScene: id == rootSceneId,
                 canNavigateBackFromRoot: canNavigateBackFromRoot
             )
@@ -457,13 +477,16 @@ enum CanvasSurveyConfigParser {
             SurveyParse.object(welcome["canvas"]),
             fallbackDesignWidth: fallbackDesignWidth
         )
+        let sharedUiOverride = SurveyParse.object(welcome["sharedUi"])
+        let parsedSharedUiOverride = sharedUiOverride.map {
+            documentParser.parse($0, fallbackDesignWidth: fallbackDesignWidth)
+        }
         return CanvasSurveySharedUiOverlay().apply(
-            overrideDocument: SurveyParse.object(welcome["sharedUi"]),
+            overrideDocument: sharedUiOverride,
+            override: parsedSharedUiOverride,
             master: sharedCanvas,
             body: canvas,
             fallbackDesignWidth: fallbackDesignWidth,
-            isWelcome: true,
-            sceneKind: nil,
             isRootScene: false,
             canNavigateBackFromRoot: false
         )
@@ -493,6 +516,41 @@ enum CanvasSurveyConfigParser {
         (try? designTokens.resolveColor(jsonAny(value)))?.lightHex
             ?? canonicalCampaignColorHex(unwrapLiteral(jsonAny(value)))
             ?? fallback
+    }
+
+    private static func canvasBackdropOpacity(
+        _ display: [String: JSONValue],
+        designTokens: DesignTokenCatalog
+    ) -> Double {
+        if let opacity = SurveyParse.double(display["backdropOpacity"]) {
+            return max(0, min(1, opacity))
+        }
+        let hex = colorHex(display["backdropColor"], designTokens: designTokens, fallback: "#99000000")
+        return alphaComponent(hex) ?? 0.6
+    }
+
+    private static func canvasBackdropColorHex(
+        _ display: [String: JSONValue],
+        opacity: Double,
+        designTokens: DesignTokenCatalog
+    ) -> String {
+        guard display["backdropColor"] != nil else { return backdropHex(opacity: opacity) }
+        return colorHex(display["backdropColor"], designTokens: designTokens, fallback: "#99000000")
+    }
+
+    private static func alphaComponent(_ hex: String) -> Double? {
+        var value = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.first == "#" { value.removeFirst() }
+        if value.count == 3 { return 1 }
+        if value.count == 6 { return 1 }
+        guard value.count == 8,
+              let alpha = UInt8(value.prefix(2), radix: 16) else { return nil }
+        return Double(alpha) / 255.0
+    }
+
+    private static func backdropHex(opacity: Double) -> String {
+        let alpha = Int(round(max(0, min(1, opacity)) * 255))
+        return String(format: "#%02X000000", alpha)
     }
 
     private static func fontWeight(_ value: JSONValue?, default fallback: Int) -> Int {

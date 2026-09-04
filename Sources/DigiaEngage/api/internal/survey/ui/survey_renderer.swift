@@ -134,7 +134,7 @@ private struct SurveySession: View {
                     accent: accent,
                     onClose: { finish(completed: false) },
                     onCompletedClose: { SDKInstance.shared.dismissCompletedSurvey() },
-                    showCloseButton: display.bottomSheet.backdropDismissible,
+                    showCloseButton: display.bottomSheet.showCloseButton,
                     paintCanvasBackground: survey.canvasSurvey == nil,
                     canvasWelcomeDone: $canvasWelcomeDone
                 )
@@ -261,6 +261,7 @@ private struct SurveySheet<Content: View>: View {
                 config: DigiaBottomSheetConfig(
                     cornerRadius: CGFloat(sheet.cornerRadius),
                     background: canvasBackground == nil ? background : .clear,
+                    scrimColor: Color(hex: sheet.backdropColorHex) ?? Color.black.opacity(sheet.backdropOpacity),
                     showHandle: sheet.showHandle,
                     allowBackdropDismiss: sheet.backdropDismissible,
                     allowDragDismiss: sheet.draggable && keyboardInset == 0,
@@ -306,7 +307,7 @@ private struct DialogContainer<Content: View>: View {
         GeometryReader { geo in
             let keyboardInset = keyboard.bottomInset(overlapping: geo.frame(in: .global))
             ZStack {
-                Color.black.opacity(dialog.backdropOpacity)
+                (Color(hex: dialog.backdropColorHex) ?? Color.black.opacity(dialog.backdropOpacity))
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture {

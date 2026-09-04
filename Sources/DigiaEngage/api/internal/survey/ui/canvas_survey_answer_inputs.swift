@@ -89,8 +89,6 @@ private struct CanvasSurveyChoiceInputView: View {
                     var values = selected
                     if values.contains(option.id) {
                         values.remove(option.id)
-                    } else if maximumSelections == 1 {
-                        values = [option.id]
                     } else {
                         values.insert(option.id)
                     }
