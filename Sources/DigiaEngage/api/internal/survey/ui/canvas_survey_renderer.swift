@@ -9,8 +9,9 @@ struct CanvasSurveyPanel: View {
     let onClose: () -> Void
     let onCompletedClose: () -> Void
     let showCloseButton: Bool
+    let paintBackground: Bool
+    @Binding var welcomeDone: Bool
 
-    @State private var welcomeDone = false
     @State private var remainingSecs = 0
     @State private var autoAdvanceTask: Task<Void, Never>?
     @State private var timerTask: Task<Void, Never>?
@@ -22,13 +23,16 @@ struct CanvasSurveyPanel: View {
             if let document = currentDocument {
                 CanvasSurveyScaledStage(
                     document: document,
+                    scene: currentSceneDocument,
                     survey: survey,
+                    designWidth: canvasSurvey.designWidth,
                     block: currentBlock,
                     answerNodeId: currentNode?.id,
                     vm: vm,
                     accent: accent,
                     remainingSecs: remainingSecs,
                     showCloseButton: showCloseButton,
+                    paintBackground: paintBackground,
                     onPrimary: primary,
                     onPrevious: previous,
                     onClose: onClose,
@@ -72,13 +76,19 @@ struct CanvasSurveyPanel: View {
 
     private var currentDocument: CanvasSurveyDocument? {
         if showingWelcome { return canvasSurvey.welcomeDocument }
-        guard let node = vm.currentNode, let scene = canvasSurvey.document(for: node) else { return nil }
-        return CanvasSurveyDocument(
-            canvas: scene.canvas,
-            sharedUi: scene.sharedUi,
-            canvasHosts: scene.canvasHosts,
-            sharedUiHosts: scene.sharedUiHosts
-        )
+        return currentSceneDocument.map {
+            CanvasSurveyDocument(
+                canvas: $0.canvas,
+                sharedUi: $0.sharedUi,
+                canvasHosts: $0.canvasHosts,
+                sharedUiHosts: $0.sharedUiHosts
+            )
+        }
+    }
+
+    private var currentSceneDocument: CanvasSurveySceneDocument? {
+        guard !showingWelcome, let node = vm.currentNode else { return nil }
+        return canvasSurvey.document(for: node)
     }
 
     private func primary() {
@@ -126,8 +136,8 @@ struct CanvasSurveyPanel: View {
     }
 
     private func scheduleAutoAdvanceIfNeeded() {
-        guard !showingWelcome, let node = vm.currentNode, let block = vm.currentBlock else { return }
-        guard survey.settings.autoAdvance && block.type.isAutoAdvanceCandidate else { return }
+        guard !showingWelcome, let node = vm.currentNode else { return }
+        guard vm.shouldAutoAdvance() else { return }
         guard let ans = vm.answers[node.id], ans.isAnswered else { return }
         let key = "\(node.id):\(ans.values.joined(separator: ","))"
         guard key != lastAutoAdvanceKey else { return }
@@ -169,13 +179,16 @@ struct CanvasSurveyPanel: View {
 
 private struct CanvasSurveyScaledStage: View {
     let document: CanvasSurveyDocument
+    let scene: CanvasSurveySceneDocument?
     let survey: SurveyConfigModel
+    let designWidth: CGFloat
     let block: SurveyBlock?
     let answerNodeId: String?
     @ObservedObject var vm: SurveyViewModel
     let accent: Color
     let remainingSecs: Int
     let showCloseButton: Bool
+    let paintBackground: Bool
     let onPrimary: () -> Void
     let onPrevious: () -> Void
     let onClose: () -> Void
@@ -184,13 +197,23 @@ private struct CanvasSurveyScaledStage: View {
 
     var body: some View {
         GeometryReader { geo in
-            let scale = geo.size.width / max(1, document.canvas.width)
+            let designScale = canvasSurveyDesignScale(viewportWidth: UIScreen.main.bounds.width)
+            let scale = canvasSurveyFitScale(
+                designScale: designScale,
+                availableWidth: geo.size.width,
+                availableHeight: geo.size.height > 0 ? geo.size.height : UIScreen.main.bounds.height
+            )
             ZStack(alignment: .topLeading) {
+                if paintBackground {
+                    CampaignCanvasBackgroundView(paint: document.sharedUi.background)
+                        .frame(width: stageWidth, height: stageHeight)
+                        .allowsHitTesting(false)
+                }
                 CampaignCanvasStage(
                     canvas: document.canvas,
                     authoredCornerRadius: 0,
                     isDark: CampaignCanvasTheme.shared.isDark(colorScheme),
-                    showBackground: true,
+                    showBackground: false,
                     onAction: onCanvasAction
                 )
                 CampaignCanvasStage(
@@ -204,6 +227,7 @@ private struct CanvasSurveyScaledStage: View {
                 ForEach(Array(hosts.enumerated()), id: \.offset) { _, host in
                     CanvasSurveyHostView(
                         host: host,
+                        scene: scene,
                         survey: survey,
                         block: block,
                         answerNodeId: answerNodeId,
@@ -213,27 +237,54 @@ private struct CanvasSurveyScaledStage: View {
                         showCloseButton: showCloseButton,
                         onPrimary: onPrimary,
                         onPrevious: onPrevious,
-                        onClose: onClose
+                        onClose: onClose,
+                        onCanvasAction: onCanvasAction
                     )
                     .frame(width: host.rect.width, height: host.rect.height, alignment: .topLeading)
                     .offset(x: host.rect.x, y: host.rect.y)
                 }
             }
-            .frame(width: document.canvas.width, height: document.canvas.height, alignment: .topLeading)
+            .frame(width: stageWidth, height: stageHeight, alignment: .topLeading)
             .scaleEffect(scale, anchor: .topLeading)
-            .frame(width: geo.size.width, height: document.canvas.height * scale, alignment: .topLeading)
+            .frame(width: stageWidth * scale, height: stageHeight * scale, alignment: .topLeading)
         }
-        .aspectRatio(document.canvas.width / max(1, document.canvas.height), contentMode: .fit)
+        .aspectRatio(stageWidth / max(1, stageHeight), contentMode: .fit)
         .fixedSize(horizontal: false, vertical: true)
     }
 
     private var hosts: [CanvasSurveyHostElement] {
         document.canvasHosts + document.sharedUiHosts.map(CanvasSurveyHostElement.managed)
     }
+
+    private var stageWidth: CGFloat {
+        max(document.canvas.width, document.sharedUi.width, 1)
+    }
+
+    private var stageHeight: CGFloat {
+        max(document.canvas.height, 1)
+    }
+
+    private func canvasSurveyDesignScale(viewportWidth: CGFloat) -> CGFloat {
+        let base = viewportWidth / max(1, designWidth)
+        return survey.settings.display.type == .bottomSheet ? base : min(1.15, base)
+    }
+
+    private func canvasSurveyFitScale(
+        designScale: CGFloat,
+        availableWidth: CGFloat,
+        availableHeight: CGFloat
+    ) -> CGFloat {
+        let desiredWidth = stageWidth * designScale
+        let desiredHeight = stageHeight * designScale
+        let widthFit = desiredWidth > 0 ? availableWidth / desiredWidth : 1
+        let heightFit = desiredHeight > 0 ? availableHeight / desiredHeight : 1
+        return designScale * min(1, widthFit, heightFit)
+    }
 }
 
 private struct CanvasSurveyHostView: View {
     let host: CanvasSurveyHostElement
+    let scene: CanvasSurveySceneDocument?
     let survey: SurveyConfigModel
     let block: SurveyBlock?
     let answerNodeId: String?
@@ -244,19 +295,18 @@ private struct CanvasSurveyHostView: View {
     let onPrimary: () -> Void
     let onPrevious: () -> Void
     let onClose: () -> Void
+    let onCanvasAction: (CampaignCanvasActionRequest) -> Void
 
     var body: some View {
         switch host {
-        case .answer:
-            if let block, let answerNodeId, !block.type.isContent {
-                ScrollView(.vertical, showsIndicators: false) {
-                    SurveyQuestionContent(
-                        block: block,
-                        answer: vm.answers[answerNodeId],
-                        accent: accent,
-                        onAnswer: { vm.setAnswer(answerNodeId, $0) }
-                    )
-                }
+        case .answer(let host):
+            if let scene, let block, let answerNodeId, !block.type.isContent {
+                CanvasSurveyAnswerInputView(
+                    scene: scene,
+                    host: host,
+                    answer: vm.answers[answerNodeId],
+                    onAnswer: { vm.setAnswer(answerNodeId, $0) }
+                )
             }
         case .managed(let host):
             CanvasSurveyManagedHostView(
@@ -269,7 +319,8 @@ private struct CanvasSurveyHostView: View {
                 showCloseButton: showCloseButton,
                 onPrimary: onPrimary,
                 onPrevious: onPrevious,
-                onClose: onClose
+                onClose: onClose,
+                onCanvasAction: onCanvasAction
             )
         }
     }
@@ -286,14 +337,23 @@ private struct CanvasSurveyManagedHostView: View {
     let onPrimary: () -> Void
     let onPrevious: () -> Void
     let onClose: () -> Void
+    let onCanvasAction: (CampaignCanvasActionRequest) -> Void
 
     var body: some View {
         if host.visible {
             switch host.role {
             case .progress:
-                CanvasSurveyProgressHost(host: host, progress: vm.progress, currentSegment: vm.currentItemIndex, totalSegments: survey.nodes.count)
+                CanvasSurveyProgressHost(
+                    host: host,
+                    progress: vm.progressFraction(countQuestionsOnly: host.countQuestionsOnly),
+                    currentSegment: vm.progressCurrent(countQuestionsOnly: host.countQuestionsOnly),
+                    totalSegments: vm.progressTotal(countQuestionsOnly: host.countQuestionsOnly)
+                )
             case .pageCount:
-                CanvasSurveyTextHost(host: host, text: "\(vm.currentItemIndex)/\(max(1, survey.nodes.count))")
+                CanvasSurveyTextHost(
+                    host: host,
+                    text: "\(vm.progressCurrent(countQuestionsOnly: host.countQuestionsOnly))/\(vm.progressTotal(countQuestionsOnly: host.countQuestionsOnly))"
+                )
             case .timer:
                 if survey.settings.timer.enabled && survey.settings.timer.timeLimitSeconds > 0 {
                     CanvasSurveyTextHost(host: host, text: formatRemaining(remainingSecs))
@@ -320,7 +380,7 @@ private struct CanvasSurveyManagedHostView: View {
                 }
             case .dismiss:
                 if showCloseButton && survey.settings.display.dismissible {
-                    CanvasSurveyDismissHost(host: host, onClose: onClose)
+                    CanvasSurveyDismissHost(host: host, onClose: onClose, onCanvasAction: onCanvasAction)
                 }
             }
         }
@@ -366,26 +426,28 @@ private struct CanvasSurveyButtonHost: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        if let button = host.button, enabled {
+        if let button = host.button {
             CampaignCanvasRendererRegistry.render(
-                button,
+                enabled ? button : button.withoutActions(),
                 isDark: CampaignCanvasTheme.shared.isDark(colorScheme),
-                onAction: { _ in onClick() }
+                onAction: { _ in if enabled { onClick() } }
             )
+            .opacity(enabled ? 1 : 0.45)
         } else {
             let fill = Color(hex: host.fillHex) ?? accent
             let foreground = Color(hex: host.colorHex) ?? Color.white
             Button(action: onClick) {
                 Text(text)
                     .font(surveyFont(size: host.fontSize, weight: 600))
-                    .foregroundColor(enabled ? foreground : foreground.opacity(0.55))
+                    .foregroundColor(foreground)
                     .lineLimit(1)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(
                         RoundedRectangle(cornerRadius: host.cornerRadius)
-                            .fill(enabled ? fill : fill.opacity(0.35))
+                            .fill(fill)
                     )
             }
+            .opacity(enabled ? 1 : 0.45)
             .buttonStyle(.plain)
             .disabled(!enabled)
         }
@@ -395,19 +457,116 @@ private struct CanvasSurveyButtonHost: View {
 private struct CanvasSurveyDismissHost: View {
     let host: CanvasSurveyManagedHostElement
     let onClose: () -> Void
+    let onCanvasAction: (CampaignCanvasActionRequest) -> Void
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        Button(action: onClose) {
-            Image(systemName: "xmark")
-                .font(surveyFont(size: host.iconSize > 0 ? host.iconSize : host.fontSize, weight: 600))
-                .foregroundColor(
-                    host.iconColorHex.flatMap(Color.init(hex:))
-                        ?? Color(hex: host.colorHex)
-                        ?? SurveyTokens.textTertiary
+        if let button = host.button {
+            ZStack {
+                CampaignCanvasRendererRegistry.render(
+                    button.withoutLabel(),
+                    isDark: CampaignCanvasTheme.shared.isDark(colorScheme),
+                    onAction: onCanvasAction
                 )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                dismissIcon.allowsHitTesting(false)
+            }
+        } else {
+            let fill = Color(hex: host.fillHex) ?? SurveyTokens.surface
+            let border = Color(hex: host.borderColorHex)
+            Button(action: onClose) {
+                dismissIcon
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(
+                        RoundedRectangle(cornerRadius: host.cornerRadius)
+                            .fill(fill)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: host.cornerRadius)
+                            .stroke(border ?? .clear, lineWidth: host.borderWidth)
+                    )
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+    }
+
+    private var dismissIcon: some View {
+        let iconSize = host.iconSize > 0 ? host.iconSize : 18
+        return Image(systemName: "xmark")
+            .font(surveyFont(size: iconSize * 0.72, weight: 600))
+            .foregroundColor(
+                host.iconColorHex.flatMap(Color.init(hex:))
+                    ?? Color(hex: host.colorHex)
+                    ?? SurveyTokens.textTertiary
+            )
+    }
+}
+
+private extension CampaignCanvasWidget {
+    func withoutActions() -> CampaignCanvasWidget {
+        guard case .button(
+            let box,
+            let label,
+            let cornerRadius,
+            let style,
+            let shadow,
+            let isPrimary,
+            let isDestructive,
+            let applyDestructiveStyling,
+            _,
+            let confirm
+        ) = self else { return self }
+        return .button(
+            box: box,
+            label: label,
+            cornerRadius: cornerRadius,
+            style: style,
+            shadow: shadow,
+            isPrimary: isPrimary,
+            isDestructive: isDestructive,
+            applyDestructiveStyling: applyDestructiveStyling,
+            actions: [],
+            confirm: confirm
+        )
+    }
+
+    func withoutLabel() -> CampaignCanvasWidget {
+        guard case .button(
+            let box,
+            var label,
+            let cornerRadius,
+            let style,
+            let shadow,
+            let isPrimary,
+            let isDestructive,
+            let applyDestructiveStyling,
+            let actions,
+            let confirm
+        ) = self else { return self }
+        label.spans = label.spans.map {
+            CampaignCanvasTextSpan(
+                text: "",
+                typography: $0.typography,
+                color: $0.color,
+                highlightColor: $0.highlightColor,
+                italic: $0.italic,
+                decoration: $0.decoration,
+                decorationColor: $0.decorationColor,
+                decorationThickness: $0.decorationThickness,
+                actions: $0.actions
+            )
+        }
+        return .button(
+            box: box,
+            label: label,
+            cornerRadius: cornerRadius,
+            style: style,
+            shadow: shadow,
+            isPrimary: isPrimary,
+            isDestructive: isDestructive,
+            applyDestructiveStyling: applyDestructiveStyling,
+            actions: actions,
+            confirm: confirm
+        )
     }
 }
 

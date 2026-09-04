@@ -405,6 +405,7 @@ enum CanvasSurveyConfigParser {
     ) -> [String: CanvasSurveySceneDocument] {
         let documentParser = CanvasSurveyDocumentParser(designTokens: designTokens)
         let overlay = CanvasSurveySharedUiOverlay()
+        let inputParser = CanvasSurveyInputParser(designTokens: designTokens)
         let sharedCanvas = documentParser.parse(
             SurveyParse.object(root["sharedUi"]),
             fallbackDesignWidth: fallbackDesignWidth
@@ -430,6 +431,7 @@ enum CanvasSurveyConfigParser {
             )
             documents[id] = CanvasSurveySceneDocument(
                 kind: kind,
+                input: inputParser.parse(SurveyParse.object(scene["input"]), requiredFallback: kind == .question),
                 canvas: composed.canvas,
                 sharedUi: composed.sharedUi,
                 canvasHosts: composed.canvasHosts,

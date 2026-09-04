@@ -289,6 +289,50 @@ struct CampaignCanvasContractTests {
         #expect(shadow?.spread == 5)
     }
 
+    @Test("text spans accept direct and style level typography overrides")
+    func textSpanOverrides() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 100,
+            "canvasHeight": 100,
+            "children": [[
+                "kind": "widget",
+                "id": "text",
+                "rect": ["x": 0, "y": 0, "width": 1, "height": 1],
+                "widget": [
+                    "type": "digia/text",
+                    "props": [
+                        "spans": [[
+                            "text": "Styled",
+                            "fontWeight": "heavy",
+                            "textColor": "#112233",
+                            "style": [
+                                "fontSize": 18,
+                                "lineHeight": 24,
+                                "letterSpacing": 0.5,
+                                "decoration": "line-through",
+                                "decorationThickness": 99,
+                            ],
+                        ]],
+                    ],
+                ],
+            ]],
+        ])
+
+        guard case .widget(_, _, .text(_, let block, _)) = canvas.children.first else {
+            Issue.record("Expected text widget")
+            return
+        }
+        let span = try #require(block.spans.first)
+        #expect(span.typography?.fontWeight == 900)
+        #expect(span.typography?.fontSize == 18)
+        #expect(span.typography?.lineHeight == 24)
+        #expect(span.typography?.letterSpacing == 0.5)
+        #expect(span.color?.lightHex == "#FF112233")
+        #expect(span.decoration == .lineThrough)
+        #expect(span.decorationThickness == 8)
+    }
+
     @Test("runtime theme selection drives colors and every media variant")
     @MainActor
     func runtimeThemeSelection() {

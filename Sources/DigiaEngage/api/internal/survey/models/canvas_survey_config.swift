@@ -6,6 +6,26 @@ enum CanvasSurveySceneKind: Equatable {
     case result
 }
 
+enum CanvasSurveyInputProfile: Equatable {
+    case choice
+    case field
+    case scale
+}
+
+enum CanvasSurveyInputType: Equatable {
+    case singleSelect
+    case multiSelect
+    case upvote
+    case shortText
+    case longText
+    case number
+    case email
+    case date
+    case rating
+    case reaction
+    case numericNps
+}
+
 enum CanvasSurveyManagedRole: Equatable {
     case progress
     case pageCount
@@ -46,6 +66,25 @@ struct CanvasSurveyInputStyle: Equatable {
     var borderWidth: CGFloat = 1
     var cornerRadius: CGFloat = 12
     var padding: CGFloat = 12
+
+    func merge(_ override: CanvasSurveyInputStyleOverride) -> CanvasSurveyInputStyle {
+        CanvasSurveyInputStyle(
+            layout: override.layout ?? layout,
+            columns: override.columns ?? columns,
+            itemGap: override.itemGap ?? itemGap,
+            fontSize: override.fontSize ?? fontSize,
+            fontWeight: override.fontWeight ?? fontWeight,
+            textColor: override.textColor ?? textColor,
+            selectedTextColor: override.selectedTextColor ?? selectedTextColor,
+            selectedFill: override.selectedFill ?? selectedFill,
+            unselectedFill: override.unselectedFill ?? unselectedFill,
+            selectedBorderColor: override.selectedBorderColor ?? selectedBorderColor,
+            borderColor: override.borderColor ?? borderColor,
+            borderWidth: override.borderWidth ?? borderWidth,
+            cornerRadius: override.cornerRadius ?? cornerRadius,
+            padding: override.padding ?? padding
+        )
+    }
 }
 
 struct CanvasSurveyInputStyleOverride: Equatable {
@@ -76,6 +115,75 @@ struct CanvasSurveyOptionPresentation: Equatable {
     var styleOverride: CanvasSurveyInputStyleOverride = CanvasSurveyInputStyleOverride()
 }
 
+struct CanvasSurveyOption: Equatable {
+    let id: String
+    let label: String
+    var presentation = CanvasSurveyOptionPresentation()
+}
+
+struct CanvasSurveyChoiceInput: Equatable {
+    let type: CanvasSurveyInputType
+    let required: Bool
+    let style: CanvasSurveyInputStyle
+    let options: [CanvasSurveyOption]
+    let maximumSelections: Int?
+    let optionStyleMode: CanvasSurveyOptionStyleMode
+    let sharedText: CanvasSurveyOptionText?
+}
+
+struct CanvasSurveyFieldInput: Equatable {
+    let type: CanvasSurveyInputType
+    let required: Bool
+    let style: CanvasSurveyInputStyle
+    let placeholder: String
+    let minLength: Int?
+    let maxLength: Int?
+    let minimum: Double?
+    let maximum: Double?
+    let multilineRows: Int
+}
+
+struct CanvasSurveyScaleInput: Equatable {
+    let type: CanvasSurveyInputType
+    let required: Bool
+    let style: CanvasSurveyInputStyle
+    let minimum: Double
+    let maximum: Double
+    let step: Double
+    let symbolSize: CGFloat
+    let numericNpsVariant: CanvasSurveyNumericNpsVariant
+}
+
+enum CanvasSurveyWireInput: Equatable {
+    case choice(CanvasSurveyChoiceInput)
+    case field(CanvasSurveyFieldInput)
+    case scale(CanvasSurveyScaleInput)
+
+    var profile: CanvasSurveyInputProfile {
+        switch self {
+        case .choice: return .choice
+        case .field: return .field
+        case .scale: return .scale
+        }
+    }
+
+    var type: CanvasSurveyInputType {
+        switch self {
+        case .choice(let input): return input.type
+        case .field(let input): return input.type
+        case .scale(let input): return input.type
+        }
+    }
+
+    var required: Bool {
+        switch self {
+        case .choice(let input): return input.required
+        case .field(let input): return input.required
+        case .scale(let input): return input.required
+        }
+    }
+}
+
 struct CanvasSurveyAnswerHostElement: Equatable {
     let id: String
     let rect: CampaignCanvasRect
@@ -83,6 +191,7 @@ struct CanvasSurveyAnswerHostElement: Equatable {
     var optionPresentations: [String: CanvasSurveyOptionPresentation] = [:]
     var optionStyleModeOverride: CanvasSurveyOptionStyleMode?
     var sharedText: CanvasSurveyOptionText?
+    var maximumSelectionsOverride: Int?
     var symbolSize: CGFloat = 0
     var numericNpsVariant: CanvasSurveyNumericNpsVariant = .rounded
 }
@@ -138,6 +247,7 @@ struct CanvasSurveyDocument: Equatable {
 
 struct CanvasSurveySceneDocument: Equatable {
     let kind: CanvasSurveySceneKind
+    var input: CanvasSurveyWireInput? = nil
     let canvas: CampaignCanvas
     let sharedUi: CampaignCanvas
     let canvasHosts: [CanvasSurveyHostElement]

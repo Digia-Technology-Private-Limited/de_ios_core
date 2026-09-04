@@ -43,7 +43,7 @@ struct CanvasSurveyDocumentParser {
                 version: 2,
                 width: width,
                 height: 420,
-                background: .solid(.literal("#FFFFFFFF")),
+                background: .solid(.literal("#00000000")),
                 children: []
             ),
             hosts: [],

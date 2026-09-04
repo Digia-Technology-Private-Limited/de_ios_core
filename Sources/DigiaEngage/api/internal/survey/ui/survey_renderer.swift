@@ -5,6 +5,58 @@ import Combine
 /// Frame-settling buffer added before the survey is shown.
 private let RENDER_DELAY_MS: Int = 150
 
+private final class SurveyKeyboardObserver: ObservableObject, @unchecked Sendable {
+    @Published private var keyboardMinY: CGFloat?
+    @Published private(set) var animationDuration: TimeInterval = 0.25
+
+    private var observers: [NSObjectProtocol] = []
+
+    init() {
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(
+                forName: UIResponder.keyboardWillChangeFrameNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                self?.handle(notification)
+            },
+            center.addObserver(
+                forName: UIResponder.keyboardWillHideNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                self?.handle(notification)
+            }
+        ]
+    }
+
+    deinit {
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func handle(_ notification: Notification) {
+        animationDuration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?
+            .doubleValue ?? 0.25
+
+        guard notification.name != UIResponder.keyboardWillHideNotification,
+              let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        else {
+            keyboardMinY = nil
+            return
+        }
+
+        keyboardMinY = frame.minY
+    }
+
+    func bottomInset(overlapping rect: CGRect) -> CGFloat {
+        guard let keyboardMinY else { return 0 }
+        return max(0, rect.maxY - keyboardMinY)
+    }
+}
+
 /// Top-level survey overlay — mounted once inside `DigiaHost`. Mirrors the
 /// dashboard `BlockEditor` visual language: a card with thin progress bar,
 /// category pill, title/body, type-specific content, and footer CTAs.
@@ -31,6 +83,7 @@ private struct SurveySession: View {
     let orchestrator: SurveyOrchestrator
     @StateObject private var vm: SurveyViewModel
     @State private var visible = false
+    @State private var canvasWelcomeDone = false
 
     init(state: ActiveSurveyState, orchestrator: SurveyOrchestrator) {
         self.state = state
@@ -49,6 +102,7 @@ private struct SurveySession: View {
                 DialogContainer(
                     dialog: display.dialog,
                     background: background,
+                    keyboardScrollsContent: survey.canvasSurvey != nil,
                     onDismiss: { finish(completed: false) },
                     content: {
                         SurveyPanelContent(
@@ -57,7 +111,9 @@ private struct SurveySession: View {
                             accent: accent,
                             onClose: { finish(completed: false) },
                             onCompletedClose: { SDKInstance.shared.dismissCompletedSurvey() },
-                            showCloseButton: display.dialog.showCloseButton
+                            showCloseButton: display.dialog.showCloseButton,
+                            paintCanvasBackground: true,
+                            canvasWelcomeDone: $canvasWelcomeDone
                         )
                     }
                 )
@@ -68,6 +124,8 @@ private struct SurveySession: View {
             let sheetContent = SurveySheet(
                 sheet: display.bottomSheet,
                 background: background,
+                canvasBackground: canvasSurveySheetBackground(survey),
+                keyboardScrollsContent: survey.canvasSurvey != nil,
                 onDismiss: { finish(completed: false) }
             ) {
                 SurveyPanelContent(
@@ -76,15 +134,18 @@ private struct SurveySession: View {
                     accent: accent,
                     onClose: { finish(completed: false) },
                     onCompletedClose: { SDKInstance.shared.dismissCompletedSurvey() },
-                    showCloseButton: display.bottomSheet.backdropDismissible
+                    showCloseButton: display.bottomSheet.backdropDismissible,
+                    paintCanvasBackground: survey.canvasSurvey == nil,
+                    canvasWelcomeDone: $canvasWelcomeDone
                 )
             }
+            let guardedSheetContent = sheetContent.interactiveDismissDisabled(true)
             // `.presentationBackground` needs iOS 16.4; below that, the cover's
             // (opaque) default background is used as-is.
             if #available(iOS 16.4, *) {
-                sheetContent.presentationBackground(.clear)
+                guardedSheetContent.presentationBackground(.clear)
             } else {
-                sheetContent
+                guardedSheetContent
             }
         }
         .transaction { $0.disablesAnimations = true }
@@ -139,6 +200,8 @@ private struct SurveyPanelContent: View {
     let onClose: () -> Void
     let onCompletedClose: () -> Void
     let showCloseButton: Bool
+    let paintCanvasBackground: Bool
+    @Binding var canvasWelcomeDone: Bool
 
     var body: some View {
         if let canvasSurvey = survey.canvasSurvey {
@@ -149,7 +212,9 @@ private struct SurveyPanelContent: View {
                 accent: accent,
                 onClose: onClose,
                 onCompletedClose: onCompletedClose,
-                showCloseButton: showCloseButton
+                showCloseButton: showCloseButton,
+                paintBackground: paintCanvasBackground,
+                welcomeDone: $canvasWelcomeDone
             )
         } else {
             SurveyBody(
@@ -165,13 +230,18 @@ private struct SurveyPanelContent: View {
 }
 
 /// Maps the survey's `BottomSheetProps` onto the shared `DigiaBottomSheet`. The
-/// survey body manages its own internal scrolling (`ContentSizedScrollView`), so
-/// it renders with `scrollable: false`.
+/// survey body manages its own internal scrolling, except canvas surveys while
+/// the keyboard is visible: those need sheet-level scrolling to keep oversized
+/// authored canvases reachable above the keyboard.
+@MainActor
 private struct SurveySheet<Content: View>: View {
     let sheet: BottomSheetProps
     let background: Color
+    let canvasBackground: CampaignCanvasPaint?
+    let keyboardScrollsContent: Bool
     let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
+    @StateObject private var keyboard = SurveyKeyboardObserver()
 
     /// `heightMode` becomes the sheet's *cap*, not a fixed height: short content
     /// hugs (no dead space), taller content scrolls within this ceiling.
@@ -185,27 +255,48 @@ private struct SurveySheet<Content: View>: View {
     }
 
     var body: some View {
-        DigiaBottomSheet(
-            config: DigiaBottomSheetConfig(
-                cornerRadius: CGFloat(sheet.cornerRadius),
-                background: background,
-                showHandle: sheet.showHandle,
-                allowBackdropDismiss: sheet.backdropDismissible,
-                allowDragDismiss: sheet.draggable,
-                heightCapFraction: heightCapFraction
-            ),
-            scrollable: false,
-            onDismiss: onDismiss,
-            content: content
-        )
+        GeometryReader { geo in
+            let keyboardInset = keyboard.bottomInset(overlapping: geo.frame(in: .global))
+            DigiaBottomSheet(
+                config: DigiaBottomSheetConfig(
+                    cornerRadius: CGFloat(sheet.cornerRadius),
+                    background: canvasBackground == nil ? background : .clear,
+                    showHandle: sheet.showHandle,
+                    allowBackdropDismiss: sheet.backdropDismissible,
+                    allowDragDismiss: sheet.draggable && keyboardInset == 0,
+                    heightCapFraction: heightCapFraction,
+                    handleOverlaysContent: canvasBackground != nil,
+                    bottomSafeAreaMode: keyboardInset > 0 ? .insetSurface : .none,
+                    bottomSafeAreaInset: keyboardInset
+                ),
+                scrollable: keyboardScrollsContent,
+                onDismiss: onDismiss,
+                content: content,
+                cardBackground: canvasBackground.map { AnyView(CampaignCanvasBackgroundView(paint: $0)) }
+            )
+            .frame(width: geo.size.width, height: geo.size.height)
+            .animation(.easeOut(duration: keyboard.animationDuration), value: keyboardInset)
+        }
+        .ignoresSafeArea()
     }
 }
 
+private func canvasSurveySheetBackground(_ survey: SurveyConfigModel) -> CampaignCanvasPaint? {
+    guard let canvasSurvey = survey.canvasSurvey else { return nil }
+    return canvasSurvey.welcomeDocument?.sharedUi.background
+        ?? canvasSurvey.scenesByBlockId.keys.sorted().compactMap {
+            canvasSurvey.scenesByBlockId[$0]?.sharedUi.background
+        }.first
+}
+
+@MainActor
 private struct DialogContainer<Content: View>: View {
     let dialog: DialogProps
     let background: Color
+    let keyboardScrollsContent: Bool
     let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
+    @StateObject private var keyboard = SurveyKeyboardObserver()
 
     // Blocks the first-frame backdrop tap from closing the survey before the
     // CTA Buttons' gesture recognisers are interactive.
@@ -213,6 +304,7 @@ private struct DialogContainer<Content: View>: View {
 
     var body: some View {
         GeometryReader { geo in
+            let keyboardInset = keyboard.bottomInset(overlapping: geo.frame(in: .global))
             ZStack {
                 Color.black.opacity(dialog.backdropOpacity)
                     .ignoresSafeArea()
@@ -221,27 +313,67 @@ private struct DialogContainer<Content: View>: View {
                         if armed && dialog.backdropDismissible { onDismiss() }
                     }
 
-                content()
-                    .frame(width: dialogWidth(geo: geo))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .background(
-                        RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius))
-                            .fill(background)
+                if keyboardScrollsContent {
+                    scrollableDialogSurface(
+                        width: dialogWidth(geo: geo),
+                        maxHeight: max(0, geo.size.height - keyboardInset - 48)
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius)))
-                    .contentShape(RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius)))
-                    .onTapGesture {}
-                    .padding(16)
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 16 + keyboardInset)
+                } else {
+                    dialogSurface(
+                        width: dialogWidth(geo: geo),
+                        maxHeight: keyboardInset > 0 ? max(0, geo.size.height - keyboardInset - 48) : nil
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.top, 16)
+                    .padding(.bottom, 16 + keyboardInset)
+                }
             }
+            .animation(.easeOut(duration: keyboard.animationDuration), value: keyboardInset)
             .task {
                 try? await Task.sleep(nanoseconds: 350_000_000)
                 armed = true
             }
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private func dialogWidth(geo: GeometryProxy) -> CGFloat {
         geo.size.width - 32
+    }
+
+    @ViewBuilder
+    private func dialogSurface(width: CGFloat, maxHeight: CGFloat?) -> some View {
+        let shape = RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius))
+        Group {
+            if let maxHeight {
+                ContentSizedScrollView(maxHeight: maxHeight) {
+                    content()
+                }
+            } else {
+                content()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(width: width)
+        .background(shape.fill(background))
+        .clipShape(shape)
+        .contentShape(shape)
+        .onTapGesture {}
+    }
+
+    private func scrollableDialogSurface(width: CGFloat, maxHeight: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius))
+        return ContentSizedScrollView(maxHeight: maxHeight) {
+            content()
+        }
+        .frame(width: width)
+        .background(shape.fill(background))
+        .clipShape(shape)
+        .contentShape(shape)
+        .onTapGesture {}
     }
 }
 

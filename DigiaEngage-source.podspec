@@ -45,8 +45,11 @@ Pod::Spec.new do |s|
   s.swift_version    = '6.0'
 
   # Compile from source (no vendored_frameworks). Sources/DigiaEngage is pure Swift —
-  # no resource bundles (mirrors Package.swift, which declares none).
+  # resource bundles keep SDK-owned assets available to local source consumers.
   s.source_files     = 'Sources/DigiaEngage/**/*.swift'
+  s.resource_bundles = {
+    'DigiaEngage' => ['Sources/DigiaEngage/Resources/**/*']
+  }
 
   # Deps as real pods (NOT baked in, unlike the fat binary). These MUST match SharedBuild/Podfile
   # (the SDK's own known-good pod set) so the source build co-exists with a host app that already
