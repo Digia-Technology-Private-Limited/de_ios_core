@@ -1944,10 +1944,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let payload = state.payload
         let total = state.steps.count
         let elapsed = dwellTracker.consumeDwellMs(payload.cepCampaignId)
-        let isAnchorless = state.currentStep?.target.anchorlessTarget != nil
-        if guideCompletionFired, isAnchorless, total > 1, !payload.usesRenderedLifecycle {
-            events.toCep(.clicked(), payload: payload)
-        } else if !guideCompletionFired, total > 1 {
+        if !guideCompletionFired, total > 1 {
             events.toDigia(
                 GuideEvent.StepDismissed(itemIndex: state.stepIndex + 1),
                 payload: payload
@@ -2114,8 +2111,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         actionUrl: String?,
         ctaLabel: String?,
         action: EngageAction? = nil,
-        elementId: String? = nil,
-        isPrimary: Bool = false
+        elementId: String? = nil
     ) {
         guard let state = guideOrchestrator.state, let step = state.currentStep else { return }
         events.toDigia(
@@ -2127,9 +2123,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 actionUrl: actionUrl
             ),
             payload: state.payload
-        )
-        reportPrimaryCTAClick(
-            payload: state.payload, elementId: elementId ?? "cta_primary", isPrimary: isPrimary
         )
         if !state.hasNext,
            action != .previous {

@@ -321,6 +321,33 @@ struct DigiaEngageTests {
         })
     }
 
+    @Test("anchorless guide completion sends no click to the CEP")
+    func anchorlessGuideCompletionStaysOutOfCepClicks() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let campaign = try #require(anchorlessGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        let payload = CEPTriggerPayload(
+            cepCampaignId: "anchorless-guide", campaignKey: campaign.campaignKey,
+            cepMetadata: [:])
+
+        #expect(SDKInstance.shared.onCampaignTriggered(payload))
+        SDKInstance.shared.reportGuideShown()
+        SDKInstance.shared.advanceGuide()
+        SDKInstance.shared.reportGuideStepClicked(
+            actionType: "dismiss",
+            actionUrl: nil,
+            ctaLabel: "Close",
+            action: .dismiss,
+            elementId: "primary"
+        )
+        SDKInstance.shared.dismissGuide()
+
+        #expect(plugin.events.map(\.0) == [.impressed, .dismissed])
+    }
+
     @Test("screen changes dismiss an accepted targeted survey")
     func screenChangesDismissTargetedSurvey() throws {
         SDKInstance.shared.resetForTesting()
@@ -900,6 +927,30 @@ private func targetedGuideCampaign() -> CampaignModel? {
                 "title": "Help",
                 "body": "Body",
             ]],
+        ],
+    ])
+}
+
+private func anchorlessGuideCampaign() -> CampaignModel? {
+    CampaignModel.fromJson([
+        "id": "anchorless-guide-id",
+        "campaignKey": "anchorless-guide",
+        "campaignType": "guide",
+        "templateConfig": [
+            "templateType": "spotlight",
+            "steps": [1, 2].map { step in
+                [
+                    "stepId": "step-\(step)",
+                    "target": ["type": "anchorless", "version": 1, "pageKey": "home"],
+                    "layoutMode": "canvas",
+                    "canvas": [
+                        "version": 2,
+                        "canvasWidth": 240,
+                        "canvasHeight": 120,
+                        "children": [],
+                    ],
+                ] as [String: Any]
+            },
         ],
     ])
 }

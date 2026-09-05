@@ -395,8 +395,7 @@ private struct GuideStepOverlay: View {
             actionUrl: reportedAction?.analyticsURL,
             ctaLabel: request.label ?? request.elementId,
             action: reportedAction,
-            elementId: request.elementId,
-            isPrimary: request.isPrimary
+            elementId: request.elementId
         )
         Task {
             await SDKInstance.shared.executeActionFlow(
