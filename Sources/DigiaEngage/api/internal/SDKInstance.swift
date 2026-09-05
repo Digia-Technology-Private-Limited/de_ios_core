@@ -1944,7 +1944,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let payload = state.payload
         let total = state.steps.count
         let elapsed = dwellTracker.consumeDwellMs(payload.cepCampaignId)
-        if !guideCompletionFired, total > 1 {
+        let isAnchorless = state.currentStep?.target.anchorlessTarget != nil
+        if guideCompletionFired, isAnchorless, total > 1, !payload.usesRenderedLifecycle {
+            events.toCep(.clicked(), payload: payload)
+        } else if !guideCompletionFired, total > 1 {
             events.toDigia(
                 GuideEvent.StepDismissed(itemIndex: state.stepIndex + 1),
                 payload: payload
