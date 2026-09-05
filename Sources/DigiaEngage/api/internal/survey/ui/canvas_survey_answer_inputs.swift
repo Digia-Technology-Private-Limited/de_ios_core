@@ -6,11 +6,18 @@ struct CanvasSurveyAnswerInputView: View {
     let host: CanvasSurveyAnswerHostElement
     let answer: SurveyAnswer?
     let onAnswer: (SurveyAnswer) -> Void
+    let onValidationError: (String?) -> Void
 
     var body: some View {
         switch scene.input {
         case .choice(let input):
-            CanvasSurveyChoiceInputView(input: input, host: host, answer: answer, onAnswer: onAnswer)
+            CanvasSurveyChoiceInputView(
+                input: input,
+                host: host,
+                answer: answer,
+                onAnswer: onAnswer,
+                onValidationError: onValidationError
+            )
         case .field(let input):
             CanvasSurveyFieldInputView(input: input, host: host, answer: answer, onAnswer: onAnswer)
         case .scale(let input):
@@ -26,6 +33,7 @@ private struct CanvasSurveyChoiceInputView: View {
     let host: CanvasSurveyAnswerHostElement
     let answer: SurveyAnswer?
     let onAnswer: (SurveyAnswer) -> Void
+    let onValidationError: (String?) -> Void
 
     var body: some View {
         let style = input.style.merge(hostStyle(host))
@@ -92,14 +100,24 @@ private struct CanvasSurveyChoiceInputView: View {
                     } else {
                         values.insert(option.id)
                     }
-                    if let maximum = maximumSelections, values.count > maximum { return }
+                    if let maximum = maximumSelections, values.count > maximum {
+                        onValidationError(maxSelectionsMessage(maximum))
+                        return
+                    }
+                    onValidationError(nil)
                     onAnswer(SurveyAnswer(values: Array(values)))
                 } else {
+                    onValidationError(nil)
                     onAnswer(SurveyAnswer(values: [option.id]))
                 }
             }
         )
     }
+}
+
+private func maxSelectionsMessage(_ maximumSelections: Int) -> String {
+    let optionWord = maximumSelections == 1 ? "option" : "options"
+    return "Select at most \(maximumSelections) \(optionWord)"
 }
 
 private func optionRows(_ options: [CanvasSurveyOption], columns: Int) -> [[CanvasSurveyOption]] {

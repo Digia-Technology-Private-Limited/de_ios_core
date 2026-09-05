@@ -82,6 +82,14 @@ final class SurveyViewModel: ObservableObject {
         return answers[node.id]?.isAnswered == true
     }
 
+    func canvasValidationError() -> String? {
+        guard let node = currentNode,
+              let scene = survey.canvasSurvey?.document(for: node),
+              scene.kind == .question
+        else { return nil }
+        return canvasAnswerValidator.validationError(input: scene.input, answer: answers[node.id])
+    }
+
     func shouldAutoAdvance() -> Bool {
         guard survey.settings.autoAdvance else { return false }
         guard let node = currentNode, let answer = answers[node.id] else { return false }

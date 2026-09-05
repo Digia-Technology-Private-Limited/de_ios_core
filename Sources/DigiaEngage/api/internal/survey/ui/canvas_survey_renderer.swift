@@ -17,6 +17,7 @@ struct CanvasSurveyPanel: View {
     @State private var timerTask: Task<Void, Never>?
     @State private var lastAutoAdvanceKey = ""
     @State private var completionReported = false
+    @State private var validationError: String?
 
     var body: some View {
         Group {
@@ -33,10 +34,14 @@ struct CanvasSurveyPanel: View {
                     remainingSecs: remainingSecs,
                     showCloseButton: showCloseButton,
                     paintBackground: paintBackground,
+                    validationError: validationError,
                     onPrimary: primary,
                     onPrevious: previous,
                     onClose: onClose,
-                    onCanvasAction: handleCanvasAction
+                    onCanvasAction: handleCanvasAction,
+                    onValidationError: { message in
+                        validationError = message
+                    }
                 )
             } else {
                 EmptyView()
@@ -49,11 +54,15 @@ struct CanvasSurveyPanel: View {
             scheduleAutoAdvanceIfNeeded()
         }
         .onChange(of: vm.currentNodeId) { _ in
+            clearValidationError()
             startTimerIfNeeded()
             reportQuestionViewedIfNeeded()
             scheduleAutoAdvanceIfNeeded()
         }
         .onChange(of: currentAnswer) { _ in
+            if validationError != nil {
+                validationError = vm.canvasValidationError()
+            }
             scheduleAutoAdvanceIfNeeded()
         }
     }
@@ -102,12 +111,17 @@ struct CanvasSurveyPanel: View {
             onCompletedClose()
             return
         }
-        guard vm.canAdvance() else { return }
+        guard vm.canAdvance() else {
+            validationError = vm.canvasValidationError()
+            return
+        }
+        clearValidationError()
         if !block.type.isContent {
             if let ans = vm.answers[node.id], ans.isAnswered {
                 SDKInstance.shared.reportSurveyAnswered(stepId: node.id, answer: ans.toMap())
             } else if !block.required {
-                SDKInstance.shared.reportSurveyQuestionSkipped(nodeId: node.id, itemIndex: vm.currentItemIndex)
+                SDKInstance.shared.reportSurveyQuestionSkipped(
+                    nodeId: node.id, itemIndex: vm.currentItemIndex)
             }
         }
         reportCompletionIfResultIsNext()
@@ -116,6 +130,11 @@ struct CanvasSurveyPanel: View {
 
     private func previous() {
         if !showingWelcome && vm.canGoBack { vm.back() }
+        clearValidationError()
+    }
+
+    private func clearValidationError() {
+        validationError = nil
     }
 
     private func handleCanvasAction(_ request: CampaignCanvasActionRequest) {
@@ -129,10 +148,13 @@ struct CanvasSurveyPanel: View {
     }
 
     private func reportQuestionViewedIfNeeded() {
-        guard !showingWelcome, let node = vm.currentNode, let block = vm.currentBlock, !block.type.isContent else {
+        guard !showingWelcome, let node = vm.currentNode, let block = vm.currentBlock,
+            !block.type.isContent
+        else {
             return
         }
-        SDKInstance.shared.reportSurveyQuestionViewed(nodeId: node.id, itemIndex: vm.currentItemIndex)
+        SDKInstance.shared.reportSurveyQuestionViewed(
+            nodeId: node.id, itemIndex: vm.currentItemIndex)
     }
 
     private func scheduleAutoAdvanceIfNeeded() {
@@ -155,7 +177,8 @@ struct CanvasSurveyPanel: View {
 
     private func reportCompletionIfResultIsNext() {
         if !completionReported && vm.nextBlockIsResultPage() {
-            SDKInstance.shared.reportSurveyCompleted(response: vm.responsePayload(), answers: vm.answers)
+            SDKInstance.shared.reportSurveyCompleted(
+                response: vm.responsePayload(), answers: vm.answers)
             completionReported = true
         }
     }
@@ -189,10 +212,12 @@ private struct CanvasSurveyScaledStage: View {
     let remainingSecs: Int
     let showCloseButton: Bool
     let paintBackground: Bool
+    let validationError: String?
     let onPrimary: () -> Void
     let onPrevious: () -> Void
     let onClose: () -> Void
     let onCanvasAction: (CampaignCanvasActionRequest) -> Void
+    let onValidationError: (String?) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -238,10 +263,17 @@ private struct CanvasSurveyScaledStage: View {
                         onPrimary: onPrimary,
                         onPrevious: onPrevious,
                         onClose: onClose,
-                        onCanvasAction: onCanvasAction
+                        onCanvasAction: onCanvasAction,
+                        onValidationError: onValidationError
                     )
                     .frame(width: host.rect.width, height: host.rect.height, alignment: .topLeading)
                     .offset(x: host.rect.x, y: host.rect.y)
+                }
+                if let validationError, !validationError.isEmpty, let rect = validationErrorRect {
+                    CanvasSurveyValidationErrorView(message: validationError)
+                        .frame(width: rect.width, alignment: .center)
+                        .offset(x: rect.x, y: rect.y)
+                        .allowsHitTesting(false)
                 }
             }
             .frame(width: stageWidth, height: stageHeight, alignment: .topLeading)
@@ -264,6 +296,33 @@ private struct CanvasSurveyScaledStage: View {
         max(document.canvas.height, 1)
     }
 
+    private var validationErrorRect: CampaignCanvasRect? {
+        let answerRect = document.canvasHosts.compactMap { host -> CampaignCanvasRect? in
+            if case .answer(let answerHost) = host { return answerHost.rect }
+            return nil
+        }.first
+        if let answerRect {
+            return CampaignCanvasRect(
+                x: answerRect.x,
+                y: answerRect.y + answerRect.height + 2,
+                width: answerRect.width,
+                height: 24
+            )
+        }
+        let margin: CGFloat = 8
+        let labelHeight: CGFloat = 32
+        let maxWidth = max(margin, stageWidth - margin * 2)
+        let width = min(maxWidth, max(answerRect?.width ?? maxWidth, 180))
+        let sourceX = answerRect?.x ?? margin
+        let sourceY = answerRect?.y ?? margin
+        let sourceWidth = answerRect?.width ?? width
+        let maxLeft = max(margin, stageWidth - width - margin)
+        let left = min(max(sourceX + (sourceWidth - width) / 2, margin), maxLeft)
+        let maxTop = max(margin, stageHeight - labelHeight - margin)
+        let top = min(max(sourceY + (answerRect?.height ?? 0) + 8, margin), maxTop)
+        return CampaignCanvasRect(x: left, y: top, width: width, height: labelHeight)
+    }
+
     private func canvasSurveyDesignScale(viewportWidth: CGFloat) -> CGFloat {
         let base = viewportWidth / max(1, designWidth)
         return survey.settings.display.type == .bottomSheet ? base : min(1.15, base)
@@ -282,6 +341,28 @@ private struct CanvasSurveyScaledStage: View {
     }
 }
 
+private struct CanvasSurveyValidationErrorView: View {
+    let message: String
+
+    var body: some View {
+        Text(message)
+            .font(surveyFont(size: 12, weight: 600))
+            .foregroundColor(Color(red: 0.85, green: 0.18, blue: 0.13))
+            .lineLimit(2)
+            .multilineTextAlignment(.center)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.white.opacity(0.94))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color(red: 0.85, green: 0.18, blue: 0.13), lineWidth: 1)
+            )
+    }
+}
+
 private struct CanvasSurveyHostView: View {
     let host: CanvasSurveyHostElement
     let scene: CanvasSurveySceneDocument?
@@ -296,6 +377,7 @@ private struct CanvasSurveyHostView: View {
     let onPrevious: () -> Void
     let onClose: () -> Void
     let onCanvasAction: (CampaignCanvasActionRequest) -> Void
+    let onValidationError: (String?) -> Void
 
     var body: some View {
         switch host {
@@ -305,7 +387,11 @@ private struct CanvasSurveyHostView: View {
                     scene: scene,
                     host: host,
                     answer: vm.answers[answerNodeId],
-                    onAnswer: { vm.setAnswer(answerNodeId, $0) }
+                    onAnswer: {
+                        vm.setAnswer(answerNodeId, $0)
+                        onValidationError(vm.canvasValidationError())
+                    },
+                    onValidationError: onValidationError
                 )
             }
         case .managed(let host):
@@ -352,7 +438,8 @@ private struct CanvasSurveyManagedHostView: View {
             case .pageCount:
                 CanvasSurveyTextHost(
                     host: host,
-                    text: "\(vm.progressCurrent(countQuestionsOnly: host.countQuestionsOnly))/\(vm.progressTotal(countQuestionsOnly: host.countQuestionsOnly))"
+                    text:
+                        "\(vm.progressCurrent(countQuestionsOnly: host.countQuestionsOnly))/\(vm.progressTotal(countQuestionsOnly: host.countQuestionsOnly))"
                 )
             case .timer:
                 if survey.settings.timer.enabled && survey.settings.timer.timeLimitSeconds > 0 {
@@ -360,11 +447,13 @@ private struct CanvasSurveyManagedHostView: View {
                 }
             case .primaryNavigation:
                 let isResult = block?.type == .resultPage
-                let label = isResult ? host.doneLabel.nonEmpty(or: "Done") : host.label.nonEmpty(or: "Next")
+                let label =
+                    isResult ? host.doneLabel.nonEmpty(or: "Done") : host.label.nonEmpty(or: "Next")
                 CanvasSurveyButtonHost(
                     host: host,
                     text: label,
                     enabled: isResult || block == nil || vm.canAdvance(),
+                    interactive: true,
                     accent: accent,
                     onClick: onPrimary
                 )
@@ -380,7 +469,8 @@ private struct CanvasSurveyManagedHostView: View {
                 }
             case .dismiss:
                 if showCloseButton {
-                    CanvasSurveyDismissHost(host: host, onClose: onClose, onCanvasAction: onCanvasAction)
+                    CanvasSurveyDismissHost(
+                        host: host, onClose: onClose, onCanvasAction: onCanvasAction)
                 }
             }
         }
@@ -421,6 +511,7 @@ private struct CanvasSurveyButtonHost: View {
     let host: CanvasSurveyManagedHostElement
     let text: String
     let enabled: Bool
+    var interactive = true
     let accent: Color
     let onClick: () -> Void
     @Environment(\.colorScheme) private var colorScheme
@@ -428,9 +519,9 @@ private struct CanvasSurveyButtonHost: View {
     var body: some View {
         if let button = host.button {
             CampaignCanvasRendererRegistry.render(
-                enabled ? button : button.withoutActions(),
+                interactive ? button : button.withoutActions(),
                 isDark: CampaignCanvasTheme.shared.isDark(colorScheme),
-                onAction: { _ in if enabled { onClick() } }
+                onAction: { _ in if interactive { onClick() } }
             )
             .opacity(enabled ? 1 : 0.45)
         } else {
@@ -449,7 +540,7 @@ private struct CanvasSurveyButtonHost: View {
             }
             .opacity(enabled ? 1 : 0.45)
             .buttonStyle(.plain)
-            .disabled(!enabled)
+            .disabled(!interactive)
         }
     }
 }
@@ -501,20 +592,22 @@ private struct CanvasSurveyDismissHost: View {
     }
 }
 
-private extension CampaignCanvasWidget {
-    func withoutActions() -> CampaignCanvasWidget {
-        guard case .button(
-            let box,
-            let label,
-            let cornerRadius,
-            let style,
-            let shadow,
-            let isPrimary,
-            let isDestructive,
-            let applyDestructiveStyling,
-            _,
-            let confirm
-        ) = self else { return self }
+extension CampaignCanvasWidget {
+    fileprivate func withoutActions() -> CampaignCanvasWidget {
+        guard
+            case .button(
+                let box,
+                let label,
+                let cornerRadius,
+                let style,
+                let shadow,
+                let isPrimary,
+                let isDestructive,
+                let applyDestructiveStyling,
+                _,
+                let confirm
+            ) = self
+        else { return self }
         return .button(
             box: box,
             label: label,
@@ -529,19 +622,21 @@ private extension CampaignCanvasWidget {
         )
     }
 
-    func withoutLabel() -> CampaignCanvasWidget {
-        guard case .button(
-            let box,
-            var label,
-            let cornerRadius,
-            let style,
-            let shadow,
-            let isPrimary,
-            let isDestructive,
-            let applyDestructiveStyling,
-            let actions,
-            let confirm
-        ) = self else { return self }
+    fileprivate func withoutLabel() -> CampaignCanvasWidget {
+        guard
+            case .button(
+                let box,
+                var label,
+                let cornerRadius,
+                let style,
+                let shadow,
+                let isPrimary,
+                let isDestructive,
+                let applyDestructiveStyling,
+                let actions,
+                let confirm
+            ) = self
+        else { return self }
         label.spans = label.spans.map {
             CampaignCanvasTextSpan(
                 text: "",
@@ -587,7 +682,8 @@ private struct CanvasSurveyTextHost: View {
             )
             .overlay(
                 RoundedRectangle(cornerRadius: host.cornerRadius)
-                    .stroke(Color(hex: host.borderColorHex) ?? Color.clear, lineWidth: host.borderWidth)
+                    .stroke(
+                        Color(hex: host.borderColorHex) ?? Color.clear, lineWidth: host.borderWidth)
             )
     }
 }
@@ -596,8 +692,8 @@ private func formatRemaining(_ remainingSecs: Int) -> String {
     String(format: "%d:%02d", remainingSecs / 60, remainingSecs % 60)
 }
 
-private extension String {
-    func nonEmpty(or fallback: String) -> String {
+extension String {
+    fileprivate func nonEmpty(or fallback: String) -> String {
         isEmpty ? fallback : self
     }
 }
