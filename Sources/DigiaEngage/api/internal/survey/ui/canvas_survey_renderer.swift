@@ -458,15 +458,14 @@ private struct CanvasSurveyManagedHostView: View {
                     onClick: onPrimary
                 )
             case .backNavigation:
-                if vm.canGoBack {
-                    CanvasSurveyButtonHost(
-                        host: host,
-                        text: host.label.nonEmpty(or: "Back"),
-                        enabled: true,
-                        accent: accent,
-                        onClick: onPrevious
-                    )
-                }
+                CanvasSurveyButtonHost(
+                    host: host,
+                    text: host.label.nonEmpty(or: "Back"),
+                    enabled: vm.canGoBack,
+                    interactive: vm.canGoBack,
+                    accent: accent,
+                    onClick: onPrevious
+                )
             case .dismiss:
                 if showCloseButton {
                     CanvasSurveyDismissHost(
