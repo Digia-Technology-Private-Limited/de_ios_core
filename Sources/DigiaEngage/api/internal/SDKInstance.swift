@@ -859,7 +859,19 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 lastCampaignDropReason = "frequency capped"
                 return false
             }
-            let started = surveyOrchestrator.start(payload: payload, config: cfg)
+            let activeSurveyCepId = surveyOrchestrator.state?.payload.cepCampaignId
+            let replaceActiveLiveTestCanvasSurvey =
+                cfg.canvasSurvey != nil
+                && isLiveTestCepId(payload.cepCampaignId)
+                && activeSurveyCepId.map(isLiveTestCepId) == true
+            if replaceActiveLiveTestCanvasSurvey {
+                markSurveyDismissed()
+            }
+            let started = surveyOrchestrator.start(
+                payload: payload,
+                config: cfg,
+                allowActiveReplacement: replaceActiveLiveTestCanvasSurvey
+            )
             if !started {
                 lastCampaignDropReason = "another survey is already on screen"
                 logVerbose("survey campaign dropped: another survey is on screen: \(key)")
