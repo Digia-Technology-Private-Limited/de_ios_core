@@ -18,6 +18,7 @@ struct CanvasSurveyPanel: View {
     @State private var lastAutoAdvanceKey = ""
     @State private var completionReported = false
     @State private var validationError: String?
+    @Environment(\.digiaVariables) private var variables
 
     var body: some View {
         Group {
@@ -142,12 +143,16 @@ struct CanvasSurveyPanel: View {
     }
 
     private func handleCanvasAction(_ request: CampaignCanvasActionRequest) {
-        if request.actions.contains(.next) {
-            primary()
-        } else if request.actions.contains(.previous) {
-            previous()
-        } else if request.actions.contains(.dismiss) {
-            onClose()
+        Task { @MainActor in
+            await SDKInstance.shared.executeActionFlow(
+                request.actions,
+                variables: variables,
+                localActionExecutor: LocalActionExecutor(
+                    dismiss: onClose,
+                    next: primary,
+                    previous: previous
+                )
+            )
         }
     }
 

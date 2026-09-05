@@ -680,6 +680,7 @@ private struct CampaignCanvasTextView: View {
     let isDark: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
     var colorOverride: UIColor? = nil
+    var inheritedColor: UIColor? = nil
     var shadow: CampaignCanvasShadow? = nil
     @Environment(\.digiaVariables) private var variables
 
@@ -744,7 +745,7 @@ private struct CampaignCanvasTextView: View {
         let baseColor =
             colorOverride ?? first?.color.map {
                 UIColor(CampaignCanvasTheme.shared.color($0, isDark: isDark))
-            } ?? .label
+            } ?? inheritedColor ?? .label
         let result = NSMutableAttributedString()
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = block.textAlign.uiTextAlignment
@@ -1108,7 +1109,12 @@ private struct CanvasButtonRenderer: View {
         ZStack {
             CampaignCanvasPaintView(paint: effectiveFill, isDark: isDark)
             CampaignCanvasTextView(
-                block: label, isDark: isDark, onAction: onAction, colorOverride: destructiveColor)
+                block: label,
+                isDark: isDark,
+                onAction: onAction,
+                colorOverride: destructiveColor,
+                inheritedColor: foregroundColor
+            )
         }.contentShape(CampaignCanvasRoundedShape(radius: cornerRadius))
     }
     private var effectiveFill: CampaignCanvasPaint {
@@ -1122,6 +1128,11 @@ private struct CanvasButtonRenderer: View {
         guard isDestructive && applyDestructiveStyling else { return nil }
         return UIColor(
             isFilled ? Color.white : CampaignCanvasTheme.shared.color(danger, isDark: isDark))
+    }
+    private var foregroundColor: UIColor {
+        if isFilled { return .white }
+        let color = outline?.color ?? CampaignColor.literal("#FF4945FF")
+        return UIColor(CampaignCanvasTheme.shared.color(color, isDark: isDark))
     }
     private var outline: CampaignCanvasBorder? {
         if case .outline(_, let outline) = style { outline } else { nil }
