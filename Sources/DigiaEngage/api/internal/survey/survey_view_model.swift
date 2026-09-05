@@ -48,18 +48,15 @@ final class SurveyViewModel: ObservableObject {
     }
 
     func progressTotal(countQuestionsOnly: Bool = true) -> Int {
-        max(1, reachableNodeIds().filter { nodeId in
-            !countQuestionsOnly || survey.nodeById(nodeId)?.isQuestionForProgress(in: survey) == true
-        }.count)
+        max(1, progressNodeIds(countQuestionsOnly: countQuestionsOnly).count)
     }
 
     func progressCurrent(countQuestionsOnly: Bool = true) -> Int {
-        if !countQuestionsOnly {
-            return min(max(1, backStack.count + 1), progressTotal(countQuestionsOnly: false))
-        }
-        let total = progressTotal(countQuestionsOnly: true)
+        let progressNodes = progressNodeIds(countQuestionsOnly: countQuestionsOnly)
+        let total = max(1, progressNodes.count)
+        let progressNodeIds = Set(progressNodes)
         let current = (backStack + [currentNodeId]).filter {
-            survey.nodeById($0)?.isQuestionForProgress(in: survey) == true
+            progressNodeIds.contains($0)
         }.count
         return min(max(1, current), total)
     }
@@ -144,45 +141,35 @@ final class SurveyViewModel: ObservableObject {
         return out
     }
 
-    private func reachableNodeIds() -> [String] {
-        guard let root = survey.rootNode()?.id else { return [] }
+    private func progressNodeIds(countQuestionsOnly: Bool) -> [String] {
         var seen = Set<String>()
         var ordered: [String] = []
-
-        func visit(_ nodeId: String) {
-            guard !seen.contains(nodeId) else { return }
-            seen.insert(nodeId)
-            ordered.append(nodeId)
-            guard let node = survey.nodeById(nodeId) else { return }
-            let targets = [node.branching.defaultTarget] + node.branching.rules.map(\.target)
-            for target in targets {
-                switch target.kind {
-                case .node:
-                    if let nodeId = target.nodeId { visit(nodeId) }
-                case .next:
-                    if let nodeId = nextNodeId(after: node) { visit(nodeId) }
-                case .url, .end:
-                    break
-                }
+        var nodeId = survey.rootNode()?.id
+        while let currentNodeId = nodeId, !seen.contains(currentNodeId) {
+            seen.insert(currentNodeId)
+            guard let node = survey.nodeById(currentNodeId) else { break }
+            if node.isIncludedInProgress(in: survey, countQuestionsOnly: countQuestionsOnly) {
+                ordered.append(node.id)
             }
+            let navigation = SurveyLogicHandler.nextStep(
+                survey: survey,
+                currentNodeId: node.id,
+                answers: answers
+            )
+            guard navigation.nextNodeId != SURVEY_FINISHED else { break }
+            nodeId = navigation.nextNodeId
         }
-
-        visit(root)
         return ordered
-    }
-
-    private func nextNodeId(after node: SurveyNode) -> String? {
-        guard let index = survey.nodes.firstIndex(where: { $0.id == node.id }) else { return nil }
-        return survey.nodes.dropFirst(index + 1).first?.id
     }
 }
 
 private extension SurveyNode {
-    func isQuestionForProgress(in survey: SurveyConfigModel) -> Bool {
+    func isIncludedInProgress(in survey: SurveyConfigModel, countQuestionsOnly: Bool) -> Bool {
         if let canvasScene = survey.canvasSurvey?.document(for: self) {
-            return canvasScene.kind == .question
+            if canvasScene.kind == .result { return false }
+            return !countQuestionsOnly || canvasScene.kind == .question
         }
         guard let block = survey.blockFor(self) else { return false }
-        return !block.type.isContent
+        return !countQuestionsOnly || !block.type.isContent
     }
 }

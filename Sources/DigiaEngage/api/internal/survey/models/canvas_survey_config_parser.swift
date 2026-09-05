@@ -285,9 +285,7 @@ enum CanvasSurveyConfigParser {
 
     private static func branchRule(_ json: [String: JSONValue]) -> BranchRule? {
         guard let id = SurveyParse.nonBlank(json["id"]) else { return nil }
-        let conditions = (SurveyParse.array(json["conditions"]) ?? [])
-            .compactMap { SurveyParse.object($0) }
-            .compactMap(condition)
+        let conditions = ruleConditions(json)
         guard !conditions.isEmpty else { return nil }
         return BranchRule(
             id: id,
@@ -297,6 +295,21 @@ enum CanvasSurveyConfigParser {
             ),
             target: target(SurveyParse.object(json["target"]))
         )
+    }
+
+    private static func ruleConditions(_ json: [String: JSONValue]) -> [Condition] {
+        if let conditions = SurveyParse.array(json["conditions"]) {
+            return conditions
+                .compactMap { SurveyParse.object($0) }
+                .compactMap(condition)
+        }
+        if let when = SurveyParse.object(json["when"]),
+           let conditions = SurveyParse.array(when["conditions"]) {
+            return conditions
+                .compactMap { SurveyParse.object($0) }
+                .compactMap(condition)
+        }
+        return SurveyParse.object(json["condition"]).flatMap(condition).map { [$0] } ?? []
     }
 
     private static func condition(_ json: [String: JSONValue]) -> Condition? {
@@ -310,7 +323,7 @@ enum CanvasSurveyConfigParser {
         return Condition(
             nodeId: SurveyParse.nonBlank(json["sourceNodeId"]),
             operator: op,
-            values: conditionValues(json["value"])
+            values: conditionValues(json["value"] ?? json["values"])
         )
     }
 
