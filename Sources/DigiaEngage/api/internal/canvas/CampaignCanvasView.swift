@@ -1112,7 +1112,10 @@ private struct CanvasButtonRenderer: View {
         }.contentShape(CampaignCanvasRoundedShape(radius: cornerRadius))
     }
     private var effectiveFill: CampaignCanvasPaint {
-        isDestructive && applyDestructiveStyling && isFilled ? .solid(danger) : style.fill
+        if isDestructive && applyDestructiveStyling && isFilled {
+            return .solid(danger)
+        }
+        return isFilled ? style.fill : .none
     }
     private var isFilled: Bool { if case .fill = style { true } else { false } }
     private var destructiveColor: UIColor? {
