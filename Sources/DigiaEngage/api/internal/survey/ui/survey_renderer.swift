@@ -69,6 +69,7 @@ struct SurveyRenderer: View {
             if let state = orchestrator.state {
                 SurveySession(state: state, orchestrator: orchestrator)
                     .id(state.token)
+                    .environment(\.digiaVariables, state.variableContext)
             }
         }
         // Default every raw Text/TextField/TextEditor to the SDK-wide family.

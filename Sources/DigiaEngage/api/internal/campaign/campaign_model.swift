@@ -215,14 +215,20 @@ struct CampaignModel: Equatable {
             raw = nil
         }
         guard let raw, let converted = surveyJSONObject(raw) else { return nil }
+        let variableSchemas = NudgeConfig.parseVariableSchemas(json.object("templateConfig") ?? raw)
         if raw.string("layoutMode") == "canvas" {
             return CanvasSurveyConfigParser.from(
                 converted,
                 fallbackId: fallbackId,
-                designTokens: designTokens
+                designTokens: designTokens,
+                variableSchemas: variableSchemas
             )
         }
-        return SurveyConfigModel.from(converted, fallbackId: fallbackId)
+        return SurveyConfigModel.from(
+            converted,
+            fallbackId: fallbackId,
+            variableSchemas: variableSchemas
+        )
     }
 
     // ── guide parsing ─────────────────────────────────────────────────────────

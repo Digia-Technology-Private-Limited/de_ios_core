@@ -126,6 +126,49 @@ struct CanvasSurveyConfigTests {
         #expect(vm.progressTotal(countQuestionsOnly: false) == 4)
     }
 
+    @Test("canvas survey campaign start builds variable context")
+    @MainActor
+    func canvasSurveyStartBuildsVariableContext() throws {
+        let data = Data(canvasSurveyTemplate(
+            welcomeEnabled: true,
+            bodyHeight: 640,
+            includeBack: false,
+            fontWeight: "semibold",
+            scenes: nil,
+            flowNodes: nil,
+            rootNodeId: "node_single_select"
+        ).utf8)
+        var template = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        template["variables"] = [
+            ["name": "first_name", "fallbackValue": "there"],
+            ["name": "score", "type": "number", "fallbackValue": "7"]
+        ]
+        let campaign = try #require(CampaignModel.fromJson([
+            "id": "campaign1",
+            "campaignKey": "canvas_survey",
+            "campaignType": "survey",
+            "templateConfig": template
+        ]))
+        let survey = try #require(campaign.surveyConfig)
+        let orchestrator = SurveyOrchestrator()
+
+        let started = orchestrator.start(
+            payload: CEPTriggerPayload(
+                cepCampaignId: "cep1",
+                campaignKey: "canvas_survey",
+                cepMetadata: [:],
+                variables: ["first_name": "Asha"]
+            ),
+            config: survey
+        )
+
+        #expect(started)
+        let variables = try #require(orchestrator.state?.variableContext)
+        #expect(variables.values["first_name"] == "Asha")
+        #expect(variables.values["score"] == "7")
+        #expect(interpolate("Hi {{first_name}}, score {{score + 1}}", context: variables) == "Hi Asha, score 8")
+    }
+
     private func parseCanvasSurveyTemplate(
         welcomeEnabled: Bool = true,
         bodyHeight: Int = 640,

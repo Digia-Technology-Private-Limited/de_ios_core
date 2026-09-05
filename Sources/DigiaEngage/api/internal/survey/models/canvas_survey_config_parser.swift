@@ -33,7 +33,8 @@ enum CanvasSurveyConfigParser {
     static func from(
         _ json: [String: JSONValue],
         fallbackId: String,
-        designTokens: DesignTokenCatalog = .empty
+        designTokens: DesignTokenCatalog = .empty,
+        variableSchemas: [VariableSchema] = []
     ) -> SurveyConfigModel? {
         guard SurveyParse.string(json["templateType"]) == "survey",
               let scenesArr = SurveyParse.array(json["scenes"]),
@@ -89,7 +90,8 @@ enum CanvasSurveyConfigParser {
                     rootSceneId: rootSceneId,
                     canNavigateBackFromRoot: welcome != nil
                 )
-            )
+            ),
+            variableSchemas: variableSchemas
         )
     }
 

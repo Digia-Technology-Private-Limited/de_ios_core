@@ -8,6 +8,7 @@ struct ActiveSurveyState: Equatable {
     let config: SurveyConfigModel
     let token: Int64
     let startedAt: Date
+    let variableContext: VariableContext
 }
 
 /// Holds the active survey. The in-progress answer state lives in the
@@ -25,7 +26,16 @@ final class SurveyOrchestrator: ObservableObject {
         guard !config.nodes.isEmpty, !config.blocks.isEmpty else { return false }
         if state != nil { return false }
         tokenCounter += 1
-        state = ActiveSurveyState(payload: payload, config: config, token: tokenCounter, startedAt: Date())
+        state = ActiveSurveyState(
+            payload: payload,
+            config: config,
+            token: tokenCounter,
+            startedAt: Date(),
+            variableContext: buildVariableContext(
+                schemas: config.variableSchemas,
+                cepVars: payload.variables
+            )
+        )
         return true
     }
 

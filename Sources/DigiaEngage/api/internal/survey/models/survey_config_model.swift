@@ -733,6 +733,7 @@ struct SurveyConfigModel: Equatable {
     let uiTemplateId: String?
     let timeDelayMs: Int
     let canvasSurvey: CanvasSurveyConfig?
+    let variableSchemas: [VariableSchema]
 
     /// O(1) block lookup keyed by block id.
     var blocksById: [String: SurveyBlock] {
@@ -758,7 +759,11 @@ struct SurveyConfigModel: Equatable {
         blocks.first { $0.type == .welcome && !$0.hidden }
     }
 
-    static func from(_ json: [String: JSONValue], fallbackId: String) -> SurveyConfigModel? {
+    static func from(
+        _ json: [String: JSONValue],
+        fallbackId: String,
+        variableSchemas: [VariableSchema] = []
+    ) -> SurveyConfigModel? {
         guard let blocksArr = SurveyParse.array(json["blocks"]),
               let nodesArr = SurveyParse.array(json["nodes"]) else { return nil }
         let blocks = blocksArr.compactMap { SurveyParse.object($0) }.compactMap(SurveyBlock.from)
@@ -797,7 +802,8 @@ struct SurveyConfigModel: Equatable {
             theme: SurveyTheme.from(SurveyParse.object(json["theme"])),
             uiTemplateId: uiTemplateId,
             timeDelayMs: timeDelayMs,
-            canvasSurvey: nil
+            canvasSurvey: nil,
+            variableSchemas: variableSchemas
         )
     }
 }
