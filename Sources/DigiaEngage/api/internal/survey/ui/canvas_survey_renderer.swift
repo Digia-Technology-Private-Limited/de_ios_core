@@ -59,6 +59,10 @@ struct CanvasSurveyPanel: View {
             reportQuestionViewedIfNeeded()
             scheduleAutoAdvanceIfNeeded()
         }
+        .onChange(of: welcomeDone) { _ in
+            reportQuestionViewedIfNeeded()
+            scheduleAutoAdvanceIfNeeded()
+        }
         .onChange(of: currentAnswer) { _ in
             if validationError != nil {
                 validationError = vm.canvasValidationError()
