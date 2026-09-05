@@ -93,14 +93,12 @@ struct DigiaInlineCanvasView: View {
         let dismiss = {
             SDKInstance.shared.dismissInlineCanvas(slotKey: config.slotKey, payload: payload)
         }
-        let hides = request.actions.contains { if case .dismiss = $0 { true } else { false } }
         Task {
             await SDKInstance.shared.executeActionFlow(
                 request.actions,
                 variables: variables,
                 localActionExecutor: LocalActionExecutor(dismiss: dismiss)
             )
-            if hides { dismiss() }
         }
     }
 }
