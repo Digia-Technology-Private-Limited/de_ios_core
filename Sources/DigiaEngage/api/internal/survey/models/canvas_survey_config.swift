@@ -51,6 +51,12 @@ enum CanvasSurveyNumericNpsVariant: Equatable {
     case circle
 }
 
+enum CanvasSurveyDateFormat: Equatable {
+    case ddMmYyyy
+    case mmDdYyyy
+    case yyyyMmDd
+}
+
 struct CanvasSurveyInputStyle: Equatable {
     var layout: CanvasSurveyChoiceLayout = .list
     var columns: Int = 1
@@ -136,6 +142,10 @@ struct CanvasSurveyFieldInput: Equatable {
     let required: Bool
     let style: CanvasSurveyInputStyle
     let placeholder: String
+    let dateFormat: CanvasSurveyDateFormat
+    let defaultDate: String?
+    let minimumDate: String?
+    let maximumDate: String?
     let minLength: Int?
     let maxLength: Int?
     let minimum: Double?

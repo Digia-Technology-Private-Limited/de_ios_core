@@ -198,57 +198,61 @@ private struct CanvasSurveyFieldInputView: View {
 
     var body: some View {
         let style = input.style.merge(hostStyle(host))
-        let isDark = CampaignCanvasTheme.shared.isDark(colorScheme)
-        let textColor = CampaignCanvasTheme.shared.color(style.textColor, isDark: isDark)
-        let placeholderColor = Color(hex: "#FF9A9AA8") ?? textColor.opacity(0.55)
-        let fillColor = CampaignCanvasTheme.shared.color(style.unselectedFill, isDark: isDark)
-        let borderColor = CampaignCanvasTheme.shared.color(isFocused ? style.selectedBorderColor : style.borderColor, isDark: isDark)
+        if input.type == .date {
+            CanvasSurveyDateFieldInputView(input: input, style: style, answer: answer, onAnswer: onAnswer)
+        } else {
+            let isDark = CampaignCanvasTheme.shared.isDark(colorScheme)
+            let textColor = CampaignCanvasTheme.shared.color(style.textColor, isDark: isDark)
+            let placeholderColor = Color(hex: "#FF9A9AA8") ?? textColor.opacity(0.55)
+            let fillColor = CampaignCanvasTheme.shared.color(style.unselectedFill, isDark: isDark)
+            let borderColor = CampaignCanvasTheme.shared.color(isFocused ? style.selectedBorderColor : style.borderColor, isDark: isDark)
 
-        ZStack(alignment: input.type == .longText ? .topLeading : .leading) {
-            if input.type == .longText {
-                TextEditor(text: Binding(
-                    get: { value },
-                    set: { update($0) }
-                ))
-                .transparentTextEditorBackground()
-                .focused($isFocused)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(.horizontal, max(0, style.padding - 5))
-                .padding(.vertical, max(0, style.padding - 8))
-                if value.isEmpty && !input.placeholder.isEmpty {
-                    Text(input.placeholder)
-                        .font(surveyFont(size: style.fontSize, weight: style.fontWeight))
-                        .foregroundColor(placeholderColor)
-                        .lineLimit(input.multilineRows)
-                        .padding(style.padding)
-                        .allowsHitTesting(false)
+            ZStack(alignment: input.type == .longText ? .topLeading : .leading) {
+                if input.type == .longText {
+                    TextEditor(text: Binding(
+                        get: { value },
+                        set: { update($0) }
+                    ))
+                    .transparentTextEditorBackground()
+                    .focused($isFocused)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, max(0, style.padding - 5))
+                    .padding(.vertical, max(0, style.padding - 8))
+                    if value.isEmpty && !input.placeholder.isEmpty {
+                        Text(input.placeholder)
+                            .font(surveyFont(size: style.fontSize, weight: style.fontWeight))
+                            .foregroundColor(placeholderColor)
+                            .lineLimit(input.multilineRows)
+                            .padding(style.padding)
+                            .allowsHitTesting(false)
+                    }
+                } else {
+                    TextField("", text: Binding(
+                        get: { value },
+                        set: { update($0) }
+                    ), prompt: Text(input.placeholder).foregroundColor(placeholderColor))
+                    .keyboardType(keyboardType)
+                    .focused($isFocused)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .padding(style.padding)
                 }
-            } else {
-                TextField("", text: Binding(
-                    get: { value },
-                    set: { update($0) }
-                ), prompt: Text(input.placeholder).foregroundColor(placeholderColor))
-                .keyboardType(keyboardType)
-                .focused($isFocused)
-                .lineLimit(1)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .padding(style.padding)
             }
+            .font(surveyFont(size: style.fontSize, weight: style.fontWeight))
+            .foregroundColor(textColor)
+            .tint(CampaignCanvasTheme.shared.color(style.selectedBorderColor, isDark: isDark))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: input.type == .longText ? .topLeading : .leading)
+            .background(
+                RoundedRectangle(cornerRadius: style.cornerRadius)
+                    .fill(fillColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: style.cornerRadius)
+                    .stroke(borderColor, lineWidth: style.borderWidth)
+            )
+            .onAppear { value = answer?.values.first ?? "" }
+            .onChange(of: answer?.values.first) { value = $0 ?? "" }
         }
-        .font(surveyFont(size: style.fontSize, weight: style.fontWeight))
-        .foregroundColor(textColor)
-        .tint(CampaignCanvasTheme.shared.color(style.selectedBorderColor, isDark: isDark))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: input.type == .longText ? .topLeading : .leading)
-        .background(
-            RoundedRectangle(cornerRadius: style.cornerRadius)
-                .fill(fillColor)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: style.cornerRadius)
-                .stroke(borderColor, lineWidth: style.borderWidth)
-        )
-        .onAppear { value = answer?.values.first ?? "" }
-        .onChange(of: answer?.values.first) { value = $0 ?? "" }
     }
 
     private var keyboardType: UIKeyboardType {
@@ -263,6 +267,255 @@ private struct CanvasSurveyFieldInputView: View {
     private func update(_ newValue: String) {
         value = newValue
         onAnswer(SurveyAnswer(values: [newValue]))
+    }
+}
+
+private struct CanvasSurveyDateFieldInputView: View {
+    let input: CanvasSurveyFieldInput
+    let style: CanvasSurveyInputStyle
+    let answer: SurveyAnswer?
+    let onAnswer: (SurveyAnswer) -> Void
+
+    @State private var selectedDate = Date()
+    @State private var value = ""
+    @State private var hydrated = false
+    @State private var showingDateDialog = false
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        let isDark = CampaignCanvasTheme.shared.isDark(colorScheme)
+        let textColor = CampaignCanvasTheme.shared.color(style.textColor, isDark: isDark)
+        let placeholderColor = Color(hex: "#FF9A9AA8") ?? textColor.opacity(0.55)
+        let fillColor = CampaignCanvasTheme.shared.color(style.unselectedFill, isDark: isDark)
+        let borderColor = CampaignCanvasTheme.shared.color(style.borderColor, isDark: isDark)
+        let displayValue = value.isEmpty ? input.placeholder : formatDisplayDate(value, format: input.dateFormat)
+        let parsedMinimumDate = parseIsoDate(input.minimumDate ?? "")
+        let parsedMaximumDate = parseIsoDate(input.maximumDate ?? "")
+        let hasValidDateRange = validDateRange(minimum: parsedMinimumDate, maximum: parsedMaximumDate)
+        let minimumDate = hasValidDateRange ? parsedMinimumDate : nil
+        let maximumDate = hasValidDateRange ? parsedMaximumDate : nil
+
+        ZStack(alignment: .leading) {
+            Text(displayValue)
+                .font(surveyFont(size: style.fontSize, weight: style.fontWeight))
+                .foregroundColor(value.isEmpty ? placeholderColor : textColor)
+                .lineLimit(1)
+                .padding(style.padding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: style.cornerRadius)
+                        .fill(fillColor)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: style.cornerRadius)
+                        .stroke(borderColor, lineWidth: style.borderWidth)
+                )
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    selectedDate = boundedDate(selectedDate, minimum: minimumDate, maximum: maximumDate)
+                    showingDateDialog = true
+                }
+            CanvasSurveyDateDialogPresenter(
+                isPresented: $showingDateDialog,
+                selectedDate: $selectedDate,
+                minimumDate: minimumDate,
+                maximumDate: maximumDate,
+                onDateChange: update
+            )
+            .frame(width: 0, height: 0)
+        }
+        .onAppear {
+            guard !hydrated else { return }
+            hydrated = true
+            value = answer?.values.first ?? ""
+            selectedDate = parseIsoDate(value)
+                ?? parseIsoDate(input.defaultDate ?? "")
+                ?? boundedDate(Date(), minimum: minimumDate, maximum: maximumDate)
+        }
+        .onChange(of: answer?.values.first) {
+            value = $0 ?? ""
+            selectedDate = parseIsoDate(value) ?? selectedDate
+        }
+    }
+
+    private func update(_ date: Date) {
+        selectedDate = date
+        value = formatIsoDate(date)
+        onAnswer(SurveyAnswer(values: [value]))
+    }
+}
+
+private struct CanvasSurveyDateDialogPresenter: UIViewControllerRepresentable {
+    @Binding var isPresented: Bool
+    @Binding var selectedDate: Date
+    let minimumDate: Date?
+    let maximumDate: Date?
+    let onDateChange: (Date) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeUIViewController(context: Context) -> UIViewController {
+        UIViewController()
+    }
+
+    func updateUIViewController(_ viewController: UIViewController, context: Context) {
+        context.coordinator.configure(
+            isPresented: isPresented,
+            selectedDate: selectedDate,
+            minimumDate: minimumDate,
+            maximumDate: maximumDate,
+            dismiss: { isPresented = false },
+            select: { date in
+                selectedDate = date
+                onDateChange(date)
+            }
+        )
+        context.coordinator.update(from: viewController)
+    }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        private var isPresented = false
+        private var selectedDate = Date()
+        private var minimumDate: Date?
+        private var maximumDate: Date?
+        private var dismiss: () -> Void = {}
+        private var select: (Date) -> Void = { _ in }
+        private weak var alertController: UIAlertController?
+        weak var datePicker: UIDatePicker?
+
+        func configure(
+            isPresented: Bool,
+            selectedDate: Date,
+            minimumDate: Date?,
+            maximumDate: Date?,
+            dismiss: @escaping () -> Void,
+            select: @escaping (Date) -> Void
+        ) {
+            self.isPresented = isPresented
+            self.selectedDate = selectedDate
+            self.minimumDate = minimumDate
+            self.maximumDate = maximumDate
+            self.dismiss = dismiss
+            self.select = select
+        }
+
+        func update(from viewController: UIViewController) {
+            if isPresented {
+                if alertController == nil {
+                    present(from: viewController)
+                } else {
+                    syncPicker()
+                }
+            } else if let alertController {
+                alertController.dismiss(animated: true)
+                self.alertController = nil
+            }
+        }
+
+        private func present(from viewController: UIViewController) {
+            guard viewController.presentedViewController == nil else { return }
+            let alert = UIAlertController(title: nil, message: "\n\n\n\n\n\n\n\n\n", preferredStyle: .alert)
+            let datePicker = UIDatePicker()
+            datePicker.datePickerMode = .date
+            if #available(iOS 13.4, *) {
+                datePicker.preferredDatePickerStyle = .wheels
+            }
+            datePicker.minimumDate = minimumDate
+            datePicker.maximumDate = maximumDate
+            datePicker.date = boundedDate(selectedDate, minimum: minimumDate, maximum: maximumDate)
+            alert.view.addSubview(datePicker)
+            datePicker.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                datePicker.leadingAnchor.constraint(equalTo: alert.view.leadingAnchor, constant: 8),
+                datePicker.trailingAnchor.constraint(equalTo: alert.view.trailingAnchor, constant: -8),
+                datePicker.topAnchor.constraint(equalTo: alert.view.topAnchor, constant: 40),
+                datePicker.heightAnchor.constraint(equalToConstant: 216),
+            ])
+            alert.addAction(
+                UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
+                    self?.alertController = nil
+                    self?.dismiss()
+                }
+            )
+            alert.addAction(
+                UIAlertAction(title: "Done", style: .default) { [weak self, weak datePicker] _ in
+                    guard let self else { return }
+                    let date = datePicker?.date ?? self.selectedDate
+                    self.alertController = nil
+                    self.select(date)
+                    self.dismiss()
+                }
+            )
+            alertController = alert
+            self.datePicker = datePicker
+            viewController.present(alert, animated: true)
+        }
+
+        private func syncPicker() {
+            datePicker?.minimumDate = minimumDate
+            datePicker?.maximumDate = maximumDate
+            datePicker?.date = boundedDate(
+                selectedDate,
+                minimum: minimumDate,
+                maximum: maximumDate
+            )
+        }
+    }
+}
+
+private func parseIsoDate(_ input: String) -> Date? {
+    let parts = input.split(separator: "-")
+    guard parts.count == 3,
+          let year = Int(parts[0]),
+          let month = Int(parts[1]),
+          let day = Int(parts[2])
+    else { return nil }
+    var components = DateComponents()
+    components.calendar = Calendar(identifier: .gregorian)
+    components.year = year
+    components.month = month
+    components.day = day
+    components.hour = 12
+    return components.date
+}
+
+private func boundedDate(_ date: Date, minimum: Date?, maximum: Date?) -> Date {
+    if let minimum, date < minimum { return minimum }
+    if let maximum, date > maximum { return maximum }
+    return date
+}
+
+private func validDateRange(minimum: Date?, maximum: Date?) -> Bool {
+    guard let minimum, let maximum else { return true }
+    return minimum <= maximum
+}
+
+private func formatIsoDate(_ date: Date) -> String {
+    let components = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: date)
+    return String(
+        format: "%04d-%02d-%02d",
+        components.year ?? 0,
+        components.month ?? 1,
+        components.day ?? 1
+    )
+}
+
+private func formatDisplayDate(_ value: String, format: CanvasSurveyDateFormat) -> String {
+    guard let date = parseIsoDate(value) else { return value }
+    let components = Calendar(identifier: .gregorian).dateComponents([.year, .month, .day], from: date)
+    let year = components.year ?? 0
+    let month = components.month ?? 1
+    let day = components.day ?? 1
+    switch format {
+    case .mmDdYyyy:
+        return String(format: "%02d / %02d / %04d", month, day, year)
+    case .yyyyMmDd:
+        return String(format: "%04d-%02d-%02d", year, month, day)
+    case .ddMmYyyy:
+        return String(format: "%02d / %02d / %04d", day, month, year)
     }
 }
 

@@ -28,6 +28,10 @@ struct CanvasSurveyInputParser {
                 required: required,
                 style: style,
                 placeholder: SurveyParse.string(json["placeholder"]) ?? "",
+                dateFormat: dateFormat(SurveyParse.string(json["dateFormat"])),
+                defaultDate: SurveyParse.string(json["defaultDate"]),
+                minimumDate: SurveyParse.string(json["minimumDate"]),
+                maximumDate: SurveyParse.string(json["maximumDate"]),
                 minLength: canvasSurveyInt(json["minLength"]),
                 maxLength: canvasSurveyInt(json["maxLength"]),
                 minimum: canvasSurveyDouble(json["minimum"]) ?? canvasSurveyDouble(json["min"]),
@@ -117,6 +121,14 @@ struct CanvasSurveyInputParser {
         case "row": return .row
         case "grid": return .grid
         default: return .list
+        }
+    }
+
+    private func dateFormat(_ value: String?) -> CanvasSurveyDateFormat {
+        switch value {
+        case "mm_dd_yyyy": return .mmDdYyyy
+        case "yyyy_mm_dd": return .yyyyMmDd
+        default: return .ddMmYyyy
         }
     }
 
