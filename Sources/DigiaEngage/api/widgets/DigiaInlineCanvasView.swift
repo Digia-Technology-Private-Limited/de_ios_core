@@ -55,6 +55,11 @@ struct DigiaInlineCanvasView: View {
     }
 
     private func perform(_ request: CampaignCanvasActionRequest, variables: VariableContext?) {
+        defer {
+            SDKInstance.shared.reportPrimaryCTAClick(
+                payload: payload, elementId: request.elementId, isPrimary: request.isPrimary
+            )
+        }
         guard !request.actions.isEmpty else { return }
         let action = request.actions.first?.resolved(with: variables)
         // A tap inside a slide or a page is a *step* click, matching what the legacy carousel and
@@ -88,14 +93,12 @@ struct DigiaInlineCanvasView: View {
         let dismiss = {
             SDKInstance.shared.dismissInlineCanvas(slotKey: config.slotKey, payload: payload)
         }
-        let hides = request.actions.contains { if case .dismiss = $0 { true } else { false } }
         Task {
             await SDKInstance.shared.executeActionFlow(
                 request.actions,
                 variables: variables,
                 localActionExecutor: LocalActionExecutor(dismiss: dismiss)
             )
-            if hides { dismiss() }
         }
     }
 }
