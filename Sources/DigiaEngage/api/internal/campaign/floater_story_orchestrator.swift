@@ -60,6 +60,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
     private var everOpened = false
     private var completed = false
     private var visible = false
+    private(set) var storyInitialIndex = 0
 
     private var autoDismissTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
@@ -129,6 +130,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
         storyStartedAtMs = nil
         everOpened = false
         completed = false
+        storyInitialIndex = 0
         return true
     }
 
@@ -150,8 +152,11 @@ final class FloaterStoryOrchestrator: ObservableObject {
     }
 
     /// The user tapped the window and the story is opening.
-    func openStory() {
+    func openStory(initialIndex: Int = 0) {
         guard let active = state, !closing, !storyOpen else { return }
+        if case .story(_, let pages, _, _, _, _, _, _, _, _) = active.config.story {
+            storyInitialIndex = min(max(0, initialIndex), pages.count - 1)
+        }
         storyOpen = true
         storyOverlayActive = true
         openCount += 1

@@ -1705,7 +1705,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             frequencyManager?.recordCompleted(
                 campaignKey, campaignStore.find(campaignKey)?.frequency)
         }
-        events.toDigia(FloaterEvent.Completed(), payload: state.payload)
     }
 
     /// SDK chrome taps on the window itself — opening the story, and the ×.
@@ -1755,6 +1754,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 request.actions, variables: state.variableContext,
                 localActionExecutor: LocalActionExecutor(dismiss: { [weak self] in
                     self?.floaterStoryOrchestrator.dismiss(.userClose)
+                }, showStory: { [weak self] index in
+                    self?.floaterStoryOrchestrator.openStory(initialIndex: index)
                 })
             )
         }
