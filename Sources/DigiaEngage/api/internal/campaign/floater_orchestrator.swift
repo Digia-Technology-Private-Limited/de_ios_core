@@ -226,8 +226,10 @@ final class FloaterOrchestrator: ObservableObject {
         // count starts at zero either way.
         expandCount = 0
         expandedMs = 0
-        expandedStartedAtMs = startsExpanded ? nowMs : nil
-        everExpanded = startsExpanded
+        // A start-expanded showing only counts after its media is visible. Until then a
+        // dismissal is an abandoned load, not a completed showing.
+        expandedStartedAtMs = nil
+        everExpanded = false
         completed = false
         // Assume we wait; prepareMedia releases it as soon as the media is ready, or
         // immediately when there is nothing to load. Set beforehand so a
@@ -255,6 +257,10 @@ final class FloaterOrchestrator: ObservableObject {
         mediaReadyTask = nil
         guard awaitingMedia else { return }
         awaitingMedia = false
+        if surface == .expanded {
+            everExpanded = true
+            expandedStartedAtMs = expandedStartedAtMs ?? now()
+        }
         restartAutoDismiss()
         onVisible(active)
     }
