@@ -690,7 +690,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
         return route(
             campaign, payload: payload,
-            context: OrganicRoutingContext(frequencyManager: frequencyManager, events: events))
+            context: OrganicRoutingContext(frequencyManager: frequencyManager))
     }
 
     /// Abstracts the two points where `route` otherwise diverges between an
@@ -707,7 +707,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     @MainActor
     private struct OrganicRoutingContext: RoutingContext {
         let frequencyManager: FrequencyManager?
-        let events: EngageEventEmitter
 
         func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool {
             guard
@@ -722,10 +721,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
 
         func onInlineRouted(payload: CEPTriggerPayload) {
-            // Re-delivery can reuse a slot that has already rendered.
-            if events.hasImpression(payload.cepCampaignId) {
-                events.toCep(.impressed, payload: payload)
-            }
+            // Inline impressions are reported when the slot first renders.
         }
 
         func onDropped(_ code: LiveTestFailureCode, message: String) {

@@ -138,10 +138,6 @@ final class EngageEventEmitter {
         toDigia(event, payload: payload)
     }
 
-    func hasImpression(_ cepCampaignId: String) -> Bool {
-        digiaImpressed.contains(cepCampaignId)
-    }
-
     /// Forgets the impression + first-click marks so a later re-trigger re-arms both.
     func resetImpression(_ cepCampaignId: String) {
         digiaImpressed.remove(cepCampaignId)
