@@ -722,7 +722,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
 
         func onInlineRouted(payload: CEPTriggerPayload) {
-            events.toCep(.inlineAccepted, payload: payload)
+            // Re-delivery can reuse a slot that has already rendered.
+            if events.hasImpression(payload.cepCampaignId) {
+                events.toCep(.impressed, payload: payload)
+            }
         }
 
         func onDropped(_ code: LiveTestFailureCode, message: String) {
@@ -1754,7 +1757,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     // MARK: - Inline slot lifecycle
     //
-    // Inline acceptance, first render, and removal are separate CEP callbacks.
+    // Inline impressions fire at first render; dismissal fires at final removal.
 
     /// Resolves the campaign for `payload`: a live test's transient entry if
     /// present, else the real store. Every campaign-by-payload lookup should go

@@ -122,6 +122,7 @@ final class EngageEventEmitter {
     }
 
     func inlineRemoved(_ payload: CEPTriggerPayload) {
+        resetImpression(payload.cepCampaignId)
         toCep(.dismissed, payload: payload)
     }
 
@@ -135,6 +136,10 @@ final class EngageEventEmitter {
     func digiaExperienceClickedOnce(payload: CEPTriggerPayload, event: EngageAnalyticsEvent) {
         guard digiaClicked.insert(payload.cepCampaignId).inserted else { return }
         toDigia(event, payload: payload)
+    }
+
+    func hasImpression(_ cepCampaignId: String) -> Bool {
+        digiaImpressed.contains(cepCampaignId)
     }
 
     /// Forgets the impression + first-click marks so a later re-trigger re-arms both.
