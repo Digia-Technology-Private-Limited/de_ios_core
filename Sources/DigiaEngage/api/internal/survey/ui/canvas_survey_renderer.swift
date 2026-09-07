@@ -1,5 +1,7 @@
 import SwiftUI
 
+private let canvasSurveySceneTransitionDuration: TimeInterval = 0.32
+
 @MainActor
 struct CanvasSurveyPanel: View {
     @ObservedObject var vm: SurveyViewModel
@@ -18,18 +20,20 @@ struct CanvasSurveyPanel: View {
     @State private var lastAutoAdvanceKey = ""
     @State private var completionReported = false
     @State private var validationError: String?
+    @State private var activeFrame: CanvasSurveyFrame?
+    @State private var previousFrame: CanvasSurveyFrame?
+    @StateObject private var sceneTransition = CanvasSurveyTransitionClock()
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
         Group {
-            if let document = currentDocument {
+            if let frame = activeFrame ?? currentFrame {
                 CanvasSurveyScaledStage(
-                    document: document,
-                    scene: currentSceneDocument,
+                    frame: frame,
+                    previousFrame: previousFrame,
+                    transitionProgress: sceneTransition.progress,
                     survey: survey,
                     designWidth: canvasSurvey.designWidth,
-                    block: currentBlock,
-                    answerNodeId: currentNode?.id,
                     vm: vm,
                     accent: accent,
                     remainingSecs: remainingSecs,
@@ -49,10 +53,14 @@ struct CanvasSurveyPanel: View {
             }
         }
         .onAppear {
+            syncSceneTransition(to: currentFrame, animated: false)
             remainingSecs = survey.settings.timer.timeLimitSeconds
             startTimerIfNeeded()
             reportQuestionViewedIfNeeded()
             scheduleAutoAdvanceIfNeeded()
+        }
+        .onChange(of: currentFrame?.key) { _ in
+            syncSceneTransition(to: currentFrame, animated: true)
         }
         .onChange(of: vm.currentNodeId) { _ in
             clearValidationError()
@@ -69,6 +77,10 @@ struct CanvasSurveyPanel: View {
                 validationError = vm.canvasValidationError()
             }
             scheduleAutoAdvanceIfNeeded()
+        }
+        .onDisappear {
+            sceneTransition.stop()
+            performWithoutAnimation { previousFrame = nil }
         }
     }
 
@@ -105,6 +117,57 @@ struct CanvasSurveyPanel: View {
         return canvasSurvey.document(for: node)
     }
 
+    private var currentFrame: CanvasSurveyFrame? {
+        guard let document = currentDocument else { return nil }
+        return CanvasSurveyFrame(
+            key: showingWelcome ? "canvas-survey-welcome" : "canvas-survey-node:\(currentNode?.id ?? "")",
+            document: document,
+            scene: showingWelcome ? nil : currentSceneDocument,
+            block: currentBlock,
+            answerNodeId: currentNode?.id
+        )
+    }
+
+    private func syncSceneTransition(to nextFrame: CanvasSurveyFrame?, animated: Bool) {
+        guard let nextFrame else {
+            sceneTransition.stop()
+            performWithoutAnimation {
+                activeFrame = nil
+                previousFrame = nil
+            }
+            return
+        }
+        guard activeFrame?.key != nextFrame.key else {
+            performWithoutAnimation { activeFrame = nextFrame }
+            return
+        }
+        sceneTransition.stop()
+        let outgoingFrame = activeFrame
+        performWithoutAnimation {
+            previousFrame = outgoingFrame
+            activeFrame = nextFrame
+        }
+        guard animated, previousFrame != nil else {
+            performWithoutAnimation {
+                previousFrame = nil
+            }
+            return
+        }
+        sceneTransition.start {
+            if activeFrame?.key == nextFrame.key {
+                performWithoutAnimation {
+                    previousFrame = nil
+                }
+            }
+        }
+    }
+
+    private func performWithoutAnimation(_ updates: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction, updates)
+    }
+
     private func primary() {
         if showingWelcome {
             SDKInstance.shared.reportSurveyWelcomeStart()
@@ -134,7 +197,9 @@ struct CanvasSurveyPanel: View {
     }
 
     private func previous() {
-        if !showingWelcome && vm.canGoBack { vm.back() }
+        if !showingWelcome && vm.canGoBack {
+            vm.back()
+        }
         clearValidationError()
     }
 
@@ -209,13 +274,64 @@ struct CanvasSurveyPanel: View {
     }
 }
 
-private struct CanvasSurveyScaledStage: View {
+// Recompute the fade and layout curves from elapsed time on every display frame.
+// Animating a plain @State Double only interpolates the resulting view properties.
+@MainActor
+private final class CanvasSurveyTransitionClock: NSObject, ObservableObject {
+    @Published private(set) var progress = 1.0
+    private var displayLink: CADisplayLink?
+    private var startedAt: CFTimeInterval = 0
+    private var completion: (() -> Void)?
+
+    func start(completion: @escaping () -> Void) {
+        stop()
+        self.completion = completion
+        startedAt = CACurrentMediaTime()
+        updateProgress(0)
+        let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
+        displayLink = link
+        link.add(to: .main, forMode: .common)
+    }
+
+    func stop() {
+        displayLink?.invalidate()
+        displayLink = nil
+        completion = nil
+        updateProgress(1)
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        let elapsed = max(0, link.timestamp - startedAt)
+        let value = min(1, elapsed / canvasSurveySceneTransitionDuration)
+        updateProgress(value)
+        if value >= 1 {
+            let completed = completion
+            stop()
+            completed?()
+        }
+    }
+
+    private func updateProgress(_ value: Double) {
+        var transaction = Transaction(animation: nil)
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { progress = value }
+    }
+}
+
+private struct CanvasSurveyFrame {
+    let key: String
     let document: CanvasSurveyDocument
     let scene: CanvasSurveySceneDocument?
-    let survey: SurveyConfigModel
-    let designWidth: CGFloat
     let block: SurveyBlock?
     let answerNodeId: String?
+}
+
+private struct CanvasSurveyScaledStage: View {
+    let frame: CanvasSurveyFrame
+    let previousFrame: CanvasSurveyFrame?
+    let transitionProgress: Double
+    let survey: SurveyConfigModel
+    let designWidth: CGFloat
     @ObservedObject var vm: SurveyViewModel
     let accent: Color
     let remainingSecs: Int
@@ -231,6 +347,7 @@ private struct CanvasSurveyScaledStage: View {
 
     var body: some View {
         GeometryReader { geo in
+            let document = visualDocument
             let designScale = canvasSurveyDesignScale(viewportWidth: UIScreen.main.bounds.width)
             let scale = canvasSurveyFitScale(
                 designScale: designScale,
@@ -243,28 +360,34 @@ private struct CanvasSurveyScaledStage: View {
                         .frame(width: stageWidth, height: stageHeight)
                         .allowsHitTesting(false)
                 }
-                CampaignCanvasStage(
-                    canvas: document.canvas,
-                    authoredCornerRadius: 0,
-                    isDark: CampaignCanvasTheme.shared.isDark(colorScheme),
-                    showBackground: false,
-                    onAction: onCanvasAction
+                CanvasSurveyContentLayer(
+                    frame: frame,
+                    previousFrame: previousFrame,
+                    transitionProgress: transitionProgress,
+                    survey: survey,
+                    vm: vm,
+                    accent: accent,
+                    onCanvasAction: onCanvasAction,
+                    onValidationError: onValidationError
                 )
+                .frame(width: stageWidth, height: stageHeight, alignment: .topLeading)
+                .clipped()
                 CampaignCanvasStage(
                     canvas: document.sharedUi,
                     authoredCornerRadius: 0,
                     isDark: CampaignCanvasTheme.shared.isDark(colorScheme),
                     showBackground: false,
                     onAction: onCanvasAction,
-                    backgroundTakesTouches: false
+                    backgroundTakesTouches: false,
+                    animateWidgetsOnAppear: false
                 )
-                ForEach(Array(hosts.enumerated()), id: \.offset) { _, host in
+                ForEach(managedHosts, id: \.id) { host in
                     CanvasSurveyHostView(
-                        host: host,
-                        scene: scene,
+                        host: .managed(host),
+                        scene: frame.scene,
                         survey: survey,
-                        block: block,
-                        answerNodeId: answerNodeId,
+                        block: frame.block,
+                        answerNodeId: frame.answerNodeId,
                         vm: vm,
                         accent: accent,
                         remainingSecs: remainingSecs,
@@ -286,6 +409,7 @@ private struct CanvasSurveyScaledStage: View {
                 }
             }
             .frame(width: stageWidth, height: stageHeight, alignment: .topLeading)
+            .clipped()
             .scaleEffect(scale, anchor: .topLeading)
             .frame(width: stageWidth * scale, height: stageHeight * scale, alignment: .topLeading)
         }
@@ -293,8 +417,23 @@ private struct CanvasSurveyScaledStage: View {
         .fixedSize(horizontal: false, vertical: true)
     }
 
-    private var hosts: [CanvasSurveyHostElement] {
-        document.canvasHosts + document.sharedUiHosts.map(CanvasSurveyHostElement.managed)
+    private var document: CanvasSurveyDocument {
+        visualDocument
+    }
+
+    private var visualDocument: CanvasSurveyDocument {
+        canvasSurveyVisualDocument(
+            current: frame.document,
+            previous: previousFrame?.document,
+            progress: transitionProgress
+        )
+    }
+
+    private var managedHosts: [CanvasSurveyManagedHostElement] {
+        document.canvasHosts.compactMap { host in
+            if case .managed(let managedHost) = host { return managedHost }
+            return nil
+        } + document.sharedUiHosts
     }
 
     private var stageWidth: CGFloat {
@@ -347,6 +486,254 @@ private struct CanvasSurveyScaledStage: View {
         let widthFit = desiredWidth > 0 ? availableWidth / desiredWidth : 1
         let heightFit = desiredHeight > 0 ? availableHeight / desiredHeight : 1
         return designScale * min(1, widthFit, heightFit)
+    }
+}
+
+private func canvasSurveyVisualDocument(
+    current: CanvasSurveyDocument,
+    previous: CanvasSurveyDocument?,
+    progress: Double
+) -> CanvasSurveyDocument {
+    guard let previous else { return current }
+    let eased = easeInOutCubic(CGFloat(min(1, max(0, progress))))
+    let previousWidth = max(previous.canvas.width, previous.sharedUi.width)
+    let currentWidth = max(current.canvas.width, current.sharedUi.width)
+    let visualWidth = max(1, lerp(previousWidth, currentWidth, eased))
+    let visualHeight = max(1, lerp(previous.canvas.height, current.canvas.height, eased))
+    let previousSharedChildren = Dictionary(
+        previous.sharedUi.children.map { ($0.id, $0) },
+        uniquingKeysWith: { _, last in last }
+    )
+    let previousManagedHosts = Dictionary(
+        (
+            previous.canvasHosts.compactMap { host -> CanvasSurveyManagedHostElement? in
+                if case .managed(let managedHost) = host { return managedHost }
+                return nil
+            } + previous.sharedUiHosts
+        ).map { ($0.id, $0) },
+        uniquingKeysWith: { _, last in last }
+    )
+    return CanvasSurveyDocument(
+        canvas: CampaignCanvas(
+            version: current.canvas.version,
+            width: visualWidth,
+            height: visualHeight,
+            background: current.canvas.background,
+            children: current.canvas.children
+        ),
+        sharedUi: CampaignCanvas(
+            version: current.sharedUi.version,
+            width: visualWidth,
+            height: visualHeight,
+            background: current.sharedUi.background,
+            children: current.sharedUi.children.map { child in
+                child.withRect(
+                    lerpRect(
+                        previousSharedChildren[child.id]?.rect ?? child.rect,
+                        child.rect,
+                        eased
+                    )
+                )
+            }
+        ),
+        canvasHosts: current.canvasHosts.map { host in
+            guard case .managed(let managedHost) = host else { return host }
+            return .managed(
+                managedHost.withRect(
+                    lerpRect(
+                        previousManagedHosts[managedHost.id]?.rect ?? managedHost.rect,
+                        managedHost.rect,
+                        eased
+                    )
+                )
+            )
+        },
+        sharedUiHosts: current.sharedUiHosts.map { host in
+            return host.withRect(
+                lerpRect(
+                    previousManagedHosts[host.id]?.rect ?? host.rect,
+                    host.rect,
+                    eased
+                )
+            )
+        }
+    )
+}
+
+private func easeInOutCubic(_ value: CGFloat) -> CGFloat {
+    if value < 0.5 {
+        return 4 * value * value * value
+    }
+    let shifted = -2 * value + 2
+    return 1 - shifted * shifted * shifted / 2
+}
+
+private func canvasSurveyOutgoingAlpha(_ progress: Double) -> Double {
+    let phase = min(1, max(0, progress / 0.4))
+    return 1 - Double(easeOutCubic(CGFloat(phase)))
+}
+
+private func canvasSurveyIncomingAlpha(_ progress: Double) -> Double {
+    let phase = min(1, max(0, (progress - 0.18) / 0.82))
+    return Double(easeOutCubic(CGFloat(phase)))
+}
+
+private func easeOutCubic(_ value: CGFloat) -> CGFloat {
+    let inverted = 1 - value
+    return 1 - inverted * inverted * inverted
+}
+
+private func lerpRect(
+    _ begin: CampaignCanvasRect,
+    _ end: CampaignCanvasRect,
+    _ progress: CGFloat
+) -> CampaignCanvasRect {
+    CampaignCanvasRect(
+        x: lerp(begin.x, end.x, progress),
+        y: lerp(begin.y, end.y, progress),
+        width: lerp(begin.width, end.width, progress),
+        height: lerp(begin.height, end.height, progress)
+    )
+}
+
+private func lerp(_ begin: CGFloat, _ end: CGFloat, _ progress: CGFloat) -> CGFloat {
+    begin + (end - begin) * progress
+}
+
+private extension CampaignCanvasChild {
+    func withRect(_ rect: CampaignCanvasRect) -> CampaignCanvasChild {
+        switch self {
+        case .widget(let id, _, let widget):
+            return .widget(id: id, rect: rect, widget: widget)
+        case .tapRegion(let id, _, let actions):
+            return .tapRegion(id: id, rect: rect, actions: actions)
+        }
+    }
+}
+
+private extension CanvasSurveyManagedHostElement {
+    func withRect(_ rect: CampaignCanvasRect) -> CanvasSurveyManagedHostElement {
+        CanvasSurveyManagedHostElement(
+            id: id,
+            rect: rect,
+            role: role,
+            visible: visible,
+            label: label,
+            doneLabel: doneLabel,
+            colorHex: colorHex,
+            fillHex: fillHex,
+            trackColorHex: trackColorHex,
+            borderColorHex: borderColorHex,
+            borderWidth: borderWidth,
+            cornerRadius: cornerRadius,
+            fontSize: fontSize,
+            gap: gap,
+            padding: padding,
+            progressStyle: progressStyle,
+            countQuestionsOnly: countQuestionsOnly,
+            iconColorHex: iconColorHex,
+            iconSize: iconSize,
+            button: button
+        )
+    }
+}
+
+private struct CanvasSurveyContentLayer: View {
+    let frame: CanvasSurveyFrame
+    let previousFrame: CanvasSurveyFrame?
+    let transitionProgress: Double
+    let survey: SurveyConfigModel
+    @ObservedObject var vm: SurveyViewModel
+    let accent: Color
+    let onCanvasAction: (CampaignCanvasActionRequest) -> Void
+    let onValidationError: (String?) -> Void
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ForEach(contentFrames, id: \.key) { contentFrame in
+                let incoming = contentFrame.key == frame.key
+                CanvasSurveyContentFrame(
+                    frame: contentFrame,
+                    answerInteractive: incoming,
+                    survey: survey,
+                    vm: vm,
+                    accent: accent,
+                    onCanvasAction: onCanvasAction,
+                    onValidationError: onValidationError
+                )
+                .compositingGroup()
+                .opacity(previousFrame == nil ? 1 : incoming
+                    ? canvasSurveyIncomingAlpha(transitionProgress)
+                    : canvasSurveyOutgoingAlpha(transitionProgress))
+                .transition(.identity)
+                .allowsHitTesting(incoming)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .clipped()
+    }
+
+    private var contentFrames: [CanvasSurveyFrame] {
+        if let previousFrame { return [previousFrame, frame] }
+        return [frame]
+    }
+}
+
+private struct CanvasSurveyContentFrame: View {
+    let frame: CanvasSurveyFrame
+    let answerInteractive: Bool
+    let survey: SurveyConfigModel
+    @ObservedObject var vm: SurveyViewModel
+    let accent: Color
+    let onCanvasAction: (CampaignCanvasActionRequest) -> Void
+    let onValidationError: (String?) -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            CampaignCanvasStage(
+                canvas: frame.document.canvas,
+                authoredCornerRadius: 0,
+                isDark: CampaignCanvasTheme.shared.isDark(colorScheme),
+                showBackground: false,
+                onAction: onCanvasAction
+            )
+            ForEach(answerHosts, id: \.id) { host in
+                CanvasSurveyHostView(
+                    host: .answer(host),
+                    scene: frame.scene,
+                    survey: survey,
+                    block: frame.block,
+                    answerNodeId: frame.answerNodeId,
+                    vm: vm,
+                    accent: accent,
+                    remainingSecs: 0,
+                    showCloseButton: false,
+                    onPrimary: {},
+                    onPrevious: {},
+                    onClose: {},
+                    onCanvasAction: onCanvasAction,
+                    onValidationError: answerInteractive ? onValidationError : { _ in }
+                )
+                .frame(width: host.rect.width, height: host.rect.height, alignment: .topLeading)
+                .offset(x: host.rect.x, y: host.rect.y)
+                .allowsHitTesting(answerInteractive)
+            }
+        }
+        .frame(
+            width: max(frame.document.canvas.width, frame.document.sharedUi.width, 1),
+            height: max(frame.document.canvas.height, 1),
+            alignment: .topLeading
+        )
+        .clipped()
+        .allowsHitTesting(answerInteractive)
+    }
+
+    private var answerHosts: [CanvasSurveyAnswerHostElement] {
+        frame.document.canvasHosts.compactMap { host in
+            if case .answer(let answerHost) = host { return answerHost }
+            return nil
+        }
     }
 }
 
@@ -532,6 +919,10 @@ private struct CanvasSurveyButtonHost: View {
                 onAction: { _ in if interactive { onClick() } }
             )
             .opacity(enabled ? 1 : 0.45)
+            .transaction { transaction in
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
         } else {
             let fill = Color(hex: host.fillHex) ?? accent
             let foreground = Color(hex: host.colorHex) ?? Color.white
@@ -549,6 +940,10 @@ private struct CanvasSurveyButtonHost: View {
             .opacity(enabled ? 1 : 0.45)
             .buttonStyle(.plain)
             .disabled(!interactive)
+            .transaction { transaction in
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
         }
     }
 }

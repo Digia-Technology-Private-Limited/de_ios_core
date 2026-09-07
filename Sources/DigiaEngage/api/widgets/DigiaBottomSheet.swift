@@ -12,6 +12,7 @@ struct DigiaBottomSheetConfig {
     var bottomPadding: CGFloat = 8
     var bottomSafeAreaMode: BottomSafeAreaMode = .none
     var bottomSafeAreaInset: CGFloat = 0
+    var animateContentHeight: Bool = false
 }
 
 /// A bottom sheet whose card attaches flush to the screen edges (the system
@@ -52,7 +53,13 @@ struct DigiaBottomSheet<Content: View>: View {
             .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
         }
         .ignoresSafeArea()
-        .onPreferenceChange(SheetHeightKey.self) { contentHeight = $0 }
+        .onPreferenceChange(SheetHeightKey.self) { height in
+            if config.animateContentHeight && contentHeight > 0 {
+                withAnimation(animation) { contentHeight = height }
+            } else {
+                contentHeight = height
+            }
+        }
         .onAppear { withAnimation(animation) { shown = true } }
     }
 

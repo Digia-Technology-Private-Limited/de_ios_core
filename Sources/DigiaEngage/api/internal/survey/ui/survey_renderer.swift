@@ -126,6 +126,7 @@ private struct SurveySession: View {
                 sheet: display.bottomSheet,
                 background: background,
                 canvasBackground: canvasSurveySheetBackground(survey),
+                animateContentHeight: survey.canvasSurvey != nil,
                 keyboardScrollsContent: survey.canvasSurvey != nil,
                 onDismiss: { finish(completed: false) }
             ) {
@@ -239,6 +240,7 @@ private struct SurveySheet<Content: View>: View {
     let sheet: BottomSheetProps
     let background: Color
     let canvasBackground: CampaignCanvasPaint?
+    let animateContentHeight: Bool
     let keyboardScrollsContent: Bool
     let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
@@ -269,7 +271,8 @@ private struct SurveySheet<Content: View>: View {
                     heightCapFraction: heightCapFraction,
                     handleOverlaysContent: canvasBackground != nil,
                     bottomSafeAreaMode: keyboardInset > 0 ? .insetSurface : .none,
-                    bottomSafeAreaInset: keyboardInset
+                    bottomSafeAreaInset: keyboardInset,
+                    animateContentHeight: canvasBackground == nil && animateContentHeight
                 ),
                 scrollable: keyboardScrollsContent,
                 onDismiss: onDismiss,

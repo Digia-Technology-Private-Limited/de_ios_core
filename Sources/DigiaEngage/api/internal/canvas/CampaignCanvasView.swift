@@ -376,6 +376,7 @@ struct CampaignCanvasStage: View {
     /// reach it while a button or tap region on that same canvas still takes its own
     /// touch.
     var backgroundTakesTouches = true
+    var animateWidgetsOnAppear = true
 
     /// Where a tap that carries `Action.showStory` is routed.
     ///
@@ -411,6 +412,12 @@ struct CampaignCanvasStage: View {
             }
             ForEach(canvas.children) { child in
                 CanvasChildView(child: child, isDark: isDark, onAction: dispatch)
+                    .transaction { transaction in
+                        if !animateWidgetsOnAppear {
+                            transaction.animation = nil
+                            transaction.disablesAnimations = true
+                        }
+                    }
                     .frame(
                         width: child.rect.width, height: child.rect.height, alignment: .topLeading
                     )
