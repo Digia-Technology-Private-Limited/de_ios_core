@@ -67,14 +67,14 @@ final class FloaterStoryOrchestrator: ObservableObject {
 
     var now: () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
 
-    private let onDismissed: (ActiveFloaterStoryState, FloaterDismissReason, FloaterMetrics) -> Void
+    private let onDismissed: (ActiveFloaterStoryState, FloaterDismissReason, FloaterMetrics, Bool) -> Void
     private let onCompleted: (ActiveFloaterStoryState) -> Void
     private let onStepViewed: (ActiveFloaterStoryState) -> Void
     private let onStepDismissed: (ActiveFloaterStoryState) -> Void
     private let onVisible: (ActiveFloaterStoryState) -> Void
 
     init(
-        onDismissed: @escaping (ActiveFloaterStoryState, FloaterDismissReason, FloaterMetrics) -> Void,
+        onDismissed: @escaping (ActiveFloaterStoryState, FloaterDismissReason, FloaterMetrics, Bool) -> Void,
         onCompleted: @escaping (ActiveFloaterStoryState) -> Void,
         onStepViewed: @escaping (ActiveFloaterStoryState) -> Void,
         onStepDismissed: @escaping (ActiveFloaterStoryState) -> Void,
@@ -238,10 +238,10 @@ final class FloaterStoryOrchestrator: ObservableObject {
         // still on screen.
         if everOpened { complete() }
 
-        // A showing that never painted reports nothing at all — no Viewed, so no
-        // Dismissed either. The terminal event is the denominator for every floater rate
-        // on the backend.
-        if visible { onDismissed(active, reason, metricsSnapshot()) }
+        // A showing that never painted reports no Digia analytics — no Viewed or
+        // Dismissed. The CEP slot is released separately so an accepted campaign
+        // cannot strand the queue.
+        onDismissed(active, reason, metricsSnapshot(), visible)
 
         let exit = active.config.window.exitAnimation
         guard exit.type != .none, !obscured else {

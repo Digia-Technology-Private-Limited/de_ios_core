@@ -146,8 +146,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return controller.onAction?(actionType, url, payload) ?? false
         }
         floaterOrchestrator = FloaterOrchestrator(
-            onDismissed: { [weak self] state, reason, metrics in
-                self?.emitFloaterDismissed(state, reason, metrics)
+            onDismissed: { [weak self] state, reason, metrics, wasVisible in
+                self?.emitFloaterDismissed(state, reason, metrics, wasVisible)
             },
             onCompleted: { [weak self] state in self?.emitFloaterCompleted(state) },
             onStepViewed: { [weak self] state in self?.emitFloaterStepViewed(state) },
@@ -158,8 +158,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             self?.guideStateDidChange(state)
         }
         floaterStoryOrchestrator = FloaterStoryOrchestrator(
-            onDismissed: { [weak self] state, reason, metrics in
-                self?.emitFloaterStoryDismissed(state, reason, metrics)
+            onDismissed: { [weak self] state, reason, metrics, wasVisible in
+                self?.emitFloaterStoryDismissed(state, reason, metrics, wasVisible)
             },
             onCompleted: { [weak self] state in self?.emitFloaterStoryCompleted(state) },
             onStepViewed: { [weak self] state in self?.emitFloaterStoryStepViewed(state) },
@@ -1584,8 +1584,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     private func emitFloaterDismissed(
-        _ state: ActiveFloaterState, _ reason: FloaterDismissReason, _ metrics: FloaterMetrics
+        _ state: ActiveFloaterState, _ reason: FloaterDismissReason, _ metrics: FloaterMetrics,
+        _ wasVisible: Bool
     ) {
+        if !wasVisible {
+            events.toCep(.dismissed, payload: state.payload)
+            return
+        }
         events.toBoth(
             .dismissed,
             FloaterEvent.Dismissed(
@@ -1676,8 +1681,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     private func emitFloaterStoryDismissed(
         _ state: ActiveFloaterStoryState, _ reason: FloaterDismissReason,
-        _ metrics: FloaterMetrics
+        _ metrics: FloaterMetrics, _ wasVisible: Bool
     ) {
+        if !wasVisible {
+            events.toCep(.dismissed, payload: state.payload)
+            return
+        }
         events.toBoth(
             .dismissed,
             FloaterEvent.Dismissed(
