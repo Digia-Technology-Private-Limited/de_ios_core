@@ -509,7 +509,7 @@ struct DigiaEngageTests {
         Digia.register(plugin)
         let payload = CEPTriggerPayload(
             cepCampaignId: "inline", campaignKey: "inline",
-            cepMetadata: ["renderedLifecycle": "true"])
+            cepMetadata: [:])
 
         SDKInstance.shared.reportStoryOpened(payload)
         SDKInstance.shared.reportStoryStepClicked(
@@ -529,22 +529,7 @@ struct DigiaEngageTests {
         ])
         #expect(plugin.events.allSatisfy { $0.1 == payload })
 
-        let legacy = CEPTriggerPayload(cepCampaignId: "legacy", campaignKey: "legacy", cepMetadata: [:])
-        SDKInstance.shared.reportClassicStoryOpened(legacy)
-        SDKInstance.shared.reportClassicCarouselContainerClicked(legacy)
-        #expect(plugin.events.count == 3)
 
-        SDKInstance.shared.reportBannerClicked(payload: legacy, action: nil)
-        #expect(plugin.events.count == 4)
-        #expect(plugin.events.last?.0 == .clicked(elementID: "banner"))
-        #expect(plugin.events.last?.1 == legacy)
-        let disabled = CEPTriggerPayload(
-            cepCampaignId: "disabled", campaignKey: "legacy",
-            cepMetadata: ["renderedLifecycle": "false"])
-        SDKInstance.shared.reportBannerClicked(payload: disabled, action: nil)
-        #expect(plugin.events.count == 5)
-        #expect(plugin.events.last?.0 == .clicked(elementID: "banner"))
-        #expect(plugin.events.last?.1 == disabled)
     }
 
     @Test("survey automatic engagement and completion do not emit its physical Start click")
@@ -557,7 +542,7 @@ struct DigiaEngageTests {
         let config = try #require(campaign.surveyConfig)
         let payload = CEPTriggerPayload(
             cepCampaignId: "survey", campaignKey: campaign.campaignKey,
-            cepMetadata: ["renderedLifecycle": "true"])
+            cepMetadata: [:])
         #expect(SDKInstance.shared.surveyOrchestrator.start(payload: payload, config: config))
 
         SDKInstance.shared.reportSurveyWelcomeStart()
@@ -589,7 +574,7 @@ struct DigiaEngageTests {
         ]))
         let payload = CEPTriggerPayload(
             cepCampaignId: "nudge", campaignKey: "nudge",
-            cepMetadata: ["renderedLifecycle": "true"])
+            cepMetadata: [:])
         SDKInstance.shared.controller.showNudge(
             DigiaNudgePresentation(config: config, payload: payload, variables: nil))
 

@@ -722,12 +722,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
 
         func onInlineRouted(payload: CEPTriggerPayload) {
-            guard !payload.usesRenderedLifecycle else { return }
-            // syncTemplate semantics: CEP considers an inline slot shown and done
-            // the moment it is delivered. Digia's impression fires only when the
-            // slot first renders (see reportSlotFirstRender).
-            events.toCep(.impressed, payload: payload)
-            events.toCep(.dismissed, payload: payload)
+            events.toCep(.inlineAccepted, payload: payload)
         }
 
         func onDropped(_ code: LiveTestFailureCode, message: String) {
@@ -792,20 +787,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         context: RoutingContext
     ) -> Bool {
         let key = campaign.campaignKey
-        if payload.usesRenderedLifecycle, let surface = payload.cepMetadata["campaignSurface"] {
-            let isInline: Bool
-            switch campaign.config {
-            case .inline, .banner, .inlineCanvas, .story: isInline = true
-            default: isInline = false
-            }
-            guard surface == (isInline ? "inline" : "overlay") else {
-                let message = "campaignSurface=\(surface) is incompatible with campaignType=\(campaign.campaignType)"
-                lastCampaignDropReason = message
-                DigiaLog.warning("[SDKInstance] Campaign dropped — \(message)")
-                context.onDropped(.renderError, message: message)
-                return false
-            }
-        }
         if !campaign.targetScreenNames.isEmpty
             && !campaign.targetScreenNames.contains(_currentScreen ?? "")
         {
@@ -837,10 +818,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         case .banner(let cfg):
             inlineController.setBannerConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
-            if !payload.usesRenderedLifecycle {
-                events.toCep(.impressed, payload: payload)
-                events.toCep(.dismissed, payload: payload)
-            }
+            context.onInlineRouted(payload: payload)
             return true
         case .inlineCanvas(let cfg):
             logVerbose("routeByCampaignKey INLINE CANVAS slotKey='\(cfg.slotKey)'")
@@ -1517,7 +1495,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// exactly the opposite.
     func dismissInlineCanvas(slotKey: String, payload: CEPTriggerPayload) {
         inlineController.dismissCampaign(slotKey)
-        if !payload.usesRenderedLifecycle { events.toCep(.dismissed, payload: payload) }
         events.toDigia(
             NudgeEvent.Dismissed(dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId)),
             payload: payload
@@ -1777,8 +1754,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     // MARK: - Inline slot lifecycle
     //
-    // Opted-in CEPs share Digia's first-render dedup and dismiss on removal.
-    // Other CEPs retain their route-time Impressed + Dismissed pair.
+    // Inline acceptance, first render, and removal are separate CEP callbacks.
 
     /// Resolves the campaign for `payload`: a live test's transient entry if
     /// present, else the real store. Every campaign-by-payload lookup should go
@@ -1843,9 +1819,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func reportBannerClicked(payload: CEPTriggerPayload, action: EngageAction?) {
-        if !payload.usesRenderedLifecycle {
-            events.toCep(.clicked(elementID: "banner"), payload: payload)
-        }
         events.toDigia(
             BannerEvent.Clicked(
                 actionType: action?.analyticsType,

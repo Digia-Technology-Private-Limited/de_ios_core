@@ -7,6 +7,7 @@
 /// events (``EngageAnalyticsEvent``): step/question/completed signals exist only
 /// there and never reach the CEP.
 public enum DigiaExperienceEvent: Sendable, Equatable {
+    case inlineAccepted
     case impressed
     case clicked(elementID: String? = nil)
     case dismissed
