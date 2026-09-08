@@ -129,9 +129,10 @@ struct DigiaInlineCanvasView: View {
         variables: VariableContext?,
         timerContext: TimerEventContext?
     ) {
-        if timerContext != nil {
-            SDKInstance.shared.reportInlineTimerPrimaryClick(payload: payload, request: request)
-        }
+        guard SDKInstance.shared.inlineController.getCampaign(config.slotKey) == payload else { return }
+        if timerContext == nil { SDKInstance.shared.reportSlotFirstRender(payload) }
+        guard SDKInstance.shared.inlineController.getCampaign(config.slotKey) == payload else { return }
+        SDKInstance.shared.reportInlineCanvasPrimaryClick(payload: payload, request: request)
         guard !request.actions.isEmpty else { return }
         let action = request.actions.first?.resolved(with: variables)
         // A tap inside a slide or a page is a *step* click, matching what the legacy carousel and
@@ -170,14 +171,12 @@ struct DigiaInlineCanvasView: View {
                 timerContext: timerContext
             )
         }
-        let hides = request.actions.contains { if case .dismiss = $0 { true } else { false } }
         Task {
             await SDKInstance.shared.executeActionFlow(
                 request.actions,
                 variables: variables,
                 localActionExecutor: LocalActionExecutor(dismiss: dismiss)
             )
-            if hides && timerContext == nil { dismiss() }
         }
     }
 }

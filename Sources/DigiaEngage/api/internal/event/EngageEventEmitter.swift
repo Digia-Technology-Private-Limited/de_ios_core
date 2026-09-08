@@ -91,7 +91,7 @@ final class EngageEventEmitter {
 
     /// `cepCampaignId`s that have already fired a Digia first-engagement click.
     private var digiaClicked: Set<String> = []
-    private var inlineTimerPayloadIds: Set<String> = []
+    private var inlineCanvasPayloadIds: Set<String> = []
     private var timerImpressedStateByCampaign: [String: String] = [:]
 
     init(cep: CepPluginSink, digia: DigiaAnalyticsSink, onLiveTestShown: ((String) -> Void)? = nil) {
@@ -120,19 +120,24 @@ final class EngageEventEmitter {
     /// instantly at route time.
     func digiaImpressionOnce(payload: CEPTriggerPayload, event: EngageAnalyticsEvent) {
         guard digiaImpressed.insert(payload.cepCampaignId).inserted else { return }
-        sink(for: payload).onFirstImpression(payload: payload, event: event)
+        if isInlineCanvas(payload) {
+            toCep(.impressed, payload: payload)
+            toDigia(event, payload: payload)
+        } else {
+            sink(for: payload).onFirstImpression(payload: payload, event: event)
+        }
     }
 
-    func registerInlineTimer(_ payload: CEPTriggerPayload) {
-        inlineTimerPayloadIds.insert(payload.cepCampaignId)
+    func registerInlineCanvas(_ payload: CEPTriggerPayload) {
+        inlineCanvasPayloadIds.insert(payload.cepCampaignId)
     }
 
-    func isInlineTimer(_ payload: CEPTriggerPayload) -> Bool {
-        inlineTimerPayloadIds.contains(payload.cepCampaignId)
+    func isInlineCanvas(_ payload: CEPTriggerPayload) -> Bool {
+        inlineCanvasPayloadIds.contains(payload.cepCampaignId)
     }
 
-    func inlineTimerRemoved(_ payload: CEPTriggerPayload) {
-        guard inlineTimerPayloadIds.remove(payload.cepCampaignId) != nil else { return }
+    func inlineCanvasRemoved(_ payload: CEPTriggerPayload) {
+        guard inlineCanvasPayloadIds.remove(payload.cepCampaignId) != nil else { return }
         resetImpression(payload.cepCampaignId)
         toCep(.dismissed, payload: payload)
     }

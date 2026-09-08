@@ -134,7 +134,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             }
         )
         inlineController.onCampaignRemoved = { [weak self] payload in
-            self?.events.inlineTimerRemoved(payload)
+            self?.events.inlineCanvasRemoved(payload)
         }
         controller.onAction = { [weak self] actionType, url, payload in
             self?.activePlugin?.notifyAction(actionType: actionType, url: url, payload: payload)
@@ -731,7 +731,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
 
         func onInlineRouted(payload: CEPTriggerPayload) {
-            if events.isInlineTimer(payload) { return }
+            if events.isInlineCanvas(payload) { return }
             // syncTemplate semantics: CEP considers an inline slot shown and done
             // the moment it is delivered. Digia's impression fires only when the
             // slot first renders (see reportSlotFirstRender).
@@ -844,7 +844,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 context.onDropped(.templateError, message: reason)
                 return false
             }
-            if cfg.statefulTimer != nil { events.registerInlineTimer(payload) }
+            events.registerInlineCanvas(payload)
             inlineController.setCanvasConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             context.onInlineRouted(payload: payload)
@@ -1512,9 +1512,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         payload: CEPTriggerPayload,
         timerContext: TimerEventContext? = nil
     ) {
-        if timerContext != nil, inlineController.getCampaign(slotKey) != payload { return }
+        if inlineController.getCampaign(slotKey) != payload { return }
         inlineController.dismissCampaign(slotKey)
-        if timerContext == nil { events.toCep(.dismissed, payload: payload) }
         events.toDigia(
             NudgeEvent.Dismissed(
                 dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId),
@@ -1791,6 +1790,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func reportSlotFirstRender(_ payload: CEPTriggerPayload) {
         guard let campaign = findCampaign(payload) else { return }
+        if case .inlineCanvas(let cfg) = campaign.config, inlineController.getCampaign(cfg.slotKey) != payload { return }
         var timerState: ResolvedTimerCanvas?
         if case .inlineCanvas(let cfg) = campaign.config, let runtime = cfg.statefulTimer {
             guard let resolved = runtime.resolve(payload.variables), resolved.canvas != nil else { return }
@@ -1826,7 +1826,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
     }
 
-    func reportInlineTimerPrimaryClick(payload: CEPTriggerPayload, request: CampaignCanvasActionRequest) {
+    func reportInlineCanvasPrimaryClick(payload: CEPTriggerPayload, request: CampaignCanvasActionRequest) {
         guard request.isPrimary else { return }
         events.toCep(.clicked(elementID: request.elementId), payload: payload)
     }
