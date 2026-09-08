@@ -365,7 +365,7 @@ private struct FloaterStorySessionView: View {
             CanvasStoryViewer(
                 pages: pages,
                 chrome: chrome,
-                initialIndex: 0,
+                initialIndex: orchestrator.storyInitialIndex,
                 restartOnCompleted: restartOnCompleted,
                 startMuted: startMuted,
                 isDark: isDark,
@@ -448,9 +448,8 @@ private struct FloaterStorySessionView: View {
 
     /// Runs an authored action from the window's canvas or from inside a story.
     ///
-    /// `Action.showStory` never reaches here: the canvas stage routes it to a rail on its
-    /// own canvas, and this campaign's window carries none — so a tap on the window is
-    /// what opens the story instead.
+    /// `Action.showStory` can open this floater's story at an authored page; window taps
+    /// without an authored action still open the story through `openStory()` above.
     private func runCanvasAction(_ request: CampaignCanvasActionRequest) {
         let action = request.actions.first?.resolved(with: state.variableContext)
         // Which level of the funnel this tap belongs to, decided by where it came from.

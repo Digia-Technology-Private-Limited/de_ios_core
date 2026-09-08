@@ -165,6 +165,10 @@ private struct InlineCarouselView: View {
                     .padding(.top, 8)
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                SDKInstance.shared.reportClassicCarouselContainerClicked(payload)
+            }
         } else {
             EmptyView()
         }

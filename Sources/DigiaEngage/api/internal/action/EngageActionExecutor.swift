@@ -6,15 +6,18 @@ struct LocalActionExecutor {
     private let dismiss: (() -> Void)?
     private let next: (() -> Void)?
     private let previous: (() -> Void)?
+    private let showStory: ((Int) -> Void)?
 
     init(
         dismiss: (() -> Void)? = nil,
         next: (() -> Void)? = nil,
-        previous: (() -> Void)? = nil
+        previous: (() -> Void)? = nil,
+        showStory: ((Int) -> Void)? = nil
     ) {
         self.dismiss = dismiss
         self.next = next
         self.previous = previous
+        self.showStory = showStory
     }
 
     func execute(_ action: EngageAction) -> Bool {
@@ -22,6 +25,8 @@ struct LocalActionExecutor {
         case .dismiss: execute("dismiss", callback: dismiss)
         case .next: execute("next", callback: next)
         case .previous: execute("previous", callback: previous)
+        case .showStory(let index):
+            execute("show_story", callback: showStory.map { callback in { callback(index) } })
         default: false
         }
     }

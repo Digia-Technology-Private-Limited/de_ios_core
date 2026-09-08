@@ -8,6 +8,7 @@ final class InlineCampaignController: ObservableObject {
     @Published private var bannerConfigs: [String: InlineBannerConfig] = [:]
     @Published private var storyConfigs: [String: InlineStoryConfig] = [:]
     @Published private var canvasConfigs: [String: InlineCanvasConfig] = [:]
+    var onCampaignRemoved: ((CEPTriggerPayload) -> Void)?
 
     func getCampaign(_ placementKey: String) -> CEPTriggerPayload? {
         campaigns[placementKey]
@@ -30,9 +31,13 @@ final class InlineCampaignController: ObservableObject {
     }
 
     func setCampaign(_ placementKey: String, payload: CEPTriggerPayload) {
+        let previous = campaigns[placementKey]
         var next = campaigns
         next[placementKey] = payload
         campaigns = next
+        if let previous, previous.cepCampaignId != payload.cepCampaignId {
+            notifyRemovedCampaigns([previous])
+        }
     }
 
     // Each setter clears every other kind for the slot: one slot holds one
@@ -81,6 +86,7 @@ final class InlineCampaignController: ObservableObject {
             campaigns
             .filter { $0.key == campaignID || $0.value.cepCampaignId == campaignID }
             .map(\.key)
+        let removedPayloads = removedKeys.compactMap { campaigns[$0] }
         campaigns = campaigns.filter { placementKey, payload in
             placementKey != campaignID && payload.cepCampaignId != campaignID
         }
@@ -90,21 +96,32 @@ final class InlineCampaignController: ObservableObject {
             storyConfigs.removeValue(forKey: key)
             canvasConfigs.removeValue(forKey: key)
         }
+        notifyRemovedCampaigns(removedPayloads)
     }
 
     func dismissCampaign(_ placementKey: String) {
-        campaigns.removeValue(forKey: placementKey)
+        let removed = campaigns.removeValue(forKey: placementKey)
         carouselConfigs.removeValue(forKey: placementKey)
         bannerConfigs.removeValue(forKey: placementKey)
         storyConfigs.removeValue(forKey: placementKey)
         canvasConfigs.removeValue(forKey: placementKey)
+        if let removed { notifyRemovedCampaigns([removed]) }
     }
 
     func clear() {
+        let removed = Array(campaigns.values)
         campaigns.removeAll()
         carouselConfigs.removeAll()
         bannerConfigs.removeAll()
         storyConfigs.removeAll()
         canvasConfigs.removeAll()
+        notifyRemovedCampaigns(removed)
+    }
+
+    private func notifyRemovedCampaigns(_ removed: [CEPTriggerPayload]) {
+        var remainingIds = Set(campaigns.values.map(\.cepCampaignId))
+        for payload in removed where remainingIds.insert(payload.cepCampaignId).inserted {
+            onCampaignRemoved?(payload)
+        }
     }
 }

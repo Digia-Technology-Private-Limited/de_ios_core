@@ -620,6 +620,7 @@ struct CanvasStoryViewer: View {
     @Environment(\.canvasInteractions) private var reportInteraction
     @State private var openedAt = Date()
     @State private var completedReported = false
+    @State private var lastReportedIndex: Int?
 
     private var page: CampaignCanvasStoryPage { pages[min(max(0, index), pages.count - 1)] }
     private var currentMediaKey: CanvasStoryMediaKey {
@@ -776,13 +777,22 @@ struct CanvasStoryViewer: View {
             index = min(max(0, initialIndex), pages.count - 1)
             muted = startMuted
             openedAt = Date()
-            reportInteraction(.storyPageViewed(index: index, total: pages.count))
+            reportPageViewed(index)
             start(retainingDisplayedMedia: false)
         }
         .onChange(of: index) { newIndex in
-            reportInteraction(.storyPageViewed(index: newIndex, total: pages.count))
+            reportPageViewed(newIndex)
         }
-        .onDisappear { stop() }
+        .onDisappear {
+            lastReportedIndex = nil
+            stop()
+        }
+    }
+
+    private func reportPageViewed(_ pageIndex: Int) {
+        guard lastReportedIndex != pageIndex else { return }
+        lastReportedIndex = pageIndex
+        reportInteraction(.storyPageViewed(index: pageIndex, total: pages.count))
     }
 
     /// Advances or rewinds, restarting the elapsed bar either way.
