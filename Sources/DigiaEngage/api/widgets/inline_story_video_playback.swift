@@ -26,6 +26,8 @@ struct StoryVideoPlaybackState: Equatable {
     let muted: Bool
     let repeatWindow: Bool
     let restartGeneration: Int
+    var rewindOnEnd = true
+    var repeatWhenInactive = false
 }
 
 struct StoryVideoPlaybackEvents {
@@ -212,16 +214,30 @@ final class StoryVideoPlayback: ObservableObject {
         requestedPriority = priority
         loadTask = Task { @MainActor [weak self] in
             do {
-                let cachedURL = try await DigiaVideoFileCache.shared.localURL(
-                    for: remoteURL,
-                    priority: priority
-                )
+                let assetURL: URL
+                if needsPlayer,
+                   let cachedURL = await DigiaVideoFileCache.shared.cachedURL(for: remoteURL) {
+                    assetURL = cachedURL
+                } else if needsPlayer {
+                    assetURL = remoteURL
+                    Task {
+                        _ = try? await DigiaVideoFileCache.shared.localURL(
+                            for: remoteURL,
+                            priority: priority
+                        )
+                    }
+                } else {
+                    assetURL = try await DigiaVideoFileCache.shared.localURL(
+                        for: remoteURL,
+                        priority: priority
+                    )
+                }
                 guard let self,
                       !Task.isCancelled,
                       self.loadGeneration == generation else { return }
                 self.loadTask = nil
                 self.requestedPriority = nil
-                let asset = AVURLAsset(url: cachedURL)
+                let asset = AVURLAsset(url: assetURL)
                 self.localAsset = asset
                 self.preparePoster(from: asset)
                 if self.state.demand.needsPlayer {
@@ -233,6 +249,21 @@ final class StoryVideoPlayback: ObservableObject {
                       self.loadGeneration == generation else { return }
                 self.loadTask = nil
                 self.requestedPriority = nil
+                if needsPlayer {
+                    let asset = AVURLAsset(url: remoteURL)
+                    self.localAsset = asset
+                    self.preparePoster(from: asset)
+                    if self.state.demand.needsPlayer {
+                        self.installPlayer(asset: asset)
+                    }
+                    Task {
+                        _ = try? await DigiaVideoFileCache.shared.localURL(
+                            for: remoteURL,
+                            priority: priority
+                        )
+                    }
+                    return
+                }
                 self.handleTerminalFailure()
             }
         }
@@ -344,16 +375,20 @@ final class StoryVideoPlayback: ObservableObject {
             events.onEnded()
             return
         }
-        if state.active, state.repeatWindow {
+        if (state.active || state.repeatWhenInactive), state.repeatWindow {
             seekToStart(retryAtZero: true, hideCurrentFrame: false) { [weak self] in
-                guard let self, self.state.active, self.applicationActive else { return }
+                guard let self,
+                      self.state.active || self.state.repeatWhenInactive,
+                      self.applicationActive else { return }
                 self.completionHandled = false
                 self.player?.play()
             }
         } else {
             // Sequential handoff must not wait for a platform seek callback.
             events.onEnded()
-            seekToStart(retryAtZero: true, hideCurrentFrame: false)
+            if state.rewindOnEnd {
+                seekToStart(retryAtZero: true, hideCurrentFrame: false)
+            }
         }
     }
 

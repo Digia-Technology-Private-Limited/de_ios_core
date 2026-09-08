@@ -11,6 +11,10 @@ public enum DigiaEnvironment: Sendable, Equatable {
     case sandbox
 }
 
+public enum DigiaThemeMode: String, Sendable, Equatable {
+    case auto, light, dark
+}
+
 public struct DigiaConfig: Sendable {
     public let apiKey: String
     public let logLevel: DigiaLogLevel
@@ -18,6 +22,7 @@ public struct DigiaConfig: Sendable {
     /// Optional global font family applied to all Digia-rendered text.
     /// Must match a font family registered by the host app.
     public let fontFamily: String?
+    public let themeMode: DigiaThemeMode
     public let analyticsConfig: AnalyticsConfig
     public let wrapperBinding: String?
     public let wrapperVersion: String?
@@ -28,6 +33,7 @@ public struct DigiaConfig: Sendable {
         logLevel: DigiaLogLevel = .error,
         environment: DigiaEnvironment = .production,
         fontFamily: String? = nil,
+        themeMode: DigiaThemeMode = .auto,
         analyticsConfig: AnalyticsConfig = AnalyticsConfig(),
         wrapperBinding: String? = nil,
         wrapperVersion: String? = nil,
@@ -37,6 +43,7 @@ public struct DigiaConfig: Sendable {
         self.logLevel = logLevel
         self.environment = environment
         self.fontFamily = fontFamily
+        self.themeMode = themeMode
         self.analyticsConfig = analyticsConfig
         self.wrapperBinding = wrapperBinding
         self.wrapperVersion = wrapperVersion
@@ -50,6 +57,7 @@ extension DigiaConfig: Equatable {
             && lhs.logLevel == rhs.logLevel
             && lhs.environment == rhs.environment
             && lhs.fontFamily == rhs.fontFamily
+            && lhs.themeMode == rhs.themeMode
             && lhs.analyticsConfig == rhs.analyticsConfig
             && lhs.wrapperBinding == rhs.wrapperBinding
             && lhs.wrapperVersion == rhs.wrapperVersion

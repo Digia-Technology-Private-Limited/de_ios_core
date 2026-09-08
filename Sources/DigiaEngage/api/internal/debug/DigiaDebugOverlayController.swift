@@ -21,7 +21,7 @@ final class DigiaDebugOverlayController: ObservableObject {
     /// `DigiaRootOverlayView` in rn/core) can tell a touch on the bubble apart
     /// from empty SwiftUI space — UIKit's `hitTest` can't distinguish the two on
     /// its own, since SwiftUI is backed by a single hosting `UIView`.
-    @Published var badgeFrame: CGRect?
+    var badgeFrame: CGRect?
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

@@ -2,6 +2,94 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.13.2] - 2026-09-08
+
+### Bug Fixes
+- A floating-window campaign that is dismissed before its media ever appears (an abandoned load) now releases its CEP rendering slot instead of holding it, so a later queued campaign can still be shown.
+- Opening a story from a floating window now opens at the authored page (or the tapped item) instead of always starting at the first page.
+- Inline placements now report their CEP impression when the slot first renders and their CEP dismissal when the content is finally removed, instead of reporting both the moment the campaign is delivered — so CEP analytics reflect what was actually shown.
+- Completing a guide no longer sends an unintended click event to CEP plugins.
+- A dismiss action on an inline canvas no longer runs its dismissal twice.
+
+## [3.13.1] - 2026-09-02
+
+### Bug Fixes
+- Anchored guides now tolerate a brief detachment or remount of their target view — such as when the host rebuilds or recycles the anchored view — waiting for the anchor to reappear instead of dismissing the guide step immediately.
+- The guide spotlight overlay now honors an alpha value embedded in its configured color, instead of always dimming at the default opacity.
+
+## [3.13.0] - 2026-09-01
+
+### New Features
+- Anchored guides now render natively on iOS. A guide step can attach to a host UI element registered through the anchor API; the SDK draws the spotlight and callout natively and keeps them locked to the anchor as the screen scrolls or relayouts, scrolls the anchor into view when it is off screen, chooses the best callout side for the available space, and hides the step gracefully when its anchor cannot be shown.
+- Canvas-designed nudges can now present full screen, covering the whole surface with safe-area handling.
+- Canvas nudges support a selectable close-button placement — inside or outside the surface, positioned by corner and edge with a configurable offset and gap, and with configurable icon and background color.
+- Canvas nudges can now auto-dismiss after a configurable delay.
+- Added `Digia.requestHeaders`, exposing the identifying metadata headers the SDK sends with its network requests, so a host can attach the same headers to its own Digia-related requests.
+
+### Bug Fixes
+- Canvas text now renders correctly: button labels stay centered and fully visible instead of being clipped, mis-aligned, or wrongly constrained, and text glyphs are no longer clipped at their edges.
+- Guide dismissal and completion events now carry the guide's campaign payload to CEP plugins instead of empty metadata.
+
+## [3.12.2] - 2026-09-01
+
+### Improvements
+- The debug tools (debug settings screen, Component Registry, live campaign testing, and on-screen debug bubble) now activate on TestFlight builds, in addition to development-provisioned builds. App Store builds remain unaffected.
+
+### Bug Fixes
+- Bottom sheets now respect the on-screen keyboard, so a keyboard no longer covers an input field inside a nudge or survey bottom sheet.
+- Anchorless spotlight guides now honor their configured tap-outside behavior — advancing to the next step or doing nothing — instead of falling back to the anchored-guide dismiss-on-tap behavior.
+
+## [3.12.1] - 2026-08-27
+
+### Bug Fixes
+- Fixed several canvas story video playback issues: each frame now keeps its poster image until the video is ready and waits for playback to actually begin before advancing (so a frame no longer flashes blank or skips ahead), a frame whose video can't load degrades gracefully instead of stalling the story, and inline and floating canvas stories now share one video playback pipeline for consistent behavior.
+- Fixed canvas story videos ignoring the "fill" content-fit setting and cover-cropping instead; "fill" videos now fill the frame.
+- Fixed full-screen canvas stories opened from a floating window not respecting the device safe area; their content now insets correctly.
+
+## [3.12.0] - 2026-08-26
+
+### New Features
+- Added story floater campaigns: a small floating canvas window — draggable, edge-snapping, and dismissible — that opens a full-screen story when tapped, animating between the collapsed window and the expanded story, with safe-area handling.
+- Canvas-designed content can now render inline in a placement slot — a free-form canvas, a canvas carousel, or a canvas story (with progress bars and tap-to-advance, close, and mute controls) — drawn by the shared canvas renderer alongside the existing inline banner, carousel, and story types.
+
+### Improvements
+- The SDK now sends a version descriptor to Digia when fetching campaigns, so the backend can serve content the installed SDK supports, and exposes the SDK version through the new `Digia.sdkVersion` property.
+
+## [3.11.0] - 2026-08-20
+
+### New Features
+- Added anchorless Canvas spotlight guides that target captured screen regions without host-registered anchor keys, and live testing.
+- React Native debug builds can now capture the current page and selected UI structure from the Digia debug settings and upload it for dashboard guide authoring; text, media, and other structural nodes are opt-in.
+
+### Bug Fixes
+- Fixed Canvas text using fit-to-text sizing measuring wider than its content, so text now keeps its authored width and alignment.
+- Fixed Canvas text ignoring its authored horizontal alignment; left-, center-, and right-aligned text now render as configured.
+
+## [3.10.1] - 2026-08-19
+
+### Improvements
+- Live campaign testing now supports floater (Picture-in-Picture) and guide campaigns, in addition to nudge, survey, and inline.
+
+### Bug Fixes
+- Fixed canvas bottom-sheet nudges (which use a transparent background) letting taps fall through to the backdrop instead of keeping the sheet interactive; drag-to-dismiss and content taps now work as expected.
+- Fixed Picture-in-Picture controls rendering behind the media in the collapsed window for some media types; the controls now stay above every media kind.
+- Fixed a Lottie element's shadow in canvas designs extending beyond its box; the shadow is now constrained to the element's shape.
+
+## [3.10.0] - 2026-08-19
+
+### New Features
+- Campaigns designed in the dashboard's canvas editor now render natively: a new design-token-based renderer draws canvas layouts — containers, decorations, shadows, borders, and rich text — with light/dark theming, for both dialog and bottom-sheet nudges.
+- Added Picture-in-Picture campaigns: a small draggable floating window that expands to full screen and plays media (video, image, or Lottie), with playback controls, mute, edge-snapping, and automatic pause/resume as the app backgrounds and foregrounds. Hosts can read the floating window's on-screen frame via `Digia.floaterActiveRect` to route taps on it correctly.
+- Added a theme mode setting — `DigiaConfig(themeMode:)` and `Digia.setThemeMode(_:)`, one of auto, light, or dark — that controls how design-token (canvas) content resolves its light and dark colors.
+
+### Improvements
+- The debug-only live campaign testing now lets you set a custom device name, shown when you connect a device for a live session.
+- The React Native bridging method `Digia.populateCampaigns(_:)` has been renamed to `Digia.populateCampaignBundle(_:)` and now takes the full campaign-bundle response (which includes canvas designs) instead of the earlier campaigns list.
+
+### Bug Fixes
+- A nudge or survey bottom sheet now honors its backdrop-tap-to-dismiss and drag-to-dismiss settings independently; previously, enabling either one enabled both.
+- Fixed text glyphs not covered by the configured font — for example an arrow appended to a button label — rendering at the wrong weight; a substituted glyph now matches the label's weight.
+
 ## [3.9.0] - 2026-08-03
 
 ### New Features

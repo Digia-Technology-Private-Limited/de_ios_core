@@ -14,8 +14,18 @@ enum DigiaDebugDetection {
         #if targetEnvironment(simulator)
         return true
         #else
-        return hasDebugProvisioningProfile()
+        return hasDebugProvisioningProfile() || isTestFlightInstall()
         #endif
+    }
+
+    /// TestFlight is a tester-distribution channel, so debug tools are
+    /// intentionally available there. TestFlight installs carry a sandbox
+    /// receipt ("sandboxReceipt"), while App Store installs get "receipt", so
+    /// production stays dark. `appStoreReceiptURL` is deprecated as of the
+    /// iOS 18 SDK; `AppTransaction.shared.environment` is the eventual
+    /// replacement, kept out for now to avoid the async + StoreKit 2 dependency.
+    private static func isTestFlightInstall() -> Bool {
+        Bundle.main.appStoreReceiptURL?.lastPathComponent == "sandboxReceipt"
     }
 
     /// `get-task-allow` is true only for debuggable builds, false for App

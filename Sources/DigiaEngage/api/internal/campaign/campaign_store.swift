@@ -17,6 +17,17 @@ final class CampaignStore {
         campaigns[campaignKey]
     }
 
+    var keys: [String] {
+        campaigns.keys.sorted()
+    }
+
+    var debugSummary: String {
+        campaigns.values
+            .sorted { $0.campaignKey < $1.campaignKey }
+            .map { "\($0.campaignKey):\($0.campaignType)" }
+            .joined(separator: ", ")
+    }
+
     var isEmpty: Bool {
         campaigns.isEmpty
     }

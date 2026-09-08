@@ -88,10 +88,12 @@ enum DigiaEndpoints {
     private static var baseURL: String { DigiaEndpointRegistry.rootURL }
 
     static var campaigns: String { "\(baseURL)/api/v1/engage/sdk/getCampaigns" }
+    static var campaignBundle: String { "\(baseURL)/api/v1/engage/sdk/getCampaignBundle" }
     static var track: String { "\(baseURL)/api/v1/engage/sdk/track" }
     static var session: String { "\(baseURL)/api/v1/engage/sdk/session" }
     static var submission: String { "\(baseURL)/api/v1/engage/sdk/recordSubmission" }
     static var recordComponents: String { "\(baseURL)/api/v1/engage/sdk/recordComponents" }
+    static var recordPageCapture: String { "\(baseURL)/api/v1/engage/sdk/recordPageCapture" }
     static var liveTestConnect: String { "\(baseURL)/api/v1/engage/sdk/live/connect" }
     static var liveTestAck: String { "\(baseURL)/api/v1/engage/sdk/testInvocation/ack" }
 }

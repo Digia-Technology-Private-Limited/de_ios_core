@@ -28,15 +28,13 @@ public struct DigiaSlot<Placeholder: View>: View {
         Group {
             if let payload = inlineController.getCampaign(placementKey) {
                 slotContent(for: payload)
+                    .id(payload.cepCampaignId)
                     .onAppear {
                         registerPlaceholderIfNeeded()
-                        // Digia's impression fires once, the first time the slot
-                        // actually renders (deduped per campaign). CEP was already
-                        // impressed instantly at route time (syncTemplate).
-                        if impressedPayloadID != payload.cepCampaignId {
-                            impressedPayloadID = payload.cepCampaignId
-                            SDKInstance.shared.reportSlotFirstRender(payload)
-                        }
+                    }
+                    .task(id: payload.cepCampaignId) {
+                        registerPlaceholderIfNeeded()
+                        reportFirstRenderIfNeeded(payload)
                     }
             } else {
                 placeholder
@@ -59,6 +57,8 @@ public struct DigiaSlot<Placeholder: View>: View {
             DigiaInlineBannerView(config: bannerConfig, payload: payload)
         } else if let storyConfig = inlineController.getStoryConfig(placementKey) {
             DigiaInlineStoryView(config: storyConfig, payload: payload)
+        } else if let canvasConfig = inlineController.getCanvasConfig(placementKey) {
+            DigiaInlineCanvasView(config: canvasConfig, payload: payload)
         } else {
             // No renderable config resolved for this slot — clean up. CEP already
             // saw Impressed + Dismissed at route time (syncTemplate semantics).
@@ -72,6 +72,16 @@ public struct DigiaSlot<Placeholder: View>: View {
     private func registerPlaceholderIfNeeded() {
         guard placeholderID == nil else { return }
         placeholderID = SDKInstance.shared.registerPlaceholderForSlot(propertyID: placementKey)
+    }
+
+    private func reportFirstRenderIfNeeded(_ payload: CEPTriggerPayload) {
+        // Digia's impression fires once, the first time this slot actually renders
+        // a given payload. CEP was already impressed instantly at route time
+        // (syncTemplate). The payload-keyed task also fires when a mounted slot is
+        // reused for another live-test invocation.
+        guard impressedPayloadID != payload.cepCampaignId else { return }
+        impressedPayloadID = payload.cepCampaignId
+        SDKInstance.shared.reportSlotFirstRender(payload)
     }
 }
 

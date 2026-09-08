@@ -13,6 +13,8 @@ enum LiveTestSseEvent {
 final class LiveTestSSEClient {
     private let config: () -> DigiaConfig
     private let deviceId: () -> String
+    private let requestHeaders: [String: String]
+    private let deviceName: () -> String?
     private let onEvent: (LiveTestSseEvent) -> Void
     private let onConnectionStateChanged: (LiveTestConnectionState) -> Void
     private let session: URLSession
@@ -27,12 +29,16 @@ final class LiveTestSSEClient {
     init(
         config: @escaping () -> DigiaConfig,
         deviceId: @escaping () -> String,
+        requestHeaders: [String: String],
+        deviceName: @escaping () -> String?,
         onEvent: @escaping (LiveTestSseEvent) -> Void,
         onConnectionStateChanged: @escaping (LiveTestConnectionState) -> Void,
         session: URLSession? = nil
     ) {
         self.config = config
         self.deviceId = deviceId
+        self.requestHeaders = requestHeaders
+        self.deviceName = deviceName
         self.onEvent = onEvent
         self.onConnectionStateChanged = onConnectionStateChanged
         if let session {
@@ -80,8 +86,24 @@ final class LiveTestSSEClient {
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
-        request.httpBody = Data("{}".utf8)
+        let body = deviceName().map { ["deviceName": $0] } ?? [:]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(
+            requestHeaders["x-digia-sdk-version"],
+            forHTTPHeaderField: "x-digia-sdk-version"
+        )
+        request.setValue(
+            requestHeaders["X-Digia-Sdk-Environment"],
+            forHTTPHeaderField: "X-Digia-Sdk-Environment"
+        )
+        request.setValue(
+            requestHeaders["X-Digia-Os-Version"],
+            forHTTPHeaderField: "X-Digia-Os-Version"
+        )
+        request.setValue(requestHeaders["x-app-version"], forHTTPHeaderField: "x-app-version")
+        request.setValue(requestHeaders["x-app-build-number"], forHTTPHeaderField: "x-app-build-number")
+        request.setValue(requestHeaders["x-app-package-name"], forHTTPHeaderField: "x-app-package-name")
         request.setValue(cfg.apiKey, forHTTPHeaderField: "X-Digia-Project-Id")
         request.setValue(deviceId(), forHTTPHeaderField: "X-Digia-Device-Id")
         // Always 'debug' — this client only ever runs in a debug build.

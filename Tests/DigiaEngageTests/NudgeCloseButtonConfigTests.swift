@@ -16,9 +16,18 @@ struct NudgeCloseButtonConfigTests {
 
     @Test("missing close button config preserves the existing appearance")
     func defaults() throws {
-        let close = try config().surface.closeButton
+        let surface = try config().surface
+        let close = surface.closeButton
         #expect(close == .defaults)
         #expect(close.diameter == 26)
+        #expect(surface.bottomSafeAreaMode == .insetContent)
+    }
+
+    @Test("bottom safe-area mode accepts known values and safely defaults unknown values")
+    func bottomSafeAreaMode() throws {
+        #expect(try config(container: ["bottomSafeAreaMode": "insetSurface"]).surface.bottomSafeAreaMode == .insetSurface)
+        #expect(try config(container: ["bottomSafeAreaMode": "none"]).surface.bottomSafeAreaMode == .none)
+        #expect(try config(container: ["bottomSafeAreaMode": "invalid"]).surface.bottomSafeAreaMode == .insetContent)
     }
 
     @Test("custom close button config clamps negatives and accepts zero")

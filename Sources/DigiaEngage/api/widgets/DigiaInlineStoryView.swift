@@ -25,6 +25,44 @@ struct DigiaInlineStoryView: View {
     let payload: CEPTriggerPayload
 
     @ObservedObject private var overlayController = SDKInstance.shared.controller
+
+    init(config: InlineStoryConfig, payload: CEPTriggerPayload) {
+        self.config = config
+        self.payload = payload
+    }
+
+    var body: some View {
+        StoryThumbnailRailView(
+            items: config.items,
+            mode: config.thumbnailVideoPlayback,
+            cardWidth: CGFloat(config.card.width),
+            cardHeight: CGFloat(config.card.height),
+            cardCornerRadius: CGFloat(config.card.borderRadius),
+            cardSpacing: CGFloat(config.card.spacing),
+            overlayOpen: overlayController.activeStoryOverlay != nil
+        ) { index in
+            SDKInstance.shared.reportStoryOpened(payload)
+            SDKInstance.shared.reportClassicStoryOpened(payload)
+            SDKInstance.shared.controller.showStoryOverlay(
+                config: config,
+                initialIndex: index,
+                payload: payload
+            )
+        }
+    }
+}
+
+@MainActor
+struct StoryThumbnailRailView: View {
+    let items: [StoryItemConfig]
+    let mode: ThumbnailVideoPlaybackMode
+    let cardWidth: CGFloat
+    let cardHeight: CGFloat
+    let cardCornerRadius: CGFloat
+    let cardSpacing: CGFloat
+    let overlayOpen: Bool
+    let onOpen: @MainActor (Int) -> Void
+
     @StateObject private var playbackStore: InlineStoryRailPlaybackStore
     @State private var latestGeometry = StoryRailGeometry()
     @State private var viewportBounds = CGRect.null
@@ -32,32 +70,45 @@ struct DigiaInlineStoryView: View {
     @State private var lastSettledVisibility: StoryRailVisibility?
     @State private var cacheDemandOwner = UUID()
 
-    init(config: InlineStoryConfig, payload: CEPTriggerPayload) {
-        self.config = config
-        self.payload = payload
+    init(
+        items: [StoryItemConfig],
+        mode: ThumbnailVideoPlaybackMode,
+        cardWidth: CGFloat,
+        cardHeight: CGFloat,
+        cardCornerRadius: CGFloat,
+        cardSpacing: CGFloat,
+        overlayOpen: Bool,
+        onOpen: @escaping @MainActor (Int) -> Void
+    ) {
+        self.items = items
+        self.mode = mode
+        self.cardWidth = cardWidth
+        self.cardHeight = cardHeight
+        self.cardCornerRadius = cardCornerRadius
+        self.cardSpacing = cardSpacing
+        self.overlayOpen = overlayOpen
+        self.onOpen = onOpen
         _playbackStore = StateObject(wrappedValue: InlineStoryRailPlaybackStore(
-            items: config.items,
-            mode: config.thumbnailVideoPlayback
+            items: items,
+            mode: mode
         ))
-    }
-
-    var body: some View {
-        storyRail
     }
 
     private var playback: InlineStoryRailPlaybackCoordinator {
         playbackStore.coordinator
     }
 
-    private var storyRail: some View {
+    var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: CGFloat(config.card.spacing)) {
-                ForEach(Array(config.items.enumerated()), id: \.offset) { index, item in
+            LazyHStack(spacing: cardSpacing) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     let playerIdentity = thumbnailPlayerIdentity(item)
                     StoryThumbnailCard(
                         index: index,
                         item: item,
-                        config: config,
+                        width: cardWidth,
+                        height: cardHeight,
+                        cornerRadius: cardCornerRadius,
                         playbackStore: playbackStore,
                         onWindowCompleted: { playbackStore.send(.windowCompleted(index)) },
                         onFailed: {
@@ -75,16 +126,11 @@ struct DigiaInlineStoryView: View {
                             }
                         }
                         .onTapGesture {
-                            SDKInstance.shared.reportStoryOpened(payload)
-                            SDKInstance.shared.controller.showStoryOverlay(
-                                config: config,
-                                initialIndex: index,
-                                payload: payload
-                            )
+                            onOpen(index)
                         }
                 }
             }
-            .padding(.horizontal, CGFloat(config.card.spacing))
+            .padding(.horizontal, cardSpacing)
         }
         .coordinateSpace(name: storyRailCoordinateSpace)
         .background {
@@ -110,10 +156,10 @@ struct DigiaInlineStoryView: View {
         }
         .onAppear {
             playbackStore.send(.configuration(
-                items: config.items,
-                mode: config.thumbnailVideoPlayback
+                items: items,
+                mode: mode
             ))
-            playbackStore.send(.overlayChanged(overlayController.activeStoryOverlay != nil))
+            playbackStore.send(.overlayChanged(overlayOpen))
             playbackStore.send(.applicationActive(
                 UIApplication.shared.applicationState == .active
             ))
@@ -134,15 +180,15 @@ struct DigiaInlineStoryView: View {
                 owner: cacheDemandOwner
             )
         }
-        .onChange(of: StoryRailConfigurationIdentity(config: config)) { _ in
+        .onChange(of: StoryRailConfigurationIdentity(items: items, mode: mode)) { _ in
             playbackStore.send(.configuration(
-                items: config.items,
-                mode: config.thumbnailVideoPlayback
+                items: items,
+                mode: mode
             ))
             lastSettledVisibility = nil
             scheduleEligibilityAfterScroll(latestGeometry)
         }
-        .onChange(of: overlayController.activeStoryOverlay != nil) { open in
+        .onChange(of: overlayOpen) { open in
             playbackStore.send(.overlayChanged(open))
         }
         .onReceive(NotificationCenter.default.publisher(
@@ -155,7 +201,7 @@ struct DigiaInlineStoryView: View {
         )) { _ in
             playbackStore.send(.applicationActive(false))
         }
-        .frame(height: CGFloat(config.card.height))
+        .frame(height: cardHeight)
     }
 
     private func settleVisibility(_ geometry: StoryRailGeometry) {
@@ -310,7 +356,9 @@ private final class StoryViewportUIView: UIView {
 private struct StoryThumbnailCard: View {
     let index: Int
     let item: StoryItemConfig
-    let config: InlineStoryConfig
+    let width: CGFloat
+    let height: CGFloat
+    let cornerRadius: CGFloat
     @ObservedObject var playbackStore: InlineStoryRailPlaybackStore
     let onWindowCompleted: @MainActor @Sendable () -> Void
     let onFailed: @MainActor @Sendable () -> Void
@@ -322,10 +370,6 @@ private struct StoryThumbnailCard: View {
     private var failed: Bool {
         playbackStore.coordinator.state.failedPlayerIdentities[index]
             == thumbnailPlayerIdentity(item)
-    }
-
-    private var width: CGFloat {
-        CGFloat(config.card.width)
     }
 
     var body: some View {
@@ -357,9 +401,9 @@ private struct StoryThumbnailCard: View {
                 StoryRemoteImage(urlString: item.url, fit: item.thumbnailBoxFit)
             }
         }
-        .frame(width: width, height: CGFloat(config.card.height))
+        .frame(width: width, height: height)
         .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: CGFloat(config.card.borderRadius), style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .contentShape(Rectangle())
     }
 }
@@ -373,9 +417,13 @@ private struct StoryRailConfigurationIdentity: Equatable {
     let players: [StoryThumbnailPlayerIdentity]
     let mode: ThumbnailVideoPlaybackMode
 
+    init(items: [StoryItemConfig], mode: ThumbnailVideoPlaybackMode) {
+        players = items.map(thumbnailPlayerIdentity)
+        self.mode = mode
+    }
+
     init(config: InlineStoryConfig) {
-        players = config.items.map(thumbnailPlayerIdentity)
-        mode = config.thumbnailVideoPlayback
+        self.init(items: config.items, mode: config.thumbnailVideoPlayback)
     }
 }
 
@@ -783,9 +831,12 @@ private struct InlineStoryOverlayContent: View {
 
     private func move(to index: Int) {
         currentIndex = index
-        if state.config.items[index].type != .video {
-            displayedIndex = index
-        }
+        // Navigation must be visible on the tap that changes it. Previously video pages waited
+        // for the new player's first frame before updating `displayedIndex`; when going back from
+        // page i to i-1 that left page i visible with reset timing, which looked like the current
+        // story restarted instead of moving to the previous story. The target video already draws
+        // its poster/thumbnail until the player is ready, so switch the visible page immediately.
+        displayedIndex = index
     }
 
     private func handleCTA(_ item: StoryItemConfig) {
@@ -845,8 +896,15 @@ private struct FullScreenStoryItem: View {
     }
 }
 
+/// A story's still media, sized the way a story sizes it.
+///
+/// Not private: the canvas story draws the same stills, on its rail cards and
+/// behind its full-screen pages. Its own version used a bare
+/// `.aspectRatio(contentMode: .fill)`, which reports an ideal size larger than
+/// the box it was given — enough to grow the enclosing stack and push the
+/// story's chrome off the top of the screen.
 @MainActor
-private struct StoryRemoteImage: View {
+struct StoryRemoteImage: View {
     let urlString: String
     let fit: StoryMediaFit
 
@@ -869,7 +927,7 @@ private struct StoryRemoteImage: View {
 }
 
 @MainActor
-private struct InlineStoryVideoView: View {
+struct InlineStoryVideoView: View {
     let item: StoryItemConfig
     var active: Bool = true
     let muted: Bool
@@ -877,6 +935,7 @@ private struct InlineStoryVideoView: View {
     var onProgress: (@MainActor @Sendable (Double) -> Void)?
     var onEnded: (@MainActor @Sendable () -> Void)?
     var onBuffering: (@MainActor @Sendable (Bool) -> Void)?
+    var onFailed: (@MainActor @Sendable () -> Void)?
 
     @StateObject private var playback: StoryVideoPlayback
 
@@ -887,7 +946,8 @@ private struct InlineStoryVideoView: View {
         onReadyForDisplay: (@MainActor @Sendable () -> Void)? = nil,
         onProgress: (@MainActor @Sendable (Double) -> Void)? = nil,
         onEnded: (@MainActor @Sendable () -> Void)? = nil,
-        onBuffering: (@MainActor @Sendable (Bool) -> Void)? = nil
+        onBuffering: (@MainActor @Sendable (Bool) -> Void)? = nil,
+        onFailed: (@MainActor @Sendable () -> Void)? = nil
     ) {
         self.item = item
         self.active = active
@@ -896,6 +956,7 @@ private struct InlineStoryVideoView: View {
         self.onProgress = onProgress
         self.onEnded = onEnded
         self.onBuffering = onBuffering
+        self.onFailed = onFailed
         _playback = StateObject(wrappedValue: StoryVideoPlayback(
             urlString: item.url,
             purpose: .fullScreen(item)
@@ -936,8 +997,10 @@ private struct InlineStoryVideoView: View {
                 onProgress: { onProgress?($0) },
                 onEnded: { onEnded?() },
                 onBuffering: { onBuffering?($0) },
-                // A broken full-screen item advances rather than trapping the viewer.
-                onFailed: { onEnded?() }
+                // A broken full-screen item advances unless its caller provides a fallback clock.
+                onFailed: {
+                    if let onFailed { onFailed() } else { onEnded?() }
+                }
             )
         )
     }
@@ -1017,6 +1080,25 @@ final class InlineStoryPlayerContainer: UIView {
 
     override class var layerClass: AnyClass {
         AVPlayerLayer.self
+    }
+
+    // A raw video rendering surface, never itself interactive in either consumer
+    // (inline story or floater/PIP) — both render separate SwiftUI content above it
+    // for actual interaction. Set explicitly rather than relying on the SwiftUI
+    // `.allowsHitTesting(false)` modifier callers apply: that modifier's propagation
+    // across a `UIViewRepresentable` boundary proved unreliable elsewhere in this
+    // hosting stack (see `floater_overlay_view.swift`'s `FloaterSessionView` — the
+    // floater's own drag/tap gesture and its chrome buttons stopped receiving touches
+    // wherever this view's real, UIKit-default-`true` `isUserInteractionEnabled` won
+    // hit-testing priority over them instead).
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
     }
 
     var playerLayer: AVPlayerLayer {

@@ -112,6 +112,8 @@ final class DigiaDecorationLayoutManager: NSLayoutManager {
 struct NudgeRichText: UIViewRepresentable {
     let attributed: NSAttributedString
     let fillWidth: Bool
+    var maxLines: Int = 0
+    var overflow: String = "visible"
 
     func makeUIView(context: Context) -> UITextView {
         let storage = NSTextStorage()
@@ -128,13 +130,20 @@ struct NudgeRichText: UIViewRepresentable {
         textView.isSelectable = false
         textView.backgroundColor = .clear
         textView.textContainerInset = .zero
+        configureContainer(textView.textContainer)
         textView.setContentHuggingPriority(.required, for: .vertical)
         return textView
     }
 
     func updateUIView(_ textView: UITextView, context: Context) {
+        configureContainer(textView.textContainer)
         textView.textStorage.setAttributedString(attributed)
         textView.invalidateIntrinsicContentSize()
+    }
+
+    private func configureContainer(_ container: NSTextContainer) {
+        container.maximumNumberOfLines = max(0, maxLines)
+        container.lineBreakMode = overflow == "ellipsis" ? .byTruncatingTail : .byClipping
     }
 
     // This `UIViewRepresentable` sizing hook needs iOS 16; below that, SwiftUI falls
