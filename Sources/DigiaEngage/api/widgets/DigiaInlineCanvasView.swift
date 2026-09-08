@@ -34,7 +34,8 @@ struct DigiaInlineCanvasView: View {
                     selectedCanvas,
                     remainingSeconds: resolved.remainingSeconds,
                     variables: variables,
-                    timerContext: resolved.analyticsContext
+                    timerContext: resolved.analyticsContext,
+                    timerState: resolved
                 )
                 .id(resolved.stateID)
             }
@@ -75,7 +76,8 @@ struct DigiaInlineCanvasView: View {
         _ canvas: CampaignCanvas,
         remainingSeconds: Int64?,
         variables: VariableContext?,
-        timerContext: TimerEventContext?
+        timerContext: TimerEventContext?,
+        timerState: ResolvedTimerCanvas? = nil
     ) -> some View {
         InlineCampaignCanvasView(
             canvas: canvas,
@@ -83,6 +85,11 @@ struct DigiaInlineCanvasView: View {
             cornerRadius: CGFloat(config.cornerRadius),
             margin: config.margin,
             onAction: { request in
+                if let timerState {
+                    SDKInstance.shared.reportInlineTimerStateRender(
+                        payload: payload, config: config, resolved: timerState
+                    )
+                }
                 perform(request, variables: variables, timerContext: timerContext)
             }
         )
@@ -122,6 +129,9 @@ struct DigiaInlineCanvasView: View {
         variables: VariableContext?,
         timerContext: TimerEventContext?
     ) {
+        if timerContext != nil {
+            SDKInstance.shared.reportInlineTimerPrimaryClick(payload: payload, request: request)
+        }
         guard !request.actions.isEmpty else { return }
         let action = request.actions.first?.resolved(with: variables)
         // A tap inside a slide or a page is a *step* click, matching what the legacy carousel and
@@ -167,7 +177,7 @@ struct DigiaInlineCanvasView: View {
                 variables: variables,
                 localActionExecutor: LocalActionExecutor(dismiss: dismiss)
             )
-            if hides { dismiss() }
+            if hides && timerContext == nil { dismiss() }
         }
     }
 }

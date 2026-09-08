@@ -571,9 +571,9 @@ private struct CanvasChildView: View {
         switch child {
         case .widget(_, _, let widget):
             CampaignCanvasRendererRegistry.render(widget, isDark: isDark, onAction: onAction)
-        case .tapRegion(let id, _, let actions):
+        case .tapRegion(let id, _, let actions, let isPrimary):
             Color.clear.contentShape(Rectangle()).onTapGesture {
-                onAction(CampaignCanvasActionRequest(actions: actions, elementId: id))
+                onAction(CampaignCanvasActionRequest(actions: actions, elementId: id, isPrimary: isPrimary))
             }
         }
     }
@@ -784,6 +784,7 @@ private struct CanvasTimerRenderer: View {
                             boxed: preset == "unitBoxes"
                         )
                         .frame(width: preset == "unitBoxes" ? boxWidth : nil)
+                        .frame(maxWidth: preset == "text" ? .infinity : nil)
                     }
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)

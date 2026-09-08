@@ -133,6 +133,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 self?.liveTestContexts[cepCampaignId]?.reportShown()
             }
         )
+        inlineController.onCampaignRemoved = { [weak self] payload in
+            self?.events.inlineTimerRemoved(payload)
+        }
         controller.onAction = { [weak self] actionType, url, payload in
             self?.activePlugin?.notifyAction(actionType: actionType, url: url, payload: payload)
                 ?? false
@@ -728,6 +731,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
 
         func onInlineRouted(payload: CEPTriggerPayload) {
+            if events.isInlineTimer(payload) { return }
             // syncTemplate semantics: CEP considers an inline slot shown and done
             // the moment it is delivered. Digia's impression fires only when the
             // slot first renders (see reportSlotFirstRender).
@@ -840,6 +844,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 context.onDropped(.templateError, message: reason)
                 return false
             }
+            if cfg.statefulTimer != nil { events.registerInlineTimer(payload) }
             inlineController.setCanvasConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             context.onInlineRouted(payload: payload)
@@ -1509,8 +1514,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     ) {
         if timerContext != nil, inlineController.getCampaign(slotKey) != payload { return }
         inlineController.dismissCampaign(slotKey)
-        events.toBoth(
-            .dismissed,
+        if timerContext == nil { events.toCep(.dismissed, payload: payload) }
+        events.toDigia(
             NudgeEvent.Dismissed(
                 dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId),
                 timer: timerContext
@@ -1821,12 +1826,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
     }
 
+    func reportInlineTimerPrimaryClick(payload: CEPTriggerPayload, request: CampaignCanvasActionRequest) {
+        guard request.isPrimary else { return }
+        events.toCep(.clicked(elementID: request.elementId), payload: payload)
+    }
+
     func reportInlineTimerStateRender(
         payload: CEPTriggerPayload,
         config: InlineCanvasConfig,
         resolved: ResolvedTimerCanvas
     ) {
-        guard config.statefulTimer != nil else { return }
+        guard config.statefulTimer != nil, inlineController.getCampaign(config.slotKey) == payload else { return }
         events.digiaTimerStateImpressionOnce(
             payload: payload,
             stateID: resolved.stateID,

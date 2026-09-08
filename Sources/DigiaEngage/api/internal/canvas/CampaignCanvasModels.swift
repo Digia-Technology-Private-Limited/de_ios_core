@@ -261,9 +261,9 @@ enum CampaignCanvasWidget: Equatable, Sendable {
 struct CampaignCanvasRect: Equatable { let x: CGFloat; let y: CGFloat; let width: CGFloat; let height: CGFloat }
 enum CampaignCanvasChild: Equatable, Identifiable, Sendable {
     case widget(id: String, rect: CampaignCanvasRect, widget: CampaignCanvasWidget)
-    case tapRegion(id: String, rect: CampaignCanvasRect, actions: [EngageAction])
-    var id: String { switch self { case .widget(let id, _, _), .tapRegion(let id, _, _): id } }
-    var rect: CampaignCanvasRect { switch self { case .widget(_, let rect, _), .tapRegion(_, let rect, _): rect } }
+    case tapRegion(id: String, rect: CampaignCanvasRect, actions: [EngageAction], isPrimary: Bool = false)
+    var id: String { switch self { case .widget(let id, _, _), .tapRegion(let id, _, _, _): id } }
+    var rect: CampaignCanvasRect { switch self { case .widget(_, let rect, _), .tapRegion(_, let rect, _, _): rect } }
     var clipsToAuthoredRect: Bool {
         guard case .widget(_, _, let widget) = self else { return true }
         if case .container = widget { return false }

@@ -91,6 +91,7 @@ final class EngageEventEmitter {
 
     /// `cepCampaignId`s that have already fired a Digia first-engagement click.
     private var digiaClicked: Set<String> = []
+    private var inlineTimerPayloadIds: Set<String> = []
     private var timerImpressedStateByCampaign: [String: String] = [:]
 
     init(cep: CepPluginSink, digia: DigiaAnalyticsSink, onLiveTestShown: ((String) -> Void)? = nil) {
@@ -122,6 +123,20 @@ final class EngageEventEmitter {
         sink(for: payload).onFirstImpression(payload: payload, event: event)
     }
 
+    func registerInlineTimer(_ payload: CEPTriggerPayload) {
+        inlineTimerPayloadIds.insert(payload.cepCampaignId)
+    }
+
+    func isInlineTimer(_ payload: CEPTriggerPayload) -> Bool {
+        inlineTimerPayloadIds.contains(payload.cepCampaignId)
+    }
+
+    func inlineTimerRemoved(_ payload: CEPTriggerPayload) {
+        guard inlineTimerPayloadIds.remove(payload.cepCampaignId) != nil else { return }
+        resetImpression(payload.cepCampaignId)
+        toCep(.dismissed, payload: payload)
+    }
+
     func digiaTimerStateImpressionOnce(
         payload: CEPTriggerPayload,
         stateID: String,
@@ -129,7 +144,10 @@ final class EngageEventEmitter {
     ) {
         guard timerImpressedStateByCampaign[payload.cepCampaignId] != stateID else { return }
         timerImpressedStateByCampaign[payload.cepCampaignId] = stateID
-        sink(for: payload).onFirstImpression(payload: payload, event: event)
+        if digiaImpressed.insert(payload.cepCampaignId).inserted {
+            toCep(.impressed, payload: payload)
+        }
+        toDigia(event, payload: payload)
     }
 
     /// Records `event` (an experience-level "Clicked") to Digia the first time the
