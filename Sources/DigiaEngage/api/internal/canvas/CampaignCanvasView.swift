@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import CoreText
 import SwiftUI
 import UIKit
 
@@ -703,9 +704,9 @@ enum CampaignCanvasRendererRegistry {
                     kind: .mute, visible: visible, iconColor: icon, backgroundColor: background,
                     isDark: dark))
         },
-        "timer": { widget, dark, _ in
+        "timer": { widget, dark, onAction in
             guard case .timer = widget else { return AnyView(EmptyView()) }
-            return AnyView(CanvasTimerRenderer(widget: widget, isDark: dark))
+            return AnyView(CanvasTimerRenderer(widget: widget, isDark: dark, onAction: onAction))
         },
     ]
 
@@ -761,11 +762,12 @@ enum CampaignCanvasRendererRegistry {
 private struct CanvasTimerRenderer: View {
     let widget: CampaignCanvasWidget
     let isDark: Bool
+    let onAction: (CampaignCanvasActionRequest) -> Void
     @Environment(\.timerRemainingSeconds) private var remainingSeconds
 
     var body: some View {
         if case .timer(
-            _, let preset, let separator, let units, let labels, let sharedStyle, let overrides
+            _, let preset, let separator, let units, let labels, let labelSpans, let sharedStyle, let overrides
         ) = widget, let remainingSeconds {
             let values = timerUnitValues(remainingSeconds: remainingSeconds, visibility: units)
             GeometryReader { geometry in
@@ -774,12 +776,14 @@ private struct CanvasTimerRenderer: View {
                 HStack(spacing: 4) {
                     ForEach(Array(values.enumerated()), id: \.element.0) { index, value in
                         if index > 0 && preset == "text" {
+                            let style = overrides[value.0] ?? sharedStyle
                             Text(separator)
-                                .foregroundStyle(color((overrides[value.0] ?? sharedStyle).digitColor))
+                                .foregroundStyle(color(style.digitTextStyle?.color ?? style.digitColor))
                         }
                         unitView(
                             value: value.1,
                             label: labels[value.0] ?? "",
+                            labelSpans: labelSpans[value.0],
                             style: overrides[value.0] ?? sharedStyle,
                             boxed: preset == "unitBoxes"
                         )
@@ -799,23 +803,41 @@ private struct CanvasTimerRenderer: View {
     private func unitView(
         value: Int64,
         label: String,
+        labelSpans: [CampaignCanvasTextSpan]?,
         style: CampaignCanvasTimerUnitStyle,
         boxed: Bool
     ) -> some View {
         let content = VStack(spacing: 1) {
-            Text(String(format: "%02lld", value))
-                .font(font(style.digitTypography, fallbackSize: 16, fallbackWeight: 400))
-                .tracking(style.digitTypography?.letterSpacing ?? 0)
-                .frame(height: timerLineHeight(style.digitTypography, fallbackSize: 16))
-                .foregroundStyle(color(style.digitColor))
-                .monospacedDigit()
-                .lineLimit(1)
-            Text(label)
-                .font(font(style.labelTypography, fallbackSize: 10, fallbackWeight: 400))
-                .tracking(style.labelTypography?.letterSpacing ?? 0)
-                .frame(height: timerLineHeight(style.labelTypography, fallbackSize: 10))
-                .foregroundStyle(color(style.labelColor))
-                .lineLimit(1)
+            if let digitStyle = style.digitTextStyle {
+                CampaignCanvasTextView(
+                    block: timerTextBlock([digitStyle], fallback: style.digitTypography, fallbackSize: 16, color: style.digitColor),
+                    isDark: isDark, onAction: onAction, tabularDigits: true,
+                    textOverride: String(format: "%02lld", value), maxLinesOverride: 1
+                )
+                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(String(format: "%02lld", value))
+                    .font(font(style.digitTypography, fallbackSize: 16, fallbackWeight: 400))
+                    .tracking(style.digitTypography?.letterSpacing ?? 0)
+                    .frame(height: timerLineHeight(style.digitTypography, fallbackSize: 16))
+                    .foregroundStyle(color(style.digitColor))
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+            if let labelSpans {
+                CampaignCanvasTextView(
+                    block: timerTextBlock(labelSpans, fallback: style.labelTypography, fallbackSize: 10, color: style.labelColor),
+                    isDark: isDark, onAction: onAction, maxLinesOverride: 1
+                )
+                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text(label)
+                    .font(font(style.labelTypography, fallbackSize: 10, fallbackWeight: 400))
+                    .tracking(style.labelTypography?.letterSpacing ?? 0)
+                    .frame(height: timerLineHeight(style.labelTypography, fallbackSize: 10))
+                    .foregroundStyle(color(style.labelColor))
+                    .lineLimit(1)
+            }
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 2)
@@ -847,6 +869,33 @@ private struct CanvasTimerRenderer: View {
             fallbackFamily: typography?.fontFamily
         ))
     }
+}
+
+private func timerTextBlock(
+    _ spans: [CampaignCanvasTextSpan], fallback: CampaignTypography?, fallbackSize: CGFloat, color: CampaignColor?
+) -> CampaignCanvasTextBlock {
+    CampaignCanvasTextBlock(
+        horizontalAlign: .center, textAlign: .center, verticalAlign: .center,
+        maxLines: 1, overflow: "clip", sizingMode: "hug",
+        spans: spans.map { span in
+            var inherited = fallback ?? CampaignTypography()
+            inherited.fontSize = span.typography?.fontSize ?? fallback?.fontSize ?? fallbackSize
+            return CampaignCanvasTextSpan(
+                text: span.text,
+                typography: CampaignTypography(
+                    fontFamily: span.typography?.fontFamily ?? fallback?.fontFamily,
+                    fontSize: span.typography?.fontSize ?? fallback?.fontSize ?? fallbackSize,
+                    fontWeight: span.typography?.fontWeight ?? fallback?.fontWeight,
+                    lineHeight: span.typography?.lineHeight ?? timerLineHeight(inherited, fallbackSize: fallbackSize),
+                    letterSpacing: span.typography?.letterSpacing ?? fallback?.letterSpacing
+                ),
+                color: span.color ?? color, highlightColor: span.highlightColor,
+                italic: span.italic, decoration: span.decoration,
+                decorationColor: span.decorationColor, decorationThickness: span.decorationThickness,
+                actions: span.actions, decorationOffset: span.decorationOffset
+            )
+        }
+    )
 }
 
 func timerLineHeight(_ typography: CampaignTypography?, fallbackSize: CGFloat) -> CGFloat? {
@@ -920,20 +969,23 @@ private struct CampaignCanvasTextView: View {
     var colorOverride: UIColor? = nil
     var shadow: CampaignCanvasShadow? = nil
     var centerVertically = false
+    var tabularDigits = false
+    var textOverride: String? = nil
+    var maxLinesOverride: Int? = nil
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
         CanvasRichText(
             attributed: attributed,
             fillWidth: block.sizingMode == "fixed",
-            maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
+            maxLines: maxLinesOverride ?? (block.overflow == "ellipsis" ? block.maxLines : 0),
             overflow: block.overflow,
             textAlignment: block.textAlign.uiTextAlignment,
             centerVertically: centerVertically,
             onSpan: { span in
                 onAction(
                     CampaignCanvasActionRequest(
-                        actions: span.actions, elementId: canvasTextSpanElementID, label: span.text)
+                        actions: span.actions, elementId: canvasTextSpanElementID, label: textOverride ?? span.text)
                 )
             },
             spans: block.spans,
@@ -998,12 +1050,19 @@ private struct CampaignCanvasTextView: View {
                 colorOverride ?? span.color.map {
                     UIColor(CampaignCanvasTheme.shared.color($0, isDark: isDark))
                 } ?? baseColor
-            let font = SDKInstance.shared.font.resolve(
+            var font = SDKInstance.shared.font.resolve(
                 size: Double(typography?.fontSize ?? baseTypography.fontSize ?? 16),
                 weight: typography?.fontWeight ?? baseTypography.fontWeight ?? 400,
                 italic: span.italic,
                 fallbackFamily: typography?.fontFamily ?? baseTypography.fontFamily
             )
+            if tabularDigits {
+                let descriptor = font.fontDescriptor.addingAttributes([
+                    .featureSettings: [[UIFontDescriptor.FeatureKey.type: kNumberSpacingType,
+                                        UIFontDescriptor.FeatureKey.selector: kMonospacedNumbersSelector]]
+                ])
+                font = UIFont(descriptor: descriptor, size: font.pointSize)
+            }
             var attributes: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: color,
@@ -1036,12 +1095,15 @@ private struct CampaignCanvasTextView: View {
             if let thickness = span.decorationThickness {
                 attributes[.digiaDecorationThickness] = thickness
             }
+            if span.decoration == .underline, let offset = span.decorationOffset {
+                attributes[.digiaDecorationOffset] = offset
+            }
             if !span.actions.isEmpty {
                 attributes[.link] = URL(string: "digia-canvas://span/\(index)")!
             }
             result.append(
                 NSAttributedString(
-                    string: interpolate(span.text, context: variables), attributes: attributes))
+                    string: textOverride ?? interpolate(span.text, context: variables), attributes: attributes))
         }
         return result
     }
@@ -1084,6 +1146,7 @@ private struct CanvasRichText: UIViewRepresentable {
         let value = CanvasRichTextContainerView(textContainer: container)
         let textView = value.textView
         textView.delegate = context.coordinator
+        textView.linkTextAttributes = [:]
         textView.isEditable = false
         textView.isScrollEnabled = false
         textView.backgroundColor = .clear

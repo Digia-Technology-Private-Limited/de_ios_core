@@ -8,6 +8,7 @@ import CoreText
 extension NSAttributedString.Key {
     static let digiaDecorationColor = NSAttributedString.Key("digiaDecorationColor")
     static let digiaDecorationThickness = NSAttributedString.Key("digiaDecorationThickness")
+    static let digiaDecorationOffset = NSAttributedString.Key("digiaDecorationOffset")
 }
 
 /// TextKit-1 layout manager that draws underline / strikethrough with a per-run
@@ -77,28 +78,27 @@ final class DigiaDecorationLayoutManager: NSLayoutManager {
         let charRange = characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
         guard charRange.location < textStorage.length else { return false }
         let attrs = textStorage.attributes(at: charRange.location, effectiveRange: nil)
-        // Only take over drawing for a custom thickness — colour is handled natively
-        // (underlineColor / strikethroughColor), which positions exactly like the
-        // system and matches Flutter/CSS. No custom thickness → let `super` draw.
-        guard let thickness = attrs[.digiaDecorationThickness] as? CGFloat else { return false }
+        let customThickness = attrs[.digiaDecorationThickness] as? CGFloat
+        let offset = attrs[.digiaDecorationOffset] as? CGFloat
+        guard customThickness != nil || offset != nil else { return false }
         let customColor = attrs[.digiaDecorationColor] as? UIColor
 
         let font = (attrs[.font] as? UIFont) ?? .systemFont(ofSize: UIFont.systemFontSize)
         let ctFont = font as CTFont
         let rect = boundingRect(forGlyphRange: glyphRange, in: container)
-        let baselineY = lineFragmentRect.minY + baselineOffset + containerOrigin.y
+        let baselineY = lineFragmentRect.minY + location(forGlyphAt: glyphRange.location).y + containerOrigin.y
         // Position off the font metrics so it matches Flutter/CSS: underline just
         // below the baseline (the font's underline position is negative = below in
         // CoreText's y-up space, so subtract); strikethrough through the x-height.
-        let y = strikethrough
+        let y = (strikethrough
             ? baselineY - font.xHeight / 2
-            : baselineY - CTFontGetUnderlinePosition(ctFont)
+            : baselineY - CTFontGetUnderlinePosition(ctFont)) + (offset ?? 0)
         let color = customColor ?? (attrs[.foregroundColor] as? UIColor) ?? .label
 
         let path = UIBezierPath()
         path.move(to: CGPoint(x: rect.minX + containerOrigin.x, y: y))
         path.addLine(to: CGPoint(x: rect.maxX + containerOrigin.x, y: y))
-        path.lineWidth = thickness
+        path.lineWidth = customThickness ?? CTFontGetUnderlineThickness(ctFont)
         color.setStroke()
         path.stroke()
         return true

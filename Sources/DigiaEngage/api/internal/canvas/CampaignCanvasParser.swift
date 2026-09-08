@@ -249,12 +249,20 @@ struct CampaignCanvasParser {
             guard let value = propertyObject(raw) else { return nil }
             overrides[unit] = try parseTimerStyle(value, fallback: shared)
         }
+        var labelSpans: [CampaignTimerUnit: [CampaignCanvasTextSpan]] = [:]
+        let rawSpans = propertyObject(props["labelSpans"]) ?? [:]
+        for unit in CampaignTimerUnit.allCases {
+            if let spans = rawSpans[unit.rawValue] as? [[String: Any]] {
+                labelSpans[unit] = try parseSpans(spans)
+            }
+        }
         return .timer(
             box: box,
             preset: preset,
             separator: props["separator"] as? String ?? ":",
             units: units,
             labels: labels,
+            labelSpans: labelSpans,
             style: shared,
             unitOverrides: overrides
         )
@@ -271,6 +279,8 @@ struct CampaignCanvasParser {
             fontFamily: nil, fontSize: 10, fontWeight: 400, lineHeight: nil, letterSpacing: nil
         )
         return CampaignCanvasTimerUnitStyle(
+            digitTextStyle: try propertyObject(json["digitTextStyle"]).map { try parseSpan($0, text: "") }
+                ?? fallback?.digitTextStyle,
             digitTypography: parseTimerTypography(json["digitTypography"], fallback: digitTypography),
             digitColor: try designTokens.resolveColor(json["digitColor"]) ?? fallback?.digitColor ?? .literal("#FFFFFFFF"),
             labelTypography: parseTimerTypography(json["labelTypography"], fallback: labelTypography),
@@ -328,20 +338,25 @@ struct CampaignCanvasParser {
     private func parseSpans(_ raw: [[String: Any]]?) throws -> [CampaignCanvasTextSpan] {
         try (raw ?? []).compactMap { span in
             guard let text = span["text"] as? String, !text.isEmpty else { return nil }
-            return CampaignCanvasTextSpan(
-                text: text,
-                typography: try designTokens.resolveTypography(span["typography"]),
-                color: try designTokens.resolveColor(span["color"]),
-                highlightColor: try designTokens.resolveColor(span["highlightColor"]),
-                italic: span["italic"] as? Bool ?? false,
-                decoration: {
-                    switch span["decoration"] as? String { case "underline": .underline; case "lineThrough": .lineThrough; default: .none }
-                }(),
-                decorationColor: try designTokens.resolveColor(span["decorationColor"]),
-                decorationThickness: propertyNumber(span["decorationThickness"]).map { CGFloat($0) },
-                actions: EngageActionParser().parse(span["onClick"] as? [String: Any])
-            )
+            return try parseSpan(span, text: text)
         }
+    }
+
+    private func parseSpan(_ span: [String: Any], text: String) throws -> CampaignCanvasTextSpan {
+        return CampaignCanvasTextSpan(
+            text: text,
+            typography: try designTokens.resolveTypography(span["typography"]),
+            color: try designTokens.resolveColor(span["color"]),
+            highlightColor: try designTokens.resolveColor(span["highlightColor"]),
+            italic: span["italic"] as? Bool ?? false,
+            decoration: {
+                switch span["decoration"] as? String { case "underline": .underline; case "lineThrough": .lineThrough; default: .none }
+            }(),
+            decorationColor: try designTokens.resolveColor(span["decorationColor"]),
+            decorationThickness: propertyNumber(span["decorationThickness"]).map { CGFloat($0) },
+            actions: EngageActionParser().parse(span["onClick"] as? [String: Any]),
+            decorationOffset: propertyNumber(span["decorationOffset"]).flatMap { $0.isFinite ? CGFloat(min(16, max(-16, $0))) : nil }
+        )
     }
 
     private func parseImage(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget {
