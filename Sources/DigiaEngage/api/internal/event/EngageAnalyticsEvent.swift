@@ -73,6 +73,16 @@ struct TimerEventContext: Equatable {
     }
 }
 
+struct TimerAnalyticsEvent: EngageAnalyticsEvent {
+    let event: EngageAnalyticsEvent
+    let timer: TimerEventContext
+
+    var eventName: String { event.eventName }
+    var properties: [String: Any] {
+        event.properties.merging(timer.properties) { current, _ in current }
+    }
+}
+
 // ── Nudge (bottom_sheet / dialog; distinguished by displayStyle) ─────────────
 
 enum NudgeEvent {
@@ -97,7 +107,6 @@ enum NudgeEvent {
         var actionUrl: String?
         var ctaRole: String?
         var timeToActionMs: Int64?
-        var timer: TimerEventContext? = nil
 
         var eventName: String { "Digia Experience Clicked" }
         var properties: [String: Any] {
@@ -108,18 +117,15 @@ enum NudgeEvent {
                 ("action_url", actionUrl),
                 ("cta_role", ctaRole),
                 ("time_to_action_ms", timeToActionMs),
-            ]).merging(timer?.properties ?? [:]) { current, _ in current }
+            ])
         }
     }
 
     struct Dismissed: EngageAnalyticsEvent {
         var dwellMs: Int64?
-        var timer: TimerEventContext? = nil
 
         var eventName: String { "Digia Experience Dismissed" }
-        var properties: [String: Any] {
-            nonNull([("dwell_ms", dwellMs)]).merging(timer?.properties ?? [:]) { current, _ in current }
-        }
+        var properties: [String: Any] { nonNull([("dwell_ms", dwellMs)]) }
     }
 }
 
@@ -450,7 +456,6 @@ enum InlineCanvasEvent {
     struct Viewed: EngageAnalyticsEvent {
         var slotKey: String?
         var screenName: String?
-        var timer: TimerEventContext? = nil
 
         var eventName: String { "Digia Experience Viewed" }
         var properties: [String: Any] {
@@ -458,7 +463,7 @@ enum InlineCanvasEvent {
                 ("display_style", "canvas"),
                 ("slot_key", slotKey),
                 ("screen_name", screenName),
-            ]).merging(timer?.properties ?? [:]) { current, _ in current }
+            ])
         }
     }
 }

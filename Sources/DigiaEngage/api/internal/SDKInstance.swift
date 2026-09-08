@@ -1492,18 +1492,16 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         ctaRole: String? = nil,
         timerContext: TimerEventContext? = nil
     ) {
-        events.toDigia(
-            NudgeEvent.Clicked(
-                elementId: elementId,
-                ctaLabel: ctaLabel,
-                actionType: actionType,
-                actionUrl: actionUrl,
-                ctaRole: ctaRole,
-                timeToActionMs: dwellTracker.elapsedMs(payload.cepCampaignId),
-                timer: timerContext
-            ),
-            payload: payload
+        var event: EngageAnalyticsEvent = NudgeEvent.Clicked(
+            elementId: elementId,
+            ctaLabel: ctaLabel,
+            actionType: actionType,
+            actionUrl: actionUrl,
+            ctaRole: ctaRole,
+            timeToActionMs: dwellTracker.elapsedMs(payload.cepCampaignId)
         )
+        if let timerContext { event = TimerAnalyticsEvent(event: event, timer: timerContext) }
+        events.toDigia(event, payload: payload)
     }
 
     /// The author's Hide action removed an inline canvas from its slot.
@@ -1518,13 +1516,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     ) {
         if inlineController.getCampaign(slotKey) != payload { return }
         inlineController.dismissCampaign(slotKey)
-        events.toDigia(
-            NudgeEvent.Dismissed(
-                dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId),
-                timer: timerContext
-            ),
-            payload: payload
+        var event: EngageAnalyticsEvent = NudgeEvent.Dismissed(
+            dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId)
         )
+        if let timerContext { event = TimerAnalyticsEvent(event: event, timer: timerContext) }
+        events.toDigia(event, payload: payload)
     }
 
     func markNudgeDismissed() {
@@ -1808,7 +1804,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             guard let resolved = runtime.resolve(payload.variables), resolved.canvas != nil else { return }
             timerState = resolved
         }
-        let timerContext = timerState?.analyticsContext
         let viewed: EngageAnalyticsEvent
         switch campaign.config {
         case .inline(let cfg):
@@ -1821,8 +1816,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         case .inlineCanvas(let cfg):
             viewed = InlineCanvasEvent.Viewed(
                 slotKey: cfg.slotKey,
-                screenName: _currentScreen,
-                timer: timerContext
+                screenName: _currentScreen
             )
         default:
             return
@@ -1831,7 +1825,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             events.digiaTimerStateImpressionOnce(
                 payload: payload,
                 stateID: resolved.stateID,
-                event: viewed
+                event: TimerAnalyticsEvent(event: viewed, timer: resolved.analyticsContext)
             )
         } else {
             events.digiaImpressionOnce(payload: payload, event: viewed)
