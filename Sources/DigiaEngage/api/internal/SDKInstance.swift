@@ -1841,9 +1841,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         events.digiaTimerStateImpressionOnce(
             payload: payload,
             stateID: resolved.stateID,
-            event: InlineCanvasEvent.Viewed(
-                slotKey: config.slotKey,
-                screenName: _currentScreen,
+            event: TimerAnalyticsEvent(
+                event: InlineCanvasEvent.Viewed(
+                    slotKey: config.slotKey,
+                    screenName: _currentScreen
+                ),
                 timer: resolved.analyticsContext
             )
         )
