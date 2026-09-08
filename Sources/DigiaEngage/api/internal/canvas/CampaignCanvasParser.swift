@@ -197,7 +197,8 @@ struct CampaignCanvasParser {
             switch child["kind"] as? String {
             case "tapRegion":
                 let actions = EngageActionParser().parse(child["onClick"] as? [String: Any])
-                if !actions.isEmpty { children.append(.tapRegion(id: id, rect: rect, actions: actions, isPrimary: child["isPrimary"] as? Bool ?? false)) }
+                let isPrimary = child["isPrimary"] as? Bool ?? false
+                if isPrimary || !actions.isEmpty { children.append(.tapRegion(id: id, rect: rect, actions: actions, isPrimary: isPrimary)) }
             case "widget":
                 if let widget = try parseWidget(child["widget"] as? [String: Any]) {
                     children.append(.widget(id: id, rect: rect, widget: widget))
