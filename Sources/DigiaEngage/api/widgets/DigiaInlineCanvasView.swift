@@ -132,7 +132,7 @@ struct DigiaInlineCanvasView: View {
         guard SDKInstance.shared.inlineController.getCampaign(config.slotKey) == payload else { return }
         if timerContext == nil { SDKInstance.shared.reportSlotFirstRender(payload) }
         guard SDKInstance.shared.inlineController.getCampaign(config.slotKey) == payload else { return }
-        SDKInstance.shared.reportInlineCanvasPrimaryClick(payload: payload, request: request)
+        SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: request.elementId, isPrimary: request.isPrimary)
         guard !request.actions.isEmpty else { return }
         let action = request.actions.first?.resolved(with: variables)
         // A tap inside a slide or a page is a *step* click, matching what the legacy carousel and

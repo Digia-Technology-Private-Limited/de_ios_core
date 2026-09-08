@@ -302,6 +302,7 @@ private struct NudgeButtonView: View {
                 actionUrl: action?.analyticsURL,
                 ctaRole: "primary"
             )
+            SDKInstance.shared.reportPrimaryCTAClick(elementId: "cta_primary", isPrimary: true)
         }
         Task {
             await SDKInstance.shared.executeActionFlow(

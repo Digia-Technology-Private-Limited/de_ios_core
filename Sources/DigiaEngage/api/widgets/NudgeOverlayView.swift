@@ -7,6 +7,11 @@ private func performCanvasAction(
     variables: VariableContext?,
     dismiss: @escaping () -> Void
 ) {
+    defer {
+        SDKInstance.shared.reportPrimaryCTAClick(
+            elementId: request.elementId, isPrimary: request.isPrimary
+        )
+    }
     guard !request.actions.isEmpty else { return }
     let action = request.actions.first?.resolved(with: variables)
     SDKInstance.shared.emitNudgeClick(

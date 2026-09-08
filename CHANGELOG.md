@@ -2,6 +2,15 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.13.2] - 2026-09-08
+
+### Bug Fixes
+- A floating-window campaign that is dismissed before its media ever appears (an abandoned load) now releases its CEP rendering slot instead of holding it, so a later queued campaign can still be shown.
+- Opening a story from a floating window now opens at the authored page (or the tapped item) instead of always starting at the first page.
+- Inline placements now report their CEP impression when the slot first renders and their CEP dismissal when the content is finally removed, instead of reporting both the moment the campaign is delivered — so CEP analytics reflect what was actually shown.
+- Completing a guide no longer sends an unintended click event to CEP plugins.
+- A dismiss action on an inline canvas no longer runs its dismissal twice.
+
 ## [3.13.1] - 2026-09-02
 
 ### Bug Fixes

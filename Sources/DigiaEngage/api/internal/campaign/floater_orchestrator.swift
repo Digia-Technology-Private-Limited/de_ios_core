@@ -163,14 +163,14 @@ final class FloaterOrchestrator: ObservableObject {
 
     private static let mediaTimeoutMs: Int64 = 10_000
 
-    private let onDismissed: (ActiveFloaterState, FloaterDismissReason, FloaterMetrics) -> Void
+    private let onDismissed: (ActiveFloaterState, FloaterDismissReason, FloaterMetrics, Bool) -> Void
     private let onCompleted: (ActiveFloaterState) -> Void
     private let onStepViewed: (ActiveFloaterState) -> Void
     private let onStepDismissed: (ActiveFloaterState) -> Void
     private let onVisible: (ActiveFloaterState) -> Void
 
     init(
-        onDismissed: @escaping (ActiveFloaterState, FloaterDismissReason, FloaterMetrics) -> Void,
+        onDismissed: @escaping (ActiveFloaterState, FloaterDismissReason, FloaterMetrics, Bool) -> Void,
         onCompleted: @escaping (ActiveFloaterState) -> Void,
         onStepViewed: @escaping (ActiveFloaterState) -> Void,
         onStepDismissed: @escaping (ActiveFloaterState) -> Void,
@@ -226,8 +226,10 @@ final class FloaterOrchestrator: ObservableObject {
         // count starts at zero either way.
         expandCount = 0
         expandedMs = 0
-        expandedStartedAtMs = startsExpanded ? nowMs : nil
-        everExpanded = startsExpanded
+        // A start-expanded showing only counts after its media is visible. Until then a
+        // dismissal is an abandoned load, not a completed showing.
+        expandedStartedAtMs = nil
+        everExpanded = false
         completed = false
         // Assume we wait; prepareMedia releases it as soon as the media is ready, or
         // immediately when there is nothing to load. Set beforehand so a
@@ -255,6 +257,10 @@ final class FloaterOrchestrator: ObservableObject {
         mediaReadyTask = nil
         guard awaitingMedia else { return }
         awaitingMedia = false
+        if surface == .expanded {
+            everExpanded = true
+            expandedStartedAtMs = expandedStartedAtMs ?? now()
+        }
         restartAutoDismiss()
         onVisible(active)
     }
@@ -262,14 +268,15 @@ final class FloaterOrchestrator: ObservableObject {
     /// The media could not be loaded, so the campaign never runs. There is nothing to
     /// degrade to: the media *is* the floater, and a bordered empty box floating over
     /// the host app is worse for the user than no campaign at all. Teardown is
-    /// silent — the window never painted, so there was no impression, no frequency
-    /// cost and no terminal event, exactly as for a floater dismissed mid-load.
+    /// silent — the window never painted, so there was no impression or frequency
+    /// cost. The CEP slot is released through the dismissal callback without Digia analytics.
     func abandonMedia(token: Int64, reason: String) {
         guard let active = state, active.token == token, awaitingMedia else { return }
         DigiaLog.warning(
             "floater campaign '\(active.campaign.campaignKey)' dropped: media could not be loaded (\(reason))."
         )
         lastStartFailureReason = "media could not be loaded: \(reason)"
+        onDismissed(active, .mediaEnd, metricsSnapshot(), false)
         finishDismiss()
     }
 
@@ -558,14 +565,10 @@ final class FloaterOrchestrator: ObservableObject {
         // the stream.
         if everExpanded { complete() }
 
-        // A showing that never painted reports nothing at all — no Viewed, so no
-        // Dismissed either. Beyond the obvious (an unseen window is not an
-        // impression), the terminal event is the denominator for every floater rate
-        // on the backend, so a showing abandoned mid-load would arrive with
-        // expands = 0 and quietly drag expand rate down.
-        if !awaitingMedia {
-            onDismissed(active, reason, metricsSnapshot())
-        }
+        // A showing that never painted reports no Digia analytics — no Viewed or
+        // Dismissed. The CEP slot is released separately so an accepted campaign
+        // cannot strand the queue.
+        onDismissed(active, reason, metricsSnapshot(), !awaitingMedia)
 
         let exit = active.config.collapsed.exitAnimation
         // Full screen fills the display, so animating it "out" to nothing looks like
