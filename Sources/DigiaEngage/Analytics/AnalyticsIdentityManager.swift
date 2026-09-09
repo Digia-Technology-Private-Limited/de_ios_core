@@ -35,12 +35,14 @@ final class AnalyticsIdentityManager {
     }
 
     func setUserId(_ userId: String) {
+        guard _userId != userId else { return }
         _userId = userId
         defaults.set(userId, forKey: Self.keyUserId)
         rotateSession()
     }
 
     func clearUserId() {
+        guard _userId != nil else { return }
         _userId = nil
         defaults.removeObject(forKey: Self.keyUserId)
         rotateSession()

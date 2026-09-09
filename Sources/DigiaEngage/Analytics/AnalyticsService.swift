@@ -81,7 +81,7 @@ final class AnalyticsService {
 
         identity.initialize(sessionTimeoutMs: config.sessionTimeoutMs)
         identity.onSessionRotated = { [weak self] in
-            Task { @MainActor [weak self] in await self?.reportSession() }
+            self?.reportSession()
         }
 
         backgroundObserver = NotificationCenter.default.addObserver(
@@ -110,7 +110,7 @@ final class AnalyticsService {
             scheduleTimer()
         }
 
-        Task { await reportSession() }
+        reportSession()
     }
 
     // MARK: - Public
@@ -215,24 +215,26 @@ final class AnalyticsService {
 
     // MARK: - Session
 
-    private func reportSession() async {
+    private func reportSession() {
+        let sessionId = identity.sessionId
+        let anonymousId = identity.anonymousId
         var body: [String: Any] = [
-            "session_id": identity.sessionId,
-            "anonymous_id": identity.anonymousId,
+            "session_id": sessionId,
+            "anonymous_id": anonymousId,
             "occurred_at": isoNow(),
             "properties": staticContext,
         ]
         if let uid = identity.userId { body["user_id"] = uid }
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
-        let status = try? await sender.post(
-            url: DigiaEndpoints.session,
-            body: data,
-            headers: jsonHeaders
-        )
-        DigiaLog.log(
-            "session reported: HTTP \(status ?? -1) sessionId=\(identity.sessionId) anonymousId=\(identity.anonymousId)",
-            tag: "DigiaAnalytics"
-        )
+        let url = DigiaEndpoints.session
+        let headers = jsonHeaders
+        Task {
+            let status = try? await sender.post(url: url, body: data, headers: headers)
+            DigiaLog.log(
+                "session reported: HTTP \(status ?? -1) sessionId=\(sessionId) anonymousId=\(anonymousId)",
+                tag: "DigiaAnalytics"
+            )
+        }
     }
 
     // MARK: - Private
