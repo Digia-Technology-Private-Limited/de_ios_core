@@ -21,6 +21,10 @@ struct CampaignBundle {
             DigiaLog.warning("[CampaignBundle] skipping malformed campaign at index \(index)")
             return nil
         }
-        return CampaignBundle(rawCampaigns: rawCampaigns, designTokens: catalog, campaigns: campaigns)
+        return CampaignBundle(
+            rawCampaigns: rawCampaigns,
+            designTokens: catalog,
+            campaigns: campaigns
+        )
     }
 }

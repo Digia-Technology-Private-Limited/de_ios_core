@@ -30,7 +30,10 @@ struct ActiveGuideState: Equatable {
 
 @MainActor
 final class GuideOrchestrator: ObservableObject {
-    @Published private(set) var state: ActiveGuideState?
+    @Published private(set) var state: ActiveGuideState? {
+        didSet { onStateChanged?(state) }
+    }
+    var onStateChanged: ((ActiveGuideState?) -> Void)?
     private var tokenCounter: Int64 = 0
 
     @discardableResult
@@ -62,13 +65,22 @@ final class GuideOrchestrator: ObservableObject {
         )
     }
 
+    func move(to stepIndex: Int) {
+        guard let current = state, current.steps.indices.contains(stepIndex) else { return }
+        state = ActiveGuideState(
+            token: current.token,
+            campaign: current.campaign,
+            stepIndex: stepIndex,
+            payload: current.payload
+        )
+    }
+
     func dismiss() {
         state = nil
     }
 
-    /// Dismiss only if the active guide matches the given campaign key.
-    func dismissIfActive(campaignKey: String) {
-        if state?.campaign.campaignKey == campaignKey {
+    func dismissIfActive(payloadId: String) {
+        if state?.payload.cepCampaignId == payloadId {
             state = nil
         }
     }

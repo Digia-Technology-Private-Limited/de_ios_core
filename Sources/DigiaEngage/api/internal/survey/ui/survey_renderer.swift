@@ -85,6 +85,7 @@ private struct SurveySession: View {
     @StateObject private var vm: SurveyViewModel
     @State private var visible = false
     @State private var canvasWelcomeDone = false
+    @State private var impressionReported = false
 
     init(state: ActiveSurveyState, orchestrator: SurveyOrchestrator) {
         self.state = state
@@ -118,6 +119,7 @@ private struct SurveySession: View {
                         )
                     }
                 )
+                .onAppear { reportVisible() }
                 .transition(.opacity)
             }
         }
@@ -141,7 +143,9 @@ private struct SurveySession: View {
                     canvasWelcomeDone: $canvasWelcomeDone
                 )
             }
-            let guardedSheetContent = sheetContent.interactiveDismissDisabled(true)
+            let guardedSheetContent = sheetContent
+                .interactiveDismissDisabled(true)
+                .onAppear { reportVisible() }
             // `.presentationBackground` needs iOS 16.4; below that, the cover's
             // (opaque) default background is used as-is.
             if #available(iOS 16.4, *) {
@@ -154,7 +158,6 @@ private struct SurveySession: View {
         .task(id: state.token) {
             let delayNs = UInt64(max(0, survey.timeDelayMs + RENDER_DELAY_MS)) * 1_000_000
             try? await Task.sleep(nanoseconds: delayNs)
-            SDKInstance.shared.reportSurveyStarted()
             visible = true
         }
         .onChange(of: vm.isComplete) { complete in
@@ -164,6 +167,12 @@ private struct SurveySession: View {
             guard let url, let parsed = URL(string: url) else { return }
             UIApplication.shared.open(parsed)
         }
+    }
+
+    private func reportVisible() {
+        guard !impressionReported else { return }
+        impressionReported = true
+        SDKInstance.shared.reportSurveyStarted()
     }
 
     private func finish(completed: Bool) {
@@ -486,6 +495,7 @@ private struct SurveyBody: View {
                 // The welcome "Start" tap is the survey's start-engagement signal
                 // ("Digia Experience Clicked" / welcome_start).
                 SDKInstance.shared.reportSurveyWelcomeStart()
+                SDKInstance.shared.reportSurveyStartClicked()
                 welcomeDone = true
             } label: {
                 Text(cta.startLabel)
@@ -649,6 +659,7 @@ private struct SurveyBody: View {
         case .welcome:
             Button {
                 SDKInstance.shared.reportSurveyWelcomeStart()
+                SDKInstance.shared.reportSurveyStartClicked()
                 vm.advance()
             } label: {
                 Text(cta.startLabel)

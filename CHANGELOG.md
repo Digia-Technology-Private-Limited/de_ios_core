@@ -2,6 +2,43 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.13.2] - 2026-09-08
+
+### Bug Fixes
+- A floating-window campaign that is dismissed before its media ever appears (an abandoned load) now releases its CEP rendering slot instead of holding it, so a later queued campaign can still be shown.
+- Opening a story from a floating window now opens at the authored page (or the tapped item) instead of always starting at the first page.
+- Inline placements now report their CEP impression when the slot first renders and their CEP dismissal when the content is finally removed, instead of reporting both the moment the campaign is delivered — so CEP analytics reflect what was actually shown.
+- Completing a guide no longer sends an unintended click event to CEP plugins.
+- A dismiss action on an inline canvas no longer runs its dismissal twice.
+
+## [3.13.1] - 2026-09-02
+
+### Bug Fixes
+- Anchored guides now tolerate a brief detachment or remount of their target view — such as when the host rebuilds or recycles the anchored view — waiting for the anchor to reappear instead of dismissing the guide step immediately.
+- The guide spotlight overlay now honors an alpha value embedded in its configured color, instead of always dimming at the default opacity.
+
+## [3.13.0] - 2026-09-01
+
+### New Features
+- Anchored guides now render natively on iOS. A guide step can attach to a host UI element registered through the anchor API; the SDK draws the spotlight and callout natively and keeps them locked to the anchor as the screen scrolls or relayouts, scrolls the anchor into view when it is off screen, chooses the best callout side for the available space, and hides the step gracefully when its anchor cannot be shown.
+- Canvas-designed nudges can now present full screen, covering the whole surface with safe-area handling.
+- Canvas nudges support a selectable close-button placement — inside or outside the surface, positioned by corner and edge with a configurable offset and gap, and with configurable icon and background color.
+- Canvas nudges can now auto-dismiss after a configurable delay.
+- Added `Digia.requestHeaders`, exposing the identifying metadata headers the SDK sends with its network requests, so a host can attach the same headers to its own Digia-related requests.
+
+### Bug Fixes
+- Canvas text now renders correctly: button labels stay centered and fully visible instead of being clipped, mis-aligned, or wrongly constrained, and text glyphs are no longer clipped at their edges.
+- Guide dismissal and completion events now carry the guide's campaign payload to CEP plugins instead of empty metadata.
+
+## [3.12.2] - 2026-09-01
+
+### Improvements
+- The debug tools (debug settings screen, Component Registry, live campaign testing, and on-screen debug bubble) now activate on TestFlight builds, in addition to development-provisioned builds. App Store builds remain unaffected.
+
+### Bug Fixes
+- Bottom sheets now respect the on-screen keyboard, so a keyboard no longer covers an input field inside a nudge or survey bottom sheet.
+- Anchorless spotlight guides now honor their configured tap-outside behavior — advancing to the next step or doing nothing — instead of falling back to the anchored-guide dismiss-on-tap behavior.
+
 ## [3.12.1] - 2026-08-27
 
 ### Bug Fixes

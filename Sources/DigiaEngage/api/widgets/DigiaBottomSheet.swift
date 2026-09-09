@@ -25,6 +25,8 @@ struct DigiaBottomSheet<Content: View>: View {
     @ViewBuilder let content: () -> Content
     var cardBackground: AnyView? = nil
     var cardOverlay: AnyView? = nil
+    /// Optional interactive chrome in viewport space, outside the card's clip.
+    var viewportOverlay: ((CGRect, CGSize) -> AnyView)? = nil
 
     @State private var contentHeight: CGFloat = 0
     @State private var shown = false
@@ -36,7 +38,8 @@ struct DigiaBottomSheet<Content: View>: View {
     var body: some View {
         GeometryReader { geo in
             let cap = geo.size.height * config.heightCapFraction
-            let surfaceBottomInset = config.bottomSafeAreaMode == .insetSurface
+            let surfaceBottomInset =
+                config.bottomSafeAreaMode == .insetSurface
                 ? config.bottomSafeAreaInset
                 : 0
             ZStack(alignment: .bottom) {
@@ -46,13 +49,22 @@ struct DigiaBottomSheet<Content: View>: View {
                     .onTapGesture { if config.allowBackdropDismiss { close() } }
 
                 card(cap: max(0, cap - surfaceBottomInset))
+                    .anchorPreference(key: NudgeCloseContainerBoundsKey.self, value: .bounds) {
+                        viewportOverlay == nil ? nil : $0
+                    }
                     .padding(.bottom, surfaceBottomInset)
                     .offset(y: shown ? max(dragOffset, 0) : geo.size.height)
                     .gesture(dragGesture)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
+            .overlayPreferenceValue(NudgeCloseContainerBoundsKey.self) { anchor in
+                if let anchor, let viewportOverlay {
+                    viewportOverlay(geo[anchor], geo.size)
+                        .opacity(shown ? 1 : 0)
+                }
+            }
         }
-        .ignoresSafeArea()
+        .ignoresSafeArea(.container)
         .onPreferenceChange(SheetHeightKey.self) { height in
             if config.animateContentHeight && contentHeight > 0 {
                 withAnimation(animation) { contentHeight = height }
@@ -64,26 +76,29 @@ struct DigiaBottomSheet<Content: View>: View {
     }
 
     private func card(cap: CGFloat) -> some View {
-        let contentBottomInset = config.bottomSafeAreaMode == .insetContent
+        let contentBottomInset =
+            config.bottomSafeAreaMode == .insetContent
             ? config.bottomSafeAreaInset
             : 0
         let base = cardContents(cap: cap)
-        .padding(.bottom, config.bottomPadding + contentBottomInset)
-        .frame(maxWidth: .infinity)
-        .background {
-            if let cardBackground {
-                cardBackground
-            } else {
-                config.background
+            .padding(.bottom, config.bottomPadding + contentBottomInset)
+            .frame(maxWidth: .infinity)
+            .background {
+                if let cardBackground {
+                    cardBackground
+                } else {
+                    config.background
+                }
             }
-        }
 
         // `UnevenRoundedRectangle`'s `.rect(topLeadingRadius:topTrailingRadius:)` needs
         // iOS 16; below that, round all four corners as the closest built-in equivalent.
         return Group {
             if #available(iOS 16, *) {
                 base.clipShape(
-                    .rect(topLeadingRadius: config.cornerRadius, topTrailingRadius: config.cornerRadius)
+                    .rect(
+                        topLeadingRadius: config.cornerRadius,
+                        topTrailingRadius: config.cornerRadius)
                 )
             } else {
                 base.clipShape(RoundedRectangle(cornerRadius: config.cornerRadius))

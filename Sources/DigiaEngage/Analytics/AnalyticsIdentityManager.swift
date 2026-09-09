@@ -25,9 +25,11 @@ final class AnalyticsIdentityManager {
     var userId: String? { _userId }
     var sessionId: String { _sessionId }
 
+    func resolveAnonymousId() -> String { loadOrCreate(key: Self.keyAnonymousId) }
+
     func initialize(sessionTimeoutMs: Int) {
         _sessionTimeoutMs = sessionTimeoutMs
-        _anonymousId = loadOrCreate(key: Self.keyAnonymousId)
+        _anonymousId = resolveAnonymousId()
         _userId = defaults.string(forKey: Self.keyUserId)
         _sessionId = UUID().uuidString
     }

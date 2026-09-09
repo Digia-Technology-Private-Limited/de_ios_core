@@ -80,6 +80,8 @@ public enum Digia {
         try await SDKInstance.shared.initialize(config)
     }
 
+    public static var requestHeaders: [String: String] { SDKInstance.shared.requestHeaders }
+
     public static var sdkVersion: String? {
         guard let config = SDKInstance.shared.config else { return nil }
         return buildSdkVersion(

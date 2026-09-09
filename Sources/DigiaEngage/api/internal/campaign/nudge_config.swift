@@ -6,11 +6,16 @@ import SwiftUI
 enum NudgeDisplayType: String, Equatable, Sendable {
     case bottomSheet
     case dialog
+    case fullScreen
 
     /// Decoded from the `container.displayType` wire value (default
-    /// `bottom_sheet`); only the literal `dialog` selects the dialog frame.
+    /// `bottom_sheet`). Existing unknown values retain the bottom-sheet fallback.
     static func from(_ value: String?) -> NudgeDisplayType {
-        value == "dialog" ? .dialog : .bottomSheet
+        switch value {
+        case "dialog": return .dialog
+        case "full_screen": return .fullScreen
+        default: return .bottomSheet
+        }
     }
 
     /// Analytics `display_style` value carried alongside nudge events.
@@ -18,6 +23,7 @@ enum NudgeDisplayType: String, Equatable, Sendable {
         switch self {
         case .bottomSheet: return "bottom_sheet"
         case .dialog: return "dialog"
+        case .fullScreen: return "full_screen"
         }
     }
 }
@@ -38,16 +44,22 @@ struct NudgeCloseButtonConfig: Equatable {
     let backgroundColor: Color
     let iconColor: Color
     let iconSize: CGFloat
+    var placement: NudgeCloseButtonPlacement? = nil
+    var backgroundToken: CampaignColor? = nil
+    var iconToken: CampaignColor? = nil
 
     var diameter: CGFloat { iconSize + 10 }
 
     func scaled(_ factor: CGFloat) -> NudgeCloseButtonConfig {
-        NudgeCloseButtonConfig(
+        if placement != nil { return self }
+        return NudgeCloseButtonConfig(
             marginTop: marginTop * factor,
             marginRight: marginRight * factor,
             backgroundColor: backgroundColor,
             iconColor: iconColor,
-            iconSize: iconSize * factor
+            iconSize: iconSize * factor,
+            backgroundToken: backgroundToken,
+            iconToken: iconToken
         )
     }
 
@@ -59,9 +71,14 @@ struct NudgeCloseButtonConfig: Equatable {
         iconSize: 16
     )
 
-    static func fromJson(_ json: [String: Any]?) -> NudgeCloseButtonConfig {
+    static func fromJson(
+        _ json: [String: Any]?, canvasMode: Bool = false,
+        designTokens: DesignTokenCatalog = .empty
+    ) -> NudgeCloseButtonConfig {
         let map = json ?? [:]
         let defaults = NudgeCloseButtonConfig.defaults
+        let placement = canvasMode
+            ? NudgeCloseButtonPlacement.fromJson(map["placement"] as? [String: Any]) : nil
         return NudgeCloseButtonConfig(
             marginTop: nonNegative(
                 map.double("marginTop", default: Double(defaults.marginTop)),
@@ -76,7 +93,10 @@ struct NudgeCloseButtonConfig: Equatable {
             iconSize: nonNegative(
                 map.double("iconSize", default: Double(defaults.iconSize)),
                 fallback: defaults.iconSize
-            )
+            ),
+            placement: placement,
+            backgroundToken: canvasMode ? try? designTokens.resolveColor(map["backgroundColor"]) : nil,
+            iconToken: canvasMode ? try? designTokens.resolveColor(map["iconColor"]) : nil
         )
     }
 
@@ -104,7 +124,7 @@ struct NudgeSurface: Equatable {
     let backdropDismissible: Bool
     /// Render an "×" close affordance on the surface.
     let showCloseButton: Bool
-    /// Visual configuration for the fixed cross close affordance.
+    /// Visual configuration and optional canvas placement for the close affordance.
     let closeButton: NudgeCloseButtonConfig
     /// Show the drag-handle pill at the top of the sheet (bottom sheet only).
     let showHandle: Bool
@@ -118,8 +138,12 @@ struct NudgeSurface: Equatable {
     let useSafeArea: Bool
     /// Bottom-system-area treatment for bottom sheets only.
     let bottomSafeAreaMode: BottomSafeAreaMode
+    /// Full-screen system-area treatment, applied to all window edges.
+    var safeAreaMode: BottomSafeAreaMode = .insetContent
+    var autoDismissAfterMs: Int = 0
 
     var isBottomSheet: Bool { displayType == .bottomSheet }
+    var isFullScreen: Bool { displayType == .fullScreen }
 
     func scaled(_ factor: CGFloat) -> NudgeSurface {
         NudgeSurface(
@@ -136,13 +160,18 @@ struct NudgeSurface: Equatable {
             widthFraction: widthFraction,
             minHorizontalMargin: minHorizontalMargin,
             useSafeArea: useSafeArea,
-            bottomSafeAreaMode: bottomSafeAreaMode
+            bottomSafeAreaMode: bottomSafeAreaMode,
+            safeAreaMode: safeAreaMode,
+            autoDismissAfterMs: autoDismissAfterMs
         )
     }
 
     /// Decodes from the `container` object. Field names and defaults match
     /// Flutter's `NudgeParser._surface`.
-    static func fromJson(_ json: [String: Any]?) -> NudgeSurface {
+    static func fromJson(
+        _ json: [String: Any]?, canvasMode: Bool = false,
+        designTokens: DesignTokenCatalog = .empty
+    ) -> NudgeSurface {
         let map = json ?? [:]
         let widthPct = map.double("widthPct", default: 86)
         let decodedMargin = map.double("minHorizontalMargin", default: 24)
@@ -154,7 +183,9 @@ struct NudgeSurface: Equatable {
             padding: CGFloat(map.double("padding", default: 20)),
             backdropDismissible: map.bool("backdropDismissible", default: true),
             showCloseButton: map.bool("showCloseButton", default: false),
-            closeButton: NudgeCloseButtonConfig.fromJson(map["closeButton"] as? [String: Any]),
+            closeButton: NudgeCloseButtonConfig.fromJson(
+                map["closeButton"] as? [String: Any], canvasMode: canvasMode, designTokens: designTokens
+            ),
             showHandle: map.bool("showHandle", default: true),
             draggable: map.bool("draggable", default: true),
             // Stored as a 0…100 percentage; normalise to a 0…1 fraction.
@@ -165,7 +196,9 @@ struct NudgeSurface: Equatable {
             useSafeArea: (map["useSafeArea"] as? NSNumber).map {
                 CFGetTypeID($0) == CFBooleanGetTypeID() && $0.boolValue
             } ?? false,
-            bottomSafeAreaMode: BottomSafeAreaMode.from(map["bottomSafeAreaMode"] as? String)
+            bottomSafeAreaMode: BottomSafeAreaMode.from(map["bottomSafeAreaMode"] as? String),
+            safeAreaMode: BottomSafeAreaMode.from(map["safeAreaMode"] as? String),
+            autoDismissAfterMs: min(map.positiveInt("autoDismissAfterMs") ?? 0, Int(Int32.max))
         )
     }
 
@@ -210,12 +243,18 @@ struct NudgeConfig: Equatable {
                 children: []
             )
         } else {
+            guard NudgeDisplayType.from((json["container"] as? [String: Any])?["displayType"] as? String) != .fullScreen else {
+                DigiaLog.warning("[NudgeConfig] rejected Full Screen nudge without Canvas layout")
+                return nil
+            }
             guard let parsedLayout = parser.parse(json) else { return nil }
             canvas = nil
             layout = parsedLayout
         }
         return NudgeConfig(
-            surface: NudgeSurface.fromJson(json["container"] as? [String: Any]),
+            surface: NudgeSurface.fromJson(
+                json["container"] as? [String: Any], canvasMode: canvas != nil, designTokens: designTokens
+            ),
             layout: layout,
             canvas: canvas,
             designWidth: designWidth,

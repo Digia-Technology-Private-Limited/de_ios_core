@@ -60,6 +60,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
     private var everOpened = false
     private var completed = false
     private var visible = false
+    private(set) var storyInitialIndex = 0
 
     private var autoDismissTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
@@ -67,14 +68,14 @@ final class FloaterStoryOrchestrator: ObservableObject {
 
     var now: () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
 
-    private let onDismissed: (ActiveFloaterStoryState, FloaterDismissReason, FloaterMetrics) -> Void
+    private let onDismissed: (ActiveFloaterStoryState, FloaterDismissReason, FloaterMetrics, Bool) -> Void
     private let onCompleted: (ActiveFloaterStoryState) -> Void
     private let onStepViewed: (ActiveFloaterStoryState) -> Void
     private let onStepDismissed: (ActiveFloaterStoryState) -> Void
     private let onVisible: (ActiveFloaterStoryState) -> Void
 
     init(
-        onDismissed: @escaping (ActiveFloaterStoryState, FloaterDismissReason, FloaterMetrics) -> Void,
+        onDismissed: @escaping (ActiveFloaterStoryState, FloaterDismissReason, FloaterMetrics, Bool) -> Void,
         onCompleted: @escaping (ActiveFloaterStoryState) -> Void,
         onStepViewed: @escaping (ActiveFloaterStoryState) -> Void,
         onStepDismissed: @escaping (ActiveFloaterStoryState) -> Void,
@@ -129,6 +130,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
         storyStartedAtMs = nil
         everOpened = false
         completed = false
+        storyInitialIndex = 0
         return true
     }
 
@@ -150,8 +152,11 @@ final class FloaterStoryOrchestrator: ObservableObject {
     }
 
     /// The user tapped the window and the story is opening.
-    func openStory() {
+    func openStory(initialIndex: Int = 0) {
         guard let active = state, !closing, !storyOpen else { return }
+        if case .story(_, let pages, _, _, _, _, _, _, _, _) = active.config.story {
+            storyInitialIndex = min(max(0, initialIndex), pages.count - 1)
+        }
         storyOpen = true
         storyOverlayActive = true
         openCount += 1
@@ -238,10 +243,10 @@ final class FloaterStoryOrchestrator: ObservableObject {
         // still on screen.
         if everOpened { complete() }
 
-        // A showing that never painted reports nothing at all — no Viewed, so no
-        // Dismissed either. The terminal event is the denominator for every floater rate
-        // on the backend.
-        if visible { onDismissed(active, reason, metricsSnapshot()) }
+        // A showing that never painted reports no Digia analytics — no Viewed or
+        // Dismissed. The CEP slot is released separately so an accepted campaign
+        // cannot strand the queue.
+        onDismissed(active, reason, metricsSnapshot(), visible)
 
         let exit = active.config.window.exitAnimation
         guard exit.type != .none, !obscured else {

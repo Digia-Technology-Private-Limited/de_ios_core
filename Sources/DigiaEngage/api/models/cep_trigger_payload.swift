@@ -18,8 +18,7 @@ public struct CEPTriggerPayload: Sendable, Equatable {
     public let campaignKey: String
 
     /// Any additional metadata the CEP passes through (e.g. template name, UTM
-    /// params, segment label). Core does not interpret these — forwarded as-is
-    /// in lifecycle events.
+    /// params, segment label).
     public let cepMetadata: [String: String]
 
     /// Optional runtime variables to interpolate into the campaign config, e.g.

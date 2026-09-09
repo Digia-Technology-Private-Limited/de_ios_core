@@ -7,6 +7,11 @@ private func performCanvasAction(
     variables: VariableContext?,
     dismiss: @escaping () -> Void
 ) {
+    defer {
+        SDKInstance.shared.reportPrimaryCTAClick(
+            elementId: request.elementId, isPrimary: request.isPrimary
+        )
+    }
     guard !request.actions.isEmpty else { return }
     let action = request.actions.first?.resolved(with: variables)
     SDKInstance.shared.emitNudgeClick(
@@ -35,7 +40,7 @@ struct NudgeOverlayView: View {
         // expose safe-area bands, so only opacity is allowed at this level.
         GeometryReader { geometry in
             ZStack {
-                if let nudge = controller.activeNudge, !nudge.config.surface.isBottomSheet {
+                if let nudge = controller.activeNudge, nudge.config.surface.displayType == .dialog {
                     NudgeDialogContainer(
                         presentation: nudge,
                         viewportSize: geometry.size,
@@ -45,7 +50,7 @@ struct NudgeOverlayView: View {
                     .transition(.opacity)
                 }
 
-                NudgeSheetPresenter(sheet: sheetBinding)
+                NudgeCoverPresenter(presentation: coverBinding)
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
@@ -54,14 +59,14 @@ struct NudgeOverlayView: View {
     }
 
     /// Drives the cover from the controller's active nudge, but only for
-    /// bottom-sheet nudges. Clearing it routes through `markNudgeDismissed()` so
+    /// bottom-sheet and full-screen nudges. Clearing it routes through `markNudgeDismissed()` so
     /// the Dismissed event fires and the dwell timer is consumed (symmetric with
     /// the impression on appear).
-    private var sheetBinding: Binding<DigiaNudgePresentation?> {
+    private var coverBinding: Binding<DigiaNudgePresentation?> {
         Binding(
             get: {
                 guard let nudge = controller.activeNudge,
-                    nudge.config.surface.isBottomSheet
+                    nudge.config.surface.isBottomSheet || nudge.config.surface.isFullScreen
                 else { return nil }
                 return nudge
             },
@@ -79,23 +84,134 @@ private func nudgeScrimColor(_ surface: NudgeSurface) -> Color {
 /// Isolates the UIKit full-screen-cover transaction from the inline dialog
 /// layer. Disabling the cover animation here must not suppress or mutate dialog
 /// transitions elsewhere in `NudgeOverlayView`.
-private struct NudgeSheetPresenter: View {
-    let sheet: Binding<DigiaNudgePresentation?>
+private struct NudgeCoverPresenter: View {
+    let presentation: Binding<DigiaNudgePresentation?>
 
     var body: some View {
         Color.clear
-            .fullScreenCover(item: sheet) { nudge in
+            .fullScreenCover(item: presentation) { nudge in
                 // `.id(nudge.id)`: a direct swap between two active nudges (no
                 // nil in between) must still create a fresh presentation view.
                 if #available(iOS 16.4, *) {
-                    NudgeSheetView(presentation: nudge)
+                    content(nudge)
                         .presentationBackground(.clear)
                         .id(nudge.id)
                 } else {
-                    NudgeSheetView(presentation: nudge).id(nudge.id)
+                    content(nudge).id(nudge.id)
                 }
             }
             .transaction { $0.disablesAnimations = true }
+    }
+
+    @ViewBuilder
+    private func content(_ nudge: DigiaNudgePresentation) -> some View {
+        if nudge.config.surface.isFullScreen {
+            NudgeFullScreenView(presentation: nudge)
+                .interactiveDismissDisabled()
+        } else {
+            NudgeSheetView(presentation: nudge)
+        }
+    }
+}
+
+// MARK: - Full Screen (canvas only)
+
+@MainActor
+private struct NudgeFullScreenView: View {
+    let presentation: DigiaNudgePresentation
+    @Environment(\.layoutDirection) private var layoutDirection
+
+    private var surface: NudgeSurface { presentation.config.surface }
+    private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let safe = activeWindowSafeAreaInsets
+            let safeInsets = EdgeInsets(
+                top: safe.top,
+                leading: layoutDirection == .rightToLeft ? safe.right : safe.left,
+                bottom: safe.bottom,
+                trailing: layoutDirection == .rightToLeft ? safe.left : safe.right
+            )
+            let protectsContent = surface.safeAreaMode != .none
+            let safeSize = CGSize(
+                width: max(1, geometry.size.width - safe.left - safe.right),
+                height: max(1, geometry.size.height - safe.top - safe.bottom)
+            )
+            let contentSize = protectsContent ? safeSize : geometry.size
+
+            ZStack {
+                if surface.safeAreaMode == .insetSurface {
+                    nudgeScrimColor(surface)
+                }
+                if let canvas = presentation.config.canvas {
+                    let canvasView = CampaignCanvasView(
+                        canvas: canvas,
+                        surface: surface,
+                        designWidth: presentation.config.designWidth,
+                        runtimeViewportWidth: geometry.size.width,
+                        availableSize: contentSize,
+                        onAction: { request in
+                            performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
+                        },
+                        showBackground: false
+                    )
+                    let surfaceSize = surface.safeAreaMode == .insetSurface ? safeSize : geometry.size
+
+                    CampaignCanvasBackgroundView(paint: canvas.background)
+                        .frame(width: surfaceSize.width, height: surfaceSize.height)
+                        .clipped()
+                        .padding(surface.safeAreaMode == .insetSurface ? safeInsets : EdgeInsets())
+
+                    canvasView
+                        .frame(width: contentSize.width, height: contentSize.height)
+                        .clipped()
+                        .padding(protectsContent ? safeInsets : EdgeInsets())
+
+                    if surface.showCloseButton && surface.closeButton.placement != nil {
+                        CanvasNudgeCloseOverlay(
+                            config: surface.closeButton.scaled(canvasView.fittedScale),
+                            container: CGRect(origin: .zero, size: safeSize),
+                            viewport: safeSize,
+                            safeAreaInsets: .zero,
+                            isBottomSheet: false,
+                            action: dismiss
+                        )
+                        .frame(width: safeSize.width, height: safeSize.height)
+                        .padding(safeInsets)
+                    } else if surface.showCloseButton {
+                        NudgeCloseButton(
+                            config: safeCloseButton(bounds: safeSize),
+                            action: dismiss
+                        )
+                        .frame(width: safeSize.width, height: safeSize.height, alignment: .topTrailing)
+                        .padding(safeInsets)
+                    }
+                }
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .contentShape(Rectangle())
+            // Empty surface bands belong to the modal and never dismiss it or
+            // pass touches through to the host app.
+            .onTapGesture {}
+        }
+        .ignoresSafeArea()
+        .environment(\.digiaVariables, presentation.variables)
+        .onAppear { SDKInstance.shared.reportNudgeImpression() }
+    }
+
+    private func safeCloseButton(bounds: CGSize) -> NudgeCloseButtonConfig {
+        let close = surface.closeButton
+        let touchSize = max(close.diameter, 44)
+        return NudgeCloseButtonConfig(
+            marginTop: min(close.marginTop, max(0, bounds.height - touchSize)),
+            marginRight: min(close.marginRight, max(0, bounds.width - touchSize)),
+            backgroundColor: close.backgroundColor,
+            iconColor: close.iconColor,
+            iconSize: close.iconSize,
+            backgroundToken: close.backgroundToken,
+            iconToken: close.iconToken
+        )
     }
 }
 
@@ -164,13 +280,39 @@ private struct NudgeSheetView: View {
             cardBackground: hostPaintsCanvasBackground
                 ? canvas.map { AnyView(CampaignCanvasBackgroundView(paint: $0.background)) }
                 : nil,
-            cardOverlay: surface.showCloseButton
-                ? AnyView(NudgeCloseButton(config: surface.closeButton, action: dismiss))
-                : nil
+            cardOverlay: cardCloseButton,
+            viewportOverlay: canvas != nil && surface.showCloseButton
+                && surface.closeButton.placement?.mode == .outside
+                ? { bounds, viewport in
+                    AnyView(CanvasNudgeCloseOverlay(
+                        config: surface.closeButton, container: bounds, viewport: viewport,
+                        safeAreaInsets: activeWindowSafeAreaInsets, isBottomSheet: true, action: dismiss
+                    ))
+                } : nil
         )
         // The cover presents this content once per nudge, so `onAppear` is the
         // impression signal (Impressed → CEP + Digia "Viewed").
         .onAppear { SDKInstance.shared.reportNudgeImpression() }
+    }
+
+    private var cardCloseButton: AnyView? {
+        guard surface.showCloseButton else { return nil }
+        guard surface.closeButton.placement?.mode != .outside else { return nil }
+        guard surface.closeButton.placement != nil else {
+            return AnyView(NudgeCloseButton(config: surface.closeButton, action: dismiss))
+        }
+        return AnyView(
+            GeometryReader { geometry in
+                CanvasNudgeCloseOverlay(
+                    config: surface.closeButton,
+                    container: CGRect(origin: .zero, size: geometry.size),
+                    viewport: geometry.size,
+                    safeAreaInsets: .zero,
+                    isBottomSheet: true,
+                    action: dismiss
+                )
+            }
+        )
     }
 
     /// The typed content column, rendered with the trigger variables in scope so
@@ -202,6 +344,11 @@ private struct NudgeDialogContainer: View {
         let insets = surface.useSafeArea ? safeAreaInsets : .zero
         let width = max(1, viewportSize.width - insets.left - insets.right)
         let height = max(1, viewportSize.height - insets.top - insets.bottom)
+        let closeButton = presentation.config.canvas == nil
+            ? surface.closeButton
+            : surface.closeButton.scaled(
+                min(width / max(presentation.config.designWidth, 1), 1.15)
+            )
 
         ZStack {
             scrimColor
@@ -245,6 +392,18 @@ private struct NudgeDialogContainer: View {
                 ))
         }
         .frame(width: viewportSize.width, height: viewportSize.height)
+        .overlayPreferenceValue(NudgeCloseContainerBoundsKey.self) { anchor in
+            if let anchor, surface.showCloseButton,
+               surface.closeButton.placement?.mode == .outside
+            {
+                GeometryReader { geometry in
+                    CanvasNudgeCloseOverlay(
+                        config: closeButton, container: geometry[anchor], viewport: viewportSize,
+                        safeAreaInsets: safeAreaInsets, isBottomSheet: false, action: dismiss
+                    )
+                }
+            }
+        }
         .onPreferenceChange(DialogHeightKey.self) { contentHeight = $0 }
         // Fires once per presentation: the `.id(nudge.id)` on the container gives
         // each nudge a fresh view identity, so `onAppear` runs once.
@@ -269,13 +428,27 @@ private struct NudgeDialogContainer: View {
                         request, variables: presentation.variables, dismiss: dismiss)
                 }
             )
-            if surface.showCloseButton {
+            if surface.showCloseButton, surface.closeButton.placement?.mode == .inside {
+                GeometryReader { geometry in
+                    CanvasNudgeCloseOverlay(
+                        config: surface.closeButton,
+                        container: CGRect(origin: .zero, size: geometry.size),
+                        viewport: geometry.size,
+                        safeAreaInsets: .zero,
+                        isBottomSheet: false,
+                        action: dismiss
+                    )
+                }
+            } else if surface.showCloseButton && surface.closeButton.placement == nil {
                 NudgeCloseButton(config: surface.closeButton, action: dismiss)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .contentShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .environment(\.digiaVariables, presentation.variables)
+        .anchorPreference(key: NudgeCloseContainerBoundsKey.self, value: .bounds) {
+            surface.closeButton.placement?.mode == .outside ? $0 : nil
+        }
     }
 
     /// Mirrors Flutter's `_DialogFrame`: centred, width-constrained, fully
@@ -336,33 +509,74 @@ private struct DialogHeightKey: PreferenceKey {
 }
 
 /// Fixed cross visual with an inward-expanding, platform-minimum hit target.
-private struct NudgeCloseButton: View {
+struct NudgeCloseButton: View {
     let config: NudgeCloseButtonConfig
     let action: () -> Void
+    var layout: NudgeCloseButtonPlacement.Layout? = nil
+
+    @ObservedObject private var theme = CampaignCanvasTheme.shared
+    @Environment(\.colorScheme) private var colorScheme
 
     private var touchSize: CGFloat { max(config.diameter, 44) }
 
+    private func color(_ token: CampaignColor?, fallback: Color) -> Color {
+        guard let token else { return fallback }
+        return theme.color(token, isDark: theme.isDark(colorScheme))
+    }
+
+    @ViewBuilder
     var body: some View {
+        if let layout {
+            button(
+                circleSize: layout.circle.width,
+                touchSize: layout.touch.size,
+                alignment: .topLeading,
+                circleOffset: CGSize(
+                    width: layout.circle.minX - layout.touch.minX,
+                    height: layout.circle.minY - layout.touch.minY
+                )
+            )
+            .offset(x: layout.touch.minX, y: layout.touch.minY)
+        } else {
+            button(
+                circleSize: config.diameter,
+                touchSize: CGSize(width: touchSize, height: touchSize),
+                alignment: .topTrailing,
+                circleOffset: .zero
+            )
+            .padding(.top, config.marginTop)
+            .padding(.trailing, config.marginRight)
+        }
+    }
+
+    private func button(
+        circleSize: CGFloat,
+        touchSize: CGSize,
+        alignment: Alignment,
+        circleOffset: CGSize
+    ) -> some View {
         Button(action: action) {
-            ZStack(alignment: .topTrailing) {
+            ZStack(alignment: alignment) {
                 Color.clear
                 ZStack {
-                    Circle().fill(config.backgroundColor)
+                    Circle().fill(color(config.backgroundToken, fallback: config.backgroundColor))
                     if config.iconSize > 0 {
                         Image(systemName: "xmark")
-                            .font(.system(size: config.iconSize, weight: .regular))
+                            .font(.system(
+                                size: min(config.iconSize, max(1, circleSize - 10)),
+                                weight: .regular
+                            ))
                             .imageScale(.small)
-                            .foregroundStyle(config.iconColor)
+                            .foregroundStyle(color(config.iconToken, fallback: config.iconColor))
                     }
                 }
-                .frame(width: config.diameter, height: config.diameter)
+                .frame(width: circleSize, height: circleSize)
+                .offset(x: circleOffset.width, y: circleOffset.height)
             }
-            .frame(width: touchSize, height: touchSize, alignment: .topTrailing)
+            .frame(width: touchSize.width, height: touchSize.height, alignment: alignment)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close")
-        .padding(.top, config.marginTop)
-        .padding(.trailing, config.marginRight)
     }
 }
