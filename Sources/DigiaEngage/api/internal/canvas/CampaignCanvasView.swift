@@ -766,44 +766,31 @@ private struct CanvasTimerRenderer: View {
 
     var body: some View {
         if case .timer(
-            _, let preset, let separator, let units, let labels, let labelSpans, let textWidgets, let sharedStyle, let overrides, let layout
+            _, let preset, _, let units, let labels, let labelSpans, let textWidgets, let sharedStyle, let overrides, let layout
         ) = widget, let remainingSeconds {
             let values = timerUnitValues(remainingSeconds: remainingSeconds, visibility: units)
             GeometryReader { geometry in
                 let unitCount = max(1, CampaignTimerUnit.allCases.filter { units[$0] != .hide }.count)
                 let boxWidth = max(0, (geometry.size.width - CGFloat(unitCount - 1) * 4) / CGFloat(unitCount))
-                if layout.isCustomized {
+                if preset == "text" {
+                    CampaignCanvasTextView(block: countdownText(
+                        values: values, style: sharedStyle, layout: layout
+                    ), isDark: isDark, onAction: { _ in }, singleLine: true)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                } else if layout.isCustomized {
                     containerUnits(values: values, layout: layout, fallback: CGSize(width: boxWidth, height: geometry.size.height))
                 } else {
                 HStack(spacing: 4) {
-                    ForEach(Array(values.enumerated()), id: \.element.0) { index, value in
-                        if index > 0 && preset == "text" {
-                            let style = overrides[value.0] ?? sharedStyle
-                            let digitSpan: CampaignCanvasTextSpan? = {
-                                guard case .text(_, let block, _)? = textWidgets[value.0]?["digits"] else { return nil }
-                                return block.spans.first
-                            }()
-                            let typography = digitSpan?.typography ?? style.digitTypography
-                            let color = digitSpan?.color ?? style.digitTextStyle?.color ?? style.digitColor
-                            timerText(.text(box: .none, block: timerTextBlock(
-                                [CampaignCanvasTextSpan(text: separator, typography: nil,
-                                    color: nil, highlightColor: nil, italic: false, decoration: .none,
-                                    decorationColor: nil, decorationThickness: nil, actions: [])],
-                                fallback: typography, fallbackSize: 16,
-                                color: color
-                            ), shadow: nil))
-                            .frame(width: max(1, CGFloat(separator.count)) * (typography?.fontSize ?? 16) * 0.6)
-                        }
+                    ForEach(Array(values.enumerated()), id: \.element.0) { _, value in
                         unitView(
                             value: value.1,
                             label: labels[value.0] ?? "",
                             labelSpans: labelSpans[value.0],
                             textWidgets: textWidgets[value.0],
                             style: overrides[value.0] ?? sharedStyle,
-                            boxed: preset == "unitBoxes"
+                            boxed: true
                         )
-                        .frame(width: preset == "unitBoxes" ? boxWidth : nil)
-                        .frame(maxWidth: preset == "text" ? .infinity : nil)
+                        .frame(width: boxWidth)
                     }
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
@@ -813,6 +800,36 @@ private struct CanvasTimerRenderer: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Countdown timer")
         }
+    }
+
+    private func countdownText(
+        values: [(CampaignTimerUnit, Int64)], style: CampaignCanvasTimerUnitStyle,
+        layout: CampaignCanvasTimerLayout
+    ) -> CampaignCanvasTextBlock {
+        let base = style.digitTextStyle ?? CampaignCanvasTextSpan(
+            text: "", typography: nil, color: nil, highlightColor: nil, italic: false,
+            decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
+        )
+        func span(_ text: String, color: CampaignColor?) -> CampaignCanvasTextSpan {
+            CampaignCanvasTextSpan(
+                text: text, typography: base.typography, color: color,
+                highlightColor: base.highlightColor, italic: base.italic, decoration: base.decoration,
+                decorationColor: base.decorationColor, decorationThickness: base.decorationThickness,
+                actions: [], decorationOffset: base.decorationOffset
+            )
+        }
+        var spans: [CampaignCanvasTextSpan] = []
+        for (index, value) in values.enumerated() {
+            if index > 0 && layout.separatorEnabled != false {
+                spans.append(span(":", color: layout.separatorColor ?? base.color))
+            }
+            spans.append(span(String(format: "%02lld", value.1), color: base.color))
+        }
+        let block = timerTextBlock(spans, fallback: style.digitTypography, fallbackSize: 16, color: style.digitColor)
+        return CampaignCanvasTextBlock(
+            horizontalAlign: layout.alignment, textAlign: layout.alignment, verticalAlign: .center,
+            maxLines: 1, overflow: "clip", sizingMode: "hug", spans: block.spans
+        )
     }
 
     @ViewBuilder
@@ -1003,9 +1020,10 @@ func timerUnitValues(
         let value = index == 0 ? rounded / entry.1 : (rounded % higher) / entry.1
         return (entry.0, value)
     }
-    return values.filter { unit, value in
-        visibility[unit] != .autoHide || value > 0 || values.count == 1
+    let visible = values.filter { unit, value in
+        visibility[unit] != .autoHide || value > 0
     }
+    return visible.isEmpty ? Array(values.suffix(1)) : visible
 }
 
 private struct CanvasTextRenderer: View {
@@ -1052,13 +1070,14 @@ private struct CampaignCanvasTextView: View {
     var colorOverride: UIColor? = nil
     var shadow: CampaignCanvasShadow? = nil
     var centerVertically = false
+    var singleLine = false
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
         CanvasRichText(
             attributed: attributed,
             fillWidth: block.sizingMode == "fixed",
-            maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
+            maxLines: singleLine ? 1 : (block.overflow == "ellipsis" ? block.maxLines : 0),
             overflow: block.overflow,
             textAlignment: block.textAlign.uiTextAlignment,
             centerVertically: centerVertically,
