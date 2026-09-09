@@ -43,6 +43,8 @@ struct StatefulTimerRule: Equatable {
     let id: String
     let state: TimerCampaignState?
     let canvas: CampaignCanvas?
+    var cornerRadius: Double? = nil
+    var margin: InlineCanvasMargin? = nil
 }
 
 struct ResolvedTimerCanvas: Equatable {
@@ -51,6 +53,8 @@ struct ResolvedTimerCanvas: Equatable {
     let canvas: CampaignCanvas?
     let remainingSeconds: Int64
     let deadlineSource: String
+    var cornerRadius: Double? = nil
+    var margin: InlineCanvasMargin? = nil
 
     var analyticsContext: TimerEventContext {
         TimerEventContext(
@@ -87,7 +91,9 @@ struct StatefulTimerConfig: Equatable {
             state: state,
             canvas: rule.canvas,
             remainingSeconds: remainingSeconds,
-            deadlineSource: deadline.sourceName
+            deadlineSource: deadline.sourceName,
+            cornerRadius: rule.cornerRadius,
+            margin: rule.margin
         )
     }
 
@@ -142,7 +148,19 @@ struct StatefulTimerConfig: Equatable {
                 canvas = parsed
             }
             guard let id = raw.nonBlankString("id") else { return nil }
-            rules.append(StatefulTimerRule(id: id, state: state, canvas: canvas))
+            let cornerRadius: Double? = raw["cornerRadius"] == nil || raw["cornerRadius"] is NSNull
+                ? nil : raw.double("cornerRadius", default: 0).finiteOrZero
+            let margin = raw.object("layout")?.object("margin").map { margin in
+                InlineCanvasMargin(
+                    top: margin.double("top", default: 0).finiteOrZero,
+                    right: margin.double("right", default: 0).finiteOrZero,
+                    bottom: margin.double("bottom", default: 0).finiteOrZero,
+                    left: margin.double("left", default: 0).finiteOrZero
+                )
+            }
+            rules.append(StatefulTimerRule(
+                id: id, state: state, canvas: canvas, cornerRadius: cornerRadius, margin: margin
+            ))
         }
         guard rules.contains(where: { $0.state == nil }) else { return nil }
         return StatefulTimerConfig(

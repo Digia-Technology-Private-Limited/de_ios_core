@@ -82,8 +82,8 @@ struct DigiaInlineCanvasView: View {
         InlineCampaignCanvasView(
             canvas: canvas,
             designWidth: CGFloat(config.designWidth),
-            cornerRadius: CGFloat(config.cornerRadius),
-            margin: config.margin,
+            cornerRadius: CGFloat(timerState?.cornerRadius ?? config.cornerRadius),
+            margin: timerState?.margin ?? config.margin,
             onAction: { request in
                 if let timerState {
                     SDKInstance.shared.reportInlineTimerStateRender(
