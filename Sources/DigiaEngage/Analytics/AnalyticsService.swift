@@ -31,6 +31,7 @@ final class AnalyticsService {
     private let sender: any AnalyticsSender
     private let requestHeaders: [String: String]
 
+    private var isCleared = false
     private var flushTimer: Timer?
     /// Non-nil for the whole lifetime of a scheduled backoff wait (including
     /// while the resulting `dispatchPending()` call is actually running) — so
@@ -160,6 +161,10 @@ final class AnalyticsService {
 
     /// Cancels timers and removes lifecycle observers. Call before releasing the service.
     func clear() {
+        isCleared = true
+        identity.onSessionRotated = nil
+        retryTask?.cancel()
+        retryTask = nil
         cancelTimer()
         if let obs = backgroundObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = foregroundObserver { NotificationCenter.default.removeObserver(obs) }
@@ -228,7 +233,8 @@ final class AnalyticsService {
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
         let url = DigiaEndpoints.session
         let headers = jsonHeaders
-        Task {
+        Task { [weak self, sender] in
+            guard self?.isCleared == false else { return }
             let status = try? await sender.post(url: url, body: data, headers: headers)
             DigiaLog.log(
                 "session reported: HTTP \(status ?? -1) sessionId=\(sessionId) anonymousId=\(anonymousId)",
@@ -297,6 +303,7 @@ final class AnalyticsService {
     }
 
     private func dispatchPending() async {
+        guard !isCleared else { return }
         guard !isDispatching else {
             DigiaLog.log("dispatchPending: already dispatching — skipped", tag: "DigiaAnalytics")
             return
@@ -414,7 +421,7 @@ final class AnalyticsService {
         let delayNs = UInt64(delayMs) * 1_000_000
         retryTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: delayNs)
-            guard let self else { return }
+            guard !Task.isCancelled, let self, !self.isCleared else { return }
             self.retryTask = nil
             await self.dispatchPending()
         }

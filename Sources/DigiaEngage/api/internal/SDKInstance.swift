@@ -198,6 +198,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         requestHeaders = SDKRequestHeaders.make(
             config: config, deviceId: AnalyticsIdentityManager().resolveAnonymousId()
         )
+        analyticsService = AnalyticsService.create(config: config, requestHeaders: requestHeaders)
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
 
         font = DigiaFont(fontFamily: config.fontFamily)
@@ -259,9 +260,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
 
         sdkState = .ready
-        if analyticsService == nil, let config {
-            analyticsService = AnalyticsService.create(config: config, requestHeaders: requestHeaders)
-        }
         if let config, let analyticsService {
             componentRegistry.configure(
                 config: config,
