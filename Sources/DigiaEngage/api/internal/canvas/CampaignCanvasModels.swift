@@ -239,6 +239,7 @@ enum CampaignCanvasWidget: Equatable, Sendable {
         units: [CampaignTimerUnit: CampaignTimerUnitVisibility],
         labels: [CampaignTimerUnit: String],
         labelSpans: [CampaignTimerUnit: [CampaignCanvasTextSpan]] = [:],
+        textWidgets: [CampaignTimerUnit: [String: CampaignCanvasWidget]] = [:],
         style: CampaignCanvasTimerUnitStyle,
         unitOverrides: [CampaignTimerUnit: CampaignCanvasTimerUnitStyle]
     )
@@ -255,7 +256,7 @@ enum CampaignCanvasWidget: Equatable, Sendable {
              .storyProgress(let box, _, _, _, _, _),
              .storyClose(let box, _, _, _),
              .storyMute(let box, _, _, _): box
-        case .timer(let box, _, _, _, _, _, _, _): box
+        case .timer(let box, _, _, _, _, _, _, _, _): box
         case .container: .none
         }
     }
@@ -284,10 +285,7 @@ enum CampaignCanvasChild: Equatable, Identifiable, Sendable {
         case .widget(_, _, .story(_, _, _, _, _, let showRail, _, _, _, _)): showRail
         case .widget(_, _, .storyClose(_, let visible, _, _)): visible
         case .widget(_, _, .storyMute(_, let visible, _, _)): visible
-        case .widget(_, _, .timer(_, _, _, _, _, let labels, let style, let overrides)):
-            labels.values.contains { $0.contains { !$0.actions.isEmpty } } ||
-                style.digitTextStyle?.actions.isEmpty == false ||
-                overrides.values.contains { $0.digitTextStyle?.actions.isEmpty == false }
+        case .widget(_, _, .timer): false
         case .widget(_, _, .text(_, let block, _)):
             block.spans.contains { !$0.actions.isEmpty }
         case .widget(_, _, .button(_, let label, _, _, _, _, _, _, let actions, _)):

@@ -256,6 +256,24 @@ struct CampaignCanvasParser {
                 labelSpans[unit] = try parseSpans(spans)
             }
         }
+        var textWidgets: [CampaignTimerUnit: [String: CampaignCanvasWidget]] = [:]
+        let rawNodes = propertyObject(props["textWidgets"]) ?? [:]
+        for unit in CampaignTimerUnit.allCases {
+            guard let parts = propertyObject(rawNodes[unit.rawValue]) else { continue }
+            for part in ["digits", "label"] {
+                guard var node = propertyObject(parts[part]), node["type"] as? String == "digia/text" else { continue }
+                var textProps = propertyObject(node["props"]) ?? [:]
+                if let spans = textProps["spans"] as? [[String: Any]] {
+                    textProps["spans"] = spans.map { span in
+                        var value = span
+                        value.removeValue(forKey: "onClick")
+                        return value
+                    }
+                }
+                node["props"] = textProps
+                if let text = try? parseWidget(node) { textWidgets[unit, default: [:]][part] = text }
+            }
+        }
         return .timer(
             box: box,
             preset: preset,
@@ -263,6 +281,7 @@ struct CampaignCanvasParser {
             units: units,
             labels: labels,
             labelSpans: labelSpans,
+            textWidgets: textWidgets,
             style: shared,
             unitOverrides: overrides
         )
