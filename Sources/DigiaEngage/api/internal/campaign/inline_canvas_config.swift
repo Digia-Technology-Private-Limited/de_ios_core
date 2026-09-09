@@ -187,28 +187,40 @@ struct StatefulTimerConfig: Equatable {
 }
 
 private func parseOffsetInstantMs(_ raw: String) -> Int64? {
-    let pattern = #"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$"#
-    guard raw.range(of: pattern, options: .regularExpression) != nil else { return nil }
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    let date = formatter.date(from: raw) ?? {
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: raw)
-    }()
-    guard let date else { return nil }
-    var offsetSeconds = 0
-    if !raw.hasSuffix("Z") {
-        let offset = raw.suffix(6)
-        guard let hours = Int(offset.dropFirst().prefix(2)), hours <= 23,
-              let minutes = Int(offset.suffix(2)), minutes <= 59 else { return nil }
-        offsetSeconds = (hours * 3_600 + minutes * 60) * (offset.first == "-" ? -1 : 1)
+    let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    if value.range(of: #"^(?:\$D_)?[0-9]{10}$"#, options: .regularExpression) != nil {
+        let seconds = value.hasPrefix("$D_") ? String(value.dropFirst(3)) : value
+        return Int64(seconds).map { $0 * 1_000 }
     }
-    guard let timeZone = TimeZone(secondsFromGMT: offsetSeconds) else { return nil }
-    formatter.timeZone = timeZone
-    formatter.formatOptions = [.withInternetDateTime]
-    // ISO8601DateFormatter normalizes invalid dates such as February 31.
-    guard formatter.string(from: date).prefix(19) == raw.prefix(19) else { return nil }
-    return Int64(date.timeIntervalSince1970 * 1_000)
+    if value.range(of: #"^[0-9]{13}$"#, options: .regularExpression) != nil { return Int64(value) }
+    let pattern = #"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?$"#
+    guard value.range(of: pattern, options: .regularExpression) != nil,
+          !value.hasPrefix("0000") else { return nil }
+    let local = String(value.prefix(19)).replacingOccurrences(of: " ", with: "T")
+    var suffix = String(value.dropFirst(19))
+    var fraction = "000"
+    if suffix.hasPrefix(".") {
+        let digits = suffix.dropFirst().prefix(while: { $0.isNumber })
+        fraction = String((String(digits) + "000").prefix(3))
+        suffix = String(suffix.dropFirst(digits.count + 1))
+    }
+    let offset = suffix.isEmpty || suffix == "Z" ? "+0000" : suffix.replacingOccurrences(of: ":", with: "")
+    guard let hours = Int(offset.dropFirst().prefix(2)), hours <= 23,
+          let minutes = Int(offset.suffix(2)), minutes <= 59 else { return nil }
+    let offsetSeconds = (hours * 3_600 + minutes * 60) * (offset.first == "-" ? -1 : 1)
+    let normalized = "\(local).\(fraction)"
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.gregorianStartDate = .distantPast
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
+    formatter.isLenient = false
+    guard let date = formatter.date(from: normalized),
+          formatter.string(from: date) == normalized else { return nil }
+    let milliseconds = (date.timeIntervalSince1970 - Double(offsetSeconds)) * 1_000
+    guard (-62_135_596_800_000...253_402_300_799_999).contains(milliseconds) else { return nil }
+    return Int64(milliseconds.rounded())
 }
 
 /// Space between an inline card and the edges of its slot, in logical pixels.
