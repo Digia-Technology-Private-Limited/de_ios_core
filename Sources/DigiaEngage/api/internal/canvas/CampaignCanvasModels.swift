@@ -292,6 +292,8 @@ enum CampaignCanvasChild: Equatable, Identifiable, Sendable {
     var clipsToAuthoredRect: Bool {
         guard case .widget(_, _, let widget) = self else { return true }
         if case .container = widget { return false }
+        if case .timer(_, let preset, _, _, _, _, _, _, _, let layout) = widget,
+            preset != "text", layout.isCustomized { return false }
         if widget.box.shadow != nil { return false }
         if case .text(_, _, let shadow) = widget, shadow != nil { return false }
         if case .button(_, _, _, _, let shadow, _, _, _, _, _) = widget { return shadow == nil }
