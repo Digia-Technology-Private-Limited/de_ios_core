@@ -187,7 +187,16 @@ struct StatefulTimerConfig: Equatable {
 }
 
 private func parseOffsetInstantMs(_ raw: String) -> Int64? {
-    let value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    var value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    let javaScriptDate = #"^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{1,2} [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT[+-][0-9]{4}(?: \([^()\r\n]+\))?$"#
+    if value.range(of: javaScriptDate, options: .regularExpression) != nil {
+        let parts = value.components(separatedBy: " ")
+        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        guard parts.count >= 6, let month = months.firstIndex(of: parts[1]) else { return nil }
+        let monthText = String(format: "%02d", month + 1)
+        let day = String(("0" + parts[2]).suffix(2))
+        value = "\(parts[3])-\(monthText)-\(day)T\(parts[4])\(parts[5].dropFirst(3))"
+    }
     if value.range(of: #"^(?:\$D_)?[0-9]{10}$"#, options: .regularExpression) != nil {
         let seconds = value.hasPrefix("$D_") ? String(value.dropFirst(3)) : value
         return Int64(seconds).map { $0 * 1_000 }
