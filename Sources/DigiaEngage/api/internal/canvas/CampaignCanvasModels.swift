@@ -115,6 +115,26 @@ enum CampaignCanvasDividerAxis: Equatable { case horizontal, vertical }
 enum CampaignCanvasDividerPattern: Equatable { case solid, dashed, dotted }
 enum CampaignCanvasStrokeCap: Equatable { case butt, round, square }
 
+struct CampaignCanvasTimerContentAlignment: Equatable {
+    var horizontal: CampaignCanvasHorizontalAlign = .center
+    var vertical: CampaignCanvasVerticalAlign = .center
+}
+
+struct CampaignCanvasTimerLayout: Equatable {
+    var containers: [CampaignTimerUnit: CampaignCanvasWidget] = [:]
+    var padding: [CampaignTimerUnit: CampaignCanvasEdgeInsets] = [:]
+    var sizes: [CampaignTimerUnit: CGSize] = [:]
+    var contentAlignment: [CampaignTimerUnit: CampaignCanvasTimerContentAlignment] = [:]
+    var gaps: [CampaignTimerUnit: CGFloat] = [:]
+    var alignment: CampaignCanvasHorizontalAlign = .center
+    var separatorEnabled: Bool?
+    var separatorColor: CampaignColor?
+    var isCustomized: Bool {
+        !containers.isEmpty || !sizes.isEmpty || !contentAlignment.isEmpty || !gaps.isEmpty ||
+            alignment != .center || separatorEnabled != nil || separatorColor != nil
+    }
+}
+
 enum CampaignTimerUnit: String, CaseIterable, Equatable, Sendable {
     case days, hours, minutes, seconds
 }
@@ -241,7 +261,8 @@ enum CampaignCanvasWidget: Equatable, Sendable {
         labelSpans: [CampaignTimerUnit: [CampaignCanvasTextSpan]] = [:],
         textWidgets: [CampaignTimerUnit: [String: CampaignCanvasWidget]] = [:],
         style: CampaignCanvasTimerUnitStyle,
-        unitOverrides: [CampaignTimerUnit: CampaignCanvasTimerUnitStyle]
+        unitOverrides: [CampaignTimerUnit: CampaignCanvasTimerUnitStyle],
+        layout: CampaignCanvasTimerLayout = .init()
     )
 
     var box: CampaignCanvasBox {
@@ -256,7 +277,7 @@ enum CampaignCanvasWidget: Equatable, Sendable {
              .storyProgress(let box, _, _, _, _, _),
              .storyClose(let box, _, _, _),
              .storyMute(let box, _, _, _): box
-        case .timer(let box, _, _, _, _, _, _, _, _): box
+        case .timer(let box, _, _, _, _, _, _, _, _, _): box
         case .container: .none
         }
     }

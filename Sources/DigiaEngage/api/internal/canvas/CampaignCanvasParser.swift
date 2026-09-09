@@ -283,8 +283,42 @@ struct CampaignCanvasParser {
             labelSpans: labelSpans,
             textWidgets: textWidgets,
             style: shared,
-            unitOverrides: overrides
+            unitOverrides: overrides,
+            layout: try parseTimerLayout(props)
         )
+    }
+
+    private func parseTimerLayout(_ props: [String: Any]) throws -> CampaignCanvasTimerLayout {
+        var layout = CampaignCanvasTimerLayout()
+        func horizontal(_ raw: Any?) -> CampaignCanvasHorizontalAlign {
+            switch raw as? String { case "left": .left; case "right": .right; default: .center }
+        }
+        for unit in CampaignTimerUnit.allCases {
+            if let node = propertyObject(propertyObject(props["unitContainers"])?[unit.rawValue]),
+               node["type"] as? String == "digia/canvasContainer",
+               let container = try? parseWidget(node) {
+                layout.containers[unit] = container
+                layout.padding[unit] = try parseBox(propertyObject(node["containerProps"])).padding
+            }
+            let size = propertyObject(propertyObject(props["unitSizes"])?[unit.rawValue])
+            if let width = propertyNumber(size?["width"]), let height = propertyNumber(size?["height"]),
+               width.isFinite, height.isFinite, width > 0, height > 0 {
+                layout.sizes[unit] = CGSize(width: min(width, 10000), height: min(height, 10000))
+            }
+            if let alignment = propertyObject(propertyObject(props["unitContentAlignment"])?[unit.rawValue]) {
+                layout.contentAlignment[unit] = CampaignCanvasTimerContentAlignment(
+                    horizontal: horizontal(alignment["horizontal"]),
+                    vertical: { switch alignment["vertical"] as? String { case "top": .top; case "bottom": .bottom; default: .center } }()
+                )
+            }
+            if let gap = propertyNumber(propertyObject(props["unitGaps"])?[unit.rawValue]), gap.isFinite, gap >= 0 {
+                layout.gaps[unit] = CGFloat(min(gap, 10000))
+            }
+        }
+        layout.alignment = horizontal(props["alignment"])
+        layout.separatorEnabled = props["separatorEnabled"] as? Bool
+        layout.separatorColor = try designTokens.resolveColor(props["separatorColor"])
+        return layout
     }
 
     private func parseTimerStyle(
