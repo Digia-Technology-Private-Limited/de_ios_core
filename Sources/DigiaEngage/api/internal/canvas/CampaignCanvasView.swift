@@ -776,14 +776,20 @@ private struct CanvasTimerRenderer: View {
                     ForEach(Array(values.enumerated()), id: \.element.0) { index, value in
                         if index > 0 && preset == "text" {
                             let style = overrides[value.0] ?? sharedStyle
+                            let digitSpan: CampaignCanvasTextSpan? = {
+                                guard case .text(_, let block, _)? = textWidgets[value.0]?["digits"] else { return nil }
+                                return block.spans.first
+                            }()
+                            let typography = digitSpan?.typography ?? style.digitTypography
+                            let color = digitSpan?.color ?? style.digitTextStyle?.color ?? style.digitColor
                             timerText(.text(box: .none, block: timerTextBlock(
                                 [CampaignCanvasTextSpan(text: separator, typography: nil,
                                     color: nil, highlightColor: nil, italic: false, decoration: .none,
                                     decorationColor: nil, decorationThickness: nil, actions: [])],
-                                fallback: style.digitTypography, fallbackSize: 16,
-                                color: style.digitTextStyle?.color ?? style.digitColor
+                                fallback: typography, fallbackSize: 16,
+                                color: color
                             ), shadow: nil))
-                            .frame(width: max(1, CGFloat(separator.count)) * (style.digitTypography?.fontSize ?? 16) * 0.6)
+                            .frame(width: max(1, CGFloat(separator.count)) * (typography?.fontSize ?? 16) * 0.6)
                         }
                         unitView(
                             value: value.1,
