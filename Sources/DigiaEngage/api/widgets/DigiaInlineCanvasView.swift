@@ -4,6 +4,7 @@ import UIKit
 private struct TimerRenderIdentity: Equatable {
     let campaignID: String
     let stateID: String?
+    let applicationActive: Bool
 }
 
 /// Hosts an authored Canvas inside a `DigiaSlot`.
@@ -42,9 +43,11 @@ struct DigiaInlineCanvasView: View {
         }
         .task(id: TimerRenderIdentity(
             campaignID: payload.cepCampaignId,
-            stateID: resolved?.stateID
+            stateID: resolved?.stateID,
+            applicationActive: applicationActive
         )) {
-            if let resolved, resolved.canvas != nil {
+            if applicationActive, UIApplication.shared.applicationState == .active,
+               !Task.isCancelled, let resolved, resolved.canvas != nil {
                 SDKInstance.shared.reportInlineTimerStateRender(
                     payload: payload,
                     config: config,
