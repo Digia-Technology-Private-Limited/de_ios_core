@@ -171,6 +171,7 @@ struct CanvasSurveyPanel: View {
     private func primary() {
         if showingWelcome {
             SDKInstance.shared.reportSurveyWelcomeStart()
+            SDKInstance.shared.reportSurveyStartClicked()
             welcomeDone = true
             return
         }

@@ -1373,7 +1373,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         events.toBoth(
             .dismissed,
             SurveyEvent.Dismissed(
-                abandonedAtItem: abandonedAtItem,
+                abandonedAtItem: completedSurveyToken == state.token ? nil : abandonedAtItem,
                 itemTotal: state.config.questionCount,
                 answeredCount: answeredCount,
                 dwellMs: dwellTracker.consumeDwellMs(state.payload.cepCampaignId)
