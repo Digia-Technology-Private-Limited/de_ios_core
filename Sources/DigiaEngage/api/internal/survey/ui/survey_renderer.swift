@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import Combine
+@_implementationOnly import SDWebImageSwiftUI
 
 /// Frame-settling buffer added before the survey is shown.
 private let RENDER_DELAY_MS: Int = 150
@@ -1113,6 +1114,11 @@ private struct BlockTitleView: View {
 private struct BlockMediaImage: View {
     let media: BlockMedia
 
+    init(media: BlockMedia) {
+        DigiaImagePipeline.configureIfNeeded()
+        self.media = media
+    }
+
     private var contentMode: ContentMode {
         switch media.boxFit {
         case "contain": return .fit
@@ -1122,8 +1128,12 @@ private struct BlockMediaImage: View {
 
     var body: some View {
         if media.hasUrl, let url = URL(string: media.url) {
-            AsyncImage(url: url) { image in
-                image.resizable().aspectRatio(contentMode: contentMode)
+            WebImage(url: url) { image in
+                if media.boxFit == "fill" {
+                    image.resizable()
+                } else {
+                    image.resizable().aspectRatio(contentMode: contentMode)
+                }
             } placeholder: {
                 ZStack {
                     SurveyTokens.surfaceSunken

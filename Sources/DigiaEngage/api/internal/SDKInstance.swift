@@ -191,6 +191,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func initialize(_ config: DigiaConfig) async throws {
+        DigiaImagePipeline.configureIfNeeded()
         hostActionExecutor.configure(config.actionHandlers)
         guard self.config == nil else { return }
         self.config = config

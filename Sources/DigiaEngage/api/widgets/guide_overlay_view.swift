@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import UIKit
+@_implementationOnly import SDWebImageSVGCoder
 
 @MainActor
 private enum AnchorlessImageLoader {
@@ -8,6 +9,7 @@ private enum AnchorlessImageLoader {
     private static let imageLoadTimeout: TimeInterval = 3
 
     static func image(for url: URL) async -> UIImage? {
+        DigiaImagePipeline.configureIfNeeded()
         if let cached = cache.object(forKey: url as NSURL) { return cached }
         var request = URLRequest(url: url)
         request.timeoutInterval = imageLoadTimeout
@@ -15,7 +17,7 @@ private enum AnchorlessImageLoader {
               !Task.isCancelled,
               let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode),
-              let image = UIImage(data: data)
+              let image = UIImage(data: data) ?? SDImageSVGCoder.shared.decodedImage(with: data, options: nil)
         else { return nil }
         cache.setObject(image, forKey: url as NSURL)
         return image
