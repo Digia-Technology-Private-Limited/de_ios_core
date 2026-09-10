@@ -32,21 +32,25 @@ final class AnalyticsIdentityManager {
         _anonymousId = resolveAnonymousId()
         _userId = defaults.string(forKey: Self.keyUserId)
         _sessionId = UUID().uuidString
+        _lastEventDate = Date()
     }
 
     func setUserId(_ userId: String) {
+        guard _userId != userId else { return }
         _userId = userId
         defaults.set(userId, forKey: Self.keyUserId)
         rotateSession()
     }
 
     func clearUserId() {
+        guard _userId != nil else { return }
         _userId = nil
         defaults.removeObject(forKey: Self.keyUserId)
         rotateSession()
     }
 
     func captureEventTime() {
+        maybeExpireSession()
         _lastEventDate = Date()
     }
 
@@ -60,6 +64,7 @@ final class AnalyticsIdentityManager {
 
     private func rotateSession() {
         _sessionId = UUID().uuidString
+        _lastEventDate = Date()
         onSessionRotated?()
     }
 
