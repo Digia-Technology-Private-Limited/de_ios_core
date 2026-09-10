@@ -151,6 +151,12 @@ private struct NudgeImageView: View {
     let canvasMode: Bool
     @Environment(\.digiaVariables) private var variables
 
+    init(node: NudgeImage, canvasMode: Bool) {
+        DigiaImagePipeline.configureIfNeeded()
+        self.node = node
+        self.canvasMode = canvasMode
+    }
+
     private var url: String { interpolate(node.url, context: variables) }
     private var maxWidth: CGFloat? { node.box.fillWidth ? .infinity : nil }
     // Placeholder slot shows the payload's blurhash (auto-computed by the
@@ -418,6 +424,11 @@ private struct NudgeLottieView: View {
 private struct NudgeCarouselView: View {
     let node: NudgeCarousel
     @Environment(\.digiaVariables) private var variables
+
+    init(node: NudgeCarousel) {
+        DigiaImagePipeline.configureIfNeeded()
+        self.node = node
+    }
     @State private var currentIndex = 0
     @State private var autoPlayTimer: Timer? = nil
 

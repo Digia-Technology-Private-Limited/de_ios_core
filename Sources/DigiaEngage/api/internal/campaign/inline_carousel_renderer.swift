@@ -218,6 +218,14 @@ private struct InlineCarouselItemImage: View {
     let height: CGFloat
     let cornerRadius: CGFloat
 
+    init(item: CarouselItem, width: CGFloat, height: CGFloat, cornerRadius: CGFloat) {
+        DigiaImagePipeline.configureIfNeeded()
+        self.item = item
+        self.width = width
+        self.height = height
+        self.cornerRadius = cornerRadius
+    }
+
     var body: some View {
         fittedImage
             .frame(width: width, height: height)

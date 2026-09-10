@@ -22,6 +22,14 @@ struct FloaterMediaView: View {
     let cover: Bool
     let resolvedUrl: String
 
+    init(media: FloaterMediaConfig, player: AVPlayer?, cover: Bool, resolvedUrl: String) {
+        DigiaImagePipeline.configureIfNeeded()
+        self.media = media
+        self.player = player
+        self.cover = cover
+        self.resolvedUrl = resolvedUrl
+    }
+
     var body: some View {
         switch media.kind {
         case .video:

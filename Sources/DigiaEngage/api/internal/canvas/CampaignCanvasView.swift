@@ -1748,6 +1748,28 @@ private struct FocalCanvasImage: View {
     var failureLabel: String? = nil
     @Environment(\.digiaVariables) private var variables
     @State private var failedURL: String?
+
+    init(
+        source: CampaignCanvasMediaSource,
+        isDark: Bool,
+        fit: String,
+        x: CGFloat,
+        y: CGFloat,
+        scale: CGFloat,
+        tint: CampaignColor? = nil,
+        failureLabel: String? = nil
+    ) {
+        DigiaImagePipeline.configureIfNeeded()
+        self.source = source
+        self.isDark = isDark
+        self.fit = fit
+        self.x = x
+        self.y = y
+        self.scale = scale
+        self.tint = tint
+        self.failureLabel = failureLabel
+    }
+
     var body: some View {
         let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
         let resolved = interpolate(raw, context: variables)
