@@ -511,12 +511,14 @@ struct BottomSheetProps: Equatable {
     let draggable: Bool
     let backdropDismissible: Bool
     let showCloseButton: Bool
+    var bottomSafeAreaMode: BottomSafeAreaMode = .none
 
     static let `default` = BottomSheetProps(
         heightMode: .wrap, customHeight: 0, cornerRadius: 20,
         backdropColorHex: "#66000000", backdropOpacity: 0.4,
         showHandle: true, draggable: true,
-        backdropDismissible: true, showCloseButton: true
+        backdropDismissible: true, showCloseButton: true,
+        bottomSafeAreaMode: .none
     )
 
     static func from(_ json: [String: JSONValue]?) -> BottomSheetProps {
@@ -532,7 +534,8 @@ struct BottomSheetProps: Equatable {
             showHandle: SurveyParse.bool(json["showHandle"]) ?? true,
             draggable: SurveyParse.bool(json["draggable"]) ?? true,
             backdropDismissible: SurveyParse.bool(json["backdropDismissible"]) ?? true,
-            showCloseButton: SurveyParse.bool(json["showCloseButton"]) ?? true
+            showCloseButton: SurveyParse.bool(json["showCloseButton"]) ?? true,
+            bottomSafeAreaMode: .none
         )
     }
 }

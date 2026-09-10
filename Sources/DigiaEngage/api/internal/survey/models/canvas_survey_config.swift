@@ -32,7 +32,6 @@ enum CanvasSurveyManagedRole: Equatable {
     case timer
     case primaryNavigation
     case backNavigation
-    case dismiss
 }
 
 enum CanvasSurveyChoiceLayout: Equatable {
@@ -224,8 +223,6 @@ struct CanvasSurveyManagedHostElement: Equatable {
     let padding: CGFloat
     let progressStyle: String
     let countQuestionsOnly: Bool
-    let iconColorHex: String?
-    let iconSize: CGFloat
     let button: CampaignCanvasWidget?
 }
 
@@ -268,6 +265,8 @@ struct CanvasSurveyConfig: Equatable {
     let designWidth: CGFloat
     let welcomeDocument: CanvasSurveyDocument?
     let scenesByBlockId: [String: CanvasSurveySceneDocument]
+    var closeButton: NudgeCloseButtonConfig? = nil
+    var closeCanvasSize = CGSize(width: 360, height: 420)
 
     func document(for node: SurveyNode) -> CanvasSurveySceneDocument? {
         scenesByBlockId[node.blockId]

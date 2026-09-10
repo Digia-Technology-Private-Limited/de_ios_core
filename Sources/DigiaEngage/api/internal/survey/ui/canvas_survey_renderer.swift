@@ -344,77 +344,113 @@ private struct CanvasSurveyScaledStage: View {
     let onCanvasAction: (CampaignCanvasActionRequest) -> Void
     let onValidationError: (String?) -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.canvasSurveyDialogPresentation) private var dialogPresentation
 
     var body: some View {
-        GeometryReader { geo in
-            let document = visualDocument
-            let designScale = canvasSurveyDesignScale(viewportWidth: UIScreen.main.bounds.width)
+        if let dialog = dialogPresentation {
+            // Fit once against the full window, as Android does inside its
+            // vertically unbounded scroll content. IME height never affects scale.
             let scale = canvasSurveyFitScale(
-                designScale: designScale,
-                availableWidth: geo.size.width,
-                availableHeight: geo.size.height > 0 ? geo.size.height : UIScreen.main.bounds.height
+                designScale: canvasSurveyDesignScale(viewportWidth: dialog.viewport.width),
+                availableWidth: dialog.availableWidth,
+                availableHeight: dialog.viewport.height
             )
-            ZStack(alignment: .topLeading) {
-                if paintBackground {
-                    CampaignCanvasBackgroundView(paint: document.sharedUi.background)
-                        .frame(width: stageWidth, height: stageHeight)
-                        .allowsHitTesting(false)
-                }
-                CanvasSurveyContentLayer(
-                    frame: frame,
-                    previousFrame: previousFrame,
-                    transitionProgress: transitionProgress,
+            scaledStage(scale: scale)
+                .modifier(CanvasSurveyDialogKeyboardLayout(
+                    presentation: dialog,
+                    surfaceSize: CGSize(width: stageWidth * scale, height: stageHeight * scale),
+                    onClose: onClose,
+                    keyboardInset: dialog.keyboardInset
+                ))
+                .animation(dialog.animation, value: dialog.keyboardInset)
+                // SurveySession disables cover presentation animations. Permit
+                // this dialog's inset interpolation; its children opt out inside.
+                .transaction { $0.disablesAnimations = false }
+        } else {
+            GeometryReader { geo in
+                let scale = canvasSurveyFitScale(
+                    designScale: canvasSurveyDesignScale(viewportWidth: UIScreen.main.bounds.width),
+                    availableWidth: geo.size.width,
+                    availableHeight: geo.size.height > 0 ? geo.size.height : UIScreen.main.bounds.height
+                )
+                scaledStage(scale: scale)
+            }
+            .aspectRatio(stageWidth / max(1, stageHeight), contentMode: .fit)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func scaledStage(scale: CGFloat) -> some View {
+        ZStack(alignment: .topLeading) {
+            if paintBackground {
+                CampaignCanvasBackgroundView(paint: document.sharedUi.background)
+                    .frame(width: stageWidth, height: stageHeight)
+                    .allowsHitTesting(false)
+            }
+            CanvasSurveyContentLayer(
+                frame: frame,
+                previousFrame: previousFrame,
+                transitionProgress: transitionProgress,
+                survey: survey,
+                vm: vm,
+                accent: accent,
+                onCanvasAction: onCanvasAction,
+                onValidationError: onValidationError
+            )
+            .frame(width: stageWidth, height: stageHeight, alignment: .topLeading)
+            .clipped()
+            CampaignCanvasStage(
+                canvas: document.sharedUi,
+                authoredCornerRadius: 0,
+                isDark: CampaignCanvasTheme.shared.isDark(colorScheme),
+                showBackground: false,
+                onAction: onCanvasAction,
+                backgroundTakesTouches: false,
+                animateWidgetsOnAppear: false
+            )
+            ForEach(managedHosts, id: \.id) { host in
+                CanvasSurveyHostView(
+                    host: .managed(host),
+                    scene: frame.scene,
                     survey: survey,
+                    block: frame.block,
+                    answerNodeId: frame.answerNodeId,
                     vm: vm,
                     accent: accent,
+                    remainingSecs: remainingSecs,
+                    showCloseButton: showCloseButton,
+                    onPrimary: onPrimary,
+                    onPrevious: onPrevious,
+                    onClose: onClose,
                     onCanvasAction: onCanvasAction,
                     onValidationError: onValidationError
                 )
-                .frame(width: stageWidth, height: stageHeight, alignment: .topLeading)
-                .clipped()
-                CampaignCanvasStage(
-                    canvas: document.sharedUi,
-                    authoredCornerRadius: 0,
-                    isDark: CampaignCanvasTheme.shared.isDark(colorScheme),
-                    showBackground: false,
-                    onAction: onCanvasAction,
-                    backgroundTakesTouches: false,
-                    animateWidgetsOnAppear: false
-                )
-                ForEach(managedHosts, id: \.id) { host in
-                    CanvasSurveyHostView(
-                        host: .managed(host),
-                        scene: frame.scene,
-                        survey: survey,
-                        block: frame.block,
-                        answerNodeId: frame.answerNodeId,
-                        vm: vm,
-                        accent: accent,
-                        remainingSecs: remainingSecs,
-                        showCloseButton: showCloseButton,
-                        onPrimary: onPrimary,
-                        onPrevious: onPrevious,
-                        onClose: onClose,
-                        onCanvasAction: onCanvasAction,
-                        onValidationError: onValidationError
-                    )
-                    .frame(width: host.rect.width, height: host.rect.height, alignment: .topLeading)
-                    .offset(x: host.rect.x, y: host.rect.y)
-                }
-                if let validationError, !validationError.isEmpty, let rect = validationErrorRect {
-                    CanvasSurveyValidationErrorView(message: validationError)
-                        .frame(width: rect.width, alignment: .center)
-                        .offset(x: rect.x, y: rect.y)
-                        .allowsHitTesting(false)
-                }
+                .frame(width: host.rect.width, height: host.rect.height, alignment: .topLeading)
+                .offset(x: host.rect.x, y: host.rect.y)
             }
-            .frame(width: stageWidth, height: stageHeight, alignment: .topLeading)
-            .clipped()
-            .scaleEffect(scale, anchor: .topLeading)
-            .frame(width: stageWidth * scale, height: stageHeight * scale, alignment: .topLeading)
+            if let validationError, !validationError.isEmpty, let rect = validationErrorRect {
+                CanvasSurveyValidationErrorView(message: validationError)
+                    .frame(width: rect.width, alignment: .center)
+                    .offset(x: rect.x, y: rect.y)
+                    .allowsHitTesting(false)
+            }
         }
-        .aspectRatio(stageWidth / max(1, stageHeight), contentMode: .fit)
-        .fixedSize(horizontal: false, vertical: true)
+        .frame(width: stageWidth, height: stageHeight, alignment: .topLeading)
+        .clipped()
+        .scaleEffect(scale, anchor: .topLeading)
+        .frame(width: stageWidth * scale, height: stageHeight * scale, alignment: .topLeading)
+        .overlay(alignment: .topLeading) {
+            if showCloseButton, let canvasConfig = survey.canvasSurvey,
+               let close = canvasConfig.closeButton, close.placement?.rect != nil {
+                let size = CGSize(width: stageWidth * scale, height: stageHeight * scale)
+                CanvasNudgeCloseOverlay(
+                    config: mappedClose(close, source: canvasConfig.closeCanvasSize),
+                    container: CGRect(origin: .zero, size: size),
+                    viewport: size, safeAreaInsets: .zero,
+                    isBottomSheet: survey.settings.display.type == .bottomSheet,
+                    action: onClose)
+            }
+        }
     }
 
     private var document: CanvasSurveyDocument {
@@ -429,11 +465,19 @@ private struct CanvasSurveyScaledStage: View {
         )
     }
 
+    private func mappedClose(_ close: NudgeCloseButtonConfig, source: CGSize) -> NudgeCloseButtonConfig {
+        var result = close
+        result.placement = close.placement?.forCanvas(
+            source: source, target: CGSize(width: stageWidth, height: stageHeight))
+        return result
+    }
+
     private var managedHosts: [CanvasSurveyManagedHostElement] {
-        document.canvasHosts.compactMap { host in
+        let hosts = document.canvasHosts.compactMap { host in
             if case .managed(let managedHost) = host { return managedHost }
             return nil
         } + document.sharedUiHosts
+        return hosts
     }
 
     private var stageWidth: CGFloat {
@@ -631,8 +675,6 @@ private extension CanvasSurveyManagedHostElement {
             padding: padding,
             progressStyle: progressStyle,
             countQuestionsOnly: countQuestionsOnly,
-            iconColorHex: iconColorHex,
-            iconSize: iconSize,
             button: button
         )
     }
@@ -862,11 +904,6 @@ private struct CanvasSurveyManagedHostView: View {
                     accent: accent,
                     onClick: onPrevious
                 )
-            case .dismiss:
-                if showCloseButton {
-                    CanvasSurveyDismissHost(
-                        host: host, onClose: onClose, onCanvasAction: onCanvasAction)
-                }
             }
         }
     }
@@ -948,53 +985,6 @@ private struct CanvasSurveyButtonHost: View {
     }
 }
 
-private struct CanvasSurveyDismissHost: View {
-    let host: CanvasSurveyManagedHostElement
-    let onClose: () -> Void
-    let onCanvasAction: (CampaignCanvasActionRequest) -> Void
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        if let button = host.button {
-            ZStack {
-                CampaignCanvasRendererRegistry.render(
-                    button.withoutLabel(),
-                    isDark: CampaignCanvasTheme.shared.isDark(colorScheme),
-                    onAction: onCanvasAction
-                )
-                dismissIcon.allowsHitTesting(false)
-            }
-        } else {
-            let fill = Color(hex: host.fillHex) ?? SurveyTokens.surface
-            let border = Color(hex: host.borderColorHex)
-            Button(action: onClose) {
-                dismissIcon
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(
-                        RoundedRectangle(cornerRadius: host.cornerRadius)
-                            .fill(fill)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: host.cornerRadius)
-                            .stroke(border ?? .clear, lineWidth: host.borderWidth)
-                    )
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var dismissIcon: some View {
-        let iconSize = host.iconSize > 0 ? host.iconSize : 18
-        return Image(systemName: "xmark")
-            .font(surveyFont(size: iconSize * 0.72, weight: 600))
-            .foregroundColor(
-                host.iconColorHex.flatMap(Color.init(hex:))
-                    ?? Color(hex: host.colorHex)
-                    ?? SurveyTokens.textTertiary
-            )
-    }
-}
-
 extension CampaignCanvasWidget {
     fileprivate func withoutActions() -> CampaignCanvasWidget {
         guard
@@ -1025,47 +1015,6 @@ extension CampaignCanvasWidget {
         )
     }
 
-    fileprivate func withoutLabel() -> CampaignCanvasWidget {
-        guard
-            case .button(
-                let box,
-                var label,
-                let cornerRadius,
-                let style,
-                let shadow,
-                let isPrimary,
-                let isDestructive,
-                let applyDestructiveStyling,
-                let actions,
-                let confirm
-            ) = self
-        else { return self }
-        label.spans = label.spans.map {
-            CampaignCanvasTextSpan(
-                text: "",
-                typography: $0.typography,
-                color: $0.color,
-                highlightColor: $0.highlightColor,
-                italic: $0.italic,
-                decoration: $0.decoration,
-                decorationColor: $0.decorationColor,
-                decorationThickness: $0.decorationThickness,
-                actions: $0.actions
-            )
-        }
-        return .button(
-            box: box,
-            label: label,
-            cornerRadius: cornerRadius,
-            style: style,
-            shadow: shadow,
-            isPrimary: isPrimary,
-            isDestructive: isDestructive,
-            applyDestructiveStyling: applyDestructiveStyling,
-            actions: actions,
-            confirm: confirm
-        )
-    }
 }
 
 private struct CanvasSurveyTextHost: View {

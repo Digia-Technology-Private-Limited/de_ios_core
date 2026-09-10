@@ -234,8 +234,6 @@ struct CanvasSurveySharedUiOverlay {
             padding: host.padding,
             progressStyle: host.progressStyle,
             countQuestionsOnly: host.countQuestionsOnly,
-            iconColorHex: host.iconColorHex,
-            iconSize: host.iconSize,
             button: host.button
         )
     }

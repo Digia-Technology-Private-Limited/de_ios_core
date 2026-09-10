@@ -86,10 +86,6 @@ private func managed(
         padding: CGFloat(min(64, max(0, canvasSurveyDouble(props["padding"]) ?? 6))),
         progressStyle: SurveyParse.string(props["progressStyle"]) ?? "segmented",
         countQuestionsOnly: SurveyParse.bool(props["countQuestionsOnly"]) ?? true,
-        iconColorHex: props["iconColor"] == nil
-            ? nil
-            : colorHex(props["iconColor"], designTokens: context.designTokens, fallback: "#FF18181B"),
-        iconSize: CGFloat(min(96, max(0, canvasSurveyDouble(props["iconSize"]) ?? 0))),
         button: managedButton(SurveyParse.object(props["button"]), role: role, designTokens: context.designTokens)
     ))
 }
@@ -146,7 +142,6 @@ private func normalizedAction(_ raw: Any?, role: CanvasSurveyManagedRole) -> [St
         let type: String
         switch role {
         case .backNavigation: type = "previous"
-        case .dismiss: type = "dismiss"
         default: type = "next"
         }
         steps.append(["type": type])
@@ -314,7 +309,6 @@ private func managedRole(_ role: String?) -> CanvasSurveyManagedRole? {
     case "timer": return .timer
     case "primaryNavigation": return .primaryNavigation
     case "backNavigation": return .backNavigation
-    case "dismiss": return .dismiss
     default: return nil
     }
 }

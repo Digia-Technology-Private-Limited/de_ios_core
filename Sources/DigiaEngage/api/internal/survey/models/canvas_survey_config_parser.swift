@@ -64,6 +64,16 @@ enum CanvasSurveyConfigParser {
             SurveyParse.string(json["surveyName"]),
             SurveyParse.string(json["title"])
         )
+        let sharedUi = SurveyParse.object(json["sharedUi"])
+        let closeJson = SurveyParse.object(sharedUi?["closeButton"])
+        let closeCanvas = CanvasSurveyDocumentParser(designTokens: designTokens)
+            .parse(sharedUi, fallbackDesignWidth: designWidth(json)).canvas
+        let close: NudgeCloseButtonConfig? = closeJson.flatMap { value in
+            let raw = canvasSurveyJsonObject(value)
+            guard raw["visible"] as? Bool != false else { return nil }
+            let config = NudgeCloseButtonConfig.fromJson(raw, canvasMode: true, designTokens: designTokens)
+            return config.placement == nil ? nil : config
+        }
         return SurveyConfigModel(
             id: SurveyParse.firstNonEmpty(
                 SurveyParse.string(json["id"]),
@@ -89,7 +99,9 @@ enum CanvasSurveyConfigParser {
                     fallbackDesignWidth: designWidth(json),
                     rootSceneId: rootSceneId,
                     canNavigateBackFromRoot: welcome != nil
-                )
+                ),
+                closeButton: close,
+                closeCanvasSize: CGSize(width: closeCanvas.width, height: closeCanvas.height)
             ),
             variableSchemas: variableSchemas
         )
@@ -391,7 +403,16 @@ enum CanvasSurveyConfigParser {
             designTokens: designTokens
         )
         let backdropDismissible = SurveyParse.bool(display["backdropDismissible"]) ?? true
-        let showCloseButton = SurveyParse.bool(display["showCloseButton"]) ?? true
+        let sharedUi = SurveyParse.object(json["sharedUi"])
+        // The standalone close owns visibility; the display flag is legacy-only.
+        let showCloseButton: Bool
+        if let closeValue = sharedUi?["closeButton"] {
+            showCloseButton = SurveyParse.object(closeValue).map {
+                SurveyParse.bool($0["visible"]) ?? true
+            } ?? false
+        } else {
+            showCloseButton = SurveyParse.bool(display["showCloseButton"]) ?? true
+        }
         return SurveyDisplay(
             type: SurveyParse.displayType(SurveyParse.string(display["type"])),
             dialog: DialogProps(
@@ -412,7 +433,10 @@ enum CanvasSurveyConfigParser {
                 showHandle: SurveyParse.bool(display["showHandle"]) ?? true,
                 draggable: SurveyParse.bool(display["dragDismissible"]) ?? true,
                 backdropDismissible: backdropDismissible,
-                showCloseButton: showCloseButton
+                showCloseButton: showCloseButton,
+                bottomSafeAreaMode: BottomSafeAreaMode.from(
+                    SurveyParse.string(display["bottomSafeAreaMode"])
+                )
             )
         )
     }
