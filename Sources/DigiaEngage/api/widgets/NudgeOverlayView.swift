@@ -171,14 +171,19 @@ private struct NudgeFullScreenView: View {
                     if surface.showCloseButton && surface.closeButton.placement != nil {
                         CanvasNudgeCloseOverlay(
                             config: surface.closeButton.scaled(canvasView.fittedScale),
-                            container: CGRect(origin: .zero, size: safeSize),
-                            viewport: safeSize,
-                            safeAreaInsets: .zero,
+                            container: surface.closeButton.placement?.rect != nil
+                                ? CGRect(
+                                    x: (geometry.size.width - canvas.width * canvasView.fittedScale) / 2,
+                                    y: (protectsContent ? safe.top : 0) + (contentSize.height - canvas.height * canvasView.fittedScale) / 2,
+                                    width: canvas.width * canvasView.fittedScale,
+                                    height: canvas.height * canvasView.fittedScale)
+                                : CGRect(x: safe.left, y: safe.top, width: safeSize.width, height: safeSize.height),
+                            viewport: geometry.size,
+                            safeAreaInsets: safe,
                             isBottomSheet: false,
                             action: dismiss
                         )
-                        .frame(width: safeSize.width, height: safeSize.height)
-                        .padding(safeInsets)
+                        .frame(width: geometry.size.width, height: geometry.size.height)
                     } else if surface.showCloseButton {
                         NudgeCloseButton(
                             config: safeCloseButton(bounds: safeSize),
@@ -270,6 +275,17 @@ private struct NudgeSheetView: View {
                             },
                             showBackground: !hostPaintsCanvasBackground
                         )
+                        .overlay(alignment: .topLeading) {
+                            if surface.showCloseButton, surface.closeButton.placement?.rect != nil {
+                                GeometryReader { geometry in
+                                    CanvasNudgeCloseOverlay(
+                                        config: surface.closeButton,
+                                        container: CGRect(origin: .zero, size: geometry.size),
+                                        viewport: geometry.size, safeAreaInsets: .zero,
+                                        isBottomSheet: true, action: dismiss)
+                                }
+                            }
+                        }
                         Spacer(minLength: 0)
                     }
                     .environment(\.digiaVariables, presentation.variables)
@@ -297,7 +313,8 @@ private struct NudgeSheetView: View {
 
     private var cardCloseButton: AnyView? {
         guard surface.showCloseButton else { return nil }
-        guard surface.closeButton.placement?.mode != .outside else { return nil }
+        guard surface.closeButton.placement?.mode != .outside,
+              surface.closeButton.placement?.rect == nil else { return nil }
         guard surface.closeButton.placement != nil else {
             return AnyView(NudgeCloseButton(config: surface.closeButton, action: dismiss))
         }
@@ -561,12 +578,9 @@ struct NudgeCloseButton: View {
                 ZStack {
                     Circle().fill(color(config.backgroundToken, fallback: config.backgroundColor))
                     if config.iconSize > 0 {
-                        Image(systemName: "xmark")
-                            .font(.system(
-                                size: min(config.iconSize, max(1, circleSize - 10)),
-                                weight: .regular
-                            ))
-                            .imageScale(.small)
+                        CanvasCloseIcon(size: config.placement?.rect != nil
+                            ? circleSize * config.iconSize / config.diameter
+                            : min(config.iconSize, circleSize))
                             .foregroundStyle(color(config.iconToken, fallback: config.iconColor))
                     }
                 }

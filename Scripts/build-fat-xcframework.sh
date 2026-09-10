@@ -121,6 +121,17 @@ echo "==> Embedding consolidated PrivacyInfo.xcprivacy"
 cp "$PRIVACY" "$DEVICE_FW/PrivacyInfo.xcprivacy"
 cp "$PRIVACY" "$SIM_FW/PrivacyInfo.xcprivacy"
 
+# --- 2c. embed SDK-owned resources -----------------------------------------
+# The fat pod ships only DigiaEngage.xcframework, so resources used by runtime UI
+# must live inside each framework slice. This keeps local RN/CocoaPods installs
+# and release zips on the same artifact path.
+SDK_RESOURCES="$ROOT/Sources/DigiaEngage/Resources"
+if [ -d "$SDK_RESOURCES" ]; then
+  echo "==> Embedding SDK resources"
+  cp -R "$SDK_RESOURCES"/. "$DEVICE_FW/"
+  cp -R "$SDK_RESOURCES"/. "$SIM_FW/"
+fi
+
 # --- 3. combine into one xcframework ---------------------------------------
 echo "==> Creating DigiaEngage.xcframework"
 DSYM_DEV="$ARCHIVES/ios.xcarchive/dSYMs/DigiaEngage.framework.dSYM"

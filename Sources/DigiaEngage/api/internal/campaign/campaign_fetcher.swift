@@ -11,7 +11,17 @@ struct CampaignFetchError: LocalizedError {
     var errorDescription: String? { message }
 }
 
-struct CampaignAPIResponse { let statusCode: Int; let data: Data }
+struct CampaignAPIResponse {
+    let statusCode: Int
+    let data: Data
+    let headers: [String: String]
+
+    init(statusCode: Int, data: Data, headers: [String: String] = [:]) {
+        self.statusCode = statusCode
+        self.data = data
+        self.headers = headers
+    }
+}
 protocol CampaignAPI { func fetchCampaignBundle() async throws -> CampaignAPIResponse }
 
 private struct URLSessionCampaignAPI: CampaignAPI {
@@ -31,7 +41,12 @@ private struct URLSessionCampaignAPI: CampaignAPI {
         request.httpBody = Data("{}".utf8)
         do {
             let (data, response) = try await session.data(for: request)
-            return CampaignAPIResponse(statusCode: (response as? HTTPURLResponse)?.statusCode ?? -1, data: data)
+            let http = response as? HTTPURLResponse
+            let headers = http?.allHeaderFields.reduce(into: [String: String]()) { result, entry in
+                guard let key = entry.key as? String else { return }
+                result[key] = String(describing: entry.value)
+            } ?? [:]
+            return CampaignAPIResponse(statusCode: http?.statusCode ?? -1, data: data, headers: headers)
         } catch {
             throw CampaignFetchError(category: .transport, endpoint: endpoint, statusCode: nil, message: "Campaign bundle transport failed: \(error.localizedDescription)", underlying: error)
         }
@@ -50,14 +65,28 @@ struct CampaignFetcher {
         guard (200...299).contains(response.statusCode) else {
             throw CampaignFetchError(category: .httpStatus, endpoint: endpoint, statusCode: response.statusCode, message: "Campaign bundle request failed: HTTP \(response.statusCode)", underlying: nil)
         }
-        do { return try Self.parse(response.data, devicePlatform: "ios") }
+        do {
+            let serverTime = response.headers.first {
+                $0.key.caseInsensitiveCompare("X-Digia-Server-Time-Ms") == .orderedSame
+            }.flatMap { Int64($0.value) }
+            return try Self.parse(
+                response.data,
+                devicePlatform: "ios",
+                serverTimeMs: serverTime
+            )
+        }
         catch let error as CampaignFetchError { throw error }
         catch {
             throw CampaignFetchError(category: .invalidResponse, endpoint: endpoint, statusCode: response.statusCode, message: "Invalid campaign bundle response: \(error.localizedDescription)", underlying: error)
         }
     }
 
-    static func parse(_ data: Data, devicePlatform: String? = nil) throws -> CampaignBundle {
+    static func parse(
+        _ data: Data,
+        devicePlatform: String? = nil,
+        serverTimeMs: Int64? = nil,
+        acceptBridgedServerTime: Bool = false
+    ) throws -> CampaignBundle {
         let endpoint = DigiaEndpoints.campaignBundle
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw CampaignFetchError(category: .invalidResponse, endpoint: endpoint, statusCode: nil, message: "Campaign bundle response is not an object", underlying: nil)
@@ -82,7 +111,10 @@ struct CampaignFetcher {
         return CampaignBundle.create(
             rawCampaigns: raw,
             designTokensJSON: designTokens,
-            devicePlatform: devicePlatform
+            devicePlatform: devicePlatform,
+            serverTimeMs: serverTimeMs ?? (acceptBridgedServerTime
+                ? (root["serverTimeMs"] as? NSNumber)?.int64Value
+                : nil)
         )
     }
 }

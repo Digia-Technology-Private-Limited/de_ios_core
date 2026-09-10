@@ -25,7 +25,10 @@ let package = Package(
                 .product(name: "SDWebImageSwiftUI", package: "SDWebImageSwiftUI"),
                 .product(name: "SDWebImageSVGCoder", package: "SDWebImageSVGCoder"),
             ],
-            path: "Sources/DigiaEngage"
+            path: "Sources/DigiaEngage",
+            resources: [
+                .process("Resources"),
+            ]
         ),
         .testTarget(
             name: "DigiaEngageTests",

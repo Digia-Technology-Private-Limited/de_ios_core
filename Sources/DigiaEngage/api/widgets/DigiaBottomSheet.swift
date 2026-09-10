@@ -1,5 +1,11 @@
 import SwiftUI
 
+private let minimumBottomSheetDismissDistance: CGFloat = 120
+
+func shouldDismissBottomSheet(dragDistance: CGFloat, sheetHeight: CGFloat) -> Bool {
+    dragDistance >= max(minimumBottomSheetDismissDistance, sheetHeight * 0.25)
+}
+
 struct DigiaBottomSheetConfig {
     var cornerRadius: CGFloat = 18
     var background: Color = .white
@@ -12,6 +18,12 @@ struct DigiaBottomSheetConfig {
     var bottomPadding: CGFloat = 8
     var bottomSafeAreaMode: BottomSafeAreaMode = .none
     var bottomSafeAreaInset: CGFloat = 0
+    var animateContentHeight: Bool = false
+    var prioritizesDragOverScrolling: Bool = false
+    var scrollsEntireSurface: Bool = false
+    var entireSurfaceScrollingEnabled: Bool = true
+    /// Keeps the visible card below viewport chrome such as an outside close control.
+    var minimumSurfaceTop: CGFloat = 0
 }
 
 /// A bottom sheet whose card attaches flush to the screen edges (the system
@@ -28,6 +40,7 @@ struct DigiaBottomSheet<Content: View>: View {
     var viewportOverlay: ((CGRect, CGSize) -> AnyView)? = nil
 
     @State private var contentHeight: CGFloat = 0
+    @State private var renderedSheetHeight: CGFloat = 0
     @State private var shown = false
     @State private var dragOffset: CGFloat = 0
 
@@ -36,7 +49,10 @@ struct DigiaBottomSheet<Content: View>: View {
 
     var body: some View {
         GeometryReader { geo in
-            let cap = geo.size.height * config.heightCapFraction
+            let cap = min(
+                geo.size.height * config.heightCapFraction,
+                max(0, geo.size.height - config.minimumSurfaceTop)
+            )
             let surfaceBottomInset =
                 config.bottomSafeAreaMode == .insetSurface
                 ? config.bottomSafeAreaInset
@@ -52,8 +68,24 @@ struct DigiaBottomSheet<Content: View>: View {
                         viewportOverlay == nil ? nil : $0
                     }
                     .padding(.bottom, surfaceBottomInset)
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: RenderedSheetHeightKey.self,
+                                value: geo.size.height
+                            )
+                        }
+                    )
                     .offset(y: shown ? max(dragOffset, 0) : geo.size.height)
-                    .gesture(dragGesture)
+                    .highPriorityGesture(
+                        dragGesture,
+                        including: config.prioritizesDragOverScrolling && config.allowDragDismiss
+                            ? .all : .none
+                    )
+                    .gesture(
+                        dragGesture,
+                        including: config.prioritizesDragOverScrolling ? .none : .all
+                    )
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
             .overlayPreferenceValue(NudgeCloseContainerBoundsKey.self) { anchor in
@@ -64,7 +96,14 @@ struct DigiaBottomSheet<Content: View>: View {
             }
         }
         .ignoresSafeArea(.container)
-        .onPreferenceChange(SheetHeightKey.self) { contentHeight = $0 }
+        .onPreferenceChange(SheetHeightKey.self) { height in
+            if config.animateContentHeight && contentHeight > 0 {
+                withAnimation(animation) { contentHeight = height }
+            } else {
+                contentHeight = height
+            }
+        }
+        .onPreferenceChange(RenderedSheetHeightKey.self) { renderedSheetHeight = $0 }
         .onAppear { withAnimation(animation) { shown = true } }
     }
 
@@ -73,14 +112,19 @@ struct DigiaBottomSheet<Content: View>: View {
             config.bottomSafeAreaMode == .insetContent
             ? config.bottomSafeAreaInset
             : 0
-        let base = cardContents(cap: cap)
-            .padding(.bottom, config.bottomPadding + contentBottomInset)
+        let bottomPadding = config.bottomPadding + contentBottomInset
+        let base = Group {
+            if config.scrollsEntireSurface {
+                entireSurfaceBody(cap: cap, bottomPadding: bottomPadding)
+            } else {
+                cardContents(cap: cap)
+                    .padding(.bottom, bottomPadding)
+            }
+        }
             .frame(maxWidth: .infinity)
             .background {
-                if let cardBackground {
-                    cardBackground
-                } else {
-                    config.background
+                if !config.scrollsEntireSurface {
+                    cardSurfaceBackground
                 }
             }
 
@@ -128,6 +172,63 @@ struct DigiaBottomSheet<Content: View>: View {
     }
 
     @ViewBuilder
+    private func entireSurfaceBody(cap: CGFloat, bottomPadding: CGFloat) -> some View {
+        let handleHeight: CGFloat = config.showHandle && !config.handleOverlaysContent ? 24 : 0
+        let height = min(contentHeight + handleHeight + bottomPadding, cap)
+        if #available(iOS 16.4, *) {
+            ScrollView {
+                entireSurfaceMeasuredContent(bottomPadding: bottomPadding)
+            }
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollDisabled(!config.entireSurfaceScrollingEnabled)
+            .frame(height: height)
+        } else if #available(iOS 16, *) {
+            ScrollView {
+                entireSurfaceMeasuredContent(bottomPadding: bottomPadding)
+            }
+            .scrollDisabled(!config.entireSurfaceScrollingEnabled)
+            .frame(height: height)
+        } else {
+            ScrollView {
+                entireSurfaceMeasuredContent(bottomPadding: bottomPadding)
+            }
+            .frame(height: height)
+        }
+    }
+
+    private func entireSurfaceMeasuredContent(bottomPadding: CGFloat) -> some View {
+        entireSurfaceContent
+            .padding(.bottom, bottomPadding)
+            .background { cardSurfaceBackground }
+    }
+
+    @ViewBuilder
+    private var cardSurfaceBackground: some View {
+        if let cardBackground {
+            cardBackground
+        } else {
+            config.background
+        }
+    }
+
+    @ViewBuilder
+    private var entireSurfaceContent: some View {
+        if config.handleOverlaysContent {
+            ZStack(alignment: .top) {
+                measuredContent
+                if config.showHandle { handle.padding(.top, 12) }
+            }
+        } else {
+            VStack(spacing: 0) {
+                if config.showHandle {
+                    handle.padding(.top, 12).padding(.bottom, 8)
+                }
+                measuredContent
+            }
+        }
+    }
+
+    @ViewBuilder
     private func sheetBody(cap: CGFloat) -> some View {
         let height = min(contentHeight, cap)
         if scrollable {
@@ -167,7 +268,10 @@ struct DigiaBottomSheet<Content: View>: View {
             }
             .onEnded { value in
                 guard config.allowDragDismiss else { return }
-                if value.translation.height > 120 || value.predictedEndTranslation.height > 280 {
+                if shouldDismissBottomSheet(
+                    dragDistance: value.translation.height,
+                    sheetHeight: renderedSheetHeight
+                ) {
                     close()
                 } else {
                     withAnimation(animation) { dragOffset = 0 }
@@ -198,6 +302,13 @@ struct DigiaBottomSheet<Content: View>: View {
 }
 
 private struct SheetHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct RenderedSheetHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())

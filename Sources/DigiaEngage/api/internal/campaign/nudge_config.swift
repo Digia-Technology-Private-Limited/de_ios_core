@@ -78,7 +78,7 @@ struct NudgeCloseButtonConfig: Equatable {
         let map = json ?? [:]
         let defaults = NudgeCloseButtonConfig.defaults
         let placement = canvasMode
-            ? NudgeCloseButtonPlacement.fromJson(map["placement"] as? [String: Any]) : nil
+            ? NudgeCloseButtonPlacement.fromCloseJson(map) : nil
         return NudgeCloseButtonConfig(
             marginTop: nonNegative(
                 map.double("marginTop", default: Double(defaults.marginTop)),
@@ -182,7 +182,8 @@ struct NudgeSurface: Equatable {
             cornerRadius: CGFloat(map.double("cornerRadius", default: 18)),
             padding: CGFloat(map.double("padding", default: 20)),
             backdropDismissible: map.bool("backdropDismissible", default: true),
-            showCloseButton: map.bool("showCloseButton", default: false),
+            showCloseButton: map.bool("showCloseButton", default: false) &&
+                (!canvasMode || (map["closeButton"] as? [String: Any]).flatMap(NudgeCloseButtonPlacement.fromCloseJson) != nil),
             closeButton: NudgeCloseButtonConfig.fromJson(
                 map["closeButton"] as? [String: Any], canvasMode: canvasMode, designTokens: designTokens
             ),

@@ -1,5 +1,16 @@
 import Foundation
 
+private extension CampaignTimerUnit {
+    var defaultLabel: String {
+        switch self {
+        case .days: "Days"
+        case .hours: "Hrs"
+        case .minutes: "Min"
+        case .seconds: "Sec"
+        }
+    }
+}
+
 struct CampaignCanvasParser {
     let designTokens: DesignTokenCatalog
     init(designTokens: DesignTokenCatalog = .empty) { self.designTokens = designTokens }
@@ -22,6 +33,7 @@ struct CampaignCanvasParser {
             "digia/storyProgress": parseStoryProgress,
             "digia/storyClose": parseStoryClose,
             "digia/storyMute": parseStoryMute,
+            "digia/timer": parseTimer,
         ]
     }
 
@@ -185,7 +197,8 @@ struct CampaignCanvasParser {
             switch child["kind"] as? String {
             case "tapRegion":
                 let actions = EngageActionParser().parse(child["onClick"] as? [String: Any])
-                if !actions.isEmpty { children.append(.tapRegion(id: id, rect: rect, actions: actions)) }
+                let isPrimary = child["isPrimary"] as? Bool ?? false
+                if isPrimary || !actions.isEmpty { children.append(.tapRegion(id: id, rect: rect, actions: actions, isPrimary: isPrimary)) }
             case "widget":
                 if let widget = try parseWidget(child["widget"] as? [String: Any]) {
                     children.append(.widget(id: id, rect: rect, widget: widget))
@@ -206,6 +219,146 @@ struct CampaignCanvasParser {
         var box = type == "digia/canvasContainer" ? .none : try parseBox(propertyObject(json["containerProps"]))
         if type == "digia/button" { box.shadow = nil }
         return try parser(box, props)
+    }
+
+    private func parseTimer(
+        _ box: CampaignCanvasBox,
+        _ props: [String: Any]
+    ) throws -> CampaignCanvasWidget? {
+        let preset = props["preset"] as? String ?? "unitBoxes"
+        guard preset == "text" || preset == "unitBoxes" else { return nil }
+        let unitJSON = propertyObject(props["units"]) ?? [:]
+        let labelJSON = propertyObject(props["labels"]) ?? [:]
+        var units: [CampaignTimerUnit: CampaignTimerUnitVisibility] = [:]
+        var labels: [CampaignTimerUnit: String] = [:]
+        for unit in CampaignTimerUnit.allCases {
+            let raw = unitJSON[unit.rawValue] ?? (unit == .days ? "autoHide" : true)
+            switch raw {
+            case let value as String where value == "autoHide": units[unit] = .autoHide
+            case let value as Bool: units[unit] = value ? .show : .hide
+            default: return nil
+            }
+            labels[unit] = labelJSON[unit.rawValue] as? String ?? unit.defaultLabel
+        }
+        guard units.values.contains(where: { $0 != .hide }) else { return nil }
+        let shared = try parseTimerStyle(props, fallback: nil)
+        let rawOverrides = propertyObject(props["unitOverrides"]) ?? [:]
+        var overrides: [CampaignTimerUnit: CampaignCanvasTimerUnitStyle] = [:]
+        for (key, raw) in rawOverrides {
+            guard let unit = CampaignTimerUnit(rawValue: key) else { continue }
+            guard let value = propertyObject(raw) else { return nil }
+            overrides[unit] = try parseTimerStyle(value, fallback: shared)
+        }
+        var labelSpans: [CampaignTimerUnit: [CampaignCanvasTextSpan]] = [:]
+        let rawSpans = propertyObject(props["labelSpans"]) ?? [:]
+        for unit in CampaignTimerUnit.allCases {
+            if let spans = rawSpans[unit.rawValue] as? [[String: Any]] {
+                labelSpans[unit] = try parseSpans(spans)
+            }
+        }
+        var textWidgets: [CampaignTimerUnit: [String: CampaignCanvasWidget]] = [:]
+        let rawNodes = propertyObject(props["textWidgets"]) ?? [:]
+        for unit in CampaignTimerUnit.allCases {
+            guard let parts = propertyObject(rawNodes[unit.rawValue]) else { continue }
+            for part in ["digits", "label"] {
+                guard var node = propertyObject(parts[part]), node["type"] as? String == "digia/text" else { continue }
+                var textProps = propertyObject(node["props"]) ?? [:]
+                if let spans = textProps["spans"] as? [[String: Any]] {
+                    textProps["spans"] = spans.map { span in
+                        var value = span
+                        value.removeValue(forKey: "onClick")
+                        return value
+                    }
+                }
+                node["props"] = textProps
+                if let text = try? parseWidget(node) { textWidgets[unit, default: [:]][part] = text }
+            }
+        }
+        return .timer(
+            box: box,
+            preset: preset,
+            separator: props["separator"] as? String ?? ":",
+            units: units,
+            labels: labels,
+            labelSpans: labelSpans,
+            textWidgets: textWidgets,
+            style: shared,
+            unitOverrides: overrides,
+            layout: try parseTimerLayout(props)
+        )
+    }
+
+    private func parseTimerLayout(_ props: [String: Any]) throws -> CampaignCanvasTimerLayout {
+        var layout = CampaignCanvasTimerLayout()
+        func horizontal(_ raw: Any?) -> CampaignCanvasHorizontalAlign {
+            switch raw as? String { case "left": .left; case "right": .right; default: .center }
+        }
+        for unit in CampaignTimerUnit.allCases {
+            if let node = propertyObject(propertyObject(props["unitContainers"])?[unit.rawValue]),
+               node["type"] as? String == "digia/canvasContainer",
+               let container = try? parseWidget(node) {
+                layout.containers[unit] = container
+                layout.padding[unit] = try parseBox(propertyObject(node["containerProps"])).padding
+            }
+            let size = propertyObject(propertyObject(props["unitSizes"])?[unit.rawValue])
+            if let width = propertyNumber(size?["width"]), let height = propertyNumber(size?["height"]),
+               width.isFinite, height.isFinite, width > 0, height > 0 {
+                layout.sizes[unit] = CGSize(width: min(width, 10000), height: min(height, 10000))
+            }
+            if let alignment = propertyObject(propertyObject(props["unitContentAlignment"])?[unit.rawValue]) {
+                layout.contentAlignment[unit] = CampaignCanvasTimerContentAlignment(
+                    horizontal: horizontal(alignment["horizontal"]),
+                    vertical: { switch alignment["vertical"] as? String { case "top": .top; case "bottom": .bottom; default: .center } }()
+                )
+            }
+            if let gap = propertyNumber(propertyObject(props["unitGaps"])?[unit.rawValue]), gap.isFinite, gap >= 0 {
+                layout.gaps[unit] = CGFloat(min(gap, 10000))
+            }
+        }
+        layout.alignment = horizontal(props["alignment"])
+        layout.separatorEnabled = props["separatorEnabled"] as? Bool
+        layout.separatorColor = try designTokens.resolveColor(props["separatorColor"])
+        return layout
+    }
+
+    private func parseTimerStyle(
+        _ json: [String: Any],
+        fallback: CampaignCanvasTimerUnitStyle?
+    ) throws -> CampaignCanvasTimerUnitStyle {
+        let digitTypography = fallback?.digitTypography ?? CampaignTypography(
+            fontFamily: nil, fontSize: 20, fontWeight: 700, lineHeight: nil, letterSpacing: nil
+        )
+        let labelTypography = fallback?.labelTypography ?? CampaignTypography(
+            fontFamily: nil, fontSize: 10, fontWeight: 400, lineHeight: nil, letterSpacing: nil
+        )
+        return CampaignCanvasTimerUnitStyle(
+            digitTextStyle: try propertyObject(json["digitTextStyle"]).map { try parseSpan($0, text: "") }
+                ?? fallback?.digitTextStyle,
+            digitTypography: parseTimerTypography(json["digitTypography"], fallback: digitTypography),
+            digitColor: try designTokens.resolveColor(json["digitColor"]) ?? fallback?.digitColor ?? .literal("#FFFFFFFF"),
+            labelTypography: parseTimerTypography(json["labelTypography"], fallback: labelTypography),
+            labelColor: try designTokens.resolveColor(json["labelColor"]) ?? fallback?.labelColor ?? .literal("#FFB9C6DA"),
+            boxFill: json["boxFill"] != nil
+                ? try parsePaint(propertyObject(json["boxFill"]), allowImage: false)
+                : fallback?.boxFill ?? .none,
+            cornerRadius: json["cornerRadius"] != nil
+                ? parseCornerRadius(json["cornerRadius"], fallback: 6)
+                : fallback?.cornerRadius ?? parseCornerRadius(nil, fallback: 6)
+        )
+    }
+
+    private func parseTimerTypography(_ raw: Any?, fallback: CampaignTypography) -> CampaignTypography {
+        var typography = (try? designTokens.resolveTypography(raw)) ?? fallback
+        if let size = typography.fontSize, !size.isFinite || size <= 0 {
+            typography.fontSize = fallback.fontSize
+        }
+        if let height = typography.lineHeight, !height.isFinite || height <= 0 {
+            typography.lineHeight = fallback.lineHeight
+        }
+        if let spacing = typography.letterSpacing, !spacing.isFinite {
+            typography.letterSpacing = fallback.letterSpacing
+        }
+        return typography
     }
 
     private func parseBackground(_ json: [String: Any]?) throws -> CampaignCanvasPaint {
@@ -238,20 +391,39 @@ struct CampaignCanvasParser {
     private func parseSpans(_ raw: [[String: Any]]?) throws -> [CampaignCanvasTextSpan] {
         try (raw ?? []).compactMap { span in
             guard let text = span["text"] as? String, !text.isEmpty else { return nil }
-            return CampaignCanvasTextSpan(
-                text: text,
-                typography: try designTokens.resolveTypography(span["typography"]),
-                color: try designTokens.resolveColor(span["color"]),
-                highlightColor: try designTokens.resolveColor(span["highlightColor"]),
-                italic: span["italic"] as? Bool ?? false,
-                decoration: {
-                    switch span["decoration"] as? String { case "underline": .underline; case "lineThrough": .lineThrough; default: .none }
-                }(),
-                decorationColor: try designTokens.resolveColor(span["decorationColor"]),
-                decorationThickness: propertyNumber(span["decorationThickness"]).map { CGFloat($0) },
-                actions: EngageActionParser().parse(span["onClick"] as? [String: Any])
-            )
+            return try parseSpan(span, text: text)
         }
+    }
+
+    private func parseSpan(_ span: [String: Any], text: String) throws -> CampaignCanvasTextSpan {
+        let style = propertyObject(span["style"]) ?? [:]
+        let composite = try designTokens.resolveTypography(span["typography"])
+        let typography = CampaignTypography(
+            fontFamily: nonBlankString(firstPresent(span["fontFamily"], style["fontFamily"])) ?? composite?.fontFamily,
+            fontSize: propertyNumber(firstPresent(span["fontSize"], style["fontSize"])).map { CGFloat($0) } ?? composite?.fontSize,
+            fontWeight: fontWeight(firstPresent(span["fontWeight"], style["fontWeight"])) ?? composite?.fontWeight,
+            lineHeight: propertyNumber(firstPresent(span["lineHeight"], style["lineHeight"])).map { CGFloat($0) } ?? composite?.lineHeight,
+            letterSpacing: propertyNumber(firstPresent(span["letterSpacing"], style["letterSpacing"])).map { CGFloat($0) } ?? composite?.letterSpacing
+        )
+        return CampaignCanvasTextSpan(
+            text: text,
+            typography: typography.isEmpty ? nil : typography,
+            color: try designTokens.resolveColor(firstPresent(span["color"], span["textColor"], style["color"], style["textColor"])),
+            highlightColor: try designTokens.resolveColor(firstPresent(span["highlightColor"], style["highlightColor"])),
+            italic: (span["italic"] as? Bool ?? false) || ((style["fontStyle"] as? String) == "italic"),
+            decoration: {
+                switch rawString(firstPresent(style["decoration"], span["decoration"]), fallback: "none") {
+                case "underline": .underline
+                case "lineThrough", "line-through": .lineThrough
+                default: .none
+                }
+            }(),
+            decorationColor: try designTokens.resolveColor(firstPresent(span["decorationColor"], style["decorationColor"])),
+            decorationThickness: propertyNumber(firstPresent(span["decorationThickness"], style["decorationThickness"]))
+                .map { min(max(CGFloat($0), 1), 8) },
+            actions: EngageActionParser().parse(span["onClick"] as? [String: Any]),
+            decorationOffset: propertyNumber(span["decorationOffset"]).flatMap { $0.isFinite ? CGFloat(min(16, max(-16, $0))) : nil }
+        )
     }
 
     private func parseImage(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget {
@@ -442,6 +614,30 @@ struct CampaignCanvasParser {
         default: fallback
         }
     }
+    private func nonBlankString(_ raw: Any?) -> String? {
+        guard let value = unwrapLiteral(raw), !(value is NSNull) else { return nil }
+        let text = String(describing: value).trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+    private func fontWeight(_ raw: Any?) -> Int? {
+        guard let value = unwrapLiteral(raw), !(value is NSNull) else { return nil }
+        if let string = value as? String, string.lowercased().hasPrefix("w") {
+            return DigiaFontWeight.optional(String(string.dropFirst()))
+        }
+        return DigiaFontWeight.optional(value)
+    }
+    private func firstPresent(_ values: Any?...) -> Any? {
+        values.first { value in
+            guard let value else { return false }
+            return !(value is NSNull)
+        } ?? nil
+    }
 }
 
 private extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }
+
+private extension CampaignTypography {
+    var isEmpty: Bool {
+        fontFamily == nil && fontSize == nil && fontWeight == nil && lineHeight == nil && letterSpacing == nil
+    }
+}
