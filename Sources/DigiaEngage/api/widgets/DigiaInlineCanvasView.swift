@@ -1,4 +1,11 @@
 import SwiftUI
+import UIKit
+
+private struct TimerRenderIdentity: Equatable {
+    let campaignID: String
+    let stateID: String?
+    let applicationActive: Bool
+}
 
 /// Hosts an authored Canvas inside a `DigiaSlot`.
 ///
@@ -9,21 +16,87 @@ import SwiftUI
 struct DigiaInlineCanvasView: View {
     let config: InlineCanvasConfig
     let payload: CEPTriggerPayload
+    @State private var applicationActive = UIApplication.shared.applicationState == .active
+    @State private var tick: UInt64 = 0
 
     var body: some View {
+        let _ = tick
         let variables = buildVariableContext(
             schemas: config.variableSchemas,
             cepVars: payload.variables
         )
+        let timerRuntime = config.statefulTimer
+        let resolved = timerRuntime?.resolve(payload.variables)
+        Group {
+            if timerRuntime == nil {
+                canvas(config.canvas, remainingSeconds: nil, variables: variables, timerContext: nil)
+            } else if let resolved, let selectedCanvas = resolved.canvas {
+                canvas(
+                    selectedCanvas,
+                    remainingSeconds: resolved.remainingSeconds,
+                    variables: variables,
+                    timerContext: resolved.analyticsContext,
+                    timerState: resolved
+                )
+                .id(resolved.stateID)
+            }
+        }
+        .task(id: TimerRenderIdentity(
+            campaignID: payload.cepCampaignId,
+            stateID: resolved?.stateID,
+            applicationActive: applicationActive
+        )) {
+            if applicationActive, UIApplication.shared.applicationState == .active,
+               !Task.isCancelled, let resolved, resolved.canvas != nil {
+                SDKInstance.shared.reportInlineTimerStateRender(
+                    payload: payload,
+                    config: config,
+                    resolved: resolved
+                )
+            }
+        }
+        .onAppear {
+            applicationActive = UIApplication.shared.applicationState == .active
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            applicationActive = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            applicationActive = false
+        }
+        .task(id: "\(applicationActive)-\(payload.cepCampaignId)") {
+            guard let runtime = config.statefulTimer, applicationActive else { return }
+            while !Task.isCancelled {
+                tick &+= 1
+                let now = runtime.timeAnchor.nowMs()
+                let wait = UInt64(max(1, min(1_000, 1_000 - (now % 1_000))))
+                try? await Task.sleep(nanoseconds: wait * 1_000_000)
+            }
+        }
+    }
+
+    private func canvas(
+        _ canvas: CampaignCanvas,
+        remainingSeconds: Int64?,
+        variables: VariableContext?,
+        timerContext: TimerEventContext?,
+        timerState: ResolvedTimerCanvas? = nil
+    ) -> some View {
         InlineCampaignCanvasView(
-            canvas: config.canvas,
+            canvas: canvas,
             designWidth: CGFloat(config.designWidth),
-            cornerRadius: CGFloat(config.cornerRadius),
-            margin: config.margin,
+            cornerRadius: CGFloat(timerState?.cornerRadius ?? config.cornerRadius),
+            margin: timerState?.margin ?? config.margin,
             onAction: { request in
-                perform(request, variables: variables)
+                if let timerState {
+                    SDKInstance.shared.reportInlineTimerStateRender(
+                        payload: payload, config: config, resolved: timerState
+                    )
+                }
+                perform(request, variables: variables, timerContext: timerContext)
             }
         )
+        .environment(\.timerRemainingSeconds, remainingSeconds)
         // Canvas widgets report what happened to them; this is where it becomes a campaign event.
         //
         // The widgets cannot do this themselves — a carousel has no idea which campaign it is part
@@ -36,7 +109,7 @@ struct DigiaInlineCanvasView: View {
                 SDKInstance.shared.reportCarouselStepViewed(
                     payload: payload, itemIndex: index + 1, itemTotal: total, auto: auto
                 )
-            case let .storyOpened(_, _):
+            case .storyOpened:
                 SDKInstance.shared.reportStoryOpened(payload)
             case let .storyPageViewed(index, total):
                 SDKInstance.shared.reportStoryStepViewed(
@@ -54,12 +127,15 @@ struct DigiaInlineCanvasView: View {
         })
     }
 
-    private func perform(_ request: CampaignCanvasActionRequest, variables: VariableContext?) {
-        defer {
-            SDKInstance.shared.reportPrimaryCTAClick(
-                payload: payload, elementId: request.elementId, isPrimary: request.isPrimary
-            )
-        }
+    private func perform(
+        _ request: CampaignCanvasActionRequest,
+        variables: VariableContext?,
+        timerContext: TimerEventContext?
+    ) {
+        guard SDKInstance.shared.inlineController.getCampaign(config.slotKey) == payload else { return }
+        if timerContext == nil { SDKInstance.shared.reportSlotFirstRender(payload) }
+        guard SDKInstance.shared.inlineController.getCampaign(config.slotKey) == payload else { return }
+        SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: request.elementId, isPrimary: request.isPrimary)
         guard !request.actions.isEmpty else { return }
         let action = request.actions.first?.resolved(with: variables)
         // A tap inside a slide or a page is a *step* click, matching what the legacy carousel and
@@ -84,14 +160,19 @@ struct DigiaInlineCanvasView: View {
                 ctaLabel: request.label,
                 actionType: action?.analyticsType,
                 actionUrl: action?.analyticsURL,
-                ctaRole: request.isPrimary ? "primary" : "secondary"
+                ctaRole: request.isPrimary ? "primary" : "secondary",
+                timerContext: timerContext
             )
         }
         // Hide means something slot-specific here: clear this slot for the
         // session. That deliberately bypasses the stickiness which otherwise
         // keeps an inline campaign alive across navigation.
         let dismiss = {
-            SDKInstance.shared.dismissInlineCanvas(slotKey: config.slotKey, payload: payload)
+            SDKInstance.shared.dismissInlineCanvas(
+                slotKey: config.slotKey,
+                payload: payload,
+                timerContext: timerContext
+            )
         }
         Task {
             await SDKInstance.shared.executeActionFlow(

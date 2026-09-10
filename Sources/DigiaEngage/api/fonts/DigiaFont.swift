@@ -29,9 +29,16 @@ struct DigiaFont {
         } else {
             base = UIFont.systemFont(ofSize: size, weight: uiWeight)
         }
-        guard italic, let descriptor = base.fontDescriptor.withSymbolicTraits(.traitItalic) else {
-            return base
+        guard italic else { return base }
+        if let descriptor = base.fontDescriptor.withSymbolicTraits(
+            base.fontDescriptor.symbolicTraits.union(.traitItalic)
+        ) {
+            let resolved = UIFont(descriptor: descriptor, size: size)
+            if resolved.fontDescriptor.symbolicTraits.contains(.traitItalic) { return resolved }
         }
+        let matrix = (base.fontDescriptor.fontAttributes[.matrix] as? NSValue)?.cgAffineTransformValue ?? .identity
+        let oblique = matrix.concatenating(CGAffineTransform(a: 1, b: 0, c: 0.2, d: 1, tx: 0, ty: 0))
+        let descriptor = base.fontDescriptor.addingAttributes([.matrix: NSValue(cgAffineTransform: oblique)])
         return UIFont(descriptor: descriptor, size: size)
     }
 

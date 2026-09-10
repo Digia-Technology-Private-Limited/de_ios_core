@@ -69,7 +69,8 @@ struct CampaignModel: Equatable {
     static func fromJson(
         _ json: [String: Any],
         designTokens: DesignTokenCatalog = .empty,
-        devicePlatform: String? = nil
+        devicePlatform: String? = nil,
+        timeAnchor: TrustedTimeAnchor? = nil
     ) -> CampaignModel? {
         guard let selectedJson = selectForDevice(json, devicePlatform: devicePlatform) else { return nil }
         guard let id = selectedJson.nonBlankString("id") ?? selectedJson.nonBlankString("_id") else { return nil }
@@ -92,6 +93,23 @@ struct CampaignModel: Equatable {
             config = .nudge(nudgeConfig)
         case "inline":
             guard let templateConfig = selectedJson.object("templateConfig") else { return nil }
+            if templateConfig["stateful"] != nil {
+                let schemas = NudgeConfig.parseVariableSchemas(templateConfig)
+                guard let stateful = StatefulTimerConfig.fromJson(
+                    templateConfig,
+                    designTokens: designTokens,
+                    timeAnchor: timeAnchor
+                ), var canvasConfig = InlineCanvasConfig.fromStatefulJson(
+                    templateConfig,
+                    stateful: stateful
+                ) else {
+                    DigiaLog.warning("campaign_skipped_unsupported: invalid inline timer config: key=\(campaignKey)")
+                    return nil
+                }
+                canvasConfig.variableSchemas = schemas
+                config = .inlineCanvas(canvasConfig)
+                break
+            }
             switch templateConfig.string("templateType", default: "carousel") {
             case "banner":
                 guard let bannerConfig = InlineBannerConfig.fromJson(templateConfig) else { return nil }

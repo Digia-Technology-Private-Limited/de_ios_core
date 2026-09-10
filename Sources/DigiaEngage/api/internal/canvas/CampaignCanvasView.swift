@@ -9,6 +9,17 @@ import UIKit
 private let maxFloatingCanvasUpscale: CGFloat = 1.15
 private let canvasTextSpanElementID = "canvas_text_span"
 
+private struct TimerRemainingSecondsKey: EnvironmentKey {
+    static let defaultValue: Int64? = nil
+}
+
+extension EnvironmentValues {
+    var timerRemainingSeconds: Int64? {
+        get { self[TimerRemainingSecondsKey.self] }
+        set { self[TimerRemainingSecondsKey.self] = newValue }
+    }
+}
+
 private struct CanvasVideoUsesStoryPlaybackKey: EnvironmentKey {
     static let defaultValue = false
 }
@@ -567,9 +578,9 @@ private struct CanvasChildView: View {
         switch child {
         case .widget(_, _, let widget):
             CampaignCanvasRendererRegistry.render(widget, isDark: isDark, onAction: onAction)
-        case .tapRegion(let id, _, let actions):
+        case .tapRegion(let id, _, let actions, let isPrimary):
             Color.clear.contentShape(Rectangle()).onTapGesture {
-                onAction(CampaignCanvasActionRequest(actions: actions, elementId: id))
+                onAction(CampaignCanvasActionRequest(actions: actions, elementId: id, isPrimary: isPrimary))
             }
         }
     }
@@ -699,6 +710,10 @@ enum CampaignCanvasRendererRegistry {
                     kind: .mute, visible: visible, iconColor: icon, backgroundColor: background,
                     isDark: dark))
         },
+        "timer": { widget, dark, onAction in
+            guard case .timer = widget else { return AnyView(EmptyView()) }
+            return AnyView(CanvasTimerRenderer(widget: widget, isDark: dark, onAction: onAction))
+        },
     ]
 
     static func render(
@@ -720,6 +735,7 @@ enum CampaignCanvasRendererRegistry {
         case .storyProgress: key = "storyProgress"
         case .storyClose: key = "storyClose"
         case .storyMute: key = "storyMute"
+        case .timer: key = "timer"
         }
         guard let renderer = renderers[key] else {
             preconditionFailure("Missing Campaign Canvas renderer for \(key)")
@@ -743,9 +759,278 @@ enum CampaignCanvasRendererRegistry {
         case .storyProgress: key = "storyProgress"
         case .storyClose: key = "storyClose"
         case .storyMute: key = "storyMute"
+        case .timer: key = "timer"
         }
         return renderers[key] != nil
     }
+}
+
+private struct CanvasTimerRenderer: View {
+    let widget: CampaignCanvasWidget
+    let isDark: Bool
+    let onAction: (CampaignCanvasActionRequest) -> Void
+    @Environment(\.timerRemainingSeconds) private var remainingSeconds
+
+    var body: some View {
+        if case .timer(
+            _, let preset, _, let units, let labels, let labelSpans, let textWidgets, let sharedStyle, let overrides, let layout
+        ) = widget, let remainingSeconds {
+            let values = timerUnitValues(remainingSeconds: remainingSeconds, visibility: units)
+            GeometryReader { geometry in
+                let unitCount = max(1, CampaignTimerUnit.allCases.filter { units[$0] != .hide }.count)
+                let boxWidth = max(0, (geometry.size.width - CGFloat(unitCount - 1) * 4) / CGFloat(unitCount))
+                if preset == "text" {
+                    CampaignCanvasTextView(block: countdownText(
+                        values: values, style: sharedStyle, layout: layout
+                    ), isDark: isDark, onAction: { _ in }, singleLine: true)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                } else if layout.isCustomized {
+                    containerUnits(values: values, layout: layout, fallback: CGSize(width: boxWidth, height: geometry.size.height))
+                } else {
+                HStack(spacing: 4) {
+                    ForEach(Array(values.enumerated()), id: \.element.0) { _, value in
+                        unitView(
+                            value: value.1,
+                            label: labels[value.0] ?? "",
+                            labelSpans: labelSpans[value.0],
+                            textWidgets: textWidgets[value.0],
+                            style: overrides[value.0] ?? sharedStyle,
+                            boxed: true
+                        )
+                        .frame(width: boxWidth)
+                    }
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Countdown timer")
+        }
+    }
+
+    private func countdownText(
+        values: [(CampaignTimerUnit, Int64)], style: CampaignCanvasTimerUnitStyle,
+        layout: CampaignCanvasTimerLayout
+    ) -> CampaignCanvasTextBlock {
+        let base = style.digitTextStyle ?? CampaignCanvasTextSpan(
+            text: "", typography: nil, color: nil, highlightColor: nil, italic: false,
+            decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
+        )
+        func span(_ text: String, color: CampaignColor?) -> CampaignCanvasTextSpan {
+            CampaignCanvasTextSpan(
+                text: text, typography: base.typography, color: color,
+                highlightColor: base.highlightColor, italic: base.italic, decoration: base.decoration,
+                decorationColor: base.decorationColor, decorationThickness: base.decorationThickness,
+                actions: [], decorationOffset: base.decorationOffset
+            )
+        }
+        var spans: [CampaignCanvasTextSpan] = []
+        for (index, value) in values.enumerated() {
+            if index > 0 && layout.separatorEnabled != false {
+                spans.append(span(":", color: layout.separatorColor ?? base.color))
+            }
+            spans.append(span(String(format: "%02lld", value.1), color: base.color))
+        }
+        let block = timerTextBlock(spans, fallback: style.digitTypography, fallbackSize: 16, color: style.digitColor)
+        return CampaignCanvasTextBlock(
+            horizontalAlign: layout.alignment, textAlign: layout.alignment, verticalAlign: .center,
+            maxLines: 1, overflow: "clip", sizingMode: "hug", spans: block.spans
+        )
+    }
+
+    @ViewBuilder
+    private func unitView(
+        value: Int64,
+        label: String,
+        labelSpans: [CampaignCanvasTextSpan]?,
+        textWidgets: [String: CampaignCanvasWidget]?,
+        style: CampaignCanvasTimerUnitStyle,
+        boxed: Bool,
+        container: CampaignCanvasWidget? = nil,
+        padding: CampaignCanvasEdgeInsets? = nil,
+        contentAlignment: CampaignCanvasTimerContentAlignment? = nil,
+        usesUnitLayout: Bool = false
+    ) -> some View {
+        let rawDigits = textWidgets?["digits"] ?? .text(
+            box: .none,
+            block: timerTextBlock([style.digitTextStyle ?? CampaignCanvasTextSpan(
+                text: "", typography: nil, color: nil, highlightColor: nil, italic: false,
+                decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
+            )], fallback: style.digitTypography, fallbackSize: 16, color: style.digitColor), shadow: nil
+        )
+        let rawLabels = textWidgets?["label"] ?? .text(
+            box: .none,
+            block: timerTextBlock(labelSpans ?? [CampaignCanvasTextSpan(
+                text: label, typography: nil, color: nil, highlightColor: nil, italic: false,
+                decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
+            )], fallback: style.labelTypography, fallbackSize: 10, color: style.labelColor), shadow: nil
+        )
+        let digits = alignedTimerText(rawDigits, alignment: contentAlignment)
+        let labels = alignedTimerText(rawLabels, alignment: contentAlignment)
+        let showLabel = !usesUnitLayout || hasLabel(textWidgets, fallback: label)
+        let padding = padding ?? CampaignCanvasEdgeInsets(top: 2, right: 4, bottom: 2, left: 4)
+        let content = GeometryReader { geometry in
+            VStack(spacing: 0) {
+                timerText(digits, value: String(format: "%02lld", value))
+                    .frame(height: showLabel ? geometry.size.height * 2 / 3 : geometry.size.height)
+                if showLabel {
+                    timerText(labels).frame(height: geometry.size.height / 3)
+                }
+            }
+        }
+        .padding(EdgeInsets(top: padding.top, leading: padding.left, bottom: padding.bottom, trailing: padding.right))
+
+        if case .container(let fill, let radius, let border, let shadow)? = container {
+            ZStack {
+                CanvasContainerRenderer(fill: fill, cornerRadius: radius, border: border, shadow: shadow, isDark: isDark)
+                content.clipShape(CampaignCanvasRoundedShape(radius: radius))
+            }
+        } else if boxed {
+            CampaignCanvasBoxView(
+                box: CampaignCanvasBox(
+                    fill: style.boxFill,
+                    cornerRadius: style.cornerRadius
+                ),
+                isDark: isDark
+            ) { content }
+        } else { content }
+    }
+
+    private func hasLabel(_ texts: [String: CampaignCanvasWidget]?, fallback: String) -> Bool {
+        if case .text(_, let block, _)? = texts?["label"] { return !block.plainText.isEmpty }
+        return !fallback.isEmpty
+    }
+
+    private func alignedTimerText(_ widget: CampaignCanvasWidget, alignment: CampaignCanvasTimerContentAlignment?) -> CampaignCanvasWidget {
+        guard let alignment, case .text(let box, let block, let shadow) = widget else { return widget }
+        return .text(box: box, block: CampaignCanvasTextBlock(
+            horizontalAlign: alignment.horizontal, textAlign: alignment.horizontal, verticalAlign: alignment.vertical,
+            maxLines: block.maxLines, overflow: block.overflow, sizingMode: block.sizingMode, spans: block.spans
+        ), shadow: shadow)
+    }
+
+    @ViewBuilder
+    private func containerUnits(values: [(CampaignTimerUnit, Int64)], layout: CampaignCanvasTimerLayout, fallback: CGSize) -> some View {
+        if case .timer(_, let preset, _, _, let labels, let spans, let texts, let shared, let overrides, _) = widget {
+            let sizes = values.map { layout.sizes[$0.0] ?? fallback }
+            let height = sizes.map(\.height).max() ?? 0
+            let gaps = values.dropLast().map { layout.gaps[$0.0] ?? 4 }
+            let width = sizes.reduce(0) { $0 + $1.width } + gaps.reduce(0, +)
+            let alignment: Alignment = switch layout.alignment { case .left: .leading; case .right: .trailing; case .center: .center }
+            ZStack(alignment: .topLeading) {
+                ForEach(Array(values.enumerated()), id: \.element.0) { index, value in
+                    let unit = value.0
+                    let size = sizes[index]
+                    let x = sizes.prefix(index).reduce(0) { $0 + $1.width } + gaps.prefix(index).reduce(0, +)
+                    let top = (height - size.height) / 2
+                    let style = overrides[unit] ?? shared
+                    unitView(value: value.1, label: labels[unit] ?? "", labelSpans: spans[unit],
+                        textWidgets: texts[unit], style: style, boxed: preset == "unitBoxes",
+                        container: layout.containers[unit], padding: layout.padding[unit], contentAlignment: layout.contentAlignment[unit], usesUnitLayout: true)
+                        .frame(width: size.width, height: size.height).offset(x: x, y: top)
+                    if index < values.count - 1 && (layout.separatorEnabled ?? (preset == "text")) {
+                        let padding = layout.padding[unit] ?? CampaignCanvasEdgeInsets(top: 2, right: 4, bottom: 2, left: 4)
+                        let contentHeight = max(0, size.height - padding.top - padding.bottom)
+                        let digitHeight = hasLabel(texts[unit], fallback: labels[unit] ?? "") ? contentHeight * 2 / 3 : contentHeight
+                        let digitSpan: CampaignCanvasTextSpan? = {
+                            guard case .text(_, let block, _)? = texts[unit]?["digits"] else { return nil }
+                            return block.spans.first
+                        }()
+                        timerText(.text(box: .none, block: timerTextBlock([
+                            CampaignCanvasTextSpan(text: ":", typography: nil, color: nil, highlightColor: nil,
+                                italic: false, decoration: .none, decorationColor: nil, decorationThickness: nil, actions: [])
+                        ], fallback: digitSpan?.typography ?? style.digitTypography, fallbackSize: 16,
+                            color: layout.separatorColor ?? digitSpan?.color ?? style.digitTextStyle?.color ?? style.digitColor), shadow: nil))
+                            .frame(width: gaps[index], height: digitHeight).clipped()
+                            .offset(x: x + size.width, y: top + padding.top)
+                    }
+                }
+            }
+            .frame(width: width, height: height, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+        }
+    }
+
+    @ViewBuilder
+    private func timerText(_ widget: CampaignCanvasWidget, value: String? = nil) -> some View {
+        if case .text(let box, let block, let shadow) = widget {
+            CanvasTextRenderer(box: box, block: timerRuntimeBlock(block, value: value), shadow: shadow, isDark: isDark, onAction: { _ in })
+        }
+    }
+
+    private func timerRuntimeBlock(_ original: CampaignCanvasTextBlock, value: String?) -> CampaignCanvasTextBlock {
+        var block = original
+        if let value {
+            let span = block.spans.first ?? CampaignCanvasTextSpan(
+                text: "", typography: nil, color: nil, highlightColor: nil, italic: false,
+                decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
+            )
+            block.spans = [CampaignCanvasTextSpan(
+                text: value, typography: span.typography, color: span.color,
+                highlightColor: span.highlightColor, italic: span.italic,
+                decoration: span.decoration, decorationColor: span.decorationColor,
+                decorationThickness: span.decorationThickness, actions: [],
+                decorationOffset: span.decorationOffset
+            )]
+        }
+        return block
+    }
+}
+
+private func timerTextBlock(
+    _ spans: [CampaignCanvasTextSpan], fallback: CampaignTypography?, fallbackSize: CGFloat, color: CampaignColor?
+) -> CampaignCanvasTextBlock {
+    CampaignCanvasTextBlock(
+        horizontalAlign: .center, textAlign: .center, verticalAlign: .center,
+        maxLines: 1, overflow: "clip", sizingMode: "hug",
+        spans: spans.map { span in
+            var inherited = fallback ?? CampaignTypography()
+            inherited.fontSize = span.typography?.fontSize ?? fallback?.fontSize ?? fallbackSize
+            return CampaignCanvasTextSpan(
+                text: span.text,
+                typography: CampaignTypography(
+                    fontFamily: span.typography?.fontFamily ?? fallback?.fontFamily,
+                    fontSize: span.typography?.fontSize ?? fallback?.fontSize ?? fallbackSize,
+                    fontWeight: span.typography?.fontWeight ?? fallback?.fontWeight,
+                    lineHeight: span.typography?.lineHeight ?? timerLineHeight(inherited, fallbackSize: fallbackSize),
+                    letterSpacing: span.typography?.letterSpacing ?? fallback?.letterSpacing
+                ),
+                color: span.color ?? color, highlightColor: span.highlightColor,
+                italic: span.italic, decoration: span.decoration,
+                decorationColor: span.decorationColor, decorationThickness: span.decorationThickness,
+                actions: [], decorationOffset: span.decorationOffset
+            )
+        }
+    )
+}
+
+func timerLineHeight(_ typography: CampaignTypography?, fallbackSize: CGFloat) -> CGFloat? {
+    guard let lineHeight = typography?.lineHeight else { return nil }
+    let height = lineHeight <= 4 ? lineHeight * (typography?.fontSize ?? fallbackSize) : lineHeight
+    return height.isFinite && height > 0 ? height : nil
+}
+
+func timerUnitValues(
+    remainingSeconds: Int64,
+    visibility: [CampaignTimerUnit: CampaignTimerUnitVisibility]
+) -> [(CampaignTimerUnit, Int64)] {
+    let factors: [(CampaignTimerUnit, Int64)] = [
+        (.days, 86_400), (.hours, 3_600), (.minutes, 60), (.seconds, 1)
+    ]
+    let configured = factors.filter { visibility[$0.0] != .hide }
+    guard let smallest = configured.last?.1 else { return [] }
+    let safe = max(0, remainingSeconds)
+    let rounded = ((safe + smallest - 1) / smallest) * smallest
+    let values = configured.enumerated().map { index, entry -> (CampaignTimerUnit, Int64) in
+        let higher = index > 0 ? configured[index - 1].1 : Int64.max
+        let value = index == 0 ? rounded / entry.1 : (rounded % higher) / entry.1
+        return (entry.0, value)
+    }
+    let visible = values.filter { unit, value in
+        visibility[unit] != .autoHide || value > 0
+    }
+    return visible.isEmpty ? Array(values.suffix(1)) : visible
 }
 
 private struct CanvasTextRenderer: View {
@@ -793,13 +1078,14 @@ private struct CampaignCanvasTextView: View {
     var inheritedColor: UIColor? = nil
     var shadow: CampaignCanvasShadow? = nil
     var centerVertically = false
+    var singleLine = false
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
         CanvasRichText(
             attributed: attributed,
             fillWidth: block.sizingMode == "fixed",
-            maxLines: block.overflow == "ellipsis" ? block.maxLines : 0,
+            maxLines: singleLine ? 1 : (block.overflow == "ellipsis" ? block.maxLines : 0),
             overflow: block.overflow,
             textAlignment: block.textAlign.uiTextAlignment,
             centerVertically: centerVertically,
@@ -909,6 +1195,9 @@ private struct CampaignCanvasTextView: View {
             if let thickness = span.decorationThickness {
                 attributes[.digiaDecorationThickness] = thickness
             }
+            if span.decoration == .underline, let offset = span.decorationOffset {
+                attributes[.digiaDecorationOffset] = offset
+            }
             if !span.actions.isEmpty {
                 attributes[.link] = URL(string: "digia-canvas://span/\(index)")!
             }
@@ -957,6 +1246,7 @@ private struct CanvasRichText: UIViewRepresentable {
         let value = CanvasRichTextContainerView(textContainer: container)
         let textView = value.textView
         textView.delegate = context.coordinator
+        textView.linkTextAttributes = [:]
         textView.isEditable = false
         textView.isScrollEnabled = false
         textView.backgroundColor = .clear

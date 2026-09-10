@@ -650,8 +650,8 @@ private extension CampaignCanvasChild {
         switch self {
         case .widget(let id, _, let widget):
             return .widget(id: id, rect: rect, widget: widget)
-        case .tapRegion(let id, _, let actions):
-            return .tapRegion(id: id, rect: rect, actions: actions)
+        case .tapRegion(let id, _, let actions, let isPrimary):
+            return .tapRegion(id: id, rect: rect, actions: actions, isPrimary: isPrimary)
         }
     }
 }
