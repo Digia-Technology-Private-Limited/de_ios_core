@@ -1,5 +1,6 @@
 import AVFoundation
 @_implementationOnly import Lottie
+@_implementationOnly import SDWebImageSVGCoder
 import Foundation
 import Combine
 import UIKit
@@ -366,6 +367,7 @@ final class FloaterOrchestrator: ObservableObject {
     private var playingCancellables = Set<AnyCancellable>()
 
     private func preloadImage(url: String, token: Int64) {
+        DigiaImagePipeline.configureIfNeeded()
         guard let parsed = URL(string: url) else {
             abandonMedia(token: token, reason: "invalid media url")
             return
@@ -381,7 +383,7 @@ final class FloaterOrchestrator: ObservableObject {
         let task = URLSession.shared.dataTask(with: parsed) { [weak self] data, _, _ in
             Task { @MainActor in
                 guard let self, self.state?.token == token else { return }
-                if let data, UIImage(data: data) != nil {
+                if let data, (UIImage(data: data) != nil || SDImageSVGCoder.shared.decodedImage(with: data, options: nil) != nil) {
                     self.markVisible(token: token)
                 } else {
                     self.abandonMedia(token: token, reason: "image failed to load")

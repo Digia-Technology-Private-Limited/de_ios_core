@@ -80,6 +80,7 @@ struct CampaignCanvasTextSpan: Equatable {
     let decorationColor: CampaignColor?
     let decorationThickness: CGFloat?
     let actions: [EngageAction]
+    var decorationOffset: CGFloat? = nil
 }
 
 struct CampaignCanvasTextBlock: Equatable {
@@ -113,6 +114,40 @@ struct CampaignCanvasAppearAnimation: Equatable { let enabled: Bool; let duratio
 enum CampaignCanvasDividerAxis: Equatable { case horizontal, vertical }
 enum CampaignCanvasDividerPattern: Equatable { case solid, dashed, dotted }
 enum CampaignCanvasStrokeCap: Equatable { case butt, round, square }
+
+struct CampaignCanvasTimerContentAlignment: Equatable {
+    var horizontal: CampaignCanvasHorizontalAlign = .center
+    var vertical: CampaignCanvasVerticalAlign = .center
+}
+
+struct CampaignCanvasTimerLayout: Equatable {
+    var containers: [CampaignTimerUnit: CampaignCanvasWidget] = [:]
+    var padding: [CampaignTimerUnit: CampaignCanvasEdgeInsets] = [:]
+    var sizes: [CampaignTimerUnit: CGSize] = [:]
+    var contentAlignment: [CampaignTimerUnit: CampaignCanvasTimerContentAlignment] = [:]
+    var gaps: [CampaignTimerUnit: CGFloat] = [:]
+    var alignment: CampaignCanvasHorizontalAlign = .center
+    var separatorEnabled: Bool?
+    var separatorColor: CampaignColor?
+    var isCustomized: Bool {
+        !containers.isEmpty || !sizes.isEmpty || !contentAlignment.isEmpty || !gaps.isEmpty ||
+            alignment != .center || separatorEnabled != nil || separatorColor != nil
+    }
+}
+
+enum CampaignTimerUnit: String, CaseIterable, Equatable, Sendable {
+    case days, hours, minutes, seconds
+}
+enum CampaignTimerUnitVisibility: Equatable, Sendable { case show, hide, autoHide }
+struct CampaignCanvasTimerUnitStyle: Equatable, Sendable {
+    var digitTextStyle: CampaignCanvasTextSpan? = nil
+    let digitTypography: CampaignTypography?
+    let digitColor: CampaignColor?
+    let labelTypography: CampaignTypography?
+    let labelColor: CampaignColor?
+    let boxFill: CampaignCanvasPaint
+    let cornerRadius: CampaignCanvasCornerRadius
+}
 
 /// How a video rail card plays, mirroring the media story's thumbnail playback.
 struct CampaignCanvasStoryThumbnailPlayback: Equatable, Sendable {
@@ -217,6 +252,18 @@ enum CampaignCanvasWidget: Equatable, Sendable {
     case storyClose(box: CampaignCanvasBox, visible: Bool, iconColor: CampaignColor?, backgroundColor: CampaignColor?)
     /// The viewer's mute toggle. Optional: a story with no video has no use for it.
     case storyMute(box: CampaignCanvasBox, visible: Bool, iconColor: CampaignColor?, backgroundColor: CampaignColor?)
+    case timer(
+        box: CampaignCanvasBox,
+        preset: String,
+        separator: String,
+        units: [CampaignTimerUnit: CampaignTimerUnitVisibility],
+        labels: [CampaignTimerUnit: String],
+        labelSpans: [CampaignTimerUnit: [CampaignCanvasTextSpan]] = [:],
+        textWidgets: [CampaignTimerUnit: [String: CampaignCanvasWidget]] = [:],
+        style: CampaignCanvasTimerUnitStyle,
+        unitOverrides: [CampaignTimerUnit: CampaignCanvasTimerUnitStyle],
+        layout: CampaignCanvasTimerLayout = .init()
+    )
 
     var box: CampaignCanvasBox {
         switch self {
@@ -230,6 +277,7 @@ enum CampaignCanvasWidget: Equatable, Sendable {
              .storyProgress(let box, _, _, _, _, _),
              .storyClose(let box, _, _, _),
              .storyMute(let box, _, _, _): box
+        case .timer(let box, _, _, _, _, _, _, _, _, _): box
         case .container: .none
         }
     }
@@ -238,12 +286,14 @@ enum CampaignCanvasWidget: Equatable, Sendable {
 struct CampaignCanvasRect: Equatable { let x: CGFloat; let y: CGFloat; let width: CGFloat; let height: CGFloat }
 enum CampaignCanvasChild: Equatable, Identifiable, Sendable {
     case widget(id: String, rect: CampaignCanvasRect, widget: CampaignCanvasWidget)
-    case tapRegion(id: String, rect: CampaignCanvasRect, actions: [EngageAction])
-    var id: String { switch self { case .widget(let id, _, _), .tapRegion(let id, _, _): id } }
-    var rect: CampaignCanvasRect { switch self { case .widget(_, let rect, _), .tapRegion(_, let rect, _): rect } }
+    case tapRegion(id: String, rect: CampaignCanvasRect, actions: [EngageAction], isPrimary: Bool = false)
+    var id: String { switch self { case .widget(let id, _, _), .tapRegion(let id, _, _, _): id } }
+    var rect: CampaignCanvasRect { switch self { case .widget(_, let rect, _), .tapRegion(_, let rect, _, _): rect } }
     var clipsToAuthoredRect: Bool {
         guard case .widget(_, _, let widget) = self else { return true }
         if case .container = widget { return false }
+        if case .timer(_, let preset, _, _, _, _, _, _, _, let layout) = widget,
+            preset != "text", layout.isCustomized { return false }
         if widget.box.shadow != nil { return false }
         if case .text(_, _, let shadow) = widget, shadow != nil { return false }
         if case .button(_, _, _, _, let shadow, _, _, _, _, _) = widget { return shadow == nil }
@@ -258,6 +308,7 @@ enum CampaignCanvasChild: Equatable, Identifiable, Sendable {
         case .widget(_, _, .story(_, _, _, _, _, let showRail, _, _, _, _)): showRail
         case .widget(_, _, .storyClose(_, let visible, _, _)): visible
         case .widget(_, _, .storyMute(_, let visible, _, _)): visible
+        case .widget(_, _, .timer): false
         case .widget(_, _, .text(_, let block, _)):
             block.spans.contains { !$0.actions.isEmpty }
         case .widget(_, _, .button(_, let label, _, _, _, _, _, _, let actions, _)):

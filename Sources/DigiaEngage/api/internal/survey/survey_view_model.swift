@@ -15,6 +15,7 @@ final class SurveyViewModel: ObservableObject {
     @Published private(set) var redirectUrl: String?
 
     private var backStack: [String] = []
+    private let canvasAnswerValidator = CanvasSurveyAnswerValidator()
 
     init(survey: SurveyConfigModel) {
         self.survey = survey
@@ -46,12 +47,57 @@ final class SurveyViewModel: ObservableObject {
         return min(1.0, max(0.0, Double(backStack.count + 1) / Double(survey.nodes.count)))
     }
 
+    func progressTotal(countQuestionsOnly: Bool = true) -> Int {
+        max(1, progressNodeIds(countQuestionsOnly: countQuestionsOnly).count)
+    }
+
+    func progressCurrent(countQuestionsOnly: Bool = true) -> Int {
+        let progressNodes = progressNodeIds(countQuestionsOnly: countQuestionsOnly)
+        let total = max(1, progressNodes.count)
+        let progressNodeIds = Set(progressNodes)
+        let current = (backStack + [currentNodeId]).filter {
+            progressNodeIds.contains($0)
+        }.count
+        return min(max(1, current), total)
+    }
+
+    func progressFraction(countQuestionsOnly: Bool = true) -> Double {
+        let total = progressTotal(countQuestionsOnly: countQuestionsOnly)
+        return min(1.0, max(0.0, Double(progressCurrent(countQuestionsOnly: countQuestionsOnly)) / Double(total)))
+    }
+
     /// Whether the current node may be left — required questions must be answered.
     func canAdvance() -> Bool {
+        guard let node = currentNode else { return false }
+        if let scene = survey.canvasSurvey?.document(for: node) {
+            if scene.kind != .question { return true }
+            return canvasAnswerValidator.isComplete(input: scene.input, answer: answers[node.id])
+        }
         guard let block = currentBlock else { return false }
         if block.type.isContent { return true }
         if !block.required { return true }
-        return answers[currentNodeId]?.isAnswered == true
+        return answers[node.id]?.isAnswered == true
+    }
+
+    func canvasValidationError() -> String? {
+        guard let node = currentNode,
+              let scene = survey.canvasSurvey?.document(for: node),
+              scene.kind == .question
+        else { return nil }
+        return canvasAnswerValidator.validationError(input: scene.input, answer: answers[node.id])
+    }
+
+    func shouldAutoAdvance() -> Bool {
+        guard survey.settings.autoAdvance else { return false }
+        guard let node = currentNode, let answer = answers[node.id] else { return false }
+        if let scene = survey.canvasSurvey?.document(for: node) {
+            if scene.kind != .question { return false }
+            return canvasAnswerValidator.autoAdvanceEligible(input: scene.input)
+                && answer.isAnswered
+                && canvasAnswerValidator.isComplete(input: scene.input, answer: answer)
+        }
+        guard let block = currentBlock else { return false }
+        return block.type.isAutoAdvanceCandidate && answer.isAnswered
     }
 
     func setAnswer(_ nodeId: String, _ answer: SurveyAnswer) {
@@ -93,5 +139,37 @@ final class SurveyViewModel: ObservableObject {
             out[nodeId] = .object(answer.toMap())
         }
         return out
+    }
+
+    private func progressNodeIds(countQuestionsOnly: Bool) -> [String] {
+        var seen = Set<String>()
+        var ordered: [String] = []
+        var nodeId = survey.rootNode()?.id
+        while let currentNodeId = nodeId, !seen.contains(currentNodeId) {
+            seen.insert(currentNodeId)
+            guard let node = survey.nodeById(currentNodeId) else { break }
+            if node.isIncludedInProgress(in: survey, countQuestionsOnly: countQuestionsOnly) {
+                ordered.append(node.id)
+            }
+            let navigation = SurveyLogicHandler.nextStep(
+                survey: survey,
+                currentNodeId: node.id,
+                answers: answers
+            )
+            guard navigation.nextNodeId != SURVEY_FINISHED else { break }
+            nodeId = navigation.nextNodeId
+        }
+        return ordered
+    }
+}
+
+private extension SurveyNode {
+    func isIncludedInProgress(in survey: SurveyConfigModel, countQuestionsOnly: Bool) -> Bool {
+        if let canvasScene = survey.canvasSurvey?.document(for: self) {
+            if canvasScene.kind == .result { return false }
+            return !countQuestionsOnly || canvasScene.kind == .question
+        }
+        guard let block = survey.blockFor(self) else { return false }
+        return !countQuestionsOnly || !block.type.isContent
     }
 }

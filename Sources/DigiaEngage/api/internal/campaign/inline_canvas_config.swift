@@ -1,5 +1,237 @@
 import Foundation
 
+struct TrustedTimeAnchor: Equatable {
+    let serverEpochMs: Int64
+    let continuousNanoseconds: UInt64
+
+    static func capture(_ serverEpochMs: Int64?) -> TrustedTimeAnchor? {
+        // Match the four-digit years supported by timer instants.
+        guard let serverEpochMs, (1...253_402_300_799_999).contains(serverEpochMs) else { return nil }
+        return TrustedTimeAnchor(
+            serverEpochMs: serverEpochMs,
+            // Includes device sleep without following wall-clock changes.
+            continuousNanoseconds: clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+        )
+    }
+
+    func nowMs() -> Int64 {
+        let now = clock_gettime_nsec_np(CLOCK_MONOTONIC_RAW)
+        let elapsed = (max(now, continuousNanoseconds) - continuousNanoseconds) / 1_000_000
+        return serverEpochMs + Int64(elapsed)
+    }
+}
+
+enum TimerCampaignState: String, Equatable { case teaser, running, urgent, ended }
+
+enum TimerInstantSource: Equatable {
+    case fixed(Int64)
+    case fromVariable(String)
+
+    var sourceName: String {
+        switch self { case .fixed: "fixed"; case .fromVariable: "fromVariable" }
+    }
+
+    func resolve(_ variables: [String: String]?) -> Int64? {
+        switch self {
+        case .fixed(let value): value
+        case .fromVariable(let token): variables?[token].flatMap(parseOffsetInstantMs)
+        }
+    }
+}
+
+struct StatefulTimerRule: Equatable {
+    let id: String
+    let state: TimerCampaignState?
+    let canvas: CampaignCanvas?
+    var cornerRadius: Double? = nil
+    var margin: InlineCanvasMargin? = nil
+}
+
+struct ResolvedTimerCanvas: Equatable {
+    let stateID: String
+    let state: TimerCampaignState
+    let canvas: CampaignCanvas?
+    let remainingSeconds: Int64
+    let deadlineSource: String
+    var cornerRadius: Double? = nil
+    var margin: InlineCanvasMargin? = nil
+
+    var analyticsContext: TimerEventContext {
+        TimerEventContext(
+            state: stateID,
+            secondsRemaining: remainingSeconds,
+            deadlineSource: deadlineSource
+        )
+    }
+}
+
+struct StatefulTimerConfig: Equatable {
+    let timeAnchor: TrustedTimeAnchor
+    let startsAt: TimerInstantSource?
+    let deadline: TimerInstantSource
+    let urgentBelowSeconds: Int64?
+    let rules: [StatefulTimerRule]
+
+    func resolve(_ variables: [String: String]?) -> ResolvedTimerCanvas? {
+        guard let deadlineMs = deadline.resolve(variables) else { return nil }
+        let startsAtMs = startsAt?.resolve(variables)
+        if startsAt != nil && (startsAtMs == nil || startsAtMs! >= deadlineMs) { return nil }
+        let now = timeAnchor.nowMs()
+        let remainingMs = deadlineMs - now
+        let remainingSeconds = (max(0, remainingMs) + 999) / 1_000
+        let state: TimerCampaignState
+        if let startsAtMs, now < startsAtMs { state = .teaser }
+        else if now >= deadlineMs { state = .ended }
+        else if let urgentBelowSeconds, remainingSeconds <= urgentBelowSeconds { state = .urgent }
+        else { state = .running }
+        guard let rule = rules.first(where: { $0.state == nil || $0.state == state })
+        else { return nil }
+        return ResolvedTimerCanvas(
+            stateID: rule.id,
+            state: state,
+            canvas: rule.canvas,
+            remainingSeconds: remainingSeconds,
+            deadlineSource: deadline.sourceName,
+            cornerRadius: rule.cornerRadius,
+            margin: rule.margin
+        )
+    }
+
+    static func fromJson(
+        _ json: [String: Any],
+        designTokens: DesignTokenCatalog,
+        timeAnchor: TrustedTimeAnchor?
+    ) -> StatefulTimerConfig? {
+        guard let timeAnchor,
+              let stateful = json.object("stateful"),
+              stateful.int("version", default: -1) == 1,
+              let sources = stateful["sources"] as? [[String: Any]], sources.count == 1,
+              let source = sources.first,
+              source["kind"] as? String == "timer",
+              source["mode"] as? String == "countdown",
+              let deadline = parseSource(source.object("deadline"))
+        else { return nil }
+
+        let startsAt: TimerInstantSource?
+        if source["startsAt"] == nil || source["startsAt"] is NSNull { startsAt = nil }
+        else {
+            guard let parsed = parseSource(source.object("startsAt")) else { return nil }
+            startsAt = parsed
+        }
+        let urgent: Int64?
+        if source["urgentBelowSeconds"] == nil || source["urgentBelowSeconds"] is NSNull {
+            urgent = nil
+        } else {
+            guard let number = source["urgentBelowSeconds"] as? NSNumber else { return nil }
+            let value = number.int64Value
+            guard number.doubleValue == Double(value), value >= 0 else { return nil }
+            urgent = value > 0 ? value : nil
+        }
+
+        guard let rawRules = stateful["rules"] as? [[String: Any]], !rawRules.isEmpty else { return nil }
+        var rules: [StatefulTimerRule] = []
+        for raw in rawRules {
+            let whenJSON = raw.object("when")
+            let state: TimerCampaignState?
+            if let whenJSON {
+                guard let rawState = whenJSON["is"] as? String,
+                      let parsed = TimerCampaignState(rawValue: rawState)
+                else { continue }
+                state = parsed
+            } else { state = nil }
+            let canvas: CampaignCanvas?
+            if raw["canvas"] == nil || raw["canvas"] is NSNull { canvas = nil }
+            else {
+                guard let rawCanvas = raw.object("canvas"),
+                      let parsed = try? CampaignCanvasParser(designTokens: designTokens).parse(rawCanvas)
+                else { return nil }
+                canvas = parsed
+            }
+            guard let id = raw.nonBlankString("id") else { return nil }
+            let cornerRadius: Double? = raw["cornerRadius"] == nil || raw["cornerRadius"] is NSNull
+                ? nil : raw.double("cornerRadius", default: 0).finiteOrZero
+            let margin = raw.object("layout")?.object("margin").map { margin in
+                InlineCanvasMargin(
+                    top: margin.double("top", default: 0).finiteOrZero,
+                    right: margin.double("right", default: 0).finiteOrZero,
+                    bottom: margin.double("bottom", default: 0).finiteOrZero,
+                    left: margin.double("left", default: 0).finiteOrZero
+                )
+            }
+            rules.append(StatefulTimerRule(
+                id: id, state: state, canvas: canvas, cornerRadius: cornerRadius, margin: margin
+            ))
+        }
+        guard rules.contains(where: { $0.state == nil }) else { return nil }
+        return StatefulTimerConfig(
+            timeAnchor: timeAnchor,
+            startsAt: startsAt,
+            deadline: deadline,
+            urgentBelowSeconds: urgent,
+            rules: rules
+        )
+    }
+
+    private static func parseSource(_ json: [String: Any]?) -> TimerInstantSource? {
+        guard let json, let source = json["source"] as? String else { return nil }
+        switch source {
+        case "fixed":
+            guard let at = json["at"] as? String, let value = parseOffsetInstantMs(at) else { return nil }
+            return .fixed(value)
+        case "fromVariable":
+            guard let token = json.nonBlankString("token") else { return nil }
+            return .fromVariable(token)
+        default: return nil
+        }
+    }
+}
+
+private func parseOffsetInstantMs(_ raw: String) -> Int64? {
+    var value = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    let javaScriptDate = #"^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [0-9]{1,2} [0-9]{4} [0-9]{2}:[0-9]{2}:[0-9]{2} GMT[+-][0-9]{4}(?: \([^()\r\n]+\))?$"#
+    if value.range(of: javaScriptDate, options: .regularExpression) != nil {
+        let parts = value.components(separatedBy: " ")
+        let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+        guard parts.count >= 6, let month = months.firstIndex(of: parts[1]) else { return nil }
+        let monthText = String(format: "%02d", month + 1)
+        let day = String(("0" + parts[2]).suffix(2))
+        value = "\(parts[3])-\(monthText)-\(day)T\(parts[4])\(parts[5].dropFirst(3))"
+    }
+    if value.range(of: #"^(?:\$D_)?[0-9]{10}$"#, options: .regularExpression) != nil {
+        let seconds = value.hasPrefix("$D_") ? String(value.dropFirst(3)) : value
+        return Int64(seconds).map { $0 * 1_000 }
+    }
+    if value.range(of: #"^[0-9]{13}$"#, options: .regularExpression) != nil { return Int64(value) }
+    let pattern = #"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:?\d{2})?$"#
+    guard value.range(of: pattern, options: .regularExpression) != nil,
+          !value.hasPrefix("0000") else { return nil }
+    let local = String(value.prefix(19)).replacingOccurrences(of: " ", with: "T")
+    var suffix = String(value.dropFirst(19))
+    var fraction = "000"
+    if suffix.hasPrefix(".") {
+        let digits = suffix.dropFirst().prefix(while: { $0.isNumber })
+        fraction = String((String(digits) + "000").prefix(3))
+        suffix = String(suffix.dropFirst(digits.count + 1))
+    }
+    let offset = suffix.isEmpty || suffix == "Z" ? "+0000" : suffix.replacingOccurrences(of: ":", with: "")
+    guard let hours = Int(offset.dropFirst().prefix(2)), hours <= 23,
+          let minutes = Int(offset.suffix(2)), minutes <= 59 else { return nil }
+    let offsetSeconds = (hours * 3_600 + minutes * 60) * (offset.first == "-" ? -1 : 1)
+    let normalized = "\(local).\(fraction)"
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.calendar = Calendar(identifier: .gregorian)
+    formatter.gregorianStartDate = .distantPast
+    formatter.timeZone = TimeZone(secondsFromGMT: 0)
+    formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS"
+    formatter.isLenient = false
+    guard let date = formatter.date(from: normalized),
+          formatter.string(from: date) == normalized else { return nil }
+    let milliseconds = (date.timeIntervalSince1970 - Double(offsetSeconds)) * 1_000
+    guard (-62_135_596_800_000...253_402_300_799_999).contains(milliseconds) else { return nil }
+    return Int64(milliseconds.rounded())
+}
+
 /// Space between an inline card and the edges of its slot, in logical pixels.
 struct InlineCanvasMargin: Equatable {
     var top: Double = 0
@@ -26,6 +258,7 @@ struct InlineCanvasConfig: Equatable {
     var cornerRadius: Double = 0
     var margin: InlineCanvasMargin = .init()
     let canvas: CampaignCanvas
+    var statefulTimer: StatefulTimerConfig? = nil
     var variableSchemas: [VariableSchema] = []
 
     /// Returns nil when the payload is not a usable inline canvas, so the
@@ -60,6 +293,30 @@ struct InlineCanvasConfig: Equatable {
                 left: marginJson.double("left", default: 0).finiteOrZero
             ),
             canvas: canvas
+        )
+    }
+
+    static func fromStatefulJson(
+        _ json: [String: Any],
+        stateful: StatefulTimerConfig
+    ) -> InlineCanvasConfig? {
+        guard let slotKey = json.nonBlankString("slotKey"),
+              let representative = stateful.rules.compactMap(\.canvas).first
+        else { return nil }
+        let marginJSON = json.object("layout")?.object("margin") ?? [:]
+        let authoredWidth = json.double("designWidth", default: 0).finiteOrZero
+        return InlineCanvasConfig(
+            slotKey: slotKey,
+            designWidth: authoredWidth > 0 ? authoredWidth : Double(representative.width),
+            cornerRadius: json.double("cornerRadius", default: 0).finiteOrZero,
+            margin: InlineCanvasMargin(
+                top: marginJSON.double("top", default: 0).finiteOrZero,
+                right: marginJSON.double("right", default: 0).finiteOrZero,
+                bottom: marginJSON.double("bottom", default: 0).finiteOrZero,
+                left: marginJSON.double("left", default: 0).finiteOrZero
+            ),
+            canvas: representative,
+            statefulTimer: stateful
         )
     }
 }

@@ -473,22 +473,26 @@ struct DialogProps: Equatable {
     let width: DialogWidthPreset
     let customWidth: Int
     let cornerRadius: Int
+    let backdropColorHex: String
     let backdropOpacity: Double
     let backdropDismissible: Bool
     let showCloseButton: Bool
 
     static let `default` = DialogProps(
         width: .medium, customWidth: 0, cornerRadius: 20,
-        backdropOpacity: 0.4, backdropDismissible: true, showCloseButton: true
+        backdropColorHex: "#66000000", backdropOpacity: 0.4,
+        backdropDismissible: true, showCloseButton: true
     )
 
     static func from(_ json: [String: JSONValue]?) -> DialogProps {
         guard let json else { return .default }
         let opacity = max(0, min(1, SurveyParse.double(json["backdropOpacity"]) ?? 0.4))
+        let backdropColor = SurveyParse.string(json["backdropColor"]) ?? surveyBackdropHex(opacity: opacity)
         return DialogProps(
             width: SurveyParse.dialogWidth(SurveyParse.string(json["width"])),
             customWidth: SurveyParse.int(json["customWidth"]) ?? 0,
             cornerRadius: SurveyParse.int(json["cornerRadius"]) ?? 20,
+            backdropColorHex: backdropColor,
             backdropOpacity: opacity,
             backdropDismissible: SurveyParse.bool(json["backdropDismissible"]) ?? true,
             showCloseButton: SurveyParse.bool(json["showCloseButton"]) ?? true
@@ -501,26 +505,44 @@ struct BottomSheetProps: Equatable {
     /// Viewport-height %. Used only when heightMode == .custom.
     let customHeight: Int
     let cornerRadius: Int
+    let backdropColorHex: String
+    let backdropOpacity: Double
     let showHandle: Bool
     let draggable: Bool
     let backdropDismissible: Bool
+    let showCloseButton: Bool
+    var bottomSafeAreaMode: BottomSafeAreaMode = .none
 
     static let `default` = BottomSheetProps(
         heightMode: .wrap, customHeight: 0, cornerRadius: 20,
-        showHandle: true, draggable: true, backdropDismissible: true
+        backdropColorHex: "#66000000", backdropOpacity: 0.4,
+        showHandle: true, draggable: true,
+        backdropDismissible: true, showCloseButton: true,
+        bottomSafeAreaMode: .none
     )
 
     static func from(_ json: [String: JSONValue]?) -> BottomSheetProps {
         guard let json else { return .default }
+        let opacity = max(0, min(1, SurveyParse.double(json["backdropOpacity"]) ?? 0.4))
+        let backdropColor = SurveyParse.string(json["backdropColor"]) ?? surveyBackdropHex(opacity: opacity)
         return BottomSheetProps(
             heightMode: SurveyParse.sheetHeight(SurveyParse.string(json["heightMode"])),
             customHeight: SurveyParse.int(json["customHeight"]) ?? 0,
             cornerRadius: SurveyParse.int(json["cornerRadius"]) ?? 20,
+            backdropColorHex: backdropColor,
+            backdropOpacity: opacity,
             showHandle: SurveyParse.bool(json["showHandle"]) ?? true,
             draggable: SurveyParse.bool(json["draggable"]) ?? true,
-            backdropDismissible: SurveyParse.bool(json["backdropDismissible"]) ?? true
+            backdropDismissible: SurveyParse.bool(json["backdropDismissible"]) ?? true,
+            showCloseButton: SurveyParse.bool(json["showCloseButton"]) ?? true,
+            bottomSafeAreaMode: .none
         )
     }
+}
+
+private func surveyBackdropHex(opacity: Double) -> String {
+    let alpha = Int(round(max(0, min(1, opacity)) * 255))
+    return String(format: "#%02X000000", alpha)
 }
 
 struct SurveyDisplay: Equatable {
@@ -530,8 +552,8 @@ struct SurveyDisplay: Equatable {
 
     var dismissible: Bool {
         switch type {
-        case .dialog: return dialog.backdropDismissible
-        case .bottomSheet: return bottomSheet.backdropDismissible || bottomSheet.draggable
+        case .dialog: return dialog.backdropDismissible || dialog.showCloseButton
+        case .bottomSheet: return bottomSheet.backdropDismissible || bottomSheet.draggable || bottomSheet.showCloseButton
         }
     }
 
@@ -713,6 +735,8 @@ struct SurveyConfigModel: Equatable {
     let theme: SurveyTheme
     let uiTemplateId: String?
     let timeDelayMs: Int
+    let canvasSurvey: CanvasSurveyConfig?
+    let variableSchemas: [VariableSchema]
 
     /// O(1) block lookup keyed by block id.
     var blocksById: [String: SurveyBlock] {
@@ -738,7 +762,11 @@ struct SurveyConfigModel: Equatable {
         blocks.first { $0.type == .welcome && !$0.hidden }
     }
 
-    static func from(_ json: [String: JSONValue], fallbackId: String) -> SurveyConfigModel? {
+    static func from(
+        _ json: [String: JSONValue],
+        fallbackId: String,
+        variableSchemas: [VariableSchema] = []
+    ) -> SurveyConfigModel? {
         guard let blocksArr = SurveyParse.array(json["blocks"]),
               let nodesArr = SurveyParse.array(json["nodes"]) else { return nil }
         let blocks = blocksArr.compactMap { SurveyParse.object($0) }.compactMap(SurveyBlock.from)
@@ -776,7 +804,9 @@ struct SurveyConfigModel: Equatable {
             settings: SurveySettings.from(SurveyParse.object(json["settings"])),
             theme: SurveyTheme.from(SurveyParse.object(json["theme"])),
             uiTemplateId: uiTemplateId,
-            timeDelayMs: timeDelayMs
+            timeDelayMs: timeDelayMs,
+            canvasSurvey: nil,
+            variableSchemas: variableSchemas
         )
     }
 }
@@ -874,7 +904,6 @@ enum SurveyParse {
         case "single_select", "single_choice", "single": return .singleSelect
         case "multi_select", "multiple_select", "multiple_choice", "multi", "multiple": return .multiSelect
         case "rating", "star", "likert_scale": return .rating
-        // gauge / slider variants render with the numeric grid for now.
         case "nps", "nps_gauge", "nps_slider": return .nps
         case "nps_emoji": return .npsEmoji
         case "nps_smiley": return .npsSmiley

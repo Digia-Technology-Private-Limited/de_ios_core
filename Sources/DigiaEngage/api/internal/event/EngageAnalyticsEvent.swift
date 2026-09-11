@@ -49,6 +49,40 @@ extension EngageAnalyticsEvent {
     var properties: [String: Any] { [:] }
 }
 
+struct TimerEventContext: Equatable {
+    let state: String
+    let secondsRemaining: Int64
+    let deadlineSource: String
+
+    var properties: [String: Any] {
+        nonNull([
+            ("state", state),
+            ("seconds_remaining", remainingBucket),
+            ("deadline_source", deadlineSource),
+        ])
+    }
+
+    private var remainingBucket: String {
+        if secondsRemaining <= 0 { return "expired" }
+        if secondsRemaining > 86_400 { return ">24h" }
+        if secondsRemaining >= 21_600 { return "24-6h" }
+        if secondsRemaining >= 3_600 { return "6-1h" }
+        if secondsRemaining >= 900 { return "60-15m" }
+        if secondsRemaining >= 300 { return "15-5m" }
+        return "<5m"
+    }
+}
+
+struct TimerAnalyticsEvent: EngageAnalyticsEvent {
+    let event: EngageAnalyticsEvent
+    let timer: TimerEventContext
+
+    var eventName: String { event.eventName }
+    var properties: [String: Any] {
+        event.properties.merging(timer.properties) { current, _ in current }
+    }
+}
+
 // ── Nudge (bottom_sheet / dialog; distinguished by displayStyle) ─────────────
 
 enum NudgeEvent {

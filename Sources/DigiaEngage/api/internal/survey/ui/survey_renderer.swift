@@ -1,9 +1,74 @@
 import SwiftUI
 import UIKit
 import Combine
+@_implementationOnly import SDWebImageSwiftUI
 
 /// Frame-settling buffer added before the survey is shown.
 private let RENDER_DELAY_MS: Int = 150
+
+private final class SurveyKeyboardObserver: ObservableObject, @unchecked Sendable {
+    @Published private var keyboardMinY: CGFloat?
+    @Published private(set) var animationDuration: TimeInterval = 0.25
+    private var animationCurve = UIView.AnimationCurve.easeInOut.rawValue
+
+    var animation: Animation {
+        switch animationCurve {
+        case UIView.AnimationCurve.easeIn.rawValue: return .easeIn(duration: animationDuration)
+        case UIView.AnimationCurve.easeOut.rawValue: return .easeOut(duration: animationDuration)
+        case UIView.AnimationCurve.linear.rawValue: return .linear(duration: animationDuration)
+        default: return .easeInOut(duration: animationDuration)
+        }
+    }
+
+    private var observers: [NSObjectProtocol] = []
+
+    init() {
+        let center = NotificationCenter.default
+        observers = [
+            center.addObserver(
+                forName: UIResponder.keyboardWillChangeFrameNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                self?.handle(notification)
+            },
+            center.addObserver(
+                forName: UIResponder.keyboardWillHideNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                self?.handle(notification)
+            }
+        ]
+    }
+
+    deinit {
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func handle(_ notification: Notification) {
+        animationCurve = (notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?
+            .intValue ?? UIView.AnimationCurve.easeInOut.rawValue
+        animationDuration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?
+            .doubleValue ?? 0.25
+
+        guard notification.name != UIResponder.keyboardWillHideNotification,
+              let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+        else {
+            keyboardMinY = nil
+            return
+        }
+
+        keyboardMinY = frame.minY
+    }
+
+    func bottomInset(overlapping rect: CGRect) -> CGFloat {
+        guard let keyboardMinY else { return 0 }
+        return max(0, rect.maxY - keyboardMinY)
+    }
+}
 
 /// Top-level survey overlay — mounted once inside `DigiaHost`. Mirrors the
 /// dashboard `BlockEditor` visual language: a card with thin progress bar,
@@ -17,6 +82,7 @@ struct SurveyRenderer: View {
             if let state = orchestrator.state {
                 SurveySession(state: state, orchestrator: orchestrator)
                     .id(state.token)
+                    .environment(\.digiaVariables, state.variableContext)
             }
         }
         // Default every raw Text/TextField/TextEditor to the SDK-wide family.
@@ -31,6 +97,7 @@ private struct SurveySession: View {
     let orchestrator: SurveyOrchestrator
     @StateObject private var vm: SurveyViewModel
     @State private var visible = false
+    @State private var canvasWelcomeDone = false
     @State private var impressionReported = false
 
     init(state: ActiveSurveyState, orchestrator: SurveyOrchestrator) {
@@ -50,15 +117,19 @@ private struct SurveySession: View {
                 DialogContainer(
                     dialog: display.dialog,
                     background: background,
+                    keyboardScrollsContent: survey.canvasSurvey != nil,
+                    separateClose: display.dialog.showCloseButton ? survey.canvasSurvey?.closeButton : nil,
                     onDismiss: { finish(completed: false) },
                     content: {
-                        SurveyBody(
+                        SurveyPanelContent(
                             vm: vm,
                             survey: survey,
                             accent: accent,
                             onClose: { finish(completed: false) },
                             onCompletedClose: { SDKInstance.shared.dismissCompletedSurvey() },
-                            showCloseButton: display.dialog.showCloseButton
+                            showCloseButton: display.dialog.showCloseButton,
+                            paintCanvasBackground: true,
+                            canvasWelcomeDone: $canvasWelcomeDone
                         )
                     }
                 )
@@ -70,24 +141,32 @@ private struct SurveySession: View {
             let sheetContent = SurveySheet(
                 sheet: display.bottomSheet,
                 background: background,
+                canvasBackground: canvasSurveySheetBackground(survey),
+                animateContentHeight: survey.canvasSurvey != nil,
+                keyboardScrollsContent: survey.canvasSurvey != nil,
+                separateClose: display.bottomSheet.showCloseButton ? survey.canvasSurvey?.closeButton : nil,
                 onDismiss: { finish(completed: false) }
             ) {
-                SurveyBody(
+                SurveyPanelContent(
                     vm: vm,
                     survey: survey,
                     accent: accent,
                     onClose: { finish(completed: false) },
                     onCompletedClose: { SDKInstance.shared.dismissCompletedSurvey() },
-                    showCloseButton: display.bottomSheet.backdropDismissible
+                    showCloseButton: display.bottomSheet.showCloseButton,
+                    paintCanvasBackground: survey.canvasSurvey == nil,
+                    canvasWelcomeDone: $canvasWelcomeDone
                 )
             }
-            .onAppear { reportVisible() }
+            let guardedSheetContent = sheetContent
+                .interactiveDismissDisabled(true)
+                .onAppear { reportVisible() }
             // `.presentationBackground` needs iOS 16.4; below that, the cover's
             // (opaque) default background is used as-is.
             if #available(iOS 16.4, *) {
-                sheetContent.presentationBackground(.clear)
+                guardedSheetContent.presentationBackground(.clear)
             } else {
-                sheetContent
+                guardedSheetContent
             }
         }
         .transaction { $0.disablesAnimations = true }
@@ -139,14 +218,58 @@ private struct SurveySession: View {
 
 // MARK: - Containers
 
+@MainActor
+private struct SurveyPanelContent: View {
+    @ObservedObject var vm: SurveyViewModel
+    let survey: SurveyConfigModel
+    let accent: Color
+    let onClose: () -> Void
+    let onCompletedClose: () -> Void
+    let showCloseButton: Bool
+    let paintCanvasBackground: Bool
+    @Binding var canvasWelcomeDone: Bool
+
+    var body: some View {
+        if let canvasSurvey = survey.canvasSurvey {
+            CanvasSurveyPanel(
+                vm: vm,
+                survey: survey,
+                canvasSurvey: canvasSurvey,
+                accent: accent,
+                onClose: onClose,
+                onCompletedClose: onCompletedClose,
+                showCloseButton: showCloseButton,
+                paintBackground: paintCanvasBackground,
+                welcomeDone: $canvasWelcomeDone
+            )
+        } else {
+            SurveyBody(
+                vm: vm,
+                survey: survey,
+                accent: accent,
+                onClose: onClose,
+                onCompletedClose: onCompletedClose,
+                showCloseButton: showCloseButton
+            )
+        }
+    }
+}
+
 /// Maps the survey's `BottomSheetProps` onto the shared `DigiaBottomSheet`. The
-/// survey body manages its own internal scrolling (`ContentSizedScrollView`), so
-/// it renders with `scrollable: false`.
+/// survey body manages its own internal scrolling, except canvas surveys while
+/// the keyboard is visible: those need sheet-level scrolling to keep oversized
+/// authored canvases reachable above the keyboard.
+@MainActor
 private struct SurveySheet<Content: View>: View {
     let sheet: BottomSheetProps
     let background: Color
+    let canvasBackground: CampaignCanvasPaint?
+    let animateContentHeight: Bool
+    let keyboardScrollsContent: Bool
+    let separateClose: NudgeCloseButtonConfig?
     let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
+    @StateObject private var keyboard = SurveyKeyboardObserver()
 
     /// `heightMode` becomes the sheet's *cap*, not a fixed height: short content
     /// hugs (no dead space), taller content scrolls within this ceiling.
@@ -160,27 +283,86 @@ private struct SurveySheet<Content: View>: View {
     }
 
     var body: some View {
-        DigiaBottomSheet(
-            config: DigiaBottomSheetConfig(
-                cornerRadius: CGFloat(sheet.cornerRadius),
-                background: background,
-                showHandle: sheet.showHandle,
-                allowBackdropDismiss: sheet.backdropDismissible,
-                allowDragDismiss: sheet.draggable,
-                heightCapFraction: heightCapFraction
-            ),
-            scrollable: false,
-            onDismiss: onDismiss,
-            content: content
-        )
+        GeometryReader { geo in
+            let keyboardInset = keyboard.bottomInset(overlapping: geo.frame(in: .global))
+            let safeAreaMode: BottomSafeAreaMode = keyboardInset > 0
+                ? .insetSurface
+                : sheet.bottomSafeAreaMode
+            let bottomInset = keyboardInset > 0
+                ? keyboardInset
+                : (safeAreaMode == .none ? 0 : surveyWindowSafeAreaInsets.bottom)
+            DigiaBottomSheet(
+                config: DigiaBottomSheetConfig(
+                    cornerRadius: CGFloat(sheet.cornerRadius),
+                    background: canvasBackground == nil ? background : .clear,
+                    scrimColor: Color(hex: sheet.backdropColorHex) ?? Color.black.opacity(sheet.backdropOpacity),
+                    showHandle: sheet.showHandle,
+                    allowBackdropDismiss: sheet.backdropDismissible,
+                    allowDragDismiss: sheet.draggable && keyboardInset == 0,
+                    heightCapFraction: heightCapFraction,
+                    handleOverlaysContent: canvasBackground != nil,
+                    bottomSafeAreaMode: safeAreaMode,
+                    bottomSafeAreaInset: bottomInset,
+                    animateContentHeight: canvasBackground == nil && animateContentHeight,
+                    prioritizesDragOverScrolling: keyboardScrollsContent,
+                    scrollsEntireSurface: keyboardScrollsContent,
+                    entireSurfaceScrollingEnabled: keyboardInset > 0,
+                    minimumSurfaceTop: outsideCloseMinimumSurfaceTop
+                ),
+                // Keep this wrapper mounted while the field is focused. Swapping
+                // it in when the keyboard appears recreates the TextField and
+                // immediately drops first responder.
+                scrollable: keyboardScrollsContent,
+                onDismiss: onDismiss,
+                content: content,
+                cardBackground: canvasBackground.map { AnyView(CampaignCanvasBackgroundView(paint: $0)) },
+                viewportOverlay: outsideCanvasClose
+            )
+            .frame(width: geo.size.width, height: geo.size.height)
+            .animation(.easeOut(duration: keyboard.animationDuration), value: keyboardInset)
+        }
+        .ignoresSafeArea()
+    }
+
+    private var outsideCanvasClose: ((CGRect, CGSize) -> AnyView)? {
+        if let close = separateClose, close.placement?.mode == .outside {
+            return { bounds, viewport in
+                AnyView(CanvasNudgeCloseOverlay(
+                    config: close, container: bounds, viewport: viewport,
+                    safeAreaInsets: surveyWindowSafeAreaInsets, isBottomSheet: true, action: onDismiss))
+            }
+        }
+        return nil
+    }
+
+    private var outsideCloseMinimumSurfaceTop: CGFloat {
+        guard let close = separateClose,
+              let placement = close.placement,
+              placement.mode == .outside
+        else { return 0 }
+        return surveyWindowSafeAreaInsets.top
+            + placement.gap
+            + max(44, close.diameter)
     }
 }
 
+private func canvasSurveySheetBackground(_ survey: SurveyConfigModel) -> CampaignCanvasPaint? {
+    guard let canvasSurvey = survey.canvasSurvey else { return nil }
+    return canvasSurvey.welcomeDocument?.sharedUi.background
+        ?? canvasSurvey.scenesByBlockId.keys.sorted().compactMap {
+            canvasSurvey.scenesByBlockId[$0]?.sharedUi.background
+        }.first
+}
+
+@MainActor
 private struct DialogContainer<Content: View>: View {
     let dialog: DialogProps
     let background: Color
+    let keyboardScrollsContent: Bool
+    let separateClose: NudgeCloseButtonConfig?
     let onDismiss: () -> Void
     @ViewBuilder let content: () -> Content
+    @StateObject private var keyboard = SurveyKeyboardObserver()
 
     // Blocks the first-frame backdrop tap from closing the survey before the
     // CTA Buttons' gesture recognisers are interactive.
@@ -188,41 +370,299 @@ private struct DialogContainer<Content: View>: View {
 
     var body: some View {
         GeometryReader { geo in
+            // SwiftUI can change GeometryReader's proposed height when the
+            // keyboard appears even when this view ignores the keyboard safe
+            // area. Window bounds remain stable for the full presentation.
+            let windowFrame = surveyWindowFrame
+            let stableViewport = windowFrame.size
+            let hostFrame = geo.frame(in: .global)
+            let keyboardInset = keyboard.bottomInset(overlapping: windowFrame)
+            let outsideExtent = outsideCloseExtent
+            let topChrome = outsideCloseEdge == .top ? outsideExtent : 0
+            let bottomChrome = outsideCloseEdge == .bottom ? outsideExtent : 0
+            let dialogMaxHeight = max(
+                0,
+                geo.size.height - keyboardInset - topChrome - bottomChrome
+            )
             ZStack {
-                Color.black.opacity(dialog.backdropOpacity)
+                (Color(hex: dialog.backdropColorHex) ?? Color.black.opacity(dialog.backdropOpacity))
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture {
                         if armed && dialog.backdropDismissible { onDismiss() }
                     }
 
-                content()
-                    .frame(width: dialogWidth(geo: geo))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .background(
-                        RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius))
-                            .fill(background)
+                if keyboardScrollsContent {
+                    content()
+                        .environment(\.canvasSurveyDialogPresentation, CanvasSurveyDialogPresentation(
+                            viewport: stableViewport,
+                            keyboardInset: keyboardInset,
+                            topChrome: topChrome,
+                            bottomChrome: bottomChrome,
+                            cornerRadius: CGFloat(dialog.cornerRadius),
+                            close: separateClose,
+                            animation: keyboard.animation
+                        ))
+                } else {
+                    dialogSurface(
+                        width: dialogWidth(geo: geo),
+                        maxHeight: outsideCloseEdge != nil || keyboardInset > 0
+                            ? dialogMaxHeight : nil
                     )
-                    .clipShape(RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius)))
-                    .contentShape(RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius)))
-                    .onTapGesture {}
-                    .padding(16)
+                    .padding(.horizontal, 16)
+                    .padding(.top, topChrome)
+                    .padding(.bottom, bottomChrome + keyboardInset)
+                }
             }
+            // GeometryReader places fixed-size children from its top-leading
+            // origin. Pinning this ZStack to window bounds prevents SwiftUI's
+            // keyboard-adjusted parent proposal from moving or resizing it.
+            .frame(
+                width: stableViewport.width,
+                height: stableViewport.height,
+                alignment: .topLeading
+            )
+            // The host can begin below the status-bar safe area. Move the
+            // stable window layer back to the window origin before centering
+            // the dialog inside it.
+            .offset(
+                x: windowFrame.minX - hostFrame.minX,
+                y: windowFrame.minY - hostFrame.minY
+            )
+            .overlayPreferenceValue(NudgeCloseContainerBoundsKey.self) { anchor in
+                if !keyboardScrollsContent, let anchor, let close = separateClose, close.placement?.mode == .outside {
+                    CanvasNudgeCloseOverlay(
+                        config: close, container: geo[anchor], viewport: stableViewport,
+                        safeAreaInsets: .zero, isBottomSheet: false, action: onDismiss)
+
+                }
+            }
+            .animation(keyboardScrollsContent ? nil : keyboard.animation, value: keyboardInset)
             .task {
                 try? await Task.sleep(nanoseconds: 350_000_000)
                 armed = true
             }
         }
+        .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
     private func dialogWidth(geo: GeometryProxy) -> CGFloat {
         geo.size.width - 32
     }
+
+    private var outsideCloseEdge: NudgeCloseButtonPlacement.Vertical? {
+        guard let placement = separateClose?.placement, placement.mode == .outside else {
+            return nil
+        }
+        return placement.vertical
+    }
+
+    private var outsideCloseExtent: CGFloat {
+        guard let close = separateClose,
+              let placement = close.placement,
+              placement.mode == .outside
+        else { return 0 }
+        return placement.gap + max(44, close.diameter)
+    }
+
+    @ViewBuilder
+    private func dialogSurface(width: CGFloat, maxHeight: CGFloat?) -> some View {
+        let shape = RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius))
+        Group {
+            if let maxHeight {
+                ContentSizedScrollView(maxHeight: maxHeight) {
+                    content()
+                }
+            } else {
+                content()
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(width: width)
+        .background(shape.fill(background))
+        .clipShape(shape)
+        .contentShape(shape)
+        .onTapGesture {}
+        .anchorPreference(key: NudgeCloseContainerBoundsKey.self, value: .bounds) {
+            separateClose?.placement?.mode != .outside ? nil : $0
+        }
+    }
+}
+
+/// The stage uses the full window for fitting; the keyboard only changes its
+/// presentation viewport. Passing this down avoids measuring a ScrollView's
+/// proposed size or retaining the dimensions of an earlier survey scene.
+struct CanvasSurveyDialogPresentation {
+    let viewport: CGSize
+    let keyboardInset: CGFloat
+    let topChrome: CGFloat
+    let bottomChrome: CGFloat
+    let cornerRadius: CGFloat
+    let close: NudgeCloseButtonConfig?
+    let animation: Animation
+
+    var availableWidth: CGFloat { max(0, viewport.width - 32) }
+}
+
+private struct CanvasSurveyDialogPresentationKey: EnvironmentKey {
+    static var defaultValue: CanvasSurveyDialogPresentation? { nil }
+}
+
+extension EnvironmentValues {
+    var canvasSurveyDialogPresentation: CanvasSurveyDialogPresentation? {
+        get { self[CanvasSurveyDialogPresentationKey.self] }
+        set { self[CanvasSurveyDialogPresentationKey.self] = newValue }
+    }
+}
+
+/// Mirrors Android's centered IME-padded host and height-capped scroll surface.
+/// Interpolate one inset, then derive both the frame and position from that same
+/// value. The authored stage retains its explicit size throughout the animation.
+struct CanvasSurveyDialogKeyboardLayout: AnimatableModifier {
+    let presentation: CanvasSurveyDialogPresentation
+    let surfaceSize: CGSize
+    let onClose: () -> Void
+    // SwiftUI interpolates this value through Animatable's nonisolated contract.
+    // It is value-only state; view construction remains on the main actor.
+    nonisolated var keyboardInset: CGFloat
+
+    nonisolated var animatableData: CGFloat {
+        get { keyboardInset }
+        set { keyboardInset = newValue }
+    }
+
+    func body(content: Content) -> some View {
+        let availableHeight = max(0, presentation.viewport.height - keyboardInset)
+        let surfaceHeight = min(surfaceSize.height, max(
+            0, availableHeight - presentation.topChrome - presentation.bottomChrome
+        ))
+        let dialogHeight = surfaceHeight + presentation.topChrome + presentation.bottomChrome
+        let top = max(0, (availableHeight - dialogHeight) / 2)
+        let width = presentation.availableWidth
+
+        return scrollSurface(content: content, height: surfaceHeight)
+            .frame(width: width, height: surfaceHeight, alignment: .top)
+            .clipShape(RoundedRectangle(cornerRadius: presentation.cornerRadius))
+            .contentShape(Rectangle())
+            .onTapGesture {}
+            .padding(.top, presentation.topChrome)
+            .padding(.bottom, presentation.bottomChrome)
+            .overlay(alignment: .topLeading) {
+                if let close = presentation.close, close.placement?.mode == .outside {
+                    CanvasNudgeCloseOverlay(
+                        config: close,
+                        container: CGRect(
+                            x: 0, y: presentation.topChrome,
+                            width: width, height: surfaceHeight
+                        ),
+                        viewport: CGSize(width: width, height: dialogHeight),
+                        safeAreaInsets: .zero,
+                        isBottomSheet: false,
+                        action: onClose
+                    )
+                }
+            }
+            .offset(y: top)
+            .frame(
+                width: presentation.viewport.width,
+                height: presentation.viewport.height,
+                alignment: .top
+            )
+            // Keep the full-window host stationary; only the dialog inside it
+            // moves. Its safe-area calculation must not follow that movement.
+            .ignoresSafeArea()
+            // This modifier already supplies each animation frame. Neither the
+            // scroll view nor its canvas should start another layout animation.
+            .transaction {
+                $0.animation = nil
+                $0.disablesAnimations = true
+            }
+    }
+
+    @ViewBuilder
+    private func scrollSurface(content: Content, height: CGFloat) -> some View {
+        let scroll = ScrollView(.vertical, showsIndicators: false) {
+            content
+                .frame(width: surfaceSize.width, height: surfaceSize.height, alignment: .topLeading)
+                .frame(width: presentation.availableWidth, alignment: .center)
+                .background(CanvasSurveyScrollBounds())
+        }
+
+        if #available(iOS 16, *) {
+            scroll
+                .scrollDisabled(surfaceSize.height <= height)
+                .scrollDismissesKeyboard(.never)
+        } else {
+            scroll
+        }
+    }
+}
+
+/// SwiftUI's basedOnSize policy still bounces when content overflows. Configure
+/// only this dialog's enclosing scroll view so dragging stops at its real ends.
+private struct CanvasSurveyScrollBounds: UIViewRepresentable {
+    func makeUIView(context: Context) -> ScrollBoundsView {
+        let view = ScrollBoundsView()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ uiView: ScrollBoundsView, context: Context) {
+        uiView.disableBounce()
+        // SwiftUI can update the enclosing scroll view later in this pass.
+        DispatchQueue.main.async { [weak uiView] in uiView?.disableBounce() }
+    }
+
+    final class ScrollBoundsView: UIView {
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            disableBounce()
+        }
+
+        override func didMoveToSuperview() {
+            super.didMoveToSuperview()
+            disableBounce()
+        }
+
+        func disableBounce() {
+            var ancestor = superview
+            while let view = ancestor {
+                if let scroll = view as? UIScrollView {
+                    scroll.bounces = false
+                    return
+                }
+                ancestor = view.superview
+            }
+        }
+    }
+}
+
+@MainActor private var surveyWindowFrame: CGRect {
+    guard let window = UIApplication.shared.connectedScenes
+        .compactMap({ $0 as? UIWindowScene })
+        .first(where: { $0.activationState == .foregroundActive })?
+        .windows.first(where: \.isKeyWindow)
+    else { return UIScreen.main.bounds }
+    return window.convert(window.bounds, to: nil)
+}
+
+@MainActor private var surveyWindowSafeAreaInsets: UIEdgeInsets {
+    UIApplication.shared.connectedScenes
+        .compactMap { $0 as? UIWindowScene }
+        .first(where: { $0.activationState == .foregroundActive })?
+        .windows.first(where: \.isKeyWindow)?
+        .safeAreaInsets ?? .zero
 }
 
 @available(iOS 16, *)
 private struct HeightCappedLayout: Layout {
-    let maxHeight: CGFloat
+    var maxHeight: CGFloat
+
+    // Interpolate the scroll viewport alongside the dialog's keyboard padding.
+    var animatableData: CGFloat {
+        get { maxHeight }
+        set { maxHeight = newValue }
+    }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard let subview = subviews.first else { return .zero }
@@ -676,6 +1116,11 @@ private struct BlockTitleView: View {
 private struct BlockMediaImage: View {
     let media: BlockMedia
 
+    init(media: BlockMedia) {
+        DigiaImagePipeline.configureIfNeeded()
+        self.media = media
+    }
+
     private var contentMode: ContentMode {
         switch media.boxFit {
         case "contain": return .fit
@@ -685,8 +1130,12 @@ private struct BlockMediaImage: View {
 
     var body: some View {
         if media.hasUrl, let url = URL(string: media.url) {
-            AsyncImage(url: url) { image in
-                image.resizable().aspectRatio(contentMode: contentMode)
+            WebImage(url: url) { image in
+                if media.boxFit == "fill" {
+                    image.resizable()
+                } else {
+                    image.resizable().aspectRatio(contentMode: contentMode)
+                }
             } placeholder: {
                 ZStack {
                     SurveyTokens.surfaceSunken

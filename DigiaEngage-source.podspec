@@ -22,7 +22,7 @@
 
 Pod::Spec.new do |s|
   s.name             = 'DigiaEngage'
-  s.version          = '3.13.2'
+  s.version          = '3.14.0'
   s.summary          = 'Digia Engage iOS SDK — SDUI native rendering layer (local source build).'
   s.homepage         = 'https://github.com/Digia-Technology-Private-Limited/digia_engage_iOS'
   s.license          = { :type => 'BUSL-1.1', :file => 'LICENSE' }
@@ -45,8 +45,11 @@ Pod::Spec.new do |s|
   s.swift_version    = '6.0'
 
   # Compile from source (no vendored_frameworks). Sources/DigiaEngage is pure Swift —
-  # no resource bundles (mirrors Package.swift, which declares none).
+  # resource bundles keep SDK-owned assets available to local source consumers.
   s.source_files     = 'Sources/DigiaEngage/**/*.swift'
+  s.resource_bundles = {
+    'DigiaEngage' => ['Sources/DigiaEngage/Resources/**/*']
+  }
 
   # Deps as real pods (NOT baked in, unlike the fat binary). These MUST match SharedBuild/Podfile
   # (the SDK's own known-good pod set) so the source build co-exists with a host app that already

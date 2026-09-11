@@ -2,6 +2,78 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.14.0] - 2026-09-10
+
+### New Features
+- **Canvas survey campaigns** — introduced multi-step surveys authored in Campaign
+  Canvas (`layoutMode: 'canvas'`), featuring freeform canvas scene layouts, animated
+  scene transitions (slide and fade), styled managed host widgets (progress bar,
+  step indicator, navigation buttons, auto-advance timers), and dynamic conditional
+  branching based on answer values. Supports single- and multi-choice cards (grid
+  and column layouts), numeric NPS scales, 5-star rating bars with custom star
+  geometries, emoji reaction scales with bundled reaction assets, single/multi-line
+  text fields, and date picker inputs with configurable date formats, backed by
+  per-field validation rules and styled error labels.
+- **Stateful inline canvas timers** — introduced stateful countdown timers rendered
+  via Campaign Canvas inside `DigiaSlot` (`stateful` payload block with
+  `kind: "timer"`). Supports four lifecycle states (`teaser`, `running`, `urgent`,
+  and `ended`), each with independent Canvas designs, corner radii, and slot
+  margins. Includes a dedicated `digia/timer` canvas widget supporting rich text
+  countdown formatting, independently styled unit boxes (days, hours, minutes,
+  seconds), auto-hiding units, overflow-safe unit decorations, foreground-aware
+  timer ticks, and server time clock synchronization to prevent device clock
+  skew.
+
+### Improvements
+- **SVG vector and animated GIF support** — integrated SDWebImageSVGCoder and
+  WebImage across surveys, guides, nudges, carousels, and floater media surfaces,
+  with eager image pipeline configuration to ensure consistent vector and
+  animated GIF decoding across all visual surfaces.
+- **Distance-based bottom sheet drag dismissal** — implemented a unified
+  distance-only drag dismissal policy across survey and nudge bottom sheets,
+  requiring an explicit downward drag to dismiss, smoothly snapping back when
+  released below the threshold, and animating sheet height smoothly between
+  survey steps of varying heights.
+- **Survey presentation chrome and dialog routing** — canvas surveys can present as
+  modal bottom sheets (with drag handles and optional backdrop dismissal) or
+  centered dialogs with customizable backdrop styling and dismissibility. Includes a
+  vector close button overlay matching dashboard Lucide X specifications and
+  maintaining authored edge margins across differing scene dimensions.
+- **Enriched timer event telemetry** — inline timer impressions, clicks, and
+  dismissals now attach structured timer context to Digia analytics and CEP forward
+  events, capturing the active state rule ID, remaining time bucket (`<5m`, `15-5m`,
+  `60-15m`, `6-1h`, `24-6h`, `>24h`, or `expired`), deadline source (`fixed` vs.
+  `fromVariable`), CTA role (`primary` or `secondary`), and resolved destination
+  URL.
+- **SDK resource bundle packaging** — added resource bundle declarations to Swift
+  Package Manager and CocoaPods podspecs to bundle reaction assets directly with
+  the SDK, with support in universal xcframework build packaging.
+
+### Bug Fixes
+- **Session and identity concurrency stabilization** — synchronized user identity
+  operations across the SDK, serializing `setUserId` and `clearUserId` while
+  skipping no-op identity changes when the user ID is unchanged. Event timestamps
+  and session expiration checks are now evaluated before timestamp capture, and
+  analytics teardown cancels pending async tasks safely.
+- **Primary canvas tap region conversion reporting** — transparent and styled
+  canvas tap regions flagged as `isPrimary` now report qualifying primary CTA
+  conversion clicks (`ExperienceClicked`) to connected CEP platforms and Digia
+  analytics even when authored without navigation or hide actions.
+- **Inline canvas slot lifecycle and cache clearing** — inline Canvas and timer
+  slots now track owned lifecycle state, properly clear state when their payload
+  is removed to prevent stale displays or duplicate dismissals, and re-arm
+  impressions and redraws on slot content update.
+- **Flexible timer timestamp parsing** — inline timers now parse JavaScript
+  `Date.toString()` strings, epoch seconds and milliseconds (including CleverTap
+  `$D_` prefixes), and ISO-8601 timestamps, defaulting to UTC when timezone
+  offsets are omitted.
+- **Survey completion analytics attribution** — completing a canvas survey now
+  suppresses the `abandonedAtItem` property in `SurveyDismissed` telemetry, and
+  advancing past the survey welcome scene properly records the survey start event.
+- **Rating star geometry and bounding box** — corrected 5-star rating SVG path
+  definitions and layout constraints to match dashboard canvas preview dimensions,
+  preventing visual clipping and misalignment across custom rating symbols.
+
 ## [3.13.2] - 2026-09-08
 
 ### Bug Fixes

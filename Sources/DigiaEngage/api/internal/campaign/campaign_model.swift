@@ -69,7 +69,8 @@ struct CampaignModel: Equatable {
     static func fromJson(
         _ json: [String: Any],
         designTokens: DesignTokenCatalog = .empty,
-        devicePlatform: String? = nil
+        devicePlatform: String? = nil,
+        timeAnchor: TrustedTimeAnchor? = nil
     ) -> CampaignModel? {
         guard let selectedJson = selectForDevice(json, devicePlatform: devicePlatform) else { return nil }
         guard let id = selectedJson.nonBlankString("id") ?? selectedJson.nonBlankString("_id") else { return nil }
@@ -92,6 +93,23 @@ struct CampaignModel: Equatable {
             config = .nudge(nudgeConfig)
         case "inline":
             guard let templateConfig = selectedJson.object("templateConfig") else { return nil }
+            if templateConfig["stateful"] != nil {
+                let schemas = NudgeConfig.parseVariableSchemas(templateConfig)
+                guard let stateful = StatefulTimerConfig.fromJson(
+                    templateConfig,
+                    designTokens: designTokens,
+                    timeAnchor: timeAnchor
+                ), var canvasConfig = InlineCanvasConfig.fromStatefulJson(
+                    templateConfig,
+                    stateful: stateful
+                ) else {
+                    DigiaLog.warning("campaign_skipped_unsupported: invalid inline timer config: key=\(campaignKey)")
+                    return nil
+                }
+                canvasConfig.variableSchemas = schemas
+                config = .inlineCanvas(canvasConfig)
+                break
+            }
             switch templateConfig.string("templateType", default: "carousel") {
             case "banner":
                 guard let bannerConfig = InlineBannerConfig.fromJson(templateConfig) else { return nil }
@@ -116,7 +134,11 @@ struct CampaignModel: Equatable {
                 config = .inline(carouselConfig)
             }
         case "survey":
-            guard let surveyConfig = parseSurveyConfig(selectedJson, fallbackId: id) else { return nil }
+            guard let surveyConfig = parseSurveyConfig(
+                selectedJson,
+                fallbackId: id,
+                designTokens: designTokens
+            ) else { return nil }
             config = .survey(surveyConfig)
         case "floater":
             guard let templateConfig = selectedJson.object("templateConfig") else { return nil }
@@ -196,7 +218,11 @@ struct CampaignModel: Equatable {
 
     // ── survey parsing ────────────────────────────────────────────────────────
 
-    private static func parseSurveyConfig(_ json: [String: Any], fallbackId: String) -> SurveyConfigModel? {
+    private static func parseSurveyConfig(
+        _ json: [String: Any],
+        fallbackId: String,
+        designTokens: DesignTokenCatalog
+    ) -> SurveyConfigModel? {
         let raw: [String: Any]?
         if let survey = json["surveyConfig"] as? [String: Any] {
             raw = survey
@@ -207,7 +233,20 @@ struct CampaignModel: Equatable {
             raw = nil
         }
         guard let raw, let converted = surveyJSONObject(raw) else { return nil }
-        return SurveyConfigModel.from(converted, fallbackId: fallbackId)
+        let variableSchemas = NudgeConfig.parseVariableSchemas(json.object("templateConfig") ?? raw)
+        if raw.string("layoutMode") == "canvas" {
+            return CanvasSurveyConfigParser.from(
+                converted,
+                fallbackId: fallbackId,
+                designTokens: designTokens,
+                variableSchemas: variableSchemas
+            )
+        }
+        return SurveyConfigModel.from(
+            converted,
+            fallbackId: fallbackId,
+            variableSchemas: variableSchemas
+        )
     }
 
     // ── guide parsing ─────────────────────────────────────────────────────────
