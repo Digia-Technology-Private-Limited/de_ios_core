@@ -30,6 +30,16 @@ struct CampaignModel: Equatable {
     // Opaque capping policy from the dashboard; nil = "No cap" / inline.
     // Used natively for nudge + survey only (guides cap in JS on RN).
     var frequency: FrequencyPolicy? = nil
+    let audienceGated: Bool
+    let trigger: CampaignTrigger?
+
+    func allowsScreen(_ currentScreen: String?) -> Bool {
+        targetScreenNames.isEmpty || targetScreenNames.contains(currentScreen ?? "")
+    }
+
+    func allowsUser(_ eligibleCampaigns: [String]) -> Bool {
+        !audienceGated || eligibleCampaigns.contains(campaignKey)
+    }
 
     var guideConfig: GuideConfigModel? {
         if case let .guide(value) = config { return value }
@@ -167,7 +177,9 @@ struct CampaignModel: Equatable {
             campaignType: campaignType,
             config: config,
             targetScreenNames: targetScreenNames,
-            frequency: FrequencyPolicy.fromJson(selectedJson.object("frequency"))
+            frequency: FrequencyPolicy.fromJson(selectedJson.object("frequency")),
+            audienceGated: (selectedJson["audienceGated"] as? Bool) == true,
+            trigger: CampaignTrigger.fromJson(selectedJson["trigger"] as? [String: Any])
         )
     }
 

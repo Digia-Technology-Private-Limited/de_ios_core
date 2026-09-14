@@ -17,6 +17,8 @@ final class CampaignStore {
         campaigns[campaignKey]
     }
 
+    func all() -> [CampaignModel] { Array(campaigns.values) }
+
     var keys: [String] {
         campaigns.keys.sorted()
     }
