@@ -15,6 +15,8 @@ final class SurveyViewModel: ObservableObject {
     @Published private(set) var redirectUrl: String?
 
     private var backStack: [String] = []
+    private var questionProgressStops: [Double] = []
+    private var allProgressStops: [Double] = []
     private let canvasAnswerValidator = CanvasSurveyAnswerValidator()
 
     init(survey: SurveyConfigModel) {
@@ -22,6 +24,7 @@ final class SurveyViewModel: ObservableObject {
         let first = SurveyLogicHandler.firstNodeId(survey: survey, answers: [:])
         self.currentNodeId = first
         self.isComplete = (first == SURVEY_FINISHED)
+        if survey.canvasSurvey != nil { syncProgressAfterNavigation(navigatingBack: false) }
     }
 
     var currentNode: SurveyNode? { survey.nodeById(currentNodeId) }
@@ -62,8 +65,32 @@ final class SurveyViewModel: ObservableObject {
     }
 
     func progressFraction(countQuestionsOnly: Bool = true) -> Double {
+        if survey.canvasSurvey == nil {
+            let total = progressTotal(countQuestionsOnly: countQuestionsOnly)
+            return min(1, max(0, Double(progressCurrent(countQuestionsOnly: countQuestionsOnly)) / Double(total)))
+        }
+        return min(1.0, max(0.0, progressStops(countQuestionsOnly: countQuestionsOnly).last ?? 0))
+    }
+
+    /// Relative width of each segment on the selected route. Previously shown
+    /// progress keeps its width when branching reveals additional scenes; only
+    /// the unfilled remainder is divided between those scenes.
+    func progressSegmentWeights(countQuestionsOnly: Bool = true) -> [Double] {
         let total = progressTotal(countQuestionsOnly: countQuestionsOnly)
-        return min(1.0, max(0.0, Double(progressCurrent(countQuestionsOnly: countQuestionsOnly)) / Double(total)))
+        let stops = progressStops(countQuestionsOnly: countQuestionsOnly)
+        let lockedCount = min(stops.count, total)
+        var weights: [Double] = []
+        var previous = 0.0
+        for index in 0..<lockedCount {
+            let stop = min(1, max(previous, stops[index]))
+            weights.append(stop - previous)
+            previous = stop
+        }
+        let remainingCount = total - lockedCount
+        if remainingCount > 0 {
+            weights.append(contentsOf: repeatElement((1 - previous) / Double(remainingCount), count: remainingCount))
+        }
+        return weights
     }
 
     /// Whether the current node may be left — required questions must be answered.
@@ -102,6 +129,7 @@ final class SurveyViewModel: ObservableObject {
 
     func setAnswer(_ nodeId: String, _ answer: SurveyAnswer) {
         answers[nodeId] = answer
+        if survey.canvasSurvey != nil { raiseProgressForSelectedRoute() }
     }
 
     func nextBlockIsResultPage() -> Bool {
@@ -124,12 +152,14 @@ final class SurveyViewModel: ObservableObject {
         } else {
             currentNodeId = navigation.nextNodeId
         }
+        if survey.canvasSurvey != nil { syncProgressAfterNavigation(navigatingBack: false) }
     }
 
     func back() {
         guard let prev = backStack.popLast() else { return }
         currentNodeId = prev
         isComplete = false
+        if survey.canvasSurvey != nil { syncProgressAfterNavigation(navigatingBack: true) }
     }
 
     /// The collected answers as a serialisable map, for the `Completed` event.
@@ -160,6 +190,48 @@ final class SurveyViewModel: ObservableObject {
             nodeId = navigation.nextNodeId
         }
         return ordered
+    }
+
+    private func progressStops(countQuestionsOnly: Bool) -> [Double] {
+        countQuestionsOnly ? questionProgressStops : allProgressStops
+    }
+
+    private func setProgressStops(_ stops: [Double], countQuestionsOnly: Bool) {
+        if countQuestionsOnly {
+            questionProgressStops = stops
+        } else {
+            allProgressStops = stops
+        }
+    }
+
+    private func syncProgressAfterNavigation(navigatingBack: Bool) {
+        for countQuestionsOnly in [true, false] {
+            let total = progressTotal(countQuestionsOnly: countQuestionsOnly)
+            let current = progressCurrent(countQuestionsOnly: countQuestionsOnly)
+            var stops = progressStops(countQuestionsOnly: countQuestionsOnly)
+            if navigatingBack && stops.count > current {
+                stops.removeLast(stops.count - current)
+            }
+            while stops.count < current {
+                let previous = stops.last ?? 0
+                let remainingSegments = max(1, total - stops.count)
+                stops.append(previous + (1 - previous) / Double(remainingSegments))
+            }
+            setProgressStops(stops, countQuestionsOnly: countQuestionsOnly)
+        }
+    }
+
+    private func raiseProgressForSelectedRoute() {
+        for countQuestionsOnly in [true, false] {
+            var stops = progressStops(countQuestionsOnly: countQuestionsOnly)
+            guard let currentStop = stops.last else { continue }
+            let selectedRouteProgress = Double(progressCurrent(countQuestionsOnly: countQuestionsOnly))
+                / Double(progressTotal(countQuestionsOnly: countQuestionsOnly))
+            if selectedRouteProgress > currentStop {
+                stops[stops.count - 1] = selectedRouteProgress
+                setProgressStops(stops, countQuestionsOnly: countQuestionsOnly)
+            }
+        }
     }
 }
 

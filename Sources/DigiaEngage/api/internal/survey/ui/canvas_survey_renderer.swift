@@ -872,7 +872,8 @@ private struct CanvasSurveyManagedHostView: View {
                     host: host,
                     progress: vm.progressFraction(countQuestionsOnly: host.countQuestionsOnly),
                     currentSegment: vm.progressCurrent(countQuestionsOnly: host.countQuestionsOnly),
-                    totalSegments: vm.progressTotal(countQuestionsOnly: host.countQuestionsOnly)
+                    totalSegments: vm.progressTotal(countQuestionsOnly: host.countQuestionsOnly),
+                    segmentWeights: vm.progressSegmentWeights(countQuestionsOnly: host.countQuestionsOnly)
                 )
             case .pageCount:
                 CanvasSurveyTextHost(
@@ -915,16 +916,25 @@ private struct CanvasSurveyProgressHost: View {
     let progress: Double
     let currentSegment: Int
     let totalSegments: Int
+    let segmentWeights: [Double]
 
     var body: some View {
         let active = Color(hex: host.colorHex) ?? SurveyTokens.textPrimary
         let track = Color(hex: host.trackColorHex) ?? SurveyTokens.surfaceSunken
         if host.progressStyle == "segmented" && totalSegments > 1 {
-            HStack(spacing: host.gap) {
-                ForEach(1...totalSegments, id: \.self) { index in
-                    RoundedRectangle(cornerRadius: host.cornerRadius)
-                        .fill(index <= currentSegment ? active : track)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+            GeometryReader { geometry in
+                let gaps = host.gap * CGFloat(max(0, totalSegments - 1))
+                let availableWidth = max(0, geometry.size.width - gaps)
+                HStack(spacing: host.gap) {
+                    ForEach(1...totalSegments, id: \.self) { index in
+                        let weight = segmentWeights.indices.contains(index - 1)
+                            ? segmentWeights[index - 1]
+                            : 1 / Double(totalSegments)
+                        RoundedRectangle(cornerRadius: host.cornerRadius)
+                            .fill(index <= currentSegment ? active : track)
+                            .frame(width: availableWidth * CGFloat(max(0, weight)))
+                            .frame(maxHeight: .infinity)
+                    }
                 }
             }
         } else {
