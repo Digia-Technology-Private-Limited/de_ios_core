@@ -2127,7 +2127,7 @@ private struct CanvasImageFit: ViewModifier {
     }
 }
 
-private struct CampaignCanvasRoundedShape: InsettableShape {
+struct CampaignCanvasRoundedShape: InsettableShape {
     let radius: CampaignCanvasCornerRadius
     var insetAmount: CGFloat = 0
 
@@ -2140,29 +2140,57 @@ private struct CampaignCanvasRoundedShape: InsettableShape {
     func path(in rect: CGRect) -> Path {
         let inset = min(max(0, insetAmount), min(rect.width, rect.height) / 2)
         let rect = rect.insetBy(dx: inset, dy: inset)
-        let radiusLimit = min(rect.width, rect.height) / 2
-        let topLeft = min(max(0, radius.topLeft - inset), radiusLimit)
-        let topRight = min(max(0, radius.topRight - inset), radiusLimit)
-        let bottomRight = min(max(0, radius.bottomRight - inset), radiusLimit)
-        let bottomLeft = min(max(0, radius.bottomLeft - inset), radiusLimit)
+        guard rect.width > 0 && rect.height > 0 else { return Path() }
+
+        var tl = max(0, radius.topLeft - inset)
+        var tr = max(0, radius.topRight - inset)
+        var br = max(0, radius.bottomRight - inset)
+        var bl = max(0, radius.bottomLeft - inset)
+
+        let topSum = tl + tr
+        let rightSum = tr + br
+        let bottomSum = bl + br
+        let leftSum = tl + bl
+
+        var factor: CGFloat = 1.0
+        if topSum > rect.width { factor = min(factor, rect.width / topSum) }
+        if rightSum > rect.height { factor = min(factor, rect.height / rightSum) }
+        if bottomSum > rect.width { factor = min(factor, rect.width / bottomSum) }
+        if leftSum > rect.height { factor = min(factor, rect.height / leftSum) }
+
+        if factor < 1.0 {
+            tl *= factor
+            tr *= factor
+            br *= factor
+            bl *= factor
+        }
+
+        if tl == tr && tr == br && br == bl {
+            return Path(roundedRect: rect, cornerRadius: tl, style: .circular)
+        }
+
         var path = Path()
-        path.move(to: CGPoint(x: rect.minX + topLeft, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX - topRight, y: rect.minY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX, y: rect.minY + topRight),
-            control: CGPoint(x: rect.maxX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - bottomRight))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.maxX - bottomRight, y: rect.maxY),
-            control: CGPoint(x: rect.maxX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX + bottomLeft, y: rect.maxY))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX, y: rect.maxY - bottomLeft),
-            control: CGPoint(x: rect.minX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + topLeft))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX + topLeft, y: rect.minY),
-            control: CGPoint(x: rect.minX, y: rect.minY))
+        path.move(to: CGPoint(x: rect.minX + tl, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX - tr, y: rect.minY))
+        path.addArc(
+            tangent1End: CGPoint(x: rect.maxX, y: rect.minY),
+            tangent2End: CGPoint(x: rect.maxX, y: rect.maxY),
+            radius: tr)
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - br))
+        path.addArc(
+            tangent1End: CGPoint(x: rect.maxX, y: rect.maxY),
+            tangent2End: CGPoint(x: rect.minX, y: rect.maxY),
+            radius: br)
+        path.addLine(to: CGPoint(x: rect.minX + bl, y: rect.maxY))
+        path.addArc(
+            tangent1End: CGPoint(x: rect.minX, y: rect.maxY),
+            tangent2End: CGPoint(x: rect.minX, y: rect.minY),
+            radius: bl)
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + tl))
+        path.addArc(
+            tangent1End: CGPoint(x: rect.minX, y: rect.minY),
+            tangent2End: CGPoint(x: rect.maxX, y: rect.minY),
+            radius: tl)
         path.closeSubpath()
         return path
     }
