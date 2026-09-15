@@ -14,6 +14,54 @@ struct NudgeCloseButtonConfigTests {
         ]))
     }
 
+    @Test("canvas outside close uses margin and ignores the removed gap key")
+    func canvasOutsideMargin() throws {
+        let placement = try #require(NudgeCloseButtonPlacement.fromCloseJson([
+            "placement": NSNull(),
+            "outsidePlacement": [
+                "horizontal": "left",
+                "vertical": "bottom",
+                "margin": ["top": 3, "right": 5, "bottom": 7, "left": 11],
+                "gap": 99,
+            ],
+        ]))
+        let legacyGapOnly = try #require(NudgeCloseButtonPlacement.fromCloseJson([
+            "placement": NSNull(),
+            "outsidePlacement": ["gap": 99],
+        ]))
+        let uniformMargin = try #require(NudgeCloseButtonPlacement.fromCloseJson([
+            "placement": NSNull(),
+            "outsidePlacement": ["margin": 9],
+        ]))
+
+        #expect(placement.horizontal == .left)
+        #expect(placement.vertical == .bottom)
+        #expect(placement.margin == .init(top: 3, right: 5, bottom: 7, left: 11))
+        #expect(legacyGapOnly.margin == .init())
+        #expect(uniformMargin.margin == .init(top: 9, right: 9, bottom: 9, left: 9))
+
+        let layout = try #require(placement.layout(
+            diameter: 20,
+            container: CGRect(x: 20, y: 60, width: 160, height: 100),
+            safe: CGRect(x: 0, y: 0, width: 200, height: 200),
+            isBottomSheet: false))
+        #expect(layout.circle.minX == 20)
+        #expect(layout.circle.minY == 160)
+        #expect(layout.touch == layout.circle)
+
+        let insideFallback = try #require(NudgeCloseButtonPlacement(
+            horizontal: .left,
+            vertical: .top,
+            margin: .init(top: 40, right: 40, bottom: 40, left: 40)
+        ).layout(
+            diameter: 20,
+            container: CGRect(x: 20, y: 10, width: 160, height: 150),
+            safe: CGRect(x: 0, y: 0, width: 200, height: 200),
+            isBottomSheet: false
+        ))
+        #expect(insideFallback.circle == CGRect(x: 20, y: 10, width: 20, height: 20))
+    }
+
     @Test("missing close button config preserves the existing appearance")
     func defaults() throws {
         let surface = try config().surface

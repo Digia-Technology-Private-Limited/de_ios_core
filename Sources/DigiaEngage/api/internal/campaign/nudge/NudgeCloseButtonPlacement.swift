@@ -2,16 +2,52 @@ import Foundation
 import CoreFoundation
 import CoreGraphics
 
-/// Inside rectangles use normalized artwork coordinates; outside gaps use screen points.
+/// Inside rectangles use normalized artwork coordinates; outside margins use screen points.
 struct NudgeCloseButtonPlacement: Equatable {
     enum Mode: String { case inside, outside }
     enum Horizontal: String { case left, center, right }
     enum Vertical: String { case top, bottom }
 
+    struct Margin: Equatable {
+        let top: CGFloat
+        let right: CGFloat
+        let bottom: CGFloat
+        let left: CGFloat
+
+        init(top: CGFloat = 0, right: CGFloat = 0, bottom: CGFloat = 0, left: CGFloat = 0) {
+            self.top = top
+            self.right = right
+            self.bottom = bottom
+            self.left = left
+        }
+
+        static func fromJson(_ value: Any?) -> Self {
+            func side(_ raw: Any?, fallback: CGFloat) -> CGFloat {
+                guard let number = raw as? NSNumber,
+                      CFGetTypeID(number) != CFBooleanGetTypeID(),
+                      number.doubleValue.isFinite, number.doubleValue >= 0
+                else { return fallback }
+                return CGFloat(number.doubleValue)
+            }
+            if let number = value as? NSNumber,
+               CFGetTypeID(number) != CFBooleanGetTypeID(),
+               number.doubleValue.isFinite, number.doubleValue >= 0 {
+                let all = CGFloat(number.doubleValue)
+                return Self(top: all, right: all, bottom: all, left: all)
+            }
+            guard let json = value as? [String: Any] else { return Self() }
+            return Self(
+                top: side(json["top"], fallback: 0),
+                right: side(json["right"], fallback: 0),
+                bottom: side(json["bottom"], fallback: 0),
+                left: side(json["left"], fallback: 0))
+        }
+    }
+
     var mode: Mode { rect == nil ? .outside : .inside }
     let horizontal: Horizontal
     let vertical: Vertical
-    let gap: CGFloat
+    let margin: Margin
     var rect: CGRect? = nil
 
     static func fromJson(_ json: [String: Any]?) -> Self? {
@@ -22,7 +58,7 @@ struct NudgeCloseButtonPlacement: Equatable {
                 return CGFloat(number.doubleValue)
             }
             if values.count == 4, values[2] > 0, values[3] > 0 {
-                return Self(horizontal: .left, vertical: .top, gap: 12,
+                return Self(horizontal: .left, vertical: .top, margin: .init(),
                     rect: CGRect(x: values[0], y: values[1], width: values[2], height: values[3]))
             }
         }
@@ -36,15 +72,8 @@ struct NudgeCloseButtonPlacement: Equatable {
         guard let horizontal = Horizontal(rawValue: snap["horizontal"] as? String ?? "right"),
             let vertical = Vertical(rawValue: snap["vertical"] as? String ?? "top")
         else { return nil }
-        let gap: CGFloat
-        if let value = snap["gap"] as? NSNumber,
-            CFGetTypeID(value) != CFBooleanGetTypeID(),
-            value.doubleValue.isFinite, value.doubleValue >= 0 {
-            gap = CGFloat(value.doubleValue)
-        } else {
-            gap = 12
-        }
-        return Self(horizontal: horizontal, vertical: vertical, gap: gap)
+        return Self(horizontal: horizontal, vertical: vertical,
+                    margin: Margin.fromJson(snap["margin"]))
     }
 
     func forCanvas(source: CGSize, target: CGSize) -> Self {
@@ -68,7 +97,7 @@ struct NudgeCloseButtonPlacement: Equatable {
         let touch: CGRect
     }
 
-    /// Resolve against the fitted card, then keep the entire hit region on screen.
+    /// Resolve the visible circle and its matching hit region against the fitted card.
     func layout(diameter: CGFloat, container: CGRect, safe: CGRect, isBottomSheet: Bool) -> Layout? {
         if let rect {
             let size = max(0, min(rect.width * container.width, rect.height * container.height, safe.width, safe.height))
@@ -79,19 +108,12 @@ struct NudgeCloseButtonPlacement: Equatable {
                 x: clamp(container.minX + rect.minX * container.width, safe.minX, safe.maxX - size),
                 y: clamp(container.minY + rect.minY * container.height, safe.minY, safe.maxY - size),
                 width: size, height: size)
-            let width = min(max(size, 44), safe.width)
-            let height = min(max(size, 44), safe.height)
-            return Layout(circle: circle, touch: CGRect(
-                x: clamp(circle.midX - width / 2, safe.minX, safe.maxX - width),
-                y: clamp(circle.midY - height / 2, safe.minY, safe.maxY - height),
-                width: width, height: height))
+            return Layout(circle: circle, touch: circle)
         }
         let inside = container.intersection(safe)
         guard !inside.isNull, inside.width > 0, inside.height > 0,
             diameter.isFinite, diameter > 0 else { return nil }
         let size = min(diameter, safe.width, safe.height)
-        let touchWidth = min(max(size, 44), safe.width)
-        let touchHeight = min(max(size, 44), safe.height)
         let edge = isBottomSheet && mode == .outside ? Vertical.top : vertical
         func clamp(_ value: CGFloat, _ lower: CGFloat, _ upper: CGFloat) -> CGFloat {
             min(max(value, lower), max(lower, upper))
@@ -106,13 +128,11 @@ struct NudgeCloseButtonPlacement: Equatable {
         var circleSize = size
         var x = horizontalOrigin(in: container, size: size)
         var y: CGFloat
-        let availableGap = edge == .top
+        let availableMargin = edge == .top
             ? container.minY - safe.minY - size
             : safe.maxY - container.maxY - size
-        if mode == .outside && availableGap >= 0 {
-            let fittedGap = min(gap, availableGap)
-            y = edge == .top ? container.minY - fittedGap - size : container.maxY + fittedGap
-            x = clamp(x, safe.minX, safe.maxX - size)
+        if mode == .outside && availableMargin >= 0 {
+            y = edge == .top ? container.minY - size : container.maxY
         } else {
             circleSize = min(size, inside.width, inside.height)
             x = horizontalOrigin(in: container, size: circleSize)
@@ -123,16 +143,6 @@ struct NudgeCloseButtonPlacement: Equatable {
             y = clamp(y, inside.minY, inside.maxY - circleSize)
         }
         let circle = CGRect(x: x, y: y, width: circleSize, height: circleSize)
-        let preferredTouchY = mode == .outside && availableGap >= 0
-            ? (edge == .top ? circle.maxY - touchHeight : circle.minY)
-            : circle.midY - touchHeight / 2
-        return Layout(
-            circle: circle,
-            touch: CGRect(
-                x: clamp(circle.midX - touchWidth / 2, safe.minX, safe.maxX - touchWidth),
-                y: clamp(preferredTouchY, safe.minY, safe.maxY - touchHeight),
-                width: touchWidth, height: touchHeight
-            )
-        )
+        return Layout(circle: circle, touch: circle)
     }
 }

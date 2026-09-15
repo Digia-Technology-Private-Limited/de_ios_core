@@ -306,8 +306,7 @@ private struct SurveySheet<Content: View>: View {
                     animateContentHeight: canvasBackground == nil && animateContentHeight,
                     prioritizesDragOverScrolling: keyboardScrollsContent,
                     scrollsEntireSurface: keyboardScrollsContent,
-                    entireSurfaceScrollingEnabled: keyboardInset > 0,
-                    minimumSurfaceTop: outsideCloseMinimumSurfaceTop
+                    entireSurfaceScrollingEnabled: keyboardInset > 0
                 ),
                 // Keep this wrapper mounted while the field is focused. Swapping
                 // it in when the keyboard appears recreates the TextField and
@@ -335,15 +334,6 @@ private struct SurveySheet<Content: View>: View {
         return nil
     }
 
-    private var outsideCloseMinimumSurfaceTop: CGFloat {
-        guard let close = separateClose,
-              let placement = close.placement,
-              placement.mode == .outside
-        else { return 0 }
-        return surveyWindowSafeAreaInsets.top
-            + placement.gap
-            + max(44, close.diameter)
-    }
 }
 
 private func canvasSurveySheetBackground(_ survey: SurveyConfigModel) -> CampaignCanvasPaint? {
@@ -377,12 +367,9 @@ private struct DialogContainer<Content: View>: View {
             let stableViewport = windowFrame.size
             let hostFrame = geo.frame(in: .global)
             let keyboardInset = keyboard.bottomInset(overlapping: windowFrame)
-            let outsideExtent = outsideCloseExtent
-            let topChrome = outsideCloseEdge == .top ? outsideExtent : 0
-            let bottomChrome = outsideCloseEdge == .bottom ? outsideExtent : 0
             let dialogMaxHeight = max(
                 0,
-                geo.size.height - keyboardInset - topChrome - bottomChrome
+                geo.size.height - keyboardInset
             )
             ZStack {
                 (Color(hex: dialog.backdropColorHex) ?? Color.black.opacity(dialog.backdropOpacity))
@@ -397,21 +384,18 @@ private struct DialogContainer<Content: View>: View {
                         .environment(\.canvasSurveyDialogPresentation, CanvasSurveyDialogPresentation(
                             viewport: stableViewport,
                             keyboardInset: keyboardInset,
-                            topChrome: topChrome,
-                            bottomChrome: bottomChrome,
                             cornerRadius: CGFloat(dialog.cornerRadius),
                             close: separateClose,
                             animation: keyboard.animation
                         ))
                 } else {
-                    dialogSurface(
+                    let surface = dialogSurface(
                         width: dialogWidth(geo: geo),
-                        maxHeight: outsideCloseEdge != nil || keyboardInset > 0
-                            ? dialogMaxHeight : nil
+                        maxHeight: keyboardInset > 0 ? dialogMaxHeight : nil
                     )
-                    .padding(.horizontal, 16)
-                    .padding(.top, topChrome)
-                    .padding(.bottom, bottomChrome + keyboardInset)
+                    surface
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, keyboardInset)
                 }
             }
             // GeometryReader places fixed-size children from its top-leading
@@ -450,21 +434,6 @@ private struct DialogContainer<Content: View>: View {
         geo.size.width - 32
     }
 
-    private var outsideCloseEdge: NudgeCloseButtonPlacement.Vertical? {
-        guard let placement = separateClose?.placement, placement.mode == .outside else {
-            return nil
-        }
-        return placement.vertical
-    }
-
-    private var outsideCloseExtent: CGFloat {
-        guard let close = separateClose,
-              let placement = close.placement,
-              placement.mode == .outside
-        else { return 0 }
-        return placement.gap + max(44, close.diameter)
-    }
-
     @ViewBuilder
     private func dialogSurface(width: CGFloat, maxHeight: CGFloat?) -> some View {
         let shape = RoundedRectangle(cornerRadius: CGFloat(dialog.cornerRadius))
@@ -495,8 +464,6 @@ private struct DialogContainer<Content: View>: View {
 struct CanvasSurveyDialogPresentation {
     let viewport: CGSize
     let keyboardInset: CGFloat
-    let topChrome: CGFloat
-    let bottomChrome: CGFloat
     let cornerRadius: CGFloat
     let close: NudgeCloseButtonConfig?
     let animation: Animation
@@ -533,40 +500,39 @@ struct CanvasSurveyDialogKeyboardLayout: AnimatableModifier {
 
     func body(content: Content) -> some View {
         let availableHeight = max(0, presentation.viewport.height - keyboardInset)
-        let surfaceHeight = min(surfaceSize.height, max(
-            0, availableHeight - presentation.topChrome - presentation.bottomChrome
-        ))
-        let dialogHeight = surfaceHeight + presentation.topChrome + presentation.bottomChrome
-        let top = max(0, (availableHeight - dialogHeight) / 2)
+        let surfaceHeight = min(surfaceSize.height, availableHeight)
+        let top = max(0, (availableHeight - surfaceHeight) / 2)
         let width = presentation.availableWidth
+        let leading = max(0, (presentation.viewport.width - width) / 2)
 
-        return scrollSurface(content: content, height: surfaceHeight)
+        let surface = scrollSurface(content: content, height: surfaceHeight)
             .frame(width: width, height: surfaceHeight, alignment: .top)
             .clipShape(RoundedRectangle(cornerRadius: presentation.cornerRadius))
             .contentShape(Rectangle())
             .onTapGesture {}
-            .padding(.top, presentation.topChrome)
-            .padding(.bottom, presentation.bottomChrome)
-            .overlay(alignment: .topLeading) {
-                if let close = presentation.close, close.placement?.mode == .outside {
-                    CanvasNudgeCloseOverlay(
-                        config: close,
-                        container: CGRect(
-                            x: 0, y: presentation.topChrome,
-                            width: width, height: surfaceHeight
-                        ),
-                        viewport: CGSize(width: width, height: dialogHeight),
-                        safeAreaInsets: .zero,
-                        isBottomSheet: false,
-                        action: onClose
-                    )
-                }
+
+        return ZStack(alignment: .topLeading) {
+            surface
+                .offset(x: leading, y: top)
+
+            if let close = presentation.close, close.placement?.mode == .outside {
+                CanvasNudgeCloseOverlay(
+                    config: close,
+                    container: CGRect(
+                        x: leading, y: top,
+                        width: width, height: surfaceHeight
+                    ),
+                    viewport: presentation.viewport,
+                    safeAreaInsets: .zero,
+                    isBottomSheet: false,
+                    action: onClose
+                )
             }
-            .offset(y: top)
+        }
             .frame(
                 width: presentation.viewport.width,
                 height: presentation.viewport.height,
-                alignment: .top
+                alignment: .topLeading
             )
             // Keep the full-window host stationary; only the dialog inside it
             // moves. Its safe-area calculation must not follow that movement.
