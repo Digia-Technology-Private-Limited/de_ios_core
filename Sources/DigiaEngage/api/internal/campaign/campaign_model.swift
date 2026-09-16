@@ -32,6 +32,8 @@ struct CampaignModel: Equatable {
     var frequency: FrequencyPolicy? = nil
     let audienceGated: Bool
     let trigger: CampaignTrigger?
+    let priority: String = "normal"
+    let createdAt: String? = nil
 
     func allowsScreen(_ currentScreen: String?) -> Bool {
         targetScreenNames.isEmpty || targetScreenNames.contains(currentScreen ?? "")
@@ -87,6 +89,9 @@ struct CampaignModel: Equatable {
         guard let campaignKey = selectedJson.nonBlankString("campaignKey") else { return nil }
         guard let campaignType = selectedJson.nonBlankString("campaignType") else { return nil }
         let targetScreenNames = selectedJson.object("targetScreenNames")?.stringArray("names") ?? []
+        let rawPriority = selectedJson.string("priority", default: "normal")
+        let priority = ["high", "normal", "low"].contains(rawPriority) ? rawPriority : "normal"
+        let createdAt = selectedJson.nonBlankString("createdAt")
 
         let config: CampaignConfigModel
         switch campaignType {
@@ -179,7 +184,9 @@ struct CampaignModel: Equatable {
             targetScreenNames: targetScreenNames,
             frequency: FrequencyPolicy.fromJson(selectedJson.object("frequency")),
             audienceGated: (selectedJson["audienceGated"] as? Bool) == true,
-            trigger: CampaignTrigger.fromJson(selectedJson["trigger"] as? [String: Any])
+            trigger: CampaignTrigger.fromJson(selectedJson["trigger"] as? [String: Any]),
+            priority: priority,
+            createdAt: createdAt
         )
     }
 

@@ -210,6 +210,16 @@ public enum Digia {
             eventName: eventName, properties: properties, value: value, currency: currency)
     }
 
+    /// Raw bundle JSON for labs/debug surfaces (waits for readiness, bounded).
+    public static func getCampaignBundle() async -> String {
+        await SDKInstance.shared.getCampaignBundle()
+    }
+
+    /// Re-fetches campaigns without refiring app-start. Labs-only.
+    public static func refreshCampaigns() {
+        SDKInstance.shared.refreshCampaigns()
+    }
+
     /// Clears inline content (carousels/stories) for the given `placementKeys`. Once
     /// loaded, inline content is retained indefinitely — hosts should call this on
     /// logout so a stale user's content doesn't linger across the account switch.
@@ -229,11 +239,10 @@ public enum Digia {
         SDKInstance.shared.clearAllInlineContent()
     }
 
-    /// Registers the RN render hook. When set, guides are treated as JS-rendered:
-    /// on a guide trigger the SDK applies frequency capping and, if allowed, invokes
-    /// this callback (with the trigger payload) to ask JS to render — it does not
-    /// render the guide natively. Used only by the React Native bridge.
-    public static func setOnGuideRenderRequest(_ callback: ((CEPTriggerPayload) -> Void)?) {
+    /// Registers the RN render hook. When set, guides render in JS: native caps
+    /// frequency then invokes this with payload plus raw campaign JSON
+    /// (nil when unavailable) for JS to render. Used by the RN bridge only.
+    public static func setOnGuideRenderRequest(_ callback: ((CEPTriggerPayload, [String: Any]?) -> Void)?) {
         SDKInstance.shared.onGuideRenderRequest = callback
     }
 

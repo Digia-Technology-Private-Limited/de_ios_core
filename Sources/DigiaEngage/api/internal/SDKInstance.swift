@@ -86,6 +86,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private var analyticsService: AnalyticsService?
     private var userContextManager = UserContextManager()
     private var userContextTask: Task<Void, Never>?
+    private var refreshTask: Task<Void, Never>?
+    private var lastBundleJson: String?
     private var selfTriggerCount: Int64 = 0
     /// Whether the floating "Digia" debug bubble is shown. See
     /// `DigiaDebugOverlayController`.
@@ -110,11 +112,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// `DiagnosticsReporter` wired into `PluginRegistry`.
     private let diagnostics = DiagnosticsReporter(logger: { DigiaLog.warning($0) })
 
-    /// Set by the RN bridge. When non-nil the SDK is RN-driven: guides render in
-    /// JS, so on a guide trigger native only applies frequency capping and (if
-    /// allowed) invokes this hook to ask JS to render, instead of rendering the
-    /// guide natively. Nil in pure-native apps, where guides render natively.
-    var onGuideRenderRequest: ((CEPTriggerPayload) -> Void)?
+    /// Set by the RN bridge. When non-nil guides render in JS: native caps
+    /// frequency then invokes this with the payload plus raw campaign JSON
+    /// (nil when unavailable) instead of rendering natively.
+    var onGuideRenderRequest: ((CEPTriggerPayload, [String: Any]?) -> Void)?
+    /// Raw bundle campaigns by key, retained for JS guide rendering.
+    private var rawCampaignsByKey: [String: [String: Any]] = [:]
 
     // Event system (mirrors Android): a fan-out emitter over two sinks — the
     // coarse CEP channel (`toCep`) and Digia's rich analytics (`toDigia`).
@@ -212,19 +215,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         font = DigiaFont(fontFamily: config.fontFamily)
         CampaignCanvasTheme.shared.update(config.themeMode)
 
-        if config.wrapperBinding == "react_native" {
-            // RN fetches campaigns itself (it needs the same response to render
-            // JS-side campaigns) and hands them to us via populateCampaignBundle() —
-            // fetching here too would duplicate the network call. sdkState stays
-            // .notInitialized until that call arrives.
-            logVerbose("Skipping native campaign fetch — awaiting populateCampaignBundle() from RN")
-            return
-        }
-
         var campaigns: [CampaignModel] = []
         do {
             let bundle = try await CampaignFetcher(requestHeaders: requestHeaders).fetch()
             campaigns = bundle.campaigns
+            rawCampaignsByKey = Self.rawMap(bundle.rawCampaigns)
+            lastBundleJson = Self.bundleJson(bundle.rawCampaigns)
             currentDesignTokens = bundle.designTokens
             currentTimeAnchor = bundle.timeAnchor
         } catch {
@@ -269,6 +265,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             )
         }
 
+        let wasReady = (sdkState == .ready)
         sdkState = .ready
         if let config, let analyticsService {
             componentRegistry.configure(
@@ -310,14 +307,14 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let readyTask = userContextTask
         Task { @MainActor [weak self] in
             _ = await readyTask?.value
-            guard let self, self.sdkState == .ready else { return }
+            guard let self, !wasReady, self.sdkState == .ready else { return }
             self.fireTriggers(matching: { if case .appStart = $0 { return true }; return false }, reason: "app start")
         }
     }
 
-    /// RN-only entrypoint: JS already fetched campaigns for its own rendering needs,
-    /// so it hands the raw campaign-bundle response here instead of native re-fetching.
-    /// Called once after `initialize` when `wrapperBinding == "react_native"`.
+    /// RN compat handoff: JS may still hand native its fetched bundle; native
+    /// also fetches itself now, so a second arrival only refreshes the store
+    /// (app-start triggers fire once via the wasReady guard above).
     func populateCampaignBundle(_ bundleJson: String) {
         var campaigns: [CampaignModel] = []
         do {
@@ -327,6 +324,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 acceptBridgedServerTime: true
             )
             campaigns = bundle.campaigns
+            rawCampaignsByKey = Self.rawMap(bundle.rawCampaigns)
+            lastBundleJson = bundleJson
             currentDesignTokens = bundle.designTokens
             currentTimeAnchor = bundle.timeAnchor
             DigiaLog.warning(
@@ -341,6 +340,53 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func setThemeMode(_ mode: DigiaThemeMode) { CampaignCanvasTheme.shared.update(mode) }
+
+    /// Indexes raw bundle campaigns by key for JS guide rendering.
+    private static func rawMap(_ raw: [[String: Any]]) -> [String: [String: Any]] {
+        var map: [String: [String: Any]] = [:]
+        for json in raw {
+            guard let key = json.nonBlankString("campaignKey") else { continue }
+            map[key] = json
+        }
+        return map
+    }
+
+    /// Raw bundle JSON for labs/debug surfaces. Labs-only; hosts never need it.
+    private static func bundleJson(_ raw: [[String: Any]]) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: ["campaigns": raw]),
+              let json = String(data: data, encoding: .utf8) else { return "{\"campaigns\":[]}" }
+        return json
+    }
+
+    /// Re-fetches campaigns without refiring app-start (transition guard in
+    /// completeInitialization skips firing when already ready). Labs-only.
+    func refreshCampaigns() {
+        refreshTask?.cancel()
+        refreshTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let bundle = try await CampaignFetcher(requestHeaders: self.requestHeaders).fetch()
+                self.rawCampaignsByKey = Self.rawMap(bundle.rawCampaigns)
+                self.lastBundleJson = Self.bundleJson(bundle.rawCampaigns)
+                self.currentDesignTokens = bundle.designTokens
+                self.currentTimeAnchor = bundle.timeAnchor
+                self.completeInitialization(bundle.campaigns)
+            } catch {
+                self.logVerbose("CampaignFetcher refresh failed: \(error)")
+            }
+        }
+    }
+
+    /// Raw bundle JSON, waiting for readiness first (bounded). Labs-only.
+    func getCampaignBundle() async -> String {
+        _ = await refreshTask?.value
+        let deadline = Date().addingTimeInterval(15)
+        while Date() < deadline {
+            if sdkState == .ready { break }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return lastBundleJson ?? "{\"campaigns\":[]}"
+    }
 
     private func logVerbose(_ message: String) {
         DigiaLog.verbose("[SDKInstance] \(message)")
@@ -818,6 +864,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         context: RoutingContext
     ) -> Bool {
         let key = campaign.campaignKey
+        let vars = payload.variables ?? userContextManager.resolvedAttributes
         if !campaign.allowsScreen(_currentScreen)
         {
             lastCampaignDropReason =
@@ -841,6 +888,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             context.onDropped(.notInAudience, message: "user not in audience")
             return false
         }
+        if payload.cepMetadata["templateName"] == "DigiaTemplate", campaign.campaignType == "inline" {
+            lastCampaignDropReason = "custom template requires Native Display"
+            DigiaLog.warning("[SDKInstance] Campaign dropped — custom template requires Native Display: campaignKey=\(key)")
+            context.onDropped(.renderError, message: "custom template requires Native Display")
+            return false
+        }
 
         logVerbose("routeByCampaignKey key='\(key)' type='\(campaign.campaignType)'")
         switch campaign.config {
@@ -858,7 +911,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return true
         case .inlineCanvas(let cfg):
             logVerbose("routeByCampaignKey INLINE CANVAS slotKey='\(cfg.slotKey)'")
-            if let runtime = cfg.statefulTimer, runtime.resolve(payload.variables) == nil {
+            if let runtime = cfg.statefulTimer, runtime.resolve(vars) == nil {
                 let reason = "inline timer campaign has invalid runtime variables"
                 lastCampaignDropReason = reason
                 DigiaLog.warning("campaign_skipped_unsupported: \(reason): key=\(key)")
@@ -891,7 +944,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     return false
                 }
                 activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
-                renderViaJs(payload)
+                renderViaJs(payload, rawCampaignsByKey[key])
                 return true
             }
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
@@ -925,7 +978,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             // CEP trigger variables win over fallbacks (D3′).
             let variableContext = buildVariableContext(
                 schemas: nudgeConfig.variableSchemas,
-                cepVars: payload.variables
+                cepVars: vars
             )
             controller.showNudge(
                 DigiaNudgePresentation(
@@ -1440,6 +1493,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func setCampaignsForTesting(_ campaigns: [CampaignModel]) {
         campaignStore.populate(campaigns)
+        rawCampaignsByKey.removeAll()
         sdkState = .ready
     }
 
@@ -1476,8 +1530,22 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         matching matches: (CampaignTrigger) -> Bool, reason: String
     ) {
         guard sdkState == .ready else { return }
+        // Priority first, then newest, then key for determinism.
+        let iso = ISO8601DateFormatter()
+        let rank = { (p: String) -> Int in p == "high" ? 0 : (p == "low" ? 2 : 1) }
+        var matched: [CampaignModel] = []
         for campaign in campaignStore.all() {
             guard let trigger = campaign.trigger, matches(trigger) else { continue }
+            matched.append(campaign)
+        }
+        matched.sort {
+            if rank($0.priority) != rank($1.priority) { return rank($0.priority) < rank($1.priority) }
+            let d0 = $0.createdAt.flatMap(iso.date(from:)) ?? .distantPast
+            let d1 = $1.createdAt.flatMap(iso.date(from:)) ?? .distantPast
+            if d0 != d1 { return d0 > d1 }
+            return $0.campaignKey < $1.campaignKey
+        }
+        for campaign in matched {
             logVerbose("campaign '\(campaign.campaignKey)' fired by \(reason).")
             routeSelfTriggered(campaign)
         }
@@ -2435,6 +2503,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         currentDesignTokens = .empty
         currentTimeAnchor = nil
         campaignStore.clear()
+        rawCampaignsByKey.removeAll()
         controller.dismissNudge()
         controller.dismissStoryOverlay()
         inlineController.clear()
