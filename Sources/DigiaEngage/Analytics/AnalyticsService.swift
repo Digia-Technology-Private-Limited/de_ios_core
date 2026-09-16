@@ -55,6 +55,7 @@ final class AnalyticsService {
     /// server explicitly rejected (named in a 200/207 response's error list)
     /// is dropped immediately instead — that's not an API-call failure.
     private static let maxAttempts = 10
+    static let appEventMarker = "_digia_app_event"
     /// 10 attempts at a low, fixed cap would mostly sit at the floor after a
     /// few seconds, which isn't a meaningful amount of patience for a real
     /// connectivity gap (e.g. a subway commute) — so the ceiling is high.
@@ -154,6 +155,25 @@ final class AnalyticsService {
 
     var userId: String? { identity.userId }
 
+    func trackAppEvent(
+        eventName: String,
+        properties: [String: Any] = [:],
+        value: Double? = nil,
+        currency: String? = nil
+    ) {
+        guard config.enabled else { return }
+        enqueue(
+            eventName: eventName,
+            campaignId: nil,
+            campaignKey: nil,
+            campaignType: nil,
+            properties: properties,
+            isAppEvent: true,
+            value: value,
+            currency: currency
+        )
+    }
+
     func flush() {
         cancelTimer()
         Task { await dispatchPending() }
@@ -250,7 +270,10 @@ final class AnalyticsService {
         campaignId: String?,
         campaignKey: String?,
         campaignType: String?,
-        properties: [String: Any] = [:]
+        properties: [String: Any] = [:],
+        isAppEvent: Bool = false,
+        value: Double? = nil,
+        currency: String? = nil
     ) {
         let eventId = UUID().uuidString
         identity.captureEventTime()
@@ -269,8 +292,11 @@ final class AnalyticsService {
         if let key = campaignKey { payloadMap["campaign_key"] = key }
         if let type = campaignType { payloadMap["campaign_type"] = type }
         if let uid = identity.userId { payloadMap["user_id"] = uid }
+        if let value { payloadMap["value"] = value }
+        if let currency { payloadMap["currency"] = currency }
 
         payloadMap["properties"] = mergedProperties
+        if isAppEvent { payloadMap[Self.appEventMarker] = true }
 
         queue.append(
             QueueEntry(
@@ -325,12 +351,19 @@ final class AnalyticsService {
         )
 
         do {
-            let body = try JSONSerialization.data(withJSONObject: [
-                "events": batch.map { $0.payload }
-            ])
+            var events: [[String: Any]] = []
+            var appEvents: [[String: Any]] = []
+            for entry in batch {
+                var payload = entry.payload
+                let isAppEvent = (payload.removeValue(forKey: Self.appEventMarker) as? Bool) == true
+                if isAppEvent { appEvents.append(payload) } else { events.append(payload) }
+            }
+            var body: [String: Any] = ["events": events]
+            if !appEvents.isEmpty { body["appEvents"] = appEvents }
+            let data = try JSONSerialization.data(withJSONObject: body)
             let statusCode = try await sender.post(
                 url: DigiaEndpoints.track,
-                body: body,
+                body: data,
                 headers: jsonHeaders
             )
             DigiaLog.log("dispatchPending: HTTP \(statusCode)", tag: "DigiaAnalytics")

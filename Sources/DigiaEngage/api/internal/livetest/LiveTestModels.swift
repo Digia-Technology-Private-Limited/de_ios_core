@@ -13,6 +13,7 @@ enum LiveTestFailureCode: String {
     case campaignNotFound = "campaign_not_found"
     case missingVariable = "missing_variable"
     case noMatchingScreen = "no_matching_screen"
+    case notInAudience = "not_in_audience"
     case templateError = "template_error"
     case renderError = "render_error"
 
