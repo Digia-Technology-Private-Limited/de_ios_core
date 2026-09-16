@@ -210,16 +210,6 @@ public enum Digia {
             eventName: eventName, properties: properties, value: value, currency: currency)
     }
 
-    /// Raw bundle JSON for labs/debug surfaces (waits for readiness, bounded).
-    public static func getCampaignBundle() async -> String {
-        await SDKInstance.shared.getCampaignBundle()
-    }
-
-    /// Re-fetches campaigns without refiring app-start. Labs-only.
-    public static func refreshCampaigns() {
-        SDKInstance.shared.refreshCampaigns()
-    }
-
     /// Clears inline content (carousels/stories) for the given `placementKeys`. Once
     /// loaded, inline content is retained indefinitely — hosts should call this on
     /// logout so a stale user's content doesn't linger across the account switch.

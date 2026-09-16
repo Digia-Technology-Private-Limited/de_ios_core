@@ -86,8 +86,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private var analyticsService: AnalyticsService?
     private var userContextManager = UserContextManager()
     private var userContextTask: Task<Void, Never>?
-    private var refreshTask: Task<Void, Never>?
-    private var lastBundleJson: String?
     private var selfTriggerCount: Int64 = 0
     /// Whether the floating "Digia" debug bubble is shown. See
     /// `DigiaDebugOverlayController`.
@@ -223,7 +221,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             let bundle = try await CampaignFetcher(requestHeaders: requestHeaders).fetch()
             campaigns = bundle.campaigns
             rawCampaignsByKey = Self.rawMap(bundle.rawCampaigns)
-            lastBundleJson = Self.bundleJson(bundle.rawCampaigns)
             currentDesignTokens = bundle.designTokens
             currentTimeAnchor = bundle.timeAnchor
         } catch {
@@ -328,7 +325,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             )
             campaigns = bundle.campaigns
             rawCampaignsByKey = Self.rawMap(bundle.rawCampaigns)
-            lastBundleJson = bundleJson
             currentDesignTokens = bundle.designTokens
             currentTimeAnchor = bundle.timeAnchor
             DigiaLog.warning(
@@ -352,43 +348,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             map[key] = json
         }
         return map
-    }
-
-    /// Raw bundle JSON for labs/debug surfaces. Labs-only; hosts never need it.
-    private static func bundleJson(_ raw: [[String: Any]]) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: ["campaigns": raw]),
-              let json = String(data: data, encoding: .utf8) else { return "{\"campaigns\":[]}" }
-        return json
-    }
-
-    /// Re-fetches campaigns without refiring app-start (transition guard in
-    /// completeInitialization skips firing when already ready). Labs-only.
-    func refreshCampaigns() {
-        refreshTask?.cancel()
-        refreshTask = Task { @MainActor [weak self] in
-            guard let self else { return }
-            do {
-                let bundle = try await CampaignFetcher(requestHeaders: self.requestHeaders).fetch()
-                self.rawCampaignsByKey = Self.rawMap(bundle.rawCampaigns)
-                self.lastBundleJson = Self.bundleJson(bundle.rawCampaigns)
-                self.currentDesignTokens = bundle.designTokens
-                self.currentTimeAnchor = bundle.timeAnchor
-                self.completeInitialization(bundle.campaigns)
-            } catch {
-                self.logVerbose("CampaignFetcher refresh failed: \(error)")
-            }
-        }
-    }
-
-    /// Raw bundle JSON, waiting for readiness first (bounded). Labs-only.
-    func getCampaignBundle() async -> String {
-        _ = await refreshTask?.value
-        let deadline = Date().addingTimeInterval(15)
-        while Date() < deadline {
-            if sdkState == .ready { break }
-            try? await Task.sleep(nanoseconds: 50_000_000)
-        }
-        return lastBundleJson ?? "{\"campaigns\":[]}"
     }
 
     private func logVerbose(_ message: String) {
