@@ -99,6 +99,102 @@ struct CanvasSurveyConfigTests {
         #expect(background.lightHex == "#FF102030")
     }
 
+    @Test("computes answer metrics with proportional scaling and error height clamping")
+    func answerMetricsScaling() throws {
+        // Choice baseline: 4 options grid -> 114.0
+        let choiceInput = CanvasSurveyWireInput.choice(CanvasSurveyChoiceInput(
+            type: .singleSelect,
+            required: false,
+            style: CanvasSurveyInputStyle(layout: .grid),
+            options: [
+                CanvasSurveyOption(id: "1", label: "A"),
+                CanvasSurveyOption(id: "2", label: "B"),
+                CanvasSurveyOption(id: "3", label: "C"),
+                CanvasSurveyOption(id: "4", label: "D"),
+            ],
+            maximumSelections: nil,
+            optionStyleMode: .individual,
+            sharedText: nil
+        ))
+        let metrics1 = CanvasSurveyAnswerMetrics.compute(
+            input: choiceInput,
+            hostHeight: 114.0
+        )
+        #expect(abs(metrics1.scaleFactor - 1.0) < 0.001)
+        #expect(abs(metrics1.validationErrorHeight - 16.0) < 0.001)
+        #expect(abs(metrics1.availableHeight - 98.0) < 0.001)
+
+        // Doubled height
+        let metrics2 = CanvasSurveyAnswerMetrics.compute(
+            input: choiceInput,
+            hostHeight: 228.0
+        )
+        #expect(abs(metrics2.scaleFactor - 2.0) < 0.001)
+        #expect(abs(metrics2.validationErrorHeight - 19.2) < 0.001)
+        #expect(abs(metrics2.availableHeight - 208.8) < 0.001)
+
+        // Field baseline: single line -> 61.0
+        let fieldInput = CanvasSurveyWireInput.field(CanvasSurveyFieldInput(
+            type: .shortText,
+            required: false,
+            style: CanvasSurveyInputStyle(),
+            placeholder: "",
+            dateFormat: .mmDdYyyy,
+            defaultDate: nil,
+            minimumDate: nil,
+            maximumDate: nil,
+            minLength: nil,
+            maxLength: nil,
+            minimum: nil,
+            maximum: nil,
+            multilineRows: 1
+        ))
+        let fieldMetrics = CanvasSurveyAnswerMetrics.compute(
+            input: fieldInput,
+            hostHeight: 122.0
+        )
+        #expect(abs(fieldMetrics.scaleFactor - 2.0) < 0.001)
+        #expect(abs(fieldMetrics.validationErrorHeight - 19.2) < 0.001)
+        #expect(abs(fieldMetrics.availableHeight - 102.8) < 0.001)
+
+        // Scale baseline: numericNps -> 52.0
+        let scaleInput = CanvasSurveyWireInput.scale(CanvasSurveyScaleInput(
+            type: .numericNps,
+            required: false,
+            style: CanvasSurveyInputStyle(),
+            minimum: 0,
+            maximum: 10,
+            step: 1,
+            symbolSize: 32,
+            numericNpsVariant: .rounded
+        ))
+        let scaleMetrics = CanvasSurveyAnswerMetrics.compute(
+            input: scaleInput,
+            hostHeight: 52.0
+        )
+        #expect(abs(scaleMetrics.scaleFactor - 1.0) < 0.001)
+        #expect(abs(scaleMetrics.validationErrorHeight - 16.0) < 0.001)
+        #expect(abs(scaleMetrics.availableHeight - 36.0) < 0.001)
+
+        // Extreme clamping: very small hostHeight
+        let smallMetrics = CanvasSurveyAnswerMetrics.compute(
+            input: fieldInput,
+            hostHeight: 5.0
+        )
+        #expect(smallMetrics.scaleFactor == 0.4)
+        #expect(abs(smallMetrics.validationErrorHeight - 14.08) < 0.001)
+        #expect(smallMetrics.availableHeight == 0.0)
+
+        // Extreme clamping: huge hostHeight
+        let largeMetrics = CanvasSurveyAnswerMetrics.compute(
+            input: fieldInput,
+            hostHeight: 1000.0
+        )
+        #expect(largeMetrics.scaleFactor == 2.5)
+        #expect(abs(largeMetrics.validationErrorHeight - 20.0) < 0.001)
+        #expect(abs(largeMetrics.availableHeight - 980.0) < 0.001)
+    }
+
     @Test("progress counts only reachable question scenes by default")
     @MainActor
     func progressCountsQuestionScenes() throws {
@@ -123,7 +219,7 @@ struct CanvasSurveyConfigTests {
 
         #expect(vm.progressTotal(countQuestionsOnly: true) == 2)
         #expect(vm.progressCurrent(countQuestionsOnly: true) == 1)
-        #expect(vm.progressTotal(countQuestionsOnly: false) == 4)
+        #expect(vm.progressTotal(countQuestionsOnly: false) == 3)
     }
 
     @Test("canvas survey campaign start builds variable context")

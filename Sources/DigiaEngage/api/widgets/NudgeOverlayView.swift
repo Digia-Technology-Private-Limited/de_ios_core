@@ -238,7 +238,6 @@ private struct NudgeSheetView: View {
     private var hostPaintsCanvasBackground: Bool {
         canvas != nil && surface.bottomSafeAreaMode == .insetContent
     }
-
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
 
     var body: some View {
@@ -268,7 +267,7 @@ private struct NudgeSheetView: View {
                             designWidth: presentation.config.designWidth,
                             availableSize: CGSize(
                                 width: runtimeSize.width,
-                                height: max(1, runtimeSize.height - 48)
+                                height: max(1, runtimeSize.height)
                             ),
                             onAction: { request in
                                 performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
@@ -381,16 +380,28 @@ private struct NudgeDialogContainer: View {
                     )
                     let naturalScale = min(width / designWidth, 1.15)
                     let scaledSurface = authoredSurface.scaled(naturalScale)
-                    canvasDialogPanel(
+                    let panel = canvasDialogPanel(
                         canvas: canvas,
                         surface: scaledSurface,
                         runtimeViewportWidth: width,
                         availableSize: CGSize(
                             width: width * ((designWidth - 2 * horizontalMargin) / designWidth),
-                            height: max(1, height - 48)
+                            height: max(1, height)
                         )
                     )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if let placement = closeButton.placement, placement.mode == .outside {
+                        let top = placement.vertical == .top
+                        let extent = placement.margin.top + closeButton.diameter
+                            + placement.margin.bottom
+                        ScrollView(.vertical, showsIndicators: false) {
+                            panel
+                                .padding(.top, top ? extent : 0)
+                                .padding(.bottom, top ? 0 : extent)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        panel.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
                 } else {
                     dialogPanel(
                         width: width * surface.widthFraction,
@@ -525,7 +536,7 @@ private struct DialogHeightKey: PreferenceKey {
     }
 }
 
-/// Fixed cross visual with an inward-expanding, platform-minimum hit target.
+/// Fixed cross visual. Placed canvas controls use the visible circle as their hit target.
 struct NudgeCloseButton: View {
     let config: NudgeCloseButtonConfig
     let action: () -> Void

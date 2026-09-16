@@ -353,6 +353,31 @@ struct CampaignCanvasContractTests {
         #expect(theme.mediaURL(sharedMedia, isDark: true) == "shared.png")
     }
 
+    @Test("rounded shape renders true circular arcs and scales oversized radii like Flutter/CSS")
+    func roundedShapeCircularAndScaling() throws {
+        let square = CGRect(x: 0, y: 0, width: 90, height: 90)
+        let exactCircleShape = CampaignCanvasRoundedShape(
+            radius: CampaignCanvasCornerRadius(topLeft: 45, topRight: 45, bottomRight: 45, bottomLeft: 45)
+        )
+        let oversizedCircleShape = CampaignCanvasRoundedShape(
+            radius: CampaignCanvasCornerRadius(topLeft: 999, topRight: 999, bottomRight: 999, bottomLeft: 999)
+        )
+        let p1 = exactCircleShape.path(in: square)
+        let p2 = oversizedCircleShape.path(in: square)
+
+        // Both exact 45 (size / 2) and oversized 999 produce identical circular paths
+        #expect(p1.description == p2.description)
+        #expect(!p1.isEmpty)
+
+        // Capsule / stadium test: 100x40 with radius 50 scales to radius 20
+        let rect = CGRect(x: 0, y: 0, width: 100, height: 40)
+        let capsuleShape = CampaignCanvasRoundedShape(
+            radius: CampaignCanvasCornerRadius(topLeft: 50, topRight: 50, bottomRight: 50, bottomLeft: 50)
+        )
+        let capsulePath = capsuleShape.path(in: rect)
+        #expect(!capsulePath.isEmpty)
+    }
+
     private func canvasCampaign(key: String, color: Any) -> [String: Any] {
         [
             "id": key, "campaignKey": key, "campaignType": "nudge",

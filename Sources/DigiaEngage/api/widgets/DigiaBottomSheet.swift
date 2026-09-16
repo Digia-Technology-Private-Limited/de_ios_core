@@ -22,8 +22,6 @@ struct DigiaBottomSheetConfig {
     var prioritizesDragOverScrolling: Bool = false
     var scrollsEntireSurface: Bool = false
     var entireSurfaceScrollingEnabled: Bool = true
-    /// Keeps the visible card below viewport chrome such as an outside close control.
-    var minimumSurfaceTop: CGFloat = 0
 }
 
 /// A bottom sheet whose card attaches flush to the screen edges (the system
@@ -49,43 +47,41 @@ struct DigiaBottomSheet<Content: View>: View {
 
     var body: some View {
         GeometryReader { geo in
-            let cap = min(
-                geo.size.height * config.heightCapFraction,
-                max(0, geo.size.height - config.minimumSurfaceTop)
-            )
+            let cap = geo.size.height * config.heightCapFraction
             let surfaceBottomInset =
                 config.bottomSafeAreaMode == .insetSurface
                 ? config.bottomSafeAreaInset
                 : 0
+            let presentedCard = card(cap: max(0, cap - surfaceBottomInset))
+                .anchorPreference(key: NudgeCloseContainerBoundsKey.self, value: .bounds) {
+                    viewportOverlay == nil ? nil : $0
+                }
+                .padding(.bottom, surfaceBottomInset)
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(
+                            key: RenderedSheetHeightKey.self,
+                            value: geo.size.height
+                        )
+                    }
+                )
+                .offset(y: shown ? max(dragOffset, 0) : geo.size.height)
+                .highPriorityGesture(
+                    dragGesture,
+                    including: config.prioritizesDragOverScrolling && config.allowDragDismiss
+                        ? .all : .none
+                )
+                .gesture(
+                    dragGesture,
+                    including: config.prioritizesDragOverScrolling ? .none : .all
+                )
             ZStack(alignment: .bottom) {
                 config.scrimColor
                     .opacity(shown ? 1 : 0)
                     .contentShape(Rectangle())
                     .onTapGesture { if config.allowBackdropDismiss { close() } }
 
-                card(cap: max(0, cap - surfaceBottomInset))
-                    .anchorPreference(key: NudgeCloseContainerBoundsKey.self, value: .bounds) {
-                        viewportOverlay == nil ? nil : $0
-                    }
-                    .padding(.bottom, surfaceBottomInset)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: RenderedSheetHeightKey.self,
-                                value: geo.size.height
-                            )
-                        }
-                    )
-                    .offset(y: shown ? max(dragOffset, 0) : geo.size.height)
-                    .highPriorityGesture(
-                        dragGesture,
-                        including: config.prioritizesDragOverScrolling && config.allowDragDismiss
-                            ? .all : .none
-                    )
-                    .gesture(
-                        dragGesture,
-                        including: config.prioritizesDragOverScrolling ? .none : .all
-                    )
+                presentedCard
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
             .overlayPreferenceValue(NudgeCloseContainerBoundsKey.self) { anchor in

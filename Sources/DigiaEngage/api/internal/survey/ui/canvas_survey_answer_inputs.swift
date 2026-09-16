@@ -41,40 +41,90 @@ private struct CanvasSurveyChoiceInputView: View {
         let selected = Set(cappedValues(answer?.values ?? [], maximum: maximumSelections))
         let optionStyleMode = host.optionStyleModeOverride ?? input.optionStyleMode
         let sharedText = host.sharedText ?? input.sharedText
-        switch style.layout {
-        case .grid:
-            let columnCount = max(1, style.columns)
-            VStack(alignment: .leading, spacing: style.itemGap) {
-                ForEach(Array(optionRows(input.options, columns: columnCount).enumerated()), id: \.offset) { _, row in
-                    HStack(alignment: .top, spacing: style.itemGap) {
-                        ForEach(0..<columnCount, id: \.self) { column in
-                            if column < row.count {
-                                tile(option: row[column], selected: selected, maximumSelections: maximumSelections, style: style, optionStyleMode: optionStyleMode, sharedText: sharedText)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            } else {
-                                Color.clear
-                                    .frame(maxWidth: .infinity)
+
+        let metrics = CanvasSurveyAnswerMetrics.compute(
+            input: .choice(input),
+            hostHeight: host.rect.height,
+            style: style
+        )
+        let scaleFactor = metrics.scaleFactor
+        let availableHeight = metrics.availableHeight
+        let validationReserve = metrics.validationErrorHeight
+
+        VStack(spacing: 0) {
+            Group {
+                switch style.layout {
+                case .grid:
+                    let columnCount = max(1, style.columns)
+                    let rows = optionRows(input.options, columns: columnCount)
+                    let scaledGap = min(max(style.itemGap * scaleFactor, 2.0), 32.0)
+                    VStack(alignment: .leading, spacing: scaledGap) {
+                        ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                            HStack(alignment: .top, spacing: scaledGap) {
+                                ForEach(0..<columnCount, id: \.self) { column in
+                                    if column < row.count {
+                                        tile(
+                                            option: row[column],
+                                            selected: selected,
+                                            maximumSelections: maximumSelections,
+                                            style: style,
+                                            optionStyleMode: optionStyleMode,
+                                            sharedText: sharedText,
+                                            scaleFactor: scaleFactor
+                                        )
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                                    } else {
+                                        Color.clear
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    }
+                                }
                             }
+                            .frame(maxHeight: .infinity)
                         }
                     }
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        case .row:
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: style.itemGap) {
-                    ForEach(input.options, id: \.id) { option in
-                        tile(option: option, selected: selected, maximumSelections: maximumSelections, style: style, optionStyleMode: optionStyleMode, sharedText: sharedText)
-                            .frame(minWidth: 96)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                case .row:
+                    let scaledGap = min(max(style.itemGap * scaleFactor, 2.0), 32.0)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: scaledGap) {
+                            ForEach(input.options, id: \.id) { option in
+                                tile(
+                                    option: option,
+                                    selected: selected,
+                                    maximumSelections: maximumSelections,
+                                    style: style,
+                                    optionStyleMode: optionStyleMode,
+                                    sharedText: sharedText,
+                                    scaleFactor: scaleFactor
+                                )
+                                .frame(minWidth: 96 * scaleFactor, maxHeight: .infinity)
+                            }
+                        }
+                        .frame(maxHeight: .infinity)
                     }
+                case .list:
+                    let scaledGap = min(max(style.itemGap * scaleFactor, 2.0), 32.0)
+                    VStack(spacing: scaledGap) {
+                        ForEach(input.options, id: \.id) { option in
+                            tile(
+                                option: option,
+                                selected: selected,
+                                maximumSelections: maximumSelections,
+                                style: style,
+                                optionStyleMode: optionStyleMode,
+                                sharedText: sharedText,
+                                scaleFactor: scaleFactor
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
-        case .list:
-            VStack(spacing: style.itemGap) {
-                ForEach(input.options, id: \.id) { option in
-                    tile(option: option, selected: selected, maximumSelections: maximumSelections, style: style, optionStyleMode: optionStyleMode, sharedText: sharedText)
-                }
-            }
+            .frame(maxWidth: .infinity)
+            .frame(height: availableHeight)
+            Spacer(minLength: 0)
+                .frame(height: validationReserve)
         }
     }
 
@@ -84,7 +134,8 @@ private struct CanvasSurveyChoiceInputView: View {
         maximumSelections: Int?,
         style: CanvasSurveyInputStyle,
         optionStyleMode: CanvasSurveyOptionStyleMode,
-        sharedText: CanvasSurveyOptionText?
+        sharedText: CanvasSurveyOptionText?,
+        scaleFactor: CGFloat = 1.0
     ) -> some View {
         let presented = presented(option, host: host, optionStyleMode: optionStyleMode, sharedText: sharedText)
         return ChoiceTile(
@@ -92,6 +143,7 @@ private struct CanvasSurveyChoiceInputView: View {
             inputType: input.type,
             selected: selected.contains(option.id),
             style: style,
+            scaleFactor: scaleFactor,
             onTap: {
                 if input.type == .multiSelect {
                     var values = selected
@@ -137,6 +189,7 @@ private struct ChoiceTile: View {
     let inputType: CanvasSurveyInputType
     let selected: Bool
     let style: CanvasSurveyInputStyle
+    var scaleFactor: CGFloat = 1.0
     let onTap: () -> Void
     @Environment(\.colorScheme) private var colorScheme
 
@@ -146,41 +199,55 @@ private struct ChoiceTile: View {
         let isDark = CampaignCanvasTheme.shared.isDark(colorScheme)
         let foreground = text?.color.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) }
             ?? CampaignCanvasTheme.shared.color(selected ? effective.selectedTextColor : effective.textColor, isDark: isDark)
+
+        let scaledIndicatorSize = min(max(16.0 * scaleFactor, 10.0), 48.0)
+        let scaledCheckSize = min(max(10.0 * scaleFactor, 6.0), 32.0)
+        let scaledGap = min(max(8.0 * scaleFactor, 4.0), 24.0)
+        let scaledPadding = min(max(effective.padding * scaleFactor, 4.0), 36.0)
+        let scaledRadius = min(max(effective.cornerRadius * scaleFactor, 0.0), 32.0)
+        let indicatorRadius = inputType == .singleSelect ? 999.0 : min(max(4.0 * scaleFactor, 2.0), 12.0)
+        let scaledBorderWidth = min(max(effective.borderWidth * scaleFactor, 0.5), 4.0)
+        let baseFontSize = text?.typography.fontSize ?? effective.fontSize
+        let scaledFontSize = min(max(baseFontSize * scaleFactor, 9.0), 28.0)
+        let fontWeight = text?.typography.fontWeight ?? effective.fontWeight
+
         Button(action: onTap) {
-            HStack(spacing: 8) {
+            HStack(spacing: scaledGap) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: inputType == .singleSelect ? 999 : 4)
+                    RoundedRectangle(cornerRadius: indicatorRadius)
                         .fill(selected ? CampaignCanvasTheme.shared.color(effective.selectedBorderColor, isDark: isDark) : .clear)
                         .overlay(
-                            RoundedRectangle(cornerRadius: inputType == .singleSelect ? 999 : 4)
-                                .stroke(CampaignCanvasTheme.shared.color(selected ? effective.selectedBorderColor : effective.borderColor, isDark: isDark), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: indicatorRadius)
+                                .stroke(CampaignCanvasTheme.shared.color(selected ? effective.selectedBorderColor : effective.borderColor, isDark: isDark), lineWidth: scaledBorderWidth)
                         )
                     if selected {
                         Text("\u{2713}")
-                            .font(surveyFont(size: 10, weight: 700))
+                            .font(surveyFont(size: scaledCheckSize, weight: 700))
                             .foregroundColor(.white)
                     }
                 }
-                .frame(width: 16, height: 16)
+                .frame(width: scaledIndicatorSize, height: scaledIndicatorSize)
                 Text(text?.text ?? option.label)
-                    .font(surveyFont(size: text?.typography.fontSize ?? effective.fontSize, weight: text?.typography.fontWeight ?? effective.fontWeight))
+                    .font(surveyFont(size: scaledFontSize, weight: fontWeight))
                     .foregroundColor(foreground)
                     .lineLimit(inputType == .upvote ? 1 : 2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 if inputType == .upvote {
                     Text("\u{2191}")
-                        .font(surveyFont(size: effective.fontSize, weight: effective.fontWeight))
+                        .font(surveyFont(size: scaledFontSize, weight: fontWeight))
                         .foregroundColor(foreground)
                 }
             }
-            .padding(effective.padding)
+            .padding(.horizontal, scaledPadding)
+            .padding(.vertical, min(max(scaledPadding * 0.7, 4.0), 24.0))
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
-                RoundedRectangle(cornerRadius: effective.cornerRadius)
+                RoundedRectangle(cornerRadius: scaledRadius)
                     .fill(CampaignCanvasTheme.shared.color(selected ? effective.selectedFill : effective.unselectedFill, isDark: isDark))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: effective.cornerRadius)
-                    .stroke(CampaignCanvasTheme.shared.color(selected ? effective.selectedBorderColor : effective.borderColor, isDark: isDark), lineWidth: effective.borderWidth)
+                RoundedRectangle(cornerRadius: scaledRadius)
+                    .stroke(CampaignCanvasTheme.shared.color(selected ? effective.selectedBorderColor : effective.borderColor, isDark: isDark), lineWidth: scaledBorderWidth)
             )
         }
         .buttonStyle(.plain)
@@ -198,60 +265,86 @@ private struct CanvasSurveyFieldInputView: View {
 
     var body: some View {
         let style = input.style.merge(hostStyle(host))
-        if input.type == .date {
-            CanvasSurveyDateFieldInputView(input: input, style: style, answer: answer, onAnswer: onAnswer)
-        } else {
-            let isDark = CampaignCanvasTheme.shared.isDark(colorScheme)
-            let textColor = CampaignCanvasTheme.shared.color(style.textColor, isDark: isDark)
-            let placeholderColor = Color(hex: "#FF9A9AA8") ?? textColor.opacity(0.55)
-            let fillColor = CampaignCanvasTheme.shared.color(style.unselectedFill, isDark: isDark)
-            let borderColor = CampaignCanvasTheme.shared.color(isFocused ? style.selectedBorderColor : style.borderColor, isDark: isDark)
+        let metrics = CanvasSurveyAnswerMetrics.compute(
+            input: .field(input),
+            hostHeight: host.rect.height,
+            style: style
+        )
+        let scaleFactor = metrics.scaleFactor
+        let availableHeight = metrics.availableHeight
+        let validationReserve = metrics.validationErrorHeight
 
-            ZStack(alignment: input.type == .longText ? .topLeading : .leading) {
-                if input.type == .longText {
-                    TextEditor(text: Binding(
-                        get: { value },
-                        set: { update($0) }
-                    ))
-                    .transparentTextEditorBackground()
-                    .focused($isFocused)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, max(0, style.padding - 5))
-                    .padding(.vertical, max(0, style.padding - 8))
-                    if value.isEmpty && !input.placeholder.isEmpty {
-                        Text(input.placeholder)
-                            .font(surveyFont(size: style.fontSize, weight: style.fontWeight))
-                            .foregroundColor(placeholderColor)
-                            .lineLimit(input.multilineRows)
-                            .padding(style.padding)
-                            .allowsHitTesting(false)
+        VStack(spacing: 0) {
+            if input.type == .date {
+                CanvasSurveyDateFieldInputView(
+                    input: input,
+                    style: style,
+                    scaleFactor: scaleFactor,
+                    availableHeight: availableHeight,
+                    answer: answer,
+                    onAnswer: onAnswer
+                )
+            } else {
+                let isDark = CampaignCanvasTheme.shared.isDark(colorScheme)
+                let textColor = CampaignCanvasTheme.shared.color(style.textColor, isDark: isDark)
+                let placeholderColor = Color(hex: "#FF9A9AA8") ?? textColor.opacity(0.55)
+                let fillColor = CampaignCanvasTheme.shared.color(style.unselectedFill, isDark: isDark)
+                let borderColor = CampaignCanvasTheme.shared.color(isFocused ? style.selectedBorderColor : style.borderColor, isDark: isDark)
+
+                let fieldFontSize = style.fontSize
+                let fieldPadding = style.padding
+                let scaledRadius = min(max(style.cornerRadius * scaleFactor, 0.0), 32.0)
+                let scaledBorderWidth = min(max(style.borderWidth * scaleFactor, 0.5), 4.0)
+
+                ZStack(alignment: input.type == .longText ? .topLeading : .center) {
+                    if input.type == .longText {
+                        TextEditor(text: Binding(
+                            get: { value },
+                            set: { update($0) }
+                        ))
+                        .transparentTextEditorBackground()
+                        .focused($isFocused)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(.horizontal, max(0, fieldPadding - 5))
+                        .padding(.vertical, max(0, fieldPadding - 8))
+                        if value.isEmpty && !input.placeholder.isEmpty {
+                            Text(input.placeholder)
+                                .font(surveyFont(size: fieldFontSize, weight: style.fontWeight))
+                                .foregroundColor(placeholderColor)
+                                .lineLimit(input.multilineRows)
+                                .padding(fieldPadding)
+                                .allowsHitTesting(false)
+                        }
+                    } else {
+                        TextField("", text: Binding(
+                            get: { value },
+                            set: { update($0) }
+                        ), prompt: Text(input.placeholder).foregroundColor(placeholderColor))
+                        .keyboardType(keyboardType)
+                        .focused($isFocused)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .padding(fieldPadding)
                     }
-                } else {
-                    TextField("", text: Binding(
-                        get: { value },
-                        set: { update($0) }
-                    ), prompt: Text(input.placeholder).foregroundColor(placeholderColor))
-                    .keyboardType(keyboardType)
-                    .focused($isFocused)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                    .padding(style.padding)
                 }
+                .font(surveyFont(size: fieldFontSize, weight: style.fontWeight))
+                .foregroundColor(textColor)
+                .tint(CampaignCanvasTheme.shared.color(style.selectedBorderColor, isDark: isDark))
+                .frame(maxWidth: .infinity)
+                .frame(height: availableHeight, alignment: input.type == .longText ? .topLeading : .center)
+                .background(
+                    RoundedRectangle(cornerRadius: scaledRadius)
+                        .fill(fillColor)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: scaledRadius)
+                        .stroke(borderColor, lineWidth: scaledBorderWidth)
+                )
+                .onAppear { value = answer?.values.first ?? "" }
+                .onChange(of: answer?.values.first) { value = $0 ?? "" }
             }
-            .font(surveyFont(size: style.fontSize, weight: style.fontWeight))
-            .foregroundColor(textColor)
-            .tint(CampaignCanvasTheme.shared.color(style.selectedBorderColor, isDark: isDark))
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: input.type == .longText ? .topLeading : .leading)
-            .background(
-                RoundedRectangle(cornerRadius: style.cornerRadius)
-                    .fill(fillColor)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: style.cornerRadius)
-                    .stroke(borderColor, lineWidth: style.borderWidth)
-            )
-            .onAppear { value = answer?.values.first ?? "" }
-            .onChange(of: answer?.values.first) { value = $0 ?? "" }
+            Spacer(minLength: 0)
+                .frame(height: validationReserve)
         }
     }
 
@@ -273,6 +366,8 @@ private struct CanvasSurveyFieldInputView: View {
 private struct CanvasSurveyDateFieldInputView: View {
     let input: CanvasSurveyFieldInput
     let style: CanvasSurveyInputStyle
+    var scaleFactor: CGFloat = 1.0
+    var availableHeight: CGFloat = 40.0
     let answer: SurveyAnswer?
     let onAnswer: (SurveyAnswer) -> Void
 
@@ -295,20 +390,25 @@ private struct CanvasSurveyDateFieldInputView: View {
         let minimumDate = hasValidDateRange ? parsedMinimumDate : nil
         let maximumDate = hasValidDateRange ? parsedMaximumDate : nil
 
+        let fieldFontSize = style.fontSize
+        let fieldPadding = style.padding
+        let scaledRadius = min(max(style.cornerRadius * scaleFactor, 0.0), 32.0)
+        let scaledBorderWidth = min(max(style.borderWidth * scaleFactor, 0.5), 4.0)
+
         ZStack(alignment: .leading) {
             Text(displayValue)
-                .font(surveyFont(size: style.fontSize, weight: style.fontWeight))
+                .font(surveyFont(size: fieldFontSize, weight: style.fontWeight))
                 .foregroundColor(value.isEmpty ? placeholderColor : textColor)
                 .lineLimit(1)
-                .padding(style.padding)
+                .padding(fieldPadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: style.cornerRadius)
+                    RoundedRectangle(cornerRadius: scaledRadius)
                         .fill(fillColor)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: style.cornerRadius)
-                        .stroke(borderColor, lineWidth: style.borderWidth)
+                    RoundedRectangle(cornerRadius: scaledRadius)
+                        .stroke(borderColor, lineWidth: scaledBorderWidth)
                 )
                 .contentShape(Rectangle())
                 .onTapGesture {
@@ -324,6 +424,8 @@ private struct CanvasSurveyDateFieldInputView: View {
             )
             .frame(width: 0, height: 0)
         }
+        .frame(maxWidth: .infinity)
+        .frame(height: availableHeight)
         .onAppear {
             guard !hydrated else { return }
             hydrated = true
@@ -540,31 +642,58 @@ private struct CanvasSurveyScaleInputView: View {
     var body: some View {
         let style = input.style.merge(hostStyle(host))
         let values = scaleValues(input)
-        switch input.type {
-        case .numericNps:
-            NumericNpsScale(
-                values: values,
-                selected: answer?.values.first,
-                circular: host.numericNpsVariant == .circle || input.numericNpsVariant == .circle,
-                style: style,
-                onTap: { onAnswer(SurveyAnswer(values: [$0])) }
-            )
-        case .rating:
-            RatingScale(
-                values: values,
-                selectedNumber: answer?.values.first.flatMap(Double.init),
-                style: style,
-                symbolSize: host.symbolSize > 0 ? host.symbolSize : (input.symbolSize > 0 ? input.symbolSize : 40),
-                onTap: { onAnswer(SurveyAnswer(values: [$0])) }
-            )
-        default:
-            ReactionScale(
-                values: values,
-                selected: answer?.values.first,
-                style: style,
-                symbolSize: host.symbolSize > 0 ? host.symbolSize : (input.symbolSize > 0 ? input.symbolSize : 30),
-                onTap: { onAnswer(SurveyAnswer(values: [$0])) }
-            )
+        let metrics = CanvasSurveyAnswerMetrics.compute(
+            input: .scale(input),
+            hostHeight: host.rect.height,
+            style: style
+        )
+        let scaleFactor = metrics.scaleFactor
+        let availableHeight = metrics.availableHeight
+        let validationReserve = metrics.validationErrorHeight
+
+        VStack(spacing: 0) {
+            ZStack(alignment: .center) {
+                switch input.type {
+                case .numericNps:
+                    NumericNpsScale(
+                        values: values,
+                        selected: answer?.values.first,
+                        circular: host.numericNpsVariant == .circle || input.numericNpsVariant == .circle,
+                        style: style,
+                        scaleFactor: scaleFactor,
+                        availableHeight: availableHeight,
+                        onTap: { onAnswer(SurveyAnswer(values: [$0])) }
+                    )
+                case .rating:
+                    let rawSymbol = host.symbolSize > 0 ? host.symbolSize : (input.symbolSize > 0 ? input.symbolSize : 40.0)
+                    let scaledSymbol = min(max(rawSymbol * scaleFactor, 16.0), 96.0)
+                    RatingScale(
+                        values: values,
+                        selectedNumber: answer?.values.first.flatMap(Double.init),
+                        style: style,
+                        scaleFactor: scaleFactor,
+                        symbolSize: scaledSymbol,
+                        availableHeight: availableHeight,
+                        onTap: { onAnswer(SurveyAnswer(values: [$0])) }
+                    )
+                default:
+                    let rawSymbol = host.symbolSize > 0 ? host.symbolSize : (input.symbolSize > 0 ? input.symbolSize : 30.0)
+                    let scaledSymbol = min(max(rawSymbol * scaleFactor, 16.0), 96.0)
+                    ReactionScale(
+                        values: values,
+                        selected: answer?.values.first,
+                        style: style,
+                        scaleFactor: scaleFactor,
+                        symbolSize: scaledSymbol,
+                        availableHeight: availableHeight,
+                        onTap: { onAnswer(SurveyAnswer(values: [$0])) }
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: availableHeight)
+            Spacer(minLength: 0)
+                .frame(height: validationReserve)
         }
     }
 }
@@ -574,6 +703,8 @@ private struct NumericNpsScale: View {
     let selected: String?
     let circular: Bool
     let style: CanvasSurveyInputStyle
+    var scaleFactor: CGFloat = 1.0
+    var availableHeight: CGFloat = 36.0
     let onTap: (String) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
@@ -581,35 +712,40 @@ private struct NumericNpsScale: View {
         let isDark = CampaignCanvasTheme.shared.isDark(colorScheme)
         GeometryReader { geo in
             let count = max(1, values.count)
-            let totalGap = CGFloat(max(0, count - 1)) * 3
+            let minGap = max(1.5, 3.0 * scaleFactor)
+            let totalMinGap = CGFloat(max(0, count - 1)) * minGap
             let availableWidth = geo.size.width > 0 ? geo.size.width : 32
-            let tileSize = max(0, min(32, (availableWidth - totalGap) / CGFloat(count)))
-            HStack(spacing: 3) {
+            let maxCellWidth = max(0, (availableWidth - totalMinGap) / CGFloat(count))
+            let maxCellH = availableHeight > 0 ? availableHeight : 32.0
+            let tileSize = min(maxCellH, min(32.0 * scaleFactor, maxCellWidth))
+            let scaledRadius = circular ? 999.0 : min(max(0.0, style.cornerRadius * scaleFactor), tileSize / 2.0)
+            let scaledBorderWidth = min(max(style.borderWidth * scaleFactor, 0.5), 4.0)
+            let scaledFontSize = min(max(12.0 * scaleFactor, 8.0), 24.0)
+            let spacing = count > 1 ? max(minGap, (availableWidth - tileSize * CGFloat(count)) / CGFloat(count - 1)) : 0
+
+            HStack(spacing: spacing) {
                 ForEach(values, id: \.self) { value in
                     let isSelected = selected == value
                     Button { onTap(value) } label: {
                         Text(value)
-                            .font(surveyFont(size: min(12, tileSize * 0.45), weight: 600))
+                            .font(surveyFont(size: scaledFontSize, weight: 600))
                             .foregroundColor(CampaignCanvasTheme.shared.color(isSelected ? style.selectedTextColor : style.textColor, isDark: isDark))
                             .lineLimit(1)
-                            .minimumScaleFactor(0.5)
                             .frame(width: tileSize, height: tileSize)
                             .background(
-                                RoundedRectangle(cornerRadius: circular ? 999 : min(max(0, style.cornerRadius), 16))
+                                RoundedRectangle(cornerRadius: scaledRadius)
                                     .fill(CampaignCanvasTheme.shared.color(isSelected ? style.selectedFill : style.unselectedFill, isDark: isDark))
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: circular ? 999 : min(max(0, style.cornerRadius), 16))
-                                    .stroke(CampaignCanvasTheme.shared.color(isSelected ? style.selectedFill : style.borderColor, isDark: isDark), lineWidth: 1)
+                                RoundedRectangle(cornerRadius: scaledRadius)
+                                    .stroke(CampaignCanvasTheme.shared.color(isSelected ? style.selectedFill : style.borderColor, isDark: isDark), lineWidth: scaledBorderWidth)
                             )
                     }
                     .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
-        .frame(minHeight: 32)
     }
 }
 
@@ -617,24 +753,29 @@ private struct RatingScale: View {
     let values: [String]
     let selectedNumber: Double?
     let style: CanvasSurveyInputStyle
+    var scaleFactor: CGFloat = 1.0
     let symbolSize: CGFloat
+    var availableHeight: CGFloat = 40.0
     let onTap: (String) -> Void
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         let isDark = CampaignCanvasTheme.shared.isDark(colorScheme)
+        let scaledGap = min(max(style.itemGap * scaleFactor, 2.0), 48.0)
+        let effectiveSize = availableHeight > 0 ? min(availableHeight, symbolSize) : symbolSize
+
         GeometryReader { geo in
             let resolvedSymbolSize = ratingSymbolSize(
                 availableWidth: geo.size.width,
                 count: values.count,
-                symbolSize: symbolSize,
-                itemGap: style.itemGap
+                symbolSize: effectiveSize,
+                itemGap: scaledGap
             )
             let spacing = ratingSpacing(
                 availableWidth: geo.size.width,
                 count: values.count,
                 symbolSize: resolvedSymbolSize,
-                itemGap: style.itemGap
+                itemGap: scaledGap
             )
             HStack(spacing: spacing) {
                 ForEach(values, id: \.self) { value in
@@ -649,9 +790,8 @@ private struct RatingScale: View {
                     .buttonStyle(.plain)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
-        .frame(minHeight: symbolSize)
     }
 }
 
@@ -756,29 +896,33 @@ private struct ReactionScale: View {
     let values: [String]
     let selected: String?
     let style: CanvasSurveyInputStyle
+    var scaleFactor: CGFloat = 1.0
     let symbolSize: CGFloat
+    var availableHeight: CGFloat = 30.0
     let onTap: (String) -> Void
 
     var body: some View {
+        let scaledGap = min(max(style.itemGap * scaleFactor, 2.0), 48.0)
+        let effectiveSize = availableHeight > 0 ? min(availableHeight, symbolSize) : symbolSize
+
         GeometryReader { geo in
             let spacing = ratingSpacing(
                 availableWidth: geo.size.width,
                 count: values.count,
-                symbolSize: symbolSize,
-                itemGap: style.itemGap
+                symbolSize: effectiveSize,
+                itemGap: scaledGap
             )
             HStack(spacing: spacing) {
                 ForEach(Array(values.enumerated()), id: \.element) { index, value in
                     Button { onTap(value) } label: {
-                        ReactionAssetIcon(index: index, size: symbolSize)
+                        ReactionAssetIcon(index: index, size: effectiveSize)
                             .opacity(selected == nil || selected == value ? 1 : 0.45)
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
-        .frame(minHeight: symbolSize)
     }
 }
 

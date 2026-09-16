@@ -54,6 +54,10 @@ final class ThrowingAnalyticsSender: AnalyticsSender, @unchecked Sendable {
 
 // MARK: - Suite
 
+private func sleepMillis(_ ms: UInt64) async throws {
+    try await Task.sleep(nanoseconds: ms * 1_000_000)
+}
+
 @MainActor
 @Suite("AnalyticsService", .serialized)
 struct AnalyticsServiceTests {
@@ -224,7 +228,7 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p2"))
         // second capture reaches flushBatchSize — dispatch Task is enqueued; release actor to let it run
-        try await Task.sleep(for: .milliseconds(50))
+        try await sleepMillis(50)
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
@@ -240,7 +244,7 @@ struct AnalyticsServiceTests {
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         // timer scheduled for 50ms — wait well past it
-        try await Task.sleep(for: .milliseconds(300))
+        try await sleepMillis(300)
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
@@ -258,7 +262,7 @@ struct AnalyticsServiceTests {
         #expect(service.queue.size == 1)
 
         service.flush()
-        try await Task.sleep(for: .milliseconds(50))
+        try await sleepMillis(50)
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
@@ -276,12 +280,12 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
         // let flush attempt run and fail (500) but not the retry yet (10ms)
-        try await Task.sleep(for: .milliseconds(5))
+        try await sleepMillis(5)
         #expect(service.retryAttempt == 1)
         #expect(service.queue.size == 1)
 
         // let the retry fire and succeed
-        try await Task.sleep(for: .milliseconds(200))
+        try await sleepMillis(200)
         #expect(service.queue.size == 0)
         #expect(service.retryAttempt == 0)
         #expect(fakeSender.callCount == 2)
@@ -299,18 +303,18 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
         // let the flush attempt run and fail (500); retry is now pending
-        try await Task.sleep(for: .milliseconds(5))
+        try await sleepMillis(5)
         #expect(fakeSender.callCount == 1)
 
         // This second capture reaches flushBatchSize (2) — without the guard this
         // would dispatch immediately and resend the still-queued failed event early.
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p2"))
-        try await Task.sleep(for: .milliseconds(10))
+        try await sleepMillis(10)
         #expect(fakeSender.callCount == 1)  // no early dispatch — still just the one attempt
         #expect(service.queue.size == 2)
 
         // let the originally scheduled retry fire — picks up both events together
-        try await Task.sleep(for: .milliseconds(100))
+        try await sleepMillis(100)
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 2)
     }
@@ -328,7 +332,7 @@ struct AnalyticsServiceTests {
         service.flush()
 
         // 10 total attempts, ~2ms apart — wait past all of them
-        try await Task.sleep(for: .milliseconds(300))
+        try await sleepMillis(300)
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 10)
@@ -347,7 +351,7 @@ struct AnalyticsServiceTests {
         service.flush()
 
         // 10 total attempts, ~2ms apart — wait past all of them
-        try await Task.sleep(for: .milliseconds(300))
+        try await sleepMillis(300)
 
         #expect(service.queue.size == 0)
         #expect(throwingSender.callCount == 10)
@@ -368,7 +372,7 @@ struct AnalyticsServiceTests {
             name: UIApplication.didEnterBackgroundNotification,
             object: nil
         )
-        try await Task.sleep(for: .milliseconds(50))
+        try await sleepMillis(50)
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
@@ -396,7 +400,7 @@ struct AnalyticsServiceTests {
             defaults: defaults
         )
 
-        try await Task.sleep(for: .milliseconds(300))
+        try await sleepMillis(300)
         _ = service2  // keep alive until timer fires
 
         #expect(fakeSender.callCount == 1)
@@ -413,7 +417,7 @@ struct AnalyticsServiceTests {
 
         service.capture(NudgeEvent.Dismissed(), payload: buildPayload("p1"))
         // small pause to confirm no background task fires
-        try await Task.sleep(for: .milliseconds(20))
+        try await sleepMillis(20)
 
         #expect(service.queue.size == 1)
         #expect(fakeSender.callCount == 0)
@@ -431,7 +435,7 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Clicked(elementId: "cta"), payload: buildPayload("p2"))
 
         service.flush()
-        try await Task.sleep(for: .milliseconds(50))
+        try await sleepMillis(50)
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
