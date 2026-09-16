@@ -430,8 +430,16 @@ private struct CanvasSurveyScaledStage: View {
                 .offset(x: host.rect.x, y: host.rect.y)
             }
             if let validationError, !validationError.isEmpty, let rect = validationErrorRect {
-                CanvasSurveyValidationErrorView(message: validationError)
-                    .frame(width: rect.width, alignment: .center)
+                let isCentered: Bool = {
+                    guard let type = frame.scene?.input?.type else { return false }
+                    return type == .numericNps || type == .rating || type == .reaction
+                }()
+                CanvasSurveyValidationErrorView(message: validationError, height: rect.height)
+                    .frame(
+                        width: rect.width,
+                        height: rect.height,
+                        alignment: isCentered ? .center : .leading
+                    )
                     .offset(x: rect.x, y: rect.y)
                     .allowsHitTesting(false)
             }
@@ -490,29 +498,34 @@ private struct CanvasSurveyScaledStage: View {
     }
 
     private var validationErrorRect: CampaignCanvasRect? {
-        let answerRect = document.canvasHosts.compactMap { host -> CampaignCanvasRect? in
-            if case .answer(let answerHost) = host { return answerHost.rect }
+        let answerHost = document.canvasHosts.compactMap { host -> CanvasSurveyAnswerHostElement? in
+            if case .answer(let answerHost) = host { return answerHost }
             return nil
         }.first
-        if let answerRect {
+        if let answerHost {
+            let answerRect = answerHost.rect
+            let input = frame.scene?.input
+            let metrics = CanvasSurveyAnswerMetrics.compute(
+                input: input,
+                hostHeight: answerRect.height,
+                style: answerHost.presentationStyle
+            )
+            let errorHeight = metrics.validationErrorHeight
             return CampaignCanvasRect(
                 x: answerRect.x,
-                y: answerRect.y + answerRect.height + 2,
+                y: answerRect.y + answerRect.height - errorHeight,
                 width: answerRect.width,
-                height: 24
+                height: errorHeight
             )
         }
         let margin: CGFloat = 8
-        let labelHeight: CGFloat = 32
+        let labelHeight = CanvasSurveyAnswerMetrics.baseValidationErrorHeight
         let maxWidth = max(margin, stageWidth - margin * 2)
-        let width = min(maxWidth, max(answerRect?.width ?? maxWidth, 180))
-        let sourceX = answerRect?.x ?? margin
-        let sourceY = answerRect?.y ?? margin
-        let sourceWidth = answerRect?.width ?? width
+        let width = min(maxWidth, max(180, maxWidth))
         let maxLeft = max(margin, stageWidth - width - margin)
-        let left = min(max(sourceX + (sourceWidth - width) / 2, margin), maxLeft)
+        let left = min(max((stageWidth - width) / 2, margin), maxLeft)
         let maxTop = max(margin, stageHeight - labelHeight - margin)
-        let top = min(max(sourceY + (answerRect?.height ?? 0) + 8, margin), maxTop)
+        let top = min(max(stageHeight - labelHeight - margin, margin), maxTop)
         return CampaignCanvasRect(x: left, y: top, width: width, height: labelHeight)
     }
 
@@ -782,22 +795,32 @@ private struct CanvasSurveyContentFrame: View {
 
 private struct CanvasSurveyValidationErrorView: View {
     let message: String
+    var height: CGFloat = CanvasSurveyAnswerMetrics.baseValidationErrorHeight
 
     var body: some View {
+        let factor = min(max(height / CanvasSurveyAnswerMetrics.baseValidationErrorHeight, 0.75), 1.25)
+        let fontSize = min(max(10.0 * factor, 8.0), 12.5)
+        let hPadding = min(max(8.0 * factor, 5.0), 10.0)
+        let vPadding = min(max(1.0 * factor, 0.5), 2.0)
+        let radius = min(max(4.0 * factor, 2.5), 5.0)
+        let borderWidth = min(max(0.8 * factor, 0.5), 1.0)
+        let errorColor = Color(red: 0.85, green: 0.18, blue: 0.13)
+
         Text(message)
-            .font(surveyFont(size: 12, weight: 600))
-            .foregroundColor(Color(red: 0.85, green: 0.18, blue: 0.13))
-            .lineLimit(2)
+            .font(surveyFont(size: fontSize, weight: 600))
+            .foregroundColor(errorColor)
+            .lineLimit(1)
+            .truncationMode(.tail)
             .multilineTextAlignment(.center)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.horizontal, hPadding)
+            .padding(.vertical, vPadding)
             .background(
-                RoundedRectangle(cornerRadius: 6)
+                RoundedRectangle(cornerRadius: radius)
                     .fill(Color.white.opacity(0.94))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color(red: 0.85, green: 0.18, blue: 0.13), lineWidth: 1)
+                RoundedRectangle(cornerRadius: radius)
+                    .stroke(errorColor, lineWidth: borderWidth)
             )
     }
 }
