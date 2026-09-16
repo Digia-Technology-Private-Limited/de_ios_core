@@ -130,7 +130,7 @@ final class UserContextManager {
         return body["campaigns"] != nil ? body : nil
     }
 
-    private static let keyAttributes = "user_attributes"
-    private static let keyContext = "user_context"
-    private static let keySentHash = "user_attributes_sent_hash"
+    private static let keyAttributes = "digia_user_attributes"
+    private static let keyContext = "digia_user_context"
+    private static let keySentHash = "digia_user_attributes_sent_hash"
 }

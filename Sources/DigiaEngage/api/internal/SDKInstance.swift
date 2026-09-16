@@ -108,6 +108,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Native frequency capping for all managed campaigns (nudge, survey, and —
     /// on React Native — guides, whose lifecycle events arrive over the bridge).
     private var frequencyManager: FrequencyManager?
+    /// FIFO of organic modal campaigns routed while another modal was live — RN
+    /// managed-mode sequential show. Pure-native hosts never enqueue (see route()).
+    private let modalQueue = ModalCampaignQueue()
     /// Reports an unhealthy CEP plugin as a gated warning. Mirrors Android's
     /// `DiagnosticsReporter` wired into `PluginRegistry`.
     private let diagnostics = DiagnosticsReporter(logger: { DigiaLog.warning($0) })
@@ -362,7 +365,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// completeInitialization skips firing when already ready). Labs-only.
     func refreshCampaigns() {
         refreshTask?.cancel()
-        refreshTask = Task { [weak self] in
+        refreshTask = Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let bundle = try await CampaignFetcher(requestHeaders: self.requestHeaders).fetch()
@@ -659,6 +662,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             ) {
                 activeExternalGuide = nil
                 events.toCep(.dismissed, payload: guide.payload)
+                scheduleModalQueuePump()
             }
         }
 
@@ -810,6 +814,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// stands in for the synchronous anchor check guide gets.
     private static let liveTestNoMatchTimeoutSeconds: UInt64 = 5
 
+    // Reused by fireTriggers sorting; avoids a per-fire allocation.
+    private static let triggerDateFormatter = ISO8601DateFormatter()
+
     @MainActor
     private final class LiveTestRoutingContext: RoutingContext {
         private let testContext: LiveTestContext
@@ -858,6 +865,76 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             || floaterStoryOrchestrator.storyOverlayActive
     }
 
+    /// Campaign keys currently holding the modal slot. Mirrors `isModalCampaignActive`
+    /// plus both guide lanes, which that gate deliberately excludes — read only by the
+    /// RN queue gate below, so pure-native routing is untouched.
+    private var activeModalCampaignKeys: [String] {
+        var keys: [String] = []
+        if let key = controller.activeNudge?.payload.campaignKey { keys.append(key) }
+        if let key = surveyOrchestrator.state?.payload.campaignKey { keys.append(key) }
+        if let key = guideOrchestrator.state?.payload.campaignKey { keys.append(key) }
+        if let key = activeExternalGuide?.payload.campaignKey { keys.append(key) }
+        if floaterOrchestrator.surface == .expanded,
+           let key = floaterOrchestrator.state?.payload.campaignKey { keys.append(key) }
+        if floaterStoryOrchestrator.storyOverlayActive,
+           let key = floaterStoryOrchestrator.state?.payload.campaignKey { keys.append(key) }
+        return keys
+    }
+
+    /// RN managed-mode sequential show: an organic modal trigger arriving while a
+    /// different modal is live queues behind it; a same-key re-fire drops. Live tests
+    /// and pure-native hosts fall through to today's replace/drop behavior. Returns nil
+    /// when routing should proceed, otherwise the value the caller must return.
+    private func enqueueIfModalBlocked(
+        campaignKey key: String, payload: CEPTriggerPayload, context: RoutingContext
+    ) -> Bool? {
+        guard config?.wrapperBinding == "react_native",
+              context is OrganicRoutingContext,
+              !activeModalCampaignKeys.isEmpty
+        else { return nil }
+        if activeModalCampaignKeys.contains(key) {
+            lastCampaignDropReason = "same campaign already on screen"
+            DigiaLog.warning("[SDKInstance] Campaign dropped — already on screen: campaignKey=\(key)")
+            context.onDropped(.renderError, message: "same campaign already on screen")
+            return false
+        }
+        if !modalQueue.enqueue(campaignKey: key, payload: payload) {
+            lastCampaignDropReason = "campaign already queued"
+            DigiaLog.warning("[SDKInstance] Campaign dropped — already queued: campaignKey=\(key)")
+            context.onDropped(.renderError, message: "campaign already queued")
+            return false
+        }
+        DigiaLog.warning(
+            "[SDKInstance] Campaign queued — modal already on screen: campaignKey=\(key) queuedBehind=\(activeModalCampaignKeys)"
+        )
+        return true
+    }
+
+    /// Shows queued RN modal campaigns head-first once the active modal ends. A head
+    /// that no longer resolves drops and the drain continues; a head that routes
+    /// (shown, or re-queued behind a live modal) ends the drain. Bounded by construction.
+    private func drainModalQueue() {
+        guard config?.wrapperBinding == "react_native" else { return }
+        // A live modal pumps on its own teardown; draining into one re-queues.
+        guard activeModalCampaignKeys.isEmpty else { return }
+        var remaining = modalQueue.count
+        while remaining > 0 {
+            remaining -= 1
+            guard let head = modalQueue.pump() else { return }
+            guard let campaign = campaignStore.find(head.campaignKey) else { continue }
+            if route(
+                campaign, payload: head.payload,
+                context: OrganicRoutingContext(frequencyManager: frequencyManager))
+            { return }
+        }
+    }
+
+    /// Deferred past the current teardown: floater exits animate out with state still
+    /// set, so draining inline would mistake the ending modal for a live one.
+    private func scheduleModalQueuePump() {
+        Task { @MainActor [weak self] in self?.drainModalQueue() }
+    }
+
     private func route(
         _ campaign: CampaignModel,
         payload: CEPTriggerPayload,
@@ -865,6 +942,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     ) -> Bool {
         let key = campaign.campaignKey
         let vars = payload.variables ?? userContextManager.resolvedAttributes
+        // CEP vars win; nil falls back to user attributes so {{ }} resolves.
+        let effectivePayload =
+            payload.variables == nil && !vars.isEmpty
+            ? CEPTriggerPayload(
+                cepCampaignId: payload.cepCampaignId,
+                campaignKey: payload.campaignKey,
+                cepMetadata: payload.cepMetadata,
+                variables: vars
+            ) : payload
         if !campaign.allowsScreen(_currentScreen)
         {
             lastCampaignDropReason =
@@ -889,9 +975,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             return false
         }
         if payload.cepMetadata["templateName"] == "DigiaTemplate", campaign.campaignType == "inline" {
-            lastCampaignDropReason = "custom template requires Native Display"
-            DigiaLog.warning("[SDKInstance] Campaign dropped — custom template requires Native Display: campaignKey=\(key)")
-            context.onDropped(.renderError, message: "custom template requires Native Display")
+            lastCampaignDropReason = "CleverTap custom template requires Native Display"
+            DigiaLog.warning("[SDKInstance] Campaign dropped — CleverTap custom template requires Native Display: campaignKey=\(key)")
+            context.onDropped(.renderError, message: "CleverTap custom template requires Native Display")
             return false
         }
 
@@ -943,8 +1029,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     lastCampaignDropReason = "frequency capped"
                     return false
                 }
-                activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
-                renderViaJs(payload, rawCampaignsByKey[key])
+                if let handled = enqueueIfModalBlocked(campaignKey: key, payload: payload, context: context) { return handled }
+                activeExternalGuide = ExternalGuide(campaign: campaign, payload: effectivePayload)
+                renderViaJs(effectivePayload, rawCampaignsByKey[key])
                 return true
             }
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
@@ -959,8 +1046,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 DigiaLog.warning("[Guide] \(message)")
                 return false
             }
+            if let handled = enqueueIfModalBlocked(campaignKey: key, payload: payload, context: context) { return handled }
             if guideOrchestrator.state != nil, !guideConfig.steps.isEmpty { dismissGuide() }
-            guard guideOrchestrator.start(campaign, payload: payload) else {
+            guard guideOrchestrator.start(campaign, payload: effectivePayload) else {
                 lastCampaignDropReason = "another guide is already on screen"
                 context.onDropped(.renderError, message: "another guide is already on screen")
                 logNativeGuideStage("route", "result=dropped reason=guide_active campaign_key=\(key)")
@@ -980,6 +1068,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 schemas: nudgeConfig.variableSchemas,
                 cepVars: vars
             )
+            if let handled = enqueueIfModalBlocked(campaignKey: key, payload: payload, context: context) { return handled }
             controller.showNudge(
                 DigiaNudgePresentation(
                     config: nudgeConfig,
@@ -994,6 +1083,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 return false
             }
             let activeSurveyCepId = surveyOrchestrator.state?.payload.cepCampaignId
+            if let handled = enqueueIfModalBlocked(campaignKey: key, payload: payload, context: context) { return handled }
             let replaceActiveLiveTestCanvasSurvey =
                 cfg.canvasSurvey != nil
                 && isLiveTestCepId(payload.cepCampaignId)
@@ -1002,7 +1092,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 markSurveyDismissed()
             }
             let started = surveyOrchestrator.start(
-                payload: payload,
+                payload: effectivePayload,
                 config: cfg,
                 allowActiveReplacement: replaceActiveLiveTestCanvasSurvey
             )
@@ -1019,6 +1109,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 lastCampaignDropReason = "frequency capped"
                 return false
             }
+            if let handled = enqueueIfModalBlocked(campaignKey: key, payload: payload, context: context) { return handled }
             // A collapsed floater is a third, independent lane (see
             // `isModalCampaignActive`'s kdoc) — it does not compete with
             // nudge/survey. But it must not *start* while one of them is already
@@ -1050,7 +1141,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             // orchestrator — see `CampaignConfigModel.floaterStory`.
             if wantsStory {
                 let started = floaterStoryOrchestrator.start(
-                    campaign, payload: payload, screenName: _currentScreen)
+                    campaign, payload: effectivePayload, screenName: _currentScreen)
                 if !started {
                     lastCampaignDropReason =
                         floaterStoryOrchestrator.lastStartFailureReason
@@ -1064,7 +1155,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 return started
             }
             let started = floaterOrchestrator.start(
-                campaign, payload: payload, screenName: _currentScreen)
+                campaign, payload: effectivePayload, screenName: _currentScreen)
             if !started {
                 lastCampaignDropReason =
                     floaterOrchestrator.lastStartFailureReason ?? "floater start failed"
@@ -1251,6 +1342,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func onCampaignInvalidated(_ campaignID: String) {
+        modalQueue.remove(campaignId: campaignID)
         if activeExternalGuide?.payload.cepCampaignId == campaignID {
             activeExternalGuide = nil
         }
@@ -1270,6 +1362,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         guideOrchestrator.dismissIfActive(payloadId: campaignID)
         // Forget the impression mark so a re-trigger impresses to Digia afresh.
         events.resetImpression(campaignID)
+        scheduleModalQueuePump()
     }
 
     // MARK: - Survey lifecycle
@@ -1479,6 +1572,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             payload: state.payload
         )
         clearQuestionViewedAt(token: state.token)
+        scheduleModalQueuePump()
     }
 
     private func clearQuestionViewedAt(token: Int64) {
@@ -1531,7 +1625,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     ) {
         guard sdkState == .ready else { return }
         // Priority first, then newest, then key for determinism.
-        let iso = ISO8601DateFormatter()
+        let iso = Self.triggerDateFormatter
         let rank = { (p: String) -> Int in p == "high" ? 0 : (p == "low" ? 2 : 1) }
         var matched: [CampaignModel] = []
         for campaign in campaignStore.all() {
@@ -1684,6 +1778,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             NudgeEvent.Dismissed(dwellMs: dwellTracker.consumeDwellMs(nudge.payload.cepCampaignId)),
             payload: nudge.payload
         )
+        scheduleModalQueuePump()
     }
 
     // MARK: - Floater lifecycle
@@ -1763,6 +1858,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         _ state: ActiveFloaterState, _ reason: FloaterDismissReason, _ metrics: FloaterMetrics,
         _ wasVisible: Bool
     ) {
+        defer { scheduleModalQueuePump() }
         if !wasVisible {
             events.toCep(.dismissed, payload: state.payload)
             return
@@ -1859,6 +1955,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         _ state: ActiveFloaterStoryState, _ reason: FloaterDismissReason,
         _ metrics: FloaterMetrics, _ wasVisible: Bool
     ) {
+        defer { scheduleModalQueuePump() }
         if !wasVisible {
             events.toCep(.dismissed, payload: state.payload)
             return
@@ -2105,6 +2202,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private func guideStateDidChange(_ state: ActiveGuideState?) {
         guard let state, let anchorKey = state.currentStep?.target.anchorKey else {
             AnchorRegistry.shared.stopTracking()
+            // Every guide teardown funnels through state=nil — the queue's guide lane.
+            scheduleModalQueuePump()
             return
         }
         AnchorRegistry.shared.track(
@@ -2389,6 +2488,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             && activeExternalGuide?.payload.cepCampaignId == payloadID
         {
             activeExternalGuide = nil
+            scheduleModalQueuePump()
         }
     }
 
@@ -2504,6 +2604,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         currentTimeAnchor = nil
         campaignStore.clear()
         rawCampaignsByKey.removeAll()
+        modalQueue.clear()
         controller.dismissNudge()
         controller.dismissStoryOverlay()
         inlineController.clear()
