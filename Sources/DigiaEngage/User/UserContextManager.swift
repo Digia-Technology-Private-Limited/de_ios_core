@@ -32,16 +32,25 @@ final class UserContextManager {
     }
 
     func onUserIdChanged(_ newUserId: String?) {
+        let previous = userId
         userId = newUserId
-        guard newUserId != nil else {
-            context = nil
-            attributes = [:]
-            defaults.removeObject(forKey: Self.keyContext)
-            defaults.removeObject(forKey: Self.keyAttributes)
-            defaults.removeObject(forKey: Self.keySentHash)
+        if newUserId == previous {
+            // Same id re-stated (e.g. every cold start): previous behavior.
+            if newUserId != nil { Task { await refresh(force: true) } }
             return
         }
-        Task { await refresh(force: true) }
+        // Identity actually changed: drop the cached context; a stale
+        // eligibility list must never gate the new user.
+        context = nil
+        defaults.removeObject(forKey: Self.keyContext)
+        if previous != nil {
+            // A→nil or A→B: A's attributes describe someone else now. Kept
+            // only for nil→X, where pre-login attributes await their owner.
+            attributes = [:]
+            defaults.removeObject(forKey: Self.keyAttributes)
+            defaults.removeObject(forKey: Self.keySentHash)
+        }
+        if newUserId != nil { Task { await refresh(force: true) } }
     }
 
     func refresh(force: Bool = false) async {
