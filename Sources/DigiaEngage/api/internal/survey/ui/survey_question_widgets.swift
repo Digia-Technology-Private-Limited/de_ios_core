@@ -1,4 +1,5 @@
 import SwiftUI
+
 @_implementationOnly import SDWebImageSwiftUI
 
 /// Synthetic option id for a choice question's "Other" entry.
@@ -47,9 +48,10 @@ let OptionDefaults = TextDefaults(sizePt: 16, weight: 500, color: SurveyTokens.t
 /// replacement at every call site.
 @MainActor
 func surveyFont(size: CGFloat, weight: Int = 400) -> Font {
-    Font(SDKInstance.shared.font.resolve(
-        size: Double(size), weight: weight, italic: false
-    ))
+    Font(
+        SDKInstance.shared.font.resolve(
+            size: Double(size), weight: weight, italic: false
+        ))
 }
 
 extension ElementStyle {
@@ -735,7 +737,9 @@ private struct ChoiceCardRow: View {
                     }
                     .frame(width: 20, height: 20)
 
-                    if showMedia, let media = option.media, media.hasUrl, let url = URL(string: media.url) {
+                    if showMedia, let media = option.media, media.hasUrl,
+                        let url = URL(string: media.url)
+                    {
                         WebImage(url: url) { image in
                             image.resizable().aspectRatio(contentMode: .fill)
                         } placeholder: {
@@ -804,11 +808,15 @@ struct OutlinedTextField: View {
     var body: some View {
         Group {
             if singleLine {
-                TextField(placeholder, text: $text)
-                    .keyboardType(keyboard)
-                    .focused($focused)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
+                TextField(
+                    "",
+                    text: $text,
+                    prompt: Text(placeholder).foregroundColor(SurveyTokens.textTertiary)
+                )
+                .keyboardType(keyboard)
+                .focused($focused)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 14)
             } else {
                 ZStack(alignment: .topLeading) {
                     if text.isEmpty {
@@ -827,9 +835,9 @@ struct OutlinedTextField: View {
                             TextEditor(text: $text)
                         }
                     }
-                        .focused($focused)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
+                    .focused($focused)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
                 }
                 .frame(minHeight: minHeight, alignment: .topLeading)
             }
