@@ -834,6 +834,7 @@ struct OutlinedTextField: View {
                 .frame(minHeight: minHeight, alignment: .topLeading)
             }
         }
+        .foregroundColor(SurveyTokens.textPrimary)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 4)
