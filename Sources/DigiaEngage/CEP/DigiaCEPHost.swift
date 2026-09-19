@@ -1,4 +1,4 @@
-/// Core's door, handed to each plugin in ``DigiaCEPPluginV2/attach(host:)``.
+/// Core's door, handed to each plugin in ``DigiaCEPPlugin/attach(host:)``.
 /// The plugin's only way into the Digia engine.
 ///
 /// Each plugin receives its own host instance, so the presentations it creates

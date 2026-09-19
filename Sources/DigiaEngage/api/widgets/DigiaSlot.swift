@@ -7,7 +7,6 @@ public struct DigiaSlot<Placeholder: View>: View {
     public let placementKey: String
     private let placeholder: Placeholder
     @ObservedObject private var inlineController = SDKInstance.shared.inlineController
-    @State private var placeholderID: Int?
     @State private var impressedPayloadID: String?
 
     public init(
@@ -16,11 +15,10 @@ public struct DigiaSlot<Placeholder: View>: View {
     ) {
         self.placementKey = placementKey
         self.placeholder = placeholder()
-        // Recorded in init, not registerPlaceholderIfNeeded()'s .onAppear:
-        // .onAppear is unreliable for a zero-intrinsic-size EmptyView() (e.g.
-        // the RN slot bridge's manually-embedded UIHostingController). init()
-        // fires reliably regardless; recordSlot's own dedupe makes repeat
-        // calls harmless.
+        // Recorded in init, not in an .onAppear: .onAppear is unreliable for a
+        // zero-intrinsic-size EmptyView() (e.g. the RN slot bridge's
+        // manually-embedded UIHostingController). init() fires reliably
+        // regardless; recordSlot's own dedupe makes repeat calls harmless.
         SDKInstance.shared.recordSlotSeen(placementKey)
     }
 
@@ -29,22 +27,11 @@ public struct DigiaSlot<Placeholder: View>: View {
             if let payload = inlineController.getCampaign(placementKey) {
                 slotContent(for: payload)
                     .id(payload.cepCampaignId)
-                    .onAppear {
-                        registerPlaceholderIfNeeded()
-                    }
                     .task(id: payload.cepCampaignId) {
-                        registerPlaceholderIfNeeded()
                         reportFirstRenderIfNeeded(payload)
                     }
             } else {
                 placeholder
-                    .onAppear { registerPlaceholderIfNeeded() }
-            }
-        }
-        .onDisappear {
-            if let placeholderID {
-                SDKInstance.shared.deregisterPlaceholderForSlot(placeholderID)
-                self.placeholderID = nil
             }
         }
     }
@@ -65,13 +52,6 @@ public struct DigiaSlot<Placeholder: View>: View {
             Color.clear.frame(height: 0)
                 .onAppear { inlineController.dismissCampaign(placementKey) }
         }
-    }
-
-    // MARK: - CEP placeholder registration (iOS-specific)
-
-    private func registerPlaceholderIfNeeded() {
-        guard placeholderID == nil else { return }
-        placeholderID = SDKInstance.shared.registerPlaceholderForSlot(propertyID: placementKey)
     }
 
     private func reportFirstRenderIfNeeded(_ payload: CEPTriggerPayload) {

@@ -56,6 +56,24 @@ enum FloaterDismissReason: Equatable {
         case .hostTeardown: return "host_teardown"
         }
     }
+
+    /// The floater's own vocabulary mapped onto the one three runtimes share.
+    ///
+    /// Two vocabularies on purpose: ``wire`` stays as specific as Digia
+    /// analytics needs, ``DismissReason`` is what a CEP plugin and the shared
+    /// backend enum understand. The mapping loses granularity, never accuracy,
+    /// and never on the analytics side.
+    var presentationReason: DismissReason {
+        switch self {
+        case .userClose: return .userClose
+        case .ctaTaken: return .ctaAction
+        case .screenExit: return .screenExit
+        case .autoTimeout, .mediaEnd: return .autoTimeout
+        case .invalidated, .hostTeardown: return .cancelled
+        case .sessionEnd: return .screenExit
+        case .superseded: return .superseded
+        }
+    }
 }
 
 struct FloaterMetrics: Equatable {

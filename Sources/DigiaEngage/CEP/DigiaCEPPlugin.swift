@@ -16,14 +16,8 @@
 /// }
 /// ```
 ///
-/// **The `V2` suffix is temporary and must never appear in a published
-/// release.** v1's `DigiaCEPPlugin` still occupies the name inside this module
-/// and dies at N4; this protocol is renamed to `DigiaCEPPlugin` in the same
-/// change, in-tree, before anything ships. It is the only name in the v2
-/// surface that carries a suffix — everything else already mirrors Kotlin and
-/// Dart exactly.
 @MainActor
-public protocol DigiaCEPPluginV2: AnyObject {
+public protocol DigiaCEPPlugin: AnyObject {
     /// Stable identifier, unique per registration. Convention: the lowercase
     /// CEP name — `clevertap`, `webengage`, `moengage`.
     var id: String { get }
@@ -58,7 +52,7 @@ public protocol DigiaCEPPluginV2: AnyObject {
 /// The defaults live here so a plugin only writes the methods its CEP has, and
 /// so a later optional method is an additive change rather than a break —
 /// which matters for an SDK that ships inside someone else's app.
-extension DigiaCEPPluginV2 {
+extension DigiaCEPPlugin {
     public func onScreenChanged(_ screenName: String) {}
     public func trackEvent(_ eventName: String, properties: [String: Any]) {}
 }

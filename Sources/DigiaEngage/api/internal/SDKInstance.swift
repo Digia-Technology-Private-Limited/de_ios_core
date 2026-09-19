@@ -3,7 +3,7 @@ import Foundation
 import UIKit
 
 @MainActor
-final class SDKInstance: ObservableObject, DigiaCEPDelegate {
+final class SDKInstance: ObservableObject, DigiaCEPHost {
     static let shared = SDKInstance()
 
     private struct ExternalGuide {
@@ -33,6 +33,23 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     var isCaptureSupported: Bool { config?.wrapperBinding == "react_native" }
 
     private var activePlugin: DigiaCEPPlugin?
+
+    /// Mints presentation ids. Injected so a test can make them deterministic;
+    /// production needs them UUID-grade, because the id is also the first-party
+    /// analytics dedup key and must not collide across sessions or devices.
+    var idGenerator: () -> String = { UUID().uuidString }
+
+    /// The single writer of presentation state. Every live presentation in the
+    /// SDK is opened, indexed and settled here — see ``PresentationCoordinator``.
+    lazy var coordinator = PresentationCoordinator(
+        // Read through, not captured: the coordinator is built lazily on first
+        // delivery, and a test that sets `idGenerator` afterwards would
+        // otherwise be silently ignored.
+        idGenerator: { [weak self] in self?.idGenerator() ?? UUID().uuidString },
+        onCancelSurface: { [weak self] cepCampaignId in
+            self?.dismissSurfaces(forCepCampaignId: cepCampaignId)
+        }
+    )
     private let hostActionExecutor = HostActionExecutor()
     private lazy var actionExecutor = EngageActionExecutor(
         hostActionExecutor: hostActionExecutor
@@ -103,9 +120,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Native frequency capping for all managed campaigns (nudge, survey, and —
     /// on React Native — guides, whose lifecycle events arrive over the bridge).
     private var frequencyManager: FrequencyManager?
-    /// Reports an unhealthy CEP plugin as a gated warning. Mirrors Android's
-    /// `DiagnosticsReporter` wired into `PluginRegistry`.
-    private let diagnostics = DiagnosticsReporter(logger: { DigiaLog.warning($0) })
 
     /// Set by the RN bridge. When non-nil the SDK is RN-driven: guides render in
     /// JS, so on a guide trigger native only applies frequency capping and (if
@@ -122,9 +136,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     private init() {
         componentRegistry = ComponentRegistryService(debugOverlay: debugOverlayController)
         events = EngageEventEmitter(
-            cep: CepPluginSink { [weak self] event, payload in
-                self?.activePlugin?.notifyEvent(event, payload: payload)
-            },
+            cep: PresentationSink { [weak self] in self?.coordinator },
             digia: DigiaAnalyticsSink(
                 getAnalyticsService: { [weak self] in self?.analyticsService },
                 getCampaign: { [weak self] key in self?.campaignStore.find(key) }
@@ -135,16 +147,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
         inlineController.onCampaignRemoved = { [weak self] payload in
             self?.events.inlineRemoved(payload)
-        }
-        controller.onAction = { [weak self] actionType, url, payload in
-            self?.activePlugin?.notifyAction(actionType: actionType, url: url, payload: payload)
-                ?? false
-        }
-        hostActionExecutor.setLegacyActionHandler { [weak self] actionType, url in
-            guard let self,
-                  let payload = guideOrchestrator.state?.payload ?? controller.activeNudge?.payload
-            else { return false }
-            return controller.onAction?(actionType, url, payload) ?? false
         }
         floaterOrchestrator = FloaterOrchestrator(
             onDismissed: { [weak self] state, reason, metrics, wasVisible in
@@ -292,14 +294,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 sessionIdProvider: { [weak self] in self?.analyticsService?.identity.sessionId }
             )
         }
-
-        if let plugin = activePlugin {
-            let report = plugin.healthCheck()
-            if !report.isHealthy {
-                diagnostics.report(report, source: plugin.identifier)
-                plugin.setup(delegate: self)
-            }
-        }
     }
 
     /// RN-only entrypoint: JS already fetched campaigns for its own rendering needs,
@@ -338,13 +332,77 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func register(_ plugin: DigiaCEPPlugin) {
-        activePlugin?.teardown()
-        activePlugin = plugin
-        plugin.setup(delegate: self)
-        diagnostics.report(plugin.healthCheck(), source: plugin.identifier)
-        if let screen = _currentScreen {
-            plugin.forwardScreen(screen)
+        if let outgoing = activePlugin {
+            // G6 — settle everything the outgoing plugin owns *before* calling
+            // `detach()`, so its own outcome handlers run while its bridge is
+            // still alive. Reversing these two lines is the leak itself.
+            coordinator.detach(owner: outgoing.id)
+            outgoing.detach()
         }
+        activePlugin = plugin
+        plugin.attach(host: self)
+        if let screen = _currentScreen {
+            plugin.onScreenChanged(screen)
+        }
+    }
+
+    // MARK: - DigiaCEPHost
+
+    /// Delivers a CEP trigger into the Digia engine.
+    ///
+    /// Total and synchronous: it never fails, always returns a handle, and a
+    /// rejection comes back as an *already settled* presentation so the caller
+    /// has one code path either way. Never make this `async` — spec §10.3.
+    func deliver(_ trigger: CEPTriggerPayload) -> CampaignPresentation {
+        let controller = coordinator.open(trigger, owner: activePlugin?.id ?? "")
+        // Routing must see the stamped payload: it is the instance every render
+        // surface stores and hands back, and the only thing that leads an event
+        // back to this presentation.
+        switch routeOrganicTrigger(controller.trigger) {
+        case .accepted(let payload, let kind):
+            coordinator.accept(
+                controller,
+                kind: kind,
+                awaitsAnchorLayout: awaitsAnchorLayout(payload)
+            )
+        case .dropped(let reason, let detail):
+            controller.settle(.dropped(reason: reason, detail: detail))
+        }
+        return controller.presentation
+    }
+
+    /// Whether this campaign cannot appear until a named anchor resolves — the
+    /// anchor watchdog's one arming condition.
+    private func awaitsAnchorLayout(_ payload: CEPTriggerPayload) -> Bool {
+        guard let guide = findCampaign(payload)?.guideConfig, !guide.isAnchorless else {
+            return false
+        }
+        return guide.steps.first?.target.anchorKey != nil
+    }
+
+    /// The ordered teardown a cancelled or timed-out presentation runs — the
+    /// same surfaces `onCampaignInvalidated` used to take down under v1, now
+    /// reached through ``CampaignPresentation/cancel()``.
+    private func dismissSurfaces(forCepCampaignId campaignID: String) {
+        if activeExternalGuide?.payload.cepCampaignId == campaignID {
+            activeExternalGuide = nil
+        }
+        if controller.activeNudge?.payload.cepCampaignId == campaignID {
+            controller.dismissNudge()
+        }
+        if surveyOrchestrator.state?.payload.cepCampaignId == campaignID {
+            surveyOrchestrator.dismiss()
+        }
+        if floaterStoryOrchestrator.state?.payload.cepCampaignId == campaignID {
+            floaterStoryOrchestrator.dismiss(.invalidated)
+        }
+        if floaterOrchestrator.state?.payload.cepCampaignId == campaignID {
+            floaterOrchestrator.dismiss(.invalidated)
+        }
+        inlineController.removeCampaign(campaignID)
+        guideOrchestrator.dismissIfActive(payloadId: campaignID)
+        // Forget the impression mark so a re-trigger impresses to Digia afresh.
+        events.resetImpression(campaignID)
     }
 
     func setCurrentScreen(_ name: String) {
@@ -359,7 +417,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             dismissActiveCampaignsNotTargetingCurrentScreen()
         }
         if screenUpdateRevision == revision {
-            activePlugin?.forwardScreen(screenName)
+            activePlugin?.onScreenChanged(screenName)
         }
     }
 
@@ -549,7 +607,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 campaignKey: nudge.payload.campaignKey,
                 campaignType: "nudge",
                 campaign: campaignStore.find(nudge.payload.campaignKey),
-                dismiss: { markNudgeDismissed() }
+                dismiss: { markNudgeDismissed(reason: .screenExit) }
             )
         }
 
@@ -558,7 +616,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 campaignKey: survey.payload.campaignKey,
                 campaignType: "survey",
                 campaign: campaignStore.find(survey.payload.campaignKey),
-                dismiss: { markSurveyDismissed() }
+                dismiss: { markSurveyDismissed(reason: .screenExit) }
             )
         }
 
@@ -569,7 +627,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     .noMatchingScreen,
                     message: "screen changed before the Guide was shown"
                 )
-                dismissGuide()
+                dismissGuide(reason: .screenExit)
             } else {
                 dismissForScreenChangeIfNeeded(
                     campaignKey: guide.campaign.campaignKey,
@@ -580,7 +638,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                             .noMatchingScreen,
                             message: "screen changed before the Guide was shown"
                         )
-                        self.dismissGuide()
+                        self.dismissGuide(reason: .screenExit)
                     }
                 )
             }
@@ -593,7 +651,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 campaign: guide.campaign
             ) {
                 activeExternalGuide = nil
-                events.toCep(.dismissed, payload: guide.payload)
+                events.toCep(.dismissed(reason: .screenExit), payload: guide.payload)
             }
         }
 
@@ -653,25 +711,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         debugOverlayController
     }
 
-    func registerPlaceholderForSlot(propertyID: String) -> Int? {
-        activePlugin?.registerPlaceholder(propertyID: propertyID)
-    }
-
-    func deregisterPlaceholderForSlot(_ id: Int) {
-        activePlugin?.deregisterPlaceholder(id)
-    }
-
     func onHostMounted() {
         isHostMounted = true
     }
 
     func onHostUnmounted() {
         isHostMounted = false
-    }
-
-    /// v1's boolean face, until `DigiaCEPDelegate` is deleted at N4's last step.
-    func onCampaignTriggered(_ payload: CEPTriggerPayload) -> Bool {
-        routeOrganicTrigger(payload).isAccepted
     }
 
     /// Routes an organically delivered trigger and answers what happened to it.
@@ -1194,28 +1239,6 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
     }
 
-    func onCampaignInvalidated(_ campaignID: String) {
-        if activeExternalGuide?.payload.cepCampaignId == campaignID {
-            activeExternalGuide = nil
-        }
-        if controller.activeNudge?.payload.cepCampaignId == campaignID {
-            controller.dismissNudge()
-        }
-        if surveyOrchestrator.state?.payload.cepCampaignId == campaignID {
-            surveyOrchestrator.dismiss()
-        }
-        if floaterStoryOrchestrator.state?.payload.cepCampaignId == campaignID {
-            floaterStoryOrchestrator.dismiss(.invalidated)
-        }
-        if floaterOrchestrator.state?.payload.cepCampaignId == campaignID {
-            floaterOrchestrator.dismiss(.invalidated)
-        }
-        inlineController.removeCampaign(campaignID)
-        guideOrchestrator.dismissIfActive(payloadId: campaignID)
-        // Forget the impression mark so a re-trigger impresses to Digia afresh.
-        events.resetImpression(campaignID)
-    }
-
     // MARK: - Survey lifecycle
     //
     // CEP plugin sees: Impressed (started), Dismissed (every teardown — closed
@@ -1409,13 +1432,18 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         markSurveyDismissed()
     }
 
-    func markSurveyDismissed(abandonedAtItem: Int? = nil, answeredCount: Int? = nil) {
+    func markSurveyDismissed(
+        abandonedAtItem: Int? = nil,
+        answeredCount: Int? = nil,
+        reason: DismissReason = .userClose
+    ) {
         guard let state = surveyOrchestrator.state else { return }
+        let completed = completedSurveyToken == state.token
         surveyOrchestrator.dismiss()
         events.toBoth(
-            .dismissed,
+            .dismissed(reason: completed ? .completed : reason, completed: completed),
             SurveyEvent.Dismissed(
-                abandonedAtItem: completedSurveyToken == state.token ? nil : abandonedAtItem,
+                abandonedAtItem: completed ? nil : abandonedAtItem,
                 itemTotal: state.config.questionCount,
                 answeredCount: answeredCount,
                 dwellMs: dwellTracker.consumeDwellMs(state.payload.cepCampaignId)
@@ -1560,11 +1588,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         events.toDigia(event, payload: payload)
     }
 
-    func markNudgeDismissed() {
+    func markNudgeDismissed(reason: DismissReason = .userClose) {
         guard let nudge = controller.activeNudge else { return }
         controller.dismissNudge()
         events.toBoth(
-            .dismissed,
+            .dismissed(reason: reason),
             NudgeEvent.Dismissed(dwellMs: dwellTracker.consumeDwellMs(nudge.payload.cepCampaignId)),
             payload: nudge.payload
         )
@@ -1648,11 +1676,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         _ wasVisible: Bool
     ) {
         if !wasVisible {
-            events.toCep(.dismissed, payload: state.payload)
+            events.toCep(.dismissed(reason: reason.presentationReason), payload: state.payload)
             return
         }
         events.toBoth(
-            .dismissed,
+            .dismissed(reason: reason.presentationReason),
             FloaterEvent.Dismissed(
                 dismissReason: reason.wire,
                 dwellMs: dwellTracker.consumeDwellMs(state.payload.cepCampaignId),
@@ -1744,11 +1772,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         _ metrics: FloaterMetrics, _ wasVisible: Bool
     ) {
         if !wasVisible {
-            events.toCep(.dismissed, payload: state.payload)
+            events.toCep(.dismissed(reason: reason.presentationReason), payload: state.payload)
             return
         }
         events.toBoth(
-            .dismissed,
+            .dismissed(reason: reason.presentationReason),
             FloaterEvent.Dismissed(
                 dismissReason: reason.wire,
                 dwellMs: dwellTracker.consumeDwellMs(state.payload.cepCampaignId),
@@ -2017,7 +2045,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
     }
 
-    func dismissGuide() {
+    func dismissGuide(reason: DismissReason = .userClose) {
         guard let state = guideOrchestrator.state else { return }
         let payload = state.payload
         let total = state.steps.count
@@ -2030,7 +2058,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
         guideOrchestrator.dismiss()
         events.toBoth(
-            .dismissed,
+            .dismissed(
+                reason: guideCompletionFired ? .completed : reason,
+                completed: guideCompletionFired
+            ),
             GuideEvent.Dismissed(
                 abandonedAtItem: state.stepIndex + 1,
                 itemTotal: total,
@@ -2108,6 +2139,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
         let payload = state.payload
         let total = state.steps.count
+        // The anchor produced a layout — that is exactly what the anchor
+        // watchdog was waiting for.
+        coordinator.noteAnchorLayout(for: payload)
         if isLiveTestCepId(payload.cepCampaignId) {
             liveTestContexts[payload.cepCampaignId]?.reportShown()
         }
@@ -2168,10 +2202,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         let payload = state.payload
         if dwellTracker.elapsedMs(payload.cepCampaignId) == nil {
             guideOrchestrator.dismiss()
-            events.toCep(.dismissed, payload: payload)
+            // It never displayed, so this is a drop — and unlike a dismissal it
+            // still knows *why*. Going through the lifecycle channel would
+            // flatten every render failure to `cancelled`.
+            coordinator.drop(
+                payload,
+                reason: Self.dropReason(for: failure),
+                detail: failure?.rawValue ?? "Anchorless Spotlight image could not be loaded"
+            )
             guideCompletionFired = false
         } else {
-            dismissGuide()
+            dismissGuide(reason: .autoTimeout)
         }
         let code: LiveTestFailureCode = switch failure {
         case .pageKeyMismatch: .noMatchingScreen
@@ -2228,6 +2269,19 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         )
     }
 
+    /// The honest drop reason for a guide that failed to produce a frame.
+    ///
+    /// The live-test path maps the same failures onto its own codes a few lines
+    /// below; these are the ones a plugin and the analytics backend see.
+    private static func dropReason(for failure: AnchorlessFailure?) -> DropReason {
+        switch failure {
+        case .pageKeyMismatch: return .screenNotTargeted
+        case .invalidTarget, .invalidGeometry: return .anchorNotRegistered
+        case .unsupportedLayout: return .invalidConfig
+        case nil: return .error
+        }
+    }
+
     private func logNativeGuideStage(_ stage: String, _ details: String) {
         guard config?.wrapperBinding == "react_native" else { return }
         DigiaLog.verbose("guide_native_stage=\(stage) \(details)")
@@ -2268,6 +2322,22 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 cepMetadata: [:]
             )
         )
+        // The presentation is native even when the guide is not: under v2 the
+        // CEP's hold belongs to core, so a JS-rendered guide's lifecycle has to
+        // reach the coordinator or its plugin never learns the showing ended.
+        if let payload {
+            switch eventName {
+            case "Digia Experience Viewed":
+                events.toCep(.impressed, payload: payload)
+            case "Digia Experience Dismissed":
+                events.toCep(.dismissed(reason: .userClose), payload: payload)
+            case "Digia Experience Completed":
+                events.toCep(
+                    .dismissed(reason: .completed, completed: true), payload: payload)
+            default:
+                break
+            }
+        }
         if (eventName == "Digia Experience Dismissed"
             || eventName == "Digia Experience Completed")
             && activeExternalGuide?.payload.cepCampaignId == payloadID
@@ -2372,7 +2442,10 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     }
 
     func resetForTesting() {
-        activePlugin?.teardown()
+        if let plugin = activePlugin {
+            coordinator.detach(owner: plugin.id)
+            plugin.detach()
+        }
         activePlugin = nil
         _currentScreen = nil
         analyticsService?.clear()
@@ -2402,6 +2475,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         welcomeStartToken = nil
         questionViewedAt.removeAll()
         liveTestService.stop()
+        coordinator.resetForTesting()
         liveTestContexts.removeAll()
         liveTestCampaigns.removeAll()
     }

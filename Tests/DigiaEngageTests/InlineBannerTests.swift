@@ -58,13 +58,13 @@ struct InlineBannerTests {
         ]))
         SDKInstance.shared.campaignStore.populate([campaign])
 
-        let accepted = SDKInstance.shared.onCampaignTriggered(CEPTriggerPayload(
+        let recorder = PresentationRecorder(SDKInstance.shared.deliver(CEPTriggerPayload(
             cepCampaignId: "cep-banner",
             campaignKey: "banner-campaign",
             cepMetadata: [:]
-        ))
+        )))
 
-        #expect(accepted)
+        #expect(!recorder.isSettled)
         #expect(campaign.bannerConfig?.slotKey == "home_hero")
         #expect(SDKInstance.shared.inlineController.getBannerConfig("home_hero") != nil)
         #expect(SDKInstance.shared.inlineController.getCampaign("home_hero")?.cepCampaignId == "cep-banner")

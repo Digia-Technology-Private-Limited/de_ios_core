@@ -124,7 +124,8 @@ final class AnalyticsService {
         _ event: EngageAnalyticsEvent,
         payload: CEPTriggerPayload,
         campaignId: String?,
-        campaignType: String?
+        campaignType: String?,
+        presentationId: String? = nil
     ) {
         guard config.enabled else {
             DigiaLog.log("capture: DISABLED — event '\(event.eventName)' dropped", tag: "DigiaAnalytics")
@@ -140,6 +141,7 @@ final class AnalyticsService {
             campaignId: campaignId,
             campaignKey: payload.campaignKey,
             campaignType: campaignType,
+            presentationId: presentationId,
             properties: event.properties
         )
     }
@@ -250,6 +252,7 @@ final class AnalyticsService {
         campaignId: String?,
         campaignKey: String?,
         campaignType: String?,
+        presentationId: String? = nil,
         properties: [String: Any] = [:]
     ) {
         let eventId = UUID().uuidString
@@ -268,6 +271,11 @@ final class AnalyticsService {
         if let id = campaignId { payloadMap["campaign_id"] = id }
         if let key = campaignKey { payloadMap["campaign_key"] = key }
         if let type = campaignType { payloadMap["campaign_type"] = type }
+        // The key that groups every event from one showing. `campaign_key`
+        // cannot do that job: the same campaign can be delivered many times in
+        // a session. Absent, not null, when there is none — a live test, or a
+        // surface outliving its presentation.
+        if let presentationId { payloadMap["presentation_id"] = presentationId }
         if let uid = identity.userId { payloadMap["user_id"] = uid }
 
         payloadMap["properties"] = mergedProperties
