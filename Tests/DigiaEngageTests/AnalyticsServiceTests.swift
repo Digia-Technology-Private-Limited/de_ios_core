@@ -179,6 +179,35 @@ struct AnalyticsServiceTests {
         #expect(entries[0].payload["element_id"] == nil)
     }
 
+    @Test("presentation_id groups the events of one showing, and is absent when there is none")
+    func presentationIdIsStamped() {
+        let service = makeService()
+        let payload = buildPayload("test")
+
+        service.capture(
+            NudgeEvent.Viewed(displayStyle: "dialog"),
+            payload: payload,
+            campaignId: "c1",
+            campaignType: "nudge",
+            presentationId: "pres-1"
+        )
+        service.capture(
+            NudgeEvent.Dismissed(),
+            payload: payload,
+            campaignId: "c1",
+            campaignType: "nudge"
+        )
+
+        let entries = service.queue.peek(maxCount: 10)
+        #expect(entries.count == 2)
+        // The key events from one showing are grouped by. `campaign_key` cannot
+        // do that job: one campaign can be delivered many times in a session.
+        #expect(entries[0].payload["presentation_id"] as? String == "pres-1")
+        // Absent, not null, when there is none — a live test, or a surface
+        // outliving its presentation.
+        #expect(entries[1].payload["presentation_id"] == nil)
+    }
+
     @Test("click analytics preserve action URL")
     func clickAnalyticsPreserveActionURL() {
         let service = makeService()
