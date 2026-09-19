@@ -110,76 +110,87 @@ final class PresentationCoordinator {
     }
 
     /// Records what kind of surface took an accepted presentation, and arms the
-    /// watchdogs it owes.
+    /// acceptance watchdog if its `kind` owes an appearance.
     ///
-    /// `awaitsAnchorLayout` is true for an experience that cannot appear until a
-    /// named anchor resolves — a non-anchorless guide. ``noteAnchorLayout(for:)``
-    /// disarms it.
-    func accept(
-        _ controller: PresentationController,
-        kind: PresentationKind,
-        awaitsAnchorLayout: Bool = false
-    ) {
+    /// platform note: the Kotlin twin also takes the routed payload here,
+    /// because it indexes by that instance's identity. Swift has the id on the
+    /// payload already, so there is nothing to index.
+    func accept(_ controller: PresentationController, kind: PresentationKind) {
         guard !controller.isSettled, let entry = live[controller.id] else { return }
         entry.kind = kind
-        if kind.armsAcceptanceWatchdog {
-            entry.acceptance = Task { @MainActor [weak self] in
-                guard let self else { return }
-                try? await Task.sleep(nanoseconds: nanoseconds(self.acceptanceTimeout))
-                guard !Task.isCancelled, !controller.isSettled else { return }
-                DigiaLog.error(
-                    "[Digia] Dropped — acceptance watchdog fired, still pending; releasing the "
-                        + "CEP hold (campaignKey=\(controller.trigger.campaignKey), "
-                        + "presentationId=\(controller.id), timeout=\(Int(self.acceptanceTimeout))s)"
+        guard kind.armsAcceptanceWatchdog else { return }
+        entry.acceptance = Task { @MainActor [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(nanoseconds: nanoseconds(self.acceptanceTimeout))
+            guard !Task.isCancelled, !controller.isSettled else { return }
+            DigiaLog.error(
+                "[Digia] Campaign dropped — acceptance watchdog fired, still pending; releasing "
+                    + "the CEP hold: campaignKey=\(controller.trigger.campaignKey) "
+                    + "presentationId=\(controller.id) timeout=\(Int(self.acceptanceTimeout * 1000))ms"
+            )
+            controller.settle(
+                .dropped(
+                    reason: .timeout,
+                    detail: "never displayed within the acceptance window"
                 )
-                controller.settle(
-                    .dropped(
-                        reason: .timeout,
-                        detail: "never displayed within the acceptance window"
-                    )
-                )
-            }
+            )
         }
-        guard awaitsAnchorLayout else { return }
+    }
+
+    /// Arms the anchor watchdog for an experience that cannot appear until a
+    /// named anchor resolves — a non-anchorless guide. ``anchorResolved(_:)``
+    /// disarms it, and so does an impression.
+    func awaitAnchor(_ payload: CEPTriggerPayload) {
+        guard let id = payload.presentationId, let entry = live[id] else { return }
+        let controller = entry.controller
+        guard !controller.isSettled else { return }
+        entry.disarmAnchor()
         entry.anchor = Task { @MainActor [weak self] in
             guard let self else { return }
             try? await Task.sleep(nanoseconds: nanoseconds(self.anchorLayoutTimeout))
             guard !Task.isCancelled, !controller.isSettled else { return }
-            DigiaLog.error(
-                "[Digia] Ended — anchor watchdog fired, no layout from the anchor "
-                    + "(campaignKey=\(controller.trigger.campaignKey), "
-                    + "presentationId=\(controller.id), timeout=\(Int(self.anchorLayoutTimeout))s)"
+            let displaying = controller.state == .displaying
+            DigiaLog.warning(
+                "[Digia] Campaign ended — anchor watchdog fired, no layout in "
+                    + "\(Int(self.anchorLayoutTimeout * 1000))ms: "
+                    + "campaignKey=\(payload.campaignKey) presentationId=\(controller.id) "
+                    + "displaying=\(displaying)"
             )
-            // Settle first, tear the surface down second: the teardown emits a
-            // `dismissed` lifecycle event, and settling after it would record
-            // whatever the surface said instead of the watchdog's own reason.
+            // Settle first, tear the surface down second. The teardown emits its
+            // own `dismissed`, and settling after it would record whatever the
+            // surface said — `user_close` for a close the user never performed —
+            // instead of the watchdog's reason. G7 names that reason, so it has
+            // to be the one that wins.
             //
-            // platform note: the Dart twin has no anchor watchdog yet, so this
-            // arm is iOS-first; Kotlin's twin owes the same two lines.
-            if controller.state == .displaying {
-                controller.settle(.dismissed(reason: .autoTimeout, completed: false))
-            } else {
-                controller.settle(
-                    .dropped(
+            // platform note: the Kotlin twin runs these two in the opposite
+            // order, and its settle is a backstop rather than the decision. The
+            // Dart core has no anchor watchdog at all yet.
+            controller.settle(
+                displaying
+                    ? .dismissed(reason: .autoTimeout, completed: false)
+                    // It never displayed, so it cannot settle `dismissed` — and
+                    // the honest reason is the one the enum already has for
+                    // exactly this: the anchor it was pinned to never showed up.
+                    : .dropped(
                         reason: .anchorNotRegistered,
-                        detail: "anchor yielded no layout within the anchor window"
+                        detail: "the anchor did not yield a layout within "
+                            + "\(Int(self.anchorLayoutTimeout * 1000))ms"
                     )
-                )
-            }
-            self.onCancelSurface(controller.trigger.cepCampaignId)
+            )
+            self.onCancelSurface(payload.cepCampaignId)
         }
+    }
+
+    /// The anchor produced a layout — disarms the watchdog ``awaitAnchor(_:)`` armed.
+    func anchorResolved(_ payload: CEPTriggerPayload) {
+        guard let id = payload.presentationId else { return }
+        live[id]?.disarmAnchor()
     }
 
     /// The presentation that owns `payload`, or nil once it has settled.
     func ownerOf(_ payload: CEPTriggerPayload) -> PresentationController? {
         guard let id = payload.presentationId else { return nil }
         return live[id]?.controller
-    }
-
-    /// Disarms the anchor watchdog — the anchor produced a layout.
-    func noteAnchorLayout(for payload: CEPTriggerPayload) {
-        guard let id = payload.presentationId else { return }
-        live[id]?.disarmAnchor()
     }
 
     /// Turns one coarse lifecycle event into a state transition on its owner.

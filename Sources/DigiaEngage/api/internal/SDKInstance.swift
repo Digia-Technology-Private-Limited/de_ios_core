@@ -360,11 +360,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // back to this presentation.
         switch routeOrganicTrigger(controller.trigger) {
         case .accepted(let payload, let kind):
-            coordinator.accept(
-                controller,
-                kind: kind,
-                awaitsAnchorLayout: awaitsAnchorLayout(payload)
-            )
+            coordinator.accept(controller, kind: kind)
+            if awaitsAnchorLayout(payload) { coordinator.awaitAnchor(payload) }
         case .dropped(let reason, let detail):
             controller.settle(.dropped(reason: reason, detail: detail))
         }
@@ -2141,7 +2138,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let total = state.steps.count
         // The anchor produced a layout — that is exactly what the anchor
         // watchdog was waiting for.
-        coordinator.noteAnchorLayout(for: payload)
+        coordinator.anchorResolved(payload)
         if isLiveTestCepId(payload.cepCampaignId) {
             liveTestContexts[payload.cepCampaignId]?.reportShown()
         }
