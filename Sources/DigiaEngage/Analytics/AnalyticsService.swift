@@ -1,6 +1,9 @@
 import Foundation
 import UIKit
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger("analytics")
+
 // MARK: - AnalyticsSender
 
 protocol AnalyticsSender: Sendable {
@@ -128,12 +131,12 @@ final class AnalyticsService {
         presentationId: String? = nil
     ) {
         guard config.enabled else {
-            DigiaLog.log("capture: DISABLED — event '\(event.eventName)' dropped", tag: "DigiaAnalytics")
+            log.d("Event dropped — analytics disabled (event=\(event.eventName))")
             return
         }
-        DigiaLog.log(
-            "capture: event='\(event.eventName)' campaignKey=\(payload.campaignKey) campaignId=\(campaignId ?? "nil")",
-            tag: "DigiaAnalytics"
+        log.d(
+            "Event captured: \"\(event.eventName)\" (cepCampaignId=\(campaignId ?? "nil"))",
+            campaign: payload.campaignKey
         )
 
         enqueue(
@@ -189,15 +192,11 @@ final class AnalyticsService {
     static func create(config: DigiaConfig, requestHeaders: [String: String]) -> AnalyticsService? {
         let ac = config.analyticsConfig
         guard ac.enabled else {
-            DigiaLog.log(
-                "create: analytics DISABLED in DigiaConfig — no events will be captured",
-                tag: "DigiaAnalytics"
-            )
+            log.i("Analytics disabled in DigiaConfig — no events will be captured")
             return nil
         }
-        DigiaLog.log(
-            "create: analytics enabled, batchSize=\(ac.flushBatchSize) interval=\(ac.flushIntervalMs)ms",
-            tag: "DigiaAnalytics"
+        log.i(
+            "Analytics enabled (batchSize=\(ac.flushBatchSize), interval=\(ac.flushIntervalMs)ms)"
         )
         return AnalyticsService(
             config: ac,
@@ -238,9 +237,8 @@ final class AnalyticsService {
         Task { [weak self, sender] in
             guard self?.isCleared == false else { return }
             let status = try? await sender.post(url: url, body: data, headers: headers)
-            DigiaLog.log(
-                "session reported: HTTP \(status ?? -1) sessionId=\(sessionId) anonymousId=\(anonymousId)",
-                tag: "DigiaAnalytics"
+            log.d(
+                "Session posted (status=\(status ?? -1), sessionId=\(sessionId), anonymousId=\(anonymousId))"
             )
         }
     }
@@ -286,9 +284,9 @@ final class AnalyticsService {
                 attempts: 0),
             maxEvents: config.queueMaxEvents
         )
-        DigiaLog.log(
-            "enqueued '\(eventName)' eventId=\(eventId) queueSize=\(queue.size) flushBatchSize=\(config.flushBatchSize)",
-            tag: "DigiaAnalytics"
+        log.i(
+            "Event fired: \"\(eventName)\" (eventId=\(eventId), queueSize=\(queue.size), "
+                + "flushBatchSize=\(config.flushBatchSize))"
         )
 
         guard retryTask == nil else {
@@ -296,16 +294,16 @@ final class AnalyticsService {
             // this event (and everything else queued) when it fires. Don't
             // jump the queue and flush early just because new events pushed
             // us past the threshold.
-            DigiaLog.log("retry pending — deferring to scheduled retry", tag: "DigiaAnalytics")
+            log.d("Dispatch deferred — a retry is already scheduled")
             return
         }
 
         if queue.size >= config.flushBatchSize {
-            DigiaLog.log("batch threshold reached — dispatching immediately", tag: "DigiaAnalytics")
+            log.d("Batch threshold reached — dispatching immediately")
             cancelTimer()
             Task { await dispatchPending() }
         } else {
-            DigiaLog.log("scheduling flush timer (interval=\(config.flushIntervalMs)ms)", tag: "DigiaAnalytics")
+            log.d("Flush timer scheduled (interval=\(config.flushIntervalMs)ms)")
             scheduleTimer()
         }
     }
@@ -313,7 +311,7 @@ final class AnalyticsService {
     private func dispatchPending() async {
         guard !isCleared else { return }
         guard !isDispatching else {
-            DigiaLog.log("dispatchPending: already dispatching — skipped", tag: "DigiaAnalytics")
+            log.d("Dispatch skipped — already dispatching")
             return
         }
         cancelTimer()
@@ -322,15 +320,12 @@ final class AnalyticsService {
 
         let batch = queue.peek(maxCount: config.maxBatchSize)
         guard !batch.isEmpty else {
-            DigiaLog.log("dispatchPending: queue empty — nothing to send", tag: "DigiaAnalytics")
+            log.d("Dispatch skipped — the queue is empty")
             retryAttempt = 0
             return
         }
 
-        DigiaLog.log(
-            "dispatchPending: sending batch of \(batch.count) event(s) to \(DigiaEndpoints.track)",
-            tag: "DigiaAnalytics"
-        )
+        log.d("Batch posting (count=\(batch.count), endpoint=\(DigiaEndpoints.track))")
 
         do {
             let body = try JSONSerialization.data(withJSONObject: [
@@ -341,7 +336,7 @@ final class AnalyticsService {
                 body: body,
                 headers: jsonHeaders
             )
-            DigiaLog.log("dispatchPending: HTTP \(statusCode)", tag: "DigiaAnalytics")
+            log.d("Batch posted (status=\(statusCode))")
 
             switch statusCode {
             case 200, 207:
@@ -350,10 +345,7 @@ final class AnalyticsService {
                 // the whole batch (accepted + rejected) is simply removed here.
                 queue.remove(eventIds: batch.map { $0.eventId })
                 retryAttempt = 0
-                DigiaLog.log(
-                    "dispatch success — removed \(batch.count) event(s), queueSize=\(queue.size)",
-                    tag: "DigiaAnalytics"
-                )
+                log.d("Batch accepted (count=\(batch.count), queueSize=\(queue.size))")
                 if queue.size > 0 { scheduleTimer(minDelayMs: 15_000) }
             default:
                 // Any other outcome is just "the API call failed" — 4xx, 5xx, or
@@ -364,7 +356,7 @@ final class AnalyticsService {
             // Verbose only — a single thrown exception is just one attempt in a
             // retry sequence, not yet a final outcome. Only the eventual drop
             // (after exhausting the cap) is warning-level.
-            DigiaLog.log("dispatchPending: exception — \(error.localizedDescription)", tag: "DigiaAnalytics")
+            log.d("Batch post failed (cause=\(error.localizedDescription))")
             handleFailure(batch: batch, statusLabel: "exception: \(error.localizedDescription)")
         }
     }
@@ -380,10 +372,9 @@ final class AnalyticsService {
 
         if !toDrop.isEmpty {
             queue.remove(eventIds: toDrop.map { $0.eventId })
-            DigiaLog.warning(
-                "dispatch failed (\(statusLabel)) — dropped \(toDrop.count) event(s) "
-                    + "after exhausting \(Self.maxAttempts) attempts",
-                tag: "DigiaAnalytics"
+            log.e(
+                "Batch post failed — dropped \(toDrop.count) event(s) after exhausting "
+                    + "\(Self.maxAttempts) attempts (cause=\(statusLabel))"
             )
         }
 
@@ -396,9 +387,9 @@ final class AnalyticsService {
         let attempt = toRetry.map { $0.attempts }.max() ?? 1
         // Verbose only — an in-progress retry isn't yet a problem; only the
         // eventual drop above (cap exhausted) is warning-level.
-        DigiaLog.log(
-            "dispatch failed (\(statusLabel)) — scheduling retry #\(attempt) for \(toRetry.count) event(s)",
-            tag: "DigiaAnalytics"
+        log.d(
+            "Batch post failed — retry #\(attempt) scheduled for \(toRetry.count) event(s) "
+                + "(cause=\(statusLabel))"
         )
         scheduleRetry(attempt: attempt)
     }

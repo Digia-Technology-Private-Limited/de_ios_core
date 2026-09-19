@@ -1,6 +1,9 @@
 import Foundation
 import Combine
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 /// Reports pages/anchors/slots seen at runtime to the Engage Component
 /// Registry (`POST .../recordComponents`), so a PM can curate them on the
 /// dashboard instead of typing keys by hand.
@@ -77,8 +80,8 @@ final class ComponentRegistryService: ObservableObject {
     /// send a call guaranteed to be rejected if it isn't set yet.
     func recordAnchor(_ key: String, screenName: String?) {
         guard let screenName, !screenName.isEmpty else {
-            DigiaLog.warning(
-                "[ComponentRegistry] Skipping anchor \"\(key)\" — no current screen name set yet. "
+            log.e(
+                "Anchor skipped — no current screen name set yet (anchor=\(key))\n"
                     + "Call Digia.setCurrentScreen() before this anchor registers."
             )
             return
@@ -116,9 +119,9 @@ final class ComponentRegistryService: ObservableObject {
         Task { [sender] in
             do {
                 let status = try await sender.post(url: DigiaEndpoints.recordComponents, body: body, headers: headers)
-                DigiaLog.log("[ComponentRegistry] recordComponents HTTP \(status) (componentKey=\(key))")
+                log.d("Components posted (status=\(status), componentKey=\(key))")
             } catch {
-                DigiaLog.warning("[ComponentRegistry] recordComponents post failed: \(error)")
+                log.e("Components post failed", error: error)
             }
         }
     }

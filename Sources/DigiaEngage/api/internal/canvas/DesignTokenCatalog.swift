@@ -1,5 +1,8 @@
 import Foundation
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 enum DesignTokenError: LocalizedError {
     case invalid(String)
     var errorDescription: String? { if case .invalid(let message) = self { message } else { nil } }
@@ -49,7 +52,16 @@ struct DesignTokenCatalog {
             guard let token = map["token"] as? String, !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return nil
             }
-            return colors[token]
+            guard let color = colors[token] else {
+                log.e(
+                    "Unknown color token — falling back to the authored default (token=\(token))",
+                    stage: .parse,
+                    reason: TimelineReason.unknownDesignToken,
+                    extras: ["token": token, "kind": "color"]
+                )
+                return nil
+            }
+            return color
         }
         return canonicalCampaignColorHex(value).map(CampaignColor.literal)
     }
@@ -58,7 +70,16 @@ struct DesignTokenCatalog {
         guard let value = unwrapLiteral(property), !(value is NSNull) else { return nil }
         guard let map = value as? [String: Any] else { throw DesignTokenError.invalid("Invalid typography property") }
         if let token = exactToken(map) {
-            guard let result = typography[token] else { throw DesignTokenError.invalid("Unknown typography token '\(token)'") }
+            guard let result = typography[token] else {
+                log.e(
+                    "Unknown typography token — falling back to the base text style "
+                        + "(token=\(token))",
+                    stage: .parse,
+                    reason: TimelineReason.unknownDesignToken,
+                    extras: ["token": token, "kind": "typography"]
+                )
+                throw DesignTokenError.invalid("Unknown typography token '\(token)'")
+            }
             return result
         }
         if map["token"] != nil { throw DesignTokenError.invalid("Ambiguous typography property") }

@@ -2,6 +2,10 @@ import Foundation
 import SwiftUI
 import UIKit
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
+
 /// Builds the composite SDK descriptor (schema v1):
 ///   `s=schema | b=binding | p=platform | [w=wrapper |] c=core`
 /// The wrapper segment (`w`) is present only when a thin wrapper SDK
@@ -50,7 +54,7 @@ public enum Digia {
     /// No-op outside a debug build.
     public static func presentDebugSettings(from presenter: UIViewController) {
         guard SDKInstance.shared.isDebugBuild else {
-            DigiaLog.warning("[Digia] presentDebugSettings() ignored — not a debug build.")
+            log.e("presentDebugSettings() ignored — not a debug build")
             return
         }
         // The same link can reach here twice — the SDK opens the screen from its

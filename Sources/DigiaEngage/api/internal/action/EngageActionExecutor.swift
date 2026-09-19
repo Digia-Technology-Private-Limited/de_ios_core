@@ -1,6 +1,9 @@
 import StoreKit
 import UIKit
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 @MainActor
 struct LocalActionExecutor {
     private let dismiss: (() -> Void)?
@@ -35,7 +38,7 @@ struct LocalActionExecutor {
         if let callback {
             callback()
         } else {
-            DigiaLog.warning("Local action '\(name)' is not supported by this campaign surface")
+            log.e("Local action ignored — not supported by this campaign surface (action=\(name))")
         }
         return true
     }
@@ -56,7 +59,7 @@ final class GlobalActionExecutor {
         },
         requestReview: @escaping () -> Void = {
             guard let scene = ViewControllerUtil.findWindowScene() else {
-                DigiaLog.warning("requestReview: no window scene; skipping")
+                log.e("requestReview() ignored — no window scene")
                 return
             }
             if #available(iOS 16, *) {
@@ -187,7 +190,7 @@ final class EngageActionExecutor {
             if globalActionExecutor.execute(action) { return }
             try hostActionExecutor.execute(action)
         } catch {
-            DigiaLog.error("Action step failed: \(error.localizedDescription)")
+            log.e("Action step failed", error: error.localizedDescription)
         }
     }
 }

@@ -13,14 +13,17 @@
 /// reason, on every stack: `plugin_missing` (needs a heuristic, not a log
 /// call), `test_invocation_received` (LiveTestSink's), `action_failed` and
 /// `survey_submitted` (out of the first slice).
+///
+/// platform note: Dart also carries `sdk_init_failed`. This core has no path
+/// that can send it — `SDKInstance.initialize` absorbs a failed campaign fetch
+/// and still reaches `ready`, so the honest row for that case is the
+/// `fetch_failed_*` pair below. Declaring the symbol anyway would promise a
+/// renderer a row that never arrives.
 enum TimelineReason: String, CaseIterable, DiagnosticReason {
     // MARK: session
 
     /// `Digia.initialize()` completed.
     case sdkInitialized = "sdk_initialized"
-
-    /// `Digia.initialize()` threw. The SDK is running but inert.
-    case sdkInitFailed = "sdk_init_failed"
 
     /// A CEP plugin attached. Which one is in `extras`.
     case pluginRegistered = "plugin_registered"

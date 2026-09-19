@@ -1,5 +1,8 @@
 import Foundation
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 struct CampaignBundle {
     let rawCampaigns: [[String: Any]]
     let designTokens: DesignTokenCatalog
@@ -15,7 +18,12 @@ struct CampaignBundle {
         let catalog: DesignTokenCatalog
         do { catalog = try designTokensJSON.map(DesignTokenCatalog.fromJson) ?? .empty }
         catch {
-            DigiaLog.warning("[CampaignBundle] invalid design tokens; using literals only: \(error.localizedDescription)")
+            log.e(
+                "Design tokens unreadable — falling back to literal values",
+                error: error.localizedDescription,
+                stage: .parse,
+                reason: TimelineReason.designTokensUnreadable
+            )
             catalog = .empty
         }
         let timeAnchor = TrustedTimeAnchor.capture(serverTimeMs)
@@ -26,7 +34,11 @@ struct CampaignBundle {
                 devicePlatform: devicePlatform,
                 timeAnchor: timeAnchor
             ) { return campaign }
-            DigiaLog.warning("[CampaignBundle] skipping malformed campaign at index \(index)")
+            log.e(
+                "Campaign skipped — could not be read (index=\(index))",
+                stage: .parse,
+                reason: TimelineReason.malformedCampaignSkipped
+            )
             return nil
         }
         return CampaignBundle(

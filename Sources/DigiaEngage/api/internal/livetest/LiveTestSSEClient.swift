@@ -1,5 +1,8 @@
 import Foundation
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger("liveTest")
+
 /// One parsed SSE event from the live-test connect stream.
 enum LiveTestSseEvent {
     case connected(sdkConnectionId: String, deviceId: String)
@@ -146,6 +149,11 @@ final class LiveTestSSEClient {
         case "connected":
             reconnectAttempt = 0
             onConnectionStateChanged(.connected)
+            log.i(
+                "Stream connected (deviceId=\(json?["deviceId"] as? String ?? ""))",
+                stage: .session,
+                reason: TimelineReason.liveSessionConnected
+            )
             onEvent(
                 .connected(
                     sdkConnectionId: json?["sdkConnectionId"] as? String ?? "",
@@ -177,7 +185,11 @@ final class LiveTestSSEClient {
             return
         }
         onConnectionStateChanged(.error)
-        DigiaLog.warning("live test stream disconnected: \(reason)")
+        log.w(
+            "Stream disconnected — reconnecting (reason=\(reason))",
+            stage: .session,
+            reason: TimelineReason.liveSessionDisconnected
+        )
         scheduleReconnect()
     }
 

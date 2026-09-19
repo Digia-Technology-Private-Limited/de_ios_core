@@ -26,7 +26,6 @@ struct TimelineWireStringsTests {
     @Test("TimelineReason wires")
     func reasonWires() {
         #expect(TimelineReason.sdkInitialized.wire == "sdk_initialized")
-        #expect(TimelineReason.sdkInitFailed.wire == "sdk_init_failed")
         #expect(TimelineReason.pluginRegistered.wire == "plugin_registered")
         #expect(TimelineReason.liveSessionConnected.wire == "live_session_connected")
         #expect(TimelineReason.liveSessionDisconnected.wire == "live_session_disconnected")
@@ -41,7 +40,7 @@ struct TimelineWireStringsTests {
         #expect(TimelineReason.cepTriggerReceived.wire == "cep_trigger_received")
         #expect(TimelineReason.displayed.wire == "displayed")
         #expect(TimelineReason.clicked.wire == "clicked")
-        #expect(TimelineReason.allCases.count == 16)
+        #expect(TimelineReason.allCases.count == 15)
     }
 
     /// The delivery enums *are* the timeline's reasons for a delivery — no

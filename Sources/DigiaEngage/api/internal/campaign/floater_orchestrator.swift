@@ -5,6 +5,9 @@ import Foundation
 import Combine
 import UIKit
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 // Ported from Flutter's `pip_orchestrator.dart` / Android's `FloaterOrchestrator.kt` —
 // method names and semantics mirror both 1:1 so all three SDKs stay in parity. Owns
 // the active floater — at most one at a time — and, critically, its media player.
@@ -291,8 +294,9 @@ final class FloaterOrchestrator: ObservableObject {
     /// cost. The CEP slot is released through the dismissal callback without Digia analytics.
     func abandonMedia(token: Int64, reason: String) {
         guard let active = state, active.token == token, awaitingMedia else { return }
-        DigiaLog.warning(
-            "floater campaign '\(active.campaign.campaignKey)' dropped: media could not be loaded (\(reason))."
+        log.e(
+            "Dropped — media could not be loaded (reason=\(reason))",
+            campaign: active.campaign.campaignKey
         )
         lastStartFailureReason = "media could not be loaded: \(reason)"
         onDismissed(active, .mediaEnd, metricsSnapshot(), false)

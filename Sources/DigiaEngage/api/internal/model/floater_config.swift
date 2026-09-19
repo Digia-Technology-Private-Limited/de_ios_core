@@ -1,5 +1,8 @@
 import SwiftUI
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 // Ported from Android `FloaterConfig.kt` / Flutter `pip_config.dart`. The "floater"
 // campaign type: a small draggable window (the dashboard/analytics template name is
 // "pip") that expands to full screen. Wire shape (see `ai_docs/pip-properties.md`,
@@ -304,8 +307,7 @@ struct FloaterExpandedConfig: Equatable {
         do {
             canvas = try CampaignCanvasParser(designTokens: designTokens).parse(canvasJson)
         } catch {
-            DigiaLog.warning(
-                "[FloaterConfig] rejected Canvas campaign: \(error.localizedDescription)")
+            log.e("Floater rejected — canvas parse failed", error: error.localizedDescription)
             return nil
         }
         let rawDesignWidth = CGFloat(

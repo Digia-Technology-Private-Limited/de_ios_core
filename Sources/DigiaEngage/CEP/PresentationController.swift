@@ -233,8 +233,9 @@ private final class PresentationBacking: CampaignPresentation {
     private func releaseHold() {
         guard !holdReleased.isSettled else { return }
         holdReleased.settle(())
-        DigiaLog.verbose(
-            "CEP hold released (campaignKey=\(trigger.campaignKey), presentationId=\(id))"
+        DigiaLogger().d(
+            "CEP hold released (presentationId=\(id))",
+            campaign: trigger.campaignKey
         )
     }
 

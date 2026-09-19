@@ -2,6 +2,9 @@ import Combine
 import Foundation
 import UIKit
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 @MainActor
 final class SDKInstance: ObservableObject, DigiaCEPHost {
     static let shared = SDKInstance()
@@ -197,7 +200,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         hostActionExecutor.configure(config.actionHandlers)
         guard self.config == nil else { return }
         self.config = config
-        DigiaLog.configure(config.logLevel)
+        DigiaLogger.configure(config.logLevel)
         DigiaEndpoints.configure(config)
         requestHeaders = SDKRequestHeaders.make(
             config: config, deviceId: AnalyticsIdentityManager().resolveAnonymousId()
@@ -226,7 +229,18 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         } catch {
             // Campaign fetch failure must not block SDK readiness.
             currentTimeAnchor = nil
-            logVerbose("CampaignFetcher failed: \(error)")
+            // A rejected key is the one fetch failure a customer can fix
+            // themselves, so it is worth its own row rather than being filed
+            // under "network". Init still reaches ready either way — the SDK
+            // comes up, it just has nothing to show.
+            let fetchFailure = error as? CampaignFetchError
+            log.e(
+                "Campaign fetch failed",
+                error: error,
+                stage: .fetch,
+                reason: Self.fetchFailureReason(fetchFailure),
+                extras: fetchFailure?.statusCode.map { ["http_status": String($0)] }
+            )
         }
         completeInitialization(campaigns)
     }
@@ -258,11 +272,22 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private func completeInitialization(_ campaigns: [CampaignModel]) {
         campaignStore.populate(campaigns)
         if campaignStore.isEmpty {
-            DigiaLog.warning("[SDKInstance] CampaignStore populated empty")
-        } else {
-            DigiaLog.warning(
-                "[SDKInstance] CampaignStore populated count=\(campaigns.count) entries=[\(campaignStore.debugSummary)]"
+            // The most common answer to "my campaign never showed": it is not
+            // live. A success with nothing in it is not a failure, and reads
+            // very differently from one.
+            log.i(
+                "No campaigns fetched — the store is empty",
+                stage: .fetch,
+                reason: TimelineReason.bundleEmpty
             )
+        } else {
+            log.i(
+                "Campaigns fetched (count=\(campaigns.count))",
+                stage: .fetch,
+                reason: TimelineReason.bundleFetched,
+                extras: ["count": String(campaigns.count)]
+            )
+            log.d("Campaign store populated (entries=[\(campaignStore.debugSummary)])")
         }
 
         sdkState = .ready
@@ -310,13 +335,22 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
             currentTimeAnchor = bundle.timeAnchor
-            DigiaLog.warning(
-                "[SDKInstance] populateCampaignBundle parsed raw=\(bundle.rawCampaigns.count) accepted=\(campaigns.count)"
+            log.d(
+                "Campaign bundle parsed (raw=\(bundle.rawCampaigns.count), "
+                    + "accepted=\(campaigns.count))"
             )
         } catch {
             currentTimeAnchor = nil
-            DigiaLog.warning(
-                "[SDKInstance] populateCampaignBundle failed: \(error.localizedDescription)")
+            // Console-only, deliberately. This is the RN path: JS did the
+            // fetch and handed us a bundle we could not read, which is neither
+            // `fetch_failed_*` (we fetched nothing) nor
+            // `malformed_campaign_skipped` (nothing survived). No symbol in the
+            // vocabulary fits, and inventing one this core alone would send is
+            // worse for the dashboard than the missing row.
+            log.e(
+                "populateCampaignBundle() failed — the bundle could not be read",
+                error: error.localizedDescription
+            )
         }
         completeInitialization(campaigns)
     }
@@ -324,11 +358,20 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     func setThemeMode(_ mode: DigiaThemeMode) { CampaignCanvasTheme.shared.update(mode) }
 
     private func logVerbose(_ message: String) {
-        DigiaLog.verbose("[SDKInstance] \(message)")
+        log.d(message)
     }
 
     private func logError(_ message: String) {
-        DigiaLog.error("[SDKInstance] ERROR: \(message)")
+        log.e(message)
+    }
+
+    /// Which fetch failure a campaign creator is looking at.
+    ///
+    /// A rejected key is the one init failure a customer can fix themselves.
+    private static func fetchFailureReason(_ failure: CampaignFetchError?) -> TimelineReason {
+        failure?.statusCode == 401 || failure?.statusCode == 403
+            ? .fetchFailedAuth
+            : .fetchFailedNetwork
     }
 
     func register(_ plugin: DigiaCEPPlugin) {
@@ -341,6 +384,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         activePlugin = plugin
         plugin.attach(host: self)
+        log.i(
+            "Plugin registered (plugin=\(plugin.id))",
+            stage: .session,
+            reason: TimelineReason.pluginRegistered,
+            extras: ["plugin": plugin.id]
+        )
         if let screen = _currentScreen {
             plugin.onScreenChanged(screen)
         }
@@ -408,7 +457,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let screenName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let previousScreen = _currentScreen
         _currentScreen = screenName.isEmpty ? nil : screenName
-        DigiaLog.warning("[SDKInstance] Current screen set: \(_currentScreen ?? "<unset>")")
+        log.d("Current screen set (screen=\(_currentScreen ?? "<unset>"))")
         componentRegistry.recordPage(screenName)
         if previousScreen != _currentScreen {
             dismissActiveCampaignsNotTargetingCurrentScreen()
@@ -674,11 +723,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         guard isMismatch else { return }
 
         let targets = targetScreenNames.map { String(describing: $0) } ?? "<missing>"
-        DigiaLog.warning(
-            "[SDKInstance] Campaign dropped — screen changed: "
-                + "campaignKey=\(campaignKey) campaignType=\(campaignType) "
-                + "currentScreen=\(_currentScreen ?? "<unset>") "
-                + "targetScreenNames=\(targets) reason=screen_changed"
+        log.d(
+            "Dismissed — screen changed (type=\(campaignType), "
+                + "currentScreen=\(_currentScreen ?? "<unset>"), targets=\(targets))",
+            campaign: campaignKey
         )
         dismiss()
     }
@@ -776,8 +824,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             else {
                 return false
             }
-            DigiaLog.warning(
-                "[SDKInstance] Campaign dropped — frequency capped: key=\(campaignKey) reason=\(reason) policy=\(String(describing: policy))"
+            log.d(
+                "Dropped — frequency capped (rule=\(reason), "
+                    + "policy=\(String(describing: policy)))",
+                campaign: campaignKey
             )
             return true
         }
@@ -858,10 +908,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 message:
                     "currentScreen=\(_currentScreen ?? "<unset>") targetScreenNames=\(campaign.targetScreenNames)"
             )
-            DigiaLog.warning(
-                "[SDKInstance] Campaign dropped — screen not targeted: "
-                    + "campaignKey=\(key) currentScreen=\(_currentScreen ?? "<unset>") "
-                    + "targetScreenNames=\(campaign.targetScreenNames)"
+            log.d(
+                "Dropped — screen not targeted (current=\(_currentScreen ?? "<unset>"), "
+                    + "targets=\(campaign.targetScreenNames))",
+                campaign: key
             )
             context.onDropped(.noMatchingScreen, message: "screen not targeted")
             return .dropped(
@@ -890,7 +940,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             if let runtime = cfg.statefulTimer, runtime.resolve(payload.variables) == nil {
                 let reason = "inline timer campaign has invalid runtime variables"
                 lastCampaignDropReason = reason
-                DigiaLog.warning("campaign_skipped_unsupported: \(reason): key=\(key)")
+                log.e("Dropped — \(reason)", campaign: key)
                 context.onDropped(.templateError, message: reason)
                 return .dropped(reason: .invalidConfig, detail: reason)
             }
@@ -932,7 +982,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 let message = "campaign has no valid Canvas guide content"
                 lastCampaignDropReason = message
                 context.onDropped(.renderError, message: message)
-                DigiaLog.warning("[Guide] \(message)")
+                log.e("Dropped — \(message)", campaign: key)
                 return .dropped(reason: .invalidConfig, detail: message)
             }
             if guideOrchestrator.state != nil, !guideConfig.steps.isEmpty { dismissGuide() }
@@ -1034,8 +1084,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     lastCampaignDropReason =
                         floaterStoryOrchestrator.lastStartFailureReason
                         ?? "story floater start failed"
-                    DigiaLog.warning(
-                        "[SDKInstance] Story floater campaign skipped: key=\(key) reason=\(floaterStoryOrchestrator.lastStartFailureReason ?? "unknown")"
+                    log.d(
+                        "Dropped — story floater not started "
+                            + "(reason=\(floaterStoryOrchestrator.lastStartFailureReason ?? "unknown"))",
+                        campaign: key
                     )
                     context.onDropped(
                         .renderError, message: "another floater is already on screen")
@@ -1051,8 +1103,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             if !started {
                 lastCampaignDropReason =
                     floaterOrchestrator.lastStartFailureReason ?? "floater start failed"
-                DigiaLog.warning(
-                    "[SDKInstance] Floater campaign skipped: key=\(key) currentScreen=\(_currentScreen ?? "<unset>") reason=\(floaterOrchestrator.lastStartFailureReason ?? "unknown")"
+                log.d(
+                    "Dropped — floater not started (currentScreen=\(_currentScreen ?? "<unset>"), "
+                        + "reason=\(floaterOrchestrator.lastStartFailureReason ?? "unknown"))",
+                    campaign: key
                 )
                 context.onDropped(.renderError, message: "another floater is already on screen")
                 return .dropped(
@@ -2190,10 +2244,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             )
         }
         if isDebugBuild, state.currentStep?.target.anchorKey == nil {
-            DigiaLog.warning(
-                "[Anchorless] render failed: \(failure?.rawValue ?? "image load failed")"
-                    + " step=\(state.stepIndex + 1)",
-                tag: "Digia"
+            log.e(
+                "Anchorless step render failed — \(failure?.rawValue ?? "image load failed") "
+                    + "(step=\(state.stepIndex + 1))"
             )
         }
         let payload = state.payload
@@ -2281,7 +2334,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     private func logNativeGuideStage(_ stage: String, _ details: String) {
         guard config?.wrapperBinding == "react_native" else { return }
-        DigiaLog.verbose("guide_native_stage=\(stage) \(details)")
+        log.d("Guide stage: \(stage) \(details)")
     }
 
     /// Public analytics entry point for JS-rendered RN campaigns (guides). The JS

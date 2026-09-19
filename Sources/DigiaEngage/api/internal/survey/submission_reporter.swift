@@ -1,6 +1,9 @@
 import Foundation
 #if canImport(UIKit)
 import UIKit
+
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
 #endif
 
 /// Posts a completed-survey submission to the dashboard backend's
@@ -40,10 +43,10 @@ struct SurveySubmissionReporter {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                DigiaLog.warning("recordSubmission HTTP \(http.statusCode)")
+                log.e("Survey submission post failed (status=\(http.statusCode))")
             }
         } catch {
-            DigiaLog.warning("recordSubmission failed: \(error)")
+            log.e("Survey submission post failed", error: error)
         }
     }
 

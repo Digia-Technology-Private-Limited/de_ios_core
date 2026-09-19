@@ -1,5 +1,8 @@
 import Foundation
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 enum CampaignFetchFailureCategory: Equatable { case transport, httpStatus, invalidResponse }
 
 struct CampaignFetchError: LocalizedError {
@@ -60,7 +63,7 @@ struct CampaignFetcher {
 
     func fetch() async throws -> CampaignBundle {
         let endpoint = DigiaEndpoints.campaignBundle
-        DigiaLog.verbose("[CampaignFetcher] fetching: \(endpoint)")
+        log.d("Campaign bundle fetch started (endpoint=\(endpoint))")
         let response = try await api.fetchCampaignBundle()
         guard (200...299).contains(response.statusCode) else {
             throw CampaignFetchError(category: .httpStatus, endpoint: endpoint, statusCode: response.statusCode, message: "Campaign bundle request failed: HTTP \(response.statusCode)", underlying: nil)
@@ -105,7 +108,11 @@ struct CampaignFetcher {
         case nil, is NSNull: designTokens = nil
         case let value as [String: Any]: designTokens = value
         default:
-            DigiaLog.warning("[CampaignFetcher] designTokens is not an object; using literals only")
+            log.e(
+                "Design tokens unreadable — not an object, falling back to literal values",
+                stage: .parse,
+                reason: TimelineReason.designTokensUnreadable
+            )
             designTokens = nil
         }
         return CampaignBundle.create(

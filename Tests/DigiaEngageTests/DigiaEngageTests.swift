@@ -7,12 +7,16 @@ import Testing
 @MainActor
 @Suite("DigiaEngage", .serialized)
 struct DigiaEngageTests {
-    @Test("defaults config to production error logging")
+    @Test("defaults config to production, with the auto log level")
     func defaultsConfig() {
         let config = DigiaConfig(apiKey: "prod_123")
 
         #expect(config.apiKey == "prod_123")
-        #expect(config.logLevel == .error)
+        // An unset level is debug-loud / release-quiet, and records that the
+        // app did not choose it — the whole answer to a "nothing shows up"
+        // ticket. See `DigiaLogLevel.auto`.
+        #expect(config.logLevel == DigiaLogLevel.resolvedAuto)
+        #expect(config.isLogLevelExplicit == false)
         #expect(config.environment == .production)
     }
 

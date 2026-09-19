@@ -1,5 +1,8 @@
 import Foundation
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 // Ported from Android `CampaignModel.kt`. Survey campaigns are delivered as the
 // campaign's `surveyConfig` (or a `templateConfig` with `templateType ==
 // "survey"`) and parsed into a `SurveyConfigModel`, mirroring Android.
@@ -103,7 +106,13 @@ struct CampaignModel: Equatable {
                     templateConfig,
                     stateful: stateful
                 ) else {
-                    DigiaLog.warning("campaign_skipped_unsupported: invalid inline timer config: key=\(campaignKey)")
+                    log.e(
+                        "Campaign skipped — invalid inline timer config",
+                        campaign: campaignKey,
+                        stage: .parse,
+                        reason: TimelineReason.campaignUnsupported,
+                        extras: ["type": "inlineCanvas"]
+                    )
                     return nil
                 }
                 canvasConfig.variableSchemas = schemas

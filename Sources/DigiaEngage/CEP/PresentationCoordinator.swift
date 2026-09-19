@@ -1,5 +1,8 @@
 import Foundation
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 /// The single writer of presentation state.
 ///
 /// Every live ``PresentationController`` in the SDK is opened here, indexed
@@ -123,10 +126,11 @@ final class PresentationCoordinator {
             guard let self else { return }
             try? await Task.sleep(nanoseconds: nanoseconds(self.acceptanceTimeout))
             guard !Task.isCancelled, !controller.isSettled else { return }
-            DigiaLog.error(
-                "[Digia] Campaign dropped — acceptance watchdog fired, still pending; releasing "
-                    + "the CEP hold: campaignKey=\(controller.trigger.campaignKey) "
-                    + "presentationId=\(controller.id) timeout=\(Int(self.acceptanceTimeout * 1000))ms"
+            log.e(
+                "Dropped — acceptance watchdog fired, still pending; releasing the CEP hold "
+                    + "(presentationId=\(controller.id), "
+                    + "timeout=\(Int(self.acceptanceTimeout * 1000))ms)",
+                campaign: controller.trigger.campaignKey
             )
             controller.settle(
                 .dropped(
@@ -150,11 +154,11 @@ final class PresentationCoordinator {
             try? await Task.sleep(nanoseconds: nanoseconds(self.anchorLayoutTimeout))
             guard !Task.isCancelled, !controller.isSettled else { return }
             let displaying = controller.state == .displaying
-            DigiaLog.warning(
-                "[Digia] Campaign ended — anchor watchdog fired, no layout in "
-                    + "\(Int(self.anchorLayoutTimeout * 1000))ms: "
-                    + "campaignKey=\(payload.campaignKey) presentationId=\(controller.id) "
-                    + "displaying=\(displaying)"
+            log.e(
+                "Ended — anchor watchdog fired, no layout in "
+                    + "\(Int(self.anchorLayoutTimeout * 1000))ms "
+                    + "(presentationId=\(controller.id), displaying=\(displaying))",
+                campaign: payload.campaignKey
             )
             // Settle first, tear the surface down second. The teardown emits its
             // own `dismissed`, and settling after it would record whatever the

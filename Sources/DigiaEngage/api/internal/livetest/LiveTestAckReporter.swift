@@ -1,5 +1,8 @@
 import Foundation
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger("liveTest")
+
 /// Posts `received` / `shown` / `failed` ACKs to `POST .../testInvocation/ack`.
 /// Fire-and-forget: a failed post is logged and swallowed, not surfaced.
 @MainActor
@@ -43,11 +46,11 @@ final class LiveTestAckReporter {
         Task { [sender] in
             do {
                 let code = try await sender.post(url: DigiaEndpoints.liveTestAck, body: data, headers: headers)
-                DigiaLog.log(
-                    "testInvocation/ack HTTP \(code) (testInvocationId=\(testInvocationId), status=\(status))"
+                log.d(
+                    "Ack posted (status=\(code), invocationId=\(testInvocationId), result=\(status))"
                 )
             } catch {
-                DigiaLog.warning("testInvocation/ack post failed: \(error)")
+                log.e("Ack post failed (invocationId=\(testInvocationId))", error: error)
             }
         }
     }
