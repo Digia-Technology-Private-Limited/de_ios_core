@@ -158,3 +158,21 @@ public enum PresentationOutcome: Sendable, Equatable {
         }
     }
 }
+
+/// The timeline's reasons for a delivery that never displayed.
+///
+/// Purely additive: ``wire`` is the same pinned string ``DropReason/value``
+/// already is. The timeline reuses this enum rather than minting a twin symbol
+/// for each of its thirteen values — see ``DiagnosticReason``.
+extension DropReason: DiagnosticReason {
+    /// The pinned string form, identical to ``value``.
+    public var wire: String { rawValue }
+}
+
+/// The timeline's reasons for a delivery that displayed and then ended.
+///
+/// Additive, for the same reason as ``DropReason``'s conformance above.
+extension DismissReason: DiagnosticReason {
+    /// The pinned string form, identical to ``value``.
+    public var wire: String { rawValue }
+}
