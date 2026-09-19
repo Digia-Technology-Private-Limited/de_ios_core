@@ -5,18 +5,40 @@ import Testing
 /// Fake sender that records every call made against `recordComponents` —
 /// distinct from `FakeAnalyticsSender` (AnalyticsServiceTests.swift), which
 /// only counts calls to the `track` endpoint.
+///
+/// Guarded, because the service sends fire-and-forget from one unstructured
+/// `Task` per component: three concurrent `post`s racing on a plain `Array`
+/// lose appends, and how often depends on how long each task takes — which is
+/// not something a test should be asserting on.
 final class FakeComponentSender: AnalyticsSender, @unchecked Sendable {
+    private let lock = NSLock()
     private var _callCount = 0
-    var callCount: Int { _callCount }
-    private(set) var bodies: [[String: Any]] = []
+    private var _bodies: [[String: Any]] = []
+
+    var callCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _callCount
+    }
+
+    var bodies: [[String: Any]] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _bodies
+    }
 
     func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
         guard url == DigiaEndpoints.recordComponents else { return 200 }
-        _callCount += 1
-        if let parsed = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
-            bodies.append(parsed)
-        }
+        record(try? JSONSerialization.jsonObject(with: body) as? [String: Any])
         return 200
+    }
+
+    /// Synchronous on purpose: `NSLock` is unavailable from an async context.
+    private func record(_ parsed: [String: Any]?) {
+        lock.lock()
+        _callCount += 1
+        if let parsed { _bodies.append(parsed) }
+        lock.unlock()
     }
 }
 

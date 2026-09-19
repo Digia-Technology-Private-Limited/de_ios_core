@@ -290,7 +290,30 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             log.d("Campaign store populated (entries=[\(campaignStore.debugSummary)])")
         }
 
+        let wasReady = sdkState == .ready
         sdkState = .ready
+        // The first line a support ticket needs, and the answer to most
+        // "nothing shows up" reports: which build, which environment, and what
+        // verbosity is actually in force — with whether the app chose it. Once
+        // per process: on the RN path this method runs again for every bundle
+        // JS hands us.
+        if let config, !wasReady {
+            log.i(
+                "Digia SDK \(DigiaSdkVersion.value) initialized "
+                    + "(env=\(config.environment.name), "
+                    + "apiKey=\(maskSecret(config.apiKey)), "
+                    + "logLevel=\(config.logLevel.name) "
+                    + "(\(config.isLogLevelExplicit ? "explicit" : "default")))",
+                stage: .session,
+                reason: TimelineReason.sdkInitialized,
+                // No apiKey, masked or otherwise: extras are readable on the
+                // device and are what a support ticket screenshots.
+                extras: [
+                    "version": DigiaSdkVersion.value,
+                    "environment": config.environment.name,
+                ]
+            )
+        }
         if let config, let analyticsService {
             componentRegistry.configure(
                 config: config,
@@ -457,6 +480,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let screenName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let previousScreen = _currentScreen
         _currentScreen = screenName.isEmpty ? nil : screenName
+        // Pushed rather than pulled: staged records are emitted from threads
+        // that cannot read main-actor state. See `DigiaLogger.currentScreenName`.
+        DigiaLogger.currentScreenName = _currentScreen
         log.d("Current screen set (screen=\(_currentScreen ?? "<unset>"))")
         componentRegistry.recordPage(screenName)
         if previousScreen != _currentScreen {

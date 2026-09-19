@@ -141,13 +141,19 @@ struct DigiaLogger: Sendable {
         sinks.removeAll { $0 === sink }
     }
 
-    /// Supplies the screen the app is currently on, so staged records can be
-    /// stamped with it without every call site passing one.
+    /// The screen the app is currently on, so staged records can be stamped
+    /// with it without every call site passing one.
     ///
-    /// Set once by `Digia.initialize()`. A closure rather than a value because
-    /// the screen changes constantly and the logger must never hold a stale
-    /// one; nil before init.
-    nonisolated(unsafe) static var screenNameSource: (@Sendable () -> String?)?
+    /// Written by `Digia.setCurrentScreen()` — the SDK's single source of truth
+    /// for screen scoping — and nil until the host names one.
+    ///
+    /// platform note: Dart holds a *closure* here and calls it per record.
+    /// That is not available to us: the current screen lives on the main-actor
+    /// `SDKInstance`, and records are emitted from URLSession callbacks and
+    /// watchdog tasks too. Pushing the value on change instead keeps the read
+    /// free and the isolation honest — same "write rarely, read often" contract
+    /// as ``level``.
+    nonisolated(unsafe) static var currentScreenName: String?
 
     /// Whether the configured level admits `severity`. The console's gate, and
     /// nothing else's.
@@ -259,7 +265,7 @@ struct DigiaLogger: Sendable {
             presentationId: presentationId,
             // Stamped only when it can be read — an unstaged record has no
             // consumer for it, and this runs on every console line.
-            screenName: stage == nil ? nil : Self.screenNameSource?(),
+            screenName: stage == nil ? nil : Self.currentScreenName,
             extras: TimelineRecord.boundExtras(extras),
             cause: error.map { String(describing: $0) }
         )

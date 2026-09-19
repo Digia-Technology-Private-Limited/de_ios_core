@@ -64,6 +64,30 @@ private let isHostDebugBuild = DigiaDebugDetection.isDebugBuild()
 public enum DigiaEnvironment: Sendable, Equatable {
     case production
     case sandbox
+
+    /// The word the init banner prints. Spelled out rather than derived, so it
+    /// stays the same word the Kotlin and Dart banners print.
+    var name: String {
+        switch self {
+        case .production: return "production"
+        case .sandbox: return "sandbox"
+        }
+    }
+}
+
+extension DigiaLogLevel {
+    /// The word the init banner prints, matching the Kotlin and Dart banners.
+    var name: String {
+        switch self {
+        case .none: return "none"
+        case .error: return "error"
+        case .warn: return "warn"
+        case .info: return "info"
+        case .debug: return "debug"
+        case .verbose: return "verbose"
+        case .auto: return "auto"
+        }
+    }
 }
 
 public enum DigiaThemeMode: String, Sendable, Equatable {

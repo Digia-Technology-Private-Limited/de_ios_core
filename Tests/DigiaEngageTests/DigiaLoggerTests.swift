@@ -172,6 +172,23 @@ struct DigiaLoggerTests {
         #expect(DigiaConfig(apiKey: "prod_123", logLevel: .none).logLevel == .none)
     }
 
+    // MARK: - Secrets
+
+    /// A dev console gets pasted into tickets and screenshots, and the default
+    /// verbosity outside release is `debug` — so anything logged is, in
+    /// practice, logged everywhere.
+    @Test("masks a secret as first-4 + .... + last-4, and short ones entirely")
+    func masksSecrets() {
+        #expect(maskSecret("dg_a1b2c3d4e5f9b2") == "dg_a....f9b2")
+        #expect(maskSecret("digia_57ab99ca4f") == "digi....ca4f")
+        // Eight of twelve reveals more than it hides.
+        #expect(maskSecret("short") == "****")
+        #expect(maskSecret("elevenchars") == "****")
+        #expect(maskSecret("twelvechars!") == "twel....ars!")
+        #expect(maskSecret(nil) == "****")
+        #expect(maskSecret("") == "****")
+    }
+
     // MARK: - Extras bounds
 
     /// One unbounded value repeated across a full ring is a leak with a log
