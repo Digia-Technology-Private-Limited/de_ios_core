@@ -427,6 +427,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// has one code path either way. Never make this `async` — spec §10.3.
     func deliver(_ trigger: CEPTriggerPayload) -> CampaignPresentation {
         let controller = coordinator.open(trigger, owner: activePlugin?.id ?? "")
+        // Before routing, so a trigger that is turned away still shows up on
+        // the timeline as having arrived. "Nothing happened at all" and "it
+        // arrived and we turned it away" are the two answers a campaign creator
+        // most needs to tell apart.
+        observeDelivery(controller)
         // Routing must see the stamped payload: it is the instance every render
         // surface stores and hands back, and the only thing that leads an event
         // back to this presentation.

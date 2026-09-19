@@ -87,10 +87,14 @@ struct DigiaLoggerTests {
     func loggerPrefix() {
         // Through the real emit path: a lowerCamelCase tag still renders in the
         // fixed-width shape the column alignment depends on.
-        let captured = capture(DigiaLogger("liveTest")) { $0.i("Stream connected (deviceId=abc123)") }
-        #expect(captured == ["🔵 [DIGIA-LIVETEST] [INFO]: Stream connected (deviceId=abc123)"])
-        #expect(capture(DigiaLogger()) { $0.e("Survey submission post failed") }
-            == ["🔴 [DIGIA] [ERROR]: Survey submission post failed"])
+        #expect(
+            capture(DigiaLogger("liveTest"), "Stream connected (deviceId=abc123)") { logger, message in
+                logger.i(message)
+            } == "🔵 [DIGIA-LIVETEST] [INFO]: Stream connected (deviceId=abc123)")
+        #expect(
+            capture(DigiaLogger(), "Survey submission post failed") { logger, message in
+                logger.e(message)
+            } == "🔴 [DIGIA] [ERROR]: Survey submission post failed")
     }
 
     @Test("re-prefixes every line of a multi-line message, slot included")
@@ -116,12 +120,23 @@ struct DigiaLoggerTests {
     }
 
     /// Captures what one logger's call renders, without going near `os_log`.
-    private func capture(_ logger: DigiaLogger, _ body: (DigiaLogger) -> Void) -> [String] {
+    ///
+    /// The registry is process-wide and the suites run in parallel, so the
+    /// record is found by a marker unique to this call rather than by being the
+    /// only one that arrived.
+    private func capture(
+        _ logger: DigiaLogger,
+        _ message: String,
+        _ body: (DigiaLogger, String) -> Void
+    ) -> String? {
+        let marker = " \u{2063}\(UUID().uuidString)"
         let sink = RecordingSink()
         DigiaLogger.registerSink(sink)
         defer { DigiaLogger.unregisterSink(sink) }
-        body(logger)
-        return sink.records.flatMap(ConsoleSink.lines(for:))
+        body(logger, message + marker)
+        let mine = sink.records.first { $0.message.hasSuffix(marker) }
+        return mine.flatMap { ConsoleSink.lines(for: $0).first }?
+            .replacingOccurrences(of: marker, with: "")
     }
 
     // MARK: - The level ladder

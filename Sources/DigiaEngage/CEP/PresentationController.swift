@@ -1,3 +1,6 @@
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 /// The **write face** of a presentation: the half only the hosting core holds.
 ///
 /// One presentation, two types — exactly as `CheckedContinuation` and its
@@ -233,10 +236,7 @@ private final class PresentationBacking: CampaignPresentation {
     private func releaseHold() {
         guard !holdReleased.isSettled else { return }
         holdReleased.settle(())
-        DigiaLogger().d(
-            "CEP hold released (presentationId=\(id))",
-            campaign: trigger.campaignKey
-        )
+        log.d("CEP hold released (presentationId=\(id))", campaign: trigger.campaignKey)
     }
 
     private func emit(_ signal: PresentationSignal) {
