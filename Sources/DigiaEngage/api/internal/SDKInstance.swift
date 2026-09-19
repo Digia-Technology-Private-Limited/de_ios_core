@@ -669,10 +669,21 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         isHostMounted = false
     }
 
+    /// v1's boolean face, until `DigiaCEPDelegate` is deleted at N4's last step.
     func onCampaignTriggered(_ payload: CEPTriggerPayload) -> Bool {
+        routeOrganicTrigger(payload).isAccepted
+    }
+
+    /// Routes an organically delivered trigger and answers what happened to it.
+    ///
+    /// The verdict — not a boolean — is what a plugin holding a CEP slot needs:
+    /// `unknown_campaign_key` and `frequency_capped` are the same "false" to a
+    /// caller that can only see accepted/not, and only one of them is a bug.
+    @discardableResult
+    func routeOrganicTrigger(_ payload: CEPTriggerPayload) -> RoutingVerdict {
         lastCampaignDropReason = nil
         logVerbose(
-            "onCampaignTriggered cepCampaignId='\(payload.cepCampaignId)' "
+            "deliver cepCampaignId='\(payload.cepCampaignId)' "
                 + "campaignKey='\(payload.campaignKey)'")
         // Route purely by the campaignKey resolved from the store (mirrors
         // Android) — fall back to cepCampaignId when no campaignKey was supplied.
@@ -681,20 +692,21 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             key.isEmpty
             ? payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
             : key
-        guard !resolvedKey.isEmpty, campaignStore.find(resolvedKey) != nil else {
+        guard !resolvedKey.isEmpty, let campaign = campaignStore.find(resolvedKey) else {
             lastCampaignDropReason = "no native campaign for key '\(resolvedKey)'"
             logError(
                 "campaign dropped — no campaign for key '\(resolvedKey)' knownKeys=[\(campaignStore.keys.joined(separator: ", "))]"
             )
-            return false
-        }
-        return routeByCampaignKey(resolvedKey, payload: payload)
-    }
-
-    private func routeByCampaignKey(_ key: String, payload: CEPTriggerPayload) -> Bool {
-        guard let campaign = campaignStore.find(key) else {
-            logError("routeByCampaignKey: no campaign found for key '\(key)'")
-            return false
+            // An empty store before the bundle lands is not an unknown key — it
+            // is a trigger that arrived before there was anything to look it up
+            // in, and the two want different fixes from whoever reads the drop.
+            let missedInit = sdkState != .ready && campaignStore.keys.isEmpty
+            return .dropped(
+                reason: missedInit ? .notInitialized : .unknownCampaignKey,
+                detail: missedInit
+                    ? "trigger arrived before the campaign bundle (state=\(sdkState))"
+                    : "no campaign for key '\(resolvedKey)'"
+            )
         }
         return route(
             campaign, payload: payload,
@@ -792,7 +804,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         _ campaign: CampaignModel,
         payload: CEPTriggerPayload,
         context: RoutingContext
-    ) -> Bool {
+    ) -> RoutingVerdict {
         let key = campaign.campaignKey
         if !campaign.targetScreenNames.isEmpty
             && !campaign.targetScreenNames.contains(_currentScreen ?? "")
@@ -810,7 +822,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     + "targetScreenNames=\(campaign.targetScreenNames)"
             )
             context.onDropped(.noMatchingScreen, message: "screen not targeted")
-            return false
+            return .dropped(
+                reason: .screenNotTargeted,
+                detail:
+                    "currentScreen=\(_currentScreen ?? "<unset>") targetScreenNames=\(campaign.targetScreenNames)"
+            )
         }
 
         logVerbose("routeByCampaignKey key='\(key)' type='\(campaign.campaignType)'")
@@ -821,12 +837,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             inlineController.setCarouselConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             context.onInlineRouted(payload: payload)
-            return true
+            return .accepted(payload: payload, kind: .inline)
         case .banner(let cfg):
             inlineController.setBannerConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             context.onInlineRouted(payload: payload)
-            return true
+            return .accepted(payload: payload, kind: .inline)
         case .inlineCanvas(let cfg):
             logVerbose("routeByCampaignKey INLINE CANVAS slotKey='\(cfg.slotKey)'")
             if let runtime = cfg.statefulTimer, runtime.resolve(payload.variables) == nil {
@@ -834,17 +850,17 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 lastCampaignDropReason = reason
                 DigiaLog.warning("campaign_skipped_unsupported: \(reason): key=\(key)")
                 context.onDropped(.templateError, message: reason)
-                return false
+                return .dropped(reason: .invalidConfig, detail: reason)
             }
             inlineController.setCanvasConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             context.onInlineRouted(payload: payload)
-            return true
+            return .accepted(payload: payload, kind: .inline)
         case .story(let cfg):
             inlineController.setStoryConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             context.onInlineRouted(payload: payload)
-            return true
+            return .accepted(payload: payload, kind: .inline)
         case .guide(let guideConfig):
             if !guideConfig.isAnchorless,
                config?.wrapperBinding == "react_native",
@@ -855,42 +871,42 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     lastCampaignDropReason = message
                     context.onDropped(.renderError, message: message)
                     logNativeGuideStage("route", "result=dropped reason=js_renderer_missing campaign_key=\(key)")
-                    return false
+                    return .dropped(reason: .hostNotMounted, detail: message)
                 }
                 if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                     lastCampaignDropReason = "frequency capped"
-                    return false
+                    return .dropped(reason: .frequencyCapped, detail: nil)
                 }
                 activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
                 renderViaJs(payload)
-                return true
+                return .accepted(payload: payload, kind: .modal)
             }
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
                 logNativeGuideStage("route", "result=dropped reason=frequency_capped campaign_key=\(key)")
-                return false
+                return .dropped(reason: .frequencyCapped, detail: nil)
             }
             guard guideConfig.steps.allSatisfy({ $0.widgetConfig.canvas != nil }) else {
                 let message = "campaign has no valid Canvas guide content"
                 lastCampaignDropReason = message
                 context.onDropped(.renderError, message: message)
                 DigiaLog.warning("[Guide] \(message)")
-                return false
+                return .dropped(reason: .invalidConfig, detail: message)
             }
             if guideOrchestrator.state != nil, !guideConfig.steps.isEmpty { dismissGuide() }
             guard guideOrchestrator.start(campaign, payload: payload) else {
                 lastCampaignDropReason = "another guide is already on screen"
                 context.onDropped(.renderError, message: "another guide is already on screen")
                 logNativeGuideStage("route", "result=dropped reason=guide_active campaign_key=\(key)")
-                return false
+                return .dropped(reason: .surfaceBusy, detail: "another guide is already on screen")
             }
             guideCompletionFired = false
             logNativeGuideStage("route", "result=accepted campaign_key=\(key)")
-            return true
+            return .accepted(payload: payload, kind: .modal)
         case .nudge(let nudgeConfig):
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
-                return false
+                return .dropped(reason: .frequencyCapped, detail: nil)
             }
             // Resolve variable context: dashboard schemas define type + fallback;
             // CEP trigger variables win over fallbacks (D3′).
@@ -905,11 +921,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     variables: variableContext.values.isEmpty && variableContext.types.isEmpty
                         ? nil : variableContext
                 ))
-            return true
+            return .accepted(payload: payload, kind: .modal)
         case .survey(let cfg):
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
-                return false
+                return .dropped(reason: .frequencyCapped, detail: nil)
             }
             let activeSurveyCepId = surveyOrchestrator.state?.payload.cepCampaignId
             let replaceActiveLiveTestCanvasSurvey =
@@ -928,14 +944,15 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 lastCampaignDropReason = "another survey is already on screen"
                 logVerbose("survey campaign dropped: another survey is on screen: \(key)")
                 context.onDropped(.renderError, message: "another survey is already on screen")
+                return .dropped(reason: .surfaceBusy, detail: "another survey is already on screen")
             }
-            return started
+            return .accepted(payload: payload, kind: .modal)
         // Both floater subtypes route through the same gate — a collapsed window of
         // either kind is the same third, non-blocking lane.
         case .floater, .floaterStory:
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
-                return false
+                return .dropped(reason: .frequencyCapped, detail: nil)
             }
             // A collapsed floater is a third, independent lane (see
             // `isModalCampaignActive`'s kdoc) — it does not compete with
@@ -950,7 +967,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 context.onDropped(
                     .renderError,
                     message: "a nudge, survey, or expanded floater is already on screen")
-                return false
+                return .dropped(
+                    reason: .surfaceBusy,
+                    detail: "a nudge, survey, or expanded floater is already on screen")
             }
             // One floater at a time across BOTH subtypes. Each orchestrator only knows
             // about its own showing, so without this a PiP and a story window could
@@ -962,7 +981,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 lastCampaignDropReason = "another floater is already on screen"
                 logVerbose("floater campaign dropped: another floater is on screen: \(key)")
                 context.onDropped(.renderError, message: "another floater is already on screen")
-                return false
+                return .dropped(reason: .surfaceBusy, detail: "another floater is already on screen")
             }
             // Two template shapes under one campaign type, each with its own
             // orchestrator — see `CampaignConfigModel.floaterStory`.
@@ -978,8 +997,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     )
                     context.onDropped(
                         .renderError, message: "another floater is already on screen")
+                    return .dropped(
+                        reason: .invalidConfig,
+                        detail: floaterStoryOrchestrator.lastStartFailureReason
+                            ?? "story floater start failed")
                 }
-                return started
+                return .accepted(payload: payload, kind: .floating)
             }
             let started = floaterOrchestrator.start(
                 campaign, payload: payload, screenName: _currentScreen)
@@ -990,8 +1013,11 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     "[SDKInstance] Floater campaign skipped: key=\(key) currentScreen=\(_currentScreen ?? "<unset>") reason=\(floaterOrchestrator.lastStartFailureReason ?? "unknown")"
                 )
                 context.onDropped(.renderError, message: "another floater is already on screen")
+                return .dropped(
+                    reason: .invalidConfig,
+                    detail: floaterOrchestrator.lastStartFailureReason ?? "floater start failed")
             }
-            return started
+            return .accepted(payload: payload, kind: .floating)
         }
     }
 
@@ -1084,12 +1110,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         liveTestContexts[cepCampaignId] = testContext
         liveTestCampaigns[cepCampaignId] = campaign
 
-        let accepted = route(
+        let verdict = route(
             campaign,
             payload: payload,
             context: LiveTestRoutingContext(testContext: testContext)
         )
-        if !accepted {
+        guard verdict.isAccepted else {
             cleanUpLiveTestState()
             return
         }
