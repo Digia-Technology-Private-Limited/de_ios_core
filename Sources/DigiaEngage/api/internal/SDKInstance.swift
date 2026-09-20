@@ -325,6 +325,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             } else if captureModeEnabled {
                 setCaptureModeEnabled(false)
             }
+            // A JS reload re-runs this whole method (RN calls
+            // `populateCampaignBundle` again), which re-configures the
+            // service below. Without this, any live-test invocation still
+            // in flight from before the reload keeps its watchdog running
+            // against post-reload state — a leak, not a failure, so it is
+            // cancelled rather than ACKed.
+            clearLiveTestState()
             liveTestService.configure(
                 config: config,
                 requestHeaders: requestHeaders,
@@ -701,7 +708,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             if let pageKey = guide.steps.first?.target.anchorlessTarget?.pageKey,
                pageKey != _currentScreen {
                 liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
-                    .noMatchingScreen,
+                    DropReason.screenNotTargeted,
                     message: "screen changed before the Guide was shown"
                 )
                 dismissGuide(reason: .screenExit)
@@ -712,7 +719,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     campaign: guide.campaign,
                     dismiss: {
                         self.liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
-                            .noMatchingScreen,
+                            DropReason.screenNotTargeted,
                             message: "screen changed before the Guide was shown"
                         )
                         self.dismissGuide(reason: .screenExit)
@@ -782,6 +789,18 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         liveTestService
     }
 
+    /// Cancels every in-flight live-test watchdog and drops its bookkeeping,
+    /// without posting an ACK — an abandoned invocation is not a failed one,
+    /// and the dashboard's own `no_response` alarm is what accounts for it
+    /// from here. Called whenever the live-test service is (re)configured, so
+    /// an RN JS reload can never leave a stale context's watchdog running
+    /// against post-reload state.
+    private func clearLiveTestState() {
+        liveTestContexts.values.forEach { $0.invalidate() }
+        liveTestContexts.removeAll()
+        liveTestCampaigns.removeAll()
+    }
+
     /// Exposes bubble visibility to `RecordingBadgeView` and `DigiaDebugSettingsView`.
     func debugOverlayControllerSnapshot() -> DigiaDebugOverlayController {
         debugOverlayController
@@ -842,7 +861,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private protocol RoutingContext {
         func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool
         func onInlineRouted(payload: CEPTriggerPayload)
-        func onDropped(_ code: LiveTestFailureCode, message: String)
+        func onDropped(_ code: DiagnosticReason, message: String)
     }
 
     @MainActor
@@ -867,15 +886,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             // Inline impressions are reported when the slot first renders.
         }
 
-        func onDropped(_ code: LiveTestFailureCode, message: String) {
+        func onDropped(_ code: DiagnosticReason, message: String) {
             // Nothing to report organically — the caller already logged why.
         }
     }
-
-    /// Seconds a live-test inline campaign waits for its target slot to mount
-    /// before giving up. Inline routing always "succeeds" immediately, so this
-    /// stands in for the synchronous anchor check guide gets.
-    private static let liveTestNoMatchTimeoutSeconds: UInt64 = 5
 
     @MainActor
     private final class LiveTestRoutingContext: RoutingContext {
@@ -888,21 +902,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool { false }
 
         func onInlineRouted(payload: CEPTriggerPayload) {
-            // No synchronous way to know a matching DigiaSlot exists — bound it
-            // with a timeout; reportSlotFirstRender's shown ACK wins the race if
-            // a slot renders first (LiveTestContext is idempotent).
-            let testContext = testContext
-            let seconds = SDKInstance.liveTestNoMatchTimeoutSeconds
-            Task {
-                try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
-                testContext.reportFailed(
-                    .noMatchingScreen,
-                    message: "no matching slot for this campaign mounted within \(seconds)s"
-                )
-            }
+            // No synchronous way to know a matching DigiaSlot exists anywhere
+            // in the app, so the invocation's own watchdog stands in for the
+            // anchor check a guide gets — this only narrows its verdict to
+            // the inline one. reportSlotFirstRender's shown ACK wins the race
+            // if a slot renders first (LiveTestContext is idempotent).
+            testContext.expectSlotToMount()
         }
 
-        func onDropped(_ code: LiveTestFailureCode, message: String) {
+        func onDropped(_ code: DiagnosticReason, message: String) {
             testContext.reportFailed(code, message: message)
         }
     }
@@ -934,17 +942,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         {
             lastCampaignDropReason =
                 "screen not targeted: currentScreen=\(_currentScreen ?? "<unset>") targetScreenNames=\(campaign.targetScreenNames)"
-            context.onDropped(
-                .noMatchingScreen,
-                message:
-                    "currentScreen=\(_currentScreen ?? "<unset>") targetScreenNames=\(campaign.targetScreenNames)"
-            )
             log.d(
                 "Dropped — screen not targeted (current=\(_currentScreen ?? "<unset>"), "
                     + "targets=\(campaign.targetScreenNames))",
                 campaign: key
             )
-            context.onDropped(.noMatchingScreen, message: "screen not targeted")
+            context.onDropped(DropReason.screenNotTargeted, message: "screen not targeted")
             return .dropped(
                 reason: .screenNotTargeted,
                 detail:
@@ -972,7 +975,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 let reason = "inline timer campaign has invalid runtime variables"
                 lastCampaignDropReason = reason
                 log.e("Dropped — \(reason)", campaign: key)
-                context.onDropped(.templateError, message: reason)
+                context.onDropped(DropReason.invalidConfig, message: reason)
                 return .dropped(reason: .invalidConfig, detail: reason)
             }
             inlineController.setCanvasConfig(cfg.slotKey, config: cfg)
@@ -992,7 +995,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 guard let renderViaJs = onGuideRenderRequest else {
                     let message = "React Native guide renderer is not registered"
                     lastCampaignDropReason = message
-                    context.onDropped(.renderError, message: message)
+                    context.onDropped(DropReason.hostNotMounted, message: message)
                     logNativeGuideStage("route", "result=dropped reason=js_renderer_missing campaign_key=\(key)")
                     return .dropped(reason: .hostNotMounted, detail: message)
                 }
@@ -1012,14 +1015,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             guard guideConfig.steps.allSatisfy({ $0.widgetConfig.canvas != nil }) else {
                 let message = "campaign has no valid Canvas guide content"
                 lastCampaignDropReason = message
-                context.onDropped(.renderError, message: message)
+                context.onDropped(DropReason.invalidConfig, message: message)
                 log.e("Dropped — \(message)", campaign: key)
                 return .dropped(reason: .invalidConfig, detail: message)
             }
             if guideOrchestrator.state != nil, !guideConfig.steps.isEmpty { dismissGuide() }
             guard guideOrchestrator.start(campaign, payload: payload) else {
                 lastCampaignDropReason = "another guide is already on screen"
-                context.onDropped(.renderError, message: "another guide is already on screen")
+                context.onDropped(DropReason.surfaceBusy, message: "another guide is already on screen")
                 logNativeGuideStage("route", "result=dropped reason=guide_active campaign_key=\(key)")
                 return .dropped(reason: .surfaceBusy, detail: "another guide is already on screen")
             }
@@ -1057,6 +1060,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 && activeSurveyCepId.map(isLiveTestCepId) == true
             if replaceActiveLiveTestCanvasSurvey {
                 markSurveyDismissed()
+                // Safe on anything, including a survey that already showed —
+                // reportFailed is idempotent, so this only actually changes
+                // the outcome of a test displaced before it ever appeared.
+                supersedeLiveTest(activeSurveyCepId)
             }
             let started = surveyOrchestrator.start(
                 payload: payload,
@@ -1066,7 +1073,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             if !started {
                 lastCampaignDropReason = "another survey is already on screen"
                 logVerbose("survey campaign dropped: another survey is on screen: \(key)")
-                context.onDropped(.renderError, message: "another survey is already on screen")
+                context.onDropped(DropReason.surfaceBusy, message: "another survey is already on screen")
                 return .dropped(reason: .surfaceBusy, detail: "another survey is already on screen")
             }
             return .accepted(payload: payload, kind: .modal)
@@ -1088,7 +1095,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     "floater campaign dropped: a nudge, survey, or expanded floater is already modal: \(key)"
                 )
                 context.onDropped(
-                    .renderError,
+                    DropReason.surfaceBusy,
                     message: "a nudge, survey, or expanded floater is already on screen")
                 return .dropped(
                     reason: .surfaceBusy,
@@ -1103,7 +1110,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             if otherLaneBusy {
                 lastCampaignDropReason = "another floater is already on screen"
                 logVerbose("floater campaign dropped: another floater is on screen: \(key)")
-                context.onDropped(.renderError, message: "another floater is already on screen")
+                context.onDropped(DropReason.surfaceBusy, message: "another floater is already on screen")
                 return .dropped(reason: .surfaceBusy, detail: "another floater is already on screen")
             }
             // Two template shapes under one campaign type, each with its own
@@ -1121,7 +1128,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                         campaign: key
                     )
                     context.onDropped(
-                        .renderError, message: "another floater is already on screen")
+                        DropReason.invalidConfig, message: "another floater is already on screen")
                     return .dropped(
                         reason: .invalidConfig,
                         detail: floaterStoryOrchestrator.lastStartFailureReason
@@ -1139,7 +1146,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                         + "reason=\(floaterOrchestrator.lastStartFailureReason ?? "unknown"))",
                     campaign: key
                 )
-                context.onDropped(.renderError, message: "another floater is already on screen")
+                context.onDropped(DropReason.invalidConfig, message: "another floater is already on screen")
                 return .dropped(
                     reason: .invalidConfig,
                     detail: floaterOrchestrator.lastStartFailureReason ?? "floater start failed")
@@ -1149,13 +1156,37 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     /// Handles one `campaign_test` SSE event.
+    ///
+    /// The `catch` is the outermost half of "every invocation ends in a
+    /// terminal ACK". This runs on an SSE callback with nothing above it, so
+    /// without it a throw anywhere in parsing or routing would escape into
+    /// the stream handler and the dashboard row would simply stop moving.
     private func handleLiveTestCampaign(_ invocation: LiveTestInvocation) {
+        do {
+            try routeLiveTestCampaign(invocation)
+        } catch {
+            log.e("Live test failed — routing threw", error: error)
+            // Through the context when one exists, so the single-fire guard
+            // holds and the watchdog is disarmed; directly otherwise, because
+            // a throw before the context was built still owes the dashboard
+            // an answer.
+            let cepCampaignId = liveTestCepId(invocation.testInvocationId)
+            if let context = liveTestContexts[cepCampaignId] {
+                context.reportFailed(DropReason.error, message: "\(error)")
+            } else {
+                liveTestService.ackReporter.postFailed(
+                    invocation.testInvocationId, code: DropReason.error, message: "\(error)")
+            }
+        }
+    }
+
+    private func routeLiveTestCampaign(_ invocation: LiveTestInvocation) throws {
         let reporter = liveTestService.ackReporter
         reporter.postReceived(invocation.testInvocationId)
 
         guard sdkState == .ready else {
             reporter.postFailed(
-                invocation.testInvocationId, code: .renderError,
+                invocation.testInvocationId, code: DropReason.notInitialized,
                 message: "SDK not ready (state=\(sdkState))"
             )
             return
@@ -1163,7 +1194,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
         guard let campaignJson = invocation.campaign else {
             reporter.postFailed(
-                invocation.testInvocationId, code: .campaignNotFound,
+                invocation.testInvocationId, code: TimelineReason.malformedCampaignSkipped,
                 message: "campaign_test message had no usable campaign object"
             )
             return
@@ -1180,7 +1211,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             timeAnchor: currentTimeAnchor
         ) else {
             reporter.postFailed(
-                invocation.testInvocationId, code: .templateError,
+                invocation.testInvocationId, code: TimelineReason.malformedCampaignSkipped,
                 message: "campaign object could not be parsed into a renderable campaign"
             )
             return
@@ -1194,7 +1225,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         guard supportsLiveTest else {
             reporter.postFailed(
-                invocation.testInvocationId, code: .templateError,
+                invocation.testInvocationId, code: TimelineReason.campaignUnsupported,
                 message:
                     "campaign type '\(campaign.campaignType)' is not supported for live testing yet"
             )
@@ -1206,7 +1237,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         {
             reporter.postFailed(
                 invocation.testInvocationId,
-                code: .templateError,
+                code: TimelineReason.campaignUnsupported,
                 message: "Classic Guides cannot be tested on a device"
             )
             return
@@ -1254,27 +1285,17 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             )
         }
         if campaign.guideConfig != nil {
-            let seconds = Self.liveTestNoMatchTimeoutSeconds
-            let graceNanoseconds = seconds * 1_000_000_000
-            let maxDelayMs = (UInt64.max - graceNanoseconds) / 1_000_000
-            let delayMs = min(
-                UInt64(max(0, campaign.guideConfig?.steps.first?.delayInMs ?? 0)),
-                maxDelayMs
-            )
-            Task { [weak self] in
-                try? await Task.sleep(
-                    nanoseconds: delayMs * 1_000_000 + graceNanoseconds)
-                guard let self,
-                      let context = self.liveTestContexts[cepCampaignId]
+            // No per-kind timer here any more — the context's own
+            // per-invocation watchdog (armed in its initializer) is what
+            // gives up if the guide host never renders it, and this just
+            // adds the guide-specific teardown that firing implies: a guide
+            // that silently never appeared must not linger in
+            // `guideOrchestrator.state`.
+            testContext.onWatchdogFired = { [weak self] in
+                guard let self, self.guideOrchestrator.state?.payload.cepCampaignId == cepCampaignId
                 else { return }
-                context.reportFailed(
-                    .renderError,
-                    message: "Guide host did not render within \(seconds)s"
-                )
-                if self.guideOrchestrator.state?.payload.cepCampaignId == cepCampaignId {
-                    self.guideOrchestrator.dismiss()
-                    self.guideCompletionFired = false
-                }
+                self.guideOrchestrator.dismiss()
+                self.guideCompletionFired = false
             }
         }
     }
@@ -1301,7 +1322,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 }
             }
             testContext.reportFailed(
-                .noMatchingScreen,
+                DropReason.anchorNotRegistered,
                 message: "anchor '\(anchorKey)' is not on screen"
             )
             self.guideOrchestrator.dismissIfActive(payloadId: payload.cepCampaignId)
@@ -1309,13 +1330,26 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
+    /// Ends the live test that owned `cepCampaignId`, if it was one. Every
+    /// pre-emption should funnel through here so a test displaced by a newer
+    /// one can never be the row that just stops ACKing.
+    ///
+    /// Safe to call on anything: not-a-live-test returns immediately, and
+    /// `LiveTestContext` is single-fire, so a test that already reported
+    /// `shown` keeps that answer. This only catches the ones displaced before
+    /// they ever appeared.
+    private func supersedeLiveTest(_ cepCampaignId: String?) {
+        guard let cepCampaignId, isLiveTestCepId(cepCampaignId) else { return }
+        liveTestContexts[cepCampaignId]?.reportFailed(
+            DropReason.superseded,
+            message: "superseded by a newer live test"
+        )
+    }
+
     private func replaceActiveLiveTestGuide() {
         if let state = guideOrchestrator.state,
            isLiveTestCepId(state.payload.cepCampaignId) {
-            liveTestContexts[state.payload.cepCampaignId]?.reportFailed(
-                .renderError,
-                message: "replaced by a newer live-test invocation"
-            )
+            supersedeLiveTest(state.payload.cepCampaignId)
             guideOrchestrator.dismissIfActive(payloadId: state.payload.cepCampaignId)
             guideCompletionFired = false
         }
@@ -2295,13 +2329,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         } else {
             dismissGuide(reason: .autoTimeout)
         }
-        let code: LiveTestFailureCode = switch failure {
-        case .pageKeyMismatch: .noMatchingScreen
-        case .invalidTarget: .templateError
-        case .unsupportedLayout, .invalidGeometry, nil: .renderError
-        }
+        // Same mapping the organic drop two lines up just used — keeping a
+        // second, live-test-only mapping beside it is exactly the two
+        // spellings of one reason the shared vocabulary exists to prevent.
         liveTestContexts[payload.cepCampaignId]?.reportFailed(
-            code,
+            Self.dropReason(for: failure),
             message: failure?.rawValue ?? "Anchorless Spotlight image could not be loaded"
         )
     }
@@ -2557,8 +2589,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         questionViewedAt.removeAll()
         liveTestService.stop()
         coordinator.resetForTesting()
-        liveTestContexts.removeAll()
-        liveTestCampaigns.removeAll()
+        clearLiveTestState()
     }
 
 }
