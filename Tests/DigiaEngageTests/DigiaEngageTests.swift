@@ -317,7 +317,7 @@ struct DigiaEngageTests {
         let plugin = TestPlugin(id: "plugin")
         var renderRequested = false
         Digia.register(plugin)
-        SDKInstance.shared.onGuideRenderRequest = { _ in renderRequested = true }
+        SDKInstance.shared.onGuideRenderRequest = { _, _ in renderRequested = true }
         defer { SDKInstance.shared.onGuideRenderRequest = nil }
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
@@ -340,7 +340,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.resetForTesting()
         let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
-        SDKInstance.shared.onGuideRenderRequest = { _ in }
+        SDKInstance.shared.onGuideRenderRequest = { _, _ in }
         defer { SDKInstance.shared.onGuideRenderRequest = nil }
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
@@ -366,6 +366,181 @@ struct DigiaEngageTests {
 
         #expect(newGuide.isSettled)
         #expect(newGuide.isHoldReleased)
+    }
+
+    @Test("onGuideRenderRequest hands the RN bridge the real presentation id")
+    func guideRenderRequestReceivesRealPresentationId() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var receivedId: String?
+        SDKInstance.shared.onGuideRenderRequest = { _, presentationId in receivedId = presentationId }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-id-check", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+
+        let id = try #require(receivedId)
+        #expect(!id.isEmpty)
+        #expect(id == recorder.presentation.id)
+    }
+
+    @Test("reportExternalGuideLifecycle drives markDisplaying, emitClicked and settle on the real controller")
+    func reportExternalGuideLifecycleDrivesRealController() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var presentationId: String?
+        SDKInstance.shared.onGuideRenderRequest = { _, id in presentationId = id }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-verbs", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+        let id = try #require(presentationId)
+
+        #expect(!recorder.displayed)
+        SDKInstance.shared.reportExternalGuideLifecycle(presentationId: id, event: .displaying)
+        #expect(recorder.displayed)
+        #expect(!recorder.isSettled)
+
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id, event: .clicked(elementId: "primary-cta"))
+        #expect(recorder.clickedElementIds == ["primary-cta"])
+        #expect(!recorder.isSettled)
+
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id, event: .settled(.dismissed(reason: .ctaAction, completed: true)))
+        #expect(recorder.isSettled)
+        #expect(recorder.isHoldReleased)
+        #expect(recorder.dismissReason == .ctaAction)
+    }
+
+    @Test("reportExternalGuideLifecycle settles dropped for a presentation that never displayed")
+    func reportExternalGuideLifecycleSettlesDropped() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var presentationId: String?
+        SDKInstance.shared.onGuideRenderRequest = { _, id in presentationId = id }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-dropped", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+        let id = try #require(presentationId)
+
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id,
+            event: .settled(.dropped(reason: .invalidConfig, detail: "js declined to render")))
+
+        #expect(recorder.isSettled)
+        #expect(recorder.isHoldReleased)
+        #expect(recorder.dropReason == .invalidConfig)
+        #expect(!recorder.displayed)
+    }
+
+    @Test("Digia.reportExternalGuideLifecycle hops off-main-thread calls onto the real controller")
+    func digiaReportExternalGuideLifecycleHopsToMainActor() async throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var presentationId: String?
+        SDKInstance.shared.onGuideRenderRequest = { _, id in presentationId = id }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-public-api", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+        let id = try #require(presentationId)
+
+        // The public entry point is `nonisolated` and hops via its own
+        // `Task { @MainActor in ... }` rather than requiring the caller to
+        // already be on the main actor — mirrors an `@objc` RN method arriving
+        // on the JS thread. Give that hop a couple of turns before asserting.
+        Digia.reportExternalGuideLifecycle(presentationId: id, event: .displaying)
+        await Task.yield()
+        await Task.yield()
+
+        #expect(recorder.displayed)
+    }
+
+    @Test("reportExternalGuideLifecycle is a silent no-op for an unknown or already-settled id")
+    func reportExternalGuideLifecycleNoOpForStaleId() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+
+        // Never minted by any delivery — must not crash and must change nothing.
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: "not-a-real-presentation-id", event: .displaying)
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: "not-a-real-presentation-id",
+            event: .settled(.dismissed(reason: .userClose, completed: false)))
+
+        // A real id, but reported against again after it already settled — the
+        // Metro-reload race the RN bridge is built to survive.
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var presentationId: String?
+        SDKInstance.shared.onGuideRenderRequest = { _, id in presentationId = id }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-stale", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+        let id = try #require(presentationId)
+
+        SDKInstance.shared.reportExternalGuideLifecycle(presentationId: id, event: .displaying)
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id, event: .settled(.dismissed(reason: .userClose, completed: false)))
+        #expect(recorder.isSettled)
+        #expect(recorder.dismissReason == .userClose)
+
+        // The stale report a Metro reload sends after native already settled on
+        // its own: a different (wrong) reason, which must never overwrite the
+        // real one.
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id, event: .clicked(elementId: "late-tap"))
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id, event: .settled(.dismissed(reason: .ctaAction, completed: true)))
+
+        #expect(recorder.dismissReason == .userClose)
+        #expect(recorder.clickedElementIds.isEmpty)
     }
 
     @Test("anchorless guide completion sends no click to the CEP")

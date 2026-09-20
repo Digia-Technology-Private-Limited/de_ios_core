@@ -217,10 +217,46 @@ public enum Digia {
 
     /// Registers the RN render hook. When set, guides are treated as JS-rendered:
     /// on a guide trigger the SDK applies frequency capping and, if allowed, invokes
-    /// this callback (with the trigger payload) to ask JS to render — it does not
+    /// this callback (with the trigger payload and the presentation id the
+    /// coordinator minted for this delivery) to ask JS to render — it does not
     /// render the guide natively. Used only by the React Native bridge.
-    public static func setOnGuideRenderRequest(_ callback: ((CEPTriggerPayload) -> Void)?) {
+    ///
+    /// The id is what a later ``reportExternalGuideLifecycle(presentationId:event:)``
+    /// call must use — it is the only thing that resolves back to the real
+    /// presentation the CEP's hold is on.
+    public static func setOnGuideRenderRequest(
+        _ callback: ((CEPTriggerPayload, String) -> Void)?
+    ) {
         SDKInstance.shared.onGuideRenderRequest = callback
+    }
+
+    /// Reports a lifecycle transition for an externally-rendered guide's
+    /// presentation — the JS-rendered path ``setOnGuideRenderRequest(_:)``
+    /// started, correlated by the `presentationId` that callback received.
+    ///
+    /// This is the one way a renderer outside this core can drive a
+    /// presentation: it never gets a ``PresentationController`` of its own to
+    /// hold, only an id and a verb, so there is no way to end up settling a
+    /// second, disconnected presentation instead of the real one.
+    ///
+    /// An unknown or already-settled `presentationId` is a silent no-op (with
+    /// a DEBUG-only log) — never a trap. A Metro reload makes JS report
+    /// lifecycle for a presentation native already settled on its own (a
+    /// screen change, the acceptance watchdog); that is a designed race, not a
+    /// caller error.
+    ///
+    /// Safe to call from any thread: React method calls arrive off the main
+    /// thread, and this hops to the main actor itself before touching any SDK
+    /// state, so a caller never needs its own `Task { @MainActor in ... }`
+    /// wrapper just to reach this one entry point.
+    nonisolated public static func reportExternalGuideLifecycle(
+        presentationId: String,
+        event: ExternalGuideLifecycleEvent
+    ) {
+        Task { @MainActor in
+            SDKInstance.shared.reportExternalGuideLifecycle(
+                presentationId: presentationId, event: event)
+        }
     }
 
     /// Records an analytics event for JS-rendered campaigns (guides / tooltips / spotlights).

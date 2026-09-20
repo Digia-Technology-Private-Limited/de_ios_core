@@ -128,7 +128,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// JS, so on a guide trigger native only applies frequency capping and (if
     /// allowed) invokes this hook to ask JS to render, instead of rendering the
     /// guide natively. Nil in pure-native apps, where guides render natively.
-    var onGuideRenderRequest: ((CEPTriggerPayload) -> Void)?
+    ///
+    /// The second argument is the presentation id the coordinator minted for
+    /// this delivery — the same id a later
+    /// ``reportExternalGuideLifecycle(presentationId:event:)`` call must use to
+    /// settle the real presentation the CEP's hold is on, rather than some
+    /// second, disconnected one the caller minted itself.
+    var onGuideRenderRequest: ((CEPTriggerPayload, String) -> Void)?
 
     // Event system (mirrors Android): a fan-out emitter over two sinks — the
     // coarse CEP channel (`toCep`) and Digia's rich analytics (`toDigia`).
@@ -1034,7 +1040,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     return .dropped(reason: .frequencyCapped, detail: nil)
                 }
                 activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
-                renderViaJs(payload)
+                // `payload` was stamped by `coordinator.open()` before routing
+                // ever saw it, so this is only ever empty for a delivery that
+                // bypassed that stamp — a live test's synthesised payload. The
+                // fallback is a harmless dead id rather than a crash: it simply
+                // never resolves in `reportExternalGuideLifecycle`.
+                renderViaJs(payload, payload.presentationId ?? "")
                 return .accepted(payload: payload, kind: .modal)
             }
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
@@ -2537,6 +2548,33 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             && activeExternalGuide?.payload.cepCampaignId == payloadID
         {
             activeExternalGuide = nil
+        }
+    }
+
+    /// Drives the real presentation an externally-rendered guide's render
+    /// surface (the RN bridge) is reporting lifecycle for.
+    ///
+    /// `presentationId` unknown, or already settled, is a silent no-op: the
+    /// coordinator forgets a presentation's id the moment it settles, so a
+    /// stale id — a Metro reload reporting against a presentation native
+    /// already settled on its own, e.g. through a screen change or the
+    /// acceptance watchdog — simply resolves to nothing here. That is a
+    /// designed race, never an error, so it never traps.
+    func reportExternalGuideLifecycle(presentationId: String, event: ExternalGuideLifecycleEvent) {
+        guard let controller = coordinator.controller(forPresentationId: presentationId) else {
+            log.d(
+                "reportExternalGuideLifecycle: no-op — unknown or already-settled presentation",
+                presentationId: presentationId
+            )
+            return
+        }
+        switch event {
+        case .displaying:
+            controller.markDisplaying()
+        case .clicked(let elementId):
+            controller.emitClicked(elementId: elementId)
+        case .settled(let outcome):
+            controller.settle(outcome)
         }
     }
 

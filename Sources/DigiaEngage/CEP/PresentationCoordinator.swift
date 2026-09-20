@@ -197,6 +197,19 @@ final class PresentationCoordinator {
         return live[id]?.controller
     }
 
+    /// The live presentation for a bare `id`, or nil when unknown or already
+    /// settled.
+    ///
+    /// Every other lookup here takes the stamped ``CEPTriggerPayload`` a render
+    /// surface still holds. A lifecycle report crossing the RN bridge for an
+    /// externally-rendered guide never gets that payload back — only the id it
+    /// was handed alongside it — so this is the one caller that has nothing but
+    /// the string. `forget(_:)` already removes a settled id from `live`, which
+    /// is what makes a stale or unrecognised id resolve to `nil` here for free.
+    func controller(forPresentationId id: String) -> PresentationController? {
+        live[id]?.controller
+    }
+
     /// Turns one coarse lifecycle event into a state transition on its owner.
     ///
     /// Total, and deliberately silent about payloads it does not know: a live
