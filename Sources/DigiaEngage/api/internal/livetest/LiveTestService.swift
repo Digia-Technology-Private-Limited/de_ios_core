@@ -77,8 +77,13 @@ final class LiveTestService: ObservableObject {
         }
     }
 
+    /// Persists the preference unconditionally, even before `configure()` has
+    /// run — the debug settings screen already gates its own visibility on a
+    /// debug build, so a second guard here only meant a toggle flipped before
+    /// the SDK reached ready (a real RN race, not a hypothetical) silently
+    /// failed to persist. The stream itself starts only when `client` exists,
+    /// i.e. once `configure()` has actually wired one up.
     func setEnabled(_ enabled: Bool) {
-        guard !enabled || isDebugBuildFlag else { return }
         isEnabled = enabled
         defaults.set(enabled, forKey: Self.enabledKey)
         if enabled { client?.start() } else { client?.stop() }
