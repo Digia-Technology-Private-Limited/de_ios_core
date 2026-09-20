@@ -149,6 +149,38 @@ final class AnalyticsService {
         )
     }
 
+    /// Captures one SDK health event for Digia's own fleet diagnostics.
+    ///
+    /// An ordinary first-party event — same envelope, same queue, same
+    /// batching, retry and identity — distinguished only by its event name.
+    /// That is the whole point: transport code is exactly the code the SDK's
+    /// release chain says not to ship twice.
+    ///
+    /// Narrow on purpose. A general-public `enqueue` would put event naming
+    /// back at the call sites, which is the drift `HealthSink`'s central
+    /// allowlist exists to prevent; this is the one door, and `HealthSink` is
+    /// the one caller. Its properties are already projected to an explicit,
+    /// symbol-only field list — nothing here re-reads a record.
+    func captureHealth(
+        campaignKey: String?,
+        reason: String,
+        stage: String?,
+        detail: [String: String]?,
+        buildMode: String
+    ) {
+        guard config.enabled else { return }
+        var properties: [String: Any] = ["reason": reason, "build_mode": buildMode]
+        if let stage { properties["stage"] = stage }
+        if let detail, !detail.isEmpty { properties["detail"] = detail }
+        enqueue(
+            eventName: HealthSink.eventName,
+            campaignId: nil,
+            campaignKey: campaignKey,
+            campaignType: nil,
+            properties: properties
+        )
+    }
+
     func setUserId(_ userId: String) {
         identity.setUserId(userId)
     }

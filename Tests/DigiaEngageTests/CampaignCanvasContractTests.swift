@@ -152,6 +152,34 @@ struct CampaignCanvasContractTests {
         #expect(throws: CampaignFetchError.self) { try CampaignFetcher.parse(Data("{}".utf8)) }
     }
 
+    @Test("sdkHealth and sdkHealthSessionCap are read defensively from the bundle")
+    func healthConfigReadDefensively() throws {
+        // Absent entirely: on, default cap.
+        let absent = try CampaignFetcher.parse(Data(#"{"campaigns":[]}"#.utf8))
+        #expect(absent.healthEnabled == true)
+        #expect(absent.healthSessionCap == nil)
+
+        // Explicit false, a real cap.
+        let disabled = try CampaignFetcher.parse(
+            Data(#"{"campaigns":[],"sdkHealth":false,"sdkHealthSessionCap":5}"#.utf8))
+        #expect(disabled.healthEnabled == false)
+        #expect(disabled.healthSessionCap == 5)
+
+        // Garbage shapes must fall back to the defaults rather than trap.
+        let garbage = try CampaignFetcher.parse(
+            Data(#"{"campaigns":[],"sdkHealth":"nope","sdkHealthSessionCap":-3}"#.utf8))
+        #expect(garbage.healthEnabled == true)
+        #expect(garbage.healthSessionCap == nil)
+
+        let garbageString = try CampaignFetcher.parse(
+            Data(#"{"campaigns":[],"sdkHealthSessionCap":"not a number"}"#.utf8))
+        #expect(garbageString.healthSessionCap == nil)
+
+        // Explicit true is still on — only an explicit false stops it.
+        let explicitTrue = try CampaignFetcher.parse(Data(#"{"campaigns":[],"sdkHealth":true}"#.utf8))
+        #expect(explicitTrue.healthEnabled == true)
+    }
+
     @Test("invalid token catalog degrades to literals only")
     func invalidCatalog() {
         let bundle = CampaignBundle.create(

@@ -52,6 +52,7 @@ import Foundation
 /// |---|---|---|
 /// | ``ConsoleSink`` | `severity` is at or above the configured ``DigiaLogLevel`` | the host developer |
 /// | ``ScreenSink`` | the record carries a `TimelineStage` | us, per call site |
+/// | ``HealthSink`` | the record's ``DiagnosticReason`` is on a central allowlist | us, in one list |
 ///
 /// Each gate reads a **different field with a different owner**, which is what
 /// makes escalation fail closed: forgetting one can only narrow the audience,
@@ -245,8 +246,8 @@ struct DigiaLogger: Sendable {
         // must therefore need a stage, a reason, or the console threshold; one
         // that needs none of the three would have to be checked here too.
         //
-        // `reason` earns its place here because a future health sink keys off
-        // it alone. Every call site that passes one passes a stage as well
+        // `reason` earns its place here because `HealthSink` keys off it
+        // alone. Every call site that passes one passes a stage as well
         // today, so this arm changes nothing in practice — it is here so that
         // the day one doesn't, the uplink is not silently blinded in release
         // builds.

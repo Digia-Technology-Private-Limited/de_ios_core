@@ -121,7 +121,18 @@ struct CampaignFetcher {
             devicePlatform: devicePlatform,
             serverTimeMs: serverTimeMs ?? (acceptBridgedServerTime
                 ? (root["serverTimeMs"] as? NSNumber)?.int64Value
-                : nil)
+                : nil),
+            healthEnabled: bundle.bool("sdkHealth", default: true),
+            healthSessionCap: healthSessionCap(bundle["sdkHealthSessionCap"])
         )
+    }
+
+    /// The per-session health-event cap, read defensively. `nil` means the
+    /// server said nothing usable, and the SDK's own default
+    /// (``HealthSink/defaultSessionCap``) stands.
+    private static func healthSessionCap(_ raw: Any?) -> Int? {
+        guard let raw, !(raw is NSNull) else { return nil }
+        guard let number = raw as? NSNumber, number.doubleValue >= 0 else { return nil }
+        return number.intValue
     }
 }

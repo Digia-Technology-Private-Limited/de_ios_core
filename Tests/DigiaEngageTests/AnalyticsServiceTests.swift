@@ -452,6 +452,104 @@ struct AnalyticsServiceTests {
         #expect(fakeSender.callCount == 0)
     }
 
+    // MARK: - HealthSink envelope
+
+    /// The assertion that "no new ClickHouse column" is actually true: a
+    /// `sdk_health` event's top-level shape is byte-for-byte the same set of
+    /// keys a normal first-party event's is. Only `event_name` and the
+    /// contents of `properties` may differ — everything else (identity,
+    /// timestamps, `campaign_key`) comes from the same enqueue path for free.
+    @Test("sdk_health rides the existing envelope verbatim — no new top-level columns")
+    func healthEventEnvelopeMatchesNormalEvent() {
+        let service = makeService()
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("cmp_normal"))
+        service.captureHealth(
+            campaignKey: "cmp_health",
+            reason: "malformed_campaign_skipped",
+            stage: "parse",
+            detail: nil,
+            buildMode: "debug"
+        )
+
+        let entries = service.queue.peek(maxCount: 2)
+        #expect(entries.count == 2)
+        let normalEvent = entries[0].payload
+        let healthEvent = entries[1].payload
+
+        // No column exists on the health payload that isn't part of the one
+        // envelope every first-party event already uses. `campaign_id` /
+        // `campaign_type` / `presentation_id` / `user_id` are optional on
+        // both — absent, not null, when there is nothing to put there — so a
+        // health event naturally has fewer populated keys than a normal event
+        // that happens to resolve a campaign id; the assertion that matters is
+        // that the health payload invents nothing new.
+        let knownEnvelopeKeys: Set<String> = [
+            "event_id", "event_name", "occurred_at", "anonymous_id", "session_id",
+            "campaign_id", "campaign_key", "campaign_type", "presentation_id", "user_id",
+            "properties",
+        ]
+        #expect(Set(healthEvent.keys).isSubset(of: knownEnvelopeKeys))
+        // And it does carry every column that has no dependency on campaign
+        // resolution — the ones a normal event always has too.
+        let mandatoryKeys: Set<String> = [
+            "event_id", "event_name", "occurred_at", "anonymous_id", "session_id", "properties",
+        ]
+        #expect(mandatoryKeys.isSubset(of: Set(healthEvent.keys)))
+        #expect(mandatoryKeys.isSubset(of: Set(normalEvent.keys)))
+
+        // The only intended differences: the event name, and the presence of
+        // campaign_id/campaign_type (health events don't resolve either).
+        #expect(healthEvent["event_name"] as? String == "sdk_health")
+        #expect(normalEvent["event_name"] as? String != "sdk_health")
+        #expect(healthEvent["campaign_id"] == nil)
+        #expect(healthEvent["campaign_type"] == nil)
+        #expect(healthEvent["campaign_key"] as? String == "cmp_health")
+
+        // Identity and timestamp columns are populated exactly like a normal
+        // event's — they come from the same enqueue path.
+        #expect((healthEvent["event_id"] as? String)?.isEmpty == false)
+        #expect((healthEvent["occurred_at"] as? String)?.isEmpty == false)
+        #expect((healthEvent["anonymous_id"] as? String)?.isEmpty == false)
+        #expect((healthEvent["session_id"] as? String)?.isEmpty == false)
+
+        let healthProps = healthEvent["properties"] as? [String: Any]
+        #expect(healthProps?["reason"] as? String == "malformed_campaign_skipped")
+        #expect(healthProps?["stage"] as? String == "parse")
+        #expect(healthProps?["detail"] == nil)
+        #expect(healthProps?["build_mode"] as? String == "debug")
+        // The static context (sdk_version, sdk_platform, …) merges in for a
+        // health event exactly as it does for a normal one.
+        #expect(healthProps?["sdk_version"] as? String == "1.0.0")
+    }
+
+    @Test("captureHealth carries stage and detail only when present")
+    func captureHealthOptionalFields() {
+        let service = makeService()
+
+        service.captureHealth(
+            campaignKey: nil,
+            reason: "fetch_failed_auth",
+            stage: nil,
+            detail: ["http_status": "401"],
+            buildMode: "release"
+        )
+
+        let entry = service.queue.peek(maxCount: 1)[0].payload
+        #expect(entry["campaign_key"] == nil)
+        let props = entry["properties"] as? [String: Any]
+        #expect(props?["stage"] == nil)
+        #expect((props?["detail"] as? [String: String]) == ["http_status": "401"])
+    }
+
+    @Test("captureHealth is a no-op when analytics is disabled")
+    func captureHealthNoOpWhenDisabled() {
+        let service = makeService(config: AnalyticsConfig(enabled: false))
+        service.captureHealth(
+            campaignKey: "cmp", reason: "fetch_failed_auth", stage: nil, detail: nil, buildMode: "release")
+        #expect(service.queue.size == 0)
+    }
+
     @Test("partial failure (207) removes all batched events without retry")
     func partialFailureRemovesAllEvents() async throws {
         let fakeSender = FakeAnalyticsSender { _ in 207 }

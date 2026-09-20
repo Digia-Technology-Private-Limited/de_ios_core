@@ -210,6 +210,24 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         )
         analyticsService = AnalyticsService.create(config: config, requestHeaders: requestHeaders)
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
+        // Sink #4 joins the registry here and nowhere else: it sends through
+        // the pipeline that was just configured, and there was nothing to
+        // send with before this line. It joins *before* the campaign bundle
+        // is fetched on purpose — `fetch_failed_auth` is one of the failures
+        // it exists to report, so waiting for a successful fetch would blind
+        // it to the fetch that failed. The bundle's kill switch and cap land
+        // in `HealthSink.applyBundleConfig` a moment later.
+        HealthSink.shared.activate { [weak self] payload in
+            Task { @MainActor [weak self] in
+                self?.analyticsService?.captureHealth(
+                    campaignKey: payload.campaignKey,
+                    reason: payload.reason,
+                    stage: payload.stage,
+                    detail: payload.detail,
+                    buildMode: payload.buildMode
+                )
+            }
+        }
 
         font = DigiaFont(fontFamily: config.fontFamily)
         CampaignCanvasTheme.shared.update(config.themeMode)
@@ -226,6 +244,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         var campaigns: [CampaignModel] = []
         do {
             let bundle = try await CampaignFetcher(requestHeaders: requestHeaders).fetch()
+            // Applied as soon as the bundle answers — the earliest point this
+            // core can reach, though `fetch()` has already parsed every
+            // campaign (and so already fired this bundle's own parse-stage
+            // health reasons) by the time it returns here; see the platform
+            // note on `CampaignBundle.create`.
+            HealthSink.shared.applyBundleConfig(
+                enabled: bundle.healthEnabled, sessionCap: bundle.healthSessionCap)
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
             currentTimeAnchor = bundle.timeAnchor
@@ -365,6 +390,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 devicePlatform: "ios",
                 acceptBridgedServerTime: true
             )
+            HealthSink.shared.applyBundleConfig(
+                enabled: bundle.healthEnabled, sessionCap: bundle.healthSessionCap)
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
             currentTimeAnchor = bundle.timeAnchor
