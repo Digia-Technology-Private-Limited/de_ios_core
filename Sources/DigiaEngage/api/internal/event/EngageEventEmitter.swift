@@ -62,13 +62,29 @@ final class EngageEventEmitter {
     @MainActor
     private final class LiveTestEventSink: EventSink {
         let onLiveTestShown: ((String) -> Void)?
+        let onLiveTestDismissed: ((String, DismissReason, Bool) -> Void)?
 
-        init(onLiveTestShown: ((String) -> Void)?) {
+        init(
+            onLiveTestShown: ((String) -> Void)?,
+            onLiveTestDismissed: ((String, DismissReason, Bool) -> Void)?
+        ) {
             self.onLiveTestShown = onLiveTestShown
+            self.onLiveTestDismissed = onLiveTestDismissed
         }
 
         func toCep(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
-            if case .impressed = event { onLiveTestShown?(payload.cepCampaignId) }
+            // A live test has no CEP to mark, so this sink exists to turn the
+            // two events a person watching the dashboard actually cares about
+            // — it appeared, and how it ended — into the invocation's own
+            // uplink.
+            switch event {
+            case .impressed:
+                onLiveTestShown?(payload.cepCampaignId)
+            case .dismissed(let reason, let completed):
+                onLiveTestDismissed?(payload.cepCampaignId, reason, completed)
+            case .clicked:
+                break
+            }
         }
 
         func toDigia(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload) {
@@ -94,9 +110,17 @@ final class EngageEventEmitter {
     private var digiaClicked: Set<String> = []
     private var timerImpressedStateByCampaign: [String: String] = [:]
 
-    init(cep: PresentationSink, digia: DigiaAnalyticsSink, onLiveTestShown: ((String) -> Void)? = nil) {
+    init(
+        cep: PresentationSink,
+        digia: DigiaAnalyticsSink,
+        onLiveTestShown: ((String) -> Void)? = nil,
+        onLiveTestDismissed: ((String, DismissReason, Bool) -> Void)? = nil
+    ) {
         self.realSink = RealEventSink(cep: cep, digia: digia)
-        self.liveTestSink = LiveTestEventSink(onLiveTestShown: onLiveTestShown)
+        self.liveTestSink = LiveTestEventSink(
+            onLiveTestShown: onLiveTestShown,
+            onLiveTestDismissed: onLiveTestDismissed
+        )
     }
 
     /// Coarse lifecycle signal to the owning presentation only.

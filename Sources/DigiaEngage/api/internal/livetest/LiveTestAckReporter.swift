@@ -3,13 +3,24 @@ import Foundation
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger("liveTest")
 
-/// Posts `received`/`shown`/`failed` ACKs for a live-test invocation.
+/// The device's uplink for one live-test invocation.
 ///
 /// Fire-and-forget at the call site — a failed post never throws — but not
 /// fire-and-forget on the wire. The ACK is the *only* thing that moves a
 /// dashboard row off "waiting", so a single dropped POST on a flaky office
 /// network is indistinguishable, to the PM, from a campaign that never fired.
 /// Hence the retries below.
+///
+/// Two kinds of message ride it, and the difference matters:
+///
+/// - **ACKs** (``postReceived``/``postShown``/``postFailed``) drive the
+///   invocation's state machine. Exactly one terminal ACK per invocation, and
+///   the backend refuses to overwrite it.
+/// - **Events** (``postEvent``) are live-only colour — what the user
+///   answered, how they dismissed it. The backend stores none of it; it looks
+///   the invocation up only to check ownership, then republishes to the
+///   dashboard that started the test. If nobody is watching, it evaporates,
+///   and that is the whole intent.
 @MainActor
 final class LiveTestAckReporter {
     /// Longest `reason.message` we will send. Debug-only free text, and the
@@ -49,12 +60,25 @@ final class LiveTestAckReporter {
         post(["testInvocationId": testInvocationId, "status": "failed", "reason": reason])
     }
 
-    /// Posts `body` to the ACK endpoint, retrying only what retrying can fix.
+    /// Sends a live-only event for an invocation that is already in flight.
+    ///
+    /// Deliberately *not* an ACK status: a survey submission and a dismissal
+    /// both happen **after** `shown`, which is terminal. Modelling them as
+    /// transitions would mean reopening a state machine whose entire value is
+    /// that it closes exactly once.
+    func postEvent(_ testInvocationId: String, type: String, payload: [String: Any]) {
+        post(
+            ["testInvocationId": testInvocationId, "type": type, "payload": payload],
+            endpoint: DigiaEndpoints.liveTestEvent
+        )
+    }
+
+    /// Posts `body` to `endpoint`, retrying only what retrying can fix.
     ///
     /// Out-of-order arrival is safe by construction: the backend's invocation
     /// state machine ignores a transition that is not forward, so a
     /// `received` that lands after the `failed` it preceded changes nothing.
-    private func post(_ body: [String: Any]) {
+    private func post(_ body: [String: Any], endpoint: String = DigiaEndpoints.liveTestAck) {
         guard let config else { return }
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
 
@@ -62,7 +86,7 @@ final class LiveTestAckReporter {
         if let deviceId { headers["x-digia-device-id"] = deviceId }
 
         let testInvocationId = body["testInvocationId"] as? String ?? ""
-        let kind = body["status"] as? String ?? ""
+        let kind = (body["status"] as? String) ?? (body["type"] as? String) ?? ""
         let pauses = retryPauses
 
         Task { [sender] in
@@ -73,8 +97,7 @@ final class LiveTestAckReporter {
                 }
                 let isLastAttempt = attempt == pauses.count
                 do {
-                    let statusCode = try await sender.post(
-                        url: DigiaEndpoints.liveTestAck, body: data, headers: headers)
+                    let statusCode = try await sender.post(url: endpoint, body: data, headers: headers)
                     if (200...299).contains(statusCode) {
                         log.d(
                             "Uplink posted (status=\(statusCode), invocationId=\(testInvocationId), "

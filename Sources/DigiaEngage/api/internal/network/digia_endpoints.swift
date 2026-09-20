@@ -23,4 +23,8 @@ enum DigiaEndpoints {
     static var recordPageCapture: String { "\(_baseUrl)/api/v1/engage/sdk/recordPageCapture" }
     static var liveTestConnect: String { "\(_baseUrl)/api/v1/engage/sdk/live/connect" }
     static var liveTestAck: String { "\(_baseUrl)/api/v1/engage/sdk/testInvocation/ack" }
+    /// Live-only colour for an in-flight test — a survey's answers, how a
+    /// nudge was dismissed. Stored nowhere; relayed to the dashboard that
+    /// started the test and dropped if nobody is watching.
+    static var liveTestEvent: String { "\(_baseUrl)/api/v1/engage/sdk/testInvocation/event" }
 }

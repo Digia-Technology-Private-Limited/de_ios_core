@@ -146,6 +146,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             ),
             onLiveTestShown: { [weak self] cepCampaignId in
                 self?.liveTestContexts[cepCampaignId]?.reportShown()
+            },
+            onLiveTestDismissed: { [weak self] cepCampaignId, reason, completed in
+                self?.relayLiveTestDismissal(cepCampaignId, reason: reason, completed: completed)
             }
         )
         inlineController.onCampaignRemoved = { [weak self] payload in
@@ -1517,9 +1520,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             payload: state.payload
         )
 
-        if answers.isEmpty || isLiveTest {
-            logVerbose(
-                "reportSurveyCompleted: skip submission — answers is empty or this is a live test")
+        if answers.isEmpty {
+            logVerbose("reportSurveyCompleted: skip submission — no answers")
+            return
+        }
+        if isLiveTest {
+            relayLiveTestSubmission(state: state, answers: answers)
             return
         }
         guard let config = self.config else {
@@ -1541,6 +1547,54 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             answers: answers,
             startedAt: state.startedAt,
             userId: analyticsService?.userId
+        )
+    }
+
+    /// Sends a live-tested survey's answers to the dashboard that asked for
+    /// the test, through the live-only event passthrough (§2.3) rather than
+    /// the real submission endpoint — one person pressing buttons during a
+    /// test is not a respondent, and nothing here is stored.
+    ///
+    /// Built by the *same* `buildBody` the real submission uses, so what a PM
+    /// reads during a test is the structure analytics would have recorded —
+    /// not a second shape that can quietly drift from it.
+    private func relayLiveTestSubmission(state: ActiveSurveyState, answers: [String: SurveyAnswer]) {
+        guard let invocationId = testInvocationIdOf(state.payload.cepCampaignId) else { return }
+        // Live-test campaigns are parsed on the spot and never added to
+        // `campaignStore` — its own `id` (not the store's) is the only one in
+        // scope here.
+        guard let campaign = liveTestCampaigns[state.payload.cepCampaignId] else { return }
+        let body = SurveySubmissionReporter.buildBody(
+            campaignId: campaign.id,
+            survey: state.config,
+            answers: answers,
+            startedAt: state.startedAt,
+            now: Date(),
+            userId: nil
+        )
+        guard let payload = body["payload"], let computed = body["computed"] else { return }
+        logVerbose(
+            "Live test submission relayed (answers=\(answers.count), invocationId=\(invocationId))")
+        liveTestService.ackReporter.postEvent(
+            invocationId,
+            type: "survey_submission",
+            payload: ["payload": payload, "computed": computed]
+        )
+    }
+
+    /// Tells the dashboard how a live-tested experience ended. Not an ACK —
+    /// `shown` is already terminal, and the invocation's state machine closing
+    /// exactly once is the property the whole ACK contract is built on. This
+    /// is live-only colour relayed through the passthrough event endpoint —
+    /// nothing is stored anywhere.
+    private func relayLiveTestDismissal(
+        _ cepCampaignId: String, reason: DismissReason, completed: Bool
+    ) {
+        guard let invocationId = testInvocationIdOf(cepCampaignId) else { return }
+        liveTestService.ackReporter.postEvent(
+            invocationId,
+            type: "dismissed",
+            payload: ["reason": reason.wire, "completed": completed]
         )
     }
 
