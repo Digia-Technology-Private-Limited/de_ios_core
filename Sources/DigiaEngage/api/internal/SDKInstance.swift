@@ -238,15 +238,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         font = DigiaFont(fontFamily: config.fontFamily)
         CampaignCanvasTheme.shared.update(config.themeMode)
 
-        if config.wrapperBinding == "react_native" {
-            // RN fetches campaigns itself (it needs the same response to render
-            // JS-side campaigns) and hands them to us via populateCampaignBundle() —
-            // fetching here too would duplicate the network call. sdkState stays
-            // .notInitialized until that call arrives.
-            logVerbose("Skipping native campaign fetch — awaiting populateCampaignBundle() from RN")
-            return
-        }
-
+        // Native owns the campaign fetch for all bindings, including react_native.
+        // JS keeps no store and fetches nothing. populateCampaignBundle() stays
+        // as a compat handoff for tests and live-test injection only.
         var campaigns: [CampaignModel] = []
         do {
             let bundle = try await CampaignFetcher(requestHeaders: requestHeaders).fetch()
@@ -385,9 +379,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
-    /// RN-only entrypoint: JS already fetched campaigns for its own rendering needs,
-    /// so it hands the raw campaign-bundle response here instead of native re-fetching.
-    /// Called once after `initialize` when `wrapperBinding == "react_native"`.
+    /// Compat handoff: native also fetches itself now, so a second arrival only
+    /// refreshes the store. Used by tests and live-test injection.
     func populateCampaignBundle(_ bundleJson: String) {
         var campaigns: [CampaignModel] = []
         do {
