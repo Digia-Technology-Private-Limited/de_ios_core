@@ -123,6 +123,31 @@ public enum Digia {
         SDKInstance.shared.populateCampaignBundle(bundleJson)
     }
 
+    /// Delivers the campaign published under `campaignKey`, right now, with no CEP involved.
+    ///
+    /// For an app that owns its own triggering: no CleverTap / MoEngage / WebEngage decides
+    /// what fires, the app does. The delivery is otherwise identical to a plugin's — same
+    /// routing, same frequency capping, same screen targeting, same analytics — so a campaign
+    /// that would be dropped for a CEP is dropped here too, for the same reason.
+    ///
+    /// `variables` override the dashboard-authored fallbacks for this one delivery, exactly
+    /// as a CEP's trigger variables do.
+    ///
+    /// Returns the presentation, whose `outcome` names what actually happened. A campaign key
+    /// that is not published, a screen that is not targeted or a frequency cap already spent
+    /// all come back as a `dropped` outcome rather than a trap — this is a delivery path, and
+    /// a delivery path never fails at its caller.
+    ///
+    /// Safe to call before the campaign bundle has loaded: the delivery is buffered and
+    /// routed once the store is ready, the same way a plugin's is.
+    @MainActor
+    public static func triggerCampaign(
+        _ campaignKey: String,
+        variables: [String: String]? = nil
+    ) -> CampaignPresentation {
+        SDKInstance.shared.triggerCampaign(campaignKey, variables: variables)
+    }
+
     public static func setThemeMode(_ mode: DigiaThemeMode) {
         SDKInstance.shared.setThemeMode(mode)
     }

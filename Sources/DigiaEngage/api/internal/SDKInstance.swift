@@ -27,6 +27,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         )
     }
     @Published private(set) var sdkState: SDKState = .notInitialized
+    /// A delivery that arrived before the campaign bundle. See `bufferUntilReady`.
+    private var pendingPresentation: PresentationController?
     @Published private(set) var isHostMounted = false
     @Published private(set) var captureModeEnabled = UserDefaults.standard.bool(
         forKey: "digia_anchorless_capture_enabled"
@@ -391,6 +393,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 sessionIdProvider: { [weak self] in self?.analyticsService?.identity.sessionId }
             )
         }
+
+        // Last: the buffered delivery is routed against a populated store, a live
+        // frequencyManager and a real screen — none of which existed when it arrived.
+        flushPendingPayloadIfAny()
     }
 
     /// Retired RN entrypoint, kept only so an older `@digia-engage/core` bundle running
@@ -461,6 +467,45 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // arrived and we turned it away" are the two answers a campaign creator
         // most needs to tell apart.
         observeDelivery(controller)
+        routeNow(controller)
+        return controller.presentation
+    }
+
+    /// Delivers the campaign published under `campaignKey`, with no CEP involved.
+    ///
+    /// The Swift twin of Kotlin's `DigiaInstance.triggerCampaign`. Same machinery a plugin
+    /// delivery gets — one presentation, the same state gate, the same routing, the same
+    /// watchdogs — because the difference between "CleverTap asked for this" and "the app
+    /// asked for this" ends at who supplied the trigger.
+    ///
+    /// The host is not a CEP and holds no slot, so it mints its own `cepCampaignId`: a
+    /// presentation still needs one for analytics dedup and for the logs to be readable, and
+    /// an id that collided across triggers would make two firings of the same campaign look
+    /// like one.
+    func triggerCampaign(_ campaignKey: String, variables: [String: String]?)
+        -> CampaignPresentation
+    {
+        let trigger = CEPTriggerPayload(
+            cepCampaignId: "host:\(UUID().uuidString)",
+            campaignKey: campaignKey.trimmingCharacters(in: .whitespacesAndNewlines),
+            cepMetadata: [:],
+            variables: variables
+        )
+        let controller = coordinator.open(trigger, owner: Self.hostOwner)
+        observeDelivery(controller)
+        if sdkState == .ready {
+            routeNow(controller)
+        } else {
+            bufferUntilReady(controller)
+        }
+        return controller.presentation
+    }
+
+    /// Owner recorded for a delivery the host app asked for itself, with no CEP involved.
+    private static let hostOwner = "<host>"
+
+    /// Routes a delivery against the store as it stands right now.
+    private func routeNow(_ controller: PresentationController) {
         // Routing must see the stamped payload: it is the instance every render
         // surface stores and hands back, and the only thing that leads an event
         // back to this presentation.
@@ -471,7 +516,48 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .dropped(let reason, let detail):
             controller.settle(.dropped(reason: reason, detail: detail))
         }
-        return controller.presentation
+    }
+
+    /// Holds a trigger that arrived before the campaign bundle.
+    ///
+    /// Only one is held, matching Kotlin: a second trigger before the fetch resolves wins, and
+    /// the older presentation *settles* rather than being forgotten, so whoever is holding a
+    /// slot for it gets it back instead of holding it for the session.
+    ///
+    /// **Only `triggerCampaign` routes through this today.** `deliver` still refuses a
+    /// pre-bundle trigger outright with `notInitialized`, where Kotlin buffers it — a real
+    /// divergence, and a real bug now that native owns the fetch and the window is a live
+    /// second or two of CEP deliveries. It is left alone here on purpose: iOS has two tests
+    /// that pin the refusing behaviour as a contract (`deliver is total …`, `a trigger before
+    /// the bundle lands is not_initialized …`) plus nine more that populate the store without
+    /// marking the SDK ready, so changing `deliver` is its own pass, not a rider on this one.
+    private func bufferUntilReady(_ controller: PresentationController) {
+        if let displaced = pendingPresentation {
+            log.w(
+                "Buffered trigger displaced (by=\(controller.trigger.campaignKey))",
+                campaign: displaced.trigger.campaignKey
+            )
+            displaced.settle(
+                .dropped(
+                    reason: .superseded,
+                    detail: "a newer trigger arrived while the SDK was still initializing"
+                )
+            )
+        }
+        log.d(
+            "Queued — the SDK is still initializing "
+                + "(cepCampaignId=\(controller.trigger.cepCampaignId))",
+            campaign: controller.trigger.campaignKey
+        )
+        pendingPresentation = controller
+    }
+
+    /// Routes whatever was held while the bundle was in flight. Called once the store is
+    /// populated, which is the first moment the screen and frequency gates mean anything.
+    private func flushPendingPayloadIfAny() {
+        guard let pending = pendingPresentation else { return }
+        pendingPresentation = nil
+        routeNow(pending)
     }
 
     /// Whether this campaign cannot appear until a named anchor resolves — the

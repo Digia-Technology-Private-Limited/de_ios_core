@@ -395,6 +395,56 @@ struct DigiaEngageTests {
         #expect(newGuide.isHoldReleased)
     }
 
+    @Test("triggerCampaign delivers a campaign with no CEP plugin attached")
+    func triggerCampaignWithNoPlugin() throws {
+        // The host is its own trigger source: no plugin registered, no CEP slot held.
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(with: DigiaConfig(apiKey: "test"))
+        let campaign = try #require(nudgeCampaign(key: "host-1"))
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+
+        let presentation = Digia.triggerCampaign("host-1")
+
+        #expect(SDKInstance.shared.controller.activeNudge?.payload.campaignKey == "host-1")
+        #expect(
+            presentation.outcome.settledValue == nil,
+            "an accepted delivery must not be settled at return")
+    }
+
+    @Test("triggerCampaign mints a distinct id per firing")
+    func triggerCampaignMintsDistinctIds() throws {
+        // Analytics dedups on this id. Reusing one across firings would make two
+        // impressions of the same campaign collapse into one on the dashboard.
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(with: DigiaConfig(apiKey: "test"))
+        let campaign = try #require(nudgeCampaign(key: "host-1"))
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+
+        let first = Digia.triggerCampaign("host-1")
+        let second = Digia.triggerCampaign("host-1")
+
+        #expect(first.trigger.cepCampaignId != second.trigger.cepCampaignId)
+    }
+
+    @Test("triggerCampaign drops an unpublished key rather than throwing")
+    func triggerCampaignUnknownKeyDrops() {
+        // A delivery path never fails at its caller — the campaign key comes from app code
+        // and a typo must cost one campaign, not the app.
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(with: DigiaConfig(apiKey: "test"))
+        SDKInstance.shared.setCampaignsForTesting([])
+
+        let presentation = Digia.triggerCampaign("no-such-campaign")
+
+        #expect(
+            presentation.outcome.settledValue
+                == .dropped(reason: .unknownCampaignKey, detail: "no campaign for key 'no-such-campaign'")
+        )
+    }
+
     @Test("onGuideRenderRequest hands the RN bridge the real presentation id")
     func guideRenderRequestReceivesRealPresentationId() throws {
         SDKInstance.shared.resetForTesting()
