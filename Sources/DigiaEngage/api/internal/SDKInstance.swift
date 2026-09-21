@@ -144,7 +144,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// ``reportExternalGuideLifecycle(presentationId:event:)`` call must use to
     /// settle the real presentation the CEP's hold is on, rather than some
     /// second, disconnected one the caller minted itself.
-    var onGuideRenderRequest: ((CEPTriggerPayload, String) -> Void)?
+    var onGuideRenderRequest: ((GuideRenderRequest) -> Void)?
 
     // Event system (mirrors Android): a fan-out emitter over two sinks — the
     // coarse CEP channel (`toCep`) and Digia's rich analytics (`toDigia`).
@@ -247,15 +247,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
         font = DigiaFont(fontFamily: config.fontFamily)
         CampaignCanvasTheme.shared.update(config.themeMode)
-
-        if config.wrapperBinding == "react_native" {
-            // RN fetches campaigns itself (it needs the same response to render
-            // JS-side campaigns) and hands them to us via populateCampaignBundle() —
-            // fetching here too would duplicate the network call. sdkState stays
-            // .notInitialized until that call arrives.
-            logVerbose("Skipping native campaign fetch — awaiting populateCampaignBundle() from RN")
-            return
-        }
 
         var campaigns: [CampaignModel] = []
         do {
@@ -402,40 +393,18 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
-    /// RN-only entrypoint: JS already fetched campaigns for its own rendering needs,
-    /// so it hands the raw campaign-bundle response here instead of native re-fetching.
-    /// Called once after `initialize` when `wrapperBinding == "react_native"`.
+    /// Retired RN entrypoint, kept only so an older `@digia-engage/core` bundle running
+    /// against this core does not fail its own `initialize()`.
+    ///
+    /// Native now fetches the campaign bundle on every binding — see `initialize` — so
+    /// accepting a second bundle here would re-run `completeInitialization` and swap the
+    /// campaign store out from under whatever is already on screen. It does nothing; the
+    /// fetch native already ran is the one that counts.
     func populateCampaignBundle(_ bundleJson: String) {
-        var campaigns: [CampaignModel] = []
-        do {
-            let bundle = try CampaignFetcher.parse(
-                Data(bundleJson.utf8),
-                devicePlatform: "ios",
-                acceptBridgedServerTime: true
-            )
-            HealthSink.shared.applyBundleConfig(
-                enabled: bundle.healthEnabled, sessionCap: bundle.healthSessionCap)
-            campaigns = bundle.campaigns
-            currentDesignTokens = bundle.designTokens
-            currentTimeAnchor = bundle.timeAnchor
-            log.d(
-                "Campaign bundle parsed (raw=\(bundle.rawCampaigns.count), "
-                    + "accepted=\(campaigns.count))"
-            )
-        } catch {
-            currentTimeAnchor = nil
-            // Console-only, deliberately. This is the RN path: JS did the
-            // fetch and handed us a bundle we could not read, which is neither
-            // `fetch_failed_*` (we fetched nothing) nor
-            // `malformed_campaign_skipped` (nothing survived). No symbol in the
-            // vocabulary fits, and inventing one this core alone would send is
-            // worse for the dashboard than the missing row.
-            log.e(
-                "populateCampaignBundle() failed — the bundle could not be read",
-                error: error.localizedDescription
-            )
-        }
-        completeInitialization(campaigns)
+        log.d(
+            "populateCampaignBundle() ignored — native owns the campaign fetch on every "
+                + "binding (bundle bytes=\(bundleJson.utf8.count))"
+        )
     }
 
     func setThemeMode(_ mode: DigiaThemeMode) { CampaignCanvasTheme.shared.update(mode) }
@@ -1062,7 +1031,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 // bypassed that stamp — a live test's synthesised payload. The
                 // fallback is a harmless dead id rather than a crash: it simply
                 // never resolves in `reportExternalGuideLifecycle`.
-                renderViaJs(payload, payload.presentationId ?? "")
+                renderViaJs(
+                    GuideRenderRequest(
+                        payload: payload,
+                        presentationId: payload.presentationId ?? "",
+                        campaignId: campaign.id,
+                        templateConfigJson: campaign.guideTemplateJson
+                    )
+                )
                 return .accepted(payload: payload, kind: .modal)
             }
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {

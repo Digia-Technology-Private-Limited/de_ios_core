@@ -344,7 +344,7 @@ struct DigiaEngageTests {
         let plugin = TestPlugin(id: "plugin")
         var renderRequested = false
         Digia.register(plugin)
-        SDKInstance.shared.onGuideRenderRequest = { _, _ in renderRequested = true }
+        SDKInstance.shared.onGuideRenderRequest = { _ in renderRequested = true }
         defer { SDKInstance.shared.onGuideRenderRequest = nil }
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
@@ -367,7 +367,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.resetForTesting()
         let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
-        SDKInstance.shared.onGuideRenderRequest = { _, _ in }
+        SDKInstance.shared.onGuideRenderRequest = { _ in }
         defer { SDKInstance.shared.onGuideRenderRequest = nil }
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
@@ -404,7 +404,7 @@ struct DigiaEngageTests {
         let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         var receivedId: String?
-        SDKInstance.shared.onGuideRenderRequest = { _, presentationId in receivedId = presentationId }
+        SDKInstance.shared.onGuideRenderRequest = { receivedId = $0.presentationId }
         defer { SDKInstance.shared.onGuideRenderRequest = nil }
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
@@ -420,6 +420,37 @@ struct DigiaEngageTests {
         #expect(id == recorder.presentation.id)
     }
 
+    @Test("the render request carries the guide's authored JSON")
+    func guideRenderRequestCarriesAuthoredJson() throws {
+        // The only source of guide content the RN renderer has: it keeps no campaign store
+        // of its own since N6a, so a request without this JSON renders nothing at all.
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var request: GuideRenderRequest?
+        SDKInstance.shared.onGuideRenderRequest = { request = $0 }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        _ = SDKInstance.shared.deliver(
+            CEPTriggerPayload(
+                cepCampaignId: "rn-guide-json-check", campaignKey: campaign.campaignKey,
+                cepMetadata: [:]))
+
+        let json = try #require(request?.templateConfigJson)
+        let decoded = try #require(
+            try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        #expect(decoded["templateType"] as? String == "tooltip")
+        // Verbatim, not this core's own guide projection: `anchorKey` is a JS-renderer
+        // field that GuideConfigModel does not keep.
+        let steps = try #require(decoded["steps"] as? [[String: Any]])
+        #expect(steps.first?["anchorKey"] as? String == "help-anchor")
+    }
+
     @Test("reportExternalGuideLifecycle drives markDisplaying, emitClicked and settle on the real controller")
     func reportExternalGuideLifecycleDrivesRealController() throws {
         SDKInstance.shared.resetForTesting()
@@ -429,7 +460,7 @@ struct DigiaEngageTests {
         let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         var presentationId: String?
-        SDKInstance.shared.onGuideRenderRequest = { _, id in presentationId = id }
+        SDKInstance.shared.onGuideRenderRequest = { presentationId = $0.presentationId }
         defer { SDKInstance.shared.onGuideRenderRequest = nil }
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
@@ -467,7 +498,7 @@ struct DigiaEngageTests {
         let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         var presentationId: String?
-        SDKInstance.shared.onGuideRenderRequest = { _, id in presentationId = id }
+        SDKInstance.shared.onGuideRenderRequest = { presentationId = $0.presentationId }
         defer { SDKInstance.shared.onGuideRenderRequest = nil }
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
@@ -498,7 +529,7 @@ struct DigiaEngageTests {
         let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         var presentationId: String?
-        SDKInstance.shared.onGuideRenderRequest = { _, id in presentationId = id }
+        SDKInstance.shared.onGuideRenderRequest = { presentationId = $0.presentationId }
         defer { SDKInstance.shared.onGuideRenderRequest = nil }
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
@@ -540,7 +571,7 @@ struct DigiaEngageTests {
         let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         var presentationId: String?
-        SDKInstance.shared.onGuideRenderRequest = { _, id in presentationId = id }
+        SDKInstance.shared.onGuideRenderRequest = { presentationId = $0.presentationId }
         defer { SDKInstance.shared.onGuideRenderRequest = nil }
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
