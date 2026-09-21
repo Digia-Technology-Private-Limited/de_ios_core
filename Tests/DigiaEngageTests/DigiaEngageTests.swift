@@ -20,6 +20,33 @@ struct DigiaEngageTests {
         #expect(config.environment == .production)
     }
 
+    @Test("sdkVersion builds composite descriptor matching s|b|p|c pattern")
+    func buildsCompositeSdkVersion() {
+        #expect(
+            buildSdkVersion(
+                binding: "native",
+                platform: "ios",
+                wrapperVersion: nil,
+                core: "3.14.0"
+            ) == "s=1|b=native|p=ios|c=3.14.0"
+        )
+        #expect(
+            buildSdkVersion(
+                binding: "react_native",
+                platform: "ios",
+                wrapperVersion: "2.22.0",
+                core: "3.14.0"
+            ) == "s=1|b=react_native|p=ios|w=2.22.0|c=3.14.0"
+        )
+
+        SDKInstance.shared.resetForTesting()
+        #expect(Digia.sdkVersion == nil)
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "key_123")
+        )
+        #expect(Digia.sdkVersion == "s=1|b=native|p=ios|c=\(DigiaSdkVersion.value)")
+    }
+
     @Test("initialize is idempotent")
     func initializeIsIdempotent() async {
         let first = DigiaConfig(apiKey: "first")

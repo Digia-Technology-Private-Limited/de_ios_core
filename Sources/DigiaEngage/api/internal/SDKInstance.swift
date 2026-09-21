@@ -16,6 +16,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     private(set) var requestHeaders: [String: String] = [:]
     @Published private(set) var config: DigiaConfig?
+
+    var sdkVersion: String? {
+        guard let config else { return nil }
+        return buildSdkVersion(
+            binding: config.wrapperBinding ?? "native",
+            platform: "ios",
+            wrapperVersion: config.wrapperVersion,
+            core: DigiaSdkVersion.value
+        )
+    }
     @Published private(set) var sdkState: SDKState = .notInitialized
     @Published private(set) var isHostMounted = false
     @Published private(set) var captureModeEnabled = UserDefaults.standard.bool(
@@ -332,8 +342,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // per process: on the RN path this method runs again for every bundle
         // JS hands us.
         if let config, !wasReady {
+            let version = sdkVersion ?? buildSdkVersion(
+                binding: config.wrapperBinding ?? "native",
+                platform: "ios",
+                wrapperVersion: config.wrapperVersion,
+                core: DigiaSdkVersion.value
+            )
             log.i(
-                "Digia SDK \(DigiaSdkVersion.value) initialized "
+                "Digia SDK \(version) initialized "
                     + "(env=\(config.environment.name), "
                     + "apiKey=\(maskSecret(config.apiKey)), "
                     + "logLevel=\(config.logLevel.name) "
@@ -343,7 +359,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 // No apiKey, masked or otherwise: extras are readable on the
                 // device and are what a support ticket screenshots.
                 extras: [
-                    "version": DigiaSdkVersion.value,
+                    "version": version,
+                    "sdkVersion": version,
                     "environment": config.environment.name,
                 ]
             )

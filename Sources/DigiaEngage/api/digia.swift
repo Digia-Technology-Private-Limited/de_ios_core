@@ -87,13 +87,7 @@ public enum Digia {
     public static var requestHeaders: [String: String] { SDKInstance.shared.requestHeaders }
 
     public static var sdkVersion: String? {
-        guard let config = SDKInstance.shared.config else { return nil }
-        return buildSdkVersion(
-            binding: config.wrapperBinding ?? "native",
-            platform: "ios",
-            wrapperVersion: config.wrapperVersion,
-            core: DigiaSdkVersion.value
-        )
+        SDKInstance.shared.sdkVersion
     }
 
     /// No-ops below iOS 17 (see `initialize`).
