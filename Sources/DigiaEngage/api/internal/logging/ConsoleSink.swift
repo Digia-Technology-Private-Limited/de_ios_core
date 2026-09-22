@@ -45,10 +45,9 @@ final class ConsoleSink: DiagnosticSink {
     func accepts(_ record: TimelineRecord) -> Bool { isEnabled(record.severity) }
 
     func emit(_ record: TimelineRecord) {
-        let logger = Self.logger(for: record.tag)
         let level = Self.osLevel(record.severity)
         for line in Self.lines(for: record) {
-            logger.log(level: level, "\(line, privacy: .public)")
+            Self.logger.log(level: level, "\(line, privacy: .public)")
         }
     }
 
@@ -82,18 +81,10 @@ final class ConsoleSink: DiagnosticSink {
         }
     }
 
-    /// One `os.Logger` per tag, so Console.app's category column is the same
-    /// six-value set the printed prefix is. Cached because the tag set is
-    /// closed and `emit` runs per line.
-    private static func logger(for tag: String) -> os.Logger {
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
-        if let existing = cache[tag] { return existing }
-        let created = os.Logger(subsystem: "tech.digia.engage", category: tag)
-        cache[tag] = created
-        return created
-    }
-
-    private static let cacheLock = NSLock()
-    nonisolated(unsafe) private static var cache: [String: os.Logger] = [:]
+    /// Shared unified logging transport.
+    ///
+    /// Uses the default `os.Logger()` initializer so Xcode / OSLog does not prepend
+    /// a duplicate `[<category>]` bracket ahead of the severity badge, while
+    /// preserving OSLog streaming for terminal runners (Expo CLI, RN CLI, simctl log stream).
+    private static let logger = os.Logger()
 }
