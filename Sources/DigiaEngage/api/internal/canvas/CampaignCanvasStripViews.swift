@@ -1,4 +1,4 @@
-@_implementationOnly import SDWebImageSwiftUI
+internal import SDWebImageSwiftUI
 import AVKit
 import SwiftUI
 

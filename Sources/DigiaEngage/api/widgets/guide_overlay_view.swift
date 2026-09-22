@@ -1,7 +1,7 @@
 import SwiftUI
 import Combine
 import UIKit
-@_implementationOnly import SDWebImageSVGCoder
+internal import SDWebImageSVGCoder
 
 @MainActor
 private enum AnchorlessImageLoader {

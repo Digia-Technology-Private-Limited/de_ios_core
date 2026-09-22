@@ -1,6 +1,6 @@
 import AVFoundation
-@_implementationOnly import Lottie
-@_implementationOnly import SDWebImageSVGCoder
+internal import Lottie
+internal import SDWebImageSVGCoder
 import Foundation
 import Combine
 import UIKit
@@ -368,15 +368,19 @@ final class FloaterOrchestrator: ObservableObject {
             endTimeObserverToken = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main
             ) { [weak self] _ in
-                guard let self, self.state?.token == token else { return }
-                self.player?.seek(to: .zero)
-                self.player?.play()
+                MainActor.assumeIsolated {
+                    guard let self, self.state?.token == token else { return }
+                    self.player?.seek(to: .zero)
+                    self.player?.play()
+                }
             }
         } else {
             endTimeObserverToken = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main
             ) { [weak self] _ in
-                self?.onVideoEnded(token: token)
+                MainActor.assumeIsolated {
+                    self?.onVideoEnded(token: token)
+                }
             }
         }
 
