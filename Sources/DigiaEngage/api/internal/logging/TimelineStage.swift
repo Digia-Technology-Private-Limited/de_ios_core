@@ -9,7 +9,7 @@
 /// a non-developer can hold: the app connected, campaigns came down, one was
 /// read, something asked for it, rules decided, we tried to draw it, the user
 /// touched it.
-enum TimelineStage: String, CaseIterable, Sendable {
+public enum TimelineStage: String, CaseIterable, Sendable {
     /// The app connected; the SDK is running.
     case session = "session"
 

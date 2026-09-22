@@ -227,7 +227,7 @@ final class AnalyticsService {
             log.i("Analytics disabled in DigiaConfig — no events will be captured")
             return nil
         }
-        log.i(
+        log.d(
             "Analytics enabled (batchSize=\(ac.flushBatchSize), interval=\(ac.flushIntervalMs)ms)"
         )
         return AnalyticsService(
@@ -316,9 +316,8 @@ final class AnalyticsService {
                 attempts: 0),
             maxEvents: config.queueMaxEvents
         )
-        log.i(
-            "Event fired: \"\(eventName)\" (eventId=\(eventId), queueSize=\(queue.size), "
-                + "flushBatchSize=\(config.flushBatchSize))"
+        log.d(
+            "Event enqueued (event='\(eventName)', eventId=\(eventId), queueSize=\(queue.size), flushBatchSize=\(config.flushBatchSize))"
         )
 
         guard retryTask == nil else {
