@@ -218,9 +218,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         DigiaImagePipeline.configureIfNeeded()
         hostActionExecutor.configure(config.actionHandlers)
         guard self.config == nil else { return }
+        DigiaEndpoints.configure(config)
         self.config = config
         DigiaLogger.configure(config.logLevel)
-        DigiaEndpoints.configure(config)
         requestHeaders = SDKRequestHeaders.make(
             config: config, deviceId: AnalyticsIdentityManager().resolveAnonymousId()
         )
@@ -2691,6 +2691,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     func resetForTesting() {
+        DigiaEndpoints.resetForTest()
         if let plugin = activePlugin {
             coordinator.detach(owner: plugin.id)
             plugin.detach()

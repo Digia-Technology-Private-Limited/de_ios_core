@@ -213,6 +213,7 @@ private struct StarRatingQuestion: View {
                         )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("\(i)")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

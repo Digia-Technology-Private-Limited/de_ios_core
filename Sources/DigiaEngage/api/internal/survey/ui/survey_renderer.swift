@@ -717,6 +717,7 @@ private struct SurveyBody: View {
                             .frame(width: 26, height: 26)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Close survey")
                 }
             }
             if block.showMedia && block.media.position == .top {
@@ -819,6 +820,7 @@ private struct SurveyBody: View {
                         .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Close survey")
             }
         }
         .frame(maxWidth: .infinity)
