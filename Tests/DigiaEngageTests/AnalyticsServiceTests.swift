@@ -22,7 +22,7 @@ private extension AnalyticsService {
 /// letting it share this counter made `callCount` (and therefore
 /// `responseFactory`'s call-numbered branching) racy depending on whether the
 /// session call happened to fire before the dispatch under test.
-final class FakeAnalyticsSender: AnalyticsSender, @unchecked Sendable {
+final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
     private var _callCount = 0
     var callCount: Int { _callCount }
     var responseFactory: (Int) -> Int
@@ -31,24 +31,47 @@ final class FakeAnalyticsSender: AnalyticsSender, @unchecked Sendable {
         self.responseFactory = responseFactory
     }
 
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
-        guard url == DigiaEndpoints.track else { return 200 }
+    func execute(request: NetworkRequest) async throws -> NetworkResponse {
+        guard request.url.absoluteString == DigiaEndpoints.track else {
+            return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+        }
         _callCount += 1
-        return responseFactory(_callCount)
+        let status = responseFactory(_callCount)
+        return NetworkResponse(statusCode: status, headers: [:], body: nil, isSuccessful: (200..<300).contains(status))
+    }
+
+    func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
+        NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+    }
+
+    func openSseStream(request: NetworkRequest, handler: SseStreamHandler) -> CancellableSubscription {
+        final class EmptySub: CancellableSubscription { func cancel() {} }
+        return EmptySub()
     }
 }
 
 /// Fake sender that always throws, to exercise the "ambiguous" (no status code
 /// at all — no connectivity, timeout, DNS failure) retry path. Only counts the
 /// track-dispatch endpoint, for the same reason as `FakeAnalyticsSender` above.
-final class ThrowingAnalyticsSender: AnalyticsSender, @unchecked Sendable {
+final class ThrowingAnalyticsSender: NetworkClient, @unchecked Sendable {
     private var _callCount = 0
     var callCount: Int { _callCount }
 
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
-        guard url == DigiaEndpoints.track else { return 200 }
+    func execute(request: NetworkRequest) async throws -> NetworkResponse {
+        guard request.url.absoluteString == DigiaEndpoints.track else {
+            return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+        }
         _callCount += 1
         throw URLError(.notConnectedToInternet)
+    }
+
+    func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
+        throw URLError(.notConnectedToInternet)
+    }
+
+    func openSseStream(request: NetworkRequest, handler: SseStreamHandler) -> CancellableSubscription {
+        final class EmptySub: CancellableSubscription { func cancel() {} }
+        return EmptySub()
     }
 }
 
@@ -72,7 +95,7 @@ struct AnalyticsServiceTests {
 
     private func makeService(
         config: AnalyticsConfig = AnalyticsConfig(flushIntervalMs: 10_000),
-        sender: any AnalyticsSender = FakeAnalyticsSender(),
+        sender: any NetworkClient = FakeAnalyticsSender(),
         defaults: UserDefaults? = nil
     ) -> AnalyticsService {
         let store = defaults ?? UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
@@ -82,7 +105,7 @@ struct AnalyticsServiceTests {
             identity: AnalyticsIdentityManager(defaults: store),
             queue: AnalyticsQueue(defaults: store),
             staticContext: ["sdk_version": "1.0.0", "sdk_platform": "ios"],
-            sender: sender
+            networkClient: sender
         )
     }
 

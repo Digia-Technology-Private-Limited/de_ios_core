@@ -21,7 +21,6 @@ final class ComponentRegistryService: ObservableObject {
     private static let keyEnabled = "recording_enabled"
 
     private let storage: LocalStorage
-    private let sender: any AnalyticsSender
 
     private var config: DigiaConfig?
     private var deviceId: String?
@@ -53,21 +52,22 @@ final class ComponentRegistryService: ObservableObject {
     /// and only while recording is actually on.
     private var didWarnNoScreen = false
 
+    private let networkClient: any NetworkClient
     private let debugOverlay: DigiaDebugOverlayController?
 
     init(
         storage: LocalStorage = UserDefaultsLocalStorage().scoped("registry"),
-        sender: any AnalyticsSender = URLSessionAnalyticsSender(),
+        networkClient: any NetworkClient = URLSessionNetworkClient(),
         debugOverlay: DigiaDebugOverlayController? = nil
     ) {
         self.storage = storage
-        self.sender = sender
+        self.networkClient = networkClient
         self.debugOverlay = debugOverlay
     }
 
     convenience init(
         defaults: UserDefaults,
-        sender: any AnalyticsSender = URLSessionAnalyticsSender(),
+        networkClient: any NetworkClient = URLSessionNetworkClient(),
         debugOverlay: DigiaDebugOverlayController? = nil
     ) {
         if defaults.bool(forKey: "digia_component_registry_recording_enabled") && !defaults.bool(forKey: "registry.recording_enabled") {
@@ -75,7 +75,19 @@ final class ComponentRegistryService: ObservableObject {
         }
         self.init(
             storage: UserDefaultsLocalStorage(defaults: defaults).scoped("registry"),
-            sender: sender,
+            networkClient: networkClient,
+            debugOverlay: debugOverlay
+        )
+    }
+
+    convenience init(
+        defaults: UserDefaults,
+        sender: (any NetworkClient)?,
+        debugOverlay: DigiaDebugOverlayController? = nil
+    ) {
+        self.init(
+            defaults: defaults,
+            networkClient: sender ?? URLSessionNetworkClient(),
             debugOverlay: debugOverlay
         )
     }
@@ -188,10 +200,13 @@ final class ComponentRegistryService: ObservableObject {
     }
 
     private func send(body: Data, headers: [String: String], key: String) {
-        Task { [sender] in
+        let client = networkClient
+        Task {
             do {
-                let status = try await sender.post(url: DigiaEndpoints.recordComponents, body: body, headers: headers)
-                log.d("Components posted (status=\(status), componentKey=\(key))")
+                guard let url = URL(string: DigiaEndpoints.recordComponents) else { return }
+                let request = NetworkRequest(url: url, method: .post, headers: headers, body: body)
+                let response = try await client.execute(request: request)
+                log.d("Components posted (status=\(response.statusCode), componentKey=\(key))")
             } catch {
                 log.e("Components post failed", error: error)
             }

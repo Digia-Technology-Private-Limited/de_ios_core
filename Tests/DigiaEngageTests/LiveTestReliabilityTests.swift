@@ -286,7 +286,7 @@ struct LiveTestReliabilityTests {
 /// and its recorded bodies are exposed only through typed accessor methods,
 /// never as raw `[String: Any]`, which cannot cross an actor boundary under
 /// strict concurrency.
-private actor FakeSender: AnalyticsSender {
+private actor FakeSender: NetworkClient {
     enum Outcome {
         case success(Int)
         case failure(Error)
@@ -301,17 +301,30 @@ private actor FakeSender: AnalyticsSender {
         self.outcomes = outcomes
     }
 
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
+    func execute(request: NetworkRequest) async throws -> NetworkResponse {
         attempts += 1
-        recordedUrls.append(url)
-        if let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+        recordedUrls.append(request.url.absoluteString)
+        if let body = request.body, let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
             bodies.append(object)
         }
-        guard !outcomes.isEmpty else { return 200 }
-        switch outcomes.removeFirst() {
-        case .success(let code): return code
-        case .failure(let error): throw error
+        guard !outcomes.isEmpty else {
+            return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
         }
+        switch outcomes.removeFirst() {
+        case .success(let code):
+            return NetworkResponse(statusCode: code, headers: [:], body: nil, isSuccessful: (200..<300).contains(code))
+        case .failure(let error):
+            throw error
+        }
+    }
+
+    func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
+        NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+    }
+
+    nonisolated func openSseStream(request: NetworkRequest, handler: SseStreamHandler) -> CancellableSubscription {
+        final class EmptySub: CancellableSubscription { func cancel() {} }
+        return EmptySub()
     }
 
     /// Polls until at least `count` attempts have landed, or gives up after a

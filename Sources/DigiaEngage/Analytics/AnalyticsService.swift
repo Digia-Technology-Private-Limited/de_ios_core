@@ -4,24 +4,6 @@ import UIKit
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger("analytics")
 
-// MARK: - AnalyticsSender
-
-protocol AnalyticsSender: Sendable {
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int
-}
-
-struct URLSessionAnalyticsSender: AnalyticsSender {
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
-        guard let endpoint = URL(string: url) else { throw URLError(.badURL) }
-        var request = URLRequest(url: endpoint, timeoutInterval: 30)
-        request.httpMethod = "POST"
-        for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
-        request.httpBody = body
-        let (_, response) = try await URLSession.shared.data(for: request)
-        return (response as? HTTPURLResponse)?.statusCode ?? 0
-    }
-}
-
 // MARK: - AnalyticsService
 
 @MainActor
@@ -31,7 +13,7 @@ final class AnalyticsService {
     let identity: AnalyticsIdentityManager
     let queue: AnalyticsQueue
     private let staticContext: [String: Any]
-    private let sender: any AnalyticsSender
+    private let networkClient: any NetworkClient
     private let requestHeaders: [String: String]
 
     private var isCleared = false
@@ -72,7 +54,7 @@ final class AnalyticsService {
         identity: AnalyticsIdentityManager,
         queue: AnalyticsQueue,
         staticContext: [String: Any],
-        sender: any AnalyticsSender = URLSessionAnalyticsSender(),
+        networkClient: any NetworkClient = URLSessionNetworkClient(),
         requestHeaders: [String: String] = [:]
     ) {
         self.config = config
@@ -80,7 +62,7 @@ final class AnalyticsService {
         self.identity = identity
         self.queue = queue
         self.staticContext = staticContext
-        self.sender = sender
+        self.networkClient = networkClient
         self.requestHeaders = requestHeaders
 
         identity.initialize(sessionTimeoutMs: config.sessionTimeoutMs)
@@ -225,7 +207,8 @@ final class AnalyticsService {
         config: DigiaConfig,
         requestHeaders: [String: String],
         storage: LocalStorage = UserDefaultsLocalStorage(),
-        identityManager: IdentityManager? = nil
+        identityManager: IdentityManager? = nil,
+        networkClient: (any NetworkClient)? = nil
     ) -> AnalyticsService? {
         let ac = config.analyticsConfig
         guard ac.enabled else {
@@ -245,6 +228,7 @@ final class AnalyticsService {
                 wrapperBinding: config.wrapperBinding,
                 wrapperVersion: config.wrapperVersion
             ),
+            networkClient: networkClient ?? URLSessionNetworkClient(),
             requestHeaders: requestHeaders
         )
     }
@@ -270,11 +254,14 @@ final class AnalyticsService {
         ]
         if let uid = identity.userId { body["user_id"] = uid }
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
-        let url = DigiaEndpoints.session
+        guard let url = URL(string: DigiaEndpoints.session) else { return }
         let headers = jsonHeaders
-        Task { [weak self, sender] in
+        let client = self.networkClient
+        Task { [weak self] in
             guard self?.isCleared == false else { return }
-            let status = try? await sender.post(url: url, body: data, headers: headers)
+            let request = NetworkRequest(url: url, method: .post, headers: headers, body: data)
+            let response = try? await client.execute(request: request)
+            let status = response?.statusCode
             log.d(
                 "Session posted (status=\(status ?? -1), sessionId=\(sessionId), anonymousId=\(anonymousId))"
             )
@@ -368,11 +355,10 @@ final class AnalyticsService {
             let body = try JSONSerialization.data(withJSONObject: [
                 "events": batch.map { $0.payload }
             ])
-            let statusCode = try await sender.post(
-                url: DigiaEndpoints.track,
-                body: body,
-                headers: jsonHeaders
-            )
+            guard let url = URL(string: DigiaEndpoints.track) else { return }
+            let request = NetworkRequest(url: url, method: .post, headers: jsonHeaders, body: body)
+            let response = try await networkClient.execute(request: request)
+            let statusCode = response.statusCode
             log.d("Batch posted (status=\(statusCode))")
 
             switch statusCode {

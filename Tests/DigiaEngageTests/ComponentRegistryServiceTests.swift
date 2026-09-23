@@ -10,7 +10,7 @@ import Testing
 /// `Task` per component: three concurrent `post`s racing on a plain `Array`
 /// lose appends, and how often depends on how long each task takes — which is
 /// not something a test should be asserting on.
-final class FakeComponentSender: AnalyticsSender, @unchecked Sendable {
+final class FakeComponentSender: NetworkClient, @unchecked Sendable {
     private let lock = NSLock()
     private var _callCount = 0
     private var _bodies: [[String: Any]] = []
@@ -27,10 +27,23 @@ final class FakeComponentSender: AnalyticsSender, @unchecked Sendable {
         return _bodies
     }
 
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
-        guard url == DigiaEndpoints.recordComponents else { return 200 }
-        record(try? JSONSerialization.jsonObject(with: body) as? [String: Any])
-        return 200
+    func execute(request: NetworkRequest) async throws -> NetworkResponse {
+        guard request.url.absoluteString == DigiaEndpoints.recordComponents else {
+            return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+        }
+        if let body = request.body {
+            record(try? JSONSerialization.jsonObject(with: body) as? [String: Any])
+        }
+        return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+    }
+
+    func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
+        NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+    }
+
+    func openSseStream(request: NetworkRequest, handler: SseStreamHandler) -> CancellableSubscription {
+        final class EmptySub: CancellableSubscription { func cancel() {} }
+        return EmptySub()
     }
 
     /// Synchronous on purpose: `NSLock` is unavailable from an async context.
@@ -58,7 +71,7 @@ struct ComponentRegistryServiceTests {
     ) -> (ComponentRegistryService, FakeComponentSender) {
         let service = ComponentRegistryService(
             defaults: defaults ?? makeDefaults(),
-            sender: sender,
+            networkClient: sender,
             debugOverlay: debugOverlay
         )
         service.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1", isDebugBuild: isDebugBuild)
@@ -192,7 +205,7 @@ struct ComponentRegistryServiceTests {
         let sender = FakeComponentSender()
         let defaults = makeDefaults()
         defaults.set(true, forKey: "digia_component_registry_recording_enabled")
-        let service = ComponentRegistryService(defaults: defaults, sender: sender)
+        let service = ComponentRegistryService(defaults: defaults, networkClient: sender)
 
         service.recordAnchor("tab_home", screenName: nil)
         service.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1", isDebugBuild: true)
@@ -223,7 +236,7 @@ struct ComponentRegistryServiceTests {
         let (service, _) = makeService(defaults: defaults)
         service.setEnabled(true)
 
-        let reconfigured = ComponentRegistryService(defaults: defaults, sender: FakeComponentSender())
+        let reconfigured = ComponentRegistryService(defaults: defaults, networkClient: FakeComponentSender())
         reconfigured.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1", isDebugBuild: true)
 
         #expect(reconfigured.isEnabled)

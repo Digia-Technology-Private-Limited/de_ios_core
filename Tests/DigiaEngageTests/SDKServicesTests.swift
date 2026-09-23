@@ -18,6 +18,7 @@ struct SDKServicesTests {
         #expect(services.deviceIdProvider.getDeviceId() == services.deviceIdProvider.deviceId)
         #expect(!services.identityManager.deviceId.isEmpty)
         #expect(services.identityManager.getDeviceId() == services.deviceIdProvider.deviceId)
+        #expect(services.networkClient is URLSessionNetworkClient)
     }
 
     @Test("storage operations read, write, and remove values")
@@ -80,17 +81,33 @@ struct SDKServicesTests {
         let customDeviceIdProvider = DefaultDeviceIdProvider(storage: customStorage, storageKey: "custom_key", idGenerator: { "injected-id" })
         let customCampaignStore = CampaignStore()
         let customLiveTestService = LiveTestService()
+        let customNetworkClient = MockNetworkClient()
 
         let services = SDKServices(
             storage: customStorage,
             deviceIdProvider: customDeviceIdProvider,
             campaignStore: customCampaignStore,
-            liveTestService: customLiveTestService
+            liveTestService: customLiveTestService,
+            networkClient: customNetworkClient
         )
 
         #expect(services.deviceIdProvider.deviceId == "injected-id")
         #expect(services.campaignStore === customCampaignStore)
         #expect(services.liveTestService === customLiveTestService)
+        #expect(services.networkClient === customNetworkClient)
+    }
+
+    @Test("networkClient default and mock injection")
+    func networkClientInjection() async throws {
+        let mock = MockNetworkClient()
+        mock.enqueueResponse(statusCode: 200, body: Data(#"{"ok":true}"#.utf8))
+        let services = SDKServices(networkClient: mock)
+        let request = NetworkRequest(url: URL(string: "https://example.com")!)
+        let response = try await services.networkClient.execute(request: request)
+        #expect(response.statusCode == 200)
+        #expect(response.isSuccessful)
+        #expect(mock.recordedRequests.count == 1)
+        #expect(mock.recordedRequests[0].url.absoluteString == "https://example.com")
     }
 
     @Test("resetForTesting clears services state")
@@ -129,6 +146,7 @@ struct SDKServicesTests {
         #expect(instance.storage === instance.services.storage)
         #expect(instance.deviceIdProvider.deviceId == instance.services.deviceIdProvider.deviceId)
         #expect(instance.identityManager.deviceId == instance.services.identityManager.deviceId)
+        #expect(instance.networkClient === instance.services.networkClient)
 
         let campaign = try #require(CampaignModel.fromJson([
             "id": "c2",

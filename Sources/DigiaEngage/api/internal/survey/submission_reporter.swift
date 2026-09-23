@@ -17,16 +17,20 @@ final class SubmissionReporter: @unchecked Sendable {
     private let identityStorage: LocalStorage
     private let lock = NSLock()
 
+    private let networkClient: any NetworkClient
+
     init(
         config: DigiaConfig? = nil,
         identityManager: IdentityManager? = nil,
         deviceIdProvider: DeviceIdProvider? = nil,
-        storage: LocalStorage = UserDefaultsLocalStorage().scoped("identity")
+        storage: LocalStorage = UserDefaultsLocalStorage().scoped("identity"),
+        networkClient: (any NetworkClient)? = nil
     ) {
         self.config = config
         self.identityManager = identityManager
         self.deviceIdProvider = deviceIdProvider
         self.identityStorage = storage
+        self.networkClient = networkClient ?? URLSessionNetworkClient()
     }
 
     func configure(config: DigiaConfig) {
@@ -61,24 +65,31 @@ final class SubmissionReporter: @unchecked Sendable {
             userId: userId
         )
         let resolvedDeviceId = identityManager?.deviceId ?? deviceIdProvider?.deviceId ?? resolveDeviceId()
-        Task.detached { await Self.post(config: currentConfig, deviceId: resolvedDeviceId, body: body) }
+        let client = self.networkClient
+        Task.detached { await Self.post(networkClient: client, config: currentConfig, deviceId: resolvedDeviceId, body: body) }
     }
 
     // MARK: - Networking
 
-    private static func post(config: DigiaConfig, deviceId: String, body: [String: Any]) async {
+    private static func post(networkClient: any NetworkClient, config: DigiaConfig, deviceId: String, body: [String: Any]) async {
         guard let url = endpoint() else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(config.apiKey, forHTTPHeaderField: "x-digia-project-id")
-        request.setValue(deviceId, forHTTPHeaderField: "x-digia-device-id")
-        request.timeoutInterval = 10
         do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                log.e("Survey submission post failed (status=\(http.statusCode))")
+            let data = try JSONSerialization.data(withJSONObject: body)
+            let request = NetworkRequest(
+                url: url,
+                method: .post,
+                headers: [
+                    "Content-Type": "application/json",
+                    "x-digia-project-id": config.apiKey,
+                    "x-digia-device-id": deviceId
+                ],
+                body: data,
+                connectTimeout: 10,
+                readTimeout: 10
+            )
+            let response = try await networkClient.execute(request: request)
+            if !response.isSuccessful {
+                log.e("Survey submission post failed (status=\(response.statusCode))")
             }
         } catch {
             log.e("Survey submission post failed", error: error)

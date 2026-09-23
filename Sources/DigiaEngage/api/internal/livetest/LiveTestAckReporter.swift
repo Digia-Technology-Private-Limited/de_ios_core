@@ -28,7 +28,7 @@ final class LiveTestAckReporter {
     /// stack-shaped message cannot become the payload.
     private static let maxMessageLength = 200
 
-    private let sender: any AnalyticsSender
+    private let networkClient: any NetworkClient
     private var config: DigiaConfig?
     private var deviceId: String?
 
@@ -37,8 +37,12 @@ final class LiveTestAckReporter {
     /// tests only; production never changes this.
     var retryPauses: [TimeInterval] = [2, 5]
 
-    init(sender: any AnalyticsSender = URLSessionAnalyticsSender()) {
-        self.sender = sender
+    init(networkClient: any NetworkClient = URLSessionNetworkClient()) {
+        self.networkClient = networkClient
+    }
+
+    convenience init(sender: any NetworkClient) {
+        self.init(networkClient: sender)
     }
 
     func configure(config: DigiaConfig, deviceId: String) {
@@ -88,8 +92,9 @@ final class LiveTestAckReporter {
         let testInvocationId = body["testInvocationId"] as? String ?? ""
         let kind = (body["status"] as? String) ?? (body["type"] as? String) ?? ""
         let pauses = retryPauses
+        let client = networkClient
 
-        Task { [sender] in
+        Task {
             for attempt in 0...pauses.count {
                 if attempt > 0 {
                     try? await Task.sleep(
@@ -97,7 +102,10 @@ final class LiveTestAckReporter {
                 }
                 let isLastAttempt = attempt == pauses.count
                 do {
-                    let statusCode = try await sender.post(url: endpoint, body: data, headers: headers)
+                    guard let url = URL(string: endpoint) else { return }
+                    let request = NetworkRequest(url: url, method: .post, headers: headers, body: data)
+                    let response = try await client.execute(request: request)
+                    let statusCode = response.statusCode
                     if (200...299).contains(statusCode) {
                         log.d(
                             "Uplink posted (status=\(statusCode), invocationId=\(testInvocationId), "

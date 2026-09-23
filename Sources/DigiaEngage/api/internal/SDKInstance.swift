@@ -114,6 +114,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         get { services.deviceIdProvider }
         set { services.deviceIdProvider = newValue }
     }
+    var networkClient: any NetworkClient {
+        get { services.networkClient }
+        set { services.networkClient = newValue }
+    }
     var identityManager: IdentityManager {
         services.identityManager
     }
@@ -180,20 +184,26 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private init() {
         LocalStorageMigrator.migrateIfNeeded()
         let defaultStorage = UserDefaultsLocalStorage()
+        let defaultNetworkClient = URLSessionNetworkClient()
         let defaultDebugOverlay = DigiaDebugOverlayController(storage: defaultStorage.scoped("debug"))
         self.debugOverlayController = defaultDebugOverlay
         let defaultIdentityManager = IdentityManager(storage: defaultStorage.scoped("identity"))
         let defaultDeviceIdProvider = DefaultDeviceIdProvider(identityManager: defaultIdentityManager)
         let defaultComponentRegistry = ComponentRegistryService(
             storage: defaultStorage.scoped("registry"),
+            networkClient: defaultNetworkClient,
             debugOverlay: defaultDebugOverlay
         )
         let defaultCampaignStore = CampaignStore()
-        let defaultLiveTestService = LiveTestService(storage: defaultStorage.scoped("live_test"))
+        let defaultLiveTestService = LiveTestService(
+            storage: defaultStorage.scoped("live_test"),
+            networkClient: defaultNetworkClient
+        )
         let defaultSubmissionReporter = SubmissionReporter(
             identityManager: defaultIdentityManager,
             deviceIdProvider: defaultDeviceIdProvider,
-            storage: defaultStorage.scoped("identity")
+            storage: defaultStorage.scoped("identity"),
+            networkClient: defaultNetworkClient
         )
 
         let captureStorage = defaultStorage.scoped("capture")
@@ -211,7 +221,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             campaignStore: defaultCampaignStore,
             submissionReporter: defaultSubmissionReporter,
             componentRegistry: defaultComponentRegistry,
-            liveTestService: defaultLiveTestService
+            liveTestService: defaultLiveTestService,
+            networkClient: defaultNetworkClient
         )
         events = EngageEventEmitter(
             cep: PresentationSink { [weak self] in self?.coordinator },
@@ -288,7 +299,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             config: config,
             requestHeaders: requestHeaders,
             storage: services.storage,
-            identityManager: services.identityManager
+            identityManager: services.identityManager,
+            networkClient: services.networkClient
         )
         // Flush pending user ID buffering
         let (flushClear, flushUserId) = pendingLock.withLock {
@@ -333,7 +345,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
         var campaigns: [CampaignModel] = []
         do {
-            let bundle = try await CampaignFetcher(requestHeaders: requestHeaders).fetch()
+            let bundle = try await CampaignFetcher(
+                networkClient: services.networkClient,
+                requestHeaders: requestHeaders
+            ).fetch()
             // Applied as soon as the bundle answers — the earliest point this
             // core can reach, though `fetch()` has already parsed every
             // campaign (and so already fired this bundle's own parse-stage
@@ -788,7 +803,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 nodes: nodes
             )
 
-            let upload = await URLSessionCaptureUploader(apiKey: config.apiKey).upload(
+            let upload = await URLSessionCaptureUploader(apiKey: config.apiKey, networkClient: services.networkClient).upload(
                 envelope: envelope,
                 png: png
             )

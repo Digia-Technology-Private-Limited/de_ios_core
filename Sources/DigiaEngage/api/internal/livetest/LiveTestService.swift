@@ -21,23 +21,29 @@ final class LiveTestService: ObservableObject {
     private var backgroundObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
     private var isDebugBuildFlag = false
+    private let networkClient: any NetworkClient
 
     init(
         storage: LocalStorage = UserDefaultsLocalStorage().scoped("live_test"),
-        ackReporter: LiveTestAckReporter = LiveTestAckReporter()
+        ackReporter: LiveTestAckReporter? = nil,
+        networkClient: (any NetworkClient)? = nil
     ) {
+        let client = networkClient ?? URLSessionNetworkClient()
+        self.networkClient = client
         self.storage = storage
-        self.ackReporter = ackReporter
+        self.ackReporter = ackReporter ?? LiveTestAckReporter(networkClient: client)
         self.deviceName = Self.normalizeDeviceName(storage.string(forKey: Self.deviceNameKey))
     }
 
     convenience init(
         defaults: UserDefaults,
-        ackReporter: LiveTestAckReporter = LiveTestAckReporter()
+        ackReporter: LiveTestAckReporter? = nil,
+        networkClient: (any NetworkClient)? = nil
     ) {
         self.init(
             storage: UserDefaultsLocalStorage(defaults: defaults).scoped("live_test"),
-            ackReporter: ackReporter
+            ackReporter: ackReporter,
+            networkClient: networkClient
         )
     }
 
@@ -63,7 +69,8 @@ final class LiveTestService: ObservableObject {
             onEvent: { event in
                 if case .campaignTest(let invocation) = event { onCampaignTest(invocation) }
             },
-            onConnectionStateChanged: { [weak self] state in self?.connectionState = state }
+            onConnectionStateChanged: { [weak self] state in self?.connectionState = state },
+            networkClient: networkClient
         )
         client = sseClient
         if isEnabled { sseClient.start() }
