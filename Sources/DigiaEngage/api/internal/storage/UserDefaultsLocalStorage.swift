@@ -3,7 +3,7 @@ import Foundation
 final class UserDefaultsLocalStorage: LocalStorage, @unchecked Sendable {
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    init(defaults: UserDefaults = UserDefaults(suiteName: "tech.digia.engage") ?? .standard) {
         self.defaults = defaults
     }
 
@@ -61,5 +61,9 @@ final class UserDefaultsLocalStorage: LocalStorage, @unchecked Sendable {
 
     func removeObject(forKey key: String) {
         defaults.removeObject(forKey: key)
+    }
+
+    func scoped(_ domain: String) -> LocalStorage {
+        ScopedLocalStorage(parent: self, domain: domain)
     }
 }

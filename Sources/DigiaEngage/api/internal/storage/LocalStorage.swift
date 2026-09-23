@@ -17,10 +17,16 @@ protocol LocalStorage: AnyObject, Sendable {
     func set(_ value: Data?, forKey key: String)
 
     func removeObject(forKey key: String)
+
+    func scoped(_ domain: String) -> LocalStorage
 }
 
 extension LocalStorage {
     func remove(forKey key: String) {
         removeObject(forKey: key)
+    }
+
+    func scoped(_ domain: String) -> LocalStorage {
+        ScopedLocalStorage(parent: self, domain: domain)
     }
 }

@@ -11,8 +11,8 @@ final class DefaultDeviceIdProvider: DeviceIdProvider, @unchecked Sendable {
     private var cachedDeviceId: String?
 
     init(
-        storage: LocalStorage = UserDefaultsLocalStorage(),
-        storageKey: String = "digia_anonymous_id",
+        storage: LocalStorage = UserDefaultsLocalStorage().scoped("identity"),
+        storageKey: String = "device_id",
         idGenerator: @escaping @Sendable () -> String = {
             #if canImport(UIKit)
             let idfv: String?
@@ -42,6 +42,13 @@ final class DefaultDeviceIdProvider: DeviceIdProvider, @unchecked Sendable {
         if let existing = storage.string(forKey: storageKey), !existing.isEmpty {
             cachedDeviceId = existing
             return existing
+        }
+        if storageKey == "device_id",
+           let anon = storage.string(forKey: "anonymous_id"),
+           !anon.isEmpty {
+            storage.set(anon, forKey: storageKey)
+            cachedDeviceId = anon
+            return anon
         }
         if storageKey != "digia_engage_device_id",
            let legacy = storage.string(forKey: "digia_engage_device_id"),

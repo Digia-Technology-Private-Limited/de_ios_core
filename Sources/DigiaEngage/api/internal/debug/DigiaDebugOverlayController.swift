@@ -10,9 +10,9 @@ import Combine
 /// affect the other.
 @MainActor
 final class DigiaDebugOverlayController: ObservableObject {
-    private static let keyVisible = "digia_debug_overlay_bubble_visible"
+    private static let keyVisible = "overlay_visible"
 
-    private let defaults: UserDefaults
+    private let storage: LocalStorage
 
     @Published private(set) var isVisible: Bool
 
@@ -23,9 +23,13 @@ final class DigiaDebugOverlayController: ObservableObject {
     /// its own, since SwiftUI is backed by a single hosting `UIView`.
     var badgeFrame: CGRect?
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        self.isVisible = defaults.bool(forKey: Self.keyVisible)
+    init(storage: LocalStorage = UserDefaultsLocalStorage().scoped("debug")) {
+        self.storage = storage
+        self.isVisible = storage.bool(forKey: Self.keyVisible)
+    }
+
+    convenience init(defaults: UserDefaults) {
+        self.init(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("debug"))
     }
 
     /// Flips the persisted bubble-visibility toggle. Called from
@@ -33,6 +37,6 @@ final class DigiaDebugOverlayController: ObservableObject {
     /// when recording turns on.
     func setVisible(_ visible: Bool) {
         isVisible = visible
-        defaults.set(visible, forKey: Self.keyVisible)
+        storage.set(visible, forKey: Self.keyVisible)
     }
 }

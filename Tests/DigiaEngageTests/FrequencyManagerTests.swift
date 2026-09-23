@@ -184,7 +184,7 @@ struct FrequencyManagerTests {
 
         // No stopOn → recordCompleted is a no-op.
         mgr.recordCompleted("a", FrequencyPolicy(maxTotal: 5))
-        #expect(defaults.string(forKey: "\(FrequencyManager.keyPrefix)a") == nil)
+        #expect(defaults.string(forKey: "frequency.a") == nil)
 
         let stopPolicy = FrequencyPolicy(stopOn: "experienceCompleted")
         mgr.recordCompleted("b", stopPolicy)

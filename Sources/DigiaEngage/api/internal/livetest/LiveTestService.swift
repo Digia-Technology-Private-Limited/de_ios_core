@@ -6,11 +6,11 @@ import UIKit
 /// dashboard as a live-test target and routes incoming campaigns for rendering.
 @MainActor
 final class LiveTestService: ObservableObject {
-    private static let enabledKey = "digia_live_testing_enabled"
-    private static let deviceNameKey = "digia_live_testing_device_name"
+    private static let enabledKey = "enabled"
+    private static let deviceNameKey = "device_name"
 
     let ackReporter: LiveTestAckReporter
-    private let defaults: UserDefaults
+    private let storage: LocalStorage
 
     @Published private(set) var isEnabled = false
     @Published private(set) var connectionState: LiveTestConnectionState = .disconnected
@@ -23,12 +23,22 @@ final class LiveTestService: ObservableObject {
     private var isDebugBuildFlag = false
 
     init(
-        defaults: UserDefaults = .standard,
+        storage: LocalStorage = UserDefaultsLocalStorage().scoped("live_test"),
         ackReporter: LiveTestAckReporter = LiveTestAckReporter()
     ) {
-        self.defaults = defaults
+        self.storage = storage
         self.ackReporter = ackReporter
-        self.deviceName = Self.normalizeDeviceName(defaults.string(forKey: Self.deviceNameKey))
+        self.deviceName = Self.normalizeDeviceName(storage.string(forKey: Self.deviceNameKey))
+    }
+
+    convenience init(
+        defaults: UserDefaults,
+        ackReporter: LiveTestAckReporter = LiveTestAckReporter()
+    ) {
+        self.init(
+            storage: UserDefaultsLocalStorage(defaults: defaults).scoped("live_test"),
+            ackReporter: ackReporter
+        )
     }
 
     func configure(
@@ -43,7 +53,7 @@ final class LiveTestService: ObservableObject {
         self.deviceId = deviceId
         guard isDebugBuild else { return }
 
-        isEnabled = defaults.bool(forKey: Self.enabledKey)
+        isEnabled = storage.bool(forKey: Self.enabledKey)
         ackReporter.configure(config: config, deviceId: deviceId)
         let sseClient = LiveTestSSEClient(
             config: { config },
@@ -85,7 +95,7 @@ final class LiveTestService: ObservableObject {
     /// i.e. once `configure()` has actually wired one up.
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
-        defaults.set(enabled, forKey: Self.enabledKey)
+        storage.set(enabled, forKey: Self.enabledKey)
         if enabled { client?.start() } else { client?.stop() }
     }
 
@@ -95,9 +105,9 @@ final class LiveTestService: ObservableObject {
 
         deviceName = updatedName
         if let updatedName {
-            defaults.set(updatedName, forKey: Self.deviceNameKey)
+            storage.set(updatedName, forKey: Self.deviceNameKey)
         } else {
-            defaults.removeObject(forKey: Self.deviceNameKey)
+            storage.removeObject(forKey: Self.deviceNameKey)
         }
 
         guard client?.isRunning == true else { return }

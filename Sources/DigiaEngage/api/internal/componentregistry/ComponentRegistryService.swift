@@ -18,9 +18,9 @@ private let log = DigiaLogger()
 /// complexity.
 @MainActor
 final class ComponentRegistryService: ObservableObject {
-    private static let keyEnabled = "digia_component_registry_recording_enabled"
+    private static let keyEnabled = "recording_enabled"
 
-    private let defaults: UserDefaults
+    private let storage: LocalStorage
     private let sender: any AnalyticsSender
 
     private var config: DigiaConfig?
@@ -56,13 +56,28 @@ final class ComponentRegistryService: ObservableObject {
     private let debugOverlay: DigiaDebugOverlayController?
 
     init(
-        defaults: UserDefaults = .standard,
+        storage: LocalStorage = UserDefaultsLocalStorage().scoped("registry"),
         sender: any AnalyticsSender = URLSessionAnalyticsSender(),
         debugOverlay: DigiaDebugOverlayController? = nil
     ) {
-        self.defaults = defaults
+        self.storage = storage
         self.sender = sender
         self.debugOverlay = debugOverlay
+    }
+
+    convenience init(
+        defaults: UserDefaults,
+        sender: any AnalyticsSender = URLSessionAnalyticsSender(),
+        debugOverlay: DigiaDebugOverlayController? = nil
+    ) {
+        if defaults.bool(forKey: "digia_component_registry_recording_enabled") && !defaults.bool(forKey: "registry.recording_enabled") {
+            defaults.set(true, forKey: "registry.recording_enabled")
+        }
+        self.init(
+            storage: UserDefaultsLocalStorage(defaults: defaults).scoped("registry"),
+            sender: sender,
+            debugOverlay: debugOverlay
+        )
     }
 
     /// Called once from `SDKInstance.completeInitialization` after the device id
@@ -71,7 +86,7 @@ final class ComponentRegistryService: ObservableObject {
         self.config = config
         self.deviceId = deviceId
         self.isDebugBuildFlag = isDebugBuild
-        self.isEnabled = defaults.bool(forKey: Self.keyEnabled)
+        self.isEnabled = storage.bool(forKey: Self.keyEnabled)
     }
 
     /// Flips the persisted recording toggle. Also shows the bubble if hidden
@@ -79,7 +94,7 @@ final class ComponentRegistryService: ObservableObject {
     /// doesn't hide it back; bubble visibility is otherwise independent.
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
-        defaults.set(enabled, forKey: Self.keyEnabled)
+        storage.set(enabled, forKey: Self.keyEnabled)
         if enabled, let debugOverlay, !debugOverlay.isVisible {
             debugOverlay.setVisible(true)
         }

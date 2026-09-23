@@ -13,11 +13,17 @@ typealias SurveySubmissionReporter = SubmissionReporter
 final class SubmissionReporter: @unchecked Sendable {
     private(set) var config: DigiaConfig?
     private let deviceIdProvider: DeviceIdProvider?
+    private let identityStorage: LocalStorage
     private let lock = NSLock()
 
-    init(config: DigiaConfig? = nil, deviceIdProvider: DeviceIdProvider? = nil) {
+    init(
+        config: DigiaConfig? = nil,
+        deviceIdProvider: DeviceIdProvider? = nil,
+        storage: LocalStorage = UserDefaultsLocalStorage().scoped("identity")
+    ) {
         self.config = config
         self.deviceIdProvider = deviceIdProvider
+        self.identityStorage = storage
     }
 
     func configure(config: DigiaConfig) {
@@ -51,7 +57,7 @@ final class SubmissionReporter: @unchecked Sendable {
             now: Date(),
             userId: userId
         )
-        let resolvedDeviceId = deviceIdProvider?.deviceId ?? Self.deviceId()
+        let resolvedDeviceId = deviceIdProvider?.deviceId ?? resolveDeviceId()
         Task.detached { await Self.post(config: currentConfig, deviceId: resolvedDeviceId, body: body) }
     }
 
@@ -80,10 +86,13 @@ final class SubmissionReporter: @unchecked Sendable {
         URL(string: DigiaEndpoints.submission)
     }
 
-    private static func deviceId() -> String {
-        let key = "digia_engage_device_id"
-        if let saved = UserDefaults.standard.string(forKey: key), !saved.isEmpty {
+    private func resolveDeviceId() -> String {
+        if let saved = identityStorage.string(forKey: "device_id"), !saved.isEmpty {
             return saved
+        }
+        if let anon = identityStorage.string(forKey: "anonymous_id"), !anon.isEmpty {
+            identityStorage.set(anon, forKey: "device_id")
+            return anon
         }
         #if canImport(UIKit)
         let idfv: String?
@@ -96,7 +105,8 @@ final class SubmissionReporter: @unchecked Sendable {
         let idfv: String? = nil
         #endif
         let id = idfv ?? UUID().uuidString
-        UserDefaults.standard.set(id, forKey: key)
+        identityStorage.set(id, forKey: "device_id")
+        identityStorage.set(id, forKey: "anonymous_id")
         return id
     }
 

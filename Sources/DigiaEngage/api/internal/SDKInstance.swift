@@ -30,18 +30,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// A delivery that arrived before the campaign bundle. See `bufferUntilReady`.
     private var pendingPresentation: PresentationController?
     @Published private(set) var isHostMounted = false
-    @Published private(set) var captureModeEnabled = UserDefaults.standard.bool(
-        forKey: "digia_anchorless_capture_enabled"
-    )
-    @Published private(set) var captureTextEnabled = UserDefaults.standard.bool(
-        forKey: "digia_anchorless_capture_include_text"
-    )
-    @Published private(set) var captureMediaEnabled = UserDefaults.standard.bool(
-        forKey: "digia_anchorless_capture_include_media"
-    )
-    @Published private(set) var captureStructureEnabled = UserDefaults.standard.bool(
-        forKey: "digia_anchorless_capture_include_structure"
-    )
+    @Published private(set) var captureModeEnabled: Bool
+    @Published private(set) var captureTextEnabled: Bool
+    @Published private(set) var captureMediaEnabled: Bool
+    @Published private(set) var captureStructureEnabled: Bool
     @Published private(set) var capturedPages: [CaptureDebugPage] = []
     @Published private(set) var captureStatusMessage: String?
     @Published private(set) var captureFlashRevision = 0
@@ -151,7 +143,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private var questionViewedAt: [String: Date] = [:]
     /// Whether the floating "Digia" debug bubble is shown. See
     /// `DigiaDebugOverlayController`.
-    private let debugOverlayController = DigiaDebugOverlayController()
+    private let debugOverlayController: DigiaDebugOverlayController
     /// Live-test campaigns, parsed on the spot — never added to `campaignStore`.
     private var liveTestCampaigns: [String: CampaignModel] = [:]
     /// In-flight live test invocations, keyed by synthetic `cepCampaignId`.
@@ -179,12 +171,27 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private var events: EngageEventEmitter!
 
     private init() {
+        LocalStorageMigrator.migrateIfNeeded()
         let defaultStorage = UserDefaultsLocalStorage()
-        let defaultDeviceIdProvider = DefaultDeviceIdProvider(storage: defaultStorage)
-        let defaultComponentRegistry = ComponentRegistryService(debugOverlay: debugOverlayController)
+        let defaultDebugOverlay = DigiaDebugOverlayController(storage: defaultStorage.scoped("debug"))
+        self.debugOverlayController = defaultDebugOverlay
+        let defaultDeviceIdProvider = DefaultDeviceIdProvider(storage: defaultStorage.scoped("identity"))
+        let defaultComponentRegistry = ComponentRegistryService(
+            storage: defaultStorage.scoped("registry"),
+            debugOverlay: defaultDebugOverlay
+        )
         let defaultCampaignStore = CampaignStore()
-        let defaultLiveTestService = LiveTestService()
-        let defaultSubmissionReporter = SubmissionReporter(deviceIdProvider: defaultDeviceIdProvider)
+        let defaultLiveTestService = LiveTestService(storage: defaultStorage.scoped("live_test"))
+        let defaultSubmissionReporter = SubmissionReporter(
+            deviceIdProvider: defaultDeviceIdProvider,
+            storage: defaultStorage.scoped("identity")
+        )
+
+        let captureStorage = defaultStorage.scoped("capture")
+        self.captureModeEnabled = captureStorage.bool(forKey: "enabled")
+        self.captureTextEnabled = captureStorage.bool(forKey: "include_text")
+        self.captureMediaEnabled = captureStorage.bool(forKey: "include_media")
+        self.captureStructureEnabled = captureStorage.bool(forKey: "include_structure")
 
         services = SDKServices(
             storage: defaultStorage,
@@ -257,6 +264,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     func initialize(_ config: DigiaConfig) async throws {
+        LocalStorageMigrator.migrateIfNeeded()
         DigiaImagePipeline.configureIfNeeded()
         hostActionExecutor.configure(config.actionHandlers)
         guard self.config == nil else { return }
@@ -266,7 +274,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         requestHeaders = SDKRequestHeaders.make(
             config: config, deviceId: services.deviceIdProvider.deviceId
         )
-        analyticsService = AnalyticsService.create(config: config, requestHeaders: requestHeaders)
+        analyticsService = AnalyticsService.create(
+            config: config,
+            requestHeaders: requestHeaders,
+            storage: services.storage
+        )
         services.submissionReporter.configure(config: config)
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
         // Sink #4 joins the registry here and nowhere else: it sends through
@@ -434,6 +446,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // `session` windows track the same session the backend sees.
         if frequencyManager == nil {
             frequencyManager = FrequencyManager(
+                storage: services.storage.scoped("frequency"),
                 sessionIdProvider: { [weak self] in self?.analyticsService?.identity.sessionId }
             )
         }
@@ -661,7 +674,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     func setCaptureModeEnabled(_ enabled: Bool) {
         guard !enabled || (isDebugBuild && isCaptureSupported) else { return }
         captureModeEnabled = enabled
-        UserDefaults.standard.set(enabled, forKey: "digia_anchorless_capture_enabled")
+        services.storage.scoped("capture").set(enabled, forKey: "enabled")
         componentRegistry.setEnabled(enabled)
         if enabled { debugOverlayController.setVisible(true) }
     }
@@ -671,17 +684,18 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         includeMedia: Bool? = nil,
         includeStructure: Bool? = nil
     ) {
+        let captureStorage = services.storage.scoped("capture")
         if let includeText {
             captureTextEnabled = includeText
-            UserDefaults.standard.set(includeText, forKey: "digia_anchorless_capture_include_text")
+            captureStorage.set(includeText, forKey: "include_text")
         }
         if let includeMedia {
             captureMediaEnabled = includeMedia
-            UserDefaults.standard.set(includeMedia, forKey: "digia_anchorless_capture_include_media")
+            captureStorage.set(includeMedia, forKey: "include_media")
         }
         if let includeStructure {
             captureStructureEnabled = includeStructure
-            UserDefaults.standard.set(includeStructure, forKey: "digia_anchorless_capture_include_structure")
+            captureStorage.set(includeStructure, forKey: "include_structure")
         }
     }
 

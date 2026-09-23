@@ -221,7 +221,11 @@ final class AnalyticsService {
     // MARK: - Factory
 
     @MainActor
-    static func create(config: DigiaConfig, requestHeaders: [String: String]) -> AnalyticsService? {
+    static func create(
+        config: DigiaConfig,
+        requestHeaders: [String: String],
+        storage: LocalStorage = UserDefaultsLocalStorage()
+    ) -> AnalyticsService? {
         let ac = config.analyticsConfig
         guard ac.enabled else {
             log.i("Analytics disabled in DigiaConfig — no events will be captured")
@@ -233,8 +237,8 @@ final class AnalyticsService {
         return AnalyticsService(
             config: ac,
             apiKey: config.apiKey,
-            identity: AnalyticsIdentityManager(),
-            queue: AnalyticsQueue(),
+            identity: AnalyticsIdentityManager(storage: storage.scoped("identity")),
+            queue: AnalyticsQueue(storage: storage.scoped("analytics")),
             staticContext: buildStaticContext(
                 wrapperBinding: config.wrapperBinding,
                 wrapperVersion: config.wrapperVersion

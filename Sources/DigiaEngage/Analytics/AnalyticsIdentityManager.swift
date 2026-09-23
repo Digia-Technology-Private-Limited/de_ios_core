@@ -4,7 +4,7 @@ import UIKit
 #endif
 
 final class AnalyticsIdentityManager {
-    private let defaults: UserDefaults
+    private let storage: LocalStorage
     private var _anonymousId: String = ""
     private var _userId: String?
     private var _sessionId: String = ""
@@ -14,11 +14,15 @@ final class AnalyticsIdentityManager {
     /// Called whenever the session ID rotates. Wired by AnalyticsService to report the new session.
     var onSessionRotated: (() -> Void)?
 
-    private static let keyAnonymousId = "digia_anonymous_id"
-    private static let keyUserId = "digia_user_id"
+    private static let keyAnonymousId = "anonymous_id"
+    private static let keyUserId = "user_id"
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
+    init(storage: LocalStorage = UserDefaultsLocalStorage().scoped("identity")) {
+        self.storage = storage
+    }
+
+    convenience init(defaults: UserDefaults) {
+        self.init(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("identity"))
     }
 
     var anonymousId: String { _anonymousId }
@@ -30,7 +34,7 @@ final class AnalyticsIdentityManager {
     func initialize(sessionTimeoutMs: Int) {
         _sessionTimeoutMs = sessionTimeoutMs
         _anonymousId = resolveAnonymousId()
-        _userId = defaults.string(forKey: Self.keyUserId)
+        _userId = storage.string(forKey: Self.keyUserId)
         _sessionId = UUID().uuidString
         _lastEventDate = Date()
     }
@@ -38,14 +42,14 @@ final class AnalyticsIdentityManager {
     func setUserId(_ userId: String) {
         guard _userId != userId else { return }
         _userId = userId
-        defaults.set(userId, forKey: Self.keyUserId)
+        storage.set(userId, forKey: Self.keyUserId)
         rotateSession()
     }
 
     func clearUserId() {
         guard _userId != nil else { return }
         _userId = nil
-        defaults.removeObject(forKey: Self.keyUserId)
+        storage.removeObject(forKey: Self.keyUserId)
         rotateSession()
     }
 
@@ -69,15 +73,19 @@ final class AnalyticsIdentityManager {
     }
 
     private func loadOrCreate(key: String) -> String {
-        if let existing = defaults.string(forKey: key), !existing.isEmpty {
+        if let existing = storage.string(forKey: key), !existing.isEmpty {
             return existing
+        }
+        if key == Self.keyAnonymousId, let deviceId = storage.string(forKey: "device_id"), !deviceId.isEmpty {
+            storage.set(deviceId, forKey: key)
+            return deviceId
         }
         #if canImport(UIKit)
         let id = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
         #else
         let id = UUID().uuidString
         #endif
-        defaults.set(id, forKey: key)
+        storage.set(id, forKey: key)
         return id
     }
 }
