@@ -40,7 +40,7 @@ struct LocalStorageMigratorTests {
         // Verify target defaults have migrated values
         #expect(targetDefaults.integer(forKey: "storage.version") == 1)
         #expect(targetDefaults.string(forKey: "identity.device_id") == "anon-1234")
-        #expect(targetDefaults.string(forKey: "identity.anonymous_id") == "anon-1234")
+        #expect(targetDefaults.string(forKey: "identity.anonymous_id") == nil)
         #expect(targetDefaults.string(forKey: "identity.user_id") == "user-5678")
         #expect(targetDefaults.string(forKey: "analytics.queue") == queueJson)
         #expect(targetDefaults.string(forKey: "frequency.camp_promo") == "{\"total\":3}")
@@ -78,7 +78,7 @@ struct LocalStorageMigratorTests {
         LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
 
         #expect(targetDefaults.string(forKey: "identity.device_id") == "dev-id-789")
-        #expect(targetDefaults.string(forKey: "identity.anonymous_id") == "dev-id-789")
+        #expect(targetDefaults.string(forKey: "identity.anonymous_id") == nil)
         #expect(standardDefaults.string(forKey: "digia_engage_device_id") == nil)
     }
 

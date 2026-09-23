@@ -18,7 +18,6 @@ enum LocalStorageMigrator {
             ?? standardDefaults.string(forKey: "digia_engage_device_id")
         if let legacyId, !legacyId.isEmpty {
             targetDefaults.set(legacyId, forKey: "identity.device_id")
-            targetDefaults.set(legacyId, forKey: "identity.anonymous_id")
         }
 
         if let userId = standardDefaults.string(forKey: "digia_user_id"), !userId.isEmpty {

@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class SDKServices {
     var storage: LocalStorage
+    let identityManager: IdentityManager
     var deviceIdProvider: DeviceIdProvider
     var analyticsService: AnalyticsService?
     var frequencyManager: FrequencyManager?
@@ -13,6 +14,7 @@ final class SDKServices {
 
     init(
         storage: LocalStorage = UserDefaultsLocalStorage(),
+        identityManager: IdentityManager? = nil,
         deviceIdProvider: DeviceIdProvider? = nil,
         analyticsService: AnalyticsService? = nil,
         frequencyManager: FrequencyManager? = nil,
@@ -22,12 +24,15 @@ final class SDKServices {
         liveTestService: LiveTestService? = nil
     ) {
         self.storage = storage
-        let resolvedDeviceIdProvider = deviceIdProvider ?? DefaultDeviceIdProvider(storage: storage.scoped("identity"))
+        let resolvedIdentityManager = identityManager ?? IdentityManager(storage: storage.scoped("identity"))
+        self.identityManager = resolvedIdentityManager
+        let resolvedDeviceIdProvider = deviceIdProvider ?? DefaultDeviceIdProvider(identityManager: resolvedIdentityManager)
         self.deviceIdProvider = resolvedDeviceIdProvider
         self.analyticsService = analyticsService
         self.frequencyManager = frequencyManager
         self.campaignStore = campaignStore
         self.submissionReporter = submissionReporter ?? SubmissionReporter(
+            identityManager: resolvedIdentityManager,
             deviceIdProvider: resolvedDeviceIdProvider,
             storage: storage.scoped("identity")
         )

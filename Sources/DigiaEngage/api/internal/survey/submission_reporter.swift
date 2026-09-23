@@ -12,16 +12,19 @@ typealias SurveySubmissionReporter = SubmissionReporter
 
 final class SubmissionReporter: @unchecked Sendable {
     private(set) var config: DigiaConfig?
+    private let identityManager: IdentityManager?
     private let deviceIdProvider: DeviceIdProvider?
     private let identityStorage: LocalStorage
     private let lock = NSLock()
 
     init(
         config: DigiaConfig? = nil,
+        identityManager: IdentityManager? = nil,
         deviceIdProvider: DeviceIdProvider? = nil,
         storage: LocalStorage = UserDefaultsLocalStorage().scoped("identity")
     ) {
         self.config = config
+        self.identityManager = identityManager
         self.deviceIdProvider = deviceIdProvider
         self.identityStorage = storage
     }
@@ -57,7 +60,7 @@ final class SubmissionReporter: @unchecked Sendable {
             now: Date(),
             userId: userId
         )
-        let resolvedDeviceId = deviceIdProvider?.deviceId ?? resolveDeviceId()
+        let resolvedDeviceId = identityManager?.deviceId ?? deviceIdProvider?.deviceId ?? resolveDeviceId()
         Task.detached { await Self.post(config: currentConfig, deviceId: resolvedDeviceId, body: body) }
     }
 
@@ -90,10 +93,6 @@ final class SubmissionReporter: @unchecked Sendable {
         if let saved = identityStorage.string(forKey: "device_id"), !saved.isEmpty {
             return saved
         }
-        if let anon = identityStorage.string(forKey: "anonymous_id"), !anon.isEmpty {
-            identityStorage.set(anon, forKey: "device_id")
-            return anon
-        }
         #if canImport(UIKit)
         let idfv: String?
         if Thread.isMainThread {
@@ -106,7 +105,6 @@ final class SubmissionReporter: @unchecked Sendable {
         #endif
         let id = idfv ?? UUID().uuidString
         identityStorage.set(id, forKey: "device_id")
-        identityStorage.set(id, forKey: "anonymous_id")
         return id
     }
 

@@ -114,6 +114,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         get { services.deviceIdProvider }
         set { services.deviceIdProvider = newValue }
     }
+    var identityManager: IdentityManager {
+        services.identityManager
+    }
+
+    private let pendingLock = NSLock()
+    private var pendingUserId: String? = nil
+    private var pendingClearUserId: Bool = false
 
     let controller = DigiaOverlayController()
     let inlineController = InlineCampaignController()
@@ -175,7 +182,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let defaultStorage = UserDefaultsLocalStorage()
         let defaultDebugOverlay = DigiaDebugOverlayController(storage: defaultStorage.scoped("debug"))
         self.debugOverlayController = defaultDebugOverlay
-        let defaultDeviceIdProvider = DefaultDeviceIdProvider(storage: defaultStorage.scoped("identity"))
+        let defaultIdentityManager = IdentityManager(storage: defaultStorage.scoped("identity"))
+        let defaultDeviceIdProvider = DefaultDeviceIdProvider(identityManager: defaultIdentityManager)
         let defaultComponentRegistry = ComponentRegistryService(
             storage: defaultStorage.scoped("registry"),
             debugOverlay: defaultDebugOverlay
@@ -183,6 +191,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let defaultCampaignStore = CampaignStore()
         let defaultLiveTestService = LiveTestService(storage: defaultStorage.scoped("live_test"))
         let defaultSubmissionReporter = SubmissionReporter(
+            identityManager: defaultIdentityManager,
             deviceIdProvider: defaultDeviceIdProvider,
             storage: defaultStorage.scoped("identity")
         )
@@ -195,6 +204,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
         services = SDKServices(
             storage: defaultStorage,
+            identityManager: defaultIdentityManager,
             deviceIdProvider: defaultDeviceIdProvider,
             analyticsService: nil,
             frequencyManager: nil,
@@ -277,8 +287,26 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         analyticsService = AnalyticsService.create(
             config: config,
             requestHeaders: requestHeaders,
-            storage: services.storage
+            storage: services.storage,
+            identityManager: services.identityManager
         )
+        // Flush pending user ID buffering
+        let (flushClear, flushUserId) = pendingLock.withLock {
+            let clear = pendingClearUserId
+            let user = pendingUserId
+            pendingClearUserId = false
+            pendingUserId = nil
+            return (clear, user)
+        }
+
+        if flushClear {
+            services.identityManager.clearUserId()
+            analyticsService?.clearUserId()
+        } else if let flushUserId {
+            services.identityManager.setUserId(flushUserId)
+            analyticsService?.setUserId(flushUserId)
+        }
+
         services.submissionReporter.configure(config: config)
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
         // Sink #4 joins the registry here and nowhere else: it sends through
@@ -1815,11 +1843,31 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     func setUserId(_ userId: String) {
-        analyticsService?.setUserId(userId)
+        let (hasAnalytics, _) = pendingLock.withLock { () -> (Bool, Void) in
+            if analyticsService == nil {
+                pendingClearUserId = false
+                pendingUserId = userId
+            }
+            return (analyticsService != nil, ())
+        }
+        services?.identityManager.setUserId(userId)
+        if hasAnalytics {
+            analyticsService?.setUserId(userId)
+        }
     }
 
     func clearUserId() {
-        analyticsService?.clearUserId()
+        let (hasAnalytics, _) = pendingLock.withLock { () -> (Bool, Void) in
+            if analyticsService == nil {
+                pendingUserId = nil
+                pendingClearUserId = true
+            }
+            return (analyticsService != nil, ())
+        }
+        services?.identityManager.clearUserId()
+        if hasAnalytics {
+            analyticsService?.clearUserId()
+        }
     }
 
     /// Removes inline content (carousel/story/payload) for each key in `placementKeys`.
@@ -2843,6 +2891,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         questionViewedAt.removeAll()
         coordinator.resetForTesting()
         clearLiveTestState()
+        pendingLock.withLock {
+            pendingUserId = nil
+            pendingClearUserId = false
+        }
     }
 
 }

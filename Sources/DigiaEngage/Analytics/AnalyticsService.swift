@@ -224,7 +224,8 @@ final class AnalyticsService {
     static func create(
         config: DigiaConfig,
         requestHeaders: [String: String],
-        storage: LocalStorage = UserDefaultsLocalStorage()
+        storage: LocalStorage = UserDefaultsLocalStorage(),
+        identityManager: IdentityManager? = nil
     ) -> AnalyticsService? {
         let ac = config.analyticsConfig
         guard ac.enabled else {
@@ -234,10 +235,11 @@ final class AnalyticsService {
         log.d(
             "Analytics enabled (batchSize=\(ac.flushBatchSize), interval=\(ac.flushIntervalMs)ms)"
         )
+        let resolvedIdentityManager = identityManager ?? IdentityManager(storage: storage.scoped("identity"))
         return AnalyticsService(
             config: ac,
             apiKey: config.apiKey,
-            identity: AnalyticsIdentityManager(storage: storage.scoped("identity")),
+            identity: AnalyticsIdentityManager(identityManager: resolvedIdentityManager),
             queue: AnalyticsQueue(storage: storage.scoped("analytics")),
             staticContext: buildStaticContext(
                 wrapperBinding: config.wrapperBinding,

@@ -16,6 +16,8 @@ struct SDKServicesTests {
         #expect(services.campaignStore.isEmpty)
         #expect(!services.deviceIdProvider.deviceId.isEmpty)
         #expect(services.deviceIdProvider.getDeviceId() == services.deviceIdProvider.deviceId)
+        #expect(!services.identityManager.deviceId.isEmpty)
+        #expect(services.identityManager.getDeviceId() == services.deviceIdProvider.deviceId)
     }
 
     @Test("storage operations read, write, and remove values")
@@ -126,6 +128,7 @@ struct SDKServicesTests {
         #expect(instance.submissionReporter === instance.services.submissionReporter)
         #expect(instance.storage === instance.services.storage)
         #expect(instance.deviceIdProvider.deviceId == instance.services.deviceIdProvider.deviceId)
+        #expect(instance.identityManager.deviceId == instance.services.identityManager.deviceId)
 
         let campaign = try #require(CampaignModel.fromJson([
             "id": "c2",
