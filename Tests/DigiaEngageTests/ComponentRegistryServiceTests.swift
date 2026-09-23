@@ -166,12 +166,52 @@ struct ComponentRegistryServiceTests {
         #expect(overlay.isVisible)
     }
 
-    @Test("drops an anchor with no current screen name")
-    func dropsAnchorWithoutScreen() async throws {
+    @Test("holds an anchor with no screen until the first screen is set")
+    func buffersAnchorUntilScreen() async throws {
         let (service, sender) = makeService()
         service.setEnabled(true)
 
         service.recordAnchor("checkout_cta", screenName: nil)
+        try await settle()
+
+        #expect(sender.callCount == 0)
+
+        service.recordPage("checkout")
+        service.attachPendingAnchors(to: "checkout")
+        try await settle()
+
+        #expect(sender.callCount == 2)
+        let components = sender.bodies.compactMap { ($0["components"] as? [[String: Any]])?.first }
+        let anchor = components.first(where: { $0["componentType"] as? String == "anchor" })
+        #expect(anchor?["componentKey"] as? String == "checkout_cta")
+        #expect(anchor?["screenName"] as? String == "checkout")
+    }
+
+    @Test("holds an anchor seen before configure and records it after")
+    func buffersAnchorUntilConfigured() async throws {
+        let sender = FakeComponentSender()
+        let defaults = makeDefaults()
+        defaults.set(true, forKey: "digia_component_registry_recording_enabled")
+        let service = ComponentRegistryService(defaults: defaults, sender: sender)
+
+        service.recordAnchor("tab_home", screenName: nil)
+        service.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1", isDebugBuild: true)
+        service.attachPendingAnchors(to: "home")
+        try await settle()
+
+        #expect(sender.callCount == 1)
+        let anchor = (sender.bodies.last?["components"] as? [[String: Any]])?.first
+        #expect(anchor?["componentKey"] as? String == "tab_home")
+        #expect(anchor?["screenName"] as? String == "home")
+    }
+
+    @Test("does not buffer when recording is off")
+    func noBufferWhenDisabled() async throws {
+        let (service, sender) = makeService() // configured, recording off
+
+        service.recordAnchor("checkout_cta", screenName: nil)
+        service.setEnabled(true)
+        service.attachPendingAnchors(to: "checkout")
         try await settle()
 
         #expect(sender.callCount == 0)

@@ -8,8 +8,23 @@ private let log = DigiaLogger()
 
 /// Posts a completed-survey submission to the dashboard backend's
 /// `engage/sdk/recordSubmission` endpoint. Fires once per `markSurveyCompleted`.
-struct SurveySubmissionReporter {
-    let config: DigiaConfig
+typealias SurveySubmissionReporter = SubmissionReporter
+
+final class SubmissionReporter: @unchecked Sendable {
+    private(set) var config: DigiaConfig?
+    private let deviceIdProvider: DeviceIdProvider?
+    private let lock = NSLock()
+
+    init(config: DigiaConfig? = nil, deviceIdProvider: DeviceIdProvider? = nil) {
+        self.config = config
+        self.deviceIdProvider = deviceIdProvider
+    }
+
+    func configure(config: DigiaConfig) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.config = config
+    }
 
     func report(
         campaignId: String,
@@ -18,6 +33,16 @@ struct SurveySubmissionReporter {
         startedAt: Date,
         userId: String?
     ) {
+        lock.lock()
+        let currentConfig = self.config
+        lock.unlock()
+
+        guard let currentConfig else {
+            #if canImport(UIKit)
+            log.e("Survey submission skipped — config is nil")
+            #endif
+            return
+        }
         let body = Self.buildBody(
             campaignId: campaignId,
             survey: survey,
@@ -26,7 +51,8 @@ struct SurveySubmissionReporter {
             now: Date(),
             userId: userId
         )
-        Task.detached { await Self.post(config: config, deviceId: Self.deviceId(), body: body) }
+        let resolvedDeviceId = deviceIdProvider?.deviceId ?? Self.deviceId()
+        Task.detached { await Self.post(config: currentConfig, deviceId: resolvedDeviceId, body: body) }
     }
 
     // MARK: - Networking
@@ -60,7 +86,12 @@ struct SurveySubmissionReporter {
             return saved
         }
         #if canImport(UIKit)
-        let idfv = UIDevice.current.identifierForVendor?.uuidString
+        let idfv: String?
+        if Thread.isMainThread {
+            idfv = MainActor.assumeIsolated { UIDevice.current.identifierForVendor?.uuidString }
+        } else {
+            idfv = DispatchQueue.main.sync { UIDevice.current.identifierForVendor?.uuidString }
+        }
         #else
         let idfv: String? = nil
         #endif

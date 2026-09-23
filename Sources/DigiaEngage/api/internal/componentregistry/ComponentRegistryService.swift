@@ -40,6 +40,19 @@ final class ComponentRegistryService: ObservableObject {
     /// refire the same key repeatedly.
     private var seen = Set<String>()
 
+    /// Anchor keys seen before they could be sent: no screen yet, or `configure`
+    /// has not run (iOS configures after the async bundle fetch, and an RN or
+    /// SwiftUI tree mounts before that). The backend rejects an anchor without a
+    /// `screenName`, so they wait for `attachPendingAnchors(to:)`, which
+    /// `SDKInstance` calls when either input arrives. First-seen order, deduped.
+    private var pendingAnchors: [String] = []
+    /// Anchor keys are ≤ 64 chars and an app has tens of anchors, not thousands.
+    /// Past the cap the newest key is dropped, with one warning per key.
+    private static let pendingAnchorCap = 64
+    /// The one actionable hint this feature keeps: once per process, at `warn`,
+    /// and only while recording is actually on.
+    private var didWarnNoScreen = false
+
     private let debugOverlay: DigiaDebugOverlayController?
 
     init(
@@ -73,20 +86,64 @@ final class ComponentRegistryService: ObservableObject {
     }
 
     func recordPage(_ key: String) {
-        record(key: key, type: "page", screenName: nil)
+        let trimmedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedKey.isEmpty else { return }
+        record(key: trimmedKey, type: "page", screenName: nil)
     }
 
-    /// `screenName` is mandatory server-side for anchors — skip rather than
-    /// send a call guaranteed to be rejected if it isn't set yet.
+    /// `screenName` is mandatory server-side for anchors. An anchor seen before
+    /// the screen (or before `configure`) waits instead of being dropped and is
+    /// attributed to the first screen reported afterwards.
     func recordAnchor(_ key: String, screenName: String?) {
-        guard let screenName, !screenName.isEmpty else {
-            log.e(
-                "Anchor skipped — no current screen name set yet (anchor=\(key))\n"
-                    + "Call Digia.setCurrentScreen() before this anchor registers."
-            )
+        // Recording is off: nothing to do and nothing to buffer. Checked first so
+        // a release build with the toggle off pays one branch here.
+        if isConfigured && !isRecording { return }
+        let trimmedScreen = screenName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isConfigured, let trimmedScreen, !trimmedScreen.isEmpty else {
+            bufferPendingAnchor(key)
             return
         }
-        record(key: key, type: "anchor", screenName: screenName)
+        record(key: key, type: "anchor", screenName: trimmedScreen)
+    }
+
+    /// `screenName` is mandatory server-side for anchors. An anchor seen before
+    /// the screen (or before `configure`) waits instead of being dropped and is
+    /// attributed to the first screen reported afterwards. `SDKInstance` calls
+    /// this from `setCurrentScreen` and after `configure`.
+    func attachPendingAnchors(to screenName: String?) {
+        guard isConfigured, !pendingAnchors.isEmpty else { return }
+        guard isRecording else { pendingAnchors.removeAll(); return }
+        guard let screenName = screenName?.trimmingCharacters(in: .whitespacesAndNewlines), !screenName.isEmpty else {
+            warnNoScreenOnce(first: pendingAnchors[0])
+            return
+        }
+        let keys = pendingAnchors
+        pendingAnchors.removeAll()
+        log.d("Attributing \(keys.count) anchor(s) seen before the screen was known (screen=\(screenName))")
+        for key in keys { record(key: key, type: "anchor", screenName: screenName) }
+    }
+
+    private var isConfigured: Bool { config != nil && deviceId != nil }
+    private var isRecording: Bool { isEnabled && isDebugBuildFlag }
+
+    private func bufferPendingAnchor(_ key: String) {
+        guard !pendingAnchors.contains(key) else { return }
+        guard pendingAnchors.count < Self.pendingAnchorCap else {
+            log.w("Anchor not buffered — \(Self.pendingAnchorCap) already waiting for a screen (anchor=\(key))")
+            return
+        }
+        pendingAnchors.append(key)
+        log.d("Anchor waiting for a screen (anchor=\(key))")
+        if isConfigured { warnNoScreenOnce(first: key) }
+    }
+
+    private func warnNoScreenOnce(first key: String) {
+        guard isRecording, !didWarnNoScreen else { return }
+        didWarnNoScreen = true
+        log.w(
+            "Anchors are waiting for a screen name (first=\(key)) — they record "
+                + "once Digia.setCurrentScreen() is called."
+        )
     }
 
     func recordSlot(_ key: String, screenName: String?) {

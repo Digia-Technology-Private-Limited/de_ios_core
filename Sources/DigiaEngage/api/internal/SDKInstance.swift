@@ -88,7 +88,41 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private var currentDesignTokens = DesignTokenCatalog.empty
     private var currentTimeAnchor: TrustedTimeAnchor?
 
-    let campaignStore = CampaignStore()
+    var services: SDKServices!
+
+    var campaignStore: CampaignStore {
+        get { services.campaignStore }
+        set { services.campaignStore = newValue }
+    }
+    var analyticsService: AnalyticsService? {
+        get { services.analyticsService }
+        set { services.analyticsService = newValue }
+    }
+    var frequencyManager: FrequencyManager? {
+        get { services.frequencyManager }
+        set { services.frequencyManager = newValue }
+    }
+    var componentRegistry: ComponentRegistryService {
+        get { services.componentRegistry }
+        set { services.componentRegistry = newValue }
+    }
+    var liveTestService: LiveTestService {
+        get { services.liveTestService }
+        set { services.liveTestService = newValue }
+    }
+    var submissionReporter: SubmissionReporter {
+        get { services.submissionReporter }
+        set { services.submissionReporter = newValue }
+    }
+    var storage: LocalStorage {
+        get { services.storage }
+        set { services.storage = newValue }
+    }
+    var deviceIdProvider: DeviceIdProvider {
+        get { services.deviceIdProvider }
+        set { services.deviceIdProvider = newValue }
+    }
+
     let controller = DigiaOverlayController()
     let inlineController = InlineCampaignController()
     let guideOrchestrator = GuideOrchestrator()
@@ -115,16 +149,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Per-question viewed-at timestamps, keyed by "<surveyToken>:<nodeId>".
     /// Used to compute `time_to_answer_ms` on QuestionAnswered.
     private var questionViewedAt: [String: Date] = [:]
-    private var analyticsService: AnalyticsService?
     /// Whether the floating "Digia" debug bubble is shown. See
     /// `DigiaDebugOverlayController`.
     private let debugOverlayController = DigiaDebugOverlayController()
-    /// Batches pages/anchors/slots seen at runtime to the Engage Component
-    /// Registry, when the debug-only "recording mode" toggle is on. See
-    /// `ComponentRegistryService`.
-    private let componentRegistry: ComponentRegistryService
-    /// Debug-only live-campaign-testing coordinator (SSE connect + ACKs).
-    private var liveTestService = LiveTestService()
     /// Live-test campaigns, parsed on the spot — never added to `campaignStore`.
     private var liveTestCampaigns: [String: CampaignModel] = [:]
     /// In-flight live test invocations, keyed by synthetic `cepCampaignId`.
@@ -132,9 +159,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Whether the host app is a debug build, resolved once at `initialize`.
     /// Gates the component registry and `DigiaDebugSettingsView`.
     private(set) var isDebugBuild = false
-    /// Native frequency capping for all managed campaigns (nudge, survey, and —
-    /// on React Native — guides, whose lifecycle events arrive over the bridge).
-    private var frequencyManager: FrequencyManager?
 
     /// Set by the RN bridge. When non-nil the SDK is RN-driven: guides render in
     /// JS, so on a guide trigger native only applies frequency capping and (if
@@ -155,7 +179,23 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private var events: EngageEventEmitter!
 
     private init() {
-        componentRegistry = ComponentRegistryService(debugOverlay: debugOverlayController)
+        let defaultStorage = UserDefaultsLocalStorage()
+        let defaultDeviceIdProvider = DefaultDeviceIdProvider(storage: defaultStorage)
+        let defaultComponentRegistry = ComponentRegistryService(debugOverlay: debugOverlayController)
+        let defaultCampaignStore = CampaignStore()
+        let defaultLiveTestService = LiveTestService()
+        let defaultSubmissionReporter = SubmissionReporter(deviceIdProvider: defaultDeviceIdProvider)
+
+        services = SDKServices(
+            storage: defaultStorage,
+            deviceIdProvider: defaultDeviceIdProvider,
+            analyticsService: nil,
+            frequencyManager: nil,
+            campaignStore: defaultCampaignStore,
+            submissionReporter: defaultSubmissionReporter,
+            componentRegistry: defaultComponentRegistry,
+            liveTestService: defaultLiveTestService
+        )
         events = EngageEventEmitter(
             cep: PresentationSink { [weak self] in self?.coordinator },
             digia: DigiaAnalyticsSink(
@@ -224,9 +264,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         DigiaLogger.configure(config.logLevel)
         DigiaEndpoints.configure(config)
         requestHeaders = SDKRequestHeaders.make(
-            config: config, deviceId: AnalyticsIdentityManager().resolveAnonymousId()
+            config: config, deviceId: services.deviceIdProvider.deviceId
         )
         analyticsService = AnalyticsService.create(config: config, requestHeaders: requestHeaders)
+        services.submissionReporter.configure(config: config)
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
         // Sink #4 joins the registry here and nowhere else: it sends through
         // the pipeline that was just configured, and there was nothing to
@@ -369,6 +410,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             } else if captureModeEnabled {
                 setCaptureModeEnabled(false)
             }
+            // Anchors that mounted before this point were buffered: an RN or
+            // SwiftUI tree renders while the bundle is still being fetched.
+            componentRegistry.attachPendingAnchors(to: _currentScreen)
             // A JS reload re-runs this whole method (RN calls
             // `populateCampaignBundle` again), which re-configures the
             // service below. Without this, any live-test invocation still
@@ -605,6 +649,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         DigiaLogger.currentScreenName = _currentScreen
         log.d("Current screen set (screen=\(_currentScreen ?? "<unset>"))")
         componentRegistry.recordPage(screenName)
+        componentRegistry.attachPendingAnchors(to: _currentScreen)
         if previousScreen != _currentScreen {
             dismissActiveCampaignsNotTargetingCurrentScreen()
         }
@@ -1658,7 +1703,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         logVerbose(
             "reportSurveyCompleted: submitting campaignId=\(campaignId) answers=\(answers.count)")
-        SurveySubmissionReporter(config: config).report(
+        submissionReporter.report(
             campaignId: campaignId,
             survey: state.config,
             answers: answers,
@@ -2759,9 +2804,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         activePlugin = nil
         _currentScreen = nil
-        analyticsService?.clear()
-        analyticsService = nil
-        frequencyManager = nil
+        services.resetForTesting()
         config = nil
         requestHeaders = [:]
         hostActionExecutor.clearHandlers()
@@ -2770,7 +2813,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         font = DigiaFont()
         currentDesignTokens = .empty
         currentTimeAnchor = nil
-        campaignStore.clear()
         controller.dismissNudge()
         controller.dismissStoryOverlay()
         inlineController.clear()
@@ -2785,7 +2827,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         completedSurveyToken = nil
         welcomeStartToken = nil
         questionViewedAt.removeAll()
-        liveTestService.stop()
         coordinator.resetForTesting()
         clearLiveTestState()
     }
