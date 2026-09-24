@@ -13,6 +13,20 @@ struct SessionReporterTests {
         return (storage, defaults)
     }
 
+    /// Reports post from a background task; polls instead of guessing a delay.
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        for _ in 0..<300 where !condition() {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
+    private func pendingCount(_ storage: LocalStorage) -> Int {
+        guard let raw = storage.scoped("session").string(forKey: "pending_session_report"),
+              let list = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [Any]
+        else { return 0 }
+        return list.count
+    }
+
     @Test("report sends post request to session endpoint with correct headers and payload")
     func reportSendsCorrectPayloadAndHeaders() async throws {
         let mock = MockNetworkClient()
@@ -31,11 +45,10 @@ struct SessionReporterTests {
         )
 
         reporter.report()
-        // Wait briefly for background Task to execute
-        try await Task.sleep(nanoseconds: 100_000_000)
+        try await waitUntil { mock.requestCount >= 1 }
 
         #expect(mock.recordedRequests.count == 1)
-        let request = mock.recordedRequests[0]
+        let request = try #require(mock.recordedRequests.first)
         #expect(request.url.absoluteString.hasSuffix("/engage/sdk/session"))
         #expect(request.headers["X-Digia-Project-Id"] == "test-api-key")
         #expect(request.headers["X-Digia-Device-Id"] == "anon-456")
@@ -73,7 +86,7 @@ struct SessionReporterTests {
         )
 
         reporter.report()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        try await waitUntil { pendingCount(storage) == 1 }
 
         #expect(mock.recordedRequests.count == 1)
         let savedReport = storage.scoped("session").string(forKey: "pending_session_report")
@@ -84,7 +97,7 @@ struct SessionReporterTests {
         mock.enqueueResponse(statusCode: 200, body: Data("{}".utf8))
 
         reporter.report()
-        try await Task.sleep(nanoseconds: 150_000_000)
+        try await waitUntil { mock.requestCount >= 3 && pendingCount(storage) == 0 }
 
         #expect(mock.recordedRequests.count == 3)
         #expect(storage.scoped("session").string(forKey: "pending_session_report") == nil)
@@ -117,13 +130,13 @@ struct SessionReporterTests {
         for id in ["s1", "s2", "s3"] {
             currentSession.mutate { $0 = id }
             reporter.report()
-            try await Task.sleep(nanoseconds: 50_000_000)
         }
+        try await waitUntil { pendingCount(storage) == 3 }
 
         mock.reset()
         mock.setResponseFactory { _ in NetworkResponse(statusCode: 200, headers: [:], body: Data()) }
         reporter.flush()
-        try await Task.sleep(nanoseconds: 200_000_000)
+        try await waitUntil { postedSessionIds(mock).count >= 3 }
 
         #expect(postedSessionIds(mock) == ["s1", "s2", "s3"])
         #expect(storage.scoped("session").string(forKey: "pending_session_report") == nil)
@@ -147,6 +160,7 @@ struct SessionReporterTests {
         )
 
         reporter.report()
+        try await waitUntil { mock.requestCount >= 1 }
         try await Task.sleep(nanoseconds: 50_000_000)
         #expect(storage.scoped("session").string(forKey: "pending_session_report") == nil)
 
@@ -156,12 +170,12 @@ struct SessionReporterTests {
             reporter.report()
         }
         reporter.flush()
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await waitUntil { mock.requestCount >= SessionReporter.pendingCap + 4 }
 
         mock.reset()
         mock.setResponseFactory { _ in NetworkResponse(statusCode: 200, headers: [:], body: Data()) }
         reporter.flush()
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await waitUntil { postedSessionIds(mock).count >= SessionReporter.pendingCap }
 
         let expected = (3...(SessionReporter.pendingCap + 2)).map { "s\($0)" }
         #expect(postedSessionIds(mock) == expected)
