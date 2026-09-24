@@ -2,6 +2,32 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.14.1] - 2026-09-24
+
+### Improvements
+- **Weighted canvas survey progress bar** — segmented progress bars in canvas
+  surveys keep the progress already shown when an answer branches to more or
+  fewer scenes; only the unfilled remainder is redistributed across the
+  remaining segments, so the bar no longer jumps backwards mid-survey.
+- **Outside close button margins** — close buttons placed outside a canvas nudge
+  or canvas survey (dialog or bottom sheet) now honour authored per-side margins
+  (`margin` as a single number or `top`/`right`/`bottom`/`left`), and canvas
+  dialogs scroll when the close button and card do not fit together on screen.
+- **Proportional canvas survey answer inputs** — choice tiles, text and date
+  fields, NPS scales, star ratings, and reaction scales now scale their size,
+  spacing, corner radii, and borders to fill the answer area authored in the
+  dashboard. Validation messages render as a compact single-line label inside
+  the bottom of that answer area instead of below it.
+
+### Bug Fixes
+- **Rounded corners on canvas elements** — corners now draw as true circular
+  arcs, and radii larger than the element are scaled down proportionally (as in
+  CSS), so pill and circle shapes render correctly instead of with flattened
+  corners.
+- **Survey text fields in dark mode** — typed text and placeholder text in
+  survey text inputs now use the survey's text colours, so they stay readable
+  when the device is in dark mode.
+
 ## [3.14.0] - 2026-09-10
 
 ### New Features
