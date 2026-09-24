@@ -189,6 +189,35 @@ struct NetworkClientTests {
         #expect(captured.value == [before, after])
     }
 
+    // MARK: - SSE stream ownership
+
+    @Test("an SSE stream keeps its handler alive: events arrive with no outside reference to it")
+    func sseStreamOwnsItsHandler() async throws {
+        let client = makeTestClient()
+        MockURLProtocol.setHandler { req in
+            let resp = HTTPURLResponse(
+                url: req.url!, statusCode: 200, httpVersion: nil,
+                headerFields: ["Content-Type": "text/event-stream"]
+            )!
+            return (resp, Data("event: connected\ndata: {}\n\nevent: campaign_test\ndata: x\n\n".utf8))
+        }
+        defer { MockURLProtocol.reset() }
+
+        let received = LockedBox<[String]>([])
+        let subscription = LockedBox<(any CancellableSubscription)?>(nil)
+        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+            // Only the subscription is kept, exactly as `LiveTestSSEClient` does.
+            let opened = client.openSseStream(
+                request: NetworkRequest(url: URL(string: "https://api.digia.cloud/live/connect")!, method: .post),
+                handler: RecordingSseHandler(received: received) { done.resume() }
+            )
+            subscription.mutate { $0 = opened }
+        }
+        subscription.value?.cancel()
+
+        #expect(received.value == ["open", "connected", "campaign_test", "closed"])
+    }
+
     // MARK: - SSEFrameParser Tests
 
     @Test("SSEFrameParser parses complete frames with id, event, and multiline data")
@@ -252,4 +281,21 @@ final class LockedBox<Value>: @unchecked Sendable {
     var value: Value { lock.withLock { stored } }
 
     func mutate(_ body: (inout Value) -> Void) { lock.withLock { body(&stored) } }
+}
+
+/// Records callbacks and reports the terminal one. Nothing outside the stream
+/// holds it, so it lives only as long as the client keeps it.
+private final class RecordingSseHandler: SseStreamHandler, @unchecked Sendable {
+    private let received: LockedBox<[String]>
+    private let onTerminal: () -> Void
+
+    init(received: LockedBox<[String]>, onTerminal: @escaping () -> Void) {
+        self.received = received
+        self.onTerminal = onTerminal
+    }
+
+    func onOpen() { received.mutate { $0.append("open") } }
+    func onEvent(_ event: SseEvent) { received.mutate { $0.append(event.event ?? "") } }
+    func onError(_ error: Error) { received.mutate { $0.append("error") }; onTerminal() }
+    func onClosed() { received.mutate { $0.append("closed") }; onTerminal() }
 }

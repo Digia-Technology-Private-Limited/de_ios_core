@@ -19,6 +19,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         if let session {
             self.session = session
             self.uploadSession = session
+            self.sseSession = session
         } else {
             let config = URLSessionConfiguration.default
             config.httpCookieStorage = nil
@@ -35,15 +36,15 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             uploadConfig.urlCache = nil
             uploadConfig.timeoutIntervalForRequest = 30
             self.uploadSession = URLSession(configuration: uploadConfig)
-        }
 
-        let sseConfig = URLSessionConfiguration.default
-        sseConfig.httpCookieStorage = nil
-        sseConfig.urlCache = nil
-        // 45s gap timer: matches the backend's presence-lease TTL, well past its 15s heartbeat
-        sseConfig.timeoutIntervalForRequest = 45
-        sseConfig.timeoutIntervalForResource = 300
-        self.sseSession = URLSession(configuration: sseConfig)
+            let sseConfig = URLSessionConfiguration.default
+            sseConfig.httpCookieStorage = nil
+            sseConfig.urlCache = nil
+            // 45s gap timer: matches the backend's presence-lease TTL, well past its 15s heartbeat
+            sseConfig.timeoutIntervalForRequest = 45
+            sseConfig.timeoutIntervalForResource = 300
+            self.sseSession = URLSession(configuration: sseConfig)
+        }
     }
 
     public func setStaticHeaders(_ headers: [String: String]) {
@@ -173,7 +174,10 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         let subscription = URLSessionSseSubscription()
         let sseSession = self.sseSession
 
-        subscription.task = Task { [weak handler] in
+        // The task holds the handler strongly: callers keep only the
+        // subscription, so the stream owns its handler until it ends or is
+        // cancelled. The task's closure (and the handler) is released then.
+        subscription.task = Task {
             // URLSession has no connect timeout separate from the 45 s gap, so
             // the response headers get their own 10 s deadline.
             let connectDeadline = Task {
@@ -189,11 +193,11 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
                     // A rejected stream never opened: an error carrying the
                     // status, not an open followed by a close.
                     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                    handler?.onError(SseHTTPStatusError(statusCode: status))
+                    handler.onError(SseHTTPStatusError(statusCode: status))
                     return
                 }
 
-                handler?.onOpen()
+                handler.onOpen()
 
                 var parser = SSEFrameParser()
                 for try await byte in bytes {
@@ -202,19 +206,19 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
                         return
                     }
                     if let frame = parser.feed(byte) {
-                        handler?.onEvent(SseEvent(id: frame.id, event: frame.event, data: frame.data))
+                        handler.onEvent(SseEvent(id: frame.id, event: frame.event, data: frame.data))
                     }
                 }
 
                 if !subscription.isCancelled {
-                    handler?.onClosed()
+                    handler.onClosed()
                 }
             } catch {
                 connectDeadline.cancel()
                 if subscription.didTimeOutConnecting {
-                    handler?.onError(URLError(.timedOut))
+                    handler.onError(URLError(.timedOut))
                 } else if !Task.isCancelled && !subscription.isCancelled {
-                    handler?.onError(error)
+                    handler.onError(error)
                 }
             }
         }
