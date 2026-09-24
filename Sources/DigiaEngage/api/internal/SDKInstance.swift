@@ -1828,6 +1828,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     func setUserId(_ userId: String) {
         guard let services else {
+            // A blank ID is ignored here exactly as `IdentityManager` ignores
+            // it after init, so it can't overwrite a buffered clear.
+            guard !userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             pendingUserChange = .set(userId)
             return
         }
