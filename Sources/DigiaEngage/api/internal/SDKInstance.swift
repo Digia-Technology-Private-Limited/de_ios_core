@@ -2404,6 +2404,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     guideToken: current.token,
                     stepIndex: current.stepIndex
                 )
+            },
+            onRemoved: { [weak self] removedKey in
+                guard let self,
+                      let current = self.guideOrchestrator.state,
+                      current.token == state.token,
+                      current.currentStep?.target.anchorKey == removedKey
+                else { return }
+                self.logNativeGuideStage("anchor", "result=removed anchor_key=\(removedKey)")
+                self.dismissGuide(reason: .screenExit)
             }
         )
     }

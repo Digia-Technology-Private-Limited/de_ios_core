@@ -73,6 +73,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     private var activeKey: String?
     private var activeAvailable: ((String) -> Void)?
     private var activeUnavailable: ((String, AnchorUnavailableReason) -> Void)?
+    private var activeRemoved: ((String) -> Void)?
     private var activeAnchorWasAvailable = false
     private let activeViewSampler = ActiveAnchorSampler()
     private var readinessTask: Task<Void, Never>?
@@ -130,6 +131,9 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         trackedRects.removeValue(forKey: key)
         version &+= 1
         guard activeKey == key else { return }
+        if activeAnchorWasAvailable, !remaining.contains(where: { $0.value?.window != nil }) {
+            notifyActiveAnchorRemovedNextTurn(key: key)
+        }
         if remaining.isEmpty {
             activeAnchorWasAvailable = false
             startReadinessTimeout(for: key, failureReason: .detached)
@@ -262,13 +266,15 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     func track(
         key: String?,
         onAvailable: @escaping (String) -> Void,
-        onUnavailable: @escaping (String, AnchorUnavailableReason) -> Void
+        onUnavailable: @escaping (String, AnchorUnavailableReason) -> Void,
+        onRemoved: ((String) -> Void)? = nil
     ) {
         stopTracking()
         guard let key else { return }
         activeKey = key
         activeAvailable = onAvailable
         activeUnavailable = onUnavailable
+        activeRemoved = onRemoved
         activeAnchorWasAvailable = false
         startReadinessTimeout(for: key)
 
@@ -287,8 +293,21 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         activeKey = nil
         activeAvailable = nil
         activeUnavailable = nil
+        activeRemoved = nil
         activeAnchorWasAvailable = false
         trackedCornerRadius = nil
+    }
+
+    /// The anchor hosting the visible step left its window. As on Flutter, the
+    /// guide is told one turn later, not during the host's teardown, and only
+    /// if no view for the key came back in the meantime.
+    private func notifyActiveAnchorRemovedNextTurn(key: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.activeKey == key, !self.isRegistered(key) else { return }
+            let callback = self.activeRemoved
+            self.stopTracking()
+            callback?(key)
+        }
     }
 
     func resetForTesting() {
