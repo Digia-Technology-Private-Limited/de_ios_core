@@ -7,16 +7,24 @@ private let log = DigiaLogger()
 
 @MainActor
 final class SDKInstance: ObservableObject, DigiaCEPHost {
-    static let shared = SDKInstance(
-        defaults: UserDefaults(suiteName: "tech.digia.engage") ?? .standard,
-        legacyDefaults: .standard,
-        makeNetworkClient: { currentSession in
-            URLSessionNetworkClient(
-                sessionIdProvider: { currentSession.sessionId },
-                headerProvider: { currentSession.requestHeaders }
-            )
+    static let shared: SDKInstance = {
+        let instance = SDKInstance(
+            defaults: UserDefaults(suiteName: "tech.digia.engage") ?? .standard,
+            legacyDefaults: .standard,
+            makeNetworkClient: { currentSession in
+                URLSessionNetworkClient(
+                    sessionIdProvider: { currentSession.sessionId },
+                    headerProvider: { currentSession.requestHeaders }
+                )
+            }
+        )
+        // Only the production instance: a test's own instance must not take
+        // over the process-wide registry's hook.
+        AnchorRegistry.shared.setAnchorSeenHandler { [weak instance] key in
+            instance?.recordAnchorSeen(key)
         }
-    )
+        return instance
+    }()
 
     private struct ExternalGuide {
         let campaign: CampaignModel

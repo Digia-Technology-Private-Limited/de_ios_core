@@ -87,8 +87,21 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     /// left alone.
     private var scrollPending = false
 
+    /// Told each time an anchor registers. Set once by `SDKInstance.shared`
+    /// (see `setAnchorSeenHandler`) rather than reached for from here.
+    private var onAnchorSeen: ((String) -> Void)?
+
     private override init() {
         super.init()
+    }
+
+    /// Installs the anchor-seen hook, then replays the anchors already
+    /// registered: a host can register anchors before the SDK instance exists.
+    func setAnchorSeenHandler(_ handler: @escaping (String) -> Void) {
+        onAnchorSeen = handler
+        for key in Set(viewRegistry.keys).union(rectRegistry.keys) {
+            handler(key)
+        }
     }
 
     public func register(key: String, view: UIView, cornerRadius: CGFloat = 0) {
@@ -99,7 +112,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         if activeKey == key { trackedCornerRadius = nil }
         cornerRadii.removeValue(forKey: key)
         version &+= 1
-        SDKInstance.shared.recordAnchorSeen(key)
+        onAnchorSeen?(key)
         guard activeKey == key, !isInStepDelay else { return }
         if !activeAnchorWasAvailable { startReadinessTimeout(for: key) }
         startSampling(key: key)
@@ -113,7 +126,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         if activeKey == key { trackedCornerRadius = nil }
         cornerRadii[key] = cornerRadius
         version &+= 1
-        SDKInstance.shared.recordAnchorSeen(key)
+        onAnchorSeen?(key)
         guard activeKey == key, !isInStepDelay else { return }
         activeAnchorWasAvailable = false
         activeViewSampler.stop()
