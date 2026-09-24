@@ -766,7 +766,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 ),
                 appVersion: appInfo["CFBundleShortVersionString"] as? String ?? "",
                 appBuildNumber: appInfo["CFBundleVersion"] as? String ?? "",
-                sdkVersion: DigiaSdkVersion.value,
+                sdkVersion: sdkVersion ?? "",
                 profile: profile,
                 traversal: traversal,
                 nodes: nodes
@@ -836,7 +836,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             ),
             appVersion: appInfo["CFBundleShortVersionString"] as? String ?? "",
             appBuildNumber: appInfo["CFBundleVersion"] as? String ?? "",
-            sdkVersion: DigiaSdkVersion.value,
+            sdkVersion: sdkVersion ?? "",
             profile: profile,
             traversal: traversal,
             nodes: nodes
