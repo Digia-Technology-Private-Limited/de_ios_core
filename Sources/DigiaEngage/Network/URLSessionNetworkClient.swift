@@ -2,6 +2,7 @@ import Foundation
 
 public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     private let session: URLSession
+    private let uploadSession: URLSession
     private let sseSession: URLSession
     private let sessionIdProvider: (@Sendable () -> String?)?
     private let headerProvider: (@Sendable () -> [String: String])?
@@ -17,6 +18,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         self.headerProvider = headerProvider
         if let session {
             self.session = session
+            self.uploadSession = session
         } else {
             let config = URLSessionConfiguration.default
             config.httpCookieStorage = nil
@@ -24,6 +26,15 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             config.timeoutIntervalForRequest = 10
             config.timeoutIntervalForResource = 30
             self.session = URLSession(configuration: config)
+
+            // Multipart: 30 s without progress in any phase (connect, write,
+            // read), but no 30 s cap on the whole upload — a multi-MB capture
+            // over cellular legitimately takes longer than that.
+            let uploadConfig = URLSessionConfiguration.default
+            uploadConfig.httpCookieStorage = nil
+            uploadConfig.urlCache = nil
+            uploadConfig.timeoutIntervalForRequest = 30
+            self.uploadSession = URLSession(configuration: uploadConfig)
         }
 
         let sseConfig = URLSessionConfiguration.default
@@ -114,7 +125,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
 
         body.append(Data("--\(boundary)--\r\n".utf8))
 
-        let (data, response) = try await session.upload(for: urlRequest, from: body)
+        let (data, response) = try await uploadSession.upload(for: urlRequest, from: body)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw URLError(.badServerResponse)
         }
@@ -163,8 +174,15 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         let sseSession = self.sseSession
 
         subscription.task = Task { [weak handler] in
+            // URLSession has no connect timeout separate from the 45 s gap, so
+            // the response headers get their own 10 s deadline.
+            let connectDeadline = Task {
+                try await Task.sleep(nanoseconds: Self.sseConnectTimeoutNs)
+                subscription.connectTimedOut()
+            }
             do {
                 let (bytes, response) = try await sseSession.bytes(for: urlRequest)
+                connectDeadline.cancel()
                 if Task.isCancelled || subscription.isCancelled { return }
 
                 guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
@@ -191,7 +209,10 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
                     handler?.onClosed()
                 }
             } catch {
-                if !Task.isCancelled && !subscription.isCancelled {
+                connectDeadline.cancel()
+                if subscription.didTimeOutConnecting {
+                    handler?.onError(URLError(.timedOut))
+                } else if !Task.isCancelled && !subscription.isCancelled {
                     handler?.onError(error)
                 }
             }
@@ -199,6 +220,8 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
 
         return subscription
     }
+
+    private static let sseConnectTimeoutNs: UInt64 = 10_000_000_000
 
     // MARK: - Header Assembler
 
@@ -299,12 +322,22 @@ private final class URLSessionSseSubscription: CancellableSubscription, @uncheck
     var task: Task<Void, Never>?
     private let lock = NSLock()
     private(set) var isCancelled = false
+    private(set) var didTimeOutConnecting = false
 
     func cancel() {
         lock.lock()
         isCancelled = true
         task?.cancel()
         task = nil
+        lock.unlock()
+    }
+
+    /// Abandons a connection whose response headers missed the deadline. Not
+    /// a caller cancel: the handler still hears about it, as a timeout.
+    func connectTimedOut() {
+        lock.lock()
+        didTimeOutConnecting = true
+        task?.cancel()
         lock.unlock()
     }
 }
