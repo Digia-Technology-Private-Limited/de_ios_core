@@ -338,6 +338,51 @@ struct DigiaEngageTests {
         #expect(recorder.isHoldReleased)
     }
 
+    @Test("removing the anchor of the visible guide step dismisses the guide one turn later")
+    func removingAnchorDismissesGuide() async throws {
+        SDKInstance.shared.resetForTesting()
+        Digia.register(TestPlugin(id: "plugin"))
+        let campaign = try #require(CampaignModel.fromJson([
+            "id": "anchor-guide-id",
+            "campaignKey": "anchor-guide",
+            "campaignType": "guide",
+            "targetScreenNames": ["names": ["Help"]],
+            "templateConfig": [
+                "templateType": "tooltip",
+                "steps": [[
+                    "stepId": "step-1",
+                    "anchorKey": "help-anchor",
+                    "layoutMode": "canvas",
+                    "canvas": [
+                        "version": 2,
+                        "canvasWidth": 240,
+                        "canvasHeight": 120,
+                        "background": ["type": "solid", "color": ["value": "#FFFFFFFF"]],
+                        "children": [],
+                    ],
+                ] as [String: Any]],
+            ],
+        ]))
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.isHidden = false
+        let anchor = DigiaAnchorView(frame: CGRect(x: 10, y: 10, width: 100, height: 40))
+        anchor.anchorKey = "help-anchor"
+        window.addSubview(anchor)
+        _ = SDKInstance.shared.deliver(
+            CEPTriggerPayload(
+                cepCampaignId: "anchor-guide-1", campaignKey: campaign.campaignKey,
+                cepMetadata: [:]))
+        #expect(SDKInstance.shared.guideOrchestrator.state != nil)
+
+        anchor.removeFromSuperview()
+        #expect(SDKInstance.shared.guideOrchestrator.state != nil)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        #expect(SDKInstance.shared.guideOrchestrator.state == nil)
+    }
+
     @Test("screen changes dismiss an accepted externally rendered guide")
     func screenChangesDismissExternalGuide() throws {
         SDKInstance.shared.resetForTesting()
