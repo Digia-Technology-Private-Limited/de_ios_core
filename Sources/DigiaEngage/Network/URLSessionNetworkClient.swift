@@ -179,7 +179,10 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         // The task holds the handler strongly: callers keep only the
         // subscription, so the stream owns its handler until it ends or is
         // cancelled. The task's closure (and the handler) is released then.
-        subscription.task = Task {
+        //
+        // Every exit calls at most one terminal callback (`onError` or
+        // `onClosed`), and none after a caller's `cancel()`.
+        let task = Task {
             // URLSession has no connect timeout separate from the 45 s gap, so
             // the response headers get their own 10 s deadline.
             let connectDeadline = Task {
@@ -189,11 +192,25 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             do {
                 let (bytes, response) = try await sseSession.bytes(for: urlRequest)
                 connectDeadline.cancel()
-                if Task.isCancelled || subscription.isCancelled { return }
+                // Decided under the subscription's lock, so a deadline firing
+                // right as the headers arrive can't leave the stream silent.
+                switch subscription.markConnected() {
+                case .cancelled:
+                    bytes.task.cancel()
+                    return
+                case .timedOut:
+                    bytes.task.cancel()
+                    handler.onError(URLError(.timedOut))
+                    return
+                case .connected:
+                    break
+                }
 
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                     // A rejected stream never opened: an error carrying the
-                    // status, not an open followed by a close.
+                    // status, not an open followed by a close. Its connection
+                    // is closed rather than left to drain.
+                    bytes.task.cancel()
                     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
                     handler.onError(SseHTTPStatusError(statusCode: status))
                     return
@@ -217,13 +234,15 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
                 }
             } catch {
                 connectDeadline.cancel()
+                if subscription.isCancelled { return }
                 if subscription.didTimeOutConnecting {
                     handler.onError(URLError(.timedOut))
-                } else if !Task.isCancelled && !subscription.isCancelled {
+                } else {
                     handler.onError(error)
                 }
             }
         }
+        subscription.setTask(task)
 
         return subscription
     }
@@ -329,26 +348,63 @@ struct SseHTTPStatusError: Error, CustomStringConvertible {
 }
 
 private final class URLSessionSseSubscription: CancellableSubscription, @unchecked Sendable {
-    var task: Task<Void, Never>?
-    private let lock = NSLock()
-    private(set) var isCancelled = false
-    private(set) var didTimeOutConnecting = false
+    enum ConnectOutcome { case connected, timedOut, cancelled }
 
-    func cancel() {
+    private let lock = NSLock()
+    private var task: Task<Void, Never>?
+    private var cancelled = false
+    private var timedOut = false
+    private var connected = false
+
+    var isCancelled: Bool { lock.withLock { cancelled } }
+    var didTimeOutConnecting: Bool { lock.withLock { timedOut } }
+
+    /// Stores the stream's task. A cancel or timeout that raced ahead of it is
+    /// applied now.
+    func setTask(_ task: Task<Void, Never>) {
         lock.lock()
-        isCancelled = true
-        task?.cancel()
-        task = nil
+        if cancelled || timedOut {
+            lock.unlock()
+            task.cancel()
+            return
+        }
+        self.task = task
         lock.unlock()
     }
 
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let task = self.task
+        self.task = nil
+        lock.unlock()
+        task?.cancel()
+    }
+
     /// Abandons a connection whose response headers missed the deadline. Not
-    /// a caller cancel: the handler still hears about it, as a timeout.
+    /// a caller cancel: the handler still hears about it, as a timeout. A
+    /// no-op once the headers have arrived.
     func connectTimedOut() {
         lock.lock()
-        didTimeOutConnecting = true
-        task?.cancel()
+        guard !connected, !cancelled else {
+            lock.unlock()
+            return
+        }
+        timedOut = true
+        let task = self.task
         lock.unlock()
+        task?.cancel()
+    }
+
+    /// Called once the response headers arrive; says which of the racing
+    /// outcomes won.
+    func markConnected() -> ConnectOutcome {
+        lock.withLock {
+            if cancelled { return .cancelled }
+            if timedOut { return .timedOut }
+            connected = true
+            return .connected
+        }
     }
 }
 
