@@ -134,29 +134,40 @@ struct LocalStorageMigratorTests {
         #expect(standardDefaults.string(forKey: "digia_engage_device_id") == nil)
     }
 
-    @Test("a failed identity write keeps the legacy key and the marker unset; the next run migrates it")
-    func failedIdentityCopyIsRetried() {
+    @Test("a failed identity write is dropped: marker written, legacy deleted, the next run changes nothing")
+    func failedIdentityCopyIsNotRetried() {
         let targetName = "test.target.\(UUID().uuidString)"
         let target = IdentityWriteFailingDefaults(suiteName: targetName)!
         target.removePersistentDomain(forName: targetName)
         let (_, standardDefaults) = makeIsolatedDefaults()
         standardDefaults.set("legacy-device", forKey: "digia_anonymous_id")
-        standardDefaults.set("live-flag", forKey: "digia_live_testing_device_name")
+        standardDefaults.set("legacy-user", forKey: "digia_user_id")
 
         target.failIdentityWrites = true
         LocalStorageMigrator.migrateIfNeeded(targetDefaults: target, standardDefaults: standardDefaults)
 
-        #expect(standardDefaults.string(forKey: "digia_anonymous_id") == "legacy-device")
-        #expect(target.object(forKey: "storage.version") == nil)
-        // Keys that did copy are still moved.
-        #expect(standardDefaults.string(forKey: "digia_live_testing_device_name") == nil)
+        #expect(target.integer(forKey: "storage.version") == 1)
+        #expect(standardDefaults.object(forKey: "digia_anonymous_id") == nil)
+        #expect(standardDefaults.object(forKey: "digia_user_id") == nil)
 
         target.failIdentityWrites = false
+        target.set("new-device", forKey: "identity.device_id")
         LocalStorageMigrator.migrateIfNeeded(targetDefaults: target, standardDefaults: standardDefaults)
 
-        #expect(target.string(forKey: "identity.device_id") == "legacy-device")
-        #expect(standardDefaults.string(forKey: "digia_anonymous_id") == nil)
-        #expect(target.integer(forKey: "storage.version") == 1)
+        #expect(target.string(forKey: "identity.device_id") == "new-device")
+        #expect(target.string(forKey: "identity.user_id") == nil)
+    }
+
+    @Test("an identity value already in the new location is never overwritten by a legacy one")
+    func existingIdentityWins() {
+        let (targetDefaults, standardDefaults) = makeIsolatedDefaults()
+        targetDefaults.set("N", forKey: "identity.device_id")
+        standardDefaults.set("L", forKey: "digia_anonymous_id")
+
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+
+        #expect(targetDefaults.string(forKey: "identity.device_id") == "N")
+        #expect(standardDefaults.object(forKey: "digia_anonymous_id") == nil)
     }
 
     @Test("Migrates string formatted queue")

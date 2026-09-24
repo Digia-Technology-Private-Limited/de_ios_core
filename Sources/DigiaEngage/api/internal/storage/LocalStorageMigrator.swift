@@ -1,5 +1,8 @@
 import Foundation
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 enum LocalStorageMigrator {
     private static let suiteName = "tech.digia.engage"
     private static let keyStorageVersion = "storage.version"
@@ -13,21 +16,17 @@ enum LocalStorageMigrator {
         let currentVersion = targetDefaults.integer(forKey: keyStorageVersion)
         guard currentVersion < currentStorageVersion else { return }
 
-        // 1. Identity Migration. Each legacy source is tried on its own, and
-        // a copy counts only once it reads back from the target: a legacy
-        // identity key is deleted, and the migration marked done, only then.
-        var identityCopied = true
+        // 1. Identity Migration. One-shot (D10): a value already in the new
+        // location is never overwritten, and a failed copy is logged and
+        // skipped; the legacy keys are deleted below either way.
         let legacyId = ["digia_anonymous_id", "digia_engage_device_id"].lazy
             .compactMap { standardDefaults.string(forKey: $0) }
             .first { !$0.isEmpty }
         if let legacyId {
-            targetDefaults.set(legacyId, forKey: "identity.device_id")
-            identityCopied = targetDefaults.string(forKey: "identity.device_id") == legacyId
+            copyIdentity(legacyId, forKey: "identity.device_id", to: targetDefaults)
         }
-
         if let userId = standardDefaults.string(forKey: "digia_user_id"), !userId.isEmpty {
-            targetDefaults.set(userId, forKey: "identity.user_id")
-            identityCopied = identityCopied && targetDefaults.string(forKey: "identity.user_id") == userId
+            copyIdentity(userId, forKey: "identity.user_id", to: targetDefaults)
         }
 
         // 2. Analytics Queue Migration (standardized to String JSON across all stacks).
@@ -107,10 +106,10 @@ enum LocalStorageMigrator {
         }
 
         // 8. Delete Legacy Keys from standard defaults
-        let identityKeys = identityCopied
-            ? ["digia_anonymous_id", "digia_engage_device_id", "digia_user_id"]
-            : []
-        let legacyKeys = identityKeys + [
+        let legacyKeys = [
+            "digia_anonymous_id",
+            "digia_engage_device_id",
+            "digia_user_id",
             "digia_analytics_queue",
             "digia_debug_overlay_bubble_visible",
             "digia_anchorless_capture_enabled",
@@ -126,11 +125,8 @@ enum LocalStorageMigrator {
             standardDefaults.removeObject(forKey: key)
         }
 
-        // A failed identity copy leaves the marker unset, so the next launch
-        // retries it. Initialization proceeds either way.
-        if identityCopied {
-            targetDefaults.set(currentStorageVersion, forKey: keyStorageVersion)
-        }
+        // Written whatever the copy results: there is no retry (D10).
+        targetDefaults.set(currentStorageVersion, forKey: keyStorageVersion)
 
         // ─────────────────────────────────────────────────────────────────────────────
         // TEMPORARY MIGRATION CLEANUP: Delete orphaned legacy video cache directory.
@@ -139,6 +135,16 @@ enum LocalStorageMigrator {
         if let cachesUrl = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
             let legacyDir = cachesUrl.appendingPathComponent("digia-engage-story-video-files")
             try? FileManager.default.removeItem(at: legacyDir)
+        }
+    }
+
+    /// Copies a legacy identity value unless the new location already holds
+    /// one; a copy that does not read back is logged and dropped.
+    private static func copyIdentity(_ value: String, forKey key: String, to target: UserDefaults) {
+        if let existing = target.string(forKey: key), !existing.isEmpty { return }
+        target.set(value, forKey: key)
+        if target.string(forKey: key) != value {
+            log.w("Legacy identity value was not migrated; it is dropped", extras: ["key": key])
         }
     }
 
