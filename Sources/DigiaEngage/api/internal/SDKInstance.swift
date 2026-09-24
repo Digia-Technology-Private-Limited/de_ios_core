@@ -390,6 +390,17 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 reason: Self.fetchFailureReason(fetchFailure),
                 extras: fetchFailure?.statusCode.map { ["http_status": String($0)] }
             )
+            // The held trigger never had a bundle to be looked up in: that is
+            // a failed init, not an unknown key (as Flutter and Android).
+            if let pending = pendingPresentation {
+                pendingPresentation = nil
+                pending.settle(
+                    .dropped(
+                        reason: .notInitialized,
+                        detail: "initialize() failed while this trigger was buffered"
+                    )
+                )
+            }
         }
         completeInitialization(campaigns)
     }

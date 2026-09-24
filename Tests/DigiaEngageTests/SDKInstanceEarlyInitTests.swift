@@ -62,7 +62,7 @@ struct SDKInstanceEarlyInitTests {
         #expect(sdk.controller.activeNudge != nil)
     }
 
-    @Test("a fetch failure reaches ready with an empty store, surfaces no error, and settles the held trigger as unknown_campaign_key")
+    @Test("a fetch failure reaches ready with an empty store, surfaces no error, and settles the held trigger as not_initialized")
     func fetchFailureSettlesHeldTrigger() async throws {
         let network = HeldBundleNetworkClient()
         let sdk = makeInstance(network: network)
@@ -73,7 +73,7 @@ struct SDKInstanceEarlyInitTests {
         try await waitUntilReady(sdk)
 
         #expect(sdk.campaignStore.isEmpty)
-        #expect(recorder.dropReason == .unknownCampaignKey)
+        #expect(recorder.dropReason == .notInitialized)
         #expect(recorder.isHoldReleased)
     }
 
