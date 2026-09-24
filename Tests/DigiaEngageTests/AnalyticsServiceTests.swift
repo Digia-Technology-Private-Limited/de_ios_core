@@ -81,6 +81,15 @@ private func sleepMillis(_ ms: UInt64) async throws {
     try await Task.sleep(nanoseconds: ms * 1_000_000)
 }
 
+/// Polls `condition` (up to 5 s) instead of guessing how long the work takes:
+/// the main actor is shared with other suites and can be busy for a while.
+@MainActor
+private func waitUntil(_ condition: () -> Bool) async throws {
+    for _ in 0..<500 where !condition() {
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+}
+
 @MainActor
 @Suite("AnalyticsService", .serialized)
 struct AnalyticsServiceTests {
@@ -306,17 +315,19 @@ struct AnalyticsServiceTests {
             config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
             sender: fakeSender
         )
-        service.retryScheduleMs = [10, 20]  // fast retries for the test
+        // Long enough that the first attempt's outcome is observed before the
+        // retry fires, whatever else the main actor is doing.
+        service.retryScheduleMs = [1_000]
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
-        // let flush attempt run and fail (500) but not the retry yet (10ms)
-        try await sleepMillis(5)
+        // The first attempt fails (500); the event waits for the retry.
+        try await waitUntil { service.retryAttempt == 1 }
         #expect(service.retryAttempt == 1)
         #expect(service.queue.size == 1)
 
-        // let the retry fire and succeed
-        try await sleepMillis(200)
+        // The retry fires and succeeds.
+        try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 }
         #expect(service.queue.size == 0)
         #expect(service.retryAttempt == 0)
         #expect(fakeSender.callCount == 2)
