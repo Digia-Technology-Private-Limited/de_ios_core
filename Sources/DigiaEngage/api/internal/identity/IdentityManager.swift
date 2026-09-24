@@ -54,18 +54,8 @@ public final class IdentityManager: @unchecked Sendable {
         }
     }
 
-    public func getDeviceId() -> String {
-        return deviceId
-    }
-
-    public func getUserId() -> String? {
-        lock.lock()
-        defer { lock.unlock() }
-        return cachedUserId
-    }
-
     public var userId: String? {
-        getUserId()
+        lock.withLock { cachedUserId }
     }
 
     public func setUserId(_ userId: String) {

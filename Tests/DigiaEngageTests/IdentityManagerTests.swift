@@ -21,7 +21,7 @@ struct IdentityManagerTests {
         #expect(scopedStorage.string(forKey: "device_id") == nil)
 
         let manager = IdentityManager(storage: scopedStorage)
-        let generatedId = manager.getDeviceId()
+        let generatedId = manager.deviceId
 
         #expect(!generatedId.isEmpty)
         #expect(manager.deviceId == generatedId)
@@ -39,7 +39,7 @@ struct IdentityManagerTests {
         let manager = IdentityManager(storage: scopedStorage, idGenerator: { "never-called" })
 
         #expect(manager.deviceId == existingId)
-        #expect(manager.getDeviceId() == existingId)
+        #expect(manager.deviceId == existingId)
     }
 
     @Test("User ID management: setUserId persists, trims, caches, and clearUserId removes it")
@@ -48,26 +48,26 @@ struct IdentityManagerTests {
         let scopedStorage = storage.scoped("identity")
         let manager = IdentityManager(storage: scopedStorage)
 
-        #expect(manager.getUserId() == nil)
+        #expect(manager.userId == nil)
 
         // setUserId with trimming
         manager.setUserId("  customer_42  ")
-        #expect(manager.getUserId() == "customer_42")
+        #expect(manager.userId == "customer_42")
         #expect(scopedStorage.string(forKey: "user_id") == "customer_42")
 
         // blank string setUserId is ignored
         manager.setUserId("   ")
-        #expect(manager.getUserId() == "customer_42")
+        #expect(manager.userId == "customer_42")
         #expect(scopedStorage.string(forKey: "user_id") == "customer_42")
 
-        // clearUserId removes user_id and sets getUserId to nil
+        // clearUserId removes user_id and sets userId to nil
         manager.clearUserId()
-        #expect(manager.getUserId() == nil)
+        #expect(manager.userId == nil)
         #expect(scopedStorage.string(forKey: "user_id") == nil)
 
         // calling clearUserId when already nil is idempotent no-op
         manager.clearUserId()
-        #expect(manager.getUserId() == nil)
+        #expect(manager.userId == nil)
         #expect(scopedStorage.string(forKey: "user_id") == nil)
     }
 
@@ -78,7 +78,7 @@ struct IdentityManagerTests {
         scopedStorage.set("user_prior", forKey: "user_id")
 
         let manager = IdentityManager(storage: scopedStorage)
-        #expect(manager.getUserId() == "user_prior")
+        #expect(manager.userId == "user_prior")
     }
 
     @Test("Identity stability on logout: clearUserId does NOT rotate or modify deviceId")
@@ -87,13 +87,13 @@ struct IdentityManagerTests {
         let scopedStorage = storage.scoped("identity")
         let manager = IdentityManager(storage: scopedStorage)
 
-        let initialDeviceId = manager.getDeviceId()
+        let initialDeviceId = manager.deviceId
         manager.setUserId("logged_in_user")
-        #expect(manager.getDeviceId() == initialDeviceId)
+        #expect(manager.deviceId == initialDeviceId)
 
         manager.clearUserId()
-        #expect(manager.getUserId() == nil)
-        #expect(manager.getDeviceId() == initialDeviceId)
+        #expect(manager.userId == nil)
+        #expect(manager.deviceId == initialDeviceId)
         #expect(scopedStorage.string(forKey: "device_id") == initialDeviceId)
     }
 
@@ -107,16 +107,16 @@ struct IdentityManagerTests {
                 let userId = "user_\(i)"
                 group.addTask {
                     manager.setUserId(userId)
-                    _ = manager.getUserId()
+                    _ = manager.userId
                 }
                 group.addTask {
                     manager.clearUserId()
-                    _ = manager.getUserId()
+                    _ = manager.userId
                 }
             }
         }
 
-        let finalUser = manager.getUserId()
+        let finalUser = manager.userId
         if let finalUser {
             #expect(!finalUser.isEmpty)
         }
