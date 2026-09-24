@@ -42,7 +42,9 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             sseConfig.urlCache = nil
             // 45s gap timer: matches the backend's presence-lease TTL, well past its 15s heartbeat
             sseConfig.timeoutIntervalForRequest = 45
-            sseConfig.timeoutIntervalForResource = 300
+            // No total-duration cap: a stream with regular heartbeats stays
+            // open. `timeoutIntervalForResource` keeps its default (7 days),
+            // effectively unbounded for a live-test session.
             self.sseSession = URLSession(configuration: sseConfig)
         }
     }
