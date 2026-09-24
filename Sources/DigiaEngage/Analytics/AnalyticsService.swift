@@ -195,8 +195,8 @@ final class AnalyticsService {
         config: DigiaConfig,
         requestHeaders: [String: String],
         storage: LocalStorage = UserDefaultsLocalStorage(),
-        identityManager: IdentityManager? = nil,
-        sessionManager: SessionManager? = nil,
+        identityManager: IdentityManager,
+        sessionManager: SessionManager,
         networkClient: (any NetworkClient)? = nil
     ) -> AnalyticsService? {
         let ac = config.analyticsConfig
@@ -207,16 +207,11 @@ final class AnalyticsService {
         log.d(
             "Analytics enabled (batchSize=\(ac.flushBatchSize), interval=\(ac.flushIntervalMs)ms)"
         )
-        let resolvedIdentityManager = identityManager ?? IdentityManager(storage: storage.scoped("identity"))
-        let resolvedSessionManager = sessionManager ?? SessionManager(
-            storage: storage,
-            timeoutMs: Int64(ac.sessionTimeoutMs)
-        )
         return AnalyticsService(
             config: ac,
             apiKey: config.apiKey,
-            identityManager: resolvedIdentityManager,
-            sessionManager: resolvedSessionManager,
+            identityManager: identityManager,
+            sessionManager: sessionManager,
             queue: AnalyticsQueue(storage: storage.scoped("analytics")),
             staticContext: buildStaticContext(
                 wrapperBinding: config.wrapperBinding,

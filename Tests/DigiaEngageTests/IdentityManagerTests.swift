@@ -168,8 +168,8 @@ struct IdentityManagerTests {
         // Call setUserId before initialize()
         instance.setUserId("early_bird_user")
 
-        // Verify IdentityManager has it persisted immediately
-        #expect(instance.identityManager.getUserId() == "early_bird_user")
+        // No services exist before initialize() (D1), so the call is buffered.
+        #expect(instance.identityManager == nil)
 
         // Now initialize the SDK
         let config = DigiaConfig(
@@ -178,7 +178,7 @@ struct IdentityManagerTests {
         )
         try await instance.initialize(config)
 
-        #expect(instance.identityManager.getUserId() == "early_bird_user")
+        #expect(instance.identityManager?.getUserId() == "early_bird_user")
         #expect(instance.analyticsService?.userId == "early_bird_user")
 
         instance.resetForTesting()
@@ -194,7 +194,7 @@ struct IdentityManagerTests {
         instance.setUserId("temp_user")
         instance.clearUserId()
 
-        #expect(instance.identityManager.getUserId() == nil)
+        #expect(instance.identityManager == nil)
 
         let config = DigiaConfig(
             apiKey: "test_key",
@@ -202,7 +202,7 @@ struct IdentityManagerTests {
         )
         try await instance.initialize(config)
 
-        #expect(instance.identityManager.getUserId() == nil)
+        #expect(instance.identityManager?.getUserId() == nil)
         #expect(instance.analyticsService?.userId == nil)
 
         instance.resetForTesting()

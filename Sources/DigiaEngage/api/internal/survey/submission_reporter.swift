@@ -12,27 +12,21 @@ typealias SurveySubmissionReporter = SubmissionReporter
 
 final class SubmissionReporter: @unchecked Sendable {
     private(set) var config: DigiaConfig?
-    private let identityManager: IdentityManager?
-    private let deviceIdProvider: DeviceIdProvider?
+    private let identityManager: IdentityManager
     private let sessionIdProvider: (@Sendable () -> String?)?
-    private let identityStorage: LocalStorage
     private let lock = NSLock()
 
     private let networkClient: any NetworkClient
 
     init(
         config: DigiaConfig? = nil,
-        identityManager: IdentityManager? = nil,
-        deviceIdProvider: DeviceIdProvider? = nil,
+        identityManager: IdentityManager,
         sessionIdProvider: (@Sendable () -> String?)? = nil,
-        storage: LocalStorage = UserDefaultsLocalStorage().scoped("identity"),
         networkClient: (any NetworkClient)? = nil
     ) {
         self.config = config
         self.identityManager = identityManager
-        self.deviceIdProvider = deviceIdProvider
         self.sessionIdProvider = sessionIdProvider
-        self.identityStorage = storage
         self.networkClient = networkClient ?? URLSessionNetworkClient()
     }
 
@@ -68,7 +62,7 @@ final class SubmissionReporter: @unchecked Sendable {
             userId: userId,
             sessionId: sessionIdProvider?()
         )
-        let resolvedDeviceId = identityManager?.deviceId ?? deviceIdProvider?.deviceId ?? resolveDeviceId()
+        let resolvedDeviceId = identityManager.deviceId
         let client = self.networkClient
         Task.detached { await Self.post(networkClient: client, config: currentConfig, deviceId: resolvedDeviceId, body: body) }
     }
@@ -102,25 +96,6 @@ final class SubmissionReporter: @unchecked Sendable {
 
     private static func endpoint() -> URL? {
         URL(string: DigiaEndpoints.submission)
-    }
-
-    private func resolveDeviceId() -> String {
-        if let saved = identityStorage.string(forKey: "device_id"), !saved.isEmpty {
-            return saved
-        }
-        #if canImport(UIKit)
-        let idfv: String?
-        if Thread.isMainThread {
-            idfv = MainActor.assumeIsolated { UIDevice.current.identifierForVendor?.uuidString }
-        } else {
-            idfv = DispatchQueue.main.sync { UIDevice.current.identifierForVendor?.uuidString }
-        }
-        #else
-        let idfv: String? = nil
-        #endif
-        let id = idfv ?? UUID().uuidString
-        identityStorage.set(id, forKey: "device_id")
-        return id
     }
 
     // MARK: - Body

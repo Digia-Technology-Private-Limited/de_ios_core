@@ -80,49 +80,27 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private var currentDesignTokens = DesignTokenCatalog.empty
     private var currentTimeAnchor: TrustedTimeAnchor?
 
-    var services: SDKServices!
+    /// Built once in `initialize(_:)`, after the storage migration ran (D1).
+    /// Nil before that: anything needed earlier is owned directly below.
+    private(set) var services: SDKServices?
 
-    var campaignStore: CampaignStore {
-        get { services.campaignStore }
-        set { services.campaignStore = newValue }
-    }
+    // Pre-init collaborators: used before `initialize()` (anchor buffering,
+    // the debug screens, capture toggles), so they live here rather than in
+    // `services`.
+    private let storage: LocalStorage
+    let networkClient: any NetworkClient
+    let campaignStore: CampaignStore
+    let componentRegistry: ComponentRegistryService
+    let liveTestService: LiveTestService
+
     var analyticsService: AnalyticsService? {
-        get { services.analyticsService }
-        set { services.analyticsService = newValue }
+        services?.analyticsService
     }
     var frequencyManager: FrequencyManager? {
-        get { services.frequencyManager }
-        set { services.frequencyManager = newValue }
+        services?.frequencyManager
     }
-    var componentRegistry: ComponentRegistryService {
-        get { services.componentRegistry }
-        set { services.componentRegistry = newValue }
-    }
-    var liveTestService: LiveTestService {
-        get { services.liveTestService }
-        set { services.liveTestService = newValue }
-    }
-    var submissionReporter: SubmissionReporter {
-        get { services.submissionReporter }
-        set { services.submissionReporter = newValue }
-    }
-    var storage: LocalStorage {
-        get { services.storage }
-        set { services.storage = newValue }
-    }
-    var deviceIdProvider: DeviceIdProvider {
-        get { services.deviceIdProvider }
-        set { services.deviceIdProvider = newValue }
-    }
-    var networkClient: any NetworkClient {
-        get { services.networkClient }
-        set { services.networkClient = newValue }
-    }
-    var identityManager: IdentityManager {
-        services.identityManager
-    }
-    var sessionManager: SessionManager {
-        services.sessionManager
+    var identityManager: IdentityManager? {
+        services?.identityManager
     }
 
     private let pendingLock = NSLock()
@@ -190,22 +168,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let defaultNetworkClient = URLSessionNetworkClient()
         let defaultDebugOverlay = DigiaDebugOverlayController(storage: defaultStorage.scoped("debug"))
         self.debugOverlayController = defaultDebugOverlay
-        let defaultIdentityManager = IdentityManager(storage: defaultStorage.scoped("identity"))
-        let defaultDeviceIdProvider = DefaultDeviceIdProvider(identityManager: defaultIdentityManager)
-        let defaultComponentRegistry = ComponentRegistryService(
+        self.storage = defaultStorage
+        self.networkClient = defaultNetworkClient
+        self.campaignStore = CampaignStore()
+        self.componentRegistry = ComponentRegistryService(
             storage: defaultStorage.scoped("registry"),
             networkClient: defaultNetworkClient,
             debugOverlay: defaultDebugOverlay
         )
-        let defaultCampaignStore = CampaignStore()
-        let defaultLiveTestService = LiveTestService(
+        self.liveTestService = LiveTestService(
             storage: defaultStorage.scoped("live_test"),
-            networkClient: defaultNetworkClient
-        )
-        let defaultSubmissionReporter = SubmissionReporter(
-            identityManager: defaultIdentityManager,
-            deviceIdProvider: defaultDeviceIdProvider,
-            storage: defaultStorage.scoped("identity"),
             networkClient: defaultNetworkClient
         )
 
@@ -215,18 +187,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         self.captureMediaEnabled = captureStorage.bool(forKey: "include_media")
         self.captureStructureEnabled = captureStorage.bool(forKey: "include_structure")
 
-        services = SDKServices(
-            storage: defaultStorage,
-            identityManager: defaultIdentityManager,
-            deviceIdProvider: defaultDeviceIdProvider,
-            analyticsService: nil,
-            frequencyManager: nil,
-            campaignStore: defaultCampaignStore,
-            submissionReporter: defaultSubmissionReporter,
-            componentRegistry: defaultComponentRegistry,
-            liveTestService: defaultLiveTestService,
-            networkClient: defaultNetworkClient
-        )
         events = EngageEventEmitter(
             cep: PresentationSink { [weak self] in self?.coordinator },
             digia: DigiaAnalyticsSink(
@@ -295,12 +255,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         self.config = config
         DigiaLogger.configure(config.logLevel)
         DigiaEndpoints.configure(config)
+        let services = SDKServices(config: config, storage: storage, networkClient: networkClient)
+        self.services = services
         requestHeaders = SDKRequestHeaders.make(
             config: config, deviceId: services.deviceIdProvider.deviceId
-        )
-        services.sessionManager = SessionManager(
-            storage: services.storage,
-            timeoutMs: Int64(config.analyticsConfig.sessionTimeoutMs)
         )
         let staticContext = AnalyticsService.buildStaticContext(
             wrapperBinding: config.wrapperBinding,
@@ -315,7 +273,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             userId: { [weak identityMgr] in identityMgr?.userId },
             context: staticContext,
             requestHeaders: requestHeaders,
-            networkClient: services.networkClient,
+            networkClient: networkClient,
             storage: services.storage
         )
         services.sessionReporter = sessReporter
@@ -324,13 +282,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             sessReporter?.report()
         }
 
-        analyticsService = AnalyticsService.create(
+        services.analyticsService = AnalyticsService.create(
             config: config,
             requestHeaders: requestHeaders,
             storage: services.storage,
             identityManager: services.identityManager,
             sessionManager: services.sessionManager,
-            networkClient: services.networkClient
+            networkClient: networkClient
         )
         // Flush pending user ID buffering
         let (flushClear, flushUserId) = pendingLock.withLock {
@@ -376,7 +334,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         var campaigns: [CampaignModel] = []
         do {
             let bundle = try await CampaignFetcher(
-                networkClient: services.networkClient,
+                networkClient: networkClient,
                 requestHeaders: requestHeaders
             ).fetch()
             // Applied as soon as the bundle answers — the earliest point this
@@ -484,7 +442,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 ]
             )
         }
-        if let config {
+        if let config, let services {
             componentRegistry.configure(
                 config: config,
                 deviceId: services.identityManager.deviceId,
@@ -517,10 +475,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
         // Frequency capping pulls the authoritative sessionId from analytics so
         // `session` windows track the same session the backend sees.
-        if frequencyManager == nil {
-            frequencyManager = FrequencyManager(
+        if let services, services.frequencyManager == nil {
+            services.frequencyManager = FrequencyManager(
                 storage: services.storage.scoped("frequency"),
-                sessionIdProvider: { [weak self] in self?.services.sessionManager.sessionId }
+                sessionIdProvider: { [weak self] in self?.services?.sessionManager.sessionId }
             )
         }
 
@@ -747,7 +705,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     func setCaptureModeEnabled(_ enabled: Bool) {
         guard !enabled || (isDebugBuild && isCaptureSupported) else { return }
         captureModeEnabled = enabled
-        services.storage.scoped("capture").set(enabled, forKey: "enabled")
+        storage.scoped("capture").set(enabled, forKey: "enabled")
         componentRegistry.setEnabled(enabled)
         if enabled { debugOverlayController.setVisible(true) }
     }
@@ -757,7 +715,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         includeMedia: Bool? = nil,
         includeStructure: Bool? = nil
     ) {
-        let captureStorage = services.storage.scoped("capture")
+        let captureStorage = storage.scoped("capture")
         if let includeText {
             captureTextEnabled = includeText
             captureStorage.set(includeText, forKey: "include_text")
@@ -833,7 +791,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 nodes: nodes
             )
 
-            let upload = await URLSessionCaptureUploader(apiKey: config.apiKey, networkClient: services.networkClient).upload(
+            let upload = await URLSessionCaptureUploader(apiKey: config.apiKey, networkClient: networkClient).upload(
                 envelope: envelope,
                 png: png
             )
@@ -1790,7 +1748,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         logVerbose(
             "reportSurveyCompleted: submitting campaignId=\(campaignId) answers=\(answers.count)")
-        submissionReporter.report(
+        services?.submissionReporter.report(
             campaignId: campaignId,
             survey: state.config,
             answers: answers,
@@ -1895,8 +1853,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
             return (analyticsService != nil, ())
         }
-        services.identityManager.setUserId(userId)
-        services.sessionManager.reset()
+        services?.identityManager.setUserId(userId)
+        services?.sessionManager.reset()
         if hasAnalytics {
             analyticsService?.setUserId(userId)
         }
@@ -1910,8 +1868,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
             return (analyticsService != nil, ())
         }
-        services.identityManager.clearUserId()
-        services.sessionManager.reset()
+        services?.identityManager.clearUserId()
+        services?.sessionManager.reset()
         if hasAnalytics {
             analyticsService?.clearUserId()
         }
@@ -2913,7 +2871,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         activePlugin = nil
         _currentScreen = nil
-        services.resetForTesting()
+        services?.tearDown()
+        services = nil
+        campaignStore.clear()
+        liveTestService.stop()
         config = nil
         requestHeaders = [:]
         hostActionExecutor.clearHandlers()
