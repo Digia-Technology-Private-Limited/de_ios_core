@@ -12,11 +12,11 @@ private let log = DigiaLogger("analytics")
 final class SDKServices {
     let storage: LocalStorage
     let identityManager: IdentityManager
-    var sessionManager: SessionManager
-    var sessionReporter: SessionReporter?
+    let sessionManager: SessionManager
+    let sessionReporter: SessionReporter
     let deviceIdProvider: DeviceIdProvider
-    var analyticsService: AnalyticsService?
-    var frequencyManager: FrequencyManager?
+    let analyticsService: AnalyticsService?
+    let frequencyManager: FrequencyManager
     let submissionReporter: SubmissionReporter
     let requestHeaders: [String: String]
 
@@ -28,13 +28,37 @@ final class SDKServices {
         self.storage = storage
         let identityManager = IdentityManager(storage: storage.scoped("identity"))
         self.identityManager = identityManager
-        self.sessionManager = SessionManager(
+        let sessionManager = SessionManager(
             storage: storage.scoped("session"),
             timeoutMs: Int64(config.analyticsConfig.sessionTimeoutMs)
         )
-        let sessionManager = self.sessionManager
+        self.sessionManager = sessionManager
         let requestHeaders = SDKRequestHeaders.make(config: config, deviceId: identityManager.deviceId)
         self.requestHeaders = requestHeaders
+        let staticContext = AnalyticsService.buildStaticContext(
+            wrapperBinding: config.wrapperBinding,
+            wrapperVersion: config.wrapperVersion
+        )
+        let sessionReporter = SessionReporter(
+            apiKey: config.apiKey,
+            sessionId: { [weak sessionManager] in sessionManager?.sessionId ?? "" },
+            anonymousId: { [weak identityManager] in identityManager?.deviceId ?? "" },
+            userId: { [weak identityManager] in identityManager?.userId },
+            context: staticContext,
+            requestHeaders: requestHeaders,
+            networkClient: networkClient,
+            storage: storage.scoped("session")
+        )
+        self.sessionReporter = sessionReporter
+        sessionManager.addRotationListener { [weak sessionReporter] in
+            sessionReporter?.report()
+        }
+        // Frequency capping reads the same sessionId the backend sees, so
+        // `session` windows track the reported session.
+        self.frequencyManager = FrequencyManager(
+            storage: storage.scoped("frequency"),
+            sessionIdProvider: { [weak sessionManager] in sessionManager?.sessionId }
+        )
         let ac = config.analyticsConfig
         if ac.enabled {
             log.d("Analytics enabled (batchSize=\(ac.flushBatchSize), interval=\(ac.flushIntervalMs)ms)")
@@ -44,10 +68,7 @@ final class SDKServices {
                 identityManager: identityManager,
                 sessionManager: sessionManager,
                 queue: AnalyticsQueue(storage: storage.scoped("analytics")),
-                staticContext: AnalyticsService.buildStaticContext(
-                    wrapperBinding: config.wrapperBinding,
-                    wrapperVersion: config.wrapperVersion
-                ),
+                staticContext: staticContext,
                 networkClient: networkClient,
                 requestHeaders: requestHeaders
             )

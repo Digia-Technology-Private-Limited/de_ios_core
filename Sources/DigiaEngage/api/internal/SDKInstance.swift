@@ -257,27 +257,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         DigiaEndpoints.configure(config)
         let services = SDKServices(config: config, storage: storage, networkClient: networkClient)
         self.services = services
-        let staticContext = AnalyticsService.buildStaticContext(
-            wrapperBinding: config.wrapperBinding,
-            wrapperVersion: config.wrapperVersion
-        )
-        let sessionMgr = services.sessionManager
-        let identityMgr = services.identityManager
-        let sessReporter = SessionReporter(
-            apiKey: config.apiKey,
-            sessionId: { [weak sessionMgr] in sessionMgr?.sessionId ?? "" },
-            anonymousId: { [weak identityMgr] in identityMgr?.deviceId ?? "" },
-            userId: { [weak identityMgr] in identityMgr?.userId },
-            context: staticContext,
-            requestHeaders: requestHeaders,
-            networkClient: networkClient,
-            storage: services.storage.scoped("session")
-        )
-        services.sessionReporter = sessReporter
-        sessReporter.report()
-        services.sessionManager.addRotationListener { [weak sessReporter] in
-            sessReporter?.report()
-        }
+        services.sessionReporter.report()
 
         // Flush pending user ID buffering
         let (flushClear, flushUserId) = pendingLock.withLock {
@@ -459,15 +439,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 isDebugBuild: isDebugBuild,
                 onCampaignTest: { [weak self] invocation in self?.handleLiveTestCampaign(invocation)
                 }
-            )
-        }
-
-        // Frequency capping pulls the authoritative sessionId from analytics so
-        // `session` windows track the same session the backend sees.
-        if let services, services.frequencyManager == nil {
-            services.frequencyManager = FrequencyManager(
-                storage: services.storage.scoped("frequency"),
-                sessionIdProvider: { [weak self] in self?.services?.sessionManager.sessionId }
             )
         }
 
