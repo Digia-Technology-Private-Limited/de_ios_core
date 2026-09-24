@@ -102,6 +102,37 @@ extension DigiaEngageTests {
         scrollView.removeFromSuperview()
     }
 
+    @Test("a step with a delay scrolls its off-screen anchor only after the delay (A41)")
+    func trackingScrollsOnlyAfterStepDelay() {
+        let window = makeWindow()
+        let scrollView = UIScrollView(frame: window.bounds)
+        scrollView.contentSize = CGSize(width: window.bounds.width, height: 4000)
+        window.addSubview(scrollView)
+        let anchor = DigiaAnchorView(frame: CGRect(x: 10, y: 3000, width: 100, height: 40))
+        anchor.anchorKey = "a41-delay"
+        scrollView.addSubview(anchor)
+        var available: [String] = []
+        let restingOffset = scrollView.contentOffset.y
+
+        registry.track(
+            key: "a41-delay",
+            delayMs: 60,
+            onAvailable: { available.append($0) },
+            onUnavailable: { _, _ in }
+        )
+        pump(0.03)
+        #expect(scrollView.contentOffset.y == restingOffset)
+        #expect(available.isEmpty)
+        #expect((registry.remainingStepDelayMs(for: "a41-delay") ?? 0) > 0)
+
+        pump(0.08)
+        #expect(scrollView.contentOffset.y > 0)
+        #expect(available == ["a41-delay"])
+        #expect(registry.remainingStepDelayMs(for: "a41-delay") == 0)
+        registry.stopTracking()
+        scrollView.removeFromSuperview()
+    }
+
     @Test("removing the anchor hosting the visible step reports it one turn later")
     func removingActiveAnchorReportsNextTurn() async {
         let window = makeWindow()
@@ -285,8 +316,8 @@ private func makeWindow() -> UIWindow {
 }
 
 @MainActor
-private func pump() {
-    RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+private func pump(_ seconds: TimeInterval = 0.1) {
+    RunLoop.main.run(until: Date().addingTimeInterval(seconds))
 }
 
 /// Lets main-queue work scheduled with `DispatchQueue.main.async` run. A nested

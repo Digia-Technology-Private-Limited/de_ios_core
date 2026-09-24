@@ -77,6 +77,15 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     private var activeAnchorWasAvailable = false
     private let activeViewSampler = ActiveAnchorSampler()
     private var readinessTask: Task<Void, Never>?
+    /// Runs while the active step's `delayInMs` has not elapsed. Until then the
+    /// anchor is neither sampled nor scrolled, and the readiness wait hasn't
+    /// started (Android `GuideRenderer.kt` waits the same way).
+    private var stepDelayTimer: Timer?
+    private var stepDelayDeadline: Date?
+    private var stepDelayMs = 0
+    /// The step scrolls its anchor into view once; a user scroll after that is
+    /// left alone.
+    private var scrollPending = false
 
     private override init() {
         super.init()
@@ -91,7 +100,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         cornerRadii.removeValue(forKey: key)
         version &+= 1
         SDKInstance.shared.recordAnchorSeen(key)
-        guard activeKey == key else { return }
+        guard activeKey == key, !isInStepDelay else { return }
         if !activeAnchorWasAvailable { startReadinessTimeout(for: key) }
         startSampling(key: key)
     }
@@ -105,7 +114,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         cornerRadii[key] = cornerRadius
         version &+= 1
         SDKInstance.shared.recordAnchorSeen(key)
-        guard activeKey == key else { return }
+        guard activeKey == key, !isInStepDelay else { return }
         activeAnchorWasAvailable = false
         activeViewSampler.stop()
         startReadinessTimeout(for: key)
@@ -136,6 +145,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         if !remaining.contains(where: { $0.value?.window != nil }) {
             notifyActiveAnchorRemovedNextTurn(key: key)
         }
+        guard !isInStepDelay else { return }
         if remaining.isEmpty {
             activeAnchorWasAvailable = false
             startReadinessTimeout(for: key, failureReason: .detached)
@@ -151,7 +161,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         trackedRects.removeValue(forKey: key)
         cornerRadii.removeValue(forKey: key)
         version &+= 1
-        if activeKey == key {
+        if activeKey == key, !isInStepDelay {
             activeAnchorWasAvailable = false
             startReadinessTimeout(for: key, failureReason: .detached)
         }
@@ -265,8 +275,12 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         return rect
     }
 
+    /// Tracks the step's anchor. With `delayMs`, sampling, scrolling and the
+    /// readiness wait start only once the delay has elapsed; a removal is still
+    /// reported during it.
     func track(
         key: String?,
+        delayMs: Int = 0,
         onAvailable: @escaping (String) -> Void,
         onUnavailable: @escaping (String, AnchorUnavailableReason) -> Void,
         onRemoved: ((String) -> Void)? = nil
@@ -278,6 +292,39 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         activeUnavailable = onUnavailable
         activeRemoved = onRemoved
         activeAnchorWasAvailable = false
+        scrollPending = true
+        guard delayMs > 0 else {
+            startWatching(key: key)
+            return
+        }
+        stepDelayMs = delayMs
+        stepDelayDeadline = Date().addingTimeInterval(TimeInterval(delayMs) / 1_000)
+        // A run-loop timer, like the sampler's display link.
+        let timer = Timer(timeInterval: TimeInterval(delayMs) / 1_000, repeats: false) {
+            [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.activeKey == key else { return }
+                self.stepDelayTimer = nil
+                self.startWatching(key: key)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        stepDelayTimer = timer
+    }
+
+    /// Milliseconds left of the tracked step's delay for `key`: nil when `key` isn't
+    /// tracked with a delay, zero once it has elapsed. The overlay counts its
+    /// own delay from the step's start with this, not from when the anchor
+    /// first became available.
+    func remainingStepDelayMs(for key: String?) -> Int? {
+        guard let key, activeKey == key, let stepDelayDeadline else { return nil }
+        let remaining = stepDelayDeadline.timeIntervalSinceNow * 1_000
+        return Int(min(max(0, remaining), Double(stepDelayMs)))
+    }
+
+    private var isInStepDelay: Bool { stepDelayTimer != nil }
+
+    private func startWatching(key: String) {
         startReadinessTimeout(for: key)
 
         if viewRegistry[key]?.isEmpty == false {
@@ -292,6 +339,11 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         activeViewSampler.stop()
         readinessTask?.cancel()
         readinessTask = nil
+        stepDelayTimer?.invalidate()
+        stepDelayTimer = nil
+        stepDelayDeadline = nil
+        stepDelayMs = 0
+        scrollPending = false
         activeKey = nil
         activeAvailable = nil
         activeUnavailable = nil
@@ -353,10 +405,10 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         case let .unavailable(reason):
             if activeAnchorWasAvailable {
                 failActiveAnchor(key: key, reason: reason)
-            } else if reason == .outsideViewport {
+            } else if reason == .outsideViewport, scrollPending {
                 // Before the step shows: bring an off-screen anchor into view
-                // through its scroll-view ancestors. The next sample sees it.
-                scrollToVisible(key)
+                // through its scroll-view ancestors, once. The next sample sees it.
+                if scrollToVisible(key) { scrollPending = false }
             }
         }
     }

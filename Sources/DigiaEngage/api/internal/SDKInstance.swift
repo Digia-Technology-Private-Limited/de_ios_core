@@ -2384,6 +2384,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         AnchorRegistry.shared.track(
             key: anchorKey,
+            // A live test shows at once, as on Android.
+            delayMs: isLiveTestCepId(state.payload.cepCampaignId)
+                ? 0 : state.currentStep?.delayInMs ?? 0,
             onAvailable: { [weak self] availableKey in
                 self?.logNativeGuideStage(
                     "anchor",
