@@ -1707,7 +1707,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             relayLiveTestSubmission(state: state, answers: answers)
             return
         }
-        guard let config = self.config else {
+        guard self.config != nil else {
             logVerbose(
                 "reportSurveyCompleted: skip submission — SDK not initialized (config is nil)")
             return

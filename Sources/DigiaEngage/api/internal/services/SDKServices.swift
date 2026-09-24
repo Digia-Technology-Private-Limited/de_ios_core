@@ -10,7 +10,6 @@ private let log = DigiaLogger("analytics")
 /// test service and network client) are owned by `SDKInstance` instead.
 @MainActor
 final class SDKServices {
-    let storage: LocalStorage
     let identityManager: IdentityManager
     let sessionManager: SessionManager
     let sessionReporter: SessionReporter
@@ -24,7 +23,6 @@ final class SDKServices {
         storage: LocalStorage,
         networkClient: any NetworkClient
     ) {
-        self.storage = storage
         let identityManager = IdentityManager(storage: storage.scoped("identity"))
         self.identityManager = identityManager
         let sessionManager = SessionManager(
