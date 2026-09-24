@@ -56,8 +56,8 @@ final class ComponentRegistryService: ObservableObject {
     private let debugOverlay: DigiaDebugOverlayController?
 
     init(
-        storage: LocalStorage = UserDefaultsLocalStorage().scoped("registry"),
-        networkClient: any NetworkClient = URLSessionNetworkClient(),
+        storage: LocalStorage,
+        networkClient: any NetworkClient,
         debugOverlay: DigiaDebugOverlayController? = nil
     ) {
         self.storage = storage
@@ -67,7 +67,7 @@ final class ComponentRegistryService: ObservableObject {
 
     convenience init(
         defaults: UserDefaults,
-        networkClient: any NetworkClient = URLSessionNetworkClient(),
+        networkClient: any NetworkClient,
         debugOverlay: DigiaDebugOverlayController? = nil
     ) {
         if defaults.bool(forKey: "digia_component_registry_recording_enabled") && !defaults.bool(forKey: "registry.recording_enabled") {
@@ -76,18 +76,6 @@ final class ComponentRegistryService: ObservableObject {
         self.init(
             storage: UserDefaultsLocalStorage(defaults: defaults).scoped("registry"),
             networkClient: networkClient,
-            debugOverlay: debugOverlay
-        )
-    }
-
-    convenience init(
-        defaults: UserDefaults,
-        sender: (any NetworkClient)?,
-        debugOverlay: DigiaDebugOverlayController? = nil
-    ) {
-        self.init(
-            defaults: defaults,
-            networkClient: sender ?? URLSessionNetworkClient(),
             debugOverlay: debugOverlay
         )
     }

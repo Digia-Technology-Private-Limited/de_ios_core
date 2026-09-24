@@ -23,7 +23,7 @@ final class DigiaDebugOverlayController: ObservableObject {
     /// its own, since SwiftUI is backed by a single hosting `UIView`.
     var badgeFrame: CGRect?
 
-    init(storage: LocalStorage = UserDefaultsLocalStorage().scoped("debug")) {
+    init(storage: LocalStorage) {
         self.storage = storage
         self.isVisible = storage.bool(forKey: Self.keyVisible)
     }

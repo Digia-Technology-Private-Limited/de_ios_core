@@ -27,7 +27,7 @@ struct SessionReporterTests {
             context: ["sdk_version": "1.0.0", "platform": "ios"],
             requestHeaders: [:],
             networkClient: mock,
-            storage: storage
+            storage: storage.scoped("session")
         )
 
         reporter.report()
@@ -69,7 +69,7 @@ struct SessionReporterTests {
             context: [:],
             requestHeaders: [:],
             networkClient: mock,
-            storage: storage
+            storage: storage.scoped("session")
         )
 
         reporter.report()

@@ -36,8 +36,7 @@ final class LiveTestSSEClient {
         deviceName: @escaping () -> String?,
         onEvent: @escaping (LiveTestSseEvent) -> Void,
         onConnectionStateChanged: @escaping (LiveTestConnectionState) -> Void,
-        networkClient: (any NetworkClient)? = nil,
-        session: URLSession? = nil
+        networkClient: any NetworkClient
     ) {
         self.config = config
         self.deviceId = deviceId
@@ -45,13 +44,7 @@ final class LiveTestSSEClient {
         self.deviceName = deviceName
         self.onEvent = onEvent
         self.onConnectionStateChanged = onConnectionStateChanged
-        if let networkClient {
-            self.networkClient = networkClient
-        } else if let session {
-            self.networkClient = URLSessionNetworkClient(session: session)
-        } else {
-            self.networkClient = URLSessionNetworkClient()
-        }
+        self.networkClient = networkClient
     }
 
     func start() {

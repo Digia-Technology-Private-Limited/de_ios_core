@@ -274,7 +274,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             context: staticContext,
             requestHeaders: requestHeaders,
             networkClient: networkClient,
-            storage: services.storage
+            storage: services.storage.scoped("session")
         )
         services.sessionReporter = sessReporter
         sessReporter.report()
@@ -285,7 +285,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         services.analyticsService = AnalyticsService.create(
             config: config,
             requestHeaders: requestHeaders,
-            storage: services.storage,
+            storage: services.storage.scoped("analytics"),
             identityManager: services.identityManager,
             sessionManager: services.sessionManager,
             networkClient: networkClient

@@ -24,21 +24,20 @@ final class LiveTestService: ObservableObject {
     private let networkClient: any NetworkClient
 
     init(
-        storage: LocalStorage = UserDefaultsLocalStorage().scoped("live_test"),
+        storage: LocalStorage,
         ackReporter: LiveTestAckReporter? = nil,
-        networkClient: (any NetworkClient)? = nil
+        networkClient: any NetworkClient
     ) {
-        let client = networkClient ?? URLSessionNetworkClient()
-        self.networkClient = client
+        self.networkClient = networkClient
         self.storage = storage
-        self.ackReporter = ackReporter ?? LiveTestAckReporter(networkClient: client)
+        self.ackReporter = ackReporter ?? LiveTestAckReporter(networkClient: networkClient)
         self.deviceName = Self.normalizeDeviceName(storage.string(forKey: Self.deviceNameKey))
     }
 
     convenience init(
         defaults: UserDefaults,
         ackReporter: LiveTestAckReporter? = nil,
-        networkClient: (any NetworkClient)? = nil
+        networkClient: any NetworkClient
     ) {
         self.init(
             storage: UserDefaultsLocalStorage(defaults: defaults).scoped("live_test"),

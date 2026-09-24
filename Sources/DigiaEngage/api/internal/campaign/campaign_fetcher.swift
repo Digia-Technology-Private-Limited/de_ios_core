@@ -30,15 +30,10 @@ struct CampaignFetcher {
     private let requestHeaders: [String: String]
 
     init(
-        networkClient: (any NetworkClient)? = nil,
+        networkClient: any NetworkClient,
         requestHeaders: [String: String] = [:]
     ) {
-        self.networkClient = networkClient ?? URLSessionNetworkClient()
-        self.requestHeaders = requestHeaders
-    }
-
-    init(requestHeaders: [String: String], session: URLSession = .shared) {
-        self.networkClient = URLSessionNetworkClient(session: session)
+        self.networkClient = networkClient
         self.requestHeaders = requestHeaders
     }
 

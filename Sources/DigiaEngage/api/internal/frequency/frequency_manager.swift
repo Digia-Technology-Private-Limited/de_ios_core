@@ -158,7 +158,7 @@ final class FrequencyManager {
     private let clock: () -> Int64
 
     init(
-        storage: LocalStorage = UserDefaultsLocalStorage().scoped("frequency"),
+        storage: LocalStorage,
         sessionIdProvider: @escaping () -> String?,
         clock: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
     ) {

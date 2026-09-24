@@ -14,7 +14,7 @@ final class AnalyticsQueue {
     private let storage: LocalStorage
     private static let key = "queue"
 
-    init(storage: LocalStorage = UserDefaultsLocalStorage().scoped("analytics")) {
+    init(storage: LocalStorage) {
         self.storage = storage
     }
 

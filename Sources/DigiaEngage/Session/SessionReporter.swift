@@ -12,7 +12,7 @@ final class SessionReporter: @unchecked Sendable {
     private let context: [String: Any]
     private let requestHeaders: [String: String]
     private let networkClient: any NetworkClient
-    private let storage: LocalStorage?
+    private let storage: LocalStorage
 
     init(
         apiKey: String,
@@ -22,7 +22,7 @@ final class SessionReporter: @unchecked Sendable {
         context: [String: Any],
         requestHeaders: [String: String] = [:],
         networkClient: any NetworkClient,
-        storage: LocalStorage? = nil
+        storage: LocalStorage
     ) {
         self.apiKey = apiKey
         self.sessionId = sessionId
@@ -31,7 +31,7 @@ final class SessionReporter: @unchecked Sendable {
         self.context = context
         self.requestHeaders = requestHeaders
         self.networkClient = networkClient
-        self.storage = storage?.scoped("session")
+        self.storage = storage
     }
 
     func report() {
@@ -43,7 +43,7 @@ final class SessionReporter: @unchecked Sendable {
     }
 
     private func flushPending() async {
-        guard let pendingDataStr = storage?.string(forKey: Self.keyPendingReport),
+        guard let pendingDataStr = storage.string(forKey: Self.keyPendingReport),
               let pendingData = pendingDataStr.data(using: .utf8),
               let url = URL(string: DigiaEndpoints.session) else {
             return
@@ -58,7 +58,7 @@ final class SessionReporter: @unchecked Sendable {
             let request = NetworkRequest(url: url, method: .post, headers: headers, body: pendingData)
             let response = try await networkClient.execute(request: request)
             if response.isSuccessful {
-                storage?.remove(forKey: Self.keyPendingReport)
+                storage.remove(forKey: Self.keyPendingReport)
             }
         } catch {
             log.d("Pending session report flush deferred cause=\(error.localizedDescription)")
@@ -91,17 +91,17 @@ final class SessionReporter: @unchecked Sendable {
             let request = NetworkRequest(url: url, method: .post, headers: headers, body: bodyData)
             let response = try await networkClient.execute(request: request)
             if response.isSuccessful {
-                storage?.remove(forKey: Self.keyPendingReport)
+                storage.remove(forKey: Self.keyPendingReport)
                 log.d("Session posted (status=\(response.statusCode), sessionId=\(sid), anonymousId=\(aid))")
             } else {
                 if let str = String(data: bodyData, encoding: .utf8) {
-                    storage?.setString(str, forKey: Self.keyPendingReport)
+                    storage.setString(str, forKey: Self.keyPendingReport)
                 }
                 log.e("Session post failed (status=\(response.statusCode))")
             }
         } catch {
             if let str = String(data: bodyData, encoding: .utf8) {
-                storage?.setString(str, forKey: Self.keyPendingReport)
+                storage.setString(str, forKey: Self.keyPendingReport)
             }
             log.d("Session posted (status=-1, sessionId=\(sid), anonymousId=\(aid))")
         }

@@ -37,7 +37,7 @@ final class LiveTestAckReporter {
     /// tests only; production never changes this.
     var retryPauses: [TimeInterval] = [2, 5]
 
-    init(networkClient: any NetworkClient = URLSessionNetworkClient()) {
+    init(networkClient: any NetworkClient) {
         self.networkClient = networkClient
     }
 

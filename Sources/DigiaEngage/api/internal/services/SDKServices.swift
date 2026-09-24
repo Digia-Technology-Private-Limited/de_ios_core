@@ -26,7 +26,7 @@ final class SDKServices {
         let identityManager = IdentityManager(storage: storage.scoped("identity"))
         self.identityManager = identityManager
         self.sessionManager = SessionManager(
-            storage: storage,
+            storage: storage.scoped("session"),
             timeoutMs: Int64(config.analyticsConfig.sessionTimeoutMs)
         )
         let deviceIdProvider = DefaultDeviceIdProvider(identityManager: identityManager)

@@ -55,7 +55,7 @@ final class AnalyticsService {
         sessionManager: SessionManager,
         queue: AnalyticsQueue,
         staticContext: [String: Any],
-        networkClient: any NetworkClient = URLSessionNetworkClient(),
+        networkClient: any NetworkClient,
         requestHeaders: [String: String] = [:]
     ) {
         self.config = config
@@ -194,10 +194,10 @@ final class AnalyticsService {
     static func create(
         config: DigiaConfig,
         requestHeaders: [String: String],
-        storage: LocalStorage = UserDefaultsLocalStorage(),
+        storage: LocalStorage,
         identityManager: IdentityManager,
         sessionManager: SessionManager,
-        networkClient: (any NetworkClient)? = nil
+        networkClient: any NetworkClient
     ) -> AnalyticsService? {
         let ac = config.analyticsConfig
         guard ac.enabled else {
@@ -212,12 +212,12 @@ final class AnalyticsService {
             apiKey: config.apiKey,
             identityManager: identityManager,
             sessionManager: sessionManager,
-            queue: AnalyticsQueue(storage: storage.scoped("analytics")),
+            queue: AnalyticsQueue(storage: storage),
             staticContext: buildStaticContext(
                 wrapperBinding: config.wrapperBinding,
                 wrapperVersion: config.wrapperVersion
             ),
-            networkClient: networkClient ?? URLSessionNetworkClient(),
+            networkClient: networkClient,
             requestHeaders: requestHeaders
         )
     }

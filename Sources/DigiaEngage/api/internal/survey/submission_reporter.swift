@@ -22,12 +22,12 @@ final class SubmissionReporter: @unchecked Sendable {
         config: DigiaConfig? = nil,
         identityManager: IdentityManager,
         sessionIdProvider: (@Sendable () -> String?)? = nil,
-        networkClient: (any NetworkClient)? = nil
+        networkClient: any NetworkClient
     ) {
         self.config = config
         self.identityManager = identityManager
         self.sessionIdProvider = sessionIdProvider
-        self.networkClient = networkClient ?? URLSessionNetworkClient()
+        self.networkClient = networkClient
     }
 
     func configure(config: DigiaConfig) {

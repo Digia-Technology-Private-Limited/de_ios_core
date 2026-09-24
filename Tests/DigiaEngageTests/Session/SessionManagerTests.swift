@@ -18,7 +18,7 @@ struct SessionManagerTests {
         let (storage, _) = makeIsolatedStorage()
         let currentTime: Int64 = 1_000_000
         let manager = SessionManager(
-            storage: storage,
+            storage: storage.scoped("session"),
             timeoutMs: 1_800_000,
             clock: { currentTime },
             observeLifecycle: false
@@ -40,7 +40,7 @@ struct SessionManagerTests {
 
         // Relaunch at 1_000_000 + 10 min (600_000 ms)
         let manager = SessionManager(
-            storage: storage,
+            storage: storage.scoped("session"),
             timeoutMs: 1_800_000,
             clock: { 1_600_000 },
             observeLifecycle: false
@@ -60,7 +60,7 @@ struct SessionManagerTests {
 
         // Relaunch at 1_000_000 + 35 min (2_100_000 ms)
         let manager = SessionManager(
-            storage: storage,
+            storage: storage.scoped("session"),
             timeoutMs: 1_800_000,
             clock: { 3_100_000 },
             observeLifecycle: false
@@ -77,7 +77,7 @@ struct SessionManagerTests {
         let (storage, _) = makeIsolatedStorage()
         var currentTime: Int64 = 1_000_000
         let manager = SessionManager(
-            storage: storage,
+            storage: storage.scoped("session"),
             timeoutMs: 1_800_000,
             clock: { currentTime },
             observeLifecycle: false
@@ -97,7 +97,7 @@ struct SessionManagerTests {
         let (storage, _) = makeIsolatedStorage()
         var currentTime: Int64 = 1_000_000
         let manager = SessionManager(
-            storage: storage,
+            storage: storage.scoped("session"),
             timeoutMs: 1_800_000,
             clock: { currentTime },
             observeLifecycle: false
@@ -121,7 +121,7 @@ struct SessionManagerTests {
         let (storage, _) = makeIsolatedStorage()
         var currentTime: Int64 = 1_000_000
         let manager = SessionManager(
-            storage: storage,
+            storage: storage.scoped("session"),
             timeoutMs: 1_800_000,
             clock: { currentTime },
             observeLifecycle: false
@@ -145,7 +145,7 @@ struct SessionManagerTests {
         let (storage, _) = makeIsolatedStorage()
         var currentTime: Int64 = 1_000_000
         let manager = SessionManager(
-            storage: storage,
+            storage: storage.scoped("session"),
             timeoutMs: 1_800_000,
             clock: { currentTime },
             observeLifecycle: false

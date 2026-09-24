@@ -25,14 +25,13 @@ public final class SessionManager: @unchecked Sendable {
         clock: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
         observeLifecycle: Bool = true
     ) {
-        let scopedStorage = storage.scoped("session")
-        self.storage = scopedStorage
+        self.storage = storage
         self.timeoutMs = timeoutMs
         self.clock = clock
 
         let now = clock()
-        let savedSessionId = scopedStorage.string(forKey: Self.keySessionId)
-        let savedLastActivityStr = scopedStorage.string(forKey: Self.keyLastActivityMs)
+        let savedSessionId = storage.string(forKey: Self.keySessionId)
+        let savedLastActivityStr = storage.string(forKey: Self.keyLastActivityMs)
         let savedLastActivity = savedLastActivityStr.flatMap { Int64($0) }
 
         if let savedSessionId, !savedSessionId.isEmpty,
@@ -40,13 +39,13 @@ public final class SessionManager: @unchecked Sendable {
            (now - savedLastActivity) < timeoutMs {
             self._sessionId = savedSessionId
             self._lastActivityMs = now
-            scopedStorage.setString(String(now), forKey: Self.keyLastActivityMs)
+            storage.setString(String(now), forKey: Self.keyLastActivityMs)
         } else {
             let newId = UUID().uuidString.lowercased()
             self._sessionId = newId
             self._lastActivityMs = now
-            scopedStorage.setString(newId, forKey: Self.keySessionId)
-            scopedStorage.setString(String(now), forKey: Self.keyLastActivityMs)
+            storage.setString(newId, forKey: Self.keySessionId)
+            storage.setString(String(now), forKey: Self.keyLastActivityMs)
         }
 
         #if canImport(UIKit)

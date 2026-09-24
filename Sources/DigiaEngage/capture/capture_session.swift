@@ -19,17 +19,10 @@ internal final class URLSessionCaptureUploader {
 
     internal init(
         apiKey: String,
-        networkClient: (any NetworkClient)? = nil,
-        session: URLSession? = nil
+        networkClient: any NetworkClient
     ) {
         self.apiKey = apiKey
-        if let networkClient {
-            self.networkClient = networkClient
-        } else if let session {
-            self.networkClient = URLSessionNetworkClient(session: session)
-        } else {
-            self.networkClient = URLSessionNetworkClient()
-        }
+        self.networkClient = networkClient
     }
 
     internal func upload(

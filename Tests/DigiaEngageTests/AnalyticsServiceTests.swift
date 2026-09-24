@@ -101,7 +101,7 @@ struct AnalyticsServiceTests {
         let store = defaults ?? UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
         let storage = UserDefaultsLocalStorage(defaults: store)
         let identityManager = IdentityManager(storage: storage.scoped("identity"))
-        let sessionManager = SessionManager(storage: storage, timeoutMs: Int64(config.sessionTimeoutMs), observeLifecycle: false)
+        let sessionManager = SessionManager(storage: storage.scoped("session"), timeoutMs: Int64(config.sessionTimeoutMs), observeLifecycle: false)
         return AnalyticsService(
             config: config,
             apiKey: "test-api-key",
