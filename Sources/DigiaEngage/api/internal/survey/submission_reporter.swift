@@ -13,7 +13,7 @@ typealias SurveySubmissionReporter = SubmissionReporter
 final class SubmissionReporter: @unchecked Sendable {
     private(set) var config: DigiaConfig?
     private let identityManager: IdentityManager
-    private let sessionIdProvider: (@Sendable () -> String?)?
+    private let sessionIdProvider: @Sendable () -> String?
     private let lock = NSLock()
 
     private let networkClient: any NetworkClient
@@ -21,7 +21,7 @@ final class SubmissionReporter: @unchecked Sendable {
     init(
         config: DigiaConfig? = nil,
         identityManager: IdentityManager,
-        sessionIdProvider: (@Sendable () -> String?)? = nil,
+        sessionIdProvider: @escaping @Sendable () -> String?,
         networkClient: any NetworkClient
     ) {
         self.config = config
@@ -60,7 +60,7 @@ final class SubmissionReporter: @unchecked Sendable {
             startedAt: startedAt,
             now: Date(),
             userId: userId,
-            sessionId: sessionIdProvider?()
+            sessionId: sessionIdProvider()
         )
         let resolvedDeviceId = identityManager.deviceId
         let client = self.networkClient

@@ -80,6 +80,7 @@ final class SDKServices {
         self.deviceIdProvider = deviceIdProvider
         self.submissionReporter = SubmissionReporter(
             identityManager: identityManager,
+            sessionIdProvider: { [weak sessionManager] in sessionManager?.sessionId },
             networkClient: networkClient
         )
     }
