@@ -1,5 +1,7 @@
 import Foundation
 
+private let log = DigiaLogger("analytics")
+
 /// The services that only exist once the SDK is initialized.
 ///
 /// Built once, by `SDKInstance.initialize(_:)`, after `LocalStorageMigrator`
@@ -16,6 +18,7 @@ final class SDKServices {
     var analyticsService: AnalyticsService?
     var frequencyManager: FrequencyManager?
     let submissionReporter: SubmissionReporter
+    let requestHeaders: [String: String]
 
     init(
         config: DigiaConfig,
@@ -29,6 +32,29 @@ final class SDKServices {
             storage: storage.scoped("session"),
             timeoutMs: Int64(config.analyticsConfig.sessionTimeoutMs)
         )
+        let sessionManager = self.sessionManager
+        let requestHeaders = SDKRequestHeaders.make(config: config, deviceId: identityManager.deviceId)
+        self.requestHeaders = requestHeaders
+        let ac = config.analyticsConfig
+        if ac.enabled {
+            log.d("Analytics enabled (batchSize=\(ac.flushBatchSize), interval=\(ac.flushIntervalMs)ms)")
+            self.analyticsService = AnalyticsService(
+                config: ac,
+                apiKey: config.apiKey,
+                identityManager: identityManager,
+                sessionManager: sessionManager,
+                queue: AnalyticsQueue(storage: storage.scoped("analytics")),
+                staticContext: AnalyticsService.buildStaticContext(
+                    wrapperBinding: config.wrapperBinding,
+                    wrapperVersion: config.wrapperVersion
+                ),
+                networkClient: networkClient,
+                requestHeaders: requestHeaders
+            )
+        } else {
+            log.i("Analytics disabled in DigiaConfig — no events will be captured")
+            self.analyticsService = nil
+        }
         let deviceIdProvider = DefaultDeviceIdProvider(identityManager: identityManager)
         self.deviceIdProvider = deviceIdProvider
         self.submissionReporter = SubmissionReporter(

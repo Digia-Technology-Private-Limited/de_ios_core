@@ -14,7 +14,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let payload: CEPTriggerPayload
     }
 
-    private(set) var requestHeaders: [String: String] = [:]
+    var requestHeaders: [String: String] { services?.requestHeaders ?? [:] }
     @Published private(set) var config: DigiaConfig?
 
     var sdkVersion: String? {
@@ -257,9 +257,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         DigiaEndpoints.configure(config)
         let services = SDKServices(config: config, storage: storage, networkClient: networkClient)
         self.services = services
-        requestHeaders = SDKRequestHeaders.make(
-            config: config, deviceId: services.deviceIdProvider.deviceId
-        )
         let staticContext = AnalyticsService.buildStaticContext(
             wrapperBinding: config.wrapperBinding,
             wrapperVersion: config.wrapperVersion
@@ -282,14 +279,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             sessReporter?.report()
         }
 
-        services.analyticsService = AnalyticsService.create(
-            config: config,
-            requestHeaders: requestHeaders,
-            storage: services.storage.scoped("analytics"),
-            identityManager: services.identityManager,
-            sessionManager: services.sessionManager,
-            networkClient: networkClient
-        )
         // Flush pending user ID buffering
         let (flushClear, flushUserId) = pendingLock.withLock {
             let clear = pendingClearUserId
@@ -2876,7 +2865,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         campaignStore.clear()
         liveTestService.stop()
         config = nil
-        requestHeaders = [:]
         hostActionExecutor.clearHandlers()
         sdkState = .notInitialized
         isHostMounted = false

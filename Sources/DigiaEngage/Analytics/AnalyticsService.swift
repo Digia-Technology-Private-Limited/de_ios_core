@@ -188,40 +188,6 @@ final class AnalyticsService {
         retryAttempt = 0
     }
 
-    // MARK: - Factory
-
-    @MainActor
-    static func create(
-        config: DigiaConfig,
-        requestHeaders: [String: String],
-        storage: LocalStorage,
-        identityManager: IdentityManager,
-        sessionManager: SessionManager,
-        networkClient: any NetworkClient
-    ) -> AnalyticsService? {
-        let ac = config.analyticsConfig
-        guard ac.enabled else {
-            log.i("Analytics disabled in DigiaConfig — no events will be captured")
-            return nil
-        }
-        log.d(
-            "Analytics enabled (batchSize=\(ac.flushBatchSize), interval=\(ac.flushIntervalMs)ms)"
-        )
-        return AnalyticsService(
-            config: ac,
-            apiKey: config.apiKey,
-            identityManager: identityManager,
-            sessionManager: sessionManager,
-            queue: AnalyticsQueue(storage: storage),
-            staticContext: buildStaticContext(
-                wrapperBinding: config.wrapperBinding,
-                wrapperVersion: config.wrapperVersion
-            ),
-            networkClient: networkClient,
-            requestHeaders: requestHeaders
-        )
-    }
-
     private var jsonHeaders: [String: String] {
         requestHeaders.merging([
             "Content-Type": "application/json",
