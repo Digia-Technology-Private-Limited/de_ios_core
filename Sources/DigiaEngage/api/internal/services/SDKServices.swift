@@ -14,7 +14,6 @@ final class SDKServices {
     let identityManager: IdentityManager
     let sessionManager: SessionManager
     let sessionReporter: SessionReporter
-    let deviceIdProvider: DeviceIdProvider
     let analyticsService: AnalyticsService?
     let frequencyManager: FrequencyManager
     let submissionReporter: SubmissionReporter
@@ -81,8 +80,6 @@ final class SDKServices {
             log.i("Analytics disabled in DigiaConfig — no events will be captured")
             self.analyticsService = nil
         }
-        let deviceIdProvider = DefaultDeviceIdProvider(identityManager: identityManager)
-        self.deviceIdProvider = deviceIdProvider
         self.submissionReporter = SubmissionReporter(
             identityManager: identityManager,
             sessionIdProvider: { [weak sessionManager] in sessionManager?.sessionId },
