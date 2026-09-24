@@ -103,7 +103,12 @@ final class LiveTestSSEClient {
                 self?.reconnectAttempt = 0
             },
             onError: { [weak self] error in
-                self?.handleDisconnect("connect failed: \(error)")
+                guard let self else { return }
+                if let status = (error as? SseHTTPStatusError)?.statusCode, status == 401 || status == 403 {
+                    self.handleAuthRejected(status: status)
+                } else {
+                    self.handleDisconnect("connect failed: \(error)")
+                }
             },
             onClosed: { [weak self] in
                 self?.handleDisconnect("stream closed")
@@ -166,6 +171,22 @@ final class LiveTestSSEClient {
             reason: TimelineReason.liveSessionDisconnected
         )
         scheduleReconnect()
+    }
+
+    /// Reconnecting cannot fix a rejected key, so the loop stops here. A later
+    /// `start()` (re-enable, or the app returning to foreground) tries again.
+    private func handleAuthRejected(status: Int) {
+        sseSubscription?.cancel()
+        sseSubscription = nil
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        stopped = true
+        onConnectionStateChanged(.error)
+        log.e(
+            "Stream rejected — not reconnecting (status=\(status))",
+            stage: .session,
+            reason: TimelineReason.liveSessionDisconnected
+        )
     }
 
     private func scheduleReconnect() {

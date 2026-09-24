@@ -185,10 +185,11 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
                 connectDeadline.cancel()
                 if Task.isCancelled || subscription.isCancelled { return }
 
-                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                    // A rejected stream never opened: an error carrying the
+                    // status, not an open followed by a close.
                     let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                    handler?.onError(URLError(.badServerResponse, userInfo: ["statusCode": status]))
-                    handler?.onClosed()
+                    handler?.onError(SseHTTPStatusError(statusCode: status))
                     return
                 }
 
@@ -316,6 +317,13 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(cString: $0) }
         }
     }
+}
+
+/// An SSE connect answered with a non-2xx status.
+struct SseHTTPStatusError: Error, CustomStringConvertible {
+    let statusCode: Int
+
+    var description: String { "HTTP \(statusCode)" }
 }
 
 private final class URLSessionSseSubscription: CancellableSubscription, @unchecked Sendable {
