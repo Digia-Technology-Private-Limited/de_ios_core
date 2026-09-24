@@ -89,4 +89,82 @@ struct SessionReporterTests {
         #expect(mock.recordedRequests.count == 3)
         #expect(storage.scoped("session").string(forKey: "pending_session_report") == nil)
     }
+
+    private func postedSessionIds(_ mock: MockNetworkClient) -> [String] {
+        mock.recordedRequests.compactMap { request in
+            request.body
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                .flatMap { $0["session_id"] as? String }
+        }
+    }
+
+    @Test("reports that failed offline are posted in order once the network is back")
+    func pendingReportsFlushInOrder() async throws {
+        let mock = MockNetworkClient()
+        mock.simulateTransportError(URLError(.notConnectedToInternet))
+        let (storage, _) = makeIsolatedStorage()
+        let currentSession = LockedBox("s1")
+        let reporter = SessionReporter(
+            apiKey: "k",
+            sessionId: { currentSession.value },
+            anonymousId: { "anon" },
+            userId: { nil },
+            context: [:],
+            networkClient: mock,
+            storage: storage.scoped("session")
+        )
+
+        for id in ["s1", "s2", "s3"] {
+            currentSession.mutate { $0 = id }
+            reporter.report()
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+
+        mock.reset()
+        mock.setResponseFactory { _ in NetworkResponse(statusCode: 200, headers: [:], body: Data()) }
+        reporter.flush()
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        #expect(postedSessionIds(mock) == ["s1", "s2", "s3"])
+        #expect(storage.scoped("session").string(forKey: "pending_session_report") == nil)
+    }
+
+    @Test("a 4xx report is dropped, 408/429 are kept, and the list is capped oldest-first")
+    func pendingListRules() async throws {
+        let mock = MockNetworkClient()
+        let status = LockedBox(400)
+        mock.setResponseFactory { _ in NetworkResponse(statusCode: status.value, headers: [:], body: Data()) }
+        let (storage, _) = makeIsolatedStorage()
+        let currentSession = LockedBox("s0")
+        let reporter = SessionReporter(
+            apiKey: "k",
+            sessionId: { currentSession.value },
+            anonymousId: { "anon" },
+            userId: { nil },
+            context: [:],
+            networkClient: mock,
+            storage: storage.scoped("session")
+        )
+
+        reporter.report()
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(storage.scoped("session").string(forKey: "pending_session_report") == nil)
+
+        status.mutate { $0 = 429 }
+        for index in 1...(SessionReporter.pendingCap + 2) {
+            currentSession.mutate { $0 = "s\(index)" }
+            reporter.report()
+        }
+        reporter.flush()
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        mock.reset()
+        mock.setResponseFactory { _ in NetworkResponse(statusCode: 200, headers: [:], body: Data()) }
+        reporter.flush()
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let expected = (3...(SessionReporter.pendingCap + 2)).map { "s\($0)" }
+        #expect(postedSessionIds(mock) == expected)
+    }
 }
+
