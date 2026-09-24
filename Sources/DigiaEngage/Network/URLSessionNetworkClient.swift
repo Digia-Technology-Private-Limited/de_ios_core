@@ -4,15 +4,15 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     private let session: URLSession
     private let uploadSession: URLSession
     private let sseSession: URLSession
-    private let sessionIdProvider: (@Sendable () -> String?)?
-    private let headerProvider: (@Sendable () -> [String: String])?
+    private let sessionIdProvider: @Sendable () -> String?
+    private let headerProvider: @Sendable () -> [String: String]
     private let lock = NSLock()
     private var staticHeaders: [String: String] = [:]
 
     public init(
         session: URLSession? = nil,
-        sessionIdProvider: (@Sendable () -> String?)? = nil,
-        headerProvider: (@Sendable () -> [String: String])? = nil
+        sessionIdProvider: @escaping @Sendable () -> String?,
+        headerProvider: @escaping @Sendable () -> [String: String]
     ) {
         self.sessionIdProvider = sessionIdProvider
         self.headerProvider = headerProvider
@@ -282,9 +282,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             headers["x-app-build-number"] = buildNumber
         }
 
-        if let provider = headerProvider {
-            headers.merge(provider())
-        }
+        headers.merge(headerProvider())
         lock.lock()
         let staticHeaders = self.staticHeaders
         lock.unlock()
@@ -295,7 +293,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         headers.fillIfMissing("X-Digia-Sdk-Environment", from: "X-Digia-Environment")
         headers.fillIfMissing("X-Digia-Environment", from: "X-Digia-Sdk-Environment")
 
-        if let sid = sessionIdProvider?() {
+        if let sid = sessionIdProvider() {
             headers["X-Digia-Session-Id"] = sid
         }
         headers["X-Digia-Platform"] = "ios"

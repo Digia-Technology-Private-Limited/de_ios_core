@@ -58,12 +58,12 @@ final class MockURLProtocol: URLProtocol, @unchecked Sendable {
 struct NetworkClientTests {
 
     private func makeTestClient(
-        headerProvider: (@Sendable () -> [String: String])? = nil
+        headerProvider: @escaping @Sendable () -> [String: String] = { [:] }
     ) -> URLSessionNetworkClient {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: config)
-        return URLSessionNetworkClient(session: session, headerProvider: headerProvider)
+        return URLSessionNetworkClient(session: session, sessionIdProvider: { nil }, headerProvider: headerProvider)
     }
 
     // MARK: - URLSessionNetworkClient Header Duplication & Contract Tests
@@ -153,7 +153,8 @@ struct NetworkClientTests {
     @Test("URLSessionNetworkClient injects canonical session headers from sessionIdProvider")
     func urlSessionSessionIdProvider() {
         let client = URLSessionNetworkClient(
-            sessionIdProvider: { "sess_test_123" }
+            sessionIdProvider: { "sess_test_123" },
+            headerProvider: { [:] }
         )
         let assembled = client.assembleHeaders(for: [:])
         #expect(assembled["X-Digia-Session-Id"] == "sess_test_123")
@@ -169,7 +170,8 @@ struct NetworkClientTests {
         config.protocolClasses = [MockURLProtocol.self]
         let client = URLSessionNetworkClient(
             session: URLSession(configuration: config),
-            sessionIdProvider: { currentSession.sessionId }
+            sessionIdProvider: { currentSession.sessionId },
+            headerProvider: { currentSession.requestHeaders }
         )
         let captured = LockedBox<[String?]>([])
         MockURLProtocol.setHandler { req in
