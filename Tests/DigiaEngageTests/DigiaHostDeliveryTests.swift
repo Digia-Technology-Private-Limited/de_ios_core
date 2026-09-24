@@ -36,16 +36,14 @@ struct DigiaHostDeliveryTests {
         #expect(recorder.isHoldReleased)
     }
 
-    @Test("a trigger before the bundle lands is held; a newer one supersedes it")
+    @Test("a trigger before initialize() was ever called is dropped not_initialized at once")
     func heldBeforeTheBundle() {
         SDKInstance.shared.resetForTesting()
 
-        let first = deliver("anything", cepCampaignId: "cep-a")
-        #expect(!first.isSettled)
-
-        let second = deliver("anything", cepCampaignId: "cep-b")
-        #expect(first.dropReason == .superseded)
-        #expect(!second.isSettled)
+        let recorder = deliver("anything", cepCampaignId: "cep-a")
+        #expect(recorder.isSettled)
+        #expect(recorder.dropReason == .notInitialized)
+        #expect(recorder.isHoldReleased)
         SDKInstance.shared.resetForTesting()
     }
 

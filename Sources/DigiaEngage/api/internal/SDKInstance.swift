@@ -580,11 +580,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // arrived and we turned it away" are the two answers a campaign creator
         // most needs to tell apart.
         observeDelivery(controller)
-        if sdkState == .ready {
-            routeNow(controller)
-        } else {
-            bufferUntilReady(controller)
-        }
+        routeOrHold(controller)
         return controller.presentation
     }
 
@@ -610,12 +606,26 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         )
         let controller = coordinator.open(trigger, owner: Self.hostOwner)
         observeDelivery(controller)
+        routeOrHold(controller)
+        return controller.presentation
+    }
+
+    /// The state gate `deliver` and `triggerCampaign` share, as Flutter and Android: route when
+    /// ready, hold only while the bundle fetch is running, and otherwise — `initialize()` was
+    /// never called — settle at once so the CEP gets its slot back.
+    private func routeOrHold(_ controller: PresentationController) {
         if sdkState == .ready {
             routeNow(controller)
-        } else {
+        } else if fetchTask != nil {
             bufferUntilReady(controller)
+        } else {
+            controller.settle(
+                .dropped(
+                    reason: .notInitialized,
+                    detail: "Digia.initialize() has not been called"
+                )
+            )
         }
-        return controller.presentation
     }
 
     /// Owner recorded for a delivery the host app asked for itself, with no CEP involved.
