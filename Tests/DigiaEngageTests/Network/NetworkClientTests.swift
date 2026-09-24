@@ -106,7 +106,7 @@ struct NetworkClientTests {
         #expect(assembled["X-Digia-Project-Id"] == "proj_p1")
         #expect(assembled["x-digia-device-id"] == "dev_d1")
         #expect(assembled["X-Digia-Platform"] == "ios")
-        #expect(assembled["x-digia-sdk-version"] == DigiaSdkVersion.value)
+        #expect(!names.contains("x-digia-sdk-version"))
         #expect(!names.contains("x-digia-version"))
         #expect(assembled["X-Custom"] == "CustomVal")
 

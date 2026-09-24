@@ -257,7 +257,6 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             "X-Digia-Device-Make": "Apple",
             "X-Digia-Os-Version": "iOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
             "X-Digia-Device-Model": Self.deviceModel(),
-            "x-digia-sdk-version": DigiaSdkVersion.value,
         ])
 
         if let bundleId = Bundle.main.bundleIdentifier, !bundleId.isEmpty {
