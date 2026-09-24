@@ -42,12 +42,10 @@ final class SDKServices {
             wrapperVersion: config.wrapperVersion
         )
         let sessionReporter = SessionReporter(
-            apiKey: config.apiKey,
             sessionId: { [weak sessionManager] in sessionManager?.sessionId ?? "" },
             anonymousId: { [weak identityManager] in identityManager?.deviceId ?? "" },
             userId: { [weak identityManager] in identityManager?.userId },
             context: staticContext,
-            requestHeaders: requestHeaders,
             networkClient: networkClient,
             storage: storage.scoped("session")
         )
@@ -70,20 +68,17 @@ final class SDKServices {
             log.d("Analytics enabled (batchSize=\(ac.flushBatchSize), interval=\(ac.flushIntervalMs)ms)")
             self.analyticsService = AnalyticsService(
                 config: ac,
-                apiKey: config.apiKey,
                 identityManager: identityManager,
                 sessionManager: sessionManager,
                 queue: AnalyticsQueue(storage: storage.scoped("analytics")),
                 staticContext: staticContext,
-                networkClient: networkClient,
-                requestHeaders: requestHeaders
+                networkClient: networkClient
             )
         } else {
             log.i("Analytics disabled in DigiaConfig — no events will be captured")
             self.analyticsService = nil
         }
         self.submissionReporter = SubmissionReporter(
-            identityManager: identityManager,
             sessionIdProvider: { [weak sessionManager] in sessionManager?.sessionId },
             networkClient: networkClient
         )

@@ -11,7 +11,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         defaults: UserDefaults(suiteName: "tech.digia.engage") ?? .standard,
         legacyDefaults: .standard,
         makeNetworkClient: { currentSession in
-            URLSessionNetworkClient(sessionIdProvider: { currentSession.sessionId })
+            URLSessionNetworkClient(
+                sessionIdProvider: { currentSession.sessionId },
+                headerProvider: { currentSession.requestHeaders }
+            )
         }
     )
 
@@ -276,7 +279,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         DigiaEndpoints.configure(config)
         let services = SDKServices(config: config, storage: storage, networkClient: networkClient)
         self.services = services
-        currentSession.set(services.sessionManager)
+        currentSession.set(services.sessionManager, requestHeaders: services.requestHeaders)
         // Session telemetry is analytics: with analytics disabled no session
         // is reported. A resumed session was reported by the launch that
         // started it.
@@ -325,10 +328,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
         var campaigns: [CampaignModel] = []
         do {
-            let bundle = try await CampaignFetcher(
-                networkClient: networkClient,
-                requestHeaders: requestHeaders
-            ).fetch()
+            let bundle = try await CampaignFetcher(networkClient: networkClient).fetch()
             // Applied as soon as the bundle answers — the earliest point this
             // core can reach, though `fetch()` has already parsed every
             // campaign (and so already fired this bundle's own parse-stage
@@ -457,7 +457,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             clearLiveTestState()
             liveTestService.configure(
                 config: config,
-                requestHeaders: requestHeaders,
                 deviceId: services.identityManager.deviceId,
                 isDebugBuild: isDebugBuild,
                 onCampaignTest: { [weak self] invocation in self?.handleLiveTestCampaign(invocation)
@@ -718,7 +717,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             publishCaptureStatus("Capture unavailable — dismiss the active Digia experience first")
             return
         }
-        guard let config, let pageKey = _currentScreen, !pageKey.isEmpty,
+        guard config != nil, let pageKey = _currentScreen, !pageKey.isEmpty,
               let window = ViewControllerUtil.keyWindow(),
               let source = UIKitCaptureFacts.sourceFrame(window: window)
         else {
@@ -773,7 +772,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 nodes: nodes
             )
 
-            let upload = await URLSessionCaptureUploader(apiKey: config.apiKey, networkClient: networkClient).upload(
+            let upload = await URLSessionCaptureUploader(networkClient: networkClient).upload(
                 envelope: envelope,
                 png: png
             )
@@ -2841,7 +2840,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         _currentScreen = nil
         services?.tearDown()
         services = nil
-        currentSession.set(nil)
+        currentSession.set(nil, requestHeaders: [:])
         campaignStore.clear()
         liveTestService.stop()
         config = nil

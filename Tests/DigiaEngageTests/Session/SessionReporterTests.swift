@@ -34,12 +34,10 @@ struct SessionReporterTests {
         let (storage, _) = makeIsolatedStorage()
 
         let reporter = SessionReporter(
-            apiKey: "test-api-key",
             sessionId: { "sess-123" },
             anonymousId: { "anon-456" },
             userId: { "user-789" },
             context: ["sdk_version": "1.0.0", "platform": "ios"],
-            requestHeaders: [:],
             networkClient: mock,
             storage: storage.scoped("session")
         )
@@ -50,8 +48,8 @@ struct SessionReporterTests {
         #expect(mock.recordedRequests.count == 1)
         let request = try #require(mock.recordedRequests.first)
         #expect(request.url.absoluteString.hasSuffix("/engage/sdk/session"))
-        #expect(request.headers["X-Digia-Project-Id"] == "test-api-key")
-        #expect(request.headers["X-Digia-Device-Id"] == "anon-456")
+        // Protocol headers only: the client adds Project-Id and Device-Id.
+        #expect(request.headers == ["Content-Type": "application/json"])
 
         let bodyData = try #require(request.body)
         let bodyJson = try #require(try JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
@@ -75,12 +73,10 @@ struct SessionReporterTests {
         let (storage, _) = makeIsolatedStorage()
 
         let reporter = SessionReporter(
-            apiKey: "test-api-key",
             sessionId: { "sess-123" },
             anonymousId: { "anon-456" },
             userId: { nil },
             context: [:],
-            requestHeaders: [:],
             networkClient: mock,
             storage: storage.scoped("session")
         )
@@ -118,7 +114,6 @@ struct SessionReporterTests {
         let (storage, _) = makeIsolatedStorage()
         let currentSession = LockedBox("s1")
         let reporter = SessionReporter(
-            apiKey: "k",
             sessionId: { currentSession.value },
             anonymousId: { "anon" },
             userId: { nil },
@@ -150,7 +145,6 @@ struct SessionReporterTests {
         let (storage, _) = makeIsolatedStorage()
         let currentSession = LockedBox("s0")
         let reporter = SessionReporter(
-            apiKey: "k",
             sessionId: { currentSession.value },
             anonymousId: { "anon" },
             userId: { nil },

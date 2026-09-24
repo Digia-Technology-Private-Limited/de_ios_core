@@ -104,7 +104,6 @@ struct AnalyticsServiceTests {
         let sessionManager = SessionManager(storage: storage.scoped("session"), timeoutMs: Int64(config.sessionTimeoutMs), observeLifecycle: false)
         return AnalyticsService(
             config: config,
-            apiKey: "test-api-key",
             identityManager: identityManager,
             sessionManager: sessionManager,
             queue: AnalyticsQueue(storage: UserDefaultsLocalStorage(defaults: store).scoped("analytics")),

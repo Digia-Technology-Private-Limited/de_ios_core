@@ -14,14 +14,9 @@ internal enum CaptureUploadResult: Equatable, Sendable {
 
 @MainActor
 internal final class URLSessionCaptureUploader {
-    private let apiKey: String
     private let networkClient: any NetworkClient
 
-    internal init(
-        apiKey: String,
-        networkClient: any NetworkClient
-    ) {
-        self.apiKey = apiKey
+    internal init(networkClient: any NetworkClient) {
         self.networkClient = networkClient
     }
 
@@ -38,10 +33,6 @@ internal final class URLSessionCaptureUploader {
 
         let request = MultipartUploadRequest(
             url: url,
-            headers: [
-                "x-digia-project-id": apiKey,
-                "X-Digia-Project-Id": apiKey
-            ],
             formFields: [:],
             files: [
                 MultipartFilePart(

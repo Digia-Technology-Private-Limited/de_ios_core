@@ -151,7 +151,7 @@ final class ComponentRegistryService: ObservableObject {
     }
 
     private func record(key: String, type: String, screenName: String?) {
-        guard isEnabled, isDebugBuildFlag, let config, let deviceId else { return }
+        guard isEnabled, isDebugBuildFlag, isConfigured else { return }
 
         let dedupeKey = "\(type):\(key):\(screenName ?? "")"
         guard seen.insert(dedupeKey).inserted else { return }
@@ -164,11 +164,7 @@ final class ComponentRegistryService: ObservableObject {
         // Serialize before crossing into Task — [String: Any] isn't Sendable
         // under strict concurrency, so only Data/String cross the boundary.
         guard let body = try? JSONSerialization.data(withJSONObject: ["components": [entry]]) else { return }
-        let headers = [
-            "Content-Type": "application/json",
-            "x-digia-project-id": config.apiKey,
-            "x-digia-device-id": deviceId,
-        ]
+        let headers = ["Content-Type": "application/json"]
         send(body: body, headers: headers, key: key)
     }
 

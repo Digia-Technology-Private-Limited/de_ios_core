@@ -30,7 +30,6 @@ final class LiveTestAckReporter {
 
     private let networkClient: any NetworkClient
     private var config: DigiaConfig?
-    private var deviceId: String?
 
     /// Pauses between attempts — three attempts in total, all inside the
     /// backend's 30s alarm so a recovered ACK still beats it. Overridable for
@@ -45,9 +44,8 @@ final class LiveTestAckReporter {
         self.init(networkClient: sender)
     }
 
-    func configure(config: DigiaConfig, deviceId: String) {
+    func configure(config: DigiaConfig) {
         self.config = config
-        self.deviceId = deviceId
     }
 
     func postReceived(_ testInvocationId: String) {
@@ -83,11 +81,10 @@ final class LiveTestAckReporter {
     /// state machine ignores a transition that is not forward, so a
     /// `received` that lands after the `failed` it preceded changes nothing.
     private func post(_ body: [String: Any], endpoint: String = DigiaEndpoints.liveTestAck) {
-        guard let config else { return }
+        guard config != nil else { return }
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
 
-        var headers = ["Content-Type": "application/json", "x-digia-project-id": config.apiKey]
-        if let deviceId { headers["x-digia-device-id"] = deviceId }
+        let headers = ["Content-Type": "application/json"]
 
         let testInvocationId = body["testInvocationId"] as? String ?? ""
         let kind = (body["status"] as? String) ?? (body["type"] as? String) ?? ""

@@ -14,9 +14,6 @@ enum LiveTestSseEvent {
 /// `URLSession.bytes(for:)`; framing is handled by `SSEFrameParser`.
 @MainActor
 final class LiveTestSSEClient {
-    private let config: () -> DigiaConfig
-    private let deviceId: () -> String
-    private let requestHeaders: [String: String]
     private let deviceName: () -> String?
     private let onEvent: (LiveTestSseEvent) -> Void
     private let onConnectionStateChanged: (LiveTestConnectionState) -> Void
@@ -30,17 +27,11 @@ final class LiveTestSSEClient {
     var isRunning: Bool { !stopped }
 
     init(
-        config: @escaping () -> DigiaConfig,
-        deviceId: @escaping () -> String,
-        requestHeaders: [String: String],
         deviceName: @escaping () -> String?,
         onEvent: @escaping (LiveTestSseEvent) -> Void,
         onConnectionStateChanged: @escaping (LiveTestConnectionState) -> Void,
         networkClient: any NetworkClient
     ) {
-        self.config = config
-        self.deviceId = deviceId
-        self.requestHeaders = requestHeaders
         self.deviceName = deviceName
         self.onEvent = onEvent
         self.onConnectionStateChanged = onConnectionStateChanged
@@ -67,7 +58,6 @@ final class LiveTestSSEClient {
     private func connect() {
         guard !stopped else { return }
         onConnectionStateChanged(.connecting)
-        let cfg = config()
         guard let url = URL(string: DigiaEndpoints.liveTestConnect) else {
             handleDisconnect("invalid live test URL")
             return
@@ -76,15 +66,12 @@ final class LiveTestSSEClient {
         let bodyDict = deviceName().map { ["deviceName": $0] } ?? [:]
         let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict)
 
-        var headers = requestHeaders
-        headers["Content-Type"] = "application/json"
-        headers["X-Digia-Project-Id"] = cfg.apiKey
-        headers["X-Digia-Device-Id"] = deviceId()
-        headers["X-Digia-Environment"] = "debug"
-        headers["X-Digia-Platform"] = "ios"
-        headers["X-Digia-Version"] = DigiaSdkVersion.value
-        headers["X-Digia-Device-Make"] = "Apple"
-        headers["X-Digia-Device-Model"] = Self.deviceModel()
+        // Protocol headers only; the client adds Project-Id, Device-Id and
+        // the device/SDK headers. Live test always connects as `debug`.
+        let headers = [
+            "Content-Type": "application/json",
+            "X-Digia-Environment": "debug",
+        ]
 
         let request = NetworkRequest(
             url: url,
@@ -197,14 +184,6 @@ final class LiveTestSSEClient {
             try? await Task.sleep(nanoseconds: UInt64(delayMs) * 1_000_000)
             guard let self, !self.stopped else { return }
             self.connect()
-        }
-    }
-
-    private static func deviceModel() -> String {
-        var sysInfo = utsname()
-        uname(&sysInfo)
-        return withUnsafePointer(to: &sysInfo.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(cString: $0) }
         }
     }
 }

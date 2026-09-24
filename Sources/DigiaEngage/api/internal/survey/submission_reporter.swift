@@ -12,7 +12,6 @@ typealias SurveySubmissionReporter = SubmissionReporter
 
 final class SubmissionReporter: @unchecked Sendable {
     private(set) var config: DigiaConfig?
-    private let identityManager: IdentityManager
     private let sessionIdProvider: @Sendable () -> String?
     private let lock = NSLock()
 
@@ -20,12 +19,10 @@ final class SubmissionReporter: @unchecked Sendable {
 
     init(
         config: DigiaConfig? = nil,
-        identityManager: IdentityManager,
         sessionIdProvider: @escaping @Sendable () -> String?,
         networkClient: any NetworkClient
     ) {
         self.config = config
-        self.identityManager = identityManager
         self.sessionIdProvider = sessionIdProvider
         self.networkClient = networkClient
     }
@@ -44,10 +41,10 @@ final class SubmissionReporter: @unchecked Sendable {
         userId: String?
     ) {
         lock.lock()
-        let currentConfig = self.config
+        let isConfigured = self.config != nil
         lock.unlock()
 
-        guard let currentConfig else {
+        guard isConfigured else {
             #if canImport(UIKit)
             log.e("Survey submission skipped — config is nil")
             #endif
@@ -62,25 +59,20 @@ final class SubmissionReporter: @unchecked Sendable {
             userId: userId,
             sessionId: sessionIdProvider()
         )
-        let resolvedDeviceId = identityManager.deviceId
         let client = self.networkClient
-        Task.detached { await Self.post(networkClient: client, config: currentConfig, deviceId: resolvedDeviceId, body: body) }
+        Task.detached { await Self.post(networkClient: client, body: body) }
     }
 
     // MARK: - Networking
 
-    private static func post(networkClient: any NetworkClient, config: DigiaConfig, deviceId: String, body: [String: Any]) async {
+    private static func post(networkClient: any NetworkClient, body: [String: Any]) async {
         guard let url = endpoint() else { return }
         do {
             let data = try JSONSerialization.data(withJSONObject: body)
             let request = NetworkRequest(
                 url: url,
                 method: .post,
-                headers: [
-                    "Content-Type": "application/json",
-                    "x-digia-project-id": config.apiKey,
-                    "x-digia-device-id": deviceId
-                ],
+                headers: ["Content-Type": "application/json"],
                 body: data,
                 connectTimeout: 10,
                 readTimeout: 10

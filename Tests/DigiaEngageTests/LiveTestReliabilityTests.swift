@@ -62,7 +62,7 @@ struct LiveTestReliabilityTests {
     func pinsAckStatuses() async {
         let sender = FakeSender(outcomes: [.success(200), .success(200), .success(200)])
         let reporter = LiveTestAckReporter(sender: sender)
-        reporter.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1")
+        reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         // Awaited individually — each call spawns its own unstructured Task,
         // and letting one land before firing the next is what pins the
@@ -87,7 +87,7 @@ struct LiveTestReliabilityTests {
     func boundsMessage() async {
         let sender = FakeSender(outcomes: [.success(200)])
         let reporter = LiveTestAckReporter(sender: sender)
-        reporter.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1")
+        reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         reporter.postFailed(
             "inv-1", code: DropReason.error, message: String(repeating: "x", count: 500))
@@ -107,7 +107,7 @@ struct LiveTestReliabilityTests {
         let sender = FakeSender(outcomes: [.success(500), .failure(NetworkError()), .success(200)])
         let reporter = LiveTestAckReporter(sender: sender)
         reporter.retryPauses = [0.01, 0.01]
-        reporter.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1")
+        reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         reporter.postShown("inv-1")
         await sender.waitForAttempts(3)
@@ -121,7 +121,7 @@ struct LiveTestReliabilityTests {
         let sender = FakeSender(outcomes: [.success(500), .success(500), .success(500), .success(500)])
         let reporter = LiveTestAckReporter(sender: sender)
         reporter.retryPauses = [0.01, 0.01]
-        reporter.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1")
+        reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         reporter.postShown("inv-1")
         // Give it time well past the two short pauses; a fourth attempt would
@@ -137,7 +137,7 @@ struct LiveTestReliabilityTests {
         let sender = FakeSender(outcomes: [.success(404), .success(200)])
         let reporter = LiveTestAckReporter(sender: sender)
         reporter.retryPauses = [0.01, 0.01]
-        reporter.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1")
+        reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         reporter.postShown("inv-1")
         try? await Task.sleep(nanoseconds: 100_000_000)
@@ -154,7 +154,7 @@ struct LiveTestReliabilityTests {
     func liveEventsRideOwnEndpoint() async {
         let sender = FakeSender(outcomes: [.success(200)])
         let reporter = LiveTestAckReporter(sender: sender)
-        reporter.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1")
+        reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         reporter.postEvent(
             "inv-1", type: "dismissed", payload: ["reason": "scrim_tap", "completed": false])
@@ -173,7 +173,7 @@ struct LiveTestReliabilityTests {
     func watchdogFiresDefaultTimeout() async {
         let sender = FakeSender(outcomes: [.success(200)])
         let reporter = LiveTestAckReporter(sender: sender)
-        reporter.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1")
+        reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         var terminalFired = false
         // Held for the test's duration — the watchdog's Task captures `self`
@@ -198,7 +198,7 @@ struct LiveTestReliabilityTests {
     func watchdogNarrowedForInline() async {
         let sender = FakeSender(outcomes: [.success(200)])
         let reporter = LiveTestAckReporter(sender: sender)
-        reporter.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1")
+        reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         let context = LiveTestContext(
             testInvocationId: "inv-1", reporter: reporter, onTerminal: {}, timeout: 0.02
@@ -217,7 +217,7 @@ struct LiveTestReliabilityTests {
     func watchdogDisarmedByShown() async {
         let sender = FakeSender(outcomes: [.success(200)])
         let reporter = LiveTestAckReporter(sender: sender)
-        reporter.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1")
+        reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         let context = LiveTestContext(
             testInvocationId: "inv-1", reporter: reporter, onTerminal: {}, timeout: 0.02
@@ -237,7 +237,7 @@ struct LiveTestReliabilityTests {
     func reportFailedIsIdempotent() async {
         let sender = FakeSender(outcomes: [.success(200), .success(200)])
         let reporter = LiveTestAckReporter(sender: sender)
-        reporter.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1")
+        reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         let context = LiveTestContext(
             testInvocationId: "inv-1", reporter: reporter, onTerminal: {}, timeout: 10
@@ -258,7 +258,7 @@ struct LiveTestReliabilityTests {
     func invalidateCancelsWithoutPosting() async {
         let sender = FakeSender(outcomes: [.success(200)])
         let reporter = LiveTestAckReporter(sender: sender)
-        reporter.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1")
+        reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         var terminalFired = false
         let context = LiveTestContext(

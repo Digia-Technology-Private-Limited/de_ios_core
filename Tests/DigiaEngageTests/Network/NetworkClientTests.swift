@@ -164,7 +164,7 @@ struct NetworkClientTests {
         let storage = UserDefaultsLocalStorage(defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!)
         let sessionManager = SessionManager(storage: storage.scoped("session"), observeLifecycle: false)
         let currentSession = CurrentSessionRef()
-        currentSession.set(sessionManager)
+        currentSession.set(sessionManager, requestHeaders: [:])
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [MockURLProtocol.self]
         let client = URLSessionNetworkClient(

@@ -5,31 +5,25 @@ private let log = DigiaLogger("analytics")
 final class SessionReporter: @unchecked Sendable {
     static let keyPendingReport = "pending_session_report"
 
-    private let apiKey: String
     private let sessionId: @Sendable () -> String
     private let anonymousId: @Sendable () -> String
     private let userId: @Sendable () -> String?
     private let context: [String: Any]
-    private let requestHeaders: [String: String]
     private let networkClient: any NetworkClient
     private let storage: LocalStorage
 
     init(
-        apiKey: String,
         sessionId: @escaping @Sendable () -> String,
         anonymousId: @escaping @Sendable () -> String,
         userId: @escaping @Sendable () -> String?,
         context: [String: Any],
-        requestHeaders: [String: String] = [:],
         networkClient: any NetworkClient,
         storage: LocalStorage
     ) {
-        self.apiKey = apiKey
         self.sessionId = sessionId
         self.anonymousId = anonymousId
         self.userId = userId
         self.context = context
-        self.requestHeaders = requestHeaders
         self.networkClient = networkClient
         self.storage = storage
     }
@@ -129,12 +123,9 @@ final class SessionReporter: @unchecked Sendable {
 
     private func post(_ body: String) async -> Outcome {
         guard let url = URL(string: DigiaEndpoints.session) else { return .rejected(-1) }
-        var headers = requestHeaders
-        headers["Content-Type"] = "application/json"
-        headers["X-Digia-Project-Id"] = apiKey
-        headers["X-Digia-Device-Id"] = anonymousId()
         do {
-            let request = NetworkRequest(url: url, method: .post, headers: headers, body: Data(body.utf8))
+            let request = NetworkRequest(
+                url: url, method: .post, headers: ["Content-Type": "application/json"], body: Data(body.utf8))
             let response = try await networkClient.execute(request: request)
             let status = response.statusCode
             if response.isSuccessful { return .sent }

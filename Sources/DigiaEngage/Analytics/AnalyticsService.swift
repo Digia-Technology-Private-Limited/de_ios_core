@@ -9,13 +9,11 @@ private let log = DigiaLogger("analytics")
 @MainActor
 final class AnalyticsService {
     private let config: AnalyticsConfig
-    private let apiKey: String
     let identityManager: IdentityManager
     let sessionManager: SessionManager
     let queue: AnalyticsQueue
     private let staticContext: [String: Any]
     private let networkClient: any NetworkClient
-    private let requestHeaders: [String: String]
 
     private var isCleared = false
     private var flushTimer: Timer?
@@ -50,22 +48,18 @@ final class AnalyticsService {
 
     init(
         config: AnalyticsConfig,
-        apiKey: String,
         identityManager: IdentityManager,
         sessionManager: SessionManager,
         queue: AnalyticsQueue,
         staticContext: [String: Any],
-        networkClient: any NetworkClient,
-        requestHeaders: [String: String] = [:]
+        networkClient: any NetworkClient
     ) {
         self.config = config
-        self.apiKey = apiKey
         self.identityManager = identityManager
         self.sessionManager = sessionManager
         self.queue = queue
         self.staticContext = staticContext
         self.networkClient = networkClient
-        self.requestHeaders = requestHeaders
 
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
@@ -173,11 +167,7 @@ final class AnalyticsService {
     }
 
     private var jsonHeaders: [String: String] {
-        requestHeaders.merging([
-            "Content-Type": "application/json",
-            "X-Digia-Project-Id": apiKey,
-            "X-Digia-Device-Id": identityManager.deviceId,
-        ]) { _, value in value }
+        ["Content-Type": "application/json"]
     }
 
     // MARK: - Private

@@ -27,14 +27,9 @@ struct CampaignAPIResponse {
 }
 struct CampaignFetcher {
     private let networkClient: any NetworkClient
-    private let requestHeaders: [String: String]
 
-    init(
-        networkClient: any NetworkClient,
-        requestHeaders: [String: String] = [:]
-    ) {
+    init(networkClient: any NetworkClient) {
         self.networkClient = networkClient
-        self.requestHeaders = requestHeaders
     }
 
     func fetch() async throws -> CampaignBundle {
@@ -46,7 +41,6 @@ struct CampaignFetcher {
         let request = NetworkRequest(
             url: url,
             method: .post,
-            headers: requestHeaders,
             body: Data("{}".utf8),
             connectTimeout: 10,
             readTimeout: 10
