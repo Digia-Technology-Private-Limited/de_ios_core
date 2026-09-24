@@ -2720,9 +2720,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         events.toDigia(
             GuideEvent.Completed(
                 itemTotal: state.steps.count,
-                timeToCompleteMs: state.currentStep?.target.anchorlessTarget == nil && !anchorLeft
-                    ? nil
-                    : dwellTracker.elapsedMs(state.payload.cepCampaignId)
+                // Dwell since step 1 showed, as Flutter; a peek, so a later dismiss keeps it (A61).
+                timeToCompleteMs: dwellTracker.elapsedMs(state.payload.cepCampaignId)
             ),
             payload: state.payload
         )

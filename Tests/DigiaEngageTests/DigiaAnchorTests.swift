@@ -247,6 +247,24 @@ extension DigiaEngageTests {
         ) == nil)
     }
 
+    @Test("CTA on an anchored guide's last step: Digia completion carries time_to_complete_ms (A61)")
+    func ctaOnLastStepCompletionCarriesDwell() async throws {
+        let (sdk, _) = try await makeGuideInstance(stepCount: 2)
+        _ = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
+        sdk.reportGuideShown()
+        sdk.advanceGuide()
+        sdk.reportGuideShown()
+
+        sdk.reportGuideStepClicked(actionType: "dismiss", actionUrl: nil, ctaLabel: "Done")
+
+        let entries = try #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
+        let completed = entries.first {
+            $0.payload["event_name"] as? String == "Digia Experience Completed"
+        }?.payload["properties"] as? [String: Any]
+        #expect(completed?["time_to_complete_ms"] != nil)
+        #expect(completed?["item_total"] as? Int == 2)
+    }
+
     @Test("anchor leaves before the step shows: user_close to the CEP only, nothing to Digia (A40)")
     func removedAnchorBeforeStepShowsTellsCepOnly() async throws {
         let (sdk, window) = try await makeGuideInstance(stepCount: 1, delayInMs: 5_000)
