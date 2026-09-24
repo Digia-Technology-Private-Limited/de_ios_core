@@ -353,21 +353,37 @@ private final class URLSessionSseSubscription: CancellableSubscription, @uncheck
 /// Buffers raw SSE bytes into `(id, event, data)` frames on each blank-line boundary.
 /// Not built on `bytes.lines` (`AsyncLineSequence`) — it silently drops blank
 /// lines (`"a\n\nb"` yields `["a", "b"]`), so a parser waiting on `line.isEmpty` never fires.
+///
+/// Lines end at LF, CRLF or a bare CR. A line is decoded only once complete,
+/// so a multi-byte character split across chunks is never broken. A field's
+/// value loses exactly one leading space, as the SSE spec says.
 struct SSEFrameParser {
     private var buffer = Data()
+    private var lastWasCR = false
     private var eventName: String?
     private var eventId: String?
     private var dataLines: [String] = []
 
     /// Returns a completed frame once a blank-line boundary closes one, else `nil`.
     mutating func feed(_ byte: UInt8) -> (id: String?, event: String?, data: String)? {
-        buffer.append(byte)
-        guard let newlineIndex = buffer.firstIndex(of: UInt8(ascii: "\n")) else { return nil }
-        let lineData = buffer[buffer.startIndex..<newlineIndex]
-        buffer.removeSubrange(buffer.startIndex...newlineIndex)
-        var line = String(decoding: lineData, as: UTF8.self)
-        if line.hasSuffix("\r") { line.removeLast() }
+        let cr = UInt8(ascii: "\r")
+        let lf = UInt8(ascii: "\n")
+        if byte == lf, lastWasCR {
+            // The LF of a CRLF: the CR already ended the line.
+            lastWasCR = false
+            return nil
+        }
+        lastWasCR = byte == cr
+        guard byte == lf || byte == cr else {
+            buffer.append(byte)
+            return nil
+        }
+        let line = String(decoding: buffer, as: UTF8.self)
+        buffer.removeAll(keepingCapacity: true)
+        return process(line)
+    }
 
+    private mutating func process(_ line: String) -> (id: String?, event: String?, data: String)? {
         if line.isEmpty {
             defer {
                 eventName = nil
@@ -378,12 +394,21 @@ struct SSEFrameParser {
             return (eventId, eventName, dataLines.joined(separator: "\n"))
         }
         if line.hasPrefix(":") { return nil } // heartbeat comment
-        if line.hasPrefix("event:") {
-            eventName = line.dropFirst("event:".count).trimmingCharacters(in: .whitespaces)
-        } else if line.hasPrefix("data:") {
-            dataLines.append(line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces))
-        } else if line.hasPrefix("id:") {
-            eventId = line.dropFirst("id:".count).trimmingCharacters(in: .whitespaces)
+        let field: Substring
+        var value: Substring
+        if let colon = line.firstIndex(of: ":") {
+            field = line[..<colon]
+            value = line[line.index(after: colon)...]
+            if value.hasPrefix(" ") { value = value.dropFirst() }
+        } else {
+            field = Substring(line)
+            value = ""
+        }
+        switch field {
+        case "event": eventName = String(value)
+        case "data": dataLines.append(String(value))
+        case "id": eventId = String(value)
+        default: break
         }
         return nil
     }

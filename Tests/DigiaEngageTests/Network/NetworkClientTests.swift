@@ -340,6 +340,22 @@ struct NetworkClientTests {
         let framesAfterReset = parser.feed(Data("\n\n".utf8))
         #expect(framesAfterReset.isEmpty)
     }
+
+    @Test("SSEFrameParser survives chunks split mid-character and across CRLF boundaries")
+    func sseFrameParserChunkBoundaries() {
+        var parser = SSEFrameParser()
+        let wire = Data("event: greet\r\ndata:  héllo 👋 \r\ndata:x\r\n\r\nid: 7\rdata: b\r\r".utf8)
+        // Every split point, including inside "é", "👋" and each "\r\n".
+        for split in 1..<wire.count {
+            var parser = SSEFrameParser()
+            let frames = parser.feed(wire.prefix(split)) + parser.feed(wire.dropFirst(split))
+            #expect(frames == [
+                SseEvent(id: nil, event: "greet", data: " héllo 👋 \nx"),
+                SseEvent(id: "7", event: nil, data: "b"),
+            ], "split at \(split)")
+        }
+        #expect(parser.feed(Data("data: one\n\n".utf8)) == [SseEvent(data: "one")])
+    }
 }
 
 /// A value shared with a `MockURLProtocol` handler, which runs off the test's thread.
