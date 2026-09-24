@@ -134,6 +134,31 @@ struct LocalStorageMigratorTests {
         #expect(standardDefaults.string(forKey: "digia_engage_device_id") == nil)
     }
 
+    @Test("a failed identity write keeps the legacy key and the marker unset; the next run migrates it")
+    func failedIdentityCopyIsRetried() {
+        let targetName = "test.target.\(UUID().uuidString)"
+        let target = IdentityWriteFailingDefaults(suiteName: targetName)!
+        target.removePersistentDomain(forName: targetName)
+        let (_, standardDefaults) = makeIsolatedDefaults()
+        standardDefaults.set("legacy-device", forKey: "digia_anonymous_id")
+        standardDefaults.set("live-flag", forKey: "digia_live_testing_device_name")
+
+        target.failIdentityWrites = true
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: target, standardDefaults: standardDefaults)
+
+        #expect(standardDefaults.string(forKey: "digia_anonymous_id") == "legacy-device")
+        #expect(target.object(forKey: "storage.version") == nil)
+        // Keys that did copy are still moved.
+        #expect(standardDefaults.string(forKey: "digia_live_testing_device_name") == nil)
+
+        target.failIdentityWrites = false
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: target, standardDefaults: standardDefaults)
+
+        #expect(target.string(forKey: "identity.device_id") == "legacy-device")
+        #expect(standardDefaults.string(forKey: "digia_anonymous_id") == nil)
+        #expect(target.integer(forKey: "storage.version") == 1)
+    }
+
     @Test("Migrates string formatted queue")
     func testQueueStringMigration() {
         let (targetDefaults, standardDefaults) = makeIsolatedDefaults()
@@ -173,5 +198,16 @@ struct LocalStorageMigratorTests {
 
             #expect(!FileManager.default.fileExists(atPath: legacyDir.path))
         }
+    }
+}
+
+/// Drops writes to `identity.*` while `failIdentityWrites` is set, standing in
+/// for a store that did not persist the copy.
+private final class IdentityWriteFailingDefaults: UserDefaults, @unchecked Sendable {
+    var failIdentityWrites = false
+
+    override func set(_ value: Any?, forKey defaultName: String) {
+        if failIdentityWrites, defaultName.hasPrefix("identity.") { return }
+        super.set(value, forKey: defaultName)
     }
 }

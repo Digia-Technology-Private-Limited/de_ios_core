@@ -13,15 +13,21 @@ enum LocalStorageMigrator {
         let currentVersion = targetDefaults.integer(forKey: keyStorageVersion)
         guard currentVersion < currentStorageVersion else { return }
 
-        // 1. Identity Migration
-        let legacyId = standardDefaults.string(forKey: "digia_anonymous_id")
-            ?? standardDefaults.string(forKey: "digia_engage_device_id")
-        if let legacyId, !legacyId.isEmpty {
+        // 1. Identity Migration. Each legacy source is tried on its own, and
+        // a copy counts only once it reads back from the target: a legacy
+        // identity key is deleted, and the migration marked done, only then.
+        var identityCopied = true
+        let legacyId = ["digia_anonymous_id", "digia_engage_device_id"].lazy
+            .compactMap { standardDefaults.string(forKey: $0) }
+            .first { !$0.isEmpty }
+        if let legacyId {
             targetDefaults.set(legacyId, forKey: "identity.device_id")
+            identityCopied = targetDefaults.string(forKey: "identity.device_id") == legacyId
         }
 
         if let userId = standardDefaults.string(forKey: "digia_user_id"), !userId.isEmpty {
             targetDefaults.set(userId, forKey: "identity.user_id")
+            identityCopied = identityCopied && targetDefaults.string(forKey: "identity.user_id") == userId
         }
 
         // 2. Analytics Queue Migration (standardized to String JSON across all stacks).
@@ -101,10 +107,10 @@ enum LocalStorageMigrator {
         }
 
         // 8. Delete Legacy Keys from standard defaults
-        let legacyKeys = [
-            "digia_anonymous_id",
-            "digia_engage_device_id",
-            "digia_user_id",
+        let identityKeys = identityCopied
+            ? ["digia_anonymous_id", "digia_engage_device_id", "digia_user_id"]
+            : []
+        let legacyKeys = identityKeys + [
             "digia_analytics_queue",
             "digia_debug_overlay_bubble_visible",
             "digia_anchorless_capture_enabled",
@@ -120,7 +126,11 @@ enum LocalStorageMigrator {
             standardDefaults.removeObject(forKey: key)
         }
 
-        targetDefaults.set(currentStorageVersion, forKey: keyStorageVersion)
+        // A failed identity copy leaves the marker unset, so the next launch
+        // retries it. Initialization proceeds either way.
+        if identityCopied {
+            targetDefaults.set(currentStorageVersion, forKey: keyStorageVersion)
+        }
 
         // ─────────────────────────────────────────────────────────────────────────────
         // TEMPORARY MIGRATION CLEANUP: Delete orphaned legacy video cache directory.
