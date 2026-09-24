@@ -6,6 +6,10 @@ import UIKit
 public final class SessionManager: @unchecked Sendable {
     private static let keySessionId = "session_id"
     private static let keyLastActivityMs = "last_activity_ms"
+    /// `touch()` runs on every tracked event; the last-activity time reaches
+    /// disk at most this often (and always on background). In-process expiry
+    /// reads the in-memory time, so only a cross-launch resume sees the lag.
+    private static let persistIntervalMs: Int64 = 10_000
 
     private let storage: LocalStorage
     private let clock: () -> Int64
@@ -14,6 +18,7 @@ public final class SessionManager: @unchecked Sendable {
 
     private var _sessionId: String
     private var _lastActivityMs: Int64
+    private var persistedActivityMs: Int64
     private var rotationListeners: [() -> Void] = []
     #if canImport(UIKit)
     private var observers: [NSObjectProtocol] = []
@@ -39,11 +44,13 @@ public final class SessionManager: @unchecked Sendable {
            (now - savedLastActivity) < timeoutMs {
             self._sessionId = savedSessionId
             self._lastActivityMs = now
+            self.persistedActivityMs = now
             storage.setString(String(now), forKey: Self.keyLastActivityMs)
         } else {
             let newId = UUID().uuidString.lowercased()
             self._sessionId = newId
             self._lastActivityMs = now
+            self.persistedActivityMs = now
             storage.setString(newId, forKey: Self.keySessionId)
             storage.setString(String(now), forKey: Self.keyLastActivityMs)
         }
@@ -99,7 +106,9 @@ public final class SessionManager: @unchecked Sendable {
             notifyListeners(listeners)
         } else {
             _lastActivityMs = now
-            storage.setString(String(now), forKey: Self.keyLastActivityMs)
+            if now - persistedActivityMs >= Self.persistIntervalMs {
+                persistLastActivity(now)
+            }
             lock.unlock()
         }
     }
@@ -134,8 +143,14 @@ public final class SessionManager: @unchecked Sendable {
         lock.lock()
         let now = clock()
         _lastActivityMs = now
-        storage.setString(String(now), forKey: Self.keyLastActivityMs)
+        persistLastActivity(now)
         lock.unlock()
+    }
+
+    /// Caller holds `lock`.
+    private func persistLastActivity(_ now: Int64) {
+        persistedActivityMs = now
+        storage.setString(String(now), forKey: Self.keyLastActivityMs)
     }
 
     private func rotateInternal(now: Int64) -> [() -> Void] {
@@ -143,7 +158,7 @@ public final class SessionManager: @unchecked Sendable {
         _sessionId = newId
         _lastActivityMs = now
         storage.setString(newId, forKey: Self.keySessionId)
-        storage.setString(String(now), forKey: Self.keyLastActivityMs)
+        persistLastActivity(now)
         return rotationListeners
     }
 
