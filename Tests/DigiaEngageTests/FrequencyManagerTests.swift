@@ -162,7 +162,7 @@ struct FrequencyManagerTests {
         var now: Int64 = 0
         var session = "s1"
         let policy = FrequencyPolicy(maxPerWindow: win(1, "session"))
-        let mgr = FrequencyManager(defaults: defaults, sessionIdProvider: { session }, clock: { now })
+        let mgr = FrequencyManager(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("frequency"), sessionIdProvider: { session }, clock: { now })
 
         #expect(mgr.isAllowed(campaignKey: "camp", policy: policy))
         mgr.recordShow("camp", policy)
@@ -170,7 +170,7 @@ struct FrequencyManagerTests {
         #expect(!mgr.isAllowed(campaignKey: "camp", policy: policy)) // same session → capped
 
         // A fresh manager over the same store must see the persisted state.
-        let mgr2 = FrequencyManager(defaults: defaults, sessionIdProvider: { session }, clock: { now })
+        let mgr2 = FrequencyManager(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("frequency"), sessionIdProvider: { session }, clock: { now })
         #expect(!mgr2.isAllowed(campaignKey: "camp", policy: policy))
 
         session = "s2" // rotate session → window resets
@@ -180,7 +180,7 @@ struct FrequencyManagerTests {
     @Test("manager recordCompleted stops only for experienceCompleted policies")
     func recordCompletedGate() {
         let defaults = makeDefaults()
-        let mgr = FrequencyManager(defaults: defaults, sessionIdProvider: { "s1" }, clock: { 0 })
+        let mgr = FrequencyManager(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("frequency"), sessionIdProvider: { "s1" }, clock: { 0 })
 
         // No stopOn → recordCompleted is a no-op.
         mgr.recordCompleted("a", FrequencyPolicy(maxTotal: 5))

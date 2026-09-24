@@ -65,21 +65,6 @@ final class ComponentRegistryService: ObservableObject {
         self.debugOverlay = debugOverlay
     }
 
-    convenience init(
-        defaults: UserDefaults,
-        networkClient: any NetworkClient,
-        debugOverlay: DigiaDebugOverlayController? = nil
-    ) {
-        if defaults.bool(forKey: "digia_component_registry_recording_enabled") && !defaults.bool(forKey: "registry.recording_enabled") {
-            defaults.set(true, forKey: "registry.recording_enabled")
-        }
-        self.init(
-            storage: UserDefaultsLocalStorage(defaults: defaults).scoped("registry"),
-            networkClient: networkClient,
-            debugOverlay: debugOverlay
-        )
-    }
-
     /// Called once from `SDKInstance.completeInitialization` after the device id
     /// is known.
     func configure(config: DigiaConfig, deviceId: String, isDebugBuild: Bool) {

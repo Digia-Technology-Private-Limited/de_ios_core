@@ -18,10 +18,6 @@ final class AnalyticsQueue {
         self.storage = storage
     }
 
-    convenience init(defaults: UserDefaults) {
-        self.init(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("analytics"))
-    }
-
     var size: Int { load().count }
 
     func append(_ entry: QueueEntry, maxEvents: Int) {

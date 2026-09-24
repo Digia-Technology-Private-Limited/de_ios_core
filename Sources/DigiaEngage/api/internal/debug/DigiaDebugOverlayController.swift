@@ -28,10 +28,6 @@ final class DigiaDebugOverlayController: ObservableObject {
         self.isVisible = storage.bool(forKey: Self.keyVisible)
     }
 
-    convenience init(defaults: UserDefaults) {
-        self.init(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("debug"))
-    }
-
     /// Flips the persisted bubble-visibility toggle. Called from
     /// `DigiaDebugSettingsView`, and internally from `ComponentRegistryService.setEnabled`
     /// when recording turns on.

@@ -90,10 +90,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Nil before that: anything needed earlier is owned directly below.
     private(set) var services: SDKServices?
 
-    // Pre-init collaborators: used before `initialize()` (anchor buffering,
-    // the debug screens, capture toggles), so they live here rather than in
-    // `services`.
+    // Pre-init collaborators: `SDKInstance`-owned buffers used before
+    // `initialize()` (anchor buffering, the debug screens, capture toggles),
+    // so they live here rather than in `services` (D1). `init` is their
+    // composition root: the only place outside `SDKServices` that scopes
+    // storage or builds a collaborator. The services themselves take storage
+    // as given and have no fallbacks (D6).
     private let storage: LocalStorage
+    /// The capture toggles `SDKInstance` itself persists.
+    private let captureStorage: LocalStorage
     let networkClient: any NetworkClient
     /// Where `networkClient` reads `X-Digia-Session-Id` from, per request.
     private let currentSession = CurrentSessionRef()
@@ -190,10 +195,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         )
         self.liveTestService = LiveTestService(
             storage: defaultStorage.scoped("live_test"),
+            ackReporter: LiveTestAckReporter(networkClient: defaultNetworkClient),
             networkClient: defaultNetworkClient
         )
 
         let captureStorage = defaultStorage.scoped("capture")
+        self.captureStorage = captureStorage
         self.captureModeEnabled = captureStorage.bool(forKey: "enabled")
         self.captureTextEnabled = captureStorage.bool(forKey: "include_text")
         self.captureMediaEnabled = captureStorage.bool(forKey: "include_media")
@@ -681,7 +688,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     func setCaptureModeEnabled(_ enabled: Bool) {
         guard !enabled || (isDebugBuild && isCaptureSupported) else { return }
         captureModeEnabled = enabled
-        storage.scoped("capture").set(enabled, forKey: "enabled")
+        captureStorage.set(enabled, forKey: "enabled")
         componentRegistry.setEnabled(enabled)
         if enabled { debugOverlayController.setVisible(true) }
     }
@@ -691,7 +698,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         includeMedia: Bool? = nil,
         includeStructure: Bool? = nil
     ) {
-        let captureStorage = storage.scoped("capture")
         if let includeText {
             captureTextEnabled = includeText
             captureStorage.set(includeText, forKey: "include_text")

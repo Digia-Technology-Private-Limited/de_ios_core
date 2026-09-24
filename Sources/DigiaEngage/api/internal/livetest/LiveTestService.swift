@@ -25,25 +25,13 @@ final class LiveTestService: ObservableObject {
 
     init(
         storage: LocalStorage,
-        ackReporter: LiveTestAckReporter? = nil,
+        ackReporter: LiveTestAckReporter,
         networkClient: any NetworkClient
     ) {
         self.networkClient = networkClient
         self.storage = storage
-        self.ackReporter = ackReporter ?? LiveTestAckReporter(networkClient: networkClient)
+        self.ackReporter = ackReporter
         self.deviceName = Self.normalizeDeviceName(storage.string(forKey: Self.deviceNameKey))
-    }
-
-    convenience init(
-        defaults: UserDefaults,
-        ackReporter: LiveTestAckReporter? = nil,
-        networkClient: any NetworkClient
-    ) {
-        self.init(
-            storage: UserDefaultsLocalStorage(defaults: defaults).scoped("live_test"),
-            ackReporter: ackReporter,
-            networkClient: networkClient
-        )
     }
 
     func configure(

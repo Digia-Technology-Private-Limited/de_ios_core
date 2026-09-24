@@ -167,18 +167,6 @@ final class FrequencyManager {
         self.clock = clock
     }
 
-    convenience init(
-        defaults: UserDefaults,
-        sessionIdProvider: @escaping () -> String?,
-        clock: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
-    ) {
-        self.init(
-            storage: UserDefaultsLocalStorage(defaults: defaults).scoped("frequency"),
-            sessionIdProvider: sessionIdProvider,
-            clock: clock
-        )
-    }
-
     /// Eligibility gate. A `nil`/empty policy is always allowed (never capped).
     func isAllowed(campaignKey: String, policy: FrequencyPolicy?) -> Bool {
         blockReason(campaignKey: campaignKey, policy: policy) == nil

@@ -70,7 +70,7 @@ struct ComponentRegistryServiceTests {
         debugOverlay: DigiaDebugOverlayController? = nil
     ) -> (ComponentRegistryService, FakeComponentSender) {
         let service = ComponentRegistryService(
-            defaults: defaults ?? makeDefaults(),
+            storage: UserDefaultsLocalStorage(defaults: defaults ?? makeDefaults()).scoped("registry"),
             networkClient: sender,
             debugOverlay: debugOverlay
         )
@@ -159,7 +159,7 @@ struct ComponentRegistryServiceTests {
 
     @Test("turning recording on shows the debug bubble automatically")
     func enablingRecordingShowsBubble() async throws {
-        let overlay = DigiaDebugOverlayController(defaults: makeDefaults())
+        let overlay = DigiaDebugOverlayController(storage: UserDefaultsLocalStorage(defaults: makeDefaults()).scoped("debug"))
         let (service, _) = makeService(debugOverlay: overlay)
         #expect(!overlay.isVisible)
 
@@ -170,7 +170,7 @@ struct ComponentRegistryServiceTests {
 
     @Test("turning recording off does not hide the debug bubble")
     func disablingRecordingDoesNotHideBubble() async throws {
-        let overlay = DigiaDebugOverlayController(defaults: makeDefaults())
+        let overlay = DigiaDebugOverlayController(storage: UserDefaultsLocalStorage(defaults: makeDefaults()).scoped("debug"))
         let (service, _) = makeService(debugOverlay: overlay)
         service.setEnabled(true)
 
@@ -204,8 +204,8 @@ struct ComponentRegistryServiceTests {
     func buffersAnchorUntilConfigured() async throws {
         let sender = FakeComponentSender()
         let defaults = makeDefaults()
-        defaults.set(true, forKey: "digia_component_registry_recording_enabled")
-        let service = ComponentRegistryService(defaults: defaults, networkClient: sender)
+        defaults.set(true, forKey: "registry.recording_enabled")
+        let service = ComponentRegistryService(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("registry"), networkClient: sender)
 
         service.recordAnchor("tab_home", screenName: nil)
         service.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1", isDebugBuild: true)
@@ -236,7 +236,7 @@ struct ComponentRegistryServiceTests {
         let (service, _) = makeService(defaults: defaults)
         service.setEnabled(true)
 
-        let reconfigured = ComponentRegistryService(defaults: defaults, networkClient: FakeComponentSender())
+        let reconfigured = ComponentRegistryService(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("registry"), networkClient: FakeComponentSender())
         reconfigured.configure(config: DigiaConfig(apiKey: "test-key"), deviceId: "device-1", isDebugBuild: true)
 
         #expect(reconfigured.isEnabled)

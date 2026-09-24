@@ -107,7 +107,7 @@ struct AnalyticsServiceTests {
             apiKey: "test-api-key",
             identityManager: identityManager,
             sessionManager: sessionManager,
-            queue: AnalyticsQueue(defaults: store),
+            queue: AnalyticsQueue(storage: UserDefaultsLocalStorage(defaults: store).scoped("analytics")),
             staticContext: ["sdk_version": "1.0.0", "sdk_platform": "ios"],
             networkClient: sender
         )
@@ -440,7 +440,7 @@ struct AnalyticsServiceTests {
         _ = service2  // keep alive until timer fires
 
         #expect(fakeSender.callCount == 1)
-        #expect(AnalyticsQueue(defaults: defaults).size == 0)
+        #expect(AnalyticsQueue(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("analytics")).size == 0)
     }
 
     @Test("dismissed event queues but does not self-flush")
