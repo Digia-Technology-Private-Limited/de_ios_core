@@ -4,6 +4,8 @@ import Foundation
 final class SDKServices {
     var storage: LocalStorage
     let identityManager: IdentityManager
+    var sessionManager: SessionManager
+    var sessionReporter: SessionReporter?
     var deviceIdProvider: DeviceIdProvider
     var networkClient: any NetworkClient
     var analyticsService: AnalyticsService?
@@ -16,6 +18,8 @@ final class SDKServices {
     init(
         storage: LocalStorage = UserDefaultsLocalStorage(),
         identityManager: IdentityManager? = nil,
+        sessionManager: SessionManager? = nil,
+        sessionReporter: SessionReporter? = nil,
         deviceIdProvider: DeviceIdProvider? = nil,
         analyticsService: AnalyticsService? = nil,
         frequencyManager: FrequencyManager? = nil,
@@ -28,9 +32,14 @@ final class SDKServices {
         self.storage = storage
         let resolvedIdentityManager = identityManager ?? IdentityManager(storage: storage.scoped("identity"))
         self.identityManager = resolvedIdentityManager
+        let resolvedSessionManager = sessionManager ?? SessionManager(storage: storage)
+        self.sessionManager = resolvedSessionManager
+        self.sessionReporter = sessionReporter
         let resolvedDeviceIdProvider = deviceIdProvider ?? DefaultDeviceIdProvider(identityManager: resolvedIdentityManager)
         self.deviceIdProvider = resolvedDeviceIdProvider
-        let resolvedNetworkClient = networkClient ?? URLSessionNetworkClient()
+        let resolvedNetworkClient = networkClient ?? URLSessionNetworkClient(
+            sessionIdProvider: { [weak resolvedSessionManager] in resolvedSessionManager?.sessionId }
+        )
         self.networkClient = resolvedNetworkClient
         self.analyticsService = analyticsService
         self.frequencyManager = frequencyManager
@@ -38,6 +47,7 @@ final class SDKServices {
         self.submissionReporter = submissionReporter ?? SubmissionReporter(
             identityManager: resolvedIdentityManager,
             deviceIdProvider: resolvedDeviceIdProvider,
+            sessionIdProvider: { [weak resolvedSessionManager] in resolvedSessionManager?.sessionId },
             storage: storage.scoped("identity"),
             networkClient: resolvedNetworkClient
         )
@@ -55,6 +65,7 @@ final class SDKServices {
     func resetForTesting() {
         analyticsService?.clear()
         analyticsService = nil
+        sessionReporter = nil
         frequencyManager = nil
         campaignStore.clear()
         liveTestService.stop()

@@ -99,10 +99,14 @@ struct AnalyticsServiceTests {
         defaults: UserDefaults? = nil
     ) -> AnalyticsService {
         let store = defaults ?? UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
+        let storage = UserDefaultsLocalStorage(defaults: store)
+        let identityManager = IdentityManager(storage: storage.scoped("identity"))
+        let sessionManager = SessionManager(storage: storage, timeoutMs: Int64(config.sessionTimeoutMs), observeLifecycle: false)
         return AnalyticsService(
             config: config,
             apiKey: "test-api-key",
-            identity: AnalyticsIdentityManager(defaults: store),
+            identityManager: identityManager,
+            sessionManager: sessionManager,
             queue: AnalyticsQueue(defaults: store),
             staticContext: ["sdk_version": "1.0.0", "sdk_platform": "ios"],
             networkClient: sender
@@ -118,8 +122,8 @@ struct AnalyticsServiceTests {
     @Test("anonymous ID is generated and stable")
     func anonymousIdIsStable() {
         let service = makeService()
-        let id1 = service.identity.anonymousId
-        let id2 = service.identity.anonymousId
+        let id1 = service.identityManager.deviceId
+        let id2 = service.identityManager.deviceId
         #expect(!id1.isEmpty)
         #expect(id1 == id2)
     }
@@ -129,14 +133,14 @@ struct AnalyticsServiceTests {
         let service = makeService()
 
         service.setUserId("user-123")
-        #expect(service.identity.userId == "user-123")
+        #expect(service.identityManager.userId == "user-123")
 
-        let sessionBefore = service.identity.sessionId
+        let sessionBefore = service.sessionManager.sessionId
         service.clearUserId()
 
-        #expect(service.identity.userId == nil)
-        #expect(!service.identity.sessionId.isEmpty)
-        #expect(service.identity.sessionId != sessionBefore)
+        #expect(service.identityManager.userId == nil)
+        #expect(!service.sessionManager.sessionId.isEmpty)
+        #expect(service.sessionManager.sessionId != sessionBefore)
     }
 
     @Test("queue drops oldest events when capacity is exceeded")
@@ -383,8 +387,10 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
 
-        // 10 total attempts, ~2ms apart — wait past all of them
-        try await sleepMillis(300)
+        for _ in 0..<20 {
+            if fakeSender.callCount == 10 { break }
+            try await sleepMillis(50)
+        }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 10)
@@ -402,8 +408,10 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
 
-        // 10 total attempts, ~2ms apart — wait past all of them
-        try await sleepMillis(300)
+        for _ in 0..<20 {
+            if throwingSender.callCount == 10 { break }
+            try await sleepMillis(50)
+        }
 
         #expect(service.queue.size == 0)
         #expect(throwingSender.callCount == 10)

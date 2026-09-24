@@ -3,14 +3,17 @@ import Foundation
 public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     private let session: URLSession
     private let sseSession: URLSession
+    private let sessionIdProvider: (@Sendable () -> String?)?
     private let headerProvider: (@Sendable () -> [String: String])?
     private let lock = NSLock()
     private var staticHeaders: [String: String] = [:]
 
     public init(
         session: URLSession? = nil,
+        sessionIdProvider: (@Sendable () -> String?)? = nil,
         headerProvider: (@Sendable () -> [String: String])? = nil
     ) {
+        self.sessionIdProvider = sessionIdProvider
         self.headerProvider = headerProvider
         if let session {
             self.session = session
@@ -268,6 +271,12 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         if let env = headers["X-Digia-Sdk-Environment"] ?? headers["X-Digia-Environment"] {
             headers["X-Digia-Sdk-Environment"] = env
             headers["X-Digia-Environment"] = env
+        }
+
+        // 5. Session ID
+        if let sid = sessionIdProvider?() ?? headers["X-Digia-Session-Id"] ?? headers["x-digia-session-id"] {
+            headers["X-Digia-Session-Id"] = sid
+            headers["x-digia-session-id"] = sid
         }
 
         // Ensure Platform is strictly "ios"

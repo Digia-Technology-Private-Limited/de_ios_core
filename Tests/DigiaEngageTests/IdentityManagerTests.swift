@@ -179,7 +179,7 @@ struct IdentityManagerTests {
         try await instance.initialize(config)
 
         #expect(instance.identityManager.getUserId() == "early_bird_user")
-        #expect(instance.analyticsService?.identity.userId == "early_bird_user")
+        #expect(instance.analyticsService?.userId == "early_bird_user")
 
         instance.resetForTesting()
     }
@@ -203,7 +203,7 @@ struct IdentityManagerTests {
         try await instance.initialize(config)
 
         #expect(instance.identityManager.getUserId() == nil)
-        #expect(instance.analyticsService?.identity.userId == nil)
+        #expect(instance.analyticsService?.userId == nil)
 
         instance.resetForTesting()
     }

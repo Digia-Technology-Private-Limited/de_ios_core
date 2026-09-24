@@ -10,7 +10,8 @@ private let log = DigiaLogger("analytics")
 final class AnalyticsService {
     private let config: AnalyticsConfig
     private let apiKey: String
-    let identity: AnalyticsIdentityManager
+    let identityManager: IdentityManager
+    let sessionManager: SessionManager
     let queue: AnalyticsQueue
     private let staticContext: [String: Any]
     private let networkClient: any NetworkClient
@@ -30,7 +31,6 @@ final class AnalyticsService {
     /// it survives app restarts correctly.
     private(set) var retryAttempt = 0
     private var backgroundObserver: NSObjectProtocol?
-    private var foregroundObserver: NSObjectProtocol?
 
     /// Override retry delays (ms) for testing. Index is attempt-1.
     var retryScheduleMs: [Int]?
@@ -51,7 +51,8 @@ final class AnalyticsService {
     init(
         config: AnalyticsConfig,
         apiKey: String,
-        identity: AnalyticsIdentityManager,
+        identityManager: IdentityManager,
+        sessionManager: SessionManager,
         queue: AnalyticsQueue,
         staticContext: [String: Any],
         networkClient: any NetworkClient = URLSessionNetworkClient(),
@@ -59,16 +60,12 @@ final class AnalyticsService {
     ) {
         self.config = config
         self.apiKey = apiKey
-        self.identity = identity
+        self.identityManager = identityManager
+        self.sessionManager = sessionManager
         self.queue = queue
         self.staticContext = staticContext
         self.networkClient = networkClient
         self.requestHeaders = requestHeaders
-
-        identity.initialize(sessionTimeoutMs: config.sessionTimeoutMs)
-        identity.onSessionRotated = { [weak self] in
-            self?.reportSession()
-        }
 
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
@@ -82,21 +79,9 @@ final class AnalyticsService {
             }
         }
 
-        foregroundObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.willEnterForegroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.identity.maybeExpireSession()
-            }
-        }
-
         if queue.size > 0 {
             scheduleTimer()
         }
-
-        reportSession()
     }
 
     // MARK: - Public
@@ -164,14 +149,20 @@ final class AnalyticsService {
     }
 
     func setUserId(_ userId: String) {
-        identity.setUserId(userId)
+        let trimmed = userId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard identityManager.userId != trimmed else { return }
+        identityManager.setUserId(trimmed)
+        sessionManager.reset()
     }
 
     func clearUserId() {
-        identity.clearUserId()
+        guard identityManager.userId != nil else { return }
+        identityManager.clearUserId()
+        sessionManager.reset()
     }
 
-    var userId: String? { identity.userId }
+    var userId: String? { identityManager.userId }
 
     func flush() {
         cancelTimer()
@@ -181,14 +172,11 @@ final class AnalyticsService {
     /// Cancels timers and removes lifecycle observers. Call before releasing the service.
     func clear() {
         isCleared = true
-        identity.onSessionRotated = nil
         retryTask?.cancel()
         retryTask = nil
         cancelTimer()
         if let obs = backgroundObserver { NotificationCenter.default.removeObserver(obs) }
-        if let obs = foregroundObserver { NotificationCenter.default.removeObserver(obs) }
         backgroundObserver = nil
-        foregroundObserver = nil
         isDispatching = false
         retryAttempt = 0
     }
@@ -208,6 +196,7 @@ final class AnalyticsService {
         requestHeaders: [String: String],
         storage: LocalStorage = UserDefaultsLocalStorage(),
         identityManager: IdentityManager? = nil,
+        sessionManager: SessionManager? = nil,
         networkClient: (any NetworkClient)? = nil
     ) -> AnalyticsService? {
         let ac = config.analyticsConfig
@@ -219,10 +208,15 @@ final class AnalyticsService {
             "Analytics enabled (batchSize=\(ac.flushBatchSize), interval=\(ac.flushIntervalMs)ms)"
         )
         let resolvedIdentityManager = identityManager ?? IdentityManager(storage: storage.scoped("identity"))
+        let resolvedSessionManager = sessionManager ?? SessionManager(
+            storage: storage,
+            timeoutMs: Int64(ac.sessionTimeoutMs)
+        )
         return AnalyticsService(
             config: ac,
             apiKey: config.apiKey,
-            identity: AnalyticsIdentityManager(identityManager: resolvedIdentityManager),
+            identityManager: resolvedIdentityManager,
+            sessionManager: resolvedSessionManager,
             queue: AnalyticsQueue(storage: storage.scoped("analytics")),
             staticContext: buildStaticContext(
                 wrapperBinding: config.wrapperBinding,
@@ -237,35 +231,8 @@ final class AnalyticsService {
         requestHeaders.merging([
             "Content-Type": "application/json",
             "X-Digia-Project-Id": apiKey,
-            "X-Digia-Device-Id": identity.anonymousId,
+            "X-Digia-Device-Id": identityManager.deviceId,
         ]) { _, value in value }
-    }
-
-    // MARK: - Session
-
-    private func reportSession() {
-        let sessionId = identity.sessionId
-        let anonymousId = identity.anonymousId
-        var body: [String: Any] = [
-            "session_id": sessionId,
-            "anonymous_id": anonymousId,
-            "occurred_at": isoNow(),
-            "properties": staticContext,
-        ]
-        if let uid = identity.userId { body["user_id"] = uid }
-        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
-        guard let url = URL(string: DigiaEndpoints.session) else { return }
-        let headers = jsonHeaders
-        let client = self.networkClient
-        Task { [weak self] in
-            guard self?.isCleared == false else { return }
-            let request = NetworkRequest(url: url, method: .post, headers: headers, body: data)
-            let response = try? await client.execute(request: request)
-            let status = response?.statusCode
-            log.d(
-                "Session posted (status=\(status ?? -1), sessionId=\(sessionId), anonymousId=\(anonymousId))"
-            )
-        }
     }
 
     // MARK: - Private
@@ -279,7 +246,7 @@ final class AnalyticsService {
         properties: [String: Any] = [:]
     ) {
         let eventId = UUID().uuidString
-        identity.captureEventTime()
+        sessionManager.touch()
 
         var mergedProperties = staticContext
         for (k, v) in properties { mergedProperties[k] = v }
@@ -288,8 +255,8 @@ final class AnalyticsService {
             "event_id": eventId,
             "event_name": eventName,
             "occurred_at": isoNow(),
-            "anonymous_id": identity.anonymousId,
-            "session_id": identity.sessionId,
+            "anonymous_id": identityManager.deviceId,
+            "session_id": sessionManager.sessionId,
         ]
         if let id = campaignId { payloadMap["campaign_id"] = id }
         if let key = campaignKey { payloadMap["campaign_key"] = key }
@@ -299,7 +266,10 @@ final class AnalyticsService {
         // a session. Absent, not null, when there is none — a live test, or a
         // surface outliving its presentation.
         if let presentationId { payloadMap["presentation_id"] = presentationId }
-        if let uid = identity.userId { payloadMap["user_id"] = uid }
+        if let uid = identityManager.userId { payloadMap["user_id"] = uid }
+        if let elementId = properties["element_id"] as? String {
+            payloadMap["element_id"] = elementId
+        }
 
         payloadMap["properties"] = mergedProperties
 
@@ -477,7 +447,7 @@ final class AnalyticsService {
         return fmt.string(from: Date())
     }
 
-    private static func buildStaticContext(
+    static func buildStaticContext(
         wrapperBinding: String?,
         wrapperVersion: String?
     ) -> [String: Any] {

@@ -63,6 +63,10 @@ public final class IdentityManager: @unchecked Sendable {
         return cachedUserId
     }
 
+    public var userId: String? {
+        getUserId()
+    }
+
     public func setUserId(_ userId: String) {
         let trimmed = userId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }

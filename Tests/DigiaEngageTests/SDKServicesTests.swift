@@ -18,6 +18,7 @@ struct SDKServicesTests {
         #expect(services.deviceIdProvider.getDeviceId() == services.deviceIdProvider.deviceId)
         #expect(!services.identityManager.deviceId.isEmpty)
         #expect(services.identityManager.getDeviceId() == services.deviceIdProvider.deviceId)
+        #expect(!services.sessionManager.sessionId.isEmpty)
         #expect(services.networkClient is URLSessionNetworkClient)
     }
 

@@ -121,6 +121,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     var identityManager: IdentityManager {
         services.identityManager
     }
+    var sessionManager: SessionManager {
+        services.sessionManager
+    }
 
     private let pendingLock = NSLock()
     private var pendingUserId: String? = nil
@@ -295,11 +298,38 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         requestHeaders = SDKRequestHeaders.make(
             config: config, deviceId: services.deviceIdProvider.deviceId
         )
+        services.sessionManager = SessionManager(
+            storage: services.storage,
+            timeoutMs: Int64(config.analyticsConfig.sessionTimeoutMs)
+        )
+        let staticContext = AnalyticsService.buildStaticContext(
+            wrapperBinding: config.wrapperBinding,
+            wrapperVersion: config.wrapperVersion
+        )
+        let sessionMgr = services.sessionManager
+        let identityMgr = services.identityManager
+        let sessReporter = SessionReporter(
+            apiKey: config.apiKey,
+            sessionId: { [weak sessionMgr] in sessionMgr?.sessionId ?? "" },
+            anonymousId: { [weak identityMgr] in identityMgr?.deviceId ?? "" },
+            userId: { [weak identityMgr] in identityMgr?.userId },
+            context: staticContext,
+            requestHeaders: requestHeaders,
+            networkClient: services.networkClient,
+            storage: services.storage
+        )
+        services.sessionReporter = sessReporter
+        sessReporter.report()
+        services.sessionManager.addRotationListener { [weak sessReporter] in
+            sessReporter?.report()
+        }
+
         analyticsService = AnalyticsService.create(
             config: config,
             requestHeaders: requestHeaders,
             storage: services.storage,
             identityManager: services.identityManager,
+            sessionManager: services.sessionManager,
             networkClient: services.networkClient
         )
         // Flush pending user ID buffering
@@ -454,10 +484,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 ]
             )
         }
-        if let config, let analyticsService {
+        if let config {
             componentRegistry.configure(
                 config: config,
-                deviceId: analyticsService.identity.anonymousId,
+                deviceId: services.identityManager.deviceId,
                 isDebugBuild: isDebugBuild
             )
             if captureModeEnabled, isCaptureSupported {
@@ -478,7 +508,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             liveTestService.configure(
                 config: config,
                 requestHeaders: requestHeaders,
-                deviceId: analyticsService.identity.anonymousId,
+                deviceId: services.identityManager.deviceId,
                 isDebugBuild: isDebugBuild,
                 onCampaignTest: { [weak self] invocation in self?.handleLiveTestCampaign(invocation)
                 }
@@ -490,7 +520,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         if frequencyManager == nil {
             frequencyManager = FrequencyManager(
                 storage: services.storage.scoped("frequency"),
-                sessionIdProvider: { [weak self] in self?.analyticsService?.identity.sessionId }
+                sessionIdProvider: { [weak self] in self?.services.sessionManager.sessionId }
             )
         }
 
@@ -1865,7 +1895,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
             return (analyticsService != nil, ())
         }
-        services?.identityManager.setUserId(userId)
+        services.identityManager.setUserId(userId)
+        services.sessionManager.reset()
         if hasAnalytics {
             analyticsService?.setUserId(userId)
         }
@@ -1879,7 +1910,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
             return (analyticsService != nil, ())
         }
-        services?.identityManager.clearUserId()
+        services.identityManager.clearUserId()
+        services.sessionManager.reset()
         if hasAnalytics {
             analyticsService?.clearUserId()
         }

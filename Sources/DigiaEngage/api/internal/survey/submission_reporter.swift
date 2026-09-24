@@ -14,6 +14,7 @@ final class SubmissionReporter: @unchecked Sendable {
     private(set) var config: DigiaConfig?
     private let identityManager: IdentityManager?
     private let deviceIdProvider: DeviceIdProvider?
+    private let sessionIdProvider: (@Sendable () -> String?)?
     private let identityStorage: LocalStorage
     private let lock = NSLock()
 
@@ -23,12 +24,14 @@ final class SubmissionReporter: @unchecked Sendable {
         config: DigiaConfig? = nil,
         identityManager: IdentityManager? = nil,
         deviceIdProvider: DeviceIdProvider? = nil,
+        sessionIdProvider: (@Sendable () -> String?)? = nil,
         storage: LocalStorage = UserDefaultsLocalStorage().scoped("identity"),
         networkClient: (any NetworkClient)? = nil
     ) {
         self.config = config
         self.identityManager = identityManager
         self.deviceIdProvider = deviceIdProvider
+        self.sessionIdProvider = sessionIdProvider
         self.identityStorage = storage
         self.networkClient = networkClient ?? URLSessionNetworkClient()
     }
@@ -62,7 +65,8 @@ final class SubmissionReporter: @unchecked Sendable {
             answers: answers,
             startedAt: startedAt,
             now: Date(),
-            userId: userId
+            userId: userId,
+            sessionId: sessionIdProvider?()
         )
         let resolvedDeviceId = identityManager?.deviceId ?? deviceIdProvider?.deviceId ?? resolveDeviceId()
         let client = self.networkClient
@@ -127,7 +131,8 @@ final class SubmissionReporter: @unchecked Sendable {
         answers: [String: SurveyAnswer],
         startedAt: Date,
         now: Date,
-        userId: String?
+        userId: String?,
+        sessionId: String? = nil
     ) -> [String: Any] {
         let promptNodes = survey.nodes.filter { node in
             guard let block = survey.blockFor(node) else { return false }
@@ -166,6 +171,7 @@ final class SubmissionReporter: @unchecked Sendable {
             "occurredAt": isoTimestamp(now),
         ]
         if let userId { body["userId"] = userId }
+        if let sessionId { body["sessionId"] = sessionId }
         return body
     }
 

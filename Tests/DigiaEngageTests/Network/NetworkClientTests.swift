@@ -265,6 +265,16 @@ struct NetworkClientTests {
         #expect(wireRequest.value(forHTTPHeaderField: "X-Custom") == "CustomVal")
     }
 
+    @Test("URLSessionNetworkClient injects canonical session headers from sessionIdProvider")
+    func urlSessionSessionIdProvider() {
+        let client = URLSessionNetworkClient(
+            sessionIdProvider: { "sess_test_123" }
+        )
+        let assembled = client.assembleHeaders(for: [:])
+        #expect(assembled["X-Digia-Session-Id"] == "sess_test_123")
+        #expect(assembled["x-digia-session-id"] == "sess_test_123")
+    }
+
     // MARK: - SSEFrameParser Tests
 
     @Test("SSEFrameParser parses complete frames with id, event, and multiline data")
