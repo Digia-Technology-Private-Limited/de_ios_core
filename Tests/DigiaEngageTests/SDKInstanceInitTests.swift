@@ -82,5 +82,15 @@ struct SDKInstanceInitTests {
         #expect(services.sessionManager.sessionId == "persisted-session")
         #expect(services.sessionManager.resumedAtStartup)
     }
+
+    @Test("setUserId then clearUserId before initialize() leaves no user")
+    func bufferedClearWins() async throws {
+        let sdk = makeInstance(defaults: makeDefaults())
+        sdk.setUserId("temp_user")
+        sdk.clearUserId()
+        try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
+
+        #expect(sdk.services?.identityManager.userId == nil)
+    }
 }
 

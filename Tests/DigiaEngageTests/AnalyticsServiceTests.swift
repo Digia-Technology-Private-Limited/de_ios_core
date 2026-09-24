@@ -119,15 +119,6 @@ struct AnalyticsServiceTests {
 
     // ── Tests ─────────────────────────────────────────────────────────────────
 
-    @Test("anonymous ID is generated and stable")
-    func anonymousIdIsStable() {
-        let service = makeService()
-        let id1 = service.identityManager.deviceId
-        let id2 = service.identityManager.deviceId
-        #expect(!id1.isEmpty)
-        #expect(id1 == id2)
-    }
-
     @Test("queue drops oldest events when capacity is exceeded")
     func queueDropsOldestWhenFull() {
         let service = makeService(

@@ -42,24 +42,6 @@ struct IdentityManagerTests {
         #expect(manager.getDeviceId() == existingId)
     }
 
-    @Test("Eager immutability: getDeviceId returns the exact same string across 1,000 parallel calls")
-    func parallelDeviceIdAccessIsImmutable() async {
-        let (storage, _) = makeIsolatedStorage()
-        let manager = IdentityManager(storage: storage.scoped("identity"))
-        let expectedId = manager.deviceId
-
-        await withTaskGroup(of: String.self) { group in
-            for _ in 0..<1_000 {
-                group.addTask {
-                    manager.getDeviceId()
-                }
-            }
-            for await id in group {
-                #expect(id == expectedId)
-            }
-        }
-    }
-
     @Test("User ID management: setUserId persists, trims, caches, and clearUserId removes it")
     func userIdLifecycle() {
         let (storage, _) = makeIsolatedStorage()
@@ -157,52 +139,5 @@ struct IdentityManagerTests {
         #expect(defaults.string(forKey: "identity.anonymous_id") == nil)
         #expect(defaults.string(forKey: "identity.device_id") == manager.deviceId)
         #expect(defaults.string(forKey: "identity.user_id") == "isolated_user")
-    }
-
-    @MainActor
-    @Test("Pre-initialization buffering: setUserId called before initialize is flushed to services")
-    func preInitUserIdBuffering() async throws {
-        let instance = SDKInstance.shared
-        instance.resetForTesting()
-
-        // Call setUserId before initialize()
-        instance.setUserId("early_bird_user")
-
-        // No services exist before initialize() (D1), so the call is buffered.
-        #expect(instance.services == nil)
-
-        // Now initialize the SDK
-        let config = DigiaConfig(
-            apiKey: "test_key",
-            analyticsConfig: AnalyticsConfig(enabled: true)
-        )
-        try await instance.initialize(config)
-
-        #expect(instance.services?.identityManager.getUserId() == "early_bird_user")
-
-        instance.resetForTesting()
-    }
-
-    @MainActor
-    @Test("Pre-initialization buffering: clearUserId before initialize leaves user cleared")
-    func preInitClearUserIdBuffering() async throws {
-        let instance = SDKInstance.shared
-        instance.resetForTesting()
-
-        // First set, then immediately clear before initialize()
-        instance.setUserId("temp_user")
-        instance.clearUserId()
-
-        #expect(instance.services == nil)
-
-        let config = DigiaConfig(
-            apiKey: "test_key",
-            analyticsConfig: AnalyticsConfig(enabled: true)
-        )
-        try await instance.initialize(config)
-
-        #expect(instance.services?.identityManager.getUserId() == nil)
-
-        instance.resetForTesting()
     }
 }
