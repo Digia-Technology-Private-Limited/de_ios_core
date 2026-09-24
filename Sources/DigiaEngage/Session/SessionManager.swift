@@ -19,6 +19,9 @@ public final class SessionManager: @unchecked Sendable {
     private var _sessionId: String
     private var _lastActivityMs: Int64
     private var persistedActivityMs: Int64
+    /// Whether construction resumed the persisted session rather than starting
+    /// a new one. A resumed session was already reported by an earlier launch.
+    let resumedAtStartup: Bool
     private var rotationListeners: [() -> Void] = []
     #if canImport(UIKit)
     private var observers: [NSObjectProtocol] = []
@@ -45,12 +48,14 @@ public final class SessionManager: @unchecked Sendable {
             self._sessionId = savedSessionId
             self._lastActivityMs = now
             self.persistedActivityMs = now
+            self.resumedAtStartup = true
             storage.setString(String(now), forKey: Self.keyLastActivityMs)
         } else {
             let newId = UUID().uuidString.lowercased()
             self._sessionId = newId
             self._lastActivityMs = now
             self.persistedActivityMs = now
+            self.resumedAtStartup = false
             storage.setString(newId, forKey: Self.keySessionId)
             storage.setString(String(now), forKey: Self.keyLastActivityMs)
         }

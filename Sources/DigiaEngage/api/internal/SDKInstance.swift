@@ -270,7 +270,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let services = SDKServices(config: config, storage: storage, networkClient: networkClient)
         self.services = services
         currentSession.set(services.sessionManager)
-        services.sessionReporter.report()
+        // A resumed session was reported by the launch that started it.
+        if services.sessionManager.resumedAtStartup {
+            services.sessionReporter.flush()
+        } else {
+            services.sessionReporter.report()
+        }
 
         // Apply the user change buffered before services existed.
         switch pendingUserChange {

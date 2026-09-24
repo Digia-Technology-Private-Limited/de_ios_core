@@ -42,6 +42,13 @@ final class SessionReporter: @unchecked Sendable {
         }
     }
 
+    /// Retries reports that failed earlier, without reporting a new session.
+    func flush() {
+        Task { [weak self] in
+            await self?.flushPending()
+        }
+    }
+
     private func flushPending() async {
         guard let pendingDataStr = storage.string(forKey: Self.keyPendingReport),
               let pendingData = pendingDataStr.data(using: .utf8),
