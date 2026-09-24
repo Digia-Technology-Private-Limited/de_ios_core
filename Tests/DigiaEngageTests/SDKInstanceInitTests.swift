@@ -63,4 +63,24 @@ struct SDKInstanceInitTests {
         #expect(try await sessionPosts(network, atLeast: 2) == 2)
         #expect(sdk.services?.identityManager.userId == "u")
     }
+
+    @Test("cold start keeps the persisted device ID and resumes a recent session")
+    func coldStartKeepsIdentityAndSession() async throws {
+        let defaults = makeDefaults()
+        let tenMinutesAgoMs = Int64(Date().timeIntervalSince1970 * 1000) - 10 * 60 * 1000
+        defaults.set(1, forKey: "storage.version")
+        defaults.set("REAL-DEVICE-ID", forKey: "identity.device_id")
+        defaults.set("persisted-session", forKey: "session.session_id")
+        defaults.set(String(tenMinutesAgoMs), forKey: "session.last_activity_ms")
+
+        let sdk = makeInstance(defaults: defaults)
+        try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
+
+        let services = try #require(sdk.services)
+        #expect(services.identityManager.deviceId == "REAL-DEVICE-ID")
+        #expect(defaults.string(forKey: "identity.device_id") == "REAL-DEVICE-ID")
+        #expect(services.sessionManager.sessionId == "persisted-session")
+        #expect(services.sessionManager.resumedAtStartup)
+    }
 }
+
