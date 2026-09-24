@@ -89,6 +89,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     // `services`.
     private let storage: LocalStorage
     let networkClient: any NetworkClient
+    /// Where `networkClient` reads `X-Digia-Session-Id` from, per request.
+    private let currentSession = CurrentSessionRef()
     let campaignStore: CampaignStore
     let componentRegistry: ComponentRegistryService
     let liveTestService: LiveTestService
@@ -155,7 +157,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private init() {
         LocalStorageMigrator.migrateIfNeeded()
         let defaultStorage = UserDefaultsLocalStorage()
-        let defaultNetworkClient = URLSessionNetworkClient()
+        let currentSession = self.currentSession
+        let defaultNetworkClient = URLSessionNetworkClient(
+            sessionIdProvider: { currentSession.sessionId }
+        )
         let defaultDebugOverlay = DigiaDebugOverlayController(storage: defaultStorage.scoped("debug"))
         self.debugOverlayController = defaultDebugOverlay
         self.storage = defaultStorage
@@ -247,6 +252,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         DigiaEndpoints.configure(config)
         let services = SDKServices(config: config, storage: storage, networkClient: networkClient)
         self.services = services
+        currentSession.set(services.sessionManager)
         services.sessionReporter.report()
 
         // Flush pending user ID buffering
@@ -2823,6 +2829,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         _currentScreen = nil
         services?.tearDown()
         services = nil
+        currentSession.set(nil)
         campaignStore.clear()
         liveTestService.stop()
         config = nil

@@ -275,6 +275,36 @@ struct NetworkClientTests {
         #expect(assembled["x-digia-session-id"] == "sess_test_123")
     }
 
+    @Test("a request after a session rotation carries the new session ID")
+    func sessionHeaderFollowsRotation() async throws {
+        let storage = UserDefaultsLocalStorage(defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!)
+        let sessionManager = SessionManager(storage: storage.scoped("session"), observeLifecycle: false)
+        let currentSession = CurrentSessionRef()
+        currentSession.set(sessionManager)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [MockURLProtocol.self]
+        let client = URLSessionNetworkClient(
+            session: URLSession(configuration: config),
+            sessionIdProvider: { currentSession.sessionId }
+        )
+        let captured = LockedBox<[String?]>([])
+        MockURLProtocol.setHandler { req in
+            captured.mutate { $0.append(req.value(forHTTPHeaderField: "X-Digia-Session-Id")) }
+            return (HTTPURLResponse(url: req.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!, Data())
+        }
+        defer { MockURLProtocol.reset() }
+        let request = NetworkRequest(url: URL(string: "https://api.digia.cloud/submission")!, method: .post)
+
+        let before = sessionManager.sessionId
+        _ = try await client.execute(request: request)
+        sessionManager.reset()
+        let after = sessionManager.sessionId
+        _ = try await client.execute(request: request)
+
+        #expect(before != after)
+        #expect(captured.value == [before, after])
+    }
+
     // MARK: - SSEFrameParser Tests
 
     @Test("SSEFrameParser parses complete frames with id, event, and multiline data")
@@ -310,4 +340,16 @@ struct NetworkClientTests {
         let framesAfterReset = parser.feed(Data("\n\n".utf8))
         #expect(framesAfterReset.isEmpty)
     }
+}
+
+/// A value shared with a `MockURLProtocol` handler, which runs off the test's thread.
+final class LockedBox<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: Value
+
+    init(_ value: Value) { stored = value }
+
+    var value: Value { lock.withLock { stored } }
+
+    func mutate(_ body: (inout Value) -> Void) { lock.withLock { body(&stored) } }
 }
