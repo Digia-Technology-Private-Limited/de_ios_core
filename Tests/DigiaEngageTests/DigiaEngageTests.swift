@@ -119,7 +119,7 @@ struct DigiaEngageTests {
                 "items": [["imageUrl": "https://example.com/a.png"]],
             ],
         ]))
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
 
         _ = SDKInstance.shared.deliver(
             CEPTriggerPayload(cepCampaignId: "carousel-campaign", campaignKey: "carousel-campaign", cepMetadata: [:]))
@@ -159,7 +159,7 @@ struct DigiaEngageTests {
                 "items": [["imageUrl": "https://example.com/a.png"]],
             ],
         ]))
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("help")
 
         let recorder = PresentationRecorder(
@@ -176,7 +176,7 @@ struct DigiaEngageTests {
     func rejectsTargetedCampaignWhenScreenIsUnset() throws {
         SDKInstance.shared.resetForTesting()
         let campaign = try #require(targetedInlineCampaign())
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
 
         let recorder = PresentationRecorder(
             SDKInstance.shared.deliver(
@@ -191,7 +191,7 @@ struct DigiaEngageTests {
     func usesLatestScreenWithoutDismissingAcceptedContent() throws {
         SDKInstance.shared.resetForTesting()
         let campaign = try #require(targetedInlineCampaign())
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Home")
         SDKInstance.shared.setCurrentScreen(" Help ")
 
@@ -795,7 +795,7 @@ struct DigiaEngageTests {
                 ],
             ],
         ]))
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
 
         _ = SDKInstance.shared.deliver(
             CEPTriggerPayload(cepCampaignId: "story-campaign", campaignKey: "story-campaign", cepMetadata: [:]))
@@ -818,7 +818,7 @@ struct DigiaEngageTests {
                 "items": [["imageUrl": "https://example.com/a.png"]],
             ],
         ]))
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
 
         let recorder = PresentationRecorder(
             SDKInstance.shared.deliver(

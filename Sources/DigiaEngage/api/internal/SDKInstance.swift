@@ -334,9 +334,37 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         font = DigiaFont(fontFamily: config.fontFamily)
         CampaignCanvasTheme.shared.update(config.themeMode)
 
+        // Pre-init buffers are handed over now, before the fetch: the component
+        // registry needs only services, and anchors that mounted before this
+        // point wait on it.
+        configureComponentRegistry(config: config, services: services)
+
+        // `initialize()` returns here (SD4). The bundle is fetched in the
+        // background; `completeInitialization` marks the SDK ready and routes
+        // the held trigger, exactly as it did when this was awaited inline.
+        let generation = initGeneration
+        fetchTask = Task { @MainActor [weak self, networkClient] in
+            let fetched: Result<CampaignBundle, Error>
+            do {
+                fetched = .success(try await CampaignFetcher(networkClient: networkClient).fetch())
+            } catch {
+                fetched = .failure(error)
+            }
+            // A reset while the fetch was in flight owns the state now.
+            guard let self, self.initGeneration == generation else { return }
+            self.fetchTask = nil
+            self.applyFetchResult(fetched)
+        }
+    }
+
+    /// Increments on reset so a fetch started before it cannot land after it.
+    private var initGeneration = 0
+    private var fetchTask: Task<Void, Never>?
+
+    private func applyFetchResult(_ fetched: Result<CampaignBundle, Error>) {
         var campaigns: [CampaignModel] = []
-        do {
-            let bundle = try await CampaignFetcher(networkClient: networkClient).fetch()
+        switch fetched {
+        case .success(let bundle):
             // Applied as soon as the bundle answers — the earliest point this
             // core can reach, though `fetch()` has already parsed every
             // campaign (and so already fired this bundle's own parse-stage
@@ -347,7 +375,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
             currentTimeAnchor = bundle.timeAnchor
-        } catch {
+        case .failure(let error):
             // Campaign fetch failure must not block SDK readiness.
             currentTimeAnchor = nil
             // A rejected key is the one fetch failure a customer can fix
@@ -364,6 +392,24 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             )
         }
         completeInitialization(campaigns)
+    }
+
+    /// Configures the component registry and hands it the anchors buffered
+    /// before `initialize()`.
+    private func configureComponentRegistry(config: DigiaConfig, services: SDKServices) {
+        componentRegistry.configure(
+            config: config,
+            deviceId: services.identityManager.deviceId,
+            isDebugBuild: isDebugBuild
+        )
+        if captureModeEnabled, isCaptureSupported {
+            componentRegistry.setEnabled(true)
+        } else if captureModeEnabled {
+            setCaptureModeEnabled(false)
+        }
+        // Anchors that mounted before this point were buffered: an RN or
+        // SwiftUI tree renders before `initialize()` runs.
+        componentRegistry.attachPendingAnchors(to: _currentScreen)
     }
 
     func executeActionFlow(
@@ -443,19 +489,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             )
         }
         if let config, let services {
-            componentRegistry.configure(
-                config: config,
-                deviceId: services.identityManager.deviceId,
-                isDebugBuild: isDebugBuild
-            )
-            if captureModeEnabled, isCaptureSupported {
-                componentRegistry.setEnabled(true)
-            } else if captureModeEnabled {
-                setCaptureModeEnabled(false)
-            }
-            // Anchors that mounted before this point were buffered: an RN or
-            // SwiftUI tree renders while the bundle is still being fetched.
-            componentRegistry.attachPendingAnchors(to: _currentScreen)
             // A JS reload re-runs this whole method (RN calls
             // `populateCampaignBundle` again), which re-configures the
             // service below. Without this, any live-test invocation still
@@ -537,7 +570,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     ///
     /// Total and synchronous: it never fails, always returns a handle, and a
     /// rejection comes back as an *already settled* presentation so the caller
-    /// has one code path either way. Never make this `async` — spec §10.3.
+    /// has one code path either way. A trigger that arrives before the bundle
+    /// is held and routed once it lands (`bufferUntilReady`). Never make this
+    /// `async` — spec §10.3.
     func deliver(_ trigger: CEPTriggerPayload) -> CampaignPresentation {
         let controller = coordinator.open(trigger, owner: activePlugin?.id ?? "")
         // Before routing, so a trigger that is turned away still shows up on
@@ -545,7 +580,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // arrived and we turned it away" are the two answers a campaign creator
         // most needs to tell apart.
         observeDelivery(controller)
-        routeNow(controller)
+        if sdkState == .ready {
+            routeNow(controller)
+        } else {
+            bufferUntilReady(controller)
+        }
         return controller.presentation
     }
 
@@ -602,13 +641,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// the older presentation *settles* rather than being forgotten, so whoever is holding a
     /// slot for it gets it back instead of holding it for the session.
     ///
-    /// **Only `triggerCampaign` routes through this today.** `deliver` still refuses a
-    /// pre-bundle trigger outright with `notInitialized`, where Kotlin buffers it — a real
-    /// divergence, and a real bug now that native owns the fetch and the window is a live
-    /// second or two of CEP deliveries. It is left alone here on purpose: iOS has two tests
-    /// that pin the refusing behaviour as a contract (`deliver is total …`, `a trigger before
-    /// the bundle lands is not_initialized …`) plus nine more that populate the store without
-    /// marking the SDK ready, so changing `deliver` is its own pass, not a rider on this one.
+    /// Both `deliver` and `triggerCampaign` route through this, since `initialize()` returns
+    /// before the bundle lands (SD4).
     private func bufferUntilReady(_ controller: PresentationController) {
         if let displaced = pendingPresentation {
             log.w(
@@ -2873,6 +2907,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         activePlugin = nil
         _currentScreen = nil
+        initGeneration &+= 1
+        fetchTask?.cancel()
+        fetchTask = nil
+        pendingPresentation = nil
         services?.tearDown()
         services = nil
         currentSession.set(nil, requestHeaders: [:])
