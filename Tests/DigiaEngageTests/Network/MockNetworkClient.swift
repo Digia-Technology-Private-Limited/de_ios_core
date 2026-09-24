@@ -1,44 +1,44 @@
 import Foundation
 @testable import DigiaEngage
 
-public final class MockNetworkClient: NetworkClient, @unchecked Sendable {
+final class MockNetworkClient: NetworkClient, @unchecked Sendable {
     private let lock = NSLock()
 
-    public private(set) var recordedRequests: [NetworkRequest] = []
-    public private(set) var recordedMultipartRequests: [MultipartUploadRequest] = []
+    private(set) var recordedRequests: [NetworkRequest] = []
+    private(set) var recordedMultipartRequests: [MultipartUploadRequest] = []
     private var responses: [String: NetworkResponse] = [:]
     private var responseQueue: [NetworkResponse] = []
     private var responseFactory: ((NetworkRequest) -> NetworkResponse?)?
     private var simulatedException: (any Error)?
     private var activeStreamHandlers: [any SseStreamHandler] = []
 
-    public init() {}
+    init() {}
 
-    public var requestCount: Int {
+    var requestCount: Int {
         lock.lock()
         defer { lock.unlock() }
         return recordedRequests.count
     }
 
-    public var multipartRequestCount: Int {
+    var multipartRequestCount: Int {
         lock.lock()
         defer { lock.unlock() }
         return recordedMultipartRequests.count
     }
 
-    public var lastRequest: NetworkRequest? {
+    var lastRequest: NetworkRequest? {
         lock.lock()
         defer { lock.unlock() }
         return recordedRequests.last
     }
 
-    public var lastMultipartRequest: MultipartUploadRequest? {
+    var lastMultipartRequest: MultipartUploadRequest? {
         lock.lock()
         defer { lock.unlock() }
         return recordedMultipartRequests.last
     }
 
-    public func enqueueResponse(
+    func enqueueResponse(
         url: String,
         statusCode: Int,
         body: String = "",
@@ -54,7 +54,7 @@ public final class MockNetworkClient: NetworkClient, @unchecked Sendable {
         )
     }
 
-    public func enqueueResponse(
+    func enqueueResponse(
         url: URL,
         statusCode: Int,
         body: String = "",
@@ -63,7 +63,7 @@ public final class MockNetworkClient: NetworkClient, @unchecked Sendable {
         enqueueResponse(url: url.absoluteString, statusCode: statusCode, body: body, headers: headers)
     }
 
-    public func enqueueResponse(
+    func enqueueResponse(
         url: String,
         statusCode: Int,
         data: Data,
@@ -79,7 +79,7 @@ public final class MockNetworkClient: NetworkClient, @unchecked Sendable {
         )
     }
 
-    public func enqueueResponse(
+    func enqueueResponse(
         statusCode: Int = 200,
         body: String = "",
         headers: [String: String] = [:]
@@ -94,7 +94,7 @@ public final class MockNetworkClient: NetworkClient, @unchecked Sendable {
         ))
     }
 
-    public func enqueueResponse(
+    func enqueueResponse(
         statusCode: Int = 200,
         body: Data?,
         headers: [String: String] = [:]
@@ -109,25 +109,25 @@ public final class MockNetworkClient: NetworkClient, @unchecked Sendable {
         ))
     }
 
-    public func enqueueResponse(_ response: NetworkResponse) {
+    func enqueueResponse(_ response: NetworkResponse) {
         lock.lock()
         defer { lock.unlock() }
         responseQueue.append(response)
     }
 
-    public func setResponseFactory(_ factory: @escaping (NetworkRequest) -> NetworkResponse?) {
+    func setResponseFactory(_ factory: @escaping (NetworkRequest) -> NetworkResponse?) {
         lock.lock()
         defer { lock.unlock() }
         self.responseFactory = factory
     }
 
-    public func simulateTransportError(_ error: any Error) {
+    func simulateTransportError(_ error: any Error) {
         lock.lock()
         defer { lock.unlock() }
         self.simulatedException = error
     }
 
-    public func reset() {
+    func reset() {
         lock.lock()
         defer { lock.unlock() }
         recordedRequests.removeAll()
@@ -173,7 +173,7 @@ public final class MockNetworkClient: NetworkClient, @unchecked Sendable {
 
     // MARK: - NetworkClient
 
-    public func execute(request: NetworkRequest) async throws -> NetworkResponse {
+    func execute(request: NetworkRequest) async throws -> NetworkResponse {
         let (error, factory, matchingResponse, queuedResponse) = recordAndResolve(request: request)
 
         if let error {
@@ -195,7 +195,7 @@ public final class MockNetworkClient: NetworkClient, @unchecked Sendable {
         return NetworkResponse(statusCode: 404, headers: [:], body: Data(), isSuccessful: false)
     }
 
-    public func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
+    func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
         let (error, matchingResponse, queuedResponse) = recordAndResolveMultipart(request: request)
 
         if let error {
@@ -213,7 +213,7 @@ public final class MockNetworkClient: NetworkClient, @unchecked Sendable {
         return NetworkResponse(statusCode: 404, headers: [:], body: Data(), isSuccessful: false)
     }
 
-    public func openSseStream(request: NetworkRequest, handler: any SseStreamHandler) -> any CancellableSubscription {
+    func openSseStream(request: NetworkRequest, handler: any SseStreamHandler) -> any CancellableSubscription {
         lock.lock()
         recordedRequests.append(request)
         let error = simulatedException
@@ -235,7 +235,7 @@ public final class MockNetworkClient: NetworkClient, @unchecked Sendable {
         }
     }
 
-    public func emitSseEvent(_ event: SseEvent) {
+    func emitSseEvent(_ event: SseEvent) {
         lock.lock()
         let handlers = activeStreamHandlers
         lock.unlock()
@@ -244,7 +244,7 @@ public final class MockNetworkClient: NetworkClient, @unchecked Sendable {
         }
     }
 
-    public func emitSseError(_ error: any Error) {
+    func emitSseError(_ error: any Error) {
         lock.lock()
         let handlers = activeStreamHandlers
         lock.unlock()
@@ -253,7 +253,7 @@ public final class MockNetworkClient: NetworkClient, @unchecked Sendable {
         }
     }
 
-    public func emitSseClosed() {
+    func emitSseClosed() {
         lock.lock()
         let handlers = activeStreamHandlers
         activeStreamHandlers.removeAll()

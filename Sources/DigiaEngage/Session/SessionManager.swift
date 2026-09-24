@@ -3,7 +3,7 @@ import Foundation
 import UIKit
 #endif
 
-public final class SessionManager: @unchecked Sendable {
+final class SessionManager: @unchecked Sendable {
     private static let keySessionId = "session_id"
     private static let keyLastActivityMs = "last_activity_ms"
     /// `touch()` runs on every tracked event; the last-activity time reaches
@@ -90,19 +90,19 @@ public final class SessionManager: @unchecked Sendable {
         #endif
     }
 
-    public var sessionId: String {
+    var sessionId: String {
         lock.lock()
         defer { lock.unlock() }
         return _sessionId
     }
 
-    public var lastActivityMs: Int64 {
+    var lastActivityMs: Int64 {
         lock.lock()
         defer { lock.unlock() }
         return _lastActivityMs
     }
 
-    public func touch() {
+    func touch() {
         lock.lock()
         let now = clock()
         if (now - _lastActivityMs) >= timeoutMs {
@@ -118,7 +118,7 @@ public final class SessionManager: @unchecked Sendable {
         }
     }
 
-    public func maybeExpire() {
+    func maybeExpire() {
         lock.lock()
         let now = clock()
         if (now - _lastActivityMs) >= timeoutMs {
@@ -130,7 +130,7 @@ public final class SessionManager: @unchecked Sendable {
         }
     }
 
-    public func reset() {
+    func reset() {
         lock.lock()
         let now = clock()
         let listeners = rotateInternal(now: now)
@@ -138,7 +138,7 @@ public final class SessionManager: @unchecked Sendable {
         notifyListeners(listeners)
     }
 
-    public func addRotationListener(_ listener: @escaping () -> Void) {
+    func addRotationListener(_ listener: @escaping () -> Void) {
         lock.lock()
         defer { lock.unlock() }
         rotationListeners.append(listener)

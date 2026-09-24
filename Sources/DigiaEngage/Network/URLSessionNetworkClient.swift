@@ -1,6 +1,6 @@
 import Foundation
 
-public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
+final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     private let session: URLSession
     private let uploadSession: URLSession
     private let sseSession: URLSession
@@ -9,7 +9,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     private let lock = NSLock()
     private var staticHeaders: [String: String] = [:]
 
-    public init(
+    init(
         session: URLSession? = nil,
         sessionIdProvider: @escaping @Sendable () -> String?,
         headerProvider: @escaping @Sendable () -> [String: String]
@@ -49,7 +49,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         }
     }
 
-    public func setStaticHeaders(_ headers: [String: String]) {
+    func setStaticHeaders(_ headers: [String: String]) {
         lock.lock()
         defer { lock.unlock() }
         self.staticHeaders = headers
@@ -57,7 +57,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
 
     // MARK: - NetworkClient
 
-    public func execute(request: NetworkRequest) async throws -> NetworkResponse {
+    func execute(request: NetworkRequest) async throws -> NetworkResponse {
         var urlRequest = URLRequest(url: request.url)
         urlRequest.httpMethod = request.method.rawValue
         if let timeout = request.timeoutInterval {
@@ -96,7 +96,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         )
     }
 
-    public func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
+    func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
         let boundary = "DigiaMultipart-\(UUID().uuidString)"
         var urlRequest = URLRequest(url: request.url)
         urlRequest.httpMethod = "POST"
@@ -148,7 +148,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         )
     }
 
-    public func openSseStream(request: NetworkRequest, handler: any SseStreamHandler) -> any CancellableSubscription {
+    func openSseStream(request: NetworkRequest, handler: any SseStreamHandler) -> any CancellableSubscription {
         var urlRequest = URLRequest(url: request.url)
         urlRequest.httpMethod = request.method.rawValue
         urlRequest.timeoutInterval = 45
@@ -258,7 +258,7 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     /// `X-Digia-Environment` / `X-Digia-Sdk-Environment` are both sent; a
     /// missing one is filled from its partner, a present one is never
     /// overwritten (D7).
-    public func assembleHeaders(for requestHeaders: [String: String]) -> [String: String] {
+    func assembleHeaders(for requestHeaders: [String: String]) -> [String: String] {
         let os = ProcessInfo.processInfo.operatingSystemVersion
         var headers = CaseInsensitiveHeaders()
         headers.merge([

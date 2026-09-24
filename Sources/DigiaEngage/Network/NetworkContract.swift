@@ -1,19 +1,19 @@
 import Foundation
 
-public enum HTTPMethod: String, Sendable {
+enum HTTPMethod: String, Sendable {
     case get = "GET"
     case post = "POST"
 }
 
-public struct NetworkRequest: Sendable {
-    public let url: URL
-    public let method: HTTPMethod
-    public let headers: [String: String]
-    public let body: Data?
-    public let connectTimeout: TimeInterval?
-    public let readTimeout: TimeInterval?
+struct NetworkRequest: Sendable {
+    let url: URL
+    let method: HTTPMethod
+    let headers: [String: String]
+    let body: Data?
+    let connectTimeout: TimeInterval?
+    let readTimeout: TimeInterval?
 
-    public init(
+    init(
         url: URL,
         method: HTTPMethod = .get,
         headers: [String: String] = [:],
@@ -29,7 +29,7 @@ public struct NetworkRequest: Sendable {
         self.readTimeout = readTimeout
     }
 
-    public init(
+    init(
         url: String,
         method: HTTPMethod = .get,
         headers: [String: String] = [:],
@@ -44,18 +44,18 @@ public struct NetworkRequest: Sendable {
         self.readTimeout = timeoutInterval
     }
 
-    public var timeoutInterval: TimeInterval? {
+    var timeoutInterval: TimeInterval? {
         readTimeout ?? connectTimeout
     }
 }
 
-public struct NetworkResponse: Sendable {
-    public let statusCode: Int
-    public let headers: [String: String]
-    public let body: Data?
-    public let isSuccessful: Bool
+struct NetworkResponse: Sendable {
+    let statusCode: Int
+    let headers: [String: String]
+    let body: Data?
+    let isSuccessful: Bool
 
-    public init(
+    init(
         statusCode: Int,
         headers: [String: String],
         body: Data?,
@@ -67,7 +67,7 @@ public struct NetworkResponse: Sendable {
         self.isSuccessful = isSuccessful ?? (200...299).contains(statusCode)
     }
 
-    public init(
+    init(
         statusCode: Int,
         headers: [String: String],
         data: Data
@@ -78,22 +78,22 @@ public struct NetworkResponse: Sendable {
         self.isSuccessful = (200...299).contains(statusCode)
     }
 
-    public var data: Data? {
+    var data: Data? {
         body
     }
 
-    public var stringBody: String? {
+    var stringBody: String? {
         body.flatMap { String(data: $0, encoding: .utf8) }
     }
 }
 
-public struct MultipartFilePart: Sendable {
-    public let fieldName: String
-    public let fileName: String
-    public let mimeType: String
-    public let data: Data
+struct MultipartFilePart: Sendable {
+    let fieldName: String
+    let fileName: String
+    let mimeType: String
+    let data: Data
 
-    public init(
+    init(
         fieldName: String,
         fileName: String,
         mimeType: String,
@@ -106,14 +106,14 @@ public struct MultipartFilePart: Sendable {
     }
 }
 
-public struct MultipartUploadRequest: Sendable {
-    public let url: URL
-    public let headers: [String: String]
-    public let formFields: [String: String]
-    public let files: [MultipartFilePart]
-    public let timeout: TimeInterval
+struct MultipartUploadRequest: Sendable {
+    let url: URL
+    let headers: [String: String]
+    let formFields: [String: String]
+    let files: [MultipartFilePart]
+    let timeout: TimeInterval
 
-    public init(
+    init(
         url: URL,
         headers: [String: String] = [:],
         formFields: [String: String] = [:],
@@ -127,7 +127,7 @@ public struct MultipartUploadRequest: Sendable {
         self.timeout = timeout
     }
 
-    public init(
+    init(
         url: String,
         headers: [String: String] = [:],
         formFields: [String: String] = [:],
@@ -141,47 +141,47 @@ public struct MultipartUploadRequest: Sendable {
         self.timeout = timeoutInterval
     }
 
-    public var timeoutInterval: TimeInterval {
+    var timeoutInterval: TimeInterval {
         timeout
     }
 }
 
-public struct SseEvent: Sendable, Equatable {
-    public let id: String?
-    public let event: String?
-    public let data: String
+struct SseEvent: Sendable, Equatable {
+    let id: String?
+    let event: String?
+    let data: String
 
-    public init(id: String? = nil, event: String? = nil, data: String) {
+    init(id: String? = nil, event: String? = nil, data: String) {
         self.id = id
         self.event = event
         self.data = data
     }
 }
 
-public typealias SSEEvent = SseEvent
+typealias SSEEvent = SseEvent
 
-public protocol SseStreamHandler: AnyObject, Sendable {
+protocol SseStreamHandler: AnyObject, Sendable {
     func onOpen()
     func onEvent(_ event: SseEvent)
     func onError(_ error: Error)
     func onClosed()
 }
 
-public typealias SSEStreamHandler = SseStreamHandler
+typealias SSEStreamHandler = SseStreamHandler
 
-public protocol CancellableSubscription: AnyObject, Sendable {
+protocol CancellableSubscription: AnyObject, Sendable {
     func cancel()
 }
 
-public typealias CancellableTask = CancellableSubscription
+typealias CancellableTask = CancellableSubscription
 
-public protocol NetworkClient: AnyObject, Sendable {
+protocol NetworkClient: AnyObject, Sendable {
     func execute(request: NetworkRequest) async throws -> NetworkResponse
     func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse
     func openSseStream(request: NetworkRequest, handler: any SseStreamHandler) -> any CancellableSubscription
 }
 
-public extension NetworkClient {
+extension NetworkClient {
     func openSSEStream(request: NetworkRequest, handler: any SseStreamHandler) -> any CancellableSubscription {
         openSseStream(request: request, handler: handler)
     }

@@ -3,7 +3,7 @@ import Foundation
 import UIKit
 #endif
 
-public final class IdentityManager: @unchecked Sendable {
+final class IdentityManager: @unchecked Sendable {
 
     private static let keyDeviceId = "device_id"
     private static let keyUserId = "user_id"
@@ -13,7 +13,7 @@ public final class IdentityManager: @unchecked Sendable {
 
     /// Canonical persistent installation identifier.
     /// Eagerly resolved once during init. Immutable, non-nil, zero locks on read.
-    public let deviceId: String
+    let deviceId: String
 
     private var cachedUserId: String?
     private var userChangedListeners: [() -> Void] = []
@@ -54,11 +54,11 @@ public final class IdentityManager: @unchecked Sendable {
         }
     }
 
-    public var userId: String? {
+    var userId: String? {
         lock.withLock { cachedUserId }
     }
 
-    public func setUserId(_ userId: String) {
+    func setUserId(_ userId: String) {
         let trimmed = userId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let listeners: [() -> Void] = lock.withLock {
@@ -70,7 +70,7 @@ public final class IdentityManager: @unchecked Sendable {
         listeners.forEach { $0() }
     }
 
-    public func clearUserId() {
+    func clearUserId() {
         let listeners: [() -> Void] = lock.withLock {
             guard cachedUserId != nil else { return [] }
             cachedUserId = nil
