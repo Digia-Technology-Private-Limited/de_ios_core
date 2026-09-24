@@ -14,6 +14,58 @@ struct LocalStorageMigratorTests {
         return (targetDefaults, standardDefaults)
     }
 
+    private func queuedEventIds(_ defaults: UserDefaults) -> [String] {
+        guard let raw = defaults.string(forKey: "analytics.queue"),
+              let list = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [[String: Any]]
+        else { return [] }
+        return list.compactMap { $0["event_id"] as? String }
+    }
+
+    private func queueJson(_ ids: [String]) -> String {
+        let list = ids.map { ["event_id": $0, "payload": [String: Any](), "created_at": 1000, "attempts": 0] as [String: Any] }
+        return String(data: try! JSONSerialization.data(withJSONObject: list), encoding: .utf8)!
+    }
+
+    @Test("TC-MIG-03: a legacy queue merges into an existing unified queue without duplicates")
+    func queueMergeDeduplicates() {
+        let (targetDefaults, standardDefaults) = makeIsolatedDefaults()
+        standardDefaults.set(Data(queueJson(["A", "B"]).utf8), forKey: "digia_analytics_queue")
+        targetDefaults.set(queueJson(["B", "C"]), forKey: "analytics.queue")
+
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+
+        #expect(queuedEventIds(targetDefaults) == ["A", "B", "C"])
+    }
+
+    @Test("TC-MIG-04: the merged queue keeps the newest queueMaxEvents, oldest dropped")
+    func queueMergeCaps() {
+        let (targetDefaults, standardDefaults) = makeIsolatedDefaults()
+        let legacy = (0..<3_000).map { "L\($0)" }
+        let unified = (0..<3_000).map { "U\($0)" }
+        standardDefaults.set(Data(queueJson(legacy).utf8), forKey: "digia_analytics_queue")
+        targetDefaults.set(queueJson(unified), forKey: "analytics.queue")
+
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+
+        let cap = AnalyticsConfig().queueMaxEvents
+        #expect(cap == 5_000)
+        #expect(queuedEventIds(targetDefaults) == Array((legacy + unified).suffix(cap)))
+    }
+
+    @Test("TC-MIG-05: a second run leaves the migrated queue untouched")
+    func queueMigrationIdempotent() {
+        let (targetDefaults, standardDefaults) = makeIsolatedDefaults()
+        standardDefaults.set(Data(queueJson(["A"]).utf8), forKey: "digia_analytics_queue")
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+        let afterFirst = targetDefaults.string(forKey: "analytics.queue")
+
+        standardDefaults.set(Data(queueJson(["Z"]).utf8), forKey: "digia_analytics_queue")
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+
+        #expect(targetDefaults.string(forKey: "analytics.queue") == afterFirst)
+        #expect(targetDefaults.integer(forKey: "storage.version") == 1)
+    }
+
     @Test("Migrates all legacy keys to unified format and deletes legacy keys")
     func testFullMigration() {
         let (targetDefaults, standardDefaults) = makeIsolatedDefaults()
@@ -42,7 +94,7 @@ struct LocalStorageMigratorTests {
         #expect(targetDefaults.string(forKey: "identity.device_id") == "anon-1234")
         #expect(targetDefaults.string(forKey: "identity.anonymous_id") == nil)
         #expect(targetDefaults.string(forKey: "identity.user_id") == "user-5678")
-        #expect(targetDefaults.string(forKey: "analytics.queue") == queueJson)
+        #expect(queuedEventIds(targetDefaults) == ["evt_1"])
         #expect(targetDefaults.string(forKey: "frequency.camp_promo") == "{\"total\":3}")
         #expect(targetDefaults.string(forKey: "frequency.camp_banner") == "{\"total\":1}")
         #expect(targetDefaults.bool(forKey: "debug.overlay_visible") == true)

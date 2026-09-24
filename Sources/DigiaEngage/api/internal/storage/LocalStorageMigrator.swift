@@ -24,12 +24,18 @@ enum LocalStorageMigrator {
             targetDefaults.set(userId, forKey: "identity.user_id")
         }
 
-        // 2. Analytics Queue Migration (standardized to String JSON across all stacks)
-        if let queueData = standardDefaults.data(forKey: "digia_analytics_queue"),
-           let queueString = String(data: queueData, encoding: .utf8) {
-            targetDefaults.set(queueString, forKey: "analytics.queue")
-        } else if let queueString = standardDefaults.string(forKey: "digia_analytics_queue") {
-            targetDefaults.set(queueString, forKey: "analytics.queue")
+        // 2. Analytics Queue Migration (standardized to String JSON across all stacks).
+        // Merged into any unified queue already there (an interrupted earlier
+        // run), never overwriting it.
+        let legacyQueue = standardDefaults.data(forKey: "digia_analytics_queue")
+            .flatMap { String(data: $0, encoding: .utf8) }
+            ?? standardDefaults.string(forKey: "digia_analytics_queue")
+        if let merged = mergeQueues(
+            legacy: legacyQueue,
+            target: targetDefaults.string(forKey: "analytics.queue"),
+            maxEvents: AnalyticsConfig().queueMaxEvents
+        ) {
+            targetDefaults.set(merged, forKey: "analytics.queue")
         }
 
         // 3. Frequency Capping Migration (freq:<campaignKey>)
@@ -124,5 +130,34 @@ enum LocalStorageMigrator {
             let legacyDir = cachesUrl.appendingPathComponent("digia-engage-story-video-files")
             try? FileManager.default.removeItem(at: legacyDir)
         }
+    }
+
+    /// Legacy entries first (they predate the unified queue), then the unified
+    /// ones; an `event_id` present in both keeps its unified copy. Past
+    /// `maxEvents` the oldest are dropped. Nil when there is nothing to write.
+    static func mergeQueues(legacy: String?, target: String?, maxEvents: Int) -> String? {
+        func entries(_ raw: String?) -> [[String: Any]] {
+            guard let raw,
+                  let list = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [Any]
+            else { return [] }
+            return list.compactMap { entry in
+                guard let entry = entry as? [String: Any],
+                      let eventId = entry["event_id"] as? String, !eventId.isEmpty
+                else { return nil }
+                return entry
+            }
+        }
+        let targetEntries = entries(target)
+        let targetIds = Set(targetEntries.compactMap { $0["event_id"] as? String })
+        var seen = Set<String>()
+        let legacyOnly = entries(legacy).filter { entry in
+            let eventId = entry["event_id"] as? String ?? ""
+            return !targetIds.contains(eventId) && seen.insert(eventId).inserted
+        }
+        let merged = Array((legacyOnly + targetEntries).suffix(maxEvents))
+        guard !merged.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: merged)
+        else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 }
