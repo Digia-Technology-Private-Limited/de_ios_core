@@ -2412,16 +2412,38 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                       current.currentStep?.target.anchorKey == removedKey
                 else { return }
                 self.logNativeGuideStage("anchor", "result=removed anchor_key=\(removedKey)")
-                self.dismissGuide(reason: .screenExit)
+                self.dismissGuideForRemovedAnchor(current)
             }
         )
     }
 
-    func dismissGuide(reason: DismissReason = .userClose) {
+    /// The anchor hosting the current step left the screen. Same events as
+    /// Flutter (`guide_showcase_manager.dart` `dismiss()` / `_finish`):
+    /// - not shown yet (still in the first step's delay): the CEP alone is told
+    ///   `dismissed(userClose)`, releasing its slot; Digia records nothing for
+    ///   an unseen guide.
+    /// - shown: a user close. On the last step of a multi-step guide that is a
+    ///   completion for Digia, but the lifecycle event stays
+    ///   `dismissed(userClose, completed: false)`.
+    private func dismissGuideForRemovedAnchor(_ state: ActiveGuideState) {
+        guard dwellTracker.elapsedMs(state.payload.cepCampaignId) != nil else {
+            guideOrchestrator.dismiss()
+            events.toCep(.dismissed(), payload: state.payload)
+            guideCompletionFired = false
+            return
+        }
+        if state.steps.count > 1, !state.hasNext { reportGuideCompletedIfNeeded(state) }
+        dismissGuide(reason: .userClose, completed: false)
+    }
+
+    /// `completed` overrides the lifecycle event's completion, which otherwise
+    /// follows whether the guide reported a completion.
+    func dismissGuide(reason: DismissReason = .userClose, completed: Bool? = nil) {
         guard let state = guideOrchestrator.state else { return }
         let payload = state.payload
         let total = state.steps.count
         let elapsed = dwellTracker.consumeDwellMs(payload.cepCampaignId)
+        let completed = completed ?? guideCompletionFired
         if !guideCompletionFired, total > 1 {
             events.toDigia(
                 GuideEvent.StepDismissed(itemIndex: state.stepIndex + 1),
@@ -2431,8 +2453,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         guideOrchestrator.dismiss()
         events.toBoth(
             .dismissed(
-                reason: guideCompletionFired ? .completed : reason,
-                completed: guideCompletionFired
+                reason: completed ? .completed : reason,
+                completed: completed
             ),
             GuideEvent.Dismissed(
                 abandonedAtItem: state.stepIndex + 1,

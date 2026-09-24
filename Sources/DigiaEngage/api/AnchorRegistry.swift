@@ -131,7 +131,9 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         trackedRects.removeValue(forKey: key)
         version &+= 1
         guard activeKey == key else { return }
-        if activeAnchorWasAvailable, !remaining.contains(where: { $0.value?.window != nil }) {
+        // As Flutter's anchor dispose: the step's anchor left, whether or not
+        // the step has shown yet. SDKInstance decides what that means.
+        if !remaining.contains(where: { $0.value?.window != nil }) {
             notifyActiveAnchorRemovedNextTurn(key: key)
         }
         if remaining.isEmpty {

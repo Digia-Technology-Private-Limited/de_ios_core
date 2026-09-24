@@ -146,6 +146,115 @@ extension DigiaEngageTests {
         registry.stopTracking()
         second.removeFromSuperview()
     }
+
+    @Test("anchor leaves while its step shows: Digia step event, then user_close to both (A40)")
+    func removedAnchorWhileStepShowsMatchesFlutter() async throws {
+        let (sdk, window) = try await makeGuideInstance(stepCount: 2)
+        let recorder = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
+        let anchor = try #require(window.subviews.first as? DigiaAnchorView)
+        sdk.reportGuideShown()
+
+        anchor.removeFromSuperview()
+        await nextTurn()
+
+        #expect(sdk.guideOrchestrator.state == nil)
+        #expect(recorder.outcome == .dismissed(reason: .userClose, completed: false))
+        #expect(try digiaEventNames(sdk) == [
+            "Digia Experience Viewed", "Digia Step Viewed",
+            "Digia Step Dismissed", "Digia Experience Dismissed",
+        ])
+    }
+
+    @Test("anchor of a multi-step guide's last step leaves: Digia completion, still user_close (A40)")
+    func removedAnchorOnLastStepCompletesForDigia() async throws {
+        let (sdk, window) = try await makeGuideInstance(stepCount: 2)
+        let recorder = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
+        sdk.reportGuideShown()
+        sdk.advanceGuide()
+        sdk.reportGuideShown()
+        let anchor = try #require(window.subviews.last as? DigiaAnchorView)
+
+        anchor.removeFromSuperview()
+        await nextTurn()
+
+        #expect(recorder.outcome == .dismissed(reason: .userClose, completed: false))
+        let names = try digiaEventNames(sdk)
+        #expect(names.suffix(2) == ["Digia Experience Completed", "Digia Experience Dismissed"])
+        #expect(!names.contains("Digia Step Dismissed"))
+    }
+
+    @Test("anchor leaves before the step shows: user_close to the CEP only, nothing to Digia (A40)")
+    func removedAnchorBeforeStepShowsTellsCepOnly() async throws {
+        let (sdk, window) = try await makeGuideInstance(stepCount: 1, delayInMs: 5_000)
+        let recorder = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
+        let anchor = try #require(window.subviews.first as? DigiaAnchorView)
+
+        anchor.removeFromSuperview()
+        await nextTurn()
+
+        #expect(sdk.guideOrchestrator.state == nil)
+        // The CEP is told dismissed(userClose); the coordinator settles a
+        // presentation that never displayed as a cancelled drop.
+        #expect(!recorder.displayed)
+        #expect(recorder.dropReason == .cancelled)
+        #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (user_close)"))
+        #expect(try digiaEventNames(sdk).isEmpty)
+    }
+}
+
+/// An initialized instance of its own (so Digia events can be read from its
+/// queue) with an N-step guide `a40-guide` on screen "Help", and a window
+/// holding one on-screen `DigiaAnchorView` per step (`a40-1`, `a40-2`, ...).
+@MainActor
+private func makeGuideInstance(
+    stepCount: Int,
+    delayInMs: Int? = nil
+) async throws -> (SDKInstance, UIWindow) {
+    AnchorRegistry.shared.resetForTesting()
+    let suite = { UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")! }
+    let sdk = SDKInstance(
+        defaults: suite(), legacyDefaults: suite(), makeNetworkClient: { _ in MockNetworkClient() }
+    )
+    try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
+    let steps: [[String: Any]] = (1...stepCount).map { index in
+        var step: [String: Any] = [
+            "stepId": "step-\(index)",
+            "anchorKey": "a40-\(index)",
+            "layoutMode": "canvas",
+            "canvas": [
+                "version": 2,
+                "canvasWidth": 240,
+                "canvasHeight": 120,
+                "background": ["type": "solid", "color": ["value": "#FFFFFFFF"]],
+                "children": [],
+            ] as [String: Any],
+        ]
+        if let delayInMs { step["delayInMs"] = delayInMs }
+        return step
+    }
+    let campaign = try #require(CampaignModel.fromJson([
+        "id": "a40-guide-id",
+        "campaignKey": "a40-guide",
+        "campaignType": "guide",
+        "targetScreenNames": ["names": ["Help"]],
+        "templateConfig": ["templateType": "tooltip", "steps": steps] as [String: Any],
+    ]))
+    sdk.setCampaignsForTesting([campaign])
+    sdk.setCurrentScreen("Help")
+    let window = makeWindow()
+    for index in 1...stepCount {
+        let anchor = DigiaAnchorView(frame: CGRect(x: 10, y: 60 * index, width: 100, height: 40))
+        anchor.anchorKey = "a40-\(index)"
+        window.addSubview(anchor)
+    }
+    return (sdk, window)
+}
+
+@MainActor
+private func digiaEventNames(_ sdk: SDKInstance) throws -> [String] {
+    let analytics = try #require(sdk.services?.analyticsService)
+    return analytics.queue.peek(maxCount: 100).compactMap { $0.payload["event_name"] as? String }
+        .filter { $0.hasPrefix("Digia ") }
 }
 
 private struct AnchoredScrollContent: View {
