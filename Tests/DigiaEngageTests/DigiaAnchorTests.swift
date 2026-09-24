@@ -250,6 +250,22 @@ extension DigiaEngageTests {
         #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (user_close)"))
         #expect(try digiaEventNames(sdk).isEmpty)
     }
+    @Test("rectangle anchor unregistered by key during the delay: user_close to the CEP only, next turn (A52)")
+    func keylessUnregisterDuringDelayTellsCepOnly() async throws {
+        let (sdk, window) = try await makeGuideInstance(stepCount: 1, delayInMs: 5_000)
+        try #require(window.subviews.first as? DigiaAnchorView)?.removeFromSuperview()
+        AnchorRegistry.shared.register(key: "a40-1", rect: CGRect(x: 10, y: 60, width: 100, height: 40))
+        let recorder = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
+
+        AnchorRegistry.shared.unregister(key: "a40-1")
+        #expect(sdk.guideOrchestrator.state != nil)
+        await nextTurn()
+
+        #expect(sdk.guideOrchestrator.state == nil)
+        #expect(!recorder.displayed)
+        #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (user_close)"))
+        #expect(try digiaEventNames(sdk).isEmpty)
+    }
 }
 
 /// An initialized instance of its own (so Digia events can be read from its

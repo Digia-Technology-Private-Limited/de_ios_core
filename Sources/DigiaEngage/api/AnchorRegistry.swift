@@ -174,7 +174,10 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         trackedRects.removeValue(forKey: key)
         cornerRadii.removeValue(forKey: key)
         version &+= 1
-        if activeKey == key, !isInStepDelay {
+        guard activeKey == key else { return }
+        // Same as the view path: the step's anchor left (A40, incl. during the delay).
+        notifyActiveAnchorRemovedNextTurn(key: key)
+        if !isInStepDelay {
             activeAnchorWasAvailable = false
             startReadinessTimeout(for: key, failureReason: .detached)
         }
