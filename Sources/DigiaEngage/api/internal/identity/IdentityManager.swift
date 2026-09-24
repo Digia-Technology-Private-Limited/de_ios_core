@@ -16,6 +16,7 @@ public final class IdentityManager: @unchecked Sendable {
     public let deviceId: String
 
     private var cachedUserId: String?
+    private var userChangedListeners: [() -> Void] = []
 
     init(
         storage: LocalStorage,
@@ -70,18 +71,28 @@ public final class IdentityManager: @unchecked Sendable {
     public func setUserId(_ userId: String) {
         let trimmed = userId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        lock.lock()
-        defer { lock.unlock() }
-        if cachedUserId == trimmed { return }
-        cachedUserId = trimmed
-        storage.set(trimmed, forKey: Self.keyUserId)
+        let listeners: [() -> Void] = lock.withLock {
+            if cachedUserId == trimmed { return [] }
+            cachedUserId = trimmed
+            storage.set(trimmed, forKey: Self.keyUserId)
+            return userChangedListeners
+        }
+        listeners.forEach { $0() }
     }
 
     public func clearUserId() {
-        lock.lock()
-        defer { lock.unlock() }
-        guard cachedUserId != nil else { return }
-        cachedUserId = nil
-        storage.remove(forKey: Self.keyUserId)
+        let listeners: [() -> Void] = lock.withLock {
+            guard cachedUserId != nil else { return [] }
+            cachedUserId = nil
+            storage.remove(forKey: Self.keyUserId)
+            return userChangedListeners
+        }
+        listeners.forEach { $0() }
+    }
+
+    /// Called after the stored user ID actually changes: set to a new value,
+    /// or cleared from non-nil. Never for a repeat of the current value.
+    func addUserChangedListener(_ listener: @escaping () -> Void) {
+        lock.withLock { userChangedListeners.append(listener) }
     }
 }

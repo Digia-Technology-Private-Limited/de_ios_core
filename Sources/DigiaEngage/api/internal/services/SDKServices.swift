@@ -33,6 +33,11 @@ final class SDKServices {
             timeoutMs: Int64(config.analyticsConfig.sessionTimeoutMs)
         )
         self.sessionManager = sessionManager
+        // A new or cleared user starts a new session (D2), whatever the
+        // analytics setting.
+        identityManager.addUserChangedListener { [weak sessionManager] in
+            sessionManager?.reset()
+        }
         let requestHeaders = SDKRequestHeaders.make(config: config, deviceId: identityManager.deviceId)
         self.requestHeaders = requestHeaders
         let staticContext = AnalyticsService.buildStaticContext(

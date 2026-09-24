@@ -128,21 +128,6 @@ struct AnalyticsServiceTests {
         #expect(id1 == id2)
     }
 
-    @Test("setUserId persists and clearUserId rotates session")
-    func setUserIdAndClearUserId() {
-        let service = makeService()
-
-        service.setUserId("user-123")
-        #expect(service.identityManager.userId == "user-123")
-
-        let sessionBefore = service.sessionManager.sessionId
-        service.clearUserId()
-
-        #expect(service.identityManager.userId == nil)
-        #expect(!service.sessionManager.sessionId.isEmpty)
-        #expect(service.sessionManager.sessionId != sessionBefore)
-    }
-
     @Test("queue drops oldest events when capacity is exceeded")
     func queueDropsOldestWhenFull() {
         let service = makeService(

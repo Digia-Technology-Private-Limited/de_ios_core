@@ -148,22 +148,6 @@ final class AnalyticsService {
         )
     }
 
-    func setUserId(_ userId: String) {
-        let trimmed = userId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        guard identityManager.userId != trimmed else { return }
-        identityManager.setUserId(trimmed)
-        sessionManager.reset()
-    }
-
-    func clearUserId() {
-        guard identityManager.userId != nil else { return }
-        identityManager.clearUserId()
-        sessionManager.reset()
-    }
-
-    var userId: String? { identityManager.userId }
-
     func flush() {
         cancelTimer()
         Task { await dispatchPending() }

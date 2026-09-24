@@ -276,10 +276,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         switch pendingUserChange {
         case let .set(userId):
             services.identityManager.setUserId(userId)
-            services.analyticsService?.setUserId(userId)
         case .clear:
             services.identityManager.clearUserId()
-            services.analyticsService?.clearUserId()
         case nil:
             break
         }
@@ -1722,7 +1720,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             survey: state.config,
             answers: answers,
             startedAt: state.startedAt,
-            userId: services?.analyticsService?.userId
+            userId: services?.identityManager.userId
         )
     }
 
@@ -1820,8 +1818,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             return
         }
         services.identityManager.setUserId(userId)
-        services.sessionManager.reset()
-        services.analyticsService?.setUserId(userId)
     }
 
     func clearUserId() {
@@ -1830,8 +1826,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             return
         }
         services.identityManager.clearUserId()
-        services.sessionManager.reset()
-        services.analyticsService?.clearUserId()
     }
 
     /// Removes inline content (carousel/story/payload) for each key in `placementKeys`.
