@@ -1502,15 +1502,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             guard let self else { return }
             guard self.guideOrchestrator.state?.payload.cepCampaignId == payload.cepCampaignId
             else { return }
-            if AnchorRegistry.shared.isRegistered(anchorKey) {
-                if case .unavailable(.outsideViewport) = AnchorRegistry.shared.resolution(
-                    for: anchorKey
-                ) {
-                    AnchorRegistry.shared.scrollToVisible(anchorKey)
-                }
-                if case .available = AnchorRegistry.shared.resolution(for: anchorKey) {
-                    return
-                }
+            if AnchorRegistry.shared.isRegistered(anchorKey),
+               AnchorRegistry.shared.isOnScreenScrollingIfNeeded(anchorKey) {
+                return
             }
             testContext.reportFailed(
                 DropReason.anchorNotRegistered,
@@ -2488,11 +2482,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     private func isGuideStepAvailable(_ step: GuideStepModel) -> Bool {
         guard let anchorKey = step.target.anchorKey else { return true }
-        if case .unavailable(.outsideViewport) = AnchorRegistry.shared.resolution(for: anchorKey) {
-            AnchorRegistry.shared.scrollToVisible(anchorKey)
-        }
-        if case .available = AnchorRegistry.shared.resolution(for: anchorKey) { return true }
-        return false
+        return AnchorRegistry.shared.isOnScreenScrollingIfNeeded(anchorKey)
     }
 
     func reportGuideShown() {

@@ -194,12 +194,31 @@ public final class AnchorRegistry: NSObject, ObservableObject {
                         animated: false
                     )
                     scrollView.layoutIfNeeded()
-                    if case .available = ActiveAnchorSampler.resolve(view: view) { return true }
+                    // The presentation layer only catches up when this
+                    // transaction commits, so judge the scroll by the model.
+                    if case .available = ActiveAnchorSampler.resolve(
+                        view: view,
+                        usePresentation: false
+                    ) { return true }
                 }
                 ancestor = current.superview
             }
         }
         return false
+    }
+
+    /// Whether `key` is on screen now, scrolling it into view first when it is
+    /// only outside the viewport. Uses `scrollToVisible`'s answer, because a
+    /// fresh `resolution(for:)` still sees the pre-scroll presentation layer.
+    func isOnScreenScrollingIfNeeded(_ key: String) -> Bool {
+        switch resolution(for: key) {
+        case .available:
+            return true
+        case .unavailable(.outsideViewport):
+            return scrollToVisible(key)
+        case .missing, .unavailable:
+            return false
+        }
     }
 
     private func preferredViewBox(for key: String) -> WeakBox? {
@@ -313,6 +332,10 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         case let .unavailable(reason):
             if activeAnchorWasAvailable {
                 failActiveAnchor(key: key, reason: reason)
+            } else if reason == .outsideViewport {
+                // Before the step shows: bring an off-screen anchor into view
+                // through its scroll-view ancestors. The next sample sees it.
+                scrollToVisible(key)
             }
         }
     }
@@ -398,7 +421,7 @@ private final class ActiveAnchorSampler: NSObject {
         onSample?(resolve?() ?? .unavailable(.detached))
     }
 
-    static func resolve(view: UIView) -> AnchorResolution {
+    static func resolve(view: UIView, usePresentation: Bool = true) -> AnchorResolution {
         guard let window = view.window else { return .unavailable(.detached) }
         let modelRect = view.convert(view.bounds, to: window)
         let destinationLayer = window.layer.presentation() ?? window.layer
@@ -417,7 +440,7 @@ private final class ActiveAnchorSampler: NSObject {
                 usePresentationLayers: false
             )
         )
-        guard let presentationRect else { return model }
+        guard usePresentation, let presentationRect else { return model }
         let presentation = resolve(
             rect: presentationRect,
             viewport: window.bounds,
