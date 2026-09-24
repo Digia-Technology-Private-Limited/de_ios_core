@@ -6,8 +6,6 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     private let sseSession: URLSession
     private let sessionIdProvider: @Sendable () -> String?
     private let headerProvider: @Sendable () -> [String: String]
-    private let lock = NSLock()
-    private var staticHeaders: [String: String] = [:]
 
     init(
         session: URLSession? = nil,
@@ -47,12 +45,6 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             // effectively unbounded for a live-test session.
             self.sseSession = URLSession(configuration: sseConfig)
         }
-    }
-
-    func setStaticHeaders(_ headers: [String: String]) {
-        lock.lock()
-        defer { lock.unlock() }
-        self.staticHeaders = headers
     }
 
     // MARK: - NetworkClient
@@ -252,7 +244,7 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     // MARK: - Header Assembler
 
     /// One entry per header name, compared case-insensitively (HTTP names are).
-    /// Later layers win: defaults, then `headerProvider`, static headers, the
+    /// Later layers win: defaults, then `headerProvider`, the
     /// request's own headers, and last the per-request session ID (D8). The
     /// distinct legacy names `X-Digia-Version` / `x-digia-sdk-version` and
     /// `X-Digia-Environment` / `X-Digia-Sdk-Environment` are both sent; a
@@ -283,10 +275,6 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         }
 
         headers.merge(headerProvider())
-        lock.lock()
-        let staticHeaders = self.staticHeaders
-        lock.unlock()
-        headers.merge(staticHeaders)
         headers.merge(requestHeaders)
 
         headers.fillIfMissing("X-Digia-Version", from: "x-digia-sdk-version")
