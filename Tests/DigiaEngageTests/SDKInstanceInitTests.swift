@@ -59,8 +59,18 @@ struct SDKInstanceInitTests {
         sdk.setUserId("u")
         try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
 
-        // One report for the new startup session, one for the rotation.
+        // One report for the new startup session, one for the rotation: two
+        // different IDs, the startup one first.
         #expect(try await sessionPosts(network, atLeast: 2) == 2)
+        let reported = network.recordedRequests
+            .filter { $0.url.absoluteString.hasSuffix("/engage/sdk/session") }
+            .compactMap { $0.body.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } }
+            .map { $0["session_id"] as? String }
+        let current = sdk.services?.sessionManager.sessionId
+        #expect(reported.count == 2)
+        #expect(reported.allSatisfy { $0 != nil })
+        #expect(reported.last == current)
+        #expect(reported.first != current)
         #expect(sdk.services?.identityManager.userId == "u")
     }
 
