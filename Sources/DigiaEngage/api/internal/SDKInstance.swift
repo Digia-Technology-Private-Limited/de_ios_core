@@ -7,7 +7,13 @@ private let log = DigiaLogger()
 
 @MainActor
 final class SDKInstance: ObservableObject, DigiaCEPHost {
-    static let shared = SDKInstance()
+    static let shared = SDKInstance(
+        defaults: UserDefaults(suiteName: "tech.digia.engage") ?? .standard,
+        legacyDefaults: .standard,
+        makeNetworkClient: { currentSession in
+            URLSessionNetworkClient(sessionIdProvider: { currentSession.sessionId })
+        }
+    )
 
     private struct ExternalGuide {
         let campaign: CampaignModel
@@ -95,9 +101,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     let componentRegistry: ComponentRegistryService
     let liveTestService: LiveTestService
 
-    private let pendingLock = NSLock()
-    private var pendingUserId: String? = nil
-    private var pendingClearUserId: Bool = false
+    /// A `setUserId` / `clearUserId` that arrived before `services` existed.
+    /// Only the last one matters; it is applied once, when services are built.
+    private enum PendingUserChange {
+        case set(String)
+        case clear
+    }
+    private var pendingUserChange: PendingUserChange?
+    private let defaults: UserDefaults
+    private let legacyDefaults: UserDefaults
 
     let controller = DigiaOverlayController()
     let inlineController = InlineCampaignController()
@@ -154,13 +166,18 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private let dwellTracker = DwellTracker()
     private var events: EngageEventEmitter!
 
-    private init() {
-        LocalStorageMigrator.migrateIfNeeded()
-        let defaultStorage = UserDefaultsLocalStorage()
-        let currentSession = self.currentSession
-        let defaultNetworkClient = URLSessionNetworkClient(
-            sessionIdProvider: { currentSession.sessionId }
-        )
+    /// `shared` is the only production instance. Tests build their own with
+    /// isolated defaults and a fake network client.
+    init(
+        defaults: UserDefaults,
+        legacyDefaults: UserDefaults,
+        makeNetworkClient: (CurrentSessionRef) -> any NetworkClient
+    ) {
+        self.defaults = defaults
+        self.legacyDefaults = legacyDefaults
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: defaults, standardDefaults: legacyDefaults)
+        let defaultStorage = UserDefaultsLocalStorage(defaults: defaults)
+        let defaultNetworkClient = makeNetworkClient(currentSession)
         let defaultDebugOverlay = DigiaDebugOverlayController(storage: defaultStorage.scoped("debug"))
         self.debugOverlayController = defaultDebugOverlay
         self.storage = defaultStorage
@@ -243,7 +260,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     func initialize(_ config: DigiaConfig) async throws {
-        LocalStorageMigrator.migrateIfNeeded()
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: defaults, standardDefaults: legacyDefaults)
         DigiaImagePipeline.configureIfNeeded()
         hostActionExecutor.configure(config.actionHandlers)
         guard self.config == nil else { return }
@@ -255,22 +272,18 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         currentSession.set(services.sessionManager)
         services.sessionReporter.report()
 
-        // Flush pending user ID buffering
-        let (flushClear, flushUserId) = pendingLock.withLock {
-            let clear = pendingClearUserId
-            let user = pendingUserId
-            pendingClearUserId = false
-            pendingUserId = nil
-            return (clear, user)
-        }
-
-        if flushClear {
+        // Apply the user change buffered before services existed.
+        switch pendingUserChange {
+        case let .set(userId):
+            services.identityManager.setUserId(userId)
+            services.analyticsService?.setUserId(userId)
+        case .clear:
             services.identityManager.clearUserId()
             services.analyticsService?.clearUserId()
-        } else if let flushUserId {
-            services.identityManager.setUserId(flushUserId)
-            services.analyticsService?.setUserId(flushUserId)
+        case nil:
+            break
         }
+        pendingUserChange = nil
 
         services.submissionReporter.configure(config: config)
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
@@ -1802,33 +1815,23 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     func setUserId(_ userId: String) {
-        let (hasAnalytics, _) = pendingLock.withLock { () -> (Bool, Void) in
-            if services?.analyticsService == nil {
-                pendingClearUserId = false
-                pendingUserId = userId
-            }
-            return (services?.analyticsService != nil, ())
+        guard let services else {
+            pendingUserChange = .set(userId)
+            return
         }
-        services?.identityManager.setUserId(userId)
-        services?.sessionManager.reset()
-        if hasAnalytics {
-            services?.analyticsService?.setUserId(userId)
-        }
+        services.identityManager.setUserId(userId)
+        services.sessionManager.reset()
+        services.analyticsService?.setUserId(userId)
     }
 
     func clearUserId() {
-        let (hasAnalytics, _) = pendingLock.withLock { () -> (Bool, Void) in
-            if services?.analyticsService == nil {
-                pendingUserId = nil
-                pendingClearUserId = true
-            }
-            return (services?.analyticsService != nil, ())
+        guard let services else {
+            pendingUserChange = .clear
+            return
         }
-        services?.identityManager.clearUserId()
-        services?.sessionManager.reset()
-        if hasAnalytics {
-            services?.analyticsService?.clearUserId()
-        }
+        services.identityManager.clearUserId()
+        services.sessionManager.reset()
+        services.analyticsService?.clearUserId()
     }
 
     /// Removes inline content (carousel/story/payload) for each key in `placementKeys`.
@@ -2855,10 +2858,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         questionViewedAt.removeAll()
         coordinator.resetForTesting()
         clearLiveTestState()
-        pendingLock.withLock {
-            pendingUserId = nil
-            pendingClearUserId = false
-        }
+        pendingUserChange = nil
     }
 
 }
