@@ -107,7 +107,7 @@ struct NetworkClientTests {
         #expect(assembled["x-digia-device-id"] == "dev_d1")
         #expect(assembled["X-Digia-Platform"] == "ios")
         #expect(assembled["x-digia-sdk-version"] == DigiaSdkVersion.value)
-        #expect(assembled["X-Digia-Version"] == DigiaSdkVersion.value)
+        #expect(!names.contains("x-digia-version"))
         #expect(assembled["X-Custom"] == "CustomVal")
 
         // 2. Verify wire URLRequest delivers the headers
@@ -139,7 +139,7 @@ struct NetworkClientTests {
             assembled.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
         }
         #expect(value("x-digia-sdk-version") == "native/ios/9.9.9")
-        #expect(value("X-Digia-Version") == DigiaSdkVersion.value)
+        #expect(value("X-Digia-Version") == nil)
         #expect(value("X-Digia-Environment") == "debug")
         #expect(value("X-Digia-Sdk-Environment") == "production")
         #expect(value("X-Digia-Device-Id") == "from-request")

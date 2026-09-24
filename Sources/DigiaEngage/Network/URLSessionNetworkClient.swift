@@ -246,10 +246,9 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     /// One entry per header name, compared case-insensitively (HTTP names are).
     /// Later layers win: defaults, then `headerProvider`, the
     /// request's own headers, and last the per-request session ID (D8). The
-    /// distinct legacy names `X-Digia-Version` / `x-digia-sdk-version` and
-    /// `X-Digia-Environment` / `X-Digia-Sdk-Environment` are both sent; a
-    /// missing one is filled from its partner, a present one is never
-    /// overwritten (D7).
+    /// distinct legacy names `X-Digia-Environment` / `X-Digia-Sdk-Environment`
+    /// are both sent; a missing one is filled from its partner, a present one
+    /// is never overwritten (D7).
     func assembleHeaders(for requestHeaders: [String: String]) -> [String: String] {
         let os = ProcessInfo.processInfo.operatingSystemVersion
         var headers = CaseInsensitiveHeaders()
@@ -259,7 +258,6 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             "X-Digia-Os-Version": "iOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
             "X-Digia-Device-Model": Self.deviceModel(),
             "x-digia-sdk-version": DigiaSdkVersion.value,
-            "X-Digia-Version": DigiaSdkVersion.value,
         ])
 
         if let bundleId = Bundle.main.bundleIdentifier, !bundleId.isEmpty {
@@ -277,7 +275,6 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         headers.merge(headerProvider())
         headers.merge(requestHeaders)
 
-        headers.fillIfMissing("X-Digia-Version", from: "x-digia-sdk-version")
         headers.fillIfMissing("X-Digia-Sdk-Environment", from: "X-Digia-Environment")
         headers.fillIfMissing("X-Digia-Environment", from: "X-Digia-Sdk-Environment")
 
