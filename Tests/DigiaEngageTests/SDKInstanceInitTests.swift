@@ -92,5 +92,18 @@ struct SDKInstanceInitTests {
 
         #expect(sdk.services?.identityManager.userId == nil)
     }
-}
 
+    @Test("with analytics disabled, no session is ever reported, though it still rotates")
+    func analyticsDisabledSendsNoSessionReports() async throws {
+        let network = MockNetworkClient()
+        let sdk = makeInstance(defaults: makeDefaults(), network: network)
+        sdk.setUserId("buffered")
+        try await sdk.initialize(DigiaConfig(apiKey: "test_key", analyticsConfig: AnalyticsConfig(enabled: false)))
+        let before = sdk.services?.sessionManager.sessionId
+        sdk.setUserId("u")
+        sdk.clearUserId()
+
+        #expect(sdk.services?.sessionManager.sessionId != before)
+        #expect(try await sessionPosts(network, atLeast: 1) == 0)
+    }
+}

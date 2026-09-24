@@ -52,8 +52,12 @@ final class SDKServices {
             storage: storage.scoped("session")
         )
         self.sessionReporter = sessionReporter
-        sessionManager.addRotationListener { [weak sessionReporter] in
-            sessionReporter?.report()
+        // Session telemetry is analytics: opting out of one stops the other.
+        // The session itself still rotates (D2); it just isn't reported.
+        if config.analyticsConfig.enabled {
+            sessionManager.addRotationListener { [weak sessionReporter] in
+                sessionReporter?.report()
+            }
         }
         // Frequency capping reads the same sessionId the backend sees, so
         // `session` windows track the reported session.
