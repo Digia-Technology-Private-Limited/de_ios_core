@@ -2477,7 +2477,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             guideCompletionFired = false
             return
         }
-        if state.steps.count > 1, !state.hasNext { reportGuideCompletedIfNeeded(state) }
+        // As Flutter (`guide_showcase_manager.dart:787-813`): the completion
+        // carries the guide's dwell and doesn't count toward frequency.
+        if state.steps.count > 1, !state.hasNext {
+            reportGuideCompletedIfNeeded(state, anchorLeft: true)
+        }
         dismissGuide(reason: .userClose, completed: false)
     }
 
@@ -2681,10 +2685,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
-    private func reportGuideCompletedIfNeeded(_ state: ActiveGuideState) {
+    /// `anchorLeft`: the last step's anchor left while it showed. Flutter then
+    /// sends the dwell as `timeToCompleteMs` and records no frequency completion.
+    private func reportGuideCompletedIfNeeded(_ state: ActiveGuideState, anchorLeft: Bool = false) {
         guard !guideCompletionFired else { return }
         guideCompletionFired = true
-        if !isLiveTestCepId(state.payload.cepCampaignId) {
+        if !anchorLeft, !isLiveTestCepId(state.payload.cepCampaignId) {
             services?.frequencyManager.recordCompleted(
                 state.payload.campaignKey,
                 findCampaign(state.payload)?.frequency
@@ -2693,7 +2699,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         events.toDigia(
             GuideEvent.Completed(
                 itemTotal: state.steps.count,
-                timeToCompleteMs: state.currentStep?.target.anchorlessTarget == nil
+                timeToCompleteMs: state.currentStep?.target.anchorlessTarget == nil && !anchorLeft
                     ? nil
                     : dwellTracker.elapsedMs(state.payload.cepCampaignId)
             ),

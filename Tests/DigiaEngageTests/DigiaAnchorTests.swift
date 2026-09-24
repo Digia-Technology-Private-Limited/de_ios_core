@@ -215,9 +215,11 @@ extension DigiaEngageTests {
         ])
     }
 
-    @Test("anchor of a multi-step guide's last step leaves: Digia completion, still user_close (A40)")
+    @Test("anchor of a multi-step guide's last step leaves: Digia completion with dwell, no frequency stop, still user_close (A40, A51)")
     func removedAnchorOnLastStepCompletesForDigia() async throws {
-        let (sdk, window) = try await makeGuideInstance(stepCount: 2)
+        let (sdk, window) = try await makeGuideInstance(
+            stepCount: 2, frequency: ["stopOn": "experienceCompleted"]
+        )
         let recorder = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
         sdk.reportGuideShown()
         sdk.advanceGuide()
@@ -231,6 +233,18 @@ extension DigiaEngageTests {
         let names = try digiaEventNames(sdk)
         #expect(names.suffix(2) == ["Digia Experience Completed", "Digia Experience Dismissed"])
         #expect(!names.contains("Digia Step Dismissed"))
+        let entries = try #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
+        let props = { (name: String) in
+            entries.first { $0.payload["event_name"] as? String == name }?
+                .payload["properties"] as? [String: Any]
+        }
+        #expect(props("Digia Experience Completed")?["time_to_complete_ms"] != nil)
+        #expect(props("Digia Experience Completed")?["item_total"] as? Int == 2)
+        #expect(props("Digia Experience Dismissed")?["dwell_ms"] != nil)
+        let frequency = try #require(sdk.services?.frequencyManager)
+        #expect(frequency.blockReason(
+            campaignKey: "a40-guide", policy: FrequencyPolicy(stopOn: "experienceCompleted")
+        ) == nil)
     }
 
     @Test("anchor leaves before the step shows: user_close to the CEP only, nothing to Digia (A40)")
@@ -274,7 +288,8 @@ extension DigiaEngageTests {
 @MainActor
 private func makeGuideInstance(
     stepCount: Int,
-    delayInMs: Int? = nil
+    delayInMs: Int? = nil,
+    frequency: [String: Any]? = nil
 ) async throws -> (SDKInstance, UIWindow) {
     AnchorRegistry.shared.resetForTesting()
     let suite = { UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")! }
@@ -298,13 +313,15 @@ private func makeGuideInstance(
         if let delayInMs { step["delayInMs"] = delayInMs }
         return step
     }
-    let campaign = try #require(CampaignModel.fromJson([
+    var json: [String: Any] = [
         "id": "a40-guide-id",
         "campaignKey": "a40-guide",
         "campaignType": "guide",
         "targetScreenNames": ["names": ["Help"]],
         "templateConfig": ["templateType": "tooltip", "steps": steps] as [String: Any],
-    ]))
+    ]
+    if let frequency { json["frequency"] = frequency }
+    let campaign = try #require(CampaignModel.fromJson(json))
     sdk.setCampaignsForTesting([campaign])
     sdk.setCurrentScreen("Help")
     let window = makeWindow()
