@@ -93,16 +93,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     let componentRegistry: ComponentRegistryService
     let liveTestService: LiveTestService
 
-    var analyticsService: AnalyticsService? {
-        services?.analyticsService
-    }
-    var frequencyManager: FrequencyManager? {
-        services?.frequencyManager
-    }
-    var identityManager: IdentityManager? {
-        services?.identityManager
-    }
-
     private let pendingLock = NSLock()
     private var pendingUserId: String? = nil
     private var pendingClearUserId: Bool = false
@@ -190,7 +180,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         events = EngageEventEmitter(
             cep: PresentationSink { [weak self] in self?.coordinator },
             digia: DigiaAnalyticsSink(
-                getAnalyticsService: { [weak self] in self?.analyticsService },
+                getAnalyticsService: { [weak self] in self?.services?.analyticsService },
                 getCampaign: { [weak self] key in self?.campaignStore.find(key) }
             ),
             onLiveTestShown: { [weak self] cepCampaignId in
@@ -270,10 +260,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
         if flushClear {
             services.identityManager.clearUserId()
-            analyticsService?.clearUserId()
+            services.analyticsService?.clearUserId()
         } else if let flushUserId {
             services.identityManager.setUserId(flushUserId)
-            analyticsService?.setUserId(flushUserId)
+            services.analyticsService?.setUserId(flushUserId)
         }
 
         services.submissionReporter.configure(config: config)
@@ -287,7 +277,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // in `HealthSink.applyBundleConfig` a moment later.
         HealthSink.shared.activate { [weak self] payload in
             Task { @MainActor [weak self] in
-                self?.analyticsService?.captureHealth(
+                self?.services?.analyticsService?.captureHealth(
                     campaignKey: payload.campaignKey,
                     reason: payload.reason,
                     stage: payload.stage,
@@ -1008,7 +998,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         return route(
             campaign, payload: payload,
-            context: OrganicRoutingContext(frequencyManager: frequencyManager))
+            context: OrganicRoutingContext(frequencyManager: services?.frequencyManager))
     }
 
     /// Abstracts the two points where `route` otherwise diverges between an
@@ -1541,7 +1531,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // Bump frequency on "Digia Experience Viewed" (the moment the survey shows).
         if !isLiveTestCepId(state.payload.cepCampaignId) {
             let campaignKey = state.payload.campaignKey
-            frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
+            services?.frequencyManager.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
         }
         events.toBoth(
             .impressed,
@@ -1670,7 +1660,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // Permanent stop on "Digia Experience Completed" when stopOn is set.
         if !isLiveTest {
             let campaignKey = state.payload.campaignKey
-            frequencyManager?.recordCompleted(
+            services?.frequencyManager.recordCompleted(
                 campaignKey, campaignStore.find(campaignKey)?.frequency)
         }
 
@@ -1713,7 +1703,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             survey: state.config,
             answers: answers,
             startedAt: state.startedAt,
-            userId: analyticsService?.userId
+            userId: services?.analyticsService?.userId
         )
     }
 
@@ -1807,31 +1797,31 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     func setUserId(_ userId: String) {
         let (hasAnalytics, _) = pendingLock.withLock { () -> (Bool, Void) in
-            if analyticsService == nil {
+            if services?.analyticsService == nil {
                 pendingClearUserId = false
                 pendingUserId = userId
             }
-            return (analyticsService != nil, ())
+            return (services?.analyticsService != nil, ())
         }
         services?.identityManager.setUserId(userId)
         services?.sessionManager.reset()
         if hasAnalytics {
-            analyticsService?.setUserId(userId)
+            services?.analyticsService?.setUserId(userId)
         }
     }
 
     func clearUserId() {
         let (hasAnalytics, _) = pendingLock.withLock { () -> (Bool, Void) in
-            if analyticsService == nil {
+            if services?.analyticsService == nil {
                 pendingUserId = nil
                 pendingClearUserId = true
             }
-            return (analyticsService != nil, ())
+            return (services?.analyticsService != nil, ())
         }
         services?.identityManager.clearUserId()
         services?.sessionManager.reset()
         if hasAnalytics {
-            analyticsService?.clearUserId()
+            services?.analyticsService?.clearUserId()
         }
     }
 
@@ -1860,7 +1850,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // Bump frequency on "Digia Experience Viewed" (the moment the nudge shows).
         if !isLiveTestCepId(nudge.payload.cepCampaignId) {
             let campaignKey = nudge.payload.campaignKey
-            frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
+            services?.frequencyManager.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
         }
         events.toBoth(
             .impressed,
@@ -1974,7 +1964,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         dwellTracker.markViewed(state.payload.cepCampaignId)
         if !isLiveTestCepId(state.payload.cepCampaignId) {
             let campaignKey = state.payload.campaignKey
-            frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
+            services?.frequencyManager.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
         }
         events.toBoth(
             .impressed, FloaterEvent.Viewed(screenName: _currentScreen), payload: state.payload)
@@ -2053,7 +2043,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private func emitFloaterCompleted(_ state: ActiveFloaterState) {
         if !isLiveTestCepId(state.payload.cepCampaignId) {
             let campaignKey = state.payload.campaignKey
-            frequencyManager?.recordCompleted(
+            services?.frequencyManager.recordCompleted(
                 campaignKey, campaignStore.find(campaignKey)?.frequency)
         }
         events.toDigia(FloaterEvent.Completed(), payload: state.payload)
@@ -2107,7 +2097,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         dwellTracker.markViewed(state.payload.cepCampaignId)
         if !isLiveTestCepId(state.payload.cepCampaignId) {
             let campaignKey = state.payload.campaignKey
-            frequencyManager?.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
+            services?.frequencyManager.recordShow(campaignKey, campaignStore.find(campaignKey)?.frequency)
         }
         events.toBoth(
             .impressed, FloaterEvent.Viewed(screenName: _currentScreen), payload: state.payload)
@@ -2149,7 +2139,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private func emitFloaterStoryCompleted(_ state: ActiveFloaterStoryState) {
         if !isLiveTestCepId(state.payload.cepCampaignId) {
             let campaignKey = state.payload.campaignKey
-            frequencyManager?.recordCompleted(
+            services?.frequencyManager.recordCompleted(
                 campaignKey, campaignStore.find(campaignKey)?.frequency)
         }
     }
@@ -2507,7 +2497,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         if state.stepIndex == 0, dwellTracker.elapsedMs(payload.cepCampaignId) == nil {
             dwellTracker.markViewed(payload.cepCampaignId)
             if !isLiveTestCepId(payload.cepCampaignId) {
-                frequencyManager?.recordShow(
+                services?.frequencyManager.recordShow(
                     payload.campaignKey,
                     findCampaign(payload)?.frequency
                 )
@@ -2609,7 +2599,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         guard !guideCompletionFired else { return }
         guideCompletionFired = true
         if !isLiveTestCepId(state.payload.cepCampaignId) {
-            frequencyManager?.recordCompleted(
+            services?.frequencyManager.recordCompleted(
                 state.payload.campaignKey,
                 findCampaign(state.payload)?.frequency
             )
@@ -2659,9 +2649,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // the permanent stop on Completed (when the policy opts into stopOn).
         switch eventName {
         case "Digia Experience Viewed":
-            frequencyManager?.recordShow(campaignKey, campaign?.frequency)
+            services?.frequencyManager.recordShow(campaignKey, campaign?.frequency)
         case "Digia Experience Completed":
-            frequencyManager?.recordCompleted(campaignKey, campaign?.frequency)
+            services?.frequencyManager.recordCompleted(campaignKey, campaign?.frequency)
         default:
             break
         }
