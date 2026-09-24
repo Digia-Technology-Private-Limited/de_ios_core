@@ -212,7 +212,7 @@ struct NetworkClientTests {
 
     // MARK: - URLSessionNetworkClient Header Duplication & Contract Tests
 
-    @Test("URLSessionNetworkClient injects duplicate headers and platform tag")
+    @Test("URLSessionNetworkClient sends each header once, with the platform tag")
     func urlSessionHeaderDuplication() async throws {
         let client = makeTestClient(headerProvider: {
             [
@@ -243,26 +243,55 @@ struct NetworkClientTests {
         #expect(response.statusCode == 200)
         #expect(response.isSuccessful)
 
-        // 1. Verify assembled headers dictionary contains BOTH casings
+        // 1. One entry per header name, whatever casing the layers used (D7)
         let assembled = client.assembleHeaders(for: request.headers)
+        let names = assembled.keys.map { $0.lowercased() }
+        #expect(names.count == Set(names).count)
         #expect(assembled["X-Digia-Project-Id"] == "proj_p1")
-        #expect(assembled["x-digia-project-id"] == "proj_p1")
-        #expect(assembled["X-Digia-Device-Id"] == "dev_d1")
         #expect(assembled["x-digia-device-id"] == "dev_d1")
         #expect(assembled["X-Digia-Platform"] == "ios")
-        #expect(assembled["x-digia-platform"] == "ios")
-        #expect(assembled["X-Digia-Sdk-Version"] == DigiaSdkVersion.value)
         #expect(assembled["x-digia-sdk-version"] == DigiaSdkVersion.value)
+        #expect(assembled["X-Digia-Version"] == DigiaSdkVersion.value)
         #expect(assembled["X-Custom"] == "CustomVal")
 
         // 2. Verify wire URLRequest delivers the headers
         let wireRequest = try #require(capturedRequest)
         #expect(wireRequest.value(forHTTPHeaderField: "X-Digia-Project-Id") == "proj_p1")
-        #expect(wireRequest.value(forHTTPHeaderField: "x-digia-project-id") == "proj_p1")
         #expect(wireRequest.value(forHTTPHeaderField: "X-Digia-Device-Id") == "dev_d1")
-        #expect(wireRequest.value(forHTTPHeaderField: "x-digia-device-id") == "dev_d1")
         #expect(wireRequest.value(forHTTPHeaderField: "X-Digia-Platform") == "ios")
         #expect(wireRequest.value(forHTTPHeaderField: "X-Custom") == "CustomVal")
+    }
+
+    @Test("request headers beat client defaults case-insensitively; legacy pairs are filled, never overwritten")
+    func headerPrecedence() {
+        let client = URLSessionNetworkClient(
+            sessionIdProvider: { "sess-live" },
+            headerProvider: { ["X-DIGIA-DEVICE-ID": "from-provider"] }
+        )
+        let assembled = client.assembleHeaders(for: [
+            "X-Digia-Sdk-Version": "native/ios/9.9.9",
+            "X-Digia-Environment": "debug",
+            "X-Digia-Sdk-Environment": "production",
+            "x-digia-device-id": "from-request",
+            "x-digia-session-id": "stale",
+            "x-digia-platform": "android",
+        ])
+
+        let names = assembled.keys.map { $0.lowercased() }
+        #expect(names.count == Set(names).count)
+        func value(_ name: String) -> String? {
+            assembled.first { $0.key.caseInsensitiveCompare(name) == .orderedSame }?.value
+        }
+        #expect(value("x-digia-sdk-version") == "native/ios/9.9.9")
+        #expect(value("X-Digia-Version") == DigiaSdkVersion.value)
+        #expect(value("X-Digia-Environment") == "debug")
+        #expect(value("X-Digia-Sdk-Environment") == "production")
+        #expect(value("X-Digia-Device-Id") == "from-request")
+        #expect(value("X-Digia-Session-Id") == "sess-live")
+        #expect(value("X-Digia-Platform") == "ios")
+
+        let filled = client.assembleHeaders(for: ["X-Digia-Sdk-Environment": "sandbox"])
+        #expect(filled["X-Digia-Environment"] == "sandbox")
     }
 
     @Test("URLSessionNetworkClient injects canonical session headers from sessionIdProvider")
@@ -272,7 +301,6 @@ struct NetworkClientTests {
         )
         let assembled = client.assembleHeaders(for: [:])
         #expect(assembled["X-Digia-Session-Id"] == "sess_test_123")
-        #expect(assembled["x-digia-session-id"] == "sess_test_123")
     }
 
     @Test("a request after a session rotation carries the new session ID")

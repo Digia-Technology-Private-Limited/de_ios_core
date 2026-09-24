@@ -226,18 +226,24 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
 
     // MARK: - Header Assembler
 
+    /// One entry per header name, compared case-insensitively (HTTP names are).
+    /// Later layers win: defaults, then `headerProvider`, static headers, the
+    /// request's own headers, and last the per-request session ID (D8). The
+    /// distinct legacy names `X-Digia-Version` / `x-digia-sdk-version` and
+    /// `X-Digia-Environment` / `X-Digia-Sdk-Environment` are both sent; a
+    /// missing one is filled from its partner, a present one is never
+    /// overwritten (D7).
     public func assembleHeaders(for requestHeaders: [String: String]) -> [String: String] {
         let os = ProcessInfo.processInfo.operatingSystemVersion
-        var headers: [String: String] = [
+        var headers = CaseInsensitiveHeaders()
+        headers.merge([
             "X-Digia-Platform": "ios",
-            "x-digia-platform": "ios",
             "X-Digia-Device-Make": "Apple",
             "X-Digia-Os-Version": "iOS \(os.majorVersion).\(os.minorVersion).\(os.patchVersion)",
             "X-Digia-Device-Model": Self.deviceModel(),
-            "X-Digia-Sdk-Version": DigiaSdkVersion.value,
             "x-digia-sdk-version": DigiaSdkVersion.value,
             "X-Digia-Version": DigiaSdkVersion.value,
-        ]
+        ])
 
         if let bundleId = Bundle.main.bundleIdentifier, !bundleId.isEmpty {
             headers["x-app-package-name"] = bundleId
@@ -251,63 +257,25 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
             headers["x-app-build-number"] = buildNumber
         }
 
-        // Merge dynamic headers from provider if available
         if let provider = headerProvider {
-            let provided = provider()
-            for (key, value) in provided {
-                headers[key] = value
-            }
+            headers.merge(provider())
         }
-
-        // Merge locked static headers if configured
         lock.lock()
-        for (key, value) in staticHeaders {
-            headers[key] = value
-        }
+        let staticHeaders = self.staticHeaders
         lock.unlock()
+        headers.merge(staticHeaders)
+        headers.merge(requestHeaders)
 
-        // Merge caller-provided request headers on top
-        for (key, value) in requestHeaders {
-            headers[key] = value
-        }
+        headers.fillIfMissing("X-Digia-Version", from: "x-digia-sdk-version")
+        headers.fillIfMissing("X-Digia-Sdk-Environment", from: "X-Digia-Environment")
+        headers.fillIfMissing("X-Digia-Environment", from: "X-Digia-Sdk-Environment")
 
-        // Canonical Duplication Rules:
-        // 1. Project ID
-        if let projectId = headers["X-Digia-Project-Id"] ?? headers["x-digia-project-id"] {
-            headers["X-Digia-Project-Id"] = projectId
-            headers["x-digia-project-id"] = projectId
-        }
-
-        // 2. Device ID
-        if let deviceId = headers["X-Digia-Device-Id"] ?? headers["x-digia-device-id"] {
-            headers["X-Digia-Device-Id"] = deviceId
-            headers["x-digia-device-id"] = deviceId
-        }
-
-        // 3. SDK Version
-        if let sdkVer = headers["X-Digia-Sdk-Version"] ?? headers["x-digia-sdk-version"] ?? headers["X-Digia-Version"] {
-            headers["X-Digia-Sdk-Version"] = sdkVer
-            headers["x-digia-sdk-version"] = sdkVer
-            headers["X-Digia-Version"] = sdkVer
-        }
-
-        // 4. SDK Environment
-        if let env = headers["X-Digia-Sdk-Environment"] ?? headers["X-Digia-Environment"] {
-            headers["X-Digia-Sdk-Environment"] = env
-            headers["X-Digia-Environment"] = env
-        }
-
-        // 5. Session ID
-        if let sid = sessionIdProvider?() ?? headers["X-Digia-Session-Id"] ?? headers["x-digia-session-id"] {
+        if let sid = sessionIdProvider?() {
             headers["X-Digia-Session-Id"] = sid
-            headers["x-digia-session-id"] = sid
         }
-
-        // Ensure Platform is strictly "ios"
         headers["X-Digia-Platform"] = "ios"
-        headers["x-digia-platform"] = "ios"
 
-        return headers
+        return headers.dictionary
     }
 
     private static func deviceModel() -> String {
@@ -316,6 +284,34 @@ public final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
         return withUnsafePointer(to: &sysInfo.machine) {
             $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(cString: $0) }
         }
+    }
+}
+
+/// Header storage keyed by lower-cased name, keeping the casing last written.
+private struct CaseInsensitiveHeaders {
+    private var entries: [String: (name: String, value: String)] = [:]
+
+    subscript(name: String) -> String? {
+        get { entries[name.lowercased()]?.value }
+        set {
+            if let newValue {
+                entries[name.lowercased()] = (name, newValue)
+            } else {
+                entries[name.lowercased()] = nil
+            }
+        }
+    }
+
+    mutating func merge(_ headers: [String: String]) {
+        for (name, value) in headers { self[name] = value }
+    }
+
+    mutating func fillIfMissing(_ name: String, from partner: String) {
+        if self[name] == nil, let value = self[partner] { self[name] = value }
+    }
+
+    var dictionary: [String: String] {
+        Dictionary(uniqueKeysWithValues: entries.values.map { ($0.name, $0.value) })
     }
 }
 
