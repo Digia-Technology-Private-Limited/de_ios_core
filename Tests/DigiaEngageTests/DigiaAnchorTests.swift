@@ -42,6 +42,25 @@ extension DigiaEngageTests {
         anchor.removeFromSuperview()
     }
 
+    @Test("a full-width UIKit anchor registers its content's frame, not its own (A42)")
+    func uikitAnchorRegistersItsContent() {
+        let window = makeWindow()
+        let anchor = DigiaAnchorView(frame: CGRect(x: 0, y: 100, width: 390, height: 60))
+        anchor.anchorKey = "a42-content"
+        let button = UIView(frame: CGRect(x: 300, y: 8, width: 44, height: 44))
+        anchor.addSubview(button)
+        window.addSubview(anchor)
+
+        #expect(registry.getView(for: "a42-content") === button)
+        #expect(registry.getRect(for: "a42-content") == CGRect(x: 300, y: 108, width: 44, height: 44))
+
+        // Losing its content falls back to the anchor itself, without a removal.
+        button.removeFromSuperview()
+        #expect(registry.getView(for: "a42-content") === anchor)
+        anchor.removeFromSuperview()
+        #expect(!registry.isRegistered("a42-content"))
+    }
+
     @Test("scrollToVisible brings a UIKit anchor inside a UIScrollView on screen and says so")
     func scrollToVisibleUIKit() {
         let window = makeWindow()
