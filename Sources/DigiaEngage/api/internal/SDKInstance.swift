@@ -1388,7 +1388,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             if isModalCampaignActive() {
                 lastCampaignDropReason = "another campaign is already on screen"
                 logVerbose(
-                    "floater campaign dropped: a nudge, survey, or expanded floater is already modal: \(key)"
+                    "floater campaign dropped: another campaign is already on screen: \(key)"
                 )
                 context.onDropped(
                     DropReason.surfaceBusy,
