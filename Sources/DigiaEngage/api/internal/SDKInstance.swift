@@ -1157,20 +1157,31 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
-    /// Whether a nudge, survey, or an *expanded* floater currently occupies the
-    /// screen modally. A *collapsed* floater is deliberately not modal — it is a
-    /// third, independent lane that never blocks and is never blocked by the
-    /// others (`ai_docs/pip-campaign-design.md` §3.2) — so this only starts
-    /// returning true once the floater expands, at which point it behaves like
-    /// every other full-screen surface. Gates only floater's own start (mirrors
+    /// Whether a guide, nudge, survey, or an *expanded* floater currently
+    /// occupies the screen modally. A *collapsed* floater is deliberately not
+    /// modal — it is a third, independent lane that never blocks and is never
+    /// blocked by the others (`ai_docs/pip-campaign-design.md` §3.2) — so this
+    /// only starts returning true once the floater expands, at which point it
+    /// behaves like every other full-screen surface. Gates every modal
+    /// campaign's routing (guide, survey, nudge) and floater start (mirrors
     /// Android's `DigiaInstance.isModalCampaignActive`, used identically at its
-    /// one call site); nudge/survey routing is intentionally left unchanged.
+    /// call sites).
     private func isModalCampaignActive() -> Bool {
-        controller.activeNudge != nil || surveyOrchestrator.state != nil
+        isGuideActive()
+            || controller.activeNudge != nil || surveyOrchestrator.state != nil
             || floaterOrchestrator.surface == .expanded
             // An open story is the story floater's expanded state: it fills the
             // screen, so from here on it behaves like every other modal surface.
             || floaterStoryOrchestrator.storyOverlayActive
+    }
+
+    /// Whether a guide is on screen in either shape: the native canvas or
+    /// anchorless guide `guideOrchestrator` drives, or the RN-rendered guide
+    /// the JS layer drives through `activeExternalGuide`. A modal guard that
+    /// reads `isModalCampaignActive()` exempts an active guide with this, so a
+    /// second guide still replaces the first.
+    private func isGuideActive() -> Bool {
+        guideOrchestrator.state != nil || activeExternalGuide != nil
     }
 
     private func route(
@@ -1245,6 +1256,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     lastCampaignDropReason = "frequency capped"
                     return .dropped(reason: .frequencyCapped, detail: nil)
                 }
+                if isModalCampaignActive() && !isGuideActive() {
+                    lastCampaignDropReason = "another campaign is already on screen"
+                    context.onDropped(
+                        DropReason.surfaceBusy,
+                        message: "another campaign is already on screen")
+                    logNativeGuideStage(
+                        "route", "result=dropped reason=surface_busy campaign_key=\(key)")
+                    return .dropped(
+                        reason: .surfaceBusy, detail: "another campaign is already on screen")
+                }
                 activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
                 // `payload` was stamped by `coordinator.open()` before routing
                 // ever saw it, so this is only ever empty for a delivery that
@@ -1265,6 +1286,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 lastCampaignDropReason = "frequency capped"
                 logNativeGuideStage("route", "result=dropped reason=frequency_capped campaign_key=\(key)")
                 return .dropped(reason: .frequencyCapped, detail: nil)
+            }
+            if isModalCampaignActive() && !isGuideActive() {
+                lastCampaignDropReason = "another campaign is already on screen"
+                context.onDropped(
+                    DropReason.surfaceBusy,
+                    message: "another campaign is already on screen")
+                logNativeGuideStage(
+                    "route", "result=dropped reason=surface_busy campaign_key=\(key)")
+                return .dropped(
+                    reason: .surfaceBusy, detail: "another campaign is already on screen")
             }
             guard guideConfig.steps.allSatisfy({ $0.widgetConfig.canvas != nil }) else {
                 let message = "campaign has no valid Canvas guide content"
@@ -1287,6 +1318,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
                 return .dropped(reason: .frequencyCapped, detail: nil)
+            }
+            if isModalCampaignActive() && controller.activeNudge == nil {
+                lastCampaignDropReason = "another campaign is already on screen"
+                logVerbose("nudge campaign dropped: another campaign is already on screen: \(key)")
+                context.onDropped(
+                    DropReason.surfaceBusy,
+                    message: "another campaign is already on screen")
+                return .dropped(
+                    reason: .surfaceBusy, detail: "another campaign is already on screen")
             }
             // Resolve variable context: dashboard schemas define type + fallback;
             // CEP trigger variables win over fallbacks (D3′).
@@ -1312,6 +1352,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 cfg.canvasSurvey != nil
                 && isLiveTestCepId(payload.cepCampaignId)
                 && activeSurveyCepId.map(isLiveTestCepId) == true
+            if !replaceActiveLiveTestCanvasSurvey && isModalCampaignActive() {
+                lastCampaignDropReason = "another campaign is already on screen"
+                logVerbose(
+                    "survey campaign dropped: another campaign is already on screen: \(key)")
+                context.onDropped(
+                    DropReason.surfaceBusy,
+                    message: "another campaign is already on screen")
+                return .dropped(
+                    reason: .surfaceBusy, detail: "another campaign is already on screen")
+            }
             if replaceActiveLiveTestCanvasSurvey {
                 markSurveyDismissed()
                 // Safe on anything, including a survey that already showed —
