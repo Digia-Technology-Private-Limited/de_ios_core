@@ -29,6 +29,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private struct ExternalGuide {
         let campaign: CampaignModel
         let payload: CEPTriggerPayload
+        let presentationId: String
     }
 
     var requestHeaders: [String: String] { services?.requestHeaders ?? [:] }
@@ -651,8 +652,20 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .accepted(let payload, let kind):
             coordinator.accept(controller, kind: kind)
             if awaitsAnchorLayout(payload) { coordinator.awaitAnchor(payload) }
+            watchExternalGuideSettle(controller)
         case .dropped(let reason, let detail):
             controller.settle(.dropped(reason: reason, detail: detail))
+        }
+    }
+
+    /// Clears the RN guide flag when its presentation settles, the watchdogs
+    /// included: they settle through the coordinator, never through a surface.
+    private func watchExternalGuideSettle(_ controller: PresentationController) {
+        guard activeExternalGuide?.presentationId == controller.id else { return }
+        let presentationId = controller.id
+        Task { @MainActor [weak self] in
+            _ = await controller.presentation.outcome.value
+            self?.clearExternalGuide(presentationId: presentationId)
         }
     }
 
@@ -1157,20 +1170,31 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
-    /// Whether a nudge, survey, or an *expanded* floater currently occupies the
-    /// screen modally. A *collapsed* floater is deliberately not modal — it is a
-    /// third, independent lane that never blocks and is never blocked by the
-    /// others (`ai_docs/pip-campaign-design.md` §3.2) — so this only starts
-    /// returning true once the floater expands, at which point it behaves like
-    /// every other full-screen surface. Gates only floater's own start (mirrors
-    /// Android's `DigiaInstance.isModalCampaignActive`, used identically at its
-    /// one call site); nudge/survey routing is intentionally left unchanged.
+    /// Whether a guide, nudge, survey, or expanded floater currently occupies
+    /// the screen modally. A collapsed floater never counts: it is a separate,
+    /// non-blocking lane (`ai_docs/pip-campaign-design.md` §3.2).
     private func isModalCampaignActive() -> Bool {
-        controller.activeNudge != nil || surveyOrchestrator.state != nil
+        isGuideActive()
+            || controller.activeNudge != nil || surveyOrchestrator.state != nil
             || floaterOrchestrator.surface == .expanded
             // An open story is the story floater's expanded state: it fills the
             // screen, so from here on it behaves like every other modal surface.
             || floaterStoryOrchestrator.storyOverlayActive
+    }
+
+    /// Whether a guide is on screen in either shape: the native guide that
+    /// `guideOrchestrator` drives, or the RN guide in `activeExternalGuide`.
+    /// A guide of either shape is modal.
+    private func isGuideActive() -> Bool {
+        guideOrchestrator.state != nil || activeExternalGuide != nil
+    }
+
+    /// Clears the RN guide flag only when `presentationId` still owns it, so an
+    /// older guide's settle never disarms a newer one.
+    private func clearExternalGuide(presentationId: String) {
+        if activeExternalGuide?.presentationId == presentationId {
+            activeExternalGuide = nil
+        }
     }
 
     private func route(
@@ -1245,7 +1269,22 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     lastCampaignDropReason = "frequency capped"
                     return .dropped(reason: .frequencyCapped, detail: nil)
                 }
-                activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
+                if isModalCampaignActive() && activeExternalGuide == nil {
+                    lastCampaignDropReason = "another campaign is already on screen"
+                    context.onDropped(
+                        DropReason.surfaceBusy,
+                        message: "another campaign is already on screen")
+                    logNativeGuideStage(
+                        "route", "result=dropped reason=surface_busy campaign_key=\(key)")
+                    return .dropped(
+                        reason: .surfaceBusy, detail: "another campaign is already on screen")
+                }
+                let presentationId = payload.presentationId ?? ""
+                activeExternalGuide = ExternalGuide(
+                    campaign: campaign,
+                    payload: payload,
+                    presentationId: presentationId
+                )
                 // `payload` was stamped by `coordinator.open()` before routing
                 // ever saw it, so this is only ever empty for a delivery that
                 // bypassed that stamp — a live test's synthesised payload. The
@@ -1254,7 +1293,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 renderViaJs(
                     GuideRenderRequest(
                         payload: payload,
-                        presentationId: payload.presentationId ?? "",
+                        presentationId: presentationId,
                         campaignId: campaign.id,
                         templateConfigJson: campaign.guideTemplateJson
                     )
@@ -1265,6 +1304,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 lastCampaignDropReason = "frequency capped"
                 logNativeGuideStage("route", "result=dropped reason=frequency_capped campaign_key=\(key)")
                 return .dropped(reason: .frequencyCapped, detail: nil)
+            }
+            if isModalCampaignActive() && guideOrchestrator.state == nil {
+                lastCampaignDropReason = "another campaign is already on screen"
+                context.onDropped(
+                    DropReason.surfaceBusy,
+                    message: "another campaign is already on screen")
+                logNativeGuideStage(
+                    "route", "result=dropped reason=surface_busy campaign_key=\(key)")
+                return .dropped(
+                    reason: .surfaceBusy, detail: "another campaign is already on screen")
             }
             guard guideConfig.steps.allSatisfy({ $0.widgetConfig.canvas != nil }) else {
                 let message = "campaign has no valid Canvas guide content"
@@ -1287,6 +1336,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
                 return .dropped(reason: .frequencyCapped, detail: nil)
+            }
+            if isModalCampaignActive() && controller.activeNudge == nil {
+                lastCampaignDropReason = "another campaign is already on screen"
+                logVerbose("nudge campaign dropped: another campaign is already on screen: \(key)")
+                context.onDropped(
+                    DropReason.surfaceBusy,
+                    message: "another campaign is already on screen")
+                return .dropped(
+                    reason: .surfaceBusy, detail: "another campaign is already on screen")
             }
             // Resolve variable context: dashboard schemas define type + fallback;
             // CEP trigger variables win over fallbacks (D3′).
@@ -1312,6 +1370,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 cfg.canvasSurvey != nil
                 && isLiveTestCepId(payload.cepCampaignId)
                 && activeSurveyCepId.map(isLiveTestCepId) == true
+            if !replaceActiveLiveTestCanvasSurvey && isModalCampaignActive() {
+                lastCampaignDropReason = "another campaign is already on screen"
+                logVerbose(
+                    "survey campaign dropped: another campaign is already on screen: \(key)")
+                context.onDropped(
+                    DropReason.surfaceBusy,
+                    message: "another campaign is already on screen")
+                return .dropped(
+                    reason: .surfaceBusy, detail: "another campaign is already on screen")
+            }
             if replaceActiveLiveTestCanvasSurvey {
                 markSurveyDismissed()
                 // Safe on anything, including a survey that already showed —
@@ -1339,21 +1407,21 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 return .dropped(reason: .frequencyCapped, detail: nil)
             }
             // A collapsed floater is a third, independent lane (see
-            // `isModalCampaignActive`'s kdoc) — it does not compete with
+            // `isModalCampaignActive`) — it does not compete with
             // nudge/survey. But it must not *start* while one of them is already
             // the modal surface, since it would otherwise float on top of a
             // nudge/survey that is supposed to own the screen exclusively.
             if isModalCampaignActive() {
-                lastCampaignDropReason = "a nudge, survey, or expanded floater is already on screen"
+                lastCampaignDropReason = "another campaign is already on screen"
                 logVerbose(
-                    "floater campaign dropped: a nudge, survey, or expanded floater is already modal: \(key)"
+                    "floater campaign dropped: another campaign is already on screen: \(key)"
                 )
                 context.onDropped(
                     DropReason.surfaceBusy,
-                    message: "a nudge, survey, or expanded floater is already on screen")
+                    message: "another campaign is already on screen")
                 return .dropped(
                     reason: .surfaceBusy,
-                    detail: "a nudge, survey, or expanded floater is already on screen")
+                    detail: "another campaign is already on screen")
             }
             // One floater at a time across BOTH subtypes. Each orchestrator only knows
             // about its own showing, so without this a PiP and a story window could
@@ -1512,6 +1580,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             self?.liveTestContexts.removeValue(forKey: cepCampaignId)
             self?.liveTestCampaigns.removeValue(forKey: cepCampaignId)
             self?.events.resetImpression(cepCampaignId)
+            // A live-test RN guide holds the empty presentation id.
+            self?.clearExternalGuide(presentationId: "")
         }
 
         let testContext = LiveTestContext(
@@ -2814,6 +2884,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// acceptance watchdog — simply resolves to nothing here. That is a
     /// designed race, never an error, so it never traps.
     func reportExternalGuideLifecycle(presentationId: String, event: ExternalGuideLifecycleEvent) {
+        // A terminal report clears the flag even when the id matches no live
+        // presentation: a live test's RN guide holds the empty id.
+        if case .settled = event {
+            clearExternalGuide(presentationId: presentationId)
+        }
         guard let controller = coordinator.controller(forPresentationId: presentationId) else {
             log.d(
                 "reportExternalGuideLifecycle: no-op — unknown or already-settled presentation",
