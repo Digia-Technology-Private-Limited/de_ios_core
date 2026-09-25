@@ -123,6 +123,9 @@ private struct NudgeFullScreenView: View {
 
     private var surface: NudgeSurface { presentation.config.surface }
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
+    private func dismissFromCta() {
+        SDKInstance.shared.markNudgeDismissed(reason: .ctaAction)
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -152,7 +155,9 @@ private struct NudgeFullScreenView: View {
                         runtimeViewportWidth: geometry.size.width,
                         availableSize: contentSize,
                         onAction: { request in
-                            performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
+                            performCanvasAction(
+                                request, variables: presentation.variables,
+                                dismiss: dismissFromCta)
                         },
                         showBackground: false
                     )
@@ -239,6 +244,9 @@ private struct NudgeSheetView: View {
         canvas != nil && surface.bottomSafeAreaMode == .insetContent
     }
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
+    private func dismissFromCta() {
+        SDKInstance.shared.markNudgeDismissed(reason: .ctaAction)
+    }
 
     var body: some View {
         DigiaBottomSheet(
@@ -270,7 +278,9 @@ private struct NudgeSheetView: View {
                                 height: max(1, runtimeSize.height)
                             ),
                             onAction: { request in
-                                performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
+                                performCanvasAction(
+                                    request, variables: presentation.variables,
+                                    dismiss: dismissFromCta)
                             },
                             showBackground: !hostPaintsCanvasBackground
                         )
@@ -335,7 +345,7 @@ private struct NudgeSheetView: View {
     /// `{{ placeholder }}` copy interpolates (mirrors Flutter's
     /// `VariableScopeProvider`).
     private var renderedContent: some View {
-        NudgeColumnContent(column: presentation.config.layout, onDismiss: dismiss)
+        NudgeColumnContent(column: presentation.config.layout, onDismiss: dismissFromCta)
             .environment(\.digiaVariables, presentation.variables)
     }
 }
@@ -355,6 +365,9 @@ private struct NudgeDialogContainer: View {
     private var scrimColor: Color { nudgeScrimColor(surface) }
     private var backgroundColor: Color { surface.backgroundColor ?? .white }
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
+    private func dismissFromCta() {
+        SDKInstance.shared.markNudgeDismissed(reason: .ctaAction)
+    }
 
     var body: some View {
         let insets = surface.useSafeArea ? safeAreaInsets : .zero
@@ -453,7 +466,7 @@ private struct NudgeDialogContainer: View {
                 availableSize: availableSize,
                 onAction: { request in
                     performCanvasAction(
-                        request, variables: presentation.variables, dismiss: dismiss)
+                        request, variables: presentation.variables, dismiss: dismissFromCta)
                 }
             )
             if surface.showCloseButton, surface.closeButton.placement?.mode == .inside {
@@ -508,7 +521,7 @@ private struct NudgeDialogContainer: View {
     }
 
     private var renderedContent: some View {
-        NudgeColumnContent(column: presentation.config.layout, onDismiss: dismiss)
+        NudgeColumnContent(column: presentation.config.layout, onDismiss: dismissFromCta)
             .environment(\.digiaVariables, presentation.variables)
     }
 }
