@@ -29,6 +29,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private struct ExternalGuide {
         let campaign: CampaignModel
         let payload: CEPTriggerPayload
+        let presentationId: String
     }
 
     var requestHeaders: [String: String] { services?.requestHeaders ?? [:] }
@@ -651,8 +652,20 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .accepted(let payload, let kind):
             coordinator.accept(controller, kind: kind)
             if awaitsAnchorLayout(payload) { coordinator.awaitAnchor(payload) }
+            watchExternalGuideSettle(controller)
         case .dropped(let reason, let detail):
             controller.settle(.dropped(reason: reason, detail: detail))
+        }
+    }
+
+    /// Clears the RN guide flag when its presentation settles, the watchdogs
+    /// included: they settle through the coordinator, never through a surface.
+    private func watchExternalGuideSettle(_ controller: PresentationController) {
+        guard activeExternalGuide?.presentationId == controller.id else { return }
+        let presentationId = controller.id
+        Task { @MainActor [weak self] in
+            _ = await controller.presentation.outcome.value
+            self?.clearExternalGuide(presentationId: presentationId)
         }
     }
 
@@ -1176,6 +1189,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         guideOrchestrator.state != nil || activeExternalGuide != nil
     }
 
+    /// Clears the RN guide flag only when `presentationId` still owns it, so an
+    /// older guide's settle never disarms a newer one.
+    private func clearExternalGuide(presentationId: String) {
+        if activeExternalGuide?.presentationId == presentationId {
+            activeExternalGuide = nil
+        }
+    }
+
     private func route(
         _ campaign: CampaignModel,
         payload: CEPTriggerPayload,
@@ -1258,7 +1279,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     return .dropped(
                         reason: .surfaceBusy, detail: "another campaign is already on screen")
                 }
-                activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
+                let presentationId = payload.presentationId ?? ""
+                activeExternalGuide = ExternalGuide(
+                    campaign: campaign,
+                    payload: payload,
+                    presentationId: presentationId
+                )
                 // `payload` was stamped by `coordinator.open()` before routing
                 // ever saw it, so this is only ever empty for a delivery that
                 // bypassed that stamp — a live test's synthesised payload. The
@@ -1267,7 +1293,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 renderViaJs(
                     GuideRenderRequest(
                         payload: payload,
-                        presentationId: payload.presentationId ?? "",
+                        presentationId: presentationId,
                         campaignId: campaign.id,
                         templateConfigJson: campaign.guideTemplateJson
                     )
@@ -1554,6 +1580,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             self?.liveTestContexts.removeValue(forKey: cepCampaignId)
             self?.liveTestCampaigns.removeValue(forKey: cepCampaignId)
             self?.events.resetImpression(cepCampaignId)
+            // A live-test RN guide holds the empty presentation id.
+            self?.clearExternalGuide(presentationId: "")
         }
 
         let testContext = LiveTestContext(
@@ -2856,6 +2884,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// acceptance watchdog — simply resolves to nothing here. That is a
     /// designed race, never an error, so it never traps.
     func reportExternalGuideLifecycle(presentationId: String, event: ExternalGuideLifecycleEvent) {
+        // A terminal report clears the flag even when the id matches no live
+        // presentation: a live test's RN guide holds the empty id.
+        if case .settled = event {
+            clearExternalGuide(presentationId: presentationId)
+        }
         guard let controller = coordinator.controller(forPresentationId: presentationId) else {
             log.d(
                 "reportExternalGuideLifecycle: no-op — unknown or already-settled presentation",
