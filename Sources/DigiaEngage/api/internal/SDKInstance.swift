@@ -1157,15 +1157,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
-    /// Whether a guide, nudge, survey, or an *expanded* floater currently
-    /// occupies the screen modally. A *collapsed* floater is deliberately not
-    /// modal — it is a third, independent lane that never blocks and is never
-    /// blocked by the others (`ai_docs/pip-campaign-design.md` §3.2) — so this
-    /// only starts returning true once the floater expands, at which point it
-    /// behaves like every other full-screen surface. Gates every modal
-    /// campaign's routing (guide, survey, nudge) and floater start (mirrors
-    /// Android's `DigiaInstance.isModalCampaignActive`, used identically at its
-    /// call sites).
+    /// Whether a guide, nudge, survey, or expanded floater currently occupies
+    /// the screen modally. A collapsed floater never counts: it is a separate,
+    /// non-blocking lane (`ai_docs/pip-campaign-design.md` §3.2).
     private func isModalCampaignActive() -> Bool {
         isGuideActive()
             || controller.activeNudge != nil || surveyOrchestrator.state != nil
@@ -1175,11 +1169,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             || floaterStoryOrchestrator.storyOverlayActive
     }
 
-    /// Whether a guide is on screen in either shape: the native canvas or
-    /// anchorless guide `guideOrchestrator` drives, or the RN-rendered guide
-    /// the JS layer drives through `activeExternalGuide`. A modal guard that
-    /// reads `isModalCampaignActive()` exempts an active guide with this, so a
-    /// second guide still replaces the first.
+    /// Whether a guide is on screen in either shape: the native guide that
+    /// `guideOrchestrator` drives, or the RN guide in `activeExternalGuide`.
+    /// A guide of either shape is modal.
     private func isGuideActive() -> Bool {
         guideOrchestrator.state != nil || activeExternalGuide != nil
     }
@@ -1256,7 +1248,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     lastCampaignDropReason = "frequency capped"
                     return .dropped(reason: .frequencyCapped, detail: nil)
                 }
-                if isModalCampaignActive() && !isGuideActive() {
+                if isModalCampaignActive() && activeExternalGuide == nil {
                     lastCampaignDropReason = "another campaign is already on screen"
                     context.onDropped(
                         DropReason.surfaceBusy,
@@ -1287,7 +1279,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 logNativeGuideStage("route", "result=dropped reason=frequency_capped campaign_key=\(key)")
                 return .dropped(reason: .frequencyCapped, detail: nil)
             }
-            if isModalCampaignActive() && !isGuideActive() {
+            if isModalCampaignActive() && guideOrchestrator.state == nil {
                 lastCampaignDropReason = "another campaign is already on screen"
                 context.onDropped(
                     DropReason.surfaceBusy,
@@ -1389,21 +1381,21 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 return .dropped(reason: .frequencyCapped, detail: nil)
             }
             // A collapsed floater is a third, independent lane (see
-            // `isModalCampaignActive`'s kdoc) — it does not compete with
+            // `isModalCampaignActive`) — it does not compete with
             // nudge/survey. But it must not *start* while one of them is already
             // the modal surface, since it would otherwise float on top of a
             // nudge/survey that is supposed to own the screen exclusively.
             if isModalCampaignActive() {
-                lastCampaignDropReason = "a nudge, survey, or expanded floater is already on screen"
+                lastCampaignDropReason = "another campaign is already on screen"
                 logVerbose(
                     "floater campaign dropped: a nudge, survey, or expanded floater is already modal: \(key)"
                 )
                 context.onDropped(
                     DropReason.surfaceBusy,
-                    message: "a nudge, survey, or expanded floater is already on screen")
+                    message: "another campaign is already on screen")
                 return .dropped(
                     reason: .surfaceBusy,
-                    detail: "a nudge, survey, or expanded floater is already on screen")
+                    detail: "another campaign is already on screen")
             }
             // One floater at a time across BOTH subtypes. Each orchestrator only knows
             // about its own showing, so without this a PiP and a story window could
