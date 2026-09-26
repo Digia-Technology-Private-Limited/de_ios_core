@@ -169,7 +169,7 @@ struct DigiaCampaignTimelineView: View {
         "campaign_unsupported": "This campaign type can't show in this app",
         // trigger
         "cep_trigger_received": "Delivered",
-        "not_initialized": "Not shown — Digia wasn't ready yet",
+        "not_initialized": "Not shown — Digia wasn't initialized",
         "not_ready": "Not shown — campaigns were still loading",
         "initialization_failed": "Not shown — campaigns couldn't be loaded",
         "unknown_campaign_key": "Not shown — no campaign with this key",
