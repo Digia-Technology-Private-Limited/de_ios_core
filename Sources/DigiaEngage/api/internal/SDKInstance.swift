@@ -228,8 +228,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 self?.relayLiveTestDismissal(cepCampaignId, reason: reason, completed: completed)
             }
         )
-        inlineController.onCampaignRemoved = { [weak self] payload in
-            self?.events.inlineRemoved(payload)
+        inlineController.onCampaignRemoved = { [weak self] payload, reason in
+            self?.events.inlineRemoved(payload, reason: reason)
         }
         floaterOrchestrator = FloaterOrchestrator(
             onDismissed: { [weak self] state, reason, metrics, wasVisible in
@@ -1131,6 +1131,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// branches on which one this is.
     @MainActor
     private protocol RoutingContext {
+        /// A live test takes the §2.2 path through the surface rule.
+        var isLiveTest: Bool { get }
         func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool
         func onInlineRouted(payload: CEPTriggerPayload)
         func onDropped(_ code: DiagnosticReason, message: String)
@@ -1139,6 +1141,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     @MainActor
     private struct OrganicRoutingContext: RoutingContext {
         let frequencyManager: FrequencyManager?
+        var isLiveTest: Bool { false }
 
         func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool {
             guard
@@ -1171,6 +1174,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             self.testContext = testContext
         }
 
+        var isLiveTest: Bool { true }
+
         func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool { false }
 
         func onInlineRouted(payload: CEPTriggerPayload) {
@@ -1187,20 +1192,109 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
-    /// Whether a nudge, survey, or an *expanded* floater currently occupies the
-    /// screen modally. A *collapsed* floater is deliberately not modal — it is a
-    /// third, independent lane that never blocks and is never blocked by the
-    /// others (`ai_docs/pip-campaign-design.md` §3.2) — so this only starts
-    /// returning true once the floater expands, at which point it behaves like
-    /// every other full-screen surface. Gates only floater's own start (mirrors
-    /// Android's `DigiaInstance.isModalCampaignActive`, used identically at its
-    /// one call site); nudge/survey routing is intentionally left unchanged.
-    private func isModalCampaignActive() -> Bool {
-        controller.activeNudge != nil || surveyOrchestrator.state != nil
-            || floaterOrchestrator.surface == .expanded
-            // An open story is the story floater's expanded state: it fills the
-            // screen, so from here on it behaves like every other modal surface.
-            || floaterStoryOrchestrator.storyOverlayActive
+    /// Every campaign routing accepted that has not settled yet (SR03), read
+    /// from the orchestrators at the moment of routing. A floater animating out
+    /// has already ended and is not an occupant. An RN classic guide
+    /// (`activeExternalGuide`) is deliberately not one (plan §2.4).
+    private func surfaceOccupants() -> [SurfaceOccupant] {
+        var result: [SurfaceOccupant] = []
+        func add(_ kind: SurfaceKind, _ payload: CEPTriggerPayload) {
+            result.append(
+                SurfaceOccupant(
+                    kind: kind,
+                    campaignKey: payload.campaignKey,
+                    cepCampaignId: payload.cepCampaignId,
+                    isLiveTest: isLiveTestCepId(payload.cepCampaignId),
+                    hasDisplayed: events.hasImpressed(payload.cepCampaignId)
+                ))
+        }
+        if let nudge = controller.activeNudge { add(.nudge, nudge.payload) }
+        if let survey = surveyOrchestrator.state { add(.survey, survey.payload) }
+        if let guide = guideOrchestrator.state { add(.guide, guide.payload) }
+        if let floater = floaterOrchestrator.state, !floaterOrchestrator.closing {
+            add(floaterOrchestrator.surface == .expanded ? .floaterExpanded : .floaterCollapsed, floater.payload)
+        }
+        if let story = floaterStoryOrchestrator.state, !floaterStoryOrchestrator.closing {
+            // An open story is the story floater's expanded state.
+            add(floaterStoryOrchestrator.storyOverlayActive ? .floaterExpanded : .floaterCollapsed, story.payload)
+        }
+        for occupant in inlineController.slotOccupants {
+            add(.inline(slot: occupant.slot), occupant.payload)
+        }
+        return result
+    }
+
+    /// The occupant that turned the last organic trigger away `surface_busy`,
+    /// read by `routeNow` to put the blocker on the drop's timeline record
+    /// (SR10). Same "last" pattern as `lastCampaignDropReason`.
+    private var lastSurfaceBlocker: SurfaceOccupant?
+
+    /// Applies the surface rule to an arriving campaign, after every other check
+    /// has passed. Returns a drop verdict, or nil to go ahead and show.
+    ///
+    /// Organic (§2.1): `busy` drops; `replace` settles the slot's never-displayed
+    /// occupant `superseded`. Live test (§2.2): never dropped; every conflicting
+    /// occupant is settled `superseded` first.
+    private func admitToSurface(
+        _ incoming: SurfaceKind,
+        campaignKey: String,
+        context: RoutingContext
+    ) -> RoutingVerdict? {
+        let occupants = surfaceOccupants()
+        if context.isLiveTest {
+            for occupant in SurfaceRule.liveTestDisplaced(incoming, occupants: occupants) {
+                log.d(
+                    "Live test displaces \(occupant.kind.wire) '\(occupant.campaignKey)'",
+                    campaign: campaignKey)
+                settleSuperseded(occupant)
+            }
+            return nil
+        }
+        switch SurfaceRule.decide(incoming, occupants: occupants) {
+        case .show:
+            return nil
+        case .replace(let occupant):
+            settleSuperseded(occupant)
+            return nil
+        case .busy(let blocker):
+            let detail = "\(blocker.kind.wire) on screen (\(blocker.campaignKey))"
+            lastCampaignDropReason = detail
+            lastSurfaceBlocker = blocker
+            log.d("Dropped — surface busy: \(detail)", campaign: campaignKey)
+            context.onDropped(DropReason.surfaceBusy, message: detail)
+            return .dropped(reason: .surfaceBusy, detail: detail)
+        }
+    }
+
+    /// Takes an occupant off the surface, settling it `superseded` — which
+    /// releases a real campaign's CEP slot, and reports an earlier live test
+    /// that never showed as superseded on its dashboard row. The one helper
+    /// every displacement goes through (SR06).
+    private func settleSuperseded(_ occupant: SurfaceOccupant) {
+        let id = occupant.cepCampaignId
+        switch occupant.kind {
+        case .nudge:
+            if controller.activeNudge?.payload.cepCampaignId == id {
+                markNudgeDismissed(reason: .superseded)
+            }
+        case .survey:
+            if surveyOrchestrator.state?.payload.cepCampaignId == id {
+                markSurveyDismissed(reason: .superseded)
+            }
+        case .guide:
+            if guideOrchestrator.state?.payload.cepCampaignId == id {
+                dismissGuide(reason: .superseded, completed: false)
+            }
+        case .floaterExpanded, .floaterCollapsed:
+            if floaterOrchestrator.state?.payload.cepCampaignId == id {
+                floaterOrchestrator.dismiss(.superseded)
+            } else if floaterStoryOrchestrator.state?.payload.cepCampaignId == id {
+                floaterStoryOrchestrator.dismiss(.superseded)
+            }
+        case .inline(let slot):
+            inlineController.dismissCampaign(slot, reason: .superseded)
+        }
+        supersedeLiveTest(id)
     }
 
     private func route(
@@ -1232,11 +1326,17 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .inline(let cfg):
             logVerbose(
                 "routeByCampaignKey INLINE slotKey='\(cfg.slotKey)' items=\(cfg.items.count)")
+            if let busy = admitToSurface(.inline(slot: cfg.slotKey), campaignKey: key, context: context) {
+                return busy
+            }
             inlineController.setCarouselConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             context.onInlineRouted(payload: payload)
             return .accepted(payload: payload, kind: .inline)
         case .banner(let cfg):
+            if let busy = admitToSurface(.inline(slot: cfg.slotKey), campaignKey: key, context: context) {
+                return busy
+            }
             inlineController.setBannerConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             context.onInlineRouted(payload: payload)
@@ -1250,11 +1350,17 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 context.onDropped(DropReason.invalidConfig, message: reason)
                 return .dropped(reason: .invalidConfig, detail: reason)
             }
+            if let busy = admitToSurface(.inline(slot: cfg.slotKey), campaignKey: key, context: context) {
+                return busy
+            }
             inlineController.setCanvasConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             context.onInlineRouted(payload: payload)
             return .accepted(payload: payload, kind: .inline)
         case .story(let cfg):
+            if let busy = admitToSurface(.inline(slot: cfg.slotKey), campaignKey: key, context: context) {
+                return busy
+            }
             inlineController.setStoryConfig(cfg.slotKey, config: cfg)
             inlineController.setCampaign(cfg.slotKey, payload: payload)
             context.onInlineRouted(payload: payload)
@@ -1296,19 +1402,27 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 logNativeGuideStage("route", "result=dropped reason=frequency_capped campaign_key=\(key)")
                 return .dropped(reason: .frequencyCapped, detail: nil)
             }
-            guard guideConfig.steps.allSatisfy({ $0.widgetConfig.canvas != nil }) else {
+            guard !guideConfig.steps.isEmpty,
+                  guideConfig.steps.allSatisfy({ $0.widgetConfig.canvas != nil })
+            else {
                 let message = "campaign has no valid Canvas guide content"
                 lastCampaignDropReason = message
                 context.onDropped(DropReason.invalidConfig, message: message)
                 log.e("Dropped — \(message)", campaign: key)
                 return .dropped(reason: .invalidConfig, detail: message)
             }
-            if guideOrchestrator.state != nil, !guideConfig.steps.isEmpty { dismissGuide() }
+            if let busy = admitToSurface(.guide, campaignKey: key, context: context) {
+                logNativeGuideStage("route", "result=dropped reason=surface_busy campaign_key=\(key)")
+                return busy
+            }
+            // The rule has cleared the surface, so a refusal here is the
+            // campaign itself (not a parsed guide), never another guide.
             guard guideOrchestrator.start(campaign, payload: payload) else {
-                lastCampaignDropReason = "another guide is already on screen"
-                context.onDropped(DropReason.surfaceBusy, message: "another guide is already on screen")
-                logNativeGuideStage("route", "result=dropped reason=guide_active campaign_key=\(key)")
-                return .dropped(reason: .surfaceBusy, detail: "another guide is already on screen")
+                let message = "guide could not start"
+                lastCampaignDropReason = message
+                context.onDropped(DropReason.invalidConfig, message: message)
+                logNativeGuideStage("route", "result=dropped reason=invalid_config campaign_key=\(key)")
+                return .dropped(reason: .invalidConfig, detail: message)
             }
             guideCompletionFired = false
             logNativeGuideStage("route", "result=accepted campaign_key=\(key)")
@@ -1324,15 +1438,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 schemas: nudgeConfig.variableSchemas,
                 cepVars: payload.variables
             )
-            // A newer nudge displaces the shown one: settle the incumbent as
-            // superseded first, CEP-only like Android and Flutter (no Digia
-            // event), or its CEP slot stays held.
-            if let incumbent = controller.activeNudge {
-                events.toCep(
-                    .dismissed(reason: .superseded),
-                    payload: incumbent.payload
-                )
-                supersedeLiveTest(incumbent.payload.cepCampaignId)
+            if let busy = admitToSurface(.nudge, campaignKey: key, context: context) {
+                return busy
             }
             controller.showNudge(
                 DigiaNudgePresentation(
@@ -1347,28 +1454,22 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 lastCampaignDropReason = "frequency capped"
                 return .dropped(reason: .frequencyCapped, detail: nil)
             }
-            let activeSurveyCepId = surveyOrchestrator.state?.payload.cepCampaignId
-            let replaceActiveLiveTestCanvasSurvey =
-                cfg.canvasSurvey != nil
-                && isLiveTestCepId(payload.cepCampaignId)
-                && activeSurveyCepId.map(isLiveTestCepId) == true
-            if replaceActiveLiveTestCanvasSurvey {
-                markSurveyDismissed()
-                // Safe on anything, including a survey that already showed —
-                // reportFailed is idempotent, so this only actually changes
-                // the outcome of a test displaced before it ever appeared.
-                supersedeLiveTest(activeSurveyCepId)
+            // Checked before the surface rule so a test with no content leaves
+            // the screen as it was (§2.2).
+            guard !cfg.nodes.isEmpty, !cfg.blocks.isEmpty else {
+                let message = "survey has no content"
+                lastCampaignDropReason = message
+                context.onDropped(DropReason.invalidConfig, message: message)
+                return .dropped(reason: .invalidConfig, detail: message)
             }
-            let started = surveyOrchestrator.start(
-                payload: payload,
-                config: cfg,
-                allowActiveReplacement: replaceActiveLiveTestCanvasSurvey
-            )
-            if !started {
-                lastCampaignDropReason = "another survey is already on screen"
-                logVerbose("survey campaign dropped: another survey is on screen: \(key)")
-                context.onDropped(DropReason.surfaceBusy, message: "another survey is already on screen")
-                return .dropped(reason: .surfaceBusy, detail: "another survey is already on screen")
+            if let busy = admitToSurface(.survey, campaignKey: key, context: context) {
+                return busy
+            }
+            guard surveyOrchestrator.start(payload: payload, config: cfg) else {
+                let message = "survey could not start"
+                lastCampaignDropReason = message
+                context.onDropped(DropReason.invalidConfig, message: message)
+                return .dropped(reason: .invalidConfig, detail: message)
             }
             return .accepted(payload: payload, kind: .modal)
         // Both floater subtypes route through the same gate — a collapsed window of
@@ -1378,35 +1479,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 lastCampaignDropReason = "frequency capped"
                 return .dropped(reason: .frequencyCapped, detail: nil)
             }
-            // A collapsed floater is a third, independent lane (see
-            // `isModalCampaignActive`'s kdoc) — it does not compete with
-            // nudge/survey. But it must not *start* while one of them is already
-            // the modal surface, since it would otherwise float on top of a
-            // nudge/survey that is supposed to own the screen exclusively.
-            if isModalCampaignActive() {
-                lastCampaignDropReason = "a nudge, survey, or expanded floater is already on screen"
-                logVerbose(
-                    "floater campaign dropped: a nudge, survey, or expanded floater is already modal: \(key)"
-                )
-                context.onDropped(
-                    DropReason.surfaceBusy,
-                    message: "a nudge, survey, or expanded floater is already on screen")
-                return .dropped(
-                    reason: .surfaceBusy,
-                    detail: "a nudge, survey, or expanded floater is already on screen")
+            // Both lanes are one floater: the rule's floater row turns this away
+            // over a blocking campaign or over any other floater.
+            if let busy = admitToSurface(.floaterCollapsed, campaignKey: key, context: context) {
+                return busy
             }
-            // One floater at a time across BOTH subtypes. Each orchestrator only knows
-            // about its own showing, so without this a PiP and a story window could
-            // float over each other — two draggable boxes competing for one corner.
             let wantsStory = campaign.floaterStoryConfig != nil
-            let otherLaneBusy =
-                wantsStory ? floaterOrchestrator.state != nil : floaterStoryOrchestrator.state != nil
-            if otherLaneBusy {
-                lastCampaignDropReason = "another floater is already on screen"
-                logVerbose("floater campaign dropped: another floater is on screen: \(key)")
-                context.onDropped(DropReason.surfaceBusy, message: "another floater is already on screen")
-                return .dropped(reason: .surfaceBusy, detail: "another floater is already on screen")
-            }
             // Two template shapes under one campaign type, each with its own
             // orchestrator — see `CampaignConfigModel.floaterStory`.
             if wantsStory {
@@ -1455,7 +1533,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// terminal ACK". This runs on an SSE callback with nothing above it, so
     /// without it a throw anywhere in parsing or routing would escape into
     /// the stream handler and the dashboard row would simply stop moving.
-    private func handleLiveTestCampaign(_ invocation: LiveTestInvocation) {
+    /// Internal (not private) so routing tests can drive a live test.
+    func handleLiveTestCampaign(_ invocation: LiveTestInvocation) {
         do {
             try routeLiveTestCampaign(invocation)
         } catch {
@@ -1536,8 +1615,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             )
             return
         }
-
-        if campaign.guideConfig != nil { replaceActiveLiveTestGuide() }
 
         let coercedVariables = invocation.variables.mapValues { "\($0)" }
         let cepCampaignId = liveTestCepId(invocation.testInvocationId)
@@ -1632,15 +1709,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             DropReason.superseded,
             message: "superseded by a newer live test"
         )
-    }
-
-    private func replaceActiveLiveTestGuide() {
-        if let state = guideOrchestrator.state,
-           isLiveTestCepId(state.payload.cepCampaignId) {
-            supersedeLiveTest(state.payload.cepCampaignId)
-            guideOrchestrator.dismissIfActive(payloadId: state.payload.cepCampaignId)
-            guideCompletionFired = false
-        }
     }
 
     // MARK: - Survey lifecycle
@@ -1916,6 +1984,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     func markInitializedForTesting(with config: DigiaConfig) {
         self.config = config
         hostActionExecutor.configure(config.actionHandlers)
+    }
+
+    /// Whether a live-test invocation is still waiting for its terminal ACK.
+    func isLiveTestPendingForTesting(_ testInvocationId: String) -> Bool {
+        liveTestContexts[liveTestCepId(testInvocationId)] != nil
     }
 
     func setCampaignsForTesting(_ campaigns: [CampaignModel]) {

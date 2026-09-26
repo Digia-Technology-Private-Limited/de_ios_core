@@ -23,7 +23,7 @@ private let log = DigiaLogger()
 // This orchestrator deliberately does **not** take a display lock while collapsed: a
 // floater can sit on a screen for minutes, and blocking every other campaign for
 // that long is not acceptable. It behaves modally only while expanded (enforced by
-// the caller, not this class — see `SDKInstance.isModalCampaignActive()`).
+// the caller, not this class — see `SurfaceRule`).
 
 enum FloaterSurface: Equatable {
     case collapsed, expanded

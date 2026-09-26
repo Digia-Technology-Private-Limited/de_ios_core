@@ -19,16 +19,15 @@ final class SurveyOrchestrator: ObservableObject {
 
     private var tokenCounter: Int64 = 0
 
-    /// Starts a survey. Returns false if an active survey cannot be replaced or
-    /// the config is empty.
+    /// Starts a survey. Returns false if a survey is already active or the
+    /// config is empty.
     @discardableResult
     func start(
         payload: CEPTriggerPayload,
-        config: SurveyConfigModel,
-        allowActiveReplacement: Bool = false
+        config: SurveyConfigModel
     ) -> Bool {
         guard !config.nodes.isEmpty, !config.blocks.isEmpty else { return false }
-        if state != nil && !allowActiveReplacement { return false }
+        if state != nil { return false }
         tokenCounter += 1
         state = ActiveSurveyState(
             payload: payload,

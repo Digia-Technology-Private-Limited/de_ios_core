@@ -157,6 +157,12 @@ final class EngageEventEmitter {
         toDigia(event, payload: payload)
     }
 
+    /// Whether this campaign has recorded its first-render impression — the
+    /// surface rule's "displayed" (SR05).
+    func hasImpressed(_ cepCampaignId: String) -> Bool {
+        digiaImpressed.contains(cepCampaignId)
+    }
+
     func inlineRemoved(_ payload: CEPTriggerPayload, reason: DismissReason = .userClose) {
         resetImpression(payload.cepCampaignId)
         toCep(.dismissed(reason: reason), payload: payload)
