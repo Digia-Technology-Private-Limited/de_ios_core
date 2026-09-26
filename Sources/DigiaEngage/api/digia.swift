@@ -88,8 +88,8 @@ public enum Digia {
     /// the fetch.
     ///
     /// A retry after a failed fetch reuses the configuration of the first call:
-    /// the `config` passed to the retry is ignored, and only the campaign fetch
-    /// runs again.
+    /// the `config` passed to the retry is ignored, except its action handlers,
+    /// which replace the first call's, and only the campaign fetch runs again.
     public static func initialize(_ config: DigiaConfig) async throws {
         guard #available(iOS 17, *) else { return }
         try await SDKInstance.shared.initialize(config)
