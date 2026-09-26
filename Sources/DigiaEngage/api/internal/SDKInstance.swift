@@ -675,6 +675,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .failed:
             drop = (.initializationFailed, "Campaign fetch failed; trigger dropped")
         }
+        log.w("Dropped — \(drop.1)", campaign: controller.trigger.campaignKey)
         controller.settle(.dropped(reason: drop.0, detail: drop.1))
     }
 
