@@ -297,7 +297,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             await awaitCampaignFetch(calledAt: calledAt)
             return
         }
-        guard self.config == nil else { return }
+        guard self.config == nil else {
+            log.w("initialize() ignored — already initialized")
+            return
+        }
         self.config = config
         // Pending mode (SP10): allowlisted records from here until `activate`
         // below are queued, not lost.
