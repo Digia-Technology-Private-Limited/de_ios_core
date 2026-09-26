@@ -73,12 +73,35 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     private var activeKey: String?
     private var activeAvailable: ((String) -> Void)?
     private var activeUnavailable: ((String, AnchorUnavailableReason) -> Void)?
+    private var activeRemoved: ((String) -> Void)?
     private var activeAnchorWasAvailable = false
     private let activeViewSampler = ActiveAnchorSampler()
     private var readinessTask: Task<Void, Never>?
+    /// Runs while the active step's `delayInMs` has not elapsed. Until then the
+    /// anchor is neither sampled nor scrolled, and the readiness wait hasn't
+    /// started (Android `GuideRenderer.kt` waits the same way).
+    private var stepDelayTimer: Timer?
+    private var stepDelayDeadline: Date?
+    private var stepDelayMs = 0
+    /// The step scrolls its anchor into view once; a user scroll after that is
+    /// left alone.
+    private var scrollPending = false
+
+    /// Told each time an anchor registers. Set once by `SDKInstance.shared`
+    /// (see `setAnchorSeenHandler`) rather than reached for from here.
+    private var onAnchorSeen: ((String) -> Void)?
 
     private override init() {
         super.init()
+    }
+
+    /// Installs the anchor-seen hook, then replays the anchors already
+    /// registered: a host can register anchors before the SDK instance exists.
+    func setAnchorSeenHandler(_ handler: @escaping (String) -> Void) {
+        onAnchorSeen = handler
+        for key in Set(viewRegistry.keys).union(rectRegistry.keys) {
+            handler(key)
+        }
     }
 
     public func register(key: String, view: UIView, cornerRadius: CGFloat = 0) {
@@ -89,8 +112,8 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         if activeKey == key { trackedCornerRadius = nil }
         cornerRadii.removeValue(forKey: key)
         version &+= 1
-        SDKInstance.shared.recordAnchorSeen(key)
-        guard activeKey == key else { return }
+        onAnchorSeen?(key)
+        guard activeKey == key, !isInStepDelay else { return }
         if !activeAnchorWasAvailable { startReadinessTimeout(for: key) }
         startSampling(key: key)
     }
@@ -103,8 +126,8 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         if activeKey == key { trackedCornerRadius = nil }
         cornerRadii[key] = cornerRadius
         version &+= 1
-        SDKInstance.shared.recordAnchorSeen(key)
-        guard activeKey == key else { return }
+        onAnchorSeen?(key)
+        guard activeKey == key, !isInStepDelay else { return }
         activeAnchorWasAvailable = false
         activeViewSampler.stop()
         startReadinessTimeout(for: key)
@@ -130,6 +153,12 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         trackedRects.removeValue(forKey: key)
         version &+= 1
         guard activeKey == key else { return }
+        // As Flutter's anchor dispose: the step's anchor left, whether or not
+        // the step has shown yet. SDKInstance decides what that means.
+        if !remaining.contains(where: { $0.value?.window != nil }) {
+            notifyActiveAnchorRemovedNextTurn(key: key)
+        }
+        guard !isInStepDelay else { return }
         if remaining.isEmpty {
             activeAnchorWasAvailable = false
             startReadinessTimeout(for: key, failureReason: .detached)
@@ -145,7 +174,10 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         trackedRects.removeValue(forKey: key)
         cornerRadii.removeValue(forKey: key)
         version &+= 1
-        if activeKey == key {
+        guard activeKey == key else { return }
+        // Same as the view path: the step's anchor left (A40, incl. during the delay).
+        notifyActiveAnchorRemovedNextTurn(key: key)
+        if !isInStepDelay {
             activeAnchorWasAvailable = false
             startReadinessTimeout(for: key, failureReason: .detached)
         }
@@ -194,12 +226,31 @@ public final class AnchorRegistry: NSObject, ObservableObject {
                         animated: false
                     )
                     scrollView.layoutIfNeeded()
-                    if case .available = ActiveAnchorSampler.resolve(view: view) { return true }
+                    // The presentation layer only catches up when this
+                    // transaction commits, so judge the scroll by the model.
+                    if case .available = ActiveAnchorSampler.resolve(
+                        view: view,
+                        usePresentation: false
+                    ) { return true }
                 }
                 ancestor = current.superview
             }
         }
         return false
+    }
+
+    /// Whether `key` is on screen now, scrolling it into view first when it is
+    /// only outside the viewport. Uses `scrollToVisible`'s answer, because a
+    /// fresh `resolution(for:)` still sees the pre-scroll presentation layer.
+    func isOnScreenScrollingIfNeeded(_ key: String) -> Bool {
+        switch resolution(for: key) {
+        case .available:
+            return true
+        case .unavailable(.outsideViewport):
+            return scrollToVisible(key)
+        case .missing, .unavailable:
+            return false
+        }
     }
 
     private func preferredViewBox(for key: String) -> WeakBox? {
@@ -240,17 +291,56 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         return rect
     }
 
+    /// Tracks the step's anchor. With `delayMs`, sampling, scrolling and the
+    /// readiness wait start only once the delay has elapsed; a removal is still
+    /// reported during it.
     func track(
         key: String?,
+        delayMs: Int = 0,
         onAvailable: @escaping (String) -> Void,
-        onUnavailable: @escaping (String, AnchorUnavailableReason) -> Void
+        onUnavailable: @escaping (String, AnchorUnavailableReason) -> Void,
+        onRemoved: ((String) -> Void)? = nil
     ) {
         stopTracking()
         guard let key else { return }
         activeKey = key
         activeAvailable = onAvailable
         activeUnavailable = onUnavailable
+        activeRemoved = onRemoved
         activeAnchorWasAvailable = false
+        scrollPending = true
+        guard delayMs > 0 else {
+            startWatching(key: key)
+            return
+        }
+        stepDelayMs = delayMs
+        stepDelayDeadline = Date().addingTimeInterval(TimeInterval(delayMs) / 1_000)
+        // A run-loop timer, like the sampler's display link.
+        let timer = Timer(timeInterval: TimeInterval(delayMs) / 1_000, repeats: false) {
+            [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.activeKey == key else { return }
+                self.stepDelayTimer = nil
+                self.startWatching(key: key)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        stepDelayTimer = timer
+    }
+
+    /// Milliseconds left of the tracked step's delay for `key`: nil when `key` isn't
+    /// tracked with a delay, zero once it has elapsed. The overlay counts its
+    /// own delay from the step's start with this, not from when the anchor
+    /// first became available.
+    func remainingStepDelayMs(for key: String?) -> Int? {
+        guard let key, activeKey == key, let stepDelayDeadline else { return nil }
+        let remaining = stepDelayDeadline.timeIntervalSinceNow * 1_000
+        return Int(min(max(0, remaining), Double(stepDelayMs)))
+    }
+
+    private var isInStepDelay: Bool { stepDelayTimer != nil }
+
+    private func startWatching(key: String) {
         startReadinessTimeout(for: key)
 
         if viewRegistry[key]?.isEmpty == false {
@@ -265,11 +355,29 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         activeViewSampler.stop()
         readinessTask?.cancel()
         readinessTask = nil
+        stepDelayTimer?.invalidate()
+        stepDelayTimer = nil
+        stepDelayDeadline = nil
+        stepDelayMs = 0
+        scrollPending = false
         activeKey = nil
         activeAvailable = nil
         activeUnavailable = nil
+        activeRemoved = nil
         activeAnchorWasAvailable = false
         trackedCornerRadius = nil
+    }
+
+    /// The anchor hosting the visible step left its window. As on Flutter, the
+    /// guide is told one turn later, not during the host's teardown, and only
+    /// if no view for the key came back in the meantime.
+    private func notifyActiveAnchorRemovedNextTurn(key: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.activeKey == key, !self.isRegistered(key) else { return }
+            let callback = self.activeRemoved
+            self.stopTracking()
+            callback?(key)
+        }
     }
 
     func resetForTesting() {
@@ -313,6 +421,10 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         case let .unavailable(reason):
             if activeAnchorWasAvailable {
                 failActiveAnchor(key: key, reason: reason)
+            } else if reason == .outsideViewport, scrollPending {
+                // Before the step shows: bring an off-screen anchor into view
+                // through its scroll-view ancestors, once. The next sample sees it.
+                if scrollToVisible(key) { scrollPending = false }
             }
         }
     }
@@ -398,7 +510,7 @@ private final class ActiveAnchorSampler: NSObject {
         onSample?(resolve?() ?? .unavailable(.detached))
     }
 
-    static func resolve(view: UIView) -> AnchorResolution {
+    static func resolve(view: UIView, usePresentation: Bool = true) -> AnchorResolution {
         guard let window = view.window else { return .unavailable(.detached) }
         let modelRect = view.convert(view.bounds, to: window)
         let destinationLayer = window.layer.presentation() ?? window.layer
@@ -417,7 +529,7 @@ private final class ActiveAnchorSampler: NSObject {
                 usePresentationLayers: false
             )
         )
-        guard let presentationRect else { return model }
+        guard usePresentation, let presentationRect else { return model }
         let presentation = resolve(
             rect: presentationRect,
             viewport: window.bounds,

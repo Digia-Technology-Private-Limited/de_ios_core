@@ -27,6 +27,7 @@ struct DigiaHostDeliveryTests {
     @Test("deliver is total — a handle comes back even with nothing to render")
     func deliverIsTotal() {
         SDKInstance.shared.resetForTesting()
+        SDKInstance.shared.setCampaignsForTesting([])
 
         let recorder = deliver("nothing-here")
 
@@ -35,11 +36,15 @@ struct DigiaHostDeliveryTests {
         #expect(recorder.isHoldReleased)
     }
 
-    @Test("a trigger before the bundle lands is not_initialized, not an unknown key")
-    func notInitializedBeforeTheBundle() {
+    @Test("a trigger before initialize() was ever called is dropped not_initialized at once")
+    func heldBeforeTheBundle() {
         SDKInstance.shared.resetForTesting()
 
-        #expect(deliver("anything").dropReason == .notInitialized)
+        let recorder = deliver("anything", cepCampaignId: "cep-a")
+        #expect(recorder.isSettled)
+        #expect(recorder.dropReason == .notInitialized)
+        #expect(recorder.isHoldReleased)
+        SDKInstance.shared.resetForTesting()
     }
 
     @Test("a key the store does not have is unknown_campaign_key")

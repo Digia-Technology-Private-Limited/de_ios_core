@@ -22,7 +22,7 @@ private extension AnalyticsService {
 /// letting it share this counter made `callCount` (and therefore
 /// `responseFactory`'s call-numbered branching) racy depending on whether the
 /// session call happened to fire before the dispatch under test.
-final class FakeAnalyticsSender: AnalyticsSender, @unchecked Sendable {
+final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
     private var _callCount = 0
     var callCount: Int { _callCount }
     var responseFactory: (Int) -> Int
@@ -31,24 +31,47 @@ final class FakeAnalyticsSender: AnalyticsSender, @unchecked Sendable {
         self.responseFactory = responseFactory
     }
 
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
-        guard url == DigiaEndpoints.track else { return 200 }
+    func execute(request: NetworkRequest) async throws -> NetworkResponse {
+        guard request.url.absoluteString == DigiaEndpoints.track else {
+            return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+        }
         _callCount += 1
-        return responseFactory(_callCount)
+        let status = responseFactory(_callCount)
+        return NetworkResponse(statusCode: status, headers: [:], body: nil, isSuccessful: (200..<300).contains(status))
+    }
+
+    func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
+        NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+    }
+
+    func openSseStream(request: NetworkRequest, handler: SseStreamHandler) -> CancellableSubscription {
+        final class EmptySub: CancellableSubscription { func cancel() {} }
+        return EmptySub()
     }
 }
 
 /// Fake sender that always throws, to exercise the "ambiguous" (no status code
 /// at all — no connectivity, timeout, DNS failure) retry path. Only counts the
 /// track-dispatch endpoint, for the same reason as `FakeAnalyticsSender` above.
-final class ThrowingAnalyticsSender: AnalyticsSender, @unchecked Sendable {
+final class ThrowingAnalyticsSender: NetworkClient, @unchecked Sendable {
     private var _callCount = 0
     var callCount: Int { _callCount }
 
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
-        guard url == DigiaEndpoints.track else { return 200 }
+    func execute(request: NetworkRequest) async throws -> NetworkResponse {
+        guard request.url.absoluteString == DigiaEndpoints.track else {
+            return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+        }
         _callCount += 1
         throw URLError(.notConnectedToInternet)
+    }
+
+    func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
+        throw URLError(.notConnectedToInternet)
+    }
+
+    func openSseStream(request: NetworkRequest, handler: SseStreamHandler) -> CancellableSubscription {
+        final class EmptySub: CancellableSubscription { func cancel() {} }
+        return EmptySub()
     }
 }
 
@@ -56,6 +79,15 @@ final class ThrowingAnalyticsSender: AnalyticsSender, @unchecked Sendable {
 
 private func sleepMillis(_ ms: UInt64) async throws {
     try await Task.sleep(nanoseconds: ms * 1_000_000)
+}
+
+/// Polls `condition` (up to 5 s) instead of guessing how long the work takes:
+/// the main actor is shared with other suites and can be busy for a while.
+@MainActor
+private func waitUntil(_ condition: () -> Bool) async throws {
+    for _ in 0..<500 where !condition() {
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
 }
 
 @MainActor
@@ -72,17 +104,20 @@ struct AnalyticsServiceTests {
 
     private func makeService(
         config: AnalyticsConfig = AnalyticsConfig(flushIntervalMs: 10_000),
-        sender: any AnalyticsSender = FakeAnalyticsSender(),
+        sender: any NetworkClient = FakeAnalyticsSender(),
         defaults: UserDefaults? = nil
     ) -> AnalyticsService {
         let store = defaults ?? UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
+        let storage = UserDefaultsLocalStorage(defaults: store)
+        let identityManager = IdentityManager(storage: storage.scoped("identity"))
+        let sessionManager = SessionManager(storage: storage.scoped("session"), timeoutMs: Int64(config.sessionTimeoutMs), observeLifecycle: false)
         return AnalyticsService(
             config: config,
-            apiKey: "test-api-key",
-            identity: AnalyticsIdentityManager(defaults: store),
-            queue: AnalyticsQueue(defaults: store),
+            identityManager: identityManager,
+            sessionManager: sessionManager,
+            queue: AnalyticsQueue(storage: UserDefaultsLocalStorage(defaults: store).scoped("analytics")),
             staticContext: ["sdk_version": "1.0.0", "sdk_platform": "ios"],
-            sender: sender
+            networkClient: sender
         )
     }
 
@@ -91,30 +126,6 @@ struct AnalyticsServiceTests {
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
-
-    @Test("anonymous ID is generated and stable")
-    func anonymousIdIsStable() {
-        let service = makeService()
-        let id1 = service.identity.anonymousId
-        let id2 = service.identity.anonymousId
-        #expect(!id1.isEmpty)
-        #expect(id1 == id2)
-    }
-
-    @Test("setUserId persists and clearUserId rotates session")
-    func setUserIdAndClearUserId() {
-        let service = makeService()
-
-        service.setUserId("user-123")
-        #expect(service.identity.userId == "user-123")
-
-        let sessionBefore = service.identity.sessionId
-        service.clearUserId()
-
-        #expect(service.identity.userId == nil)
-        #expect(!service.identity.sessionId.isEmpty)
-        #expect(service.identity.sessionId != sessionBefore)
-    }
 
     @Test("queue drops oldest events when capacity is exceeded")
     func queueDropsOldestWhenFull() {
@@ -304,17 +315,19 @@ struct AnalyticsServiceTests {
             config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
             sender: fakeSender
         )
-        service.retryScheduleMs = [10, 20]  // fast retries for the test
+        // Long enough that the first attempt's outcome is observed before the
+        // retry fires, whatever else the main actor is doing.
+        service.retryScheduleMs = [1_000]
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
-        // let flush attempt run and fail (500) but not the retry yet (10ms)
-        try await sleepMillis(5)
+        // The first attempt fails (500); the event waits for the retry.
+        try await waitUntil { service.retryAttempt == 1 }
         #expect(service.retryAttempt == 1)
         #expect(service.queue.size == 1)
 
-        // let the retry fire and succeed
-        try await sleepMillis(200)
+        // The retry fires and succeeds.
+        try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 }
         #expect(service.queue.size == 0)
         #expect(service.retryAttempt == 0)
         #expect(fakeSender.callCount == 2)
@@ -360,8 +373,10 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
 
-        // 10 total attempts, ~2ms apart — wait past all of them
-        try await sleepMillis(300)
+        for _ in 0..<20 {
+            if fakeSender.callCount == 10 { break }
+            try await sleepMillis(50)
+        }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 10)
@@ -379,8 +394,10 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
 
-        // 10 total attempts, ~2ms apart — wait past all of them
-        try await sleepMillis(300)
+        for _ in 0..<20 {
+            if throwingSender.callCount == 10 { break }
+            try await sleepMillis(50)
+        }
 
         #expect(service.queue.size == 0)
         #expect(throwingSender.callCount == 10)
@@ -433,7 +450,7 @@ struct AnalyticsServiceTests {
         _ = service2  // keep alive until timer fires
 
         #expect(fakeSender.callCount == 1)
-        #expect(AnalyticsQueue(defaults: defaults).size == 0)
+        #expect(AnalyticsQueue(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("analytics")).size == 0)
     }
 
     @Test("dismissed event queues but does not self-flush")

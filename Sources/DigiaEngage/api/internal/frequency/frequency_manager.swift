@@ -147,23 +147,22 @@ enum FrequencyEvaluator {
 // MARK: - Persistent manager
 
 /// Stateful façade over the pure evaluator. Persists per-campaign state in
-/// `UserDefaults` (JSON string keyed `"freq:<campaignKey>"`) and resolves the
+/// `LocalStorage` (scoped to `"frequency"`, keyed by `campaignKey`) and resolves the
 /// current sessionId + clock through injected closures, matching Android's
 /// `FrequencyManager`.
 final class FrequencyManager {
-    static let keyPrefix = "freq:"
     static let stopOnExperienceCompleted = "experienceCompleted"
 
-    private let defaults: UserDefaults
+    private let storage: LocalStorage
     private let sessionIdProvider: () -> String?
     private let clock: () -> Int64
 
     init(
-        defaults: UserDefaults = .standard,
+        storage: LocalStorage,
         sessionIdProvider: @escaping () -> String?,
         clock: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
     ) {
-        self.defaults = defaults
+        self.storage = storage
         self.sessionIdProvider = sessionIdProvider
         self.clock = clock
     }
@@ -199,10 +198,8 @@ final class FrequencyManager {
 
     // ── Persistence ───────────────────────────────────────────────────────────
 
-    private func keyFor(_ campaignKey: String) -> String { "\(Self.keyPrefix)\(campaignKey)" }
-
     private func load(_ campaignKey: String) -> FrequencyState? {
-        guard let raw = defaults.string(forKey: keyFor(campaignKey)),
+        guard let raw = storage.string(forKey: campaignKey),
               let data = raw.data(using: .utf8),
               let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         else { return nil }
@@ -223,6 +220,6 @@ final class FrequencyManager {
         guard let data = try? JSONSerialization.data(withJSONObject: o),
               let raw = String(data: data, encoding: .utf8)
         else { return }
-        defaults.set(raw, forKey: keyFor(campaignKey))
+        storage.set(raw, forKey: campaignKey)
     }
 }

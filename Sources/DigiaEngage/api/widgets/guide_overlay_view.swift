@@ -1,7 +1,7 @@
 import SwiftUI
 import Combine
 import UIKit
-@_implementationOnly import SDWebImageSVGCoder
+internal import SDWebImageSVGCoder
 
 @MainActor
 private enum AnchorlessImageLoader {
@@ -312,7 +312,13 @@ private struct GuideStepOverlay: View {
             delayElapsedForStep = nil
             let delayMs = step.delayInMs ?? 0
             if delayMs > 0 {
-                try? await Task.sleep(nanoseconds: guideDelayNanoseconds(delayMs))
+                // An anchored step's delay started with the step, not when its
+                // anchor became available (it may have been scrolled in after).
+                let remainingMs = AnchorRegistry.shared
+                    .remainingStepDelayMs(for: step.target.anchorKey) ?? delayMs
+                if remainingMs > 0 {
+                    try? await Task.sleep(nanoseconds: guideDelayNanoseconds(remainingMs))
+                }
                 guard !Task.isCancelled else { return }
                 delayElapsedForStep = stepIndex
             }

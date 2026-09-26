@@ -28,22 +28,24 @@ final class LiveTestAckReporter {
     /// stack-shaped message cannot become the payload.
     private static let maxMessageLength = 200
 
-    private let sender: any AnalyticsSender
+    private let networkClient: any NetworkClient
     private var config: DigiaConfig?
-    private var deviceId: String?
 
     /// Pauses between attempts — three attempts in total, all inside the
     /// backend's 30s alarm so a recovered ACK still beats it. Overridable for
     /// tests only; production never changes this.
     var retryPauses: [TimeInterval] = [2, 5]
 
-    init(sender: any AnalyticsSender = URLSessionAnalyticsSender()) {
-        self.sender = sender
+    init(networkClient: any NetworkClient) {
+        self.networkClient = networkClient
     }
 
-    func configure(config: DigiaConfig, deviceId: String) {
+    convenience init(sender: any NetworkClient) {
+        self.init(networkClient: sender)
+    }
+
+    func configure(config: DigiaConfig) {
         self.config = config
-        self.deviceId = deviceId
     }
 
     func postReceived(_ testInvocationId: String) {
@@ -79,17 +81,17 @@ final class LiveTestAckReporter {
     /// state machine ignores a transition that is not forward, so a
     /// `received` that lands after the `failed` it preceded changes nothing.
     private func post(_ body: [String: Any], endpoint: String = DigiaEndpoints.liveTestAck) {
-        guard let config else { return }
+        guard config != nil else { return }
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
 
-        var headers = ["Content-Type": "application/json", "x-digia-project-id": config.apiKey]
-        if let deviceId { headers["x-digia-device-id"] = deviceId }
+        let headers = ["Content-Type": "application/json"]
 
         let testInvocationId = body["testInvocationId"] as? String ?? ""
         let kind = (body["status"] as? String) ?? (body["type"] as? String) ?? ""
         let pauses = retryPauses
+        let client = networkClient
 
-        Task { [sender] in
+        Task {
             for attempt in 0...pauses.count {
                 if attempt > 0 {
                     try? await Task.sleep(
@@ -97,7 +99,10 @@ final class LiveTestAckReporter {
                 }
                 let isLastAttempt = attempt == pauses.count
                 do {
-                    let statusCode = try await sender.post(url: endpoint, body: data, headers: headers)
+                    guard let url = URL(string: endpoint) else { return }
+                    let request = NetworkRequest(url: url, method: .post, headers: headers, body: data)
+                    let response = try await client.execute(request: request)
+                    let statusCode = response.statusCode
                     if (200...299).contains(statusCode) {
                         log.d(
                             "Uplink posted (status=\(statusCode), invocationId=\(testInvocationId), "

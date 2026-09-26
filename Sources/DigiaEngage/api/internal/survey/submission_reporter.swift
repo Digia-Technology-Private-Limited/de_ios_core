@@ -8,8 +8,30 @@ private let log = DigiaLogger()
 
 /// Posts a completed-survey submission to the dashboard backend's
 /// `engage/sdk/recordSubmission` endpoint. Fires once per `markSurveyCompleted`.
-struct SurveySubmissionReporter {
-    let config: DigiaConfig
+typealias SurveySubmissionReporter = SubmissionReporter
+
+final class SubmissionReporter: @unchecked Sendable {
+    private(set) var config: DigiaConfig?
+    private let sessionIdProvider: @Sendable () -> String?
+    private let lock = NSLock()
+
+    private let networkClient: any NetworkClient
+
+    init(
+        config: DigiaConfig? = nil,
+        sessionIdProvider: @escaping @Sendable () -> String?,
+        networkClient: any NetworkClient
+    ) {
+        self.config = config
+        self.sessionIdProvider = sessionIdProvider
+        self.networkClient = networkClient
+    }
+
+    func configure(config: DigiaConfig) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.config = config
+    }
 
     func report(
         campaignId: String,
@@ -18,32 +40,46 @@ struct SurveySubmissionReporter {
         startedAt: Date,
         userId: String?
     ) {
+        lock.lock()
+        let isConfigured = self.config != nil
+        lock.unlock()
+
+        guard isConfigured else {
+            #if canImport(UIKit)
+            log.e("Survey submission skipped — config is nil")
+            #endif
+            return
+        }
         let body = Self.buildBody(
             campaignId: campaignId,
             survey: survey,
             answers: answers,
             startedAt: startedAt,
             now: Date(),
-            userId: userId
+            userId: userId,
+            sessionId: sessionIdProvider()
         )
-        Task.detached { await Self.post(config: config, deviceId: Self.deviceId(), body: body) }
+        let client = self.networkClient
+        Task.detached { await Self.post(networkClient: client, body: body) }
     }
 
     // MARK: - Networking
 
-    private static func post(config: DigiaConfig, deviceId: String, body: [String: Any]) async {
+    private static func post(networkClient: any NetworkClient, body: [String: Any]) async {
         guard let url = endpoint() else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(config.apiKey, forHTTPHeaderField: "x-digia-project-id")
-        request.setValue(deviceId, forHTTPHeaderField: "x-digia-device-id")
-        request.timeoutInterval = 10
         do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                log.e("Survey submission post failed (status=\(http.statusCode))")
+            let data = try JSONSerialization.data(withJSONObject: body)
+            let request = NetworkRequest(
+                url: url,
+                method: .post,
+                headers: ["Content-Type": "application/json"],
+                body: data,
+                connectTimeout: 10,
+                readTimeout: 10
+            )
+            let response = try await networkClient.execute(request: request)
+            if !response.isSuccessful {
+                log.e("Survey submission post failed (status=\(response.statusCode))")
             }
         } catch {
             log.e("Survey submission post failed", error: error)
@@ -54,21 +90,6 @@ struct SurveySubmissionReporter {
         URL(string: DigiaEndpoints.submission)
     }
 
-    private static func deviceId() -> String {
-        let key = "digia_engage_device_id"
-        if let saved = UserDefaults.standard.string(forKey: key), !saved.isEmpty {
-            return saved
-        }
-        #if canImport(UIKit)
-        let idfv = UIDevice.current.identifierForVendor?.uuidString
-        #else
-        let idfv: String? = nil
-        #endif
-        let id = idfv ?? UUID().uuidString
-        UserDefaults.standard.set(id, forKey: key)
-        return id
-    }
-
     // MARK: - Body
 
     static func buildBody(
@@ -77,7 +98,8 @@ struct SurveySubmissionReporter {
         answers: [String: SurveyAnswer],
         startedAt: Date,
         now: Date,
-        userId: String?
+        userId: String?,
+        sessionId: String? = nil
     ) -> [String: Any] {
         let promptNodes = survey.nodes.filter { node in
             guard let block = survey.blockFor(node) else { return false }
@@ -116,6 +138,7 @@ struct SurveySubmissionReporter {
             "occurredAt": isoTimestamp(now),
         ]
         if let userId { body["userId"] = userId }
+        if let sessionId { body["sessionId"] = sessionId }
         return body
     }
 

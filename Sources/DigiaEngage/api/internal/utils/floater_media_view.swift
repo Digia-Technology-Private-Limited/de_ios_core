@@ -1,6 +1,6 @@
 import AVFoundation
-@_implementationOnly import Lottie
-@_implementationOnly import SDWebImageSwiftUI
+internal import Lottie
+internal import SDWebImageSwiftUI
 import SwiftUI
 
 /// The media surface, shared by both states. Reads the orchestrator's own `player` —

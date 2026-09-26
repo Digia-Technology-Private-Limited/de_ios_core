@@ -17,16 +17,17 @@ import os
 /// Core's deployment floor is iOS 15, so `os.Logger` is unconditionally
 /// available and there is no fallback path.
 ///
-/// Two `os_log` details this depends on, and one that limits it:
+/// Two `os_log` details this depends on:
 ///
 /// - **Interpolated values are redacted by default.** Anything dynamic renders
 ///   as `<private>` on a real device — which is exactly where the logs matter —
 ///   unless it is marked `privacy: .public`. Redaction is governed at the call
 ///   site instead (the diagnostics spec's denylist), so the whole line is
 ///   marked public here.
-/// - **`.debug` is not persisted** and is dropped unless the process is being
-///   observed. Acceptable: `debug` is the level a developer turns on while
-///   actively watching.
+/// - **Transport uses `.default` for info/debug/warn** so that log streaming
+///   tools (like `npx expo run:ios` and `xcrun simctl log stream`) capture and
+///   display permitted logs in the terminal without dropping them. Gating is
+///   governed upstream by `DigiaLogger.isSeverityEnabled`.
 final class ConsoleSink: DiagnosticSink {
     /// Creates the console sink.
     ///
@@ -44,10 +45,9 @@ final class ConsoleSink: DiagnosticSink {
     func accepts(_ record: TimelineRecord) -> Bool { isEnabled(record.severity) }
 
     func emit(_ record: TimelineRecord) {
-        let logger = Self.logger(for: record.tag)
         let level = Self.osLevel(record.severity)
         for line in Self.lines(for: record) {
-            logger.log(level: level, "\(line, privacy: .public)")
+            Self.logger.log(level: level, "\(line, privacy: .public)")
         }
     }
 
@@ -67,30 +67,24 @@ final class ConsoleSink: DiagnosticSink {
         return body.components(separatedBy: "\n").map { "\(head) \($0)" }
     }
 
-    /// Severity onto `os_log`'s ladder, per the diagnostics spec's transport
-    /// table. `warn` has no `os_log` level of its own; `.default` is the one
-    /// above `.info`, which is the ordering the ladder needs.
+    /// Severity onto `os_log`'s ladder.
+    ///
+    /// `.error` maps to `OSLogType.error`. All other permitted levels (`.warn`,
+    /// `.info`, `.debug`) map to `OSLogType.default` so that CLI runners
+    /// (such as Expo CLI's `log stream` or terminal simulators) stream them
+    /// without requiring explicit `--level info` or `--level debug` flags.
+    /// Gating is performed upstream by `isEnabled(record.severity)`.
     private static func osLevel(_ severity: DigiaLogSeverity) -> OSLogType {
         switch severity {
         case .error: return .error
-        case .warn: return .default
-        case .info: return .info
-        case .debug: return .debug
+        case .warn, .info, .debug: return .default
         }
     }
 
-    /// One `os.Logger` per tag, so Console.app's category column is the same
-    /// six-value set the printed prefix is. Cached because the tag set is
-    /// closed and `emit` runs per line.
-    private static func logger(for tag: String) -> os.Logger {
-        cacheLock.lock()
-        defer { cacheLock.unlock() }
-        if let existing = cache[tag] { return existing }
-        let created = os.Logger(subsystem: "tech.digia.engage", category: tag)
-        cache[tag] = created
-        return created
-    }
-
-    private static let cacheLock = NSLock()
-    nonisolated(unsafe) private static var cache: [String: os.Logger] = [:]
+    /// Shared unified logging transport.
+    ///
+    /// Uses the default `os.Logger()` initializer so Xcode / OSLog does not prepend
+    /// a duplicate `[<category>]` bracket ahead of the severity badge, while
+    /// preserving OSLog streaming for terminal runners (Expo CLI, RN CLI, simctl log stream).
+    private static let logger = os.Logger()
 }

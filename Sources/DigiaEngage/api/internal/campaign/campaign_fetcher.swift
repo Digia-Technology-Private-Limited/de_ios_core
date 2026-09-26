@@ -25,47 +25,33 @@ struct CampaignAPIResponse {
         self.headers = headers
     }
 }
-protocol CampaignAPI { func fetchCampaignBundle() async throws -> CampaignAPIResponse }
+struct CampaignFetcher {
+    private let networkClient: any NetworkClient
 
-private struct URLSessionCampaignAPI: CampaignAPI {
-    let requestHeaders: [String: String]
-    let session: URLSession
+    init(networkClient: any NetworkClient) {
+        self.networkClient = networkClient
+    }
 
-    func fetchCampaignBundle() async throws -> CampaignAPIResponse {
+    func fetch() async throws -> CampaignBundle {
         let endpoint = DigiaEndpoints.campaignBundle
         guard let url = URL(string: endpoint) else {
             throw CampaignFetchError(category: .transport, endpoint: endpoint, statusCode: nil, message: "Invalid campaign bundle URL", underlying: nil)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        for (key, value) in requestHeaders { request.setValue(value, forHTTPHeaderField: key) }
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 10
-        request.httpBody = Data("{}".utf8)
+        log.d("Campaign bundle fetch started (endpoint=\(endpoint))")
+        let request = NetworkRequest(
+            url: url,
+            method: .post,
+            body: Data("{}".utf8),
+            connectTimeout: 10,
+            readTimeout: 10
+        )
+        let response: NetworkResponse
         do {
-            let (data, response) = try await session.data(for: request)
-            let http = response as? HTTPURLResponse
-            let headers = http?.allHeaderFields.reduce(into: [String: String]()) { result, entry in
-                guard let key = entry.key as? String else { return }
-                result[key] = String(describing: entry.value)
-            } ?? [:]
-            return CampaignAPIResponse(statusCode: http?.statusCode ?? -1, data: data, headers: headers)
+            response = try await networkClient.execute(request: request)
         } catch {
             throw CampaignFetchError(category: .transport, endpoint: endpoint, statusCode: nil, message: "Campaign bundle transport failed: \(error.localizedDescription)", underlying: error)
         }
-    }
-}
-
-struct CampaignFetcher {
-    let api: any CampaignAPI
-    init(requestHeaders: [String: String], session: URLSession = .shared) { api = URLSessionCampaignAPI(requestHeaders: requestHeaders, session: session) }
-    init(api: any CampaignAPI) { self.api = api }
-
-    func fetch() async throws -> CampaignBundle {
-        let endpoint = DigiaEndpoints.campaignBundle
-        log.d("Campaign bundle fetch started (endpoint=\(endpoint))")
-        let response = try await api.fetchCampaignBundle()
-        guard (200...299).contains(response.statusCode) else {
+        guard response.isSuccessful else {
             throw CampaignFetchError(category: .httpStatus, endpoint: endpoint, statusCode: response.statusCode, message: "Campaign bundle request failed: HTTP \(response.statusCode)", underlying: nil)
         }
         do {
@@ -73,7 +59,7 @@ struct CampaignFetcher {
                 $0.key.caseInsensitiveCompare("X-Digia-Server-Time-Ms") == .orderedSame
             }.flatMap { Int64($0.value) }
             return try Self.parse(
-                response.data,
+                response.body ?? Data(),
                 devicePlatform: "ios",
                 serverTimeMs: serverTime
             )

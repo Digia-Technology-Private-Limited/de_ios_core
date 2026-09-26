@@ -3,8 +3,8 @@ import AVKit
 import SwiftUI
 import UIKit
 
-@_implementationOnly import Lottie
-@_implementationOnly import SDWebImageSwiftUI
+internal import Lottie
+internal import SDWebImageSwiftUI
 
 private let maxFloatingCanvasUpscale: CGFloat = 1.15
 private let canvasTextSpanElementID = "canvas_text_span"
@@ -1782,8 +1782,10 @@ private struct CanvasVideoRenderer: View {
             observer = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
             ) { _ in
-                value.seek(to: .zero)
-                value.play()
+                MainActor.assumeIsolated {
+                    value.seek(to: .zero)
+                    value.play()
+                }
             }
         }
         if autoplay { value.play() }
@@ -1815,8 +1817,8 @@ struct CanvasPlayerController: UIViewControllerRepresentable {
         value.videoGravity = gravity
         context.coordinator.readyObservation = value.observe(
             \.isReadyForDisplay, options: [.initial, .new]
-        ) { controller, _ in
-            guard controller.isReadyForDisplay else { return }
+        ) { _, change in
+            guard change.newValue == true else { return }
             Task { @MainActor in onReadyForDisplay() }
         }
         return value

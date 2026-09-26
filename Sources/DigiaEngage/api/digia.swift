@@ -111,15 +111,41 @@ public enum Digia {
         SDKInstance.shared.setOpenURLHandler(handler)
     }
 
-    /// RN-only: hand native the same campaign-bundle response JS already fetched, so
-    /// native doesn't also fetch it. Call once after `initialize` when the config's
-    /// `wrapperBinding` is `"react_native"`.
-    ///
-    /// No-ops below iOS 17 (see `initialize`) — this bypasses `initialize`'s own
-    /// state guard, so it needs the same OS check independently.
+    /// No longer does anything: native fetches the campaign bundle itself on every
+    /// binding, React Native included. Kept so an older React Native bundle that still
+    /// calls this keeps working against a newer core.
+    @available(
+        *, deprecated,
+        message: "Native owns the campaign fetch on every binding; this is a no-op."
+    )
     public static func populateCampaignBundle(_ bundleJson: String) {
         guard #available(iOS 17, *) else { return }
         SDKInstance.shared.populateCampaignBundle(bundleJson)
+    }
+
+    /// Delivers the campaign published under `campaignKey`, right now, with no CEP involved.
+    ///
+    /// For an app that owns its own triggering: no CleverTap / MoEngage / WebEngage decides
+    /// what fires, the app does. The delivery is otherwise identical to a plugin's — same
+    /// routing, same frequency capping, same screen targeting, same analytics — so a campaign
+    /// that would be dropped for a CEP is dropped here too, for the same reason.
+    ///
+    /// `variables` override the dashboard-authored fallbacks for this one delivery, exactly
+    /// as a CEP's trigger variables do.
+    ///
+    /// Returns the presentation, whose `outcome` names what actually happened. A campaign key
+    /// that is not published, a screen that is not targeted or a frequency cap already spent
+    /// all come back as a `dropped` outcome rather than a trap — this is a delivery path, and
+    /// a delivery path never fails at its caller.
+    ///
+    /// Safe to call before the campaign bundle has loaded: the delivery is buffered and
+    /// routed once the store is ready, the same way a plugin's is.
+    @MainActor
+    public static func triggerCampaign(
+        _ campaignKey: String,
+        variables: [String: String]? = nil
+    ) -> CampaignPresentation {
+        SDKInstance.shared.triggerCampaign(campaignKey, variables: variables)
     }
 
     public static func setThemeMode(_ mode: DigiaThemeMode) {
@@ -211,15 +237,16 @@ public enum Digia {
 
     /// Registers the RN render hook. When set, guides are treated as JS-rendered:
     /// on a guide trigger the SDK applies frequency capping and, if allowed, invokes
-    /// this callback (with the trigger payload and the presentation id the
-    /// coordinator minted for this delivery) to ask JS to render — it does not
-    /// render the guide natively. Used only by the React Native bridge.
+    /// this callback with a ``GuideRenderRequest`` — the trigger payload, the
+    /// presentation id the coordinator minted for this delivery, and the guide's
+    /// authored JSON — to ask JS to render. It does not render the guide natively.
+    /// Used only by the React Native bridge.
     ///
     /// The id is what a later ``reportExternalGuideLifecycle(presentationId:event:)``
     /// call must use — it is the only thing that resolves back to the real
     /// presentation the CEP's hold is on.
     public static func setOnGuideRenderRequest(
-        _ callback: ((CEPTriggerPayload, String) -> Void)?
+        _ callback: ((GuideRenderRequest) -> Void)?
     ) {
         SDKInstance.shared.onGuideRenderRequest = callback
     }

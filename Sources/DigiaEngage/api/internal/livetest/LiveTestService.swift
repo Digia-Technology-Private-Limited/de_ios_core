@@ -6,11 +6,11 @@ import UIKit
 /// dashboard as a live-test target and routes incoming campaigns for rendering.
 @MainActor
 final class LiveTestService: ObservableObject {
-    private static let enabledKey = "digia_live_testing_enabled"
-    private static let deviceNameKey = "digia_live_testing_device_name"
+    private static let enabledKey = "enabled"
+    private static let deviceNameKey = "device_name"
 
     let ackReporter: LiveTestAckReporter
-    private let defaults: UserDefaults
+    private let storage: LocalStorage
 
     @Published private(set) var isEnabled = false
     @Published private(set) var connectionState: LiveTestConnectionState = .disconnected
@@ -21,19 +21,21 @@ final class LiveTestService: ObservableObject {
     private var backgroundObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
     private var isDebugBuildFlag = false
+    private let networkClient: any NetworkClient
 
     init(
-        defaults: UserDefaults = .standard,
-        ackReporter: LiveTestAckReporter = LiveTestAckReporter()
+        storage: LocalStorage,
+        ackReporter: LiveTestAckReporter,
+        networkClient: any NetworkClient
     ) {
-        self.defaults = defaults
+        self.networkClient = networkClient
+        self.storage = storage
         self.ackReporter = ackReporter
-        self.deviceName = Self.normalizeDeviceName(defaults.string(forKey: Self.deviceNameKey))
+        self.deviceName = Self.normalizeDeviceName(storage.string(forKey: Self.deviceNameKey))
     }
 
     func configure(
         config: DigiaConfig,
-        requestHeaders: [String: String],
         deviceId: String,
         isDebugBuild: Bool,
         onCampaignTest: @escaping (LiveTestInvocation) -> Void
@@ -43,17 +45,15 @@ final class LiveTestService: ObservableObject {
         self.deviceId = deviceId
         guard isDebugBuild else { return }
 
-        isEnabled = defaults.bool(forKey: Self.enabledKey)
-        ackReporter.configure(config: config, deviceId: deviceId)
+        isEnabled = storage.bool(forKey: Self.enabledKey)
+        ackReporter.configure(config: config)
         let sseClient = LiveTestSSEClient(
-            config: { config },
-            deviceId: { deviceId },
-            requestHeaders: requestHeaders,
             deviceName: { [weak self] in self?.deviceName },
             onEvent: { event in
                 if case .campaignTest(let invocation) = event { onCampaignTest(invocation) }
             },
-            onConnectionStateChanged: { [weak self] state in self?.connectionState = state }
+            onConnectionStateChanged: { [weak self] state in self?.connectionState = state },
+            networkClient: networkClient
         )
         client = sseClient
         if isEnabled { sseClient.start() }
@@ -85,7 +85,7 @@ final class LiveTestService: ObservableObject {
     /// i.e. once `configure()` has actually wired one up.
     func setEnabled(_ enabled: Bool) {
         isEnabled = enabled
-        defaults.set(enabled, forKey: Self.enabledKey)
+        storage.set(enabled, forKey: Self.enabledKey)
         if enabled { client?.start() } else { client?.stop() }
     }
 
@@ -95,9 +95,9 @@ final class LiveTestService: ObservableObject {
 
         deviceName = updatedName
         if let updatedName {
-            defaults.set(updatedName, forKey: Self.deviceNameKey)
+            storage.set(updatedName, forKey: Self.deviceNameKey)
         } else {
-            defaults.removeObject(forKey: Self.deviceNameKey)
+            storage.removeObject(forKey: Self.deviceNameKey)
         }
 
         guard client?.isRunning == true else { return }

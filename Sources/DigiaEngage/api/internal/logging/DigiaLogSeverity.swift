@@ -8,7 +8,7 @@
 /// `DigiaLogger` and the RN console sink expose the same ladder, and the
 /// diagnostics spec makes it the `severity` field of the structured record.
 /// Renaming one here renames it in four places.
-enum DigiaLogSeverity: Sendable {
+public enum DigiaLogSeverity: Sendable {
     /// The SDK could not do the thing: a campaign dropped, an action failed, an
     /// invariant violated. Visible at every level except ``DigiaLogLevel/none``.
     case error
@@ -26,7 +26,7 @@ enum DigiaLogSeverity: Sendable {
 
     /// Verbosity rank — higher is chattier. Compared against the configured
     /// level's rank, never against a raw enum ordinal.
-    var rank: Int {
+    public var rank: Int {
         switch self {
         case .error: return 0
         case .warn: return 1
@@ -37,7 +37,7 @@ enum DigiaLogSeverity: Sendable {
 
     /// The uppercase word in the line's `[<LEVEL>]` bracket. Spelled out rather
     /// than derived, because it is part of the frozen console prefix.
-    var label: String {
+    public var label: String {
         switch self {
         case .error: return "ERROR"
         case .warn: return "WARN"
@@ -58,7 +58,7 @@ enum DigiaLogSeverity: Sendable {
     /// Display only: filtering and grep key on `DIGIA` and `[<LEVEL>]`, never
     /// on this. It is part of the frozen prefix all the same — keep the glyphs
     /// stable once shipped.
-    var badge: String {
+    public var badge: String {
         switch self {
         case .error: return "🔴"
         case .warn: return "🟡"

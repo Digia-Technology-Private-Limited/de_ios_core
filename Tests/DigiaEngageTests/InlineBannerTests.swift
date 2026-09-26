@@ -56,7 +56,7 @@ struct InlineBannerTests {
             "campaignType": "inline",
             "templateConfig": Self.configJson.merging(["templateType": "banner"]) { _, new in new },
         ]))
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
 
         let recorder = PresentationRecorder(SDKInstance.shared.deliver(CEPTriggerPayload(
             cepCampaignId: "cep-banner",

@@ -33,6 +33,14 @@ struct CampaignModel: Equatable {
     // Opaque capping policy from the dashboard; nil = "No cap" / inline.
     // Used natively for nudge + survey only (guides cap in JS on RN).
     var frequency: FrequencyPolicy? = nil
+    /// The campaign's authored guide JSON, verbatim, retained for guide campaigns only.
+    ///
+    /// The React Native renderer draws tooltips and spotlights in JS from this exact
+    /// object — it has no campaign store of its own — so it must survive parsing
+    /// unmodified rather than being rebuilt from ``guideConfig``, which is this core's
+    /// own lossy projection of it. Nothing native reads it; every other campaign type
+    /// leaves it nil so a bundle costs no extra memory for it.
+    var guideTemplateJson: String? = nil
 
     var guideConfig: GuideConfigModel? {
         if case let .guide(value) = config { return value }
@@ -176,8 +184,29 @@ struct CampaignModel: Equatable {
             campaignType: campaignType,
             config: config,
             targetScreenNames: targetScreenNames,
-            frequency: FrequencyPolicy.fromJson(selectedJson.object("frequency"))
+            frequency: FrequencyPolicy.fromJson(selectedJson.object("frequency")),
+            guideTemplateJson: campaignType == "guide"
+                // Authored under either key depending on the campaign's age; both carry
+                // the same `{ templateType, steps, variables }` shape the JS renderer reads.
+                ? encodeGuideTemplate(
+                    selectedJson.object("templateConfig") ?? selectedJson.object("guideConfig")
+                )
+                : nil
         )
+    }
+
+    /// Re-serialises the authored guide object for the out-of-process renderer.
+    ///
+    /// `JSONSerialization` is the one thing here that can throw on otherwise valid-looking
+    /// input (a non-JSON value smuggled into the dictionary), and a guide that cannot be
+    /// re-encoded must degrade to "this campaign has no renderable content" rather than
+    /// take the parse down with it — every other campaign in the bundle is still good.
+    private static func encodeGuideTemplate(_ template: [String: Any]?) -> String? {
+        guard let template,
+              JSONSerialization.isValidJSONObject(template),
+              let data = try? JSONSerialization.data(withJSONObject: template)
+        else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     private static func selectForDevice(

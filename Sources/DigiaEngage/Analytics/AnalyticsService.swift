@@ -4,35 +4,16 @@ import UIKit
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger("analytics")
 
-// MARK: - AnalyticsSender
-
-protocol AnalyticsSender: Sendable {
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int
-}
-
-struct URLSessionAnalyticsSender: AnalyticsSender {
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
-        guard let endpoint = URL(string: url) else { throw URLError(.badURL) }
-        var request = URLRequest(url: endpoint, timeoutInterval: 30)
-        request.httpMethod = "POST"
-        for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
-        request.httpBody = body
-        let (_, response) = try await URLSession.shared.data(for: request)
-        return (response as? HTTPURLResponse)?.statusCode ?? 0
-    }
-}
-
 // MARK: - AnalyticsService
 
 @MainActor
 final class AnalyticsService {
     private let config: AnalyticsConfig
-    private let apiKey: String
-    let identity: AnalyticsIdentityManager
+    let identityManager: IdentityManager
+    let sessionManager: SessionManager
     let queue: AnalyticsQueue
     private let staticContext: [String: Any]
-    private let sender: any AnalyticsSender
-    private let requestHeaders: [String: String]
+    private let networkClient: any NetworkClient
 
     private var isCleared = false
     private var flushTimer: Timer?
@@ -48,7 +29,6 @@ final class AnalyticsService {
     /// it survives app restarts correctly.
     private(set) var retryAttempt = 0
     private var backgroundObserver: NSObjectProtocol?
-    private var foregroundObserver: NSObjectProtocol?
 
     /// Override retry delays (ms) for testing. Index is attempt-1.
     var retryScheduleMs: [Int]?
@@ -68,25 +48,18 @@ final class AnalyticsService {
 
     init(
         config: AnalyticsConfig,
-        apiKey: String,
-        identity: AnalyticsIdentityManager,
+        identityManager: IdentityManager,
+        sessionManager: SessionManager,
         queue: AnalyticsQueue,
         staticContext: [String: Any],
-        sender: any AnalyticsSender = URLSessionAnalyticsSender(),
-        requestHeaders: [String: String] = [:]
+        networkClient: any NetworkClient
     ) {
         self.config = config
-        self.apiKey = apiKey
-        self.identity = identity
+        self.identityManager = identityManager
+        self.sessionManager = sessionManager
         self.queue = queue
         self.staticContext = staticContext
-        self.sender = sender
-        self.requestHeaders = requestHeaders
-
-        identity.initialize(sessionTimeoutMs: config.sessionTimeoutMs)
-        identity.onSessionRotated = { [weak self] in
-            self?.reportSession()
-        }
+        self.networkClient = networkClient
 
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
@@ -100,21 +73,9 @@ final class AnalyticsService {
             }
         }
 
-        foregroundObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.willEnterForegroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.identity.maybeExpireSession()
-            }
-        }
-
         if queue.size > 0 {
             scheduleTimer()
         }
-
-        reportSession()
     }
 
     // MARK: - Public
@@ -181,16 +142,6 @@ final class AnalyticsService {
         )
     }
 
-    func setUserId(_ userId: String) {
-        identity.setUserId(userId)
-    }
-
-    func clearUserId() {
-        identity.clearUserId()
-    }
-
-    var userId: String? { identity.userId }
-
     func flush() {
         cancelTimer()
         Task { await dispatchPending() }
@@ -199,14 +150,11 @@ final class AnalyticsService {
     /// Cancels timers and removes lifecycle observers. Call before releasing the service.
     func clear() {
         isCleared = true
-        identity.onSessionRotated = nil
         retryTask?.cancel()
         retryTask = nil
         cancelTimer()
         if let obs = backgroundObserver { NotificationCenter.default.removeObserver(obs) }
-        if let obs = foregroundObserver { NotificationCenter.default.removeObserver(obs) }
         backgroundObserver = nil
-        foregroundObserver = nil
         isDispatching = false
         retryAttempt = 0
     }
@@ -218,61 +166,8 @@ final class AnalyticsService {
         retryAttempt = 0
     }
 
-    // MARK: - Factory
-
-    @MainActor
-    static func create(config: DigiaConfig, requestHeaders: [String: String]) -> AnalyticsService? {
-        let ac = config.analyticsConfig
-        guard ac.enabled else {
-            log.i("Analytics disabled in DigiaConfig — no events will be captured")
-            return nil
-        }
-        log.i(
-            "Analytics enabled (batchSize=\(ac.flushBatchSize), interval=\(ac.flushIntervalMs)ms)"
-        )
-        return AnalyticsService(
-            config: ac,
-            apiKey: config.apiKey,
-            identity: AnalyticsIdentityManager(),
-            queue: AnalyticsQueue(),
-            staticContext: buildStaticContext(
-                wrapperBinding: config.wrapperBinding,
-                wrapperVersion: config.wrapperVersion
-            ),
-            requestHeaders: requestHeaders
-        )
-    }
-
     private var jsonHeaders: [String: String] {
-        requestHeaders.merging([
-            "Content-Type": "application/json",
-            "X-Digia-Project-Id": apiKey,
-            "X-Digia-Device-Id": identity.anonymousId,
-        ]) { _, value in value }
-    }
-
-    // MARK: - Session
-
-    private func reportSession() {
-        let sessionId = identity.sessionId
-        let anonymousId = identity.anonymousId
-        var body: [String: Any] = [
-            "session_id": sessionId,
-            "anonymous_id": anonymousId,
-            "occurred_at": isoNow(),
-            "properties": staticContext,
-        ]
-        if let uid = identity.userId { body["user_id"] = uid }
-        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
-        let url = DigiaEndpoints.session
-        let headers = jsonHeaders
-        Task { [weak self, sender] in
-            guard self?.isCleared == false else { return }
-            let status = try? await sender.post(url: url, body: data, headers: headers)
-            log.d(
-                "Session posted (status=\(status ?? -1), sessionId=\(sessionId), anonymousId=\(anonymousId))"
-            )
-        }
+        ["Content-Type": "application/json"]
     }
 
     // MARK: - Private
@@ -286,7 +181,7 @@ final class AnalyticsService {
         properties: [String: Any] = [:]
     ) {
         let eventId = UUID().uuidString
-        identity.captureEventTime()
+        sessionManager.touch()
 
         var mergedProperties = staticContext
         for (k, v) in properties { mergedProperties[k] = v }
@@ -295,8 +190,8 @@ final class AnalyticsService {
             "event_id": eventId,
             "event_name": eventName,
             "occurred_at": isoNow(),
-            "anonymous_id": identity.anonymousId,
-            "session_id": identity.sessionId,
+            "anonymous_id": identityManager.deviceId,
+            "session_id": sessionManager.sessionId,
         ]
         if let id = campaignId { payloadMap["campaign_id"] = id }
         if let key = campaignKey { payloadMap["campaign_key"] = key }
@@ -306,7 +201,10 @@ final class AnalyticsService {
         // a session. Absent, not null, when there is none — a live test, or a
         // surface outliving its presentation.
         if let presentationId { payloadMap["presentation_id"] = presentationId }
-        if let uid = identity.userId { payloadMap["user_id"] = uid }
+        if let uid = identityManager.userId { payloadMap["user_id"] = uid }
+        if let elementId = properties["element_id"] as? String {
+            payloadMap["element_id"] = elementId
+        }
 
         payloadMap["properties"] = mergedProperties
 
@@ -316,9 +214,8 @@ final class AnalyticsService {
                 attempts: 0),
             maxEvents: config.queueMaxEvents
         )
-        log.i(
-            "Event fired: \"\(eventName)\" (eventId=\(eventId), queueSize=\(queue.size), "
-                + "flushBatchSize=\(config.flushBatchSize))"
+        log.d(
+            "Event enqueued (event='\(eventName)', eventId=\(eventId), queueSize=\(queue.size), flushBatchSize=\(config.flushBatchSize))"
         )
 
         guard retryTask == nil else {
@@ -363,11 +260,10 @@ final class AnalyticsService {
             let body = try JSONSerialization.data(withJSONObject: [
                 "events": batch.map { $0.payload }
             ])
-            let statusCode = try await sender.post(
-                url: DigiaEndpoints.track,
-                body: body,
-                headers: jsonHeaders
-            )
+            guard let url = URL(string: DigiaEndpoints.track) else { return }
+            let request = NetworkRequest(url: url, method: .post, headers: jsonHeaders, body: body)
+            let response = try await networkClient.execute(request: request)
+            let statusCode = response.statusCode
             log.d("Batch posted (status=\(statusCode))")
 
             switch statusCode {
@@ -486,7 +382,7 @@ final class AnalyticsService {
         return fmt.string(from: Date())
     }
 
-    private static func buildStaticContext(
+    static func buildStaticContext(
         wrapperBinding: String?,
         wrapperVersion: String?
     ) -> [String: Any] {

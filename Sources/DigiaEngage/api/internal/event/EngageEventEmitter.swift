@@ -1,12 +1,6 @@
 import Foundation
 import os
 
-/// Unified-logging channel for event emissions. Visible to Console.app and
-/// `log stream` (unlike `print`, which only reaches stdout). Filter with:
-/// `log stream --predicate 'subsystem == "tech.digia.engage"'` or
-/// `... 'eventMessage CONTAINS "DigiaEvent"'`.
-private let eventLog = os.Logger(subsystem: "tech.digia.engage", category: "DigiaEvent")
-
 /// The SDK's single entry point for emitting events, and the one place every
 /// emission is logged.
 ///
@@ -17,6 +11,8 @@ private let eventLog = os.Logger(subsystem: "tech.digia.engage", category: "Digi
 /// fires a dual signal (e.g. a nudge impression). Also owns the first-render
 /// impression dedup, an emission concern rather than widget state. Ported from
 /// Android `internal/event/EngageEventEmitter.kt`.
+private let log = DigiaLogger("analytics")
+
 @MainActor
 final class EngageEventEmitter {
     /// Where an event actually goes — real delivery, or a live test's ACK
@@ -40,15 +36,17 @@ final class EngageEventEmitter {
         }
 
         func toCep(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
-            eventLog.info(
-                "[DigiaEvent] Event fired → CEP: \(String(describing: event), privacy: .public) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public)"
-            )
+            // Deliberately unlogged: this hands the event to the coordinator, which settles
+            // the owning presentation, and the plugin that owns it logs what it then did
+            // with its CEP ("CEP impression marked", "In-app slot released"). One fact,
+            // one line, one owner.
             cep.deliver(event, payload: payload)
         }
 
         func toDigia(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload) {
-            eventLog.info(
-                "[DigiaEvent] Event fired → DIGIA: '\(event.eventName, privacy: .public)' (\(String(describing: type(of: event)), privacy: .public)) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public) properties=\(String(describing: event.properties), privacy: .public)"
+            log.i(
+                "Event fired: \"\(event.eventName)\" (\(type(of: event))) (cepCampaignId=\(payload.cepCampaignId), properties=\(event.properties))",
+                campaign: payload.campaignKey
             )
             digia.deliver(event, payload: payload)
         }

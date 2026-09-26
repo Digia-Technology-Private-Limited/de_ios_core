@@ -77,13 +77,13 @@ import Foundation
 /// - **A staged call is never wrapped in ``isEnabled(_:)``.** That guard is for
 ///   hot unstaged chatter only; around a staged call it silently blinds the
 ///   timeline in exactly the release build someone opened it to debug.
-struct DigiaLogger: Sendable {
+public struct DigiaLogger: Sendable {
     /// Creates a logger for one module.
     ///
     /// Omit `tag` for plain `[DIGIA]` — the right answer for most of core. Pass
     /// one only for the tags in the table above; a new tag is a decision about
     /// what a developer filters for, not a detail of the file you are in.
-    init(_ tag: String = "") {
+    public init(_ tag: String = "") {
         prefix = tag.isEmpty ? "DIGIA" : "DIGIA-\(tag.uppercased())"
     }
 
@@ -168,7 +168,7 @@ struct DigiaLogger: Sendable {
     /// Guard hot and render-path call sites with this so a release build pays
     /// nothing for a message it will not print — and never guard a *staged*
     /// call with it.
-    func isEnabled(_ severity: DigiaLogSeverity) -> Bool {
+    public func isEnabled(_ severity: DigiaLogSeverity) -> Bool {
         Self.isSeverityEnabled(severity)
     }
 
@@ -179,7 +179,7 @@ struct DigiaLogger: Sendable {
     ///
     /// `stage` and `reason` promote the line onto the campaign timeline; see
     /// the gate table on this type before adding them.
-    func e(
+    public func e(
         _ message: String,
         campaign: String? = nil,
         error: Any? = nil,
@@ -192,7 +192,7 @@ struct DigiaLogger: Sendable {
     }
 
     /// Degraded, but recovered.
-    func w(
+    public func w(
         _ message: String,
         campaign: String? = nil,
         error: Any? = nil,
@@ -205,7 +205,7 @@ struct DigiaLogger: Sendable {
     }
 
     /// A lifecycle milestone.
-    func i(
+    public func i(
         _ message: String,
         campaign: String? = nil,
         stage: TimelineStage? = nil,
@@ -217,7 +217,7 @@ struct DigiaLogger: Sendable {
     }
 
     /// Per-node, per-frame, per-request detail.
-    func d(
+    public func d(
         _ message: String,
         campaign: String? = nil,
         stage: TimelineStage? = nil,

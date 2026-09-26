@@ -30,6 +30,15 @@ struct PresentationCoordinatorTests {
         )
     }
 
+    /// Waits (up to 5 s) for a watchdog's effect. Polls rather than sleeping a
+    /// fixed time: the main actor the watchdog runs on is shared with other
+    /// suites and can be busy well past a short timeout.
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        for _ in 0..<500 where !condition() {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
     private func payload(_ cepCampaignId: String, key: String = "campaign") -> CEPTriggerPayload {
         CEPTriggerPayload(cepCampaignId: cepCampaignId, campaignKey: key, cepMetadata: [:])
     }
@@ -156,7 +165,8 @@ struct PresentationCoordinatorTests {
         let controller = coordinator.open(payload("a"), owner: "clevertap")
         coordinator.accept(controller, kind: .modal)
 
-        try await Task.sleep(nanoseconds: 120_000_000)
+        // Settling forgets the presentation on a later main-actor turn.
+        try await waitUntil { controller.isSettled && coordinator.liveCount == 0 }
 
         #expect(controller.presentation.outcome.settledValue == .dropped(reason: .timeout, detail: "never displayed within the acceptance window"))
         #expect(controller.isHoldReleased)
@@ -213,7 +223,7 @@ struct PresentationCoordinatorTests {
         coordinator.awaitAnchor(controller.trigger)
         controller.markDisplaying()
 
-        try await Task.sleep(nanoseconds: 120_000_000)
+        try await waitUntil { controller.isSettled }
 
         #expect(controller.presentation.outcome.settledValue
             == .dismissed(reason: .autoTimeout, completed: false))
@@ -229,7 +239,7 @@ struct PresentationCoordinatorTests {
         coordinator.accept(controller, kind: .modal)
         coordinator.awaitAnchor(controller.trigger)
 
-        try await Task.sleep(nanoseconds: 120_000_000)
+        try await waitUntil { controller.isSettled }
 
         #expect(controller.presentation.outcome.settledValue?.reasonValue
             == DropReason.anchorNotRegistered.value)

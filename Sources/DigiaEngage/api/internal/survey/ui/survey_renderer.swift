@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 import Combine
-@_implementationOnly import SDWebImageSwiftUI
+internal import SDWebImageSwiftUI
 
 /// Frame-settling buffer added before the survey is shown.
 private let RENDER_DELAY_MS: Int = 150

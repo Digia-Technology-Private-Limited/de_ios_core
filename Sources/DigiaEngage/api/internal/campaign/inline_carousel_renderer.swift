@@ -1,6 +1,6 @@
 import SwiftUI
 import UIKit
-@_implementationOnly import SDWebImageSwiftUI
+internal import SDWebImageSwiftUI
 
 @MainActor
 enum InlineCarouselRenderer {
@@ -198,10 +198,12 @@ private struct InlineCarouselView: View {
         let interval = TimeInterval(config.autoPlayInterval) / 1000
         let transitionDuration = TimeInterval(config.animationDuration) / 1000
         autoPlayTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-            autoAdvanced = true
-            let next = (scrollPosition ?? 0) + 1
-            withAnimation(.easeInOut(duration: transitionDuration)) {
-                scrollPosition = loopEnabled ? next : min(next, pageCount - 1)
+            MainActor.assumeIsolated {
+                autoAdvanced = true
+                let next = (scrollPosition ?? 0) + 1
+                withAnimation(.easeInOut(duration: transitionDuration)) {
+                    scrollPosition = loopEnabled ? next : min(next, pageCount - 1)
+                }
             }
         }
     }
