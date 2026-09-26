@@ -192,6 +192,7 @@ struct DigiaCampaignTimelineView: View {
         "cta_action": "Dismissed — a button closed it",
         "auto_timeout": "Dismissed — closed itself",
         "screen_exit": "Dismissed — left the screen",
+        "target_lost": "Dismissed — lost its target",
         "completed": "Finished",
         // Shared by the drop and dismiss arms: the same word is correct whether
         // it was replaced before or after it appeared.

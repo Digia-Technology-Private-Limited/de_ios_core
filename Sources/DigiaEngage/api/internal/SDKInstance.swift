@@ -88,6 +88,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private var captureInFlight = false
     private var guideCompletionFired = false
     private var lastReportedGuideStep: (token: Int64, index: Int)?
+    /// Terminal reason the initiator knows and the dismiss call does not carry
+    /// directly — consumed once by the next guide dismiss. Mirrors Flutter's
+    /// `_pendingDismissReason`.
+    private var pendingGuideDismissReason: DismissReason?
+    /// Screen the current guide step showed on — an anchor that unmounts after
+    /// a host screen change is a screen exit, in place it is a lost target.
+    private var screenAtGuideStep: String?
     /// The design tokens the current campaign bundle was parsed with.
     ///
     /// Held because live test parses a campaign that never came through the
@@ -1303,7 +1310,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 log.e("Dropped — \(message)", campaign: key)
                 return .dropped(reason: .invalidConfig, detail: message)
             }
-            if guideOrchestrator.state != nil, !guideConfig.steps.isEmpty { dismissGuide() }
+            if guideOrchestrator.state != nil, !guideConfig.steps.isEmpty {
+                // A newer trigger displaces the displayed guide, as Flutter.
+                pendingGuideDismissReason = .superseded
+                dismissGuide()
+            }
             guard guideOrchestrator.start(campaign, payload: payload) else {
                 lastCampaignDropReason = "another guide is already on screen"
                 context.onDropped(DropReason.surfaceBusy, message: "another guide is already on screen")
@@ -1637,9 +1648,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private func replaceActiveLiveTestGuide() {
         if let state = guideOrchestrator.state,
            isLiveTestCepId(state.payload.cepCampaignId) {
-            supersedeLiveTest(state.payload.cepCampaignId)
-            guideOrchestrator.dismissIfActive(payloadId: state.payload.cepCampaignId)
-            guideCompletionFired = false
+            if dwellTracker.elapsedMs(state.payload.cepCampaignId) != nil {
+                // Displayed test displaced: honest superseded, as Flutter.
+                pendingGuideDismissReason = .superseded
+                dismissGuide()
+            } else {
+                supersedeLiveTest(state.payload.cepCampaignId)
+                guideOrchestrator.dismissIfActive(payloadId: state.payload.cepCampaignId)
+                guideCompletionFired = false
+            }
         }
     }
 
@@ -2526,16 +2543,17 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// The anchor hosting the current step left the screen. Same events as
     /// Flutter (`guide_showcase_manager.dart` `dismiss()` / `_finish`):
     /// - not shown yet (still in the first step's delay): the CEP alone is told
-    ///   `dismissed(userClose)`, releasing its slot; Digia records nothing for
-    ///   an unseen guide.
-    /// - shown: a user close. On the last step of a multi-step guide that is a
-    ///   completion for Digia, but the lifecycle event stays
-    ///   `dismissed(userClose, completed: false)`.
-    private func dismissGuideForRemovedAnchor(_ state: ActiveGuideState) {
+    ///   `dismissed` with the caller's reason, or `cancelled` when the SDK ended
+    ///   an unseen guide; Digia records nothing for an unseen guide.
+    /// - shown: a lost target in place, a screen exit after a host screen change.
+    ///   On the last step of a multi-step guide that is a completion for Digia,
+    ///   but the lifecycle event stays `dismissed` with the real reason.
+    private func dismissGuideForRemovedAnchor(_ state: ActiveGuideState, reason: DismissReason? = nil) {
         guard dwellTracker.elapsedMs(state.payload.cepCampaignId) != nil else {
             guideOrchestrator.dismiss()
-            events.toCep(.dismissed(), payload: state.payload)
+            events.toCep(.dismissed(reason: reason ?? .cancelled), payload: state.payload)
             guideCompletionFired = false
+            pendingGuideDismissReason = nil
             return
         }
         // As Flutter (`guide_showcase_manager.dart:787-813`): the completion
@@ -2543,7 +2561,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         if state.steps.count > 1, !state.hasNext {
             reportGuideCompletedIfNeeded(state, anchorLeft: true)
         }
-        dismissGuide(reason: .userClose, completed: false)
+        pendingGuideDismissReason =
+            reason ?? ((_currentScreen == screenAtGuideStep) ? .targetLost : .screenExit)
+        dismissGuide(completed: false)
+    }
+
+    /// Displayed-guide reason in Flutter's `_finish` order: a completion, then
+    /// the initiator's pending reason, then the direct reason.
+    private func resolveGuideDismissReason(explicit reason: DismissReason, completed: Bool) -> DismissReason {
+        if completed { return .completed }
+        return pendingGuideDismissReason ?? reason
     }
 
     /// `completed` overrides the lifecycle event's completion, which otherwise
@@ -2554,6 +2581,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let total = state.steps.count
         let elapsed = dwellTracker.consumeDwellMs(payload.cepCampaignId)
         let completed = completed ?? guideCompletionFired
+        let reason = resolveGuideDismissReason(explicit: reason, completed: completed)
+        pendingGuideDismissReason = nil
         if !guideCompletionFired, total > 1 {
             events.toDigia(
                 GuideEvent.StepDismissed(itemIndex: state.stepIndex + 1),
@@ -2567,6 +2596,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 completed: completed
             ),
             GuideEvent.Dismissed(
+                dismissReason: (completed ? .completed : reason).wire,
                 abandonedAtItem: state.stepIndex + 1,
                 itemTotal: total,
                 dwellMs: elapsed
@@ -2589,6 +2619,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
         } else {
             if completesOnLast, state.steps.count > 1 { reportGuideCompletedIfNeeded(state) }
+            if !completesOnLast {
+                // Scrim/outside tap off the last step, as Flutter's scrimTap.
+                pendingGuideDismissReason = .scrimTap
+            }
             dismissGuide()
         }
     }
@@ -2628,6 +2662,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     func reportGuideShown() {
         guard let state = guideOrchestrator.state else { return }
+        // Snapshot for a later anchor loss, as Flutter's `_screenAtStep`.
+        screenAtGuideStep = _currentScreen
         let stepWasReported = lastReportedGuideStep.map {
             $0.token == state.token && $0.index == state.stepIndex
         } ?? false
@@ -2902,6 +2938,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             return GuideEvent.StepDismissed(itemIndex: int("step_index") ?? 0)
         case "Digia Experience Dismissed":
             return GuideEvent.Dismissed(
+                dismissReason: str("dismiss_reason") ?? DismissReason.userClose.value,
                 abandonedAtItem: int("abandoned_at_step") ?? int("step_index"),
                 itemTotal: int("step_total"))
         case "Digia Experience Completed":
