@@ -26,8 +26,9 @@ public protocol DigiaCEPPlugin: AnyObject {
     /// to the CEP SDK.
     ///
     /// CEP events that arrive before this runs are the plugin's own problem to
-    /// buffer — including the case where `Digia.initialize()` is never called
-    /// at all, which is the one timer a plugin still owns.
+    /// buffer. Once attached, a delivery made before the SDK is ready settles at
+    /// once as dropped (`not_initialized`, `not_ready` or
+    /// `initialization_failed`); core never holds one.
     func attach(host: DigiaCEPHost)
 
     /// Called by `Digia.unregister()`, or when a replacement plugin is
