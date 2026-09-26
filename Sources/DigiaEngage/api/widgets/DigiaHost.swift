@@ -18,9 +18,11 @@ public struct DigiaHost<Content: View>: View {
                 .onAppear { SDKInstance.shared.onHostMounted() }
                 .onDisappear { SDKInstance.shared.onHostUnmounted() }
 
+            // Above the floaters (3): a guide may show over a collapsed floater
+            // (surface rule), and must be drawn over it like a nudge or survey.
             GuideOverlayView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .zIndex(2)
+                .zIndex(3.5)
 
             // Between guide and survey/nudge: lets a survey/nudge that starts
             // while a floater is collapsed cover it "for free" via layering,

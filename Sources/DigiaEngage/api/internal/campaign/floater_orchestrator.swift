@@ -473,8 +473,14 @@ final class FloaterOrchestrator: ObservableObject {
         }
     }
 
+    /// Whether a nudge, survey or guide is on screen. A collapsed window can sit
+    /// under one (surface rule) but must not open over it. Set by `SDKInstance`.
+    var isCoveredByBlockingCampaign: () -> Bool = { false }
+
     func expand() {
-        guard let active = state, !closing, surface != .expanded else { return }
+        guard let active = state, !closing, surface != .expanded,
+              !isCoveredByBlockingCampaign()
+        else { return }
         surface = .expanded
         expandCount += 1
         everExpanded = true

@@ -152,8 +152,13 @@ final class FloaterStoryOrchestrator: ObservableObject {
     }
 
     /// The user tapped the window and the story is opening.
+    /// Whether a nudge, survey or guide is on screen. A collapsed window can sit
+    /// under one (surface rule) but must not open over it. Set by `SDKInstance`.
+    var isCoveredByBlockingCampaign: () -> Bool = { false }
+
     func openStory(initialIndex: Int = 0) {
-        guard let active = state, !closing, !storyOpen else { return }
+        guard let active = state, !closing, !storyOpen, !isCoveredByBlockingCampaign()
+        else { return }
         if case .story(_, let pages, _, _, _, _, _, _, _, _) = active.config.story {
             storyInitialIndex = min(max(0, initialIndex), pages.count - 1)
         }

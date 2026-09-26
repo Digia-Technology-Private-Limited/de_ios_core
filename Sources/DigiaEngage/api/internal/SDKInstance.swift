@@ -252,6 +252,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             onStepDismissed: { [weak self] state in self?.emitFloaterStoryStepDismissed(state) },
             onVisible: { [weak self] state in self?.reportFloaterStoryImpression(state) }
         )
+        // SR07: a floater under a nudge, survey or guide cannot open over it.
+        let coveredByBlocking: () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return self.controller.activeNudge != nil || self.surveyOrchestrator.state != nil
+                || self.guideOrchestrator.state != nil
+        }
+        floaterOrchestrator.isCoveredByBlockingCampaign = coveredByBlocking
+        floaterStoryOrchestrator.isCoveredByBlockingCampaign = coveredByBlocking
 
         appBackgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,

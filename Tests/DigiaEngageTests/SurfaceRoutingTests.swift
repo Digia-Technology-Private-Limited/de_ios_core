@@ -56,6 +56,21 @@ struct SurfaceRoutingTests {
         #expect(sdk.guideOrchestrator.state?.payload.campaignKey == "g")
     }
 
+    @Test("a collapsed floater cannot expand under a nudge (SR07)")
+    func floaterCannotExpandUnderNudge() throws {
+        try start([floaterJson("pip"), nudgeJson("n")])
+        _ = deliver("pip", "cep-f")
+        _ = deliver("n", "cep-n")
+        try #require(sdk.controller.activeNudge != nil)
+
+        sdk.floaterOrchestrator.expand()
+        #expect(sdk.floaterOrchestrator.surface == .collapsed)
+
+        sdk.markNudgeDismissed()
+        sdk.floaterOrchestrator.expand()
+        #expect(sdk.floaterOrchestrator.surface == .expanded)
+    }
+
     @Test("floater over a collapsed floater → surface_busy")
     func floaterOverCollapsedFloater() throws {
         try start([floaterJson("pip1"), floaterJson("pip2")])
