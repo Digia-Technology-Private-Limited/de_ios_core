@@ -1,6 +1,6 @@
 import Foundation
 
-enum DigiaEndpoints {
+enum DigiaEndpointRegistry {
     private static let production = "https://app.digia.tech"
     private static let sandbox = "https://dev.digia.tech"
 
@@ -22,6 +22,16 @@ enum DigiaEndpoints {
         _testRoot = try normalizeRoot(rootUrl)
     }
 
+    static func useMockServer(_ rootURL: String, allowInRelease: Bool) throws {
+        guard !_initialized else {
+            throw DigiaTestKitError.alreadyInitialized
+        }
+        guard DigiaDebugDetection.isDebugBuild() || allowInRelease else {
+            throw DigiaTestKitError.unavailableInRelease
+        }
+        _testRoot = try normalizeRoot(rootURL)
+    }
+
     /// Resets all endpoint and test state to defaults. Use in tests only.
     static func resetForTest() {
         _environmentRoot = production
@@ -29,8 +39,10 @@ enum DigiaEndpoints {
         _initialized = false
     }
 
-    static var baseUrl: String { _testRoot ?? _environmentRoot }
+    static var rootURL: String { _testRoot ?? _environmentRoot }
+    static var baseUrl: String { rootURL }
 
+    static var campaigns: String { "\(baseUrl)/api/v1/engage/sdk/getCampaigns" }
     static var campaignBundle: String { "\(baseUrl)/api/v1/engage/sdk/getCampaignBundle" }
     static var track: String { "\(baseUrl)/api/v1/engage/sdk/track" }
     static var session: String { "\(baseUrl)/api/v1/engage/sdk/session" }
@@ -46,16 +58,15 @@ enum DigiaEndpoints {
 
     private static func normalizeRoot(_ rootUrl: String) throws -> String {
         let candidate = rootUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let schemeDelimiter = candidate.range(of: "://") else {
+            throw DigiaTestKit.Error.invalidRootUrl(rootUrl)
+        }
         guard let url = URL(string: candidate),
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             throw DigiaTestKit.Error.invalidRootUrl(rootUrl)
         }
         let scheme = components.scheme?.lowercased()
-        let schemeDelimiter = "://"
-        guard let range = candidate.range(of: schemeDelimiter) else {
-            throw DigiaTestKit.Error.invalidRootUrl(rootUrl)
-        }
-        let suffix = String(candidate[range.upperBound...])
+        let suffix = String(candidate[schemeDelimiter.upperBound...])
         let authority = suffix.hasSuffix("/") ? String(suffix.dropLast()) : suffix
 
         guard !candidate.isEmpty,
@@ -81,4 +92,39 @@ enum DigiaEndpoints {
         let portPart = components.port != nil ? ":\(components.port!)" : ""
         return "\(scheme!)://\(host)\(portPart)"
     }
+}
+
+enum DigiaEndpoints {
+    static var isInitialized: Bool { DigiaEndpointRegistry.isInitialized }
+
+    static func configure(_ config: DigiaConfig) {
+        DigiaEndpointRegistry.configure(config)
+    }
+
+    static func setTestRoot(_ rootUrl: String) throws {
+        try DigiaEndpointRegistry.setTestRoot(rootUrl)
+    }
+
+    static func useMockServer(_ rootURL: String, allowInRelease: Bool) throws {
+        try DigiaEndpointRegistry.useMockServer(rootURL, allowInRelease: allowInRelease)
+    }
+
+    /// Resets to the production default. Use in tests only.
+    static func resetForTest() {
+        DigiaEndpointRegistry.resetForTest()
+    }
+
+    static var baseUrl: String { DigiaEndpointRegistry.baseUrl }
+    static var rootURL: String { DigiaEndpointRegistry.rootURL }
+
+    static var campaigns: String { DigiaEndpointRegistry.campaigns }
+    static var campaignBundle: String { DigiaEndpointRegistry.campaignBundle }
+    static var track: String { DigiaEndpointRegistry.track }
+    static var session: String { DigiaEndpointRegistry.session }
+    static var submission: String { DigiaEndpointRegistry.submission }
+    static var recordComponents: String { DigiaEndpointRegistry.recordComponents }
+    static var recordPageCapture: String { DigiaEndpointRegistry.recordPageCapture }
+    static var liveTestConnect: String { DigiaEndpointRegistry.liveTestConnect }
+    static var liveTestAck: String { DigiaEndpointRegistry.liveTestAck }
+    static var liveTestEvent: String { DigiaEndpointRegistry.liveTestEvent }
 }

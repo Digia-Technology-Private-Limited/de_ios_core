@@ -15,6 +15,7 @@ struct CanvasNudgeCloseOverlay: View {
     let safeAreaInsets: UIEdgeInsets
     let isBottomSheet: Bool
     let action: () -> Void
+    var accessibilityLabel: String? = nil
 
     var body: some View {
         if let placement = config.placement, placement.mode == .outside {
@@ -35,7 +36,7 @@ struct CanvasNudgeCloseOverlay: View {
                 diameter: config.diameter, container: container, safe: safe,
                 isBottomSheet: isBottomSheet
             ) {
-                NudgeCloseButton(config: config, action: action, layout: layout)
+                NudgeCloseButton(config: config, action: action, layout: layout, accessibilityLabel: accessibilityLabel)
             }
         }
         .frame(width: viewport.width, height: viewport.height, alignment: .topLeading)
@@ -64,7 +65,8 @@ struct CanvasNudgeCloseOverlay: View {
                 NudgeCloseButton(
                     config: config,
                     action: action,
-                    layout: .init(circle: circle, touch: circle)
+                    layout: .init(circle: circle, touch: circle),
+                    accessibilityLabel: accessibilityLabel
                 )
                 .padding(padding)
             }

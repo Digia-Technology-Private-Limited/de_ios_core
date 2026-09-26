@@ -2927,6 +2927,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     func resetForTesting() {
+        DigiaEndpoints.resetForTest()
         if let plugin = activePlugin {
             coordinator.detach(owner: plugin.id)
             plugin.detach()

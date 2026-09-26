@@ -328,7 +328,8 @@ private struct SurveySheet<Content: View>: View {
             return { bounds, viewport in
                 AnyView(CanvasNudgeCloseOverlay(
                     config: close, container: bounds, viewport: viewport,
-                    safeAreaInsets: surveyWindowSafeAreaInsets, isBottomSheet: true, action: onDismiss))
+                    safeAreaInsets: surveyWindowSafeAreaInsets, isBottomSheet: true, action: onDismiss,
+                    accessibilityLabel: "Close survey"))
             }
         }
         return nil
@@ -417,7 +418,8 @@ private struct DialogContainer<Content: View>: View {
                 if !keyboardScrollsContent, let anchor, let close = separateClose, close.placement?.mode == .outside {
                     CanvasNudgeCloseOverlay(
                         config: close, container: geo[anchor], viewport: stableViewport,
-                        safeAreaInsets: .zero, isBottomSheet: false, action: onDismiss)
+                        safeAreaInsets: .zero, isBottomSheet: false, action: onDismiss,
+                        accessibilityLabel: "Close survey")
 
                 }
             }
@@ -525,7 +527,8 @@ struct CanvasSurveyDialogKeyboardLayout: AnimatableModifier {
                     viewport: presentation.viewport,
                     safeAreaInsets: .zero,
                     isBottomSheet: false,
-                    action: onClose
+                    action: onClose,
+                    accessibilityLabel: "Close survey"
                 )
             }
         }
@@ -717,6 +720,7 @@ private struct SurveyBody: View {
                             .frame(width: 26, height: 26)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Close survey")
                 }
             }
             if block.showMedia && block.media.position == .top {
@@ -819,6 +823,7 @@ private struct SurveyBody: View {
                         .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Close survey")
             }
         }
         .frame(maxWidth: .infinity)
