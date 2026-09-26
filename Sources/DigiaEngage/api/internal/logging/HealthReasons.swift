@@ -25,7 +25,7 @@ enum HealthReasons {
     /// Reasons the backend may hear about, by wire symbol.
     ///
     /// Wire strings rather than a closed Swift enum on purpose: three of the
-    /// ten have no emit site on this core yet, and the rest are spread across
+    /// twelve have no emit site on this core yet, and the rest are spread across
     /// ``DropReason`` and `TimelineReason` — two enums that deliberately do not
     /// merge. Matching on ``DiagnosticReason/wire`` is the one thing all of
     /// them share.
@@ -40,6 +40,11 @@ enum HealthReasons {
         "fetch_failed_auth",
         "invalid_config",
         "missing_variable",
+        // Startup drops (SP5/SP6): a trigger that reached core before the SDK
+        // was ready. `not_initialized` stays off the list — the sink does not
+        // exist before `initialize()`.
+        "not_ready",
+        "initialization_failed",
     ]
 
     /// Which `extras` keys each reason may send as `detail` — and nothing else.
@@ -73,6 +78,8 @@ enum HealthReasons {
         "fetch_failed_auth": ["http_status"],
         "invalid_config": [],
         "missing_variable": [],
+        "not_ready": [],
+        "initialization_failed": [],
     ]
 
     /// Reasons that identify *no* campaign, and so dedup on the symbol alone.
@@ -88,7 +95,7 @@ enum HealthReasons {
     /// The extra that makes one campaign's several instances of a reason
     /// distinct.
     ///
-    /// Spec §2's dedup key is `(reason, campaign)` for eight of the ten. The
+    /// Spec §2's dedup key is `(reason, campaign)` for ten of the twelve. The
     /// two here can happen repeatedly within one campaign for genuinely
     /// different causes — two broken tokens, two unsupplied variables — and
     /// collapsing them would report the first and hide the rest, which is the

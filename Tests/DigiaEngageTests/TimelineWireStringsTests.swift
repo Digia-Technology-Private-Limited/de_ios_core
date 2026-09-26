@@ -74,6 +74,8 @@ struct TimelineWireStringsTests {
                 "fetch_failed_auth",
                 "invalid_config",
                 "missing_variable",
+                "not_ready",
+                "initialization_failed",
             ])
     }
 
@@ -89,6 +91,8 @@ struct TimelineWireStringsTests {
         #expect(HealthReasons.detailKeys["fetch_failed_auth"] == ["http_status"])
         #expect(HealthReasons.detailKeys["invalid_config"] == [])
         #expect(HealthReasons.detailKeys["missing_variable"] == [])
+        #expect(HealthReasons.detailKeys["not_ready"] == [])
+        #expect(HealthReasons.detailKeys["initialization_failed"] == [])
         // Every allowlisted reason has an explicit projection, even if empty —
         // an absent entry and an empty list must never be conflated.
         for reason in HealthReasons.reasons {
