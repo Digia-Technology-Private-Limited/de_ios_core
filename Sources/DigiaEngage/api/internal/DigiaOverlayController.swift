@@ -53,7 +53,7 @@ final class DigiaOverlayController: ObservableObject {
             do { try await Task.sleep(nanoseconds: nanoseconds) }
             catch { return }
             guard !Task.isCancelled, self?.activeNudge?.id == nudge.id else { return }
-            SDKInstance.shared.markNudgeDismissed()
+            SDKInstance.shared.markNudgeDismissed(reason: .autoTimeout)
         }
     }
 
