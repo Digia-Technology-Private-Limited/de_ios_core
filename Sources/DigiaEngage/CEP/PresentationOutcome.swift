@@ -27,8 +27,16 @@ public enum PresentationState: String, CaseIterable, Sendable {
 /// the case name — the two differ, and a silently derived string is a wire
 /// break no test would catch at the call site.
 public enum DropReason: String, CaseIterable, Sendable {
-    /// SDK not ready and the trigger was not queueable.
+    /// `Digia.initialize()` has not been called.
     case notInitialized = "not_initialized"
+
+    /// `Digia.initialize()` was called but the campaign fetch is still running.
+    /// Core never holds a trigger that arrives before the SDK is ready.
+    case notReady = "not_ready"
+
+    /// The campaign fetch failed; the SDK stays unusable until the host calls
+    /// `Digia.initialize()` again.
+    case initializationFailed = "initialization_failed"
 
     /// The key is not in the campaign store.
     case unknownCampaignKey = "unknown_campaign_key"

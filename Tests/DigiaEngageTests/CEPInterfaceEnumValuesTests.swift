@@ -23,6 +23,8 @@ struct CEPInterfaceEnumValuesTests {
     @Test("DropReason values")
     func dropReasonValues() {
         #expect(DropReason.notInitialized.value == "not_initialized")
+        #expect(DropReason.notReady.value == "not_ready")
+        #expect(DropReason.initializationFailed.value == "initialization_failed")
         #expect(DropReason.unknownCampaignKey.value == "unknown_campaign_key")
         #expect(DropReason.invalidConfig.value == "invalid_config")
         #expect(DropReason.anchorNotRegistered.value == "anchor_not_registered")
@@ -35,7 +37,7 @@ struct CEPInterfaceEnumValuesTests {
         #expect(DropReason.cancelled.value == "cancelled")
         #expect(DropReason.pluginDetached.value == "plugin_detached")
         #expect(DropReason.error.value == "error")
-        #expect(DropReason.allCases.count == 13)
+        #expect(DropReason.allCases.count == 15)
     }
 
     @Test("DismissReason values")

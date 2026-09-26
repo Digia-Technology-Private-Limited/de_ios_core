@@ -14,6 +14,8 @@ struct DeliveryTimelineObserverTests {
     @Test("maps every drop reason onto the beat it happened on")
     func stageOfEveryDropReason() {
         #expect(stageOf(.notInitialized) == .trigger)
+        #expect(stageOf(.notReady) == .trigger)
+        #expect(stageOf(.initializationFailed) == .trigger)
         #expect(stageOf(.unknownCampaignKey) == .trigger)
 
         #expect(stageOf(.frequencyCapped) == .gating)
@@ -33,6 +35,6 @@ struct DeliveryTimelineObserverTests {
 
         // Total by construction — if a reason is ever added, this count fails
         // before the mapping can silently acquire a default branch.
-        #expect(DropReason.allCases.count == 13)
+        #expect(DropReason.allCases.count == 15)
     }
 }
