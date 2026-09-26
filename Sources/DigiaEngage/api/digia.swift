@@ -86,6 +86,10 @@ public enum Digia {
     /// completes are dropped, not held. A fetch failure does not throw: the SDK
     /// stays unable to show campaigns, and calling `initialize()` again retries
     /// the fetch.
+    ///
+    /// A retry after a failed fetch reuses the configuration of the first call:
+    /// the `config` passed to the retry is ignored, and only the campaign fetch
+    /// runs again.
     public static func initialize(_ config: DigiaConfig) async throws {
         guard #available(iOS 17, *) else { return }
         try await SDKInstance.shared.initialize(config)
