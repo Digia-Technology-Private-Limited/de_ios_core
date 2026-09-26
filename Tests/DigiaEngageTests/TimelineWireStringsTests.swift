@@ -76,6 +76,7 @@ struct TimelineWireStringsTests {
                 "missing_variable",
                 "not_ready",
                 "initialization_failed",
+                "surface_busy",
             ])
     }
 
@@ -93,6 +94,7 @@ struct TimelineWireStringsTests {
         #expect(HealthReasons.detailKeys["missing_variable"] == [])
         #expect(HealthReasons.detailKeys["not_ready"] == [])
         #expect(HealthReasons.detailKeys["initialization_failed"] == [])
+        #expect(HealthReasons.detailKeys["surface_busy"] == ["blocking_campaign_key", "blocking_kind"])
         // Every allowlisted reason has an explicit projection, even if empty —
         // an absent entry and an empty list must never be conflated.
         for reason in HealthReasons.reasons {
@@ -106,6 +108,8 @@ struct TimelineWireStringsTests {
         #expect(HealthReasons.dedupExtraKey == [
             "unknown_design_token": "token",
             "missing_variable": "variable",
+            "surface_busy": "blocking_campaign_key",
         ])
+        #expect(HealthReasons.liveTestBlockerKey == "blocking_live_test")
     }
 }
