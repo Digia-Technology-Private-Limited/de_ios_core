@@ -541,6 +541,7 @@ struct NudgeCloseButton: View {
     let config: NudgeCloseButtonConfig
     let action: () -> Void
     var layout: NudgeCloseButtonPlacement.Layout? = nil
+    var accessibilityLabel: String? = nil
 
     @ObservedObject private var theme = CampaignCanvasTheme.shared
     @Environment(\.colorScheme) private var colorScheme
@@ -602,6 +603,6 @@ struct NudgeCloseButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Close")
+        .accessibilityLabel(accessibilityLabel ?? "Close")
     }
 }

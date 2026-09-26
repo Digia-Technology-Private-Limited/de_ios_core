@@ -457,7 +457,7 @@ private struct CanvasSurveyScaledStage: View {
                     container: CGRect(origin: .zero, size: size),
                     viewport: size, safeAreaInsets: .zero,
                     isBottomSheet: survey.settings.display.type == .bottomSheet,
-                    action: onClose)
+                    action: onClose, accessibilityLabel: "Close survey")
             }
         }
     }
