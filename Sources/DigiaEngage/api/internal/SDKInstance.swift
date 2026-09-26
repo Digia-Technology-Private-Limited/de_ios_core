@@ -601,16 +601,42 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             // `detach()`, so its own outcome handlers run while its bridge is
             // still alive. Reversing these two lines is the leak itself.
             coordinator.detach(owner: outgoing.id)
-            outgoing.detach()
+            // One still waiting for its attach hop was never attached.
+            if outgoing !== pendingAttach { outgoing.detach() }
         }
+        pendingAttach = nil
         activePlugin = plugin
-        plugin.attach(host: self)
         log.i(
             "Plugin registered (plugin=\(plugin.id))",
             stage: .session,
             reason: TimelineReason.pluginRegistered,
             extras: ["plugin": plugin.id]
         )
+        guard config == nil else {
+            attachActive(plugin)
+            return
+        }
+        // `initialize()` hasn't started. A host that wrote
+        // `Task { try await Digia.initialize(config) }; Digia.register(plugin)`
+        // has an init Task queued on the main actor but not yet run. One hop
+        // lets it run first and reach `initializing`, so the replays `attach`
+        // delivers synchronously drop `not_ready` (logged and reported), not
+        // `not_initialized` (R2-S03).
+        pendingAttach = plugin
+        Task { @MainActor [weak self] in
+            self?.attachActive(plugin)
+        }
+    }
+
+    /// The plugin `register` accepted before `initialize()` started, until its
+    /// attach hop runs.
+    private var pendingAttach: DigiaCEPPlugin?
+
+    private func attachActive(_ plugin: DigiaCEPPlugin) {
+        // A later `register` (or a reset) replaced it during the hop.
+        guard activePlugin === plugin else { return }
+        if pendingAttach === plugin { pendingAttach = nil }
+        plugin.attach(host: self)
         if let screen = _currentScreen {
             plugin.onScreenChanged(screen)
         }
@@ -2943,6 +2969,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             plugin.detach()
         }
         activePlugin = nil
+        pendingAttach = nil
         _currentScreen = nil
         initGeneration &+= 1
         fetchTask?.cancel()

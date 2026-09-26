@@ -67,6 +67,8 @@ struct DigiaEngageTests {
     @Test("register replaces and detaches the previous plugin")
     func registerReplacesPlugin() {
         SDKInstance.shared.resetForTesting()
+        // Initialized, so `register` attaches synchronously (ST43).
+        SDKInstance.shared.markInitializedForTesting(with: DigiaConfig(apiKey: "key_123"))
         let first = TestPlugin(id: "first")
         let second = TestPlugin(id: "second")
 
@@ -82,6 +84,8 @@ struct DigiaEngageTests {
     @Test("G6 — the outgoing plugin's presentations settle before it detaches")
     func detachSettlesOwnedPresentationsFirst() throws {
         SDKInstance.shared.resetForTesting()
+        // Initialized, so `register` attaches synchronously (ST43).
+        SDKInstance.shared.markInitializedForTesting(with: DigiaConfig(apiKey: "key_123"))
         let first = TestPlugin(id: "first")
         Digia.register(first)
         let campaign = try #require(nudgeCampaign(key: "global-nudge"))

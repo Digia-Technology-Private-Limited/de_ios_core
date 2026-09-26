@@ -131,6 +131,29 @@ struct SDKInstanceEarlyInitTests {
         #expect(!sdk.campaignStore.isEmpty)
     }
 
+    @Test("register right after scheduling the init Task: the plugin's synchronous replay drops not_ready")
+    func registerBeforeInitTaskRuns() async throws {
+        let network = HeldBundleNetworkClient()
+        let sdk = makeInstance(network: network)
+        let plugin = ReplayOnAttachPlugin()
+
+        // The host pattern from R2-S03: the init Task has not run when
+        // `register` is called in the same main-actor turn.
+        let initTask = Task { @MainActor in try await sdk.initialize(DigiaConfig(apiKey: "test_key")) }
+        sdk.register(plugin)
+        #expect(plugin.replay == nil)
+
+        for _ in 0..<200 where plugin.replay == nil {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let replay = try #require(plugin.replay)
+        #expect(replay.isSettled)
+        #expect(replay.dropReason == .notReady)
+
+        network.release(.success(Self.bundle(campaignKey: "launch")))
+        try await initTask.value
+    }
+
     private static func bundle(campaignKey: String) -> NetworkResponse {
         let campaign: [String: Any] = [
             "id": "\(campaignKey)-id",
@@ -144,6 +167,21 @@ struct SDKInstanceEarlyInitTests {
         let body = try! JSONSerialization.data(withJSONObject: ["campaigns": [campaign]])
         return NetworkResponse(statusCode: 200, headers: [:], body: body, isSuccessful: true)
     }
+}
+
+/// Delivers one trigger synchronously inside `attach`, the way the CleverTap
+/// and MoEngage plugins replay what they buffered before attach.
+private final class ReplayOnAttachPlugin: DigiaCEPPlugin {
+    let id = "replay"
+    var replay: PresentationRecorder?
+
+    func attach(host: DigiaCEPHost) {
+        replay = PresentationRecorder(
+            host.deliver(CEPTriggerPayload(cepCampaignId: "cep-1", campaignKey: "launch", cepMetadata: [:]))
+        )
+    }
+
+    func detach() {}
 }
 
 /// Holds the campaign-bundle request until the test releases it; every other
