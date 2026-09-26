@@ -1294,9 +1294,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 schemas: nudgeConfig.variableSchemas,
                 cepVars: payload.variables
             )
-            // A newer nudge displaces the shown one. Settle the incumbent as
-            // superseded first — otherwise its CEP slot stays held (as on
-            // Android and Flutter). CEP-only, like theirs: no Digia event.
+            // A newer nudge displaces the shown one: settle the incumbent as
+            // superseded first, CEP-only like Android and Flutter (no Digia
+            // event), or its CEP slot stays held.
             if let incumbent = controller.activeNudge {
                 events.toCep(
                     .dismissed(reason: .superseded),
