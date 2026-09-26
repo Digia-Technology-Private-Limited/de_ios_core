@@ -130,6 +130,49 @@ struct HealthSinkTests {
         #expect(recorder.payloads.count == 1)
     }
 
+    // MARK: - Pending mode (SP10)
+
+    @Test("pending mode queues early events, dedups them, and flushes once on activate")
+    func pendingModeQueuesAndFlushes() {
+        let sink = HealthSink()
+        sink.beginPending()
+        defer { sink.deactivate() }
+        #expect(sink.isRegistered)
+
+        let early = record(DropReason.notReady, campaignKey: "cmp_early")
+        #expect(sink.accepts(early))
+        sink.emit(early)
+        // A duplicate before activation is deduplicated.
+        #expect(!sink.accepts(early))
+
+        let recorder = Recorder()
+        sink.activate(recorder.capture)
+        #expect(recorder.payloads.map(\.campaignKey) == ["cmp_early"])
+        #expect(recorder.payloads.first?.reason == DropReason.notReady.wire)
+
+        // A second activate (a retry) does not flush it again.
+        sink.activate(recorder.capture)
+        #expect(recorder.payloads.count == 1)
+    }
+
+    @Test("queued events count toward the session cap")
+    func pendingModeCountsTowardCap() {
+        let sink = HealthSink()
+        sink.beginPending()
+        defer { sink.deactivate() }
+        for index in 0..<25 {
+            let r = record(DropReason.notReady, campaignKey: "cmp_\(index)")
+            if sink.accepts(r) { sink.emit(r) }
+        }
+        #expect(sink.sentCount == HealthSink.defaultSessionCap)
+
+        let recorder = Recorder()
+        sink.activate(recorder.capture)
+        #expect(recorder.payloads.count == HealthSink.defaultSessionCap)
+        let late = record(DropReason.notReady, campaignKey: "cmp_late")
+        #expect(!sink.accepts(late))
+    }
+
     // MARK: - Session cap
 
     @Test("stops sending once the session cap is reached, regardless of dedup keys")

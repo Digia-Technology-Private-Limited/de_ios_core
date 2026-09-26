@@ -62,9 +62,10 @@ typealias HealthReporter = @Sendable (HealthEventPayload) -> Void
 /// | The kill switch | ``applyBundleConfig(enabled:sessionCap:)`` deregisters the sink outright |
 ///
 /// It is **not** in ``DigiaLogger``'s static registry. The other sinks are
-/// always present; this one registers only once the analytics pipeline it
-/// sends through is up (``activate(_:)``), and unregisters entirely when the
-/// server says stop — zero work, not zero sends.
+/// always present; this one registers when `initialize()` starts, in a pending
+/// mode that queues events (``beginPending()``), sends them once the analytics
+/// pipeline it sends through is up (``activate(_:)``), and unregisters entirely
+/// when the server says stop — zero work, not zero sends.
 ///
 /// Every mutable field is behind one lock: records reach ``accepts(_:)`` and
 /// ``emit(_:)`` from wherever ``DigiaLogger`` dispatched — the main actor, a
@@ -96,6 +97,10 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
     private var report: HealthReporter?
     private var registered = false
     private var buildMode = "release"
+    /// Events accepted in pending mode, before ``activate(_:)`` supplied a
+    /// reporter (SP10). Bounded by the session cap: every queued event counts
+    /// toward `sent`.
+    private var queued: [HealthEventPayload] = []
 
     /// Whether the sink is currently in ``DigiaLogger``'s registry.
     var isRegistered: Bool {
@@ -112,7 +117,27 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         return sent
     }
 
-    /// Registers the sink and points it at `report`.
+    /// Registers the sink in pending mode, with no reporter yet (SP10).
+    ///
+    /// Called at the start of `initialize()`. Records that pass the same
+    /// allowlist, dedup and cap checks are queued until ``activate(_:)`` sends
+    /// them; if it never runs, they are discarded with the process.
+    func beginPending() {
+        var shouldRegister = false
+        lock.lock()
+        if !registered {
+            registered = true
+            buildMode = DigiaDebugDetection.isDebugBuild() ? "debug" : "release"
+            shouldRegister = true
+        }
+        lock.unlock()
+        if shouldRegister {
+            DigiaLogger.registerSink(self)
+        }
+    }
+
+    /// Registers the sink (if ``beginPending()`` did not already) and points it
+    /// at `report`, then sends anything queued in pending mode, once, in order.
     ///
     /// Called once init has an analytics pipeline configured, and deliberately
     /// **before** the campaign bundle is fetched: `fetch_failed_auth` is one of
@@ -129,9 +154,14 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
             buildMode = DigiaDebugDetection.isDebugBuild() ? "debug" : "release"
             shouldRegister = true
         }
+        let pending = queued
+        queued.removeAll()
         lock.unlock()
         if shouldRegister {
             DigiaLogger.registerSink(self)
+        }
+        for payload in pending {
+            report(payload)
         }
     }
 
@@ -171,6 +201,7 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         sent = 0
         cap = Self.defaultSessionCap
         report = nil
+        queued.removeAll()
         buildMode = "release"
         lock.unlock()
     }
@@ -196,24 +227,22 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         let wire = reason.wire
         let detail = projectedDetail(record, wire)
 
-        let reporter: HealthReporter?
-        let mode: String
         lock.lock()
         seen.insert(dedupKey(record, wire))
         sent += 1
-        reporter = report
-        mode = buildMode
+        let payload = HealthEventPayload(
+            campaignKey: record.campaignKey,
+            reason: wire,
+            stage: record.stage?.wire,
+            detail: detail.isEmpty ? nil : detail,
+            buildMode: buildMode
+        )
+        let reporter = report
+        // Pending mode (SP10): no reporter yet, so hold it for `activate`.
+        if reporter == nil { queued.append(payload) }
         lock.unlock()
 
-        reporter?(
-            HealthEventPayload(
-                campaignKey: record.campaignKey,
-                reason: wire,
-                stage: record.stage?.wire,
-                detail: detail.isEmpty ? nil : detail,
-                buildMode: mode
-            )
-        )
+        reporter?(payload)
     }
 
     /// The per-reason projection: only the keys ``HealthReasons/detailKeys``

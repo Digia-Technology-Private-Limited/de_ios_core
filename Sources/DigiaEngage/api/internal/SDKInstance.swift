@@ -299,6 +299,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         guard self.config == nil else { return }
         self.config = config
+        // Pending mode (SP10): allowlisted records from here until `activate`
+        // below are queued, not lost.
+        HealthSink.shared.beginPending()
         DigiaLogger.configure(config.logLevel)
         DigiaEndpoints.configure(config)
         let services = SDKServices(config: config, storage: storage, networkClient: networkClient)
