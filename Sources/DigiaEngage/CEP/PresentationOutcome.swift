@@ -97,6 +97,11 @@ public enum DismissReason: String, CaseIterable, Sendable {
     /// close the user never performed.
     case screenExit = "screen_exit"
 
+    /// The engine lost the target it was showing, or was about to show — it moved
+    /// off screen, or its anchor left the tree or the registry. The host reported
+    /// no screen change; this is not `screenExit`.
+    case targetLost = "target_lost"
+
     /// A newer trigger displaced it while it was on screen. The displaying
     /// counterpart of ``DropReason/superseded``; without it a displaced
     /// experience would have no honest terminal reason at all.

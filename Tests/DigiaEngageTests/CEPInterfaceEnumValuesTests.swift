@@ -46,11 +46,12 @@ struct CEPInterfaceEnumValuesTests {
         #expect(DismissReason.ctaAction.value == "cta_action")
         #expect(DismissReason.autoTimeout.value == "auto_timeout")
         #expect(DismissReason.screenExit.value == "screen_exit")
+        #expect(DismissReason.targetLost.value == "target_lost")
         #expect(DismissReason.superseded.value == "superseded")
         #expect(DismissReason.completed.value == "completed")
         #expect(DismissReason.cancelled.value == "cancelled")
         #expect(DismissReason.pluginDetached.value == "plugin_detached")
-        #expect(DismissReason.allCases.count == 10)
+        #expect(DismissReason.allCases.count == 11)
     }
 
     @Test("PresentationOutcome kinds carry the arm's reason value")
