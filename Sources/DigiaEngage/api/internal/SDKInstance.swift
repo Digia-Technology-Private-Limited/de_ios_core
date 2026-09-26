@@ -44,8 +44,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         )
     }
     @Published private(set) var sdkState: SDKState = .notInitialized
-    /// A delivery that arrived before the campaign bundle. See `bufferUntilReady`.
-    private var pendingPresentation: PresentationController?
     @Published private(set) var isHostMounted = false
     @Published private(set) var captureModeEnabled: Bool
     @Published private(set) var captureTextEnabled: Bool
@@ -340,8 +338,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         configureComponentRegistry(config: config, services: services)
 
         // `initialize()` returns here (SD4). The bundle is fetched in the
-        // background; `completeInitialization` marks the SDK ready and routes
-        // the held trigger, exactly as it did when this was awaited inline.
+        // background; `completeInitialization` marks the SDK ready. A trigger
+        // that arrives before then is dropped, never held (SP5).
         let generation = initGeneration
         fetchTask = Task { @MainActor [weak self, networkClient] in
             let fetched: Result<CampaignBundle, Error>
@@ -390,17 +388,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 reason: Self.fetchFailureReason(fetchFailure),
                 extras: fetchFailure?.statusCode.map { ["http_status": String($0)] }
             )
-            // The held trigger never had a bundle to be looked up in: that is
-            // a failed init, not an unknown key (as Flutter and Android).
-            if let pending = pendingPresentation {
-                pendingPresentation = nil
-                pending.settle(
-                    .dropped(
-                        reason: .notInitialized,
-                        detail: "initialize() failed while this trigger was buffered"
-                    )
-                )
-            }
         }
         completeInitialization(campaigns)
     }
@@ -515,10 +502,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 }
             )
         }
-
-        // Last: the buffered delivery is routed against a populated store, a live
-        // frequencyManager and a real screen — none of which existed when it arrived.
-        flushPendingPayloadIfAny()
     }
 
     /// Retired RN entrypoint, kept only so an older `@digia-engage/core` bundle running
@@ -581,8 +564,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     ///
     /// Total and synchronous: it never fails, always returns a handle, and a
     /// rejection comes back as an *already settled* presentation so the caller
-    /// has one code path either way. A trigger that arrives before the bundle
-    /// is held and routed once it lands (`bufferUntilReady`). Never make this
+    /// has one code path either way. A trigger that arrives before the SDK is
+    /// ready is dropped at once, never held (`routeOrDrop`). Never make this
     /// `async` — spec §10.3.
     func deliver(_ trigger: CEPTriggerPayload) -> CampaignPresentation {
         let controller = coordinator.open(trigger, owner: activePlugin?.id ?? "")
@@ -591,7 +574,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // arrived and we turned it away" are the two answers a campaign creator
         // most needs to tell apart.
         observeDelivery(controller)
-        routeOrHold(controller)
+        routeOrDrop(controller)
         return controller.presentation
     }
 
@@ -617,18 +600,23 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         )
         let controller = coordinator.open(trigger, owner: Self.hostOwner)
         observeDelivery(controller)
-        routeOrHold(controller)
+        routeOrDrop(controller)
         return controller.presentation
     }
 
     /// The state gate `deliver` and `triggerCampaign` share, as Flutter and Android: route when
-    /// ready, hold only while the bundle fetch is running, and otherwise — `initialize()` was
-    /// never called — settle at once so the CEP gets its slot back.
-    private func routeOrHold(_ controller: PresentationController) {
+    /// ready, otherwise settle at once as dropped so the CEP gets its slot back. Core never
+    /// holds a trigger (SP5); the reason says which of the not-ready states it met.
+    private func routeOrDrop(_ controller: PresentationController) {
         if sdkState == .ready {
             routeNow(controller)
         } else if fetchTask != nil {
-            bufferUntilReady(controller)
+            controller.settle(
+                .dropped(
+                    reason: .notReady,
+                    detail: "Campaigns are still loading; trigger dropped"
+                )
+            )
         } else {
             controller.settle(
                 .dropped(
@@ -654,43 +642,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .dropped(let reason, let detail):
             controller.settle(.dropped(reason: reason, detail: detail))
         }
-    }
-
-    /// Holds a trigger that arrived before the campaign bundle.
-    ///
-    /// Only one is held, matching Kotlin: a second trigger before the fetch resolves wins, and
-    /// the older presentation *settles* rather than being forgotten, so whoever is holding a
-    /// slot for it gets it back instead of holding it for the session.
-    ///
-    /// Both `deliver` and `triggerCampaign` route through this, since `initialize()` returns
-    /// before the bundle lands (SD4).
-    private func bufferUntilReady(_ controller: PresentationController) {
-        if let displaced = pendingPresentation {
-            log.w(
-                "Buffered trigger displaced (by=\(controller.trigger.campaignKey))",
-                campaign: displaced.trigger.campaignKey
-            )
-            displaced.settle(
-                .dropped(
-                    reason: .superseded,
-                    detail: "a newer trigger arrived while the SDK was still initializing"
-                )
-            )
-        }
-        log.d(
-            "Queued — the SDK is still initializing "
-                + "(cepCampaignId=\(controller.trigger.cepCampaignId))",
-            campaign: controller.trigger.campaignKey
-        )
-        pendingPresentation = controller
-    }
-
-    /// Routes whatever was held while the bundle was in flight. Called once the store is
-    /// populated, which is the first moment the screen and frequency gates mean anything.
-    private func flushPendingPayloadIfAny() {
-        guard let pending = pendingPresentation else { return }
-        pendingPresentation = nil
-        routeNow(pending)
     }
 
     /// Whether this campaign cannot appear until a named anchor resolves — the
@@ -2946,7 +2897,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         initGeneration &+= 1
         fetchTask?.cancel()
         fetchTask = nil
-        pendingPresentation = nil
         services?.tearDown()
         services = nil
         currentSession.set(nil, requestHeaders: [:])

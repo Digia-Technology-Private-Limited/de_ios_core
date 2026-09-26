@@ -37,7 +37,7 @@ struct DigiaHostDeliveryTests {
     }
 
     @Test("a trigger before initialize() was ever called is dropped not_initialized at once")
-    func heldBeforeTheBundle() {
+    func droppedBeforeInitialize() {
         SDKInstance.shared.resetForTesting()
 
         let recorder = deliver("anything", cepCampaignId: "cep-a")

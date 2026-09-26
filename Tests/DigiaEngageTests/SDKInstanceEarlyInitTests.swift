@@ -4,8 +4,8 @@ import Testing
 @testable import DigiaEngage
 
 /// `initialize()` returns once SDKServices is built; the campaign bundle is
-/// fetched in the background (SD4). A trigger that arrives in between is held
-/// and routed when the fetch resolves.
+/// fetched in the background (SD4). A trigger that arrives before the SDK is
+/// ready is dropped at once, never held (SP5).
 @MainActor
 @Suite("SDKInstance initialize returns before the fetch", .serialized)
 struct SDKInstanceEarlyInitTests {
@@ -45,36 +45,40 @@ struct SDKInstanceEarlyInitTests {
         try await waitUntilReady(sdk)
     }
 
-    @Test("a trigger delivered before the fetch is presented once it succeeds")
-    func heldTriggerPresentedAfterFetch() async throws {
+    @Test("a trigger before ready settles dropped at once, with the reason for the state it met")
+    func dropsBeforeReady() async throws {
         let network = HeldBundleNetworkClient()
         let sdk = makeInstance(network: network)
+
+        // Never initialized.
+        let beforeInit = deliver(sdk, "launch")
+        #expect(beforeInit.isSettled)
+        #expect(beforeInit.dropReason == .notInitialized)
+        #expect(beforeInit.isHoldReleased)
+
+        // Initializing: the fetch is still running.
         try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
+        let whileFetching = deliver(sdk, "launch")
+        #expect(whileFetching.isSettled)
+        #expect(whileFetching.dropReason == .notReady)
+        #expect(whileFetching.isHoldReleased)
 
-        let recorder = deliver(sdk, "launch")
-        #expect(!recorder.isSettled)
-        #expect(sdk.controller.activeNudge == nil)
-
+        // Nothing was held: the fetch landing shows nothing.
         network.release(.success(Self.bundle(campaignKey: "launch")))
         try await waitUntilReady(sdk)
-
-        #expect(!recorder.isSettled)
-        #expect(sdk.controller.activeNudge != nil)
+        #expect(sdk.controller.activeNudge == nil)
     }
 
-    @Test("a fetch failure reaches ready with an empty store, surfaces no error, and settles the held trigger as not_initialized")
-    func fetchFailureSettlesHeldTrigger() async throws {
+    @Test("a fetch failure reaches ready with an empty store and surfaces no error")
+    func fetchFailureReachesReady() async throws {
         let network = HeldBundleNetworkClient()
         let sdk = makeInstance(network: network)
         try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
 
-        let recorder = deliver(sdk, "launch")
         network.release(.failure(URLError(.notConnectedToInternet)))
         try await waitUntilReady(sdk)
 
         #expect(sdk.campaignStore.isEmpty)
-        #expect(recorder.dropReason == .notInitialized)
-        #expect(recorder.isHoldReleased)
     }
 
     private static func bundle(campaignKey: String) -> NetworkResponse {

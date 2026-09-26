@@ -138,8 +138,9 @@ public enum Digia {
     /// all come back as a `dropped` outcome rather than a trap — this is a delivery path, and
     /// a delivery path never fails at its caller.
     ///
-    /// Safe to call before the campaign bundle has loaded: the delivery is buffered and
-    /// routed once the store is ready, the same way a plugin's is.
+    /// Before the campaign bundle has loaded, the delivery is not held: it comes back
+    /// already dropped (`notInitialized`, `notReady` or `initializationFailed`), the same
+    /// way a plugin's does.
     @MainActor
     public static func triggerCampaign(
         _ campaignKey: String,
