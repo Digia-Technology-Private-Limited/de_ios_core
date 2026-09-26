@@ -49,6 +49,40 @@ struct SDKInstanceEarlyInitTests {
         try await waitUntilReady(sdk)
     }
 
+    @Test("initialize() waits for the fetch, capped at 2 s; the fetch continues past the cap")
+    func initializeCappedAwait() async throws {
+        // (a) A held fetch: returns at the cap, still initializing.
+        let held = HeldBundleNetworkClient()
+        let slow = makeInstance(network: held)
+        var start = Date()
+        try await slow.initialize(DigiaConfig(apiKey: "test_key"))
+        var elapsed = Date().timeIntervalSince(start)
+        #expect(elapsed >= 1.9 && elapsed < 3.0)
+        #expect(slow.sdkState == .initializing)
+        held.release(.success(Self.bundle(campaignKey: "launch")))
+        try await waitUntilReady(slow)
+
+        // (b) A fetch that answers at ~100 ms: returns then, ready.
+        let quick = HeldBundleNetworkClient()
+        let fast = makeInstance(network: quick)
+        Task { try? await Task.sleep(nanoseconds: 100_000_000); quick.release(.success(Self.bundle(campaignKey: "launch"))) }
+        start = Date()
+        try await fast.initialize(DigiaConfig(apiKey: "test_key"))
+        elapsed = Date().timeIntervalSince(start)
+        #expect(elapsed < 1.0)
+        #expect(fast.sdkState == .ready)
+
+        // (c) A fetch that fails at ~100 ms: returns then, failed, no throw.
+        let broken = HeldBundleNetworkClient()
+        let failing = makeInstance(network: broken)
+        Task { try? await Task.sleep(nanoseconds: 100_000_000); broken.release(.failure(URLError(.notConnectedToInternet))) }
+        start = Date()
+        try await failing.initialize(DigiaConfig(apiKey: "test_key"))
+        elapsed = Date().timeIntervalSince(start)
+        #expect(elapsed < 1.0)
+        #expect(failing.sdkState == .failed)
+    }
+
     @Test("a trigger before ready settles dropped at once, with the reason for the state it met")
     func dropsBeforeReady() async throws {
         let network = HeldBundleNetworkClient()

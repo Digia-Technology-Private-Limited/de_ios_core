@@ -79,6 +79,13 @@ public enum Digia {
     /// Initializes the Digia SDK. No-ops below iOS 17 — the SDUI rendering layer
     /// requires APIs (`Layout`, newer `SwiftUI` scroll/animation modifiers) that
     /// only exist from iOS 17 onward.
+    ///
+    /// Await it. It returns once the campaign fetch has completed, or 2 seconds
+    /// after the call, whichever comes first; if the cap fires, the fetch keeps
+    /// running in the background. Campaign triggers that arrive before the fetch
+    /// completes are dropped, not held. A fetch failure does not throw: the SDK
+    /// stays unable to show campaigns, and calling `initialize()` again retries
+    /// the fetch.
     public static func initialize(_ config: DigiaConfig) async throws {
         guard #available(iOS 17, *) else { return }
         try await SDKInstance.shared.initialize(config)

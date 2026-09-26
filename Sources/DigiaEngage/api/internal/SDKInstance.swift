@@ -275,7 +275,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
+    /// How long `initialize()` may keep its caller waiting, measured from the call
+    /// (startup plan SP2). The fetch itself is never cut short: if the cap fires
+    /// first, it finishes in the background.
+    static let initializeCapNanoseconds: UInt64 = 2_000_000_000
+
+    /// Returns when the campaign fetch has settled the SDK state (ready or failed)
+    /// or `initializeCapNanoseconds` after the call, whichever comes first. Never
+    /// throws on a fetch failure: the SDK is left `failed` (SP4).
     func initialize(_ config: DigiaConfig) async throws {
+        let calledAt = DispatchTime.now().uptimeNanoseconds
         LocalStorageMigrator.migrateIfNeeded(targetDefaults: defaults, standardDefaults: legacyDefaults)
         DigiaImagePipeline.configureIfNeeded()
         hostActionExecutor.configure(config.actionHandlers)
@@ -285,6 +294,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             // fetch runs again, with the first call's config.
             log.i("Retrying the campaign fetch after a failed initialization", stage: .fetch)
             startCampaignFetch()
+            await awaitCampaignFetch(calledAt: calledAt)
             return
         }
         guard self.config == nil else { return }
@@ -345,10 +355,39 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // point wait on it.
         configureComponentRegistry(config: config, services: services)
 
-        // `initialize()` returns here (SD4). The bundle is fetched in the
-        // background; `completeInitialization` marks the SDK ready. A trigger
-        // that arrives before then is dropped, never held (SP5).
+        // `completeInitialization` marks the SDK ready once the bundle lands. A
+        // trigger that arrives before then is dropped, never held (SP5).
         startCampaignFetch()
+        await awaitCampaignFetch(calledAt: calledAt)
+    }
+
+    /// Waits for the running fetch, but no later than the cap measured from
+    /// `calledAt` (SP2). Only the wait ends at the cap: the fetch is an
+    /// unstructured task, so it keeps running when this returns.
+    private func awaitCampaignFetch(calledAt: UInt64) async {
+        guard let fetchTask else { return }
+        let elapsed = DispatchTime.now().uptimeNanoseconds &- calledAt
+        guard elapsed < Self.initializeCapNanoseconds else { return }
+        let remaining = Self.initializeCapNanoseconds - elapsed
+        // Not a task group: a group waits for every child before it returns,
+        // and the fetch child cannot be cancelled. Whichever finishes first
+        // resumes; the other finds the continuation already spent.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            var resumed = false
+            let resumeOnce = { @MainActor in
+                guard !resumed else { return }
+                resumed = true
+                continuation.resume()
+            }
+            Task { @MainActor in
+                await fetchTask.value
+                resumeOnce()
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: remaining)
+                resumeOnce()
+            }
+        }
     }
 
     /// Moves to `initializing` and fetches the campaign bundle in the background.
