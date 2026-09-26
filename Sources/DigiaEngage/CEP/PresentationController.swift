@@ -236,7 +236,7 @@ private final class PresentationBacking: CampaignPresentation {
     private func releaseHold() {
         guard !holdReleased.isSettled else { return }
         holdReleased.settle(())
-        log.d("CEP hold released (presentationId=\(id))", campaign: trigger.campaignKey)
+        log.i("CEP hold released (presentationId=\(id))", campaign: trigger.campaignKey)
     }
 
     private func emit(_ signal: PresentationSignal) {
