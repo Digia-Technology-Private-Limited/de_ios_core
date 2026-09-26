@@ -128,6 +128,35 @@ struct SurfaceRoutingTests {
         #expect(busy.extras[HealthReasons.liveTestBlockerKey] == nil)
     }
 
+    @Test("RN classic guide over a nudge → surface_busy, not sent to JS (SR21)")
+    func classicGuideOverNudge() throws {
+        try start([nudgeJson("n"), classicGuideJson("classic")])
+        sdk.markInitializedForTesting(with: DigiaConfig(apiKey: "k", wrapperBinding: "react_native"))
+        var rendered: [String] = []
+        sdk.onGuideRenderRequest = { rendered.append($0.payload.campaignKey) }
+        defer { sdk.onGuideRenderRequest = nil }
+
+        _ = deliver("n", "cep-1")
+        let guide = deliver("classic", "cep-2")
+
+        #expect(guide.dropReason == .surfaceBusy)
+        #expect(rendered.isEmpty)
+    }
+
+    @Test("RN classic guide on a free screen is still sent to JS (SR21)")
+    func classicGuideAlone() throws {
+        try start([classicGuideJson("classic")])
+        sdk.markInitializedForTesting(with: DigiaConfig(apiKey: "k", wrapperBinding: "react_native"))
+        var rendered: [String] = []
+        sdk.onGuideRenderRequest = { rendered.append($0.payload.campaignKey) }
+        defer { sdk.onGuideRenderRequest = nil }
+
+        let guide = deliver("classic", "cep-1")
+
+        #expect(!guide.isSettled)
+        #expect(rendered == ["classic"])
+    }
+
     // MARK: - Live test
 
     @Test("test over a test nudge → old dismissed and its row superseded, new shown")
@@ -232,6 +261,20 @@ func guideJson(_ key: String) -> [String: Any] {
                     "layoutMode": "canvas",
                     "canvas": emptyCanvas,
                 ] as [String: Any]
+            ],
+        ] as [String: Any],
+    ]
+}
+
+func classicGuideJson(_ key: String) -> [String: Any] {
+    [
+        "id": "\(key)-id",
+        "campaignKey": key,
+        "campaignType": "guide",
+        "templateConfig": [
+            "templateType": "tooltip",
+            "steps": [
+                ["stepId": "step-1", "anchorKey": "\(key)-anchor", "title": "Hi"] as [String: Any]
             ],
         ] as [String: Any],
     ]

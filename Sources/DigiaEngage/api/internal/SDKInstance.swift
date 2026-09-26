@@ -1397,6 +1397,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     lastCampaignDropReason = "frequency capped"
                     return .dropped(reason: .frequencyCapped, detail: nil)
                 }
+                // G1 (plan §2.4): an arriving classic guide goes through the
+                // rule like any guide. It is still not counted as an occupant.
+                if let busy = admitToSurface(.guide, campaignKey: key, context: context) {
+                    return busy
+                }
                 activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
                 // `payload` was stamped by `coordinator.open()` before routing
                 // ever saw it, so this is only ever empty for a delivery that
