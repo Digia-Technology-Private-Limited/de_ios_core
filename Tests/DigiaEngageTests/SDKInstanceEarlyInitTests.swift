@@ -25,10 +25,14 @@ struct SDKInstanceEarlyInitTests {
     }
 
     private func waitUntilReady(_ sdk: SDKInstance) async throws {
-        for _ in 0..<200 where sdk.sdkState != .ready {
+        try await waitUntil(sdk, .ready)
+    }
+
+    private func waitUntil(_ sdk: SDKInstance, _ state: SDKState) async throws {
+        for _ in 0..<200 where sdk.sdkState != state {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
-        #expect(sdk.sdkState == .ready)
+        #expect(sdk.sdkState == state)
     }
 
     @Test("initialize() completes while the fetch is still pending")
@@ -39,7 +43,7 @@ struct SDKInstanceEarlyInitTests {
         try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
 
         #expect(sdk.services != nil)
-        #expect(sdk.sdkState == .notInitialized)
+        #expect(sdk.sdkState == .initializing)
         #expect(sdk.campaignStore.isEmpty)
         network.release(.success(Self.bundle(campaignKey: "launch")))
         try await waitUntilReady(sdk)
@@ -69,16 +73,28 @@ struct SDKInstanceEarlyInitTests {
         #expect(sdk.controller.activeNudge == nil)
     }
 
-    @Test("a fetch failure reaches ready with an empty store and surfaces no error")
-    func fetchFailureReachesReady() async throws {
-        let network = HeldBundleNetworkClient()
-        let sdk = makeInstance(network: network)
+    @Test("a fetch failure leaves the SDK failed, drops initialization_failed, and a second initialize() recovers")
+    func fetchFailureThenRetry() async throws {
+        let failing = HeldBundleNetworkClient()
+        let sdk = makeInstance(network: failing)
         try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
 
-        network.release(.failure(URLError(.notConnectedToInternet)))
-        try await waitUntilReady(sdk)
-
+        failing.release(.failure(URLError(.notConnectedToInternet)))
+        try await waitUntil(sdk, .failed)
         #expect(sdk.campaignStore.isEmpty)
+
+        let afterFailure = deliver(sdk, "launch")
+        #expect(afterFailure.isSettled)
+        #expect(afterFailure.dropReason == .initializationFailed)
+        #expect(afterFailure.isHoldReleased)
+
+        // The retry runs the fetch again; this one answers.
+        failing.reset()
+        try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
+        #expect(sdk.sdkState == .initializing)
+        failing.release(.success(Self.bundle(campaignKey: "launch")))
+        try await waitUntilReady(sdk)
+        #expect(!sdk.campaignStore.isEmpty)
     }
 
     private static func bundle(campaignKey: String) -> NetworkResponse {
@@ -102,6 +118,13 @@ final class HeldBundleNetworkClient: NetworkClient, @unchecked Sendable {
     private let lock = NSLock()
     private var waiter: CheckedContinuation<NetworkResponse, Error>?
     private var result: Result<NetworkResponse, Error>?
+
+    /// Forgets an answer already given, so the next bundle request is held again.
+    func reset() {
+        lock.lock()
+        result = nil
+        lock.unlock()
+    }
 
     func release(_ result: Result<NetworkResponse, Error>) {
         lock.lock()

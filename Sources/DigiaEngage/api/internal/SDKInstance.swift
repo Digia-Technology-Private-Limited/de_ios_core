@@ -279,6 +279,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         LocalStorageMigrator.migrateIfNeeded(targetDefaults: defaults, standardDefaults: legacyDefaults)
         DigiaImagePipeline.configureIfNeeded()
         hostActionExecutor.configure(config.actionHandlers)
+        if sdkState == .failed {
+            // A retry after a failed fetch (SP4). Services, identity and the
+            // health sink were built by the first call and are kept: only the
+            // fetch runs again, with the first call's config.
+            log.i("Retrying the campaign fetch after a failed initialization", stage: .fetch)
+            startCampaignFetch()
+            return
+        }
         guard self.config == nil else { return }
         self.config = config
         DigiaLogger.configure(config.logLevel)
@@ -340,6 +348,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // `initialize()` returns here (SD4). The bundle is fetched in the
         // background; `completeInitialization` marks the SDK ready. A trigger
         // that arrives before then is dropped, never held (SP5).
+        startCampaignFetch()
+    }
+
+    /// Moves to `initializing` and fetches the campaign bundle in the background.
+    private func startCampaignFetch() {
+        sdkState = .initializing
         let generation = initGeneration
         fetchTask = Task { @MainActor [weak self, networkClient] in
             let fetched: Result<CampaignBundle, Error>
@@ -374,12 +388,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             currentDesignTokens = bundle.designTokens
             currentTimeAnchor = bundle.timeAnchor
         case .failure(let error):
-            // Campaign fetch failure must not block SDK readiness.
             currentTimeAnchor = nil
             // A rejected key is the one fetch failure a customer can fix
             // themselves, so it is worth its own row rather than being filed
-            // under "network". Init still reaches ready either way — the SDK
-            // comes up, it just has nothing to show.
+            // under "network".
             let fetchFailure = error as? CampaignFetchError
             log.e(
                 "Campaign fetch failed",
@@ -388,6 +400,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 reason: Self.fetchFailureReason(fetchFailure),
                 extras: fetchFailure?.statusCode.map { ["http_status": String($0)] }
             )
+            // Not ready with an empty store (SP7): every trigger drops
+            // `initialization_failed` until the host calls `initialize()` again.
+            sdkState = .failed
+            return
         }
         completeInitialization(campaigns)
     }
@@ -608,23 +624,19 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// ready, otherwise settle at once as dropped so the CEP gets its slot back. Core never
     /// holds a trigger (SP5); the reason says which of the not-ready states it met.
     private func routeOrDrop(_ controller: PresentationController) {
-        if sdkState == .ready {
+        let drop: (DropReason, String)
+        switch sdkState {
+        case .ready:
             routeNow(controller)
-        } else if fetchTask != nil {
-            controller.settle(
-                .dropped(
-                    reason: .notReady,
-                    detail: "Campaigns are still loading; trigger dropped"
-                )
-            )
-        } else {
-            controller.settle(
-                .dropped(
-                    reason: .notInitialized,
-                    detail: "Digia.initialize() has not been called"
-                )
-            )
+            return
+        case .notInitialized:
+            drop = (.notInitialized, "Digia.initialize() has not been called")
+        case .initializing:
+            drop = (.notReady, "Campaigns are still loading; trigger dropped")
+        case .failed:
+            drop = (.initializationFailed, "Campaign fetch failed; trigger dropped")
         }
+        controller.settle(.dropped(reason: drop.0, detail: drop.1))
     }
 
     /// Owner recorded for a delivery the host app asked for itself, with no CEP involved.
@@ -1030,15 +1042,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             logError(
                 "campaign dropped — no campaign for key '\(resolvedKey)' knownKeys=[\(campaignStore.keys.joined(separator: ", "))]"
             )
-            // An empty store before the bundle lands is not an unknown key — it
-            // is a trigger that arrived before there was anything to look it up
-            // in, and the two want different fixes from whoever reads the drop.
-            let missedInit = sdkState != .ready && campaignStore.keys.isEmpty
+            // Only reached once ready: `routeOrDrop` settles earlier states.
             return .dropped(
-                reason: missedInit ? .notInitialized : .unknownCampaignKey,
-                detail: missedInit
-                    ? "trigger arrived before the campaign bundle (state=\(sdkState))"
-                    : "no campaign for key '\(resolvedKey)'"
+                reason: .unknownCampaignKey,
+                detail: "no campaign for key '\(resolvedKey)'"
             )
         }
         return route(

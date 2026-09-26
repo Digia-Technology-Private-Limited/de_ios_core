@@ -47,7 +47,7 @@ struct DigiaEngageTests {
         #expect(Digia.sdkVersion == "s=1|b=native|p=ios|c=\(DigiaSdkVersion.value)")
     }
 
-    @Test("initialize is idempotent")
+    @Test("initialize is idempotent once ready")
     func initializeIsIdempotent() async {
         let first = DigiaConfig(apiKey: "first")
         let second = DigiaConfig(apiKey: "second", environment: .sandbox)
@@ -56,6 +56,7 @@ struct DigiaEngageTests {
         // Seed config synchronously to avoid a network-call suspension point that would
         // allow concurrent tests to interfere via resetForTesting().
         SDKInstance.shared.markInitializedForTesting(with: first)
+        SDKInstance.shared.setCampaignsForTesting([])
 
         // A second initialize call should hit the guard and return immediately (no await inside).
         try? await Digia.initialize(second)
