@@ -732,6 +732,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             coordinator.accept(controller, kind: kind)
             if awaitsAnchorLayout(payload) { coordinator.awaitAnchor(payload) }
         case .dropped(let reason, let detail):
+            if reason == .surfaceBusy, let blocker = lastSurfaceBlocker {
+                controller.dropExtras = HealthReasons.surfaceBusyExtras(
+                    blockingCampaignKey: blocker.campaignKey,
+                    blockingKind: blocker.kind.wire,
+                    blockerIsLiveTest: blocker.isLiveTest
+                )
+            }
             controller.settle(.dropped(reason: reason, detail: detail))
         }
     }
@@ -1107,6 +1114,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     @discardableResult
     func routeOrganicTrigger(_ payload: CEPTriggerPayload) -> RoutingVerdict {
         lastCampaignDropReason = nil
+        lastSurfaceBlocker = nil
         logVerbose(
             "deliver cepCampaignId='\(payload.cepCampaignId)' "
                 + "campaignKey='\(payload.campaignKey)'")

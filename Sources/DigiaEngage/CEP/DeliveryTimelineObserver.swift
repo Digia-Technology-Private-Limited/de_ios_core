@@ -84,7 +84,8 @@ func observeDelivery(_ controller: PresentationController) {
                 campaign: campaignKey,
                 stage: stageOf(reason),
                 reason: reason,
-                presentationId: id
+                presentationId: id,
+                extras: controller.dropExtras
             )
         }
     }

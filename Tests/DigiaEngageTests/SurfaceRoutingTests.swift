@@ -108,6 +108,26 @@ struct SurfaceRoutingTests {
         #expect(sdk.inlineController.getCampaign("home_hero")?.campaignKey == "i1")
     }
 
+    @Test("a surface_busy drop's timeline record names the blocker (SR10)")
+    func busyRecordCarriesBlocker() async throws {
+        let sink = TimelineRecorder()
+        DigiaLogger.registerSink(sink)
+        defer { DigiaLogger.unregisterSink(sink) }
+        try start([nudgeJson("welcome"), nudgeJson("sale")])
+        _ = deliver("welcome", "cep-1")
+        _ = deliver("sale", "cep-2")
+
+        var record: TimelineRecord?
+        for _ in 0..<50 where record == nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+            record = sink.records.first { $0.reason?.wire == "surface_busy" && $0.campaignKey == "sale" }
+        }
+        let busy = try #require(record)
+        #expect(busy.extras["blocking_campaign_key"] == "welcome")
+        #expect(busy.extras["blocking_kind"] == "nudge")
+        #expect(busy.extras[HealthReasons.liveTestBlockerKey] == nil)
+    }
+
     // MARK: - Live test
 
     @Test("test over a test nudge → old dismissed and its row superseded, new shown")
@@ -229,4 +249,23 @@ func inlineJson(_ key: String, slotKey: String = "home_hero") -> [String: Any] {
             "canvas": emptyCanvas,
         ] as [String: Any],
     ]
+}
+
+private final class TimelineRecorder: DiagnosticSink, @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [TimelineRecord] = []
+
+    var records: [TimelineRecord] {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+
+    func accepts(_ record: TimelineRecord) -> Bool { true }
+
+    func emit(_ record: TimelineRecord) {
+        lock.lock()
+        stored.append(record)
+        lock.unlock()
+    }
 }

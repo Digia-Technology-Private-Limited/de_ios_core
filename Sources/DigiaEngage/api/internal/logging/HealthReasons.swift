@@ -45,6 +45,9 @@ enum HealthReasons {
         // exist before `initialize()`.
         "not_ready",
         "initialization_failed",
+        // A setup mistake the customer fixes, not breakage (surface rule §2.5):
+        // one campaign turned away by another that holds the surface.
+        "surface_busy",
     ]
 
     /// Which `extras` keys each reason may send as `detail` — and nothing else.
@@ -80,6 +83,7 @@ enum HealthReasons {
         "missing_variable": [],
         "not_ready": [],
         "initialization_failed": [],
+        "surface_busy": ["blocking_campaign_key", "blocking_kind"],
     ]
 
     /// Reasons that identify *no* campaign, and so dedup on the symbol alone.
@@ -103,5 +107,25 @@ enum HealthReasons {
     static let dedupExtraKey: [String: String] = [
         "unknown_design_token": "token",
         "missing_variable": "variable",
+        // One report per (dropped campaign, blocker) per launch — "blocked by X
+        // on N% of app opens".
+        "surface_busy": "blocking_campaign_key",
     ]
+
+    /// Extra marking a record whose blocker is a live test. Such a record stays
+    /// on the console and timeline but never reaches HealthSink: a PM's testing
+    /// must not show up in the customer's report (§2.5, LT-Q2).
+    static let liveTestBlockerKey = "blocking_live_test"
+
+    /// The timeline extras for a `surface_busy` drop.
+    static func surfaceBusyExtras(
+        blockingCampaignKey: String, blockingKind: String, blockerIsLiveTest: Bool
+    ) -> [String: String] {
+        var extras = [
+            "blocking_campaign_key": blockingCampaignKey,
+            "blocking_kind": blockingKind,
+        ]
+        if blockerIsLiveTest { extras[liveTestBlockerKey] = "true" }
+        return extras
+    }
 }

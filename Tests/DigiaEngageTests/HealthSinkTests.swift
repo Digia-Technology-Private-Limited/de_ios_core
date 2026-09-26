@@ -362,3 +362,78 @@ struct HealthSinkTests {
         #expect(!recorder.payloads.contains { $0.campaignKey == "cmp_after_deactivate" })
     }
 }
+
+/// `surface_busy` on HealthSink (surface-rule plan §2.5, SR10).
+@Suite("HealthSink surface_busy")
+struct HealthSinkSurfaceBusyTests {
+    private func busy(_ campaignKey: String, blocker: String, kind: String = "nudge", liveTest: Bool = false)
+        -> TimelineRecord
+    {
+        TimelineRecord(
+            timestamp: Date(timeIntervalSince1970: 0),
+            severity: .debug,
+            tag: "DIGIA",
+            message: "Dropped — surface_busy",
+            stage: .gating,
+            reason: DropReason.surfaceBusy,
+            campaignKey: campaignKey,
+            extras: HealthReasons.surfaceBusyExtras(
+                blockingCampaignKey: blocker, blockingKind: kind, blockerIsLiveTest: liveTest)
+        )
+    }
+
+    private final class Recorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: [HealthEventPayload] = []
+        var payloads: [HealthEventPayload] {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
+        func capture(_ payload: HealthEventPayload) {
+            lock.lock()
+            stored.append(payload)
+            lock.unlock()
+        }
+    }
+
+    private func send(_ sink: HealthSink, _ record: TimelineRecord) {
+        if sink.accepts(record) { sink.emit(record) }
+    }
+
+    @Test("the projection carries exactly the two blocker keys")
+    func projection() throws {
+        let sink = HealthSink()
+        let recorder = Recorder()
+        sink.activate(recorder.capture)
+        defer { sink.resetForTest() }
+
+        send(sink, busy("summer_sale", blocker: "welcome", kind: "floater_expanded"))
+
+        let payload = try #require(recorder.payloads.first)
+        #expect(payload.reason == "surface_busy")
+        #expect(payload.campaignKey == "summer_sale")
+        #expect(payload.detail == ["blocking_campaign_key": "welcome", "blocking_kind": "floater_expanded"])
+    }
+
+    @Test("dedup separates two blockers of the same dropped campaign")
+    func dedupPerBlocker() {
+        let sink = HealthSink()
+        let recorder = Recorder()
+        sink.activate(recorder.capture)
+        defer { sink.resetForTest() }
+
+        send(sink, busy("summer_sale", blocker: "welcome"))
+        send(sink, busy("summer_sale", blocker: "welcome"))
+        send(sink, busy("summer_sale", blocker: "rate_us"))
+
+        #expect(recorder.payloads.map { $0.detail?["blocking_campaign_key"] } == ["welcome", "rate_us"])
+    }
+
+    @Test("a live-test blocker sends nothing")
+    func liveTestBlockerExcluded() {
+        let sink = HealthSink()
+        #expect(!sink.accepts(busy("summer_sale", blocker: "t1", liveTest: true)))
+        #expect(sink.accepts(busy("summer_sale", blocker: "welcome")))
+    }
+}

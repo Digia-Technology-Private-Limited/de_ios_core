@@ -77,6 +77,11 @@ public final class PresentationController {
     /// Whether the terminal result has already been decided.
     public var isSettled: Bool { backing.state == .settled }
 
+    /// Structured extras for this presentation's drop record on the timeline
+    /// (a `surface_busy` drop's blocker). Set by core before it settles the
+    /// drop; read by `observeDelivery`. Internal.
+    var dropExtras: [String: String]?
+
     /// Whether the CEP has already been told it may release its hold.
     public var isHoldReleased: Bool { backing.holdReleased.isSettled }
 

@@ -213,6 +213,7 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         guard let reason = record.reason else { return false }
         let wire = reason.wire
         guard HealthReasons.reasons.contains(wire) else { return false }
+        guard record.extras[HealthReasons.liveTestBlockerKey] != "true" else { return false }
         lock.lock()
         defer { lock.unlock() }
         guard sent < cap else { return false }
