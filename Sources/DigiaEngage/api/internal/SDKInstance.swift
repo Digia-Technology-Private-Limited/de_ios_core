@@ -3098,7 +3098,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         switch event {
         case .displaying:
-            controller.markDisplaying()
+            // Through the impression path, keyed by this guide's own
+            // presentation, so the acceptance watchdog is disarmed even when
+            // `activeExternalGuide` has already moved on (SR91).
+            coordinator.handle(.impressed, payload: controller.trigger)
         case .clicked(let elementId):
             controller.emitClicked(elementId: elementId)
         case .settled(let outcome):
