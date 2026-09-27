@@ -122,10 +122,18 @@ enum NudgeEvent {
     }
 
     struct Dismissed: EngageAnalyticsEvent {
+        /// The `DismissReason` wire value the CEP got for this close (R3-D13).
+        /// Nil only for an inline canvas's Hide, which reuses this event.
+        var dismissReason: String?
         var dwellMs: Int64?
 
         var eventName: String { "Digia Experience Dismissed" }
-        var properties: [String: Any] { nonNull([("dwell_ms", dwellMs)]) }
+        var properties: [String: Any] {
+            nonNull([
+                ("dismiss_reason", dismissReason),
+                ("dwell_ms", dwellMs),
+            ])
+        }
     }
 }
 
@@ -334,6 +342,8 @@ enum SurveyEvent {
     }
 
     struct Dismissed: EngageAnalyticsEvent {
+        /// The `DismissReason` wire value the CEP got for this close (R3-D13).
+        var dismissReason: String?
         var abandonedAtItem: Int?
         var itemTotal: Int?
         var answeredCount: Int?
@@ -342,6 +352,7 @@ enum SurveyEvent {
         var eventName: String { "Digia Experience Dismissed" }
         var properties: [String: Any] {
             nonNull([
+                ("dismiss_reason", dismissReason),
                 ("abandoned_at_item", abandonedAtItem),
                 ("item_total", itemTotal),
                 ("answered_count", answeredCount),

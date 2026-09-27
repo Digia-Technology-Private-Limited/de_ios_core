@@ -44,12 +44,13 @@ final class PresentationCoordinator {
     /// production needs it UUID-grade.
     ///
     /// `onCancelSurface` runs the SDK's ordered teardown for a campaign the
-    /// plugin cancelled — it must take the experience off the screen. The
-    /// controller settles `cancelled` afterwards whatever it does, so a teardown
-    /// can never be the thing that wedges a CEP slot.
+    /// plugin cancelled or a watchdog gave up on — it must take that delivery
+    /// (the stamped payload) off the screen. The controller settles first
+    /// whatever it does, so a teardown can never be the thing that wedges a CEP
+    /// slot.
     init(
         idGenerator: @escaping () -> String,
-        onCancelSurface: @escaping (String) -> Void,
+        onCancelSurface: @escaping (CEPTriggerPayload) -> Void,
         acceptanceTimeout: TimeInterval = PresentationCoordinator.defaultAcceptanceTimeout,
         anchorLayoutTimeout: TimeInterval = PresentationCoordinator.defaultAnchorLayoutTimeout
     ) {
@@ -80,7 +81,7 @@ final class PresentationCoordinator {
     let anchorLayoutTimeout: TimeInterval
 
     private let newId: () -> String
-    private let onCancelSurface: (String) -> Void
+    private let onCancelSurface: (CEPTriggerPayload) -> Void
 
     private var live: [String: LiveEntry] = [:]
 
@@ -98,7 +99,7 @@ final class PresentationCoordinator {
         let controller = PresentationController(
             id: id,
             trigger: trigger.stamped(presentationId: id),
-            onCancel: { [weak self] c in self?.onCancelSurface(c.trigger.cepCampaignId) }
+            onCancel: { [weak self] c in self?.onCancelSurface(c.trigger) }
         )
         live[id] = LiveEntry(owner: owner, controller: controller)
         // Cleanup binds to the outcome rather than to each settling path, so a
@@ -115,43 +116,62 @@ final class PresentationCoordinator {
     /// Records what kind of surface took an accepted presentation, and arms the
     /// acceptance watchdog if its `kind` owes an appearance.
     ///
+    /// `dueDelay` is the authored wait before the campaign is due to appear
+    /// (R3-D9); the window counts from then. `surfaceKind` is the `timeout`
+    /// drop's `surface_kind` for HealthSink (R3-D10).
+    ///
     /// platform note: the Kotlin twin also takes the routed payload here,
     /// because it indexes by that instance's identity. Swift has the id on the
     /// payload already, so there is nothing to index.
-    func accept(_ controller: PresentationController, kind: PresentationKind) {
+    func accept(
+        _ controller: PresentationController,
+        kind: PresentationKind,
+        dueDelay: TimeInterval = 0,
+        surfaceKind: String? = nil
+    ) {
         guard !controller.isSettled, let entry = live[controller.id] else { return }
         entry.kind = kind
         guard kind.armsAcceptanceWatchdog else { return }
+        let window = acceptanceTimeout + max(0, dueDelay)
         entry.acceptance = Task { @MainActor [weak self] in
             guard let self else { return }
-            try? await Task.sleep(nanoseconds: nanoseconds(self.acceptanceTimeout))
+            try? await Task.sleep(nanoseconds: nanoseconds(window))
             guard !Task.isCancelled, !controller.isSettled else { return }
             log.e(
                 "Dropped — acceptance watchdog fired, still pending; releasing the CEP hold "
-                    + "(presentationId=\(controller.id), "
-                    + "timeout=\(Int(self.acceptanceTimeout * 1000))ms)",
+                    + "and clearing the surface (presentationId=\(controller.id), "
+                    + "timeout=\(Int(window * 1000))ms)",
                 campaign: controller.trigger.campaignKey
             )
+            if let surfaceKind { controller.dropExtras = ["surface_kind": surfaceKind] }
+            // Settle first, then take it off the surface (R3-D1), as the anchor
+            // watchdog does: the settle is the decision and can't be undone by
+            // whatever the teardown emits.
             controller.settle(
                 .dropped(
                     reason: .timeout,
                     detail: "never displayed within the acceptance window"
                 )
             )
+            self.onCancelSurface(controller.trigger)
         }
     }
 
     /// Arms the anchor watchdog for an experience that cannot appear until a
     /// named anchor resolves — a non-anchorless guide. ``anchorResolved(_:)``
     /// disarms it, and so does an impression.
-    func awaitAnchor(_ payload: CEPTriggerPayload) {
+    ///
+    /// `dueDelay`: the first step's authored delay, added so the window counts
+    /// from when the step is due to appear (R3-D9).
+    func awaitAnchor(_ payload: CEPTriggerPayload, dueDelay: TimeInterval = 0) {
         guard let id = payload.presentationId, let entry = live[id] else { return }
         let controller = entry.controller
         guard !controller.isSettled else { return }
         entry.disarmAnchor()
+        let window = anchorLayoutTimeout + max(0, dueDelay)
         entry.anchor = Task { @MainActor [weak self] in
             guard let self else { return }
-            try? await Task.sleep(nanoseconds: nanoseconds(self.anchorLayoutTimeout))
+            try? await Task.sleep(nanoseconds: nanoseconds(window))
             guard !Task.isCancelled, !controller.isSettled else { return }
             let displaying = controller.state == .displaying
             log.e(
@@ -181,7 +201,7 @@ final class PresentationCoordinator {
                             + "\(Int(self.anchorLayoutTimeout * 1000))ms"
                     )
             )
-            self.onCancelSurface(payload.cepCampaignId)
+            self.onCancelSurface(payload)
         }
     }
 

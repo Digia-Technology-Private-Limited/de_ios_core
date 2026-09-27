@@ -171,6 +171,11 @@ private struct SurveySession: View {
         }
         .transaction { $0.disablesAnimations = true }
         .task(id: state.token) {
+            let model = vm
+            orchestrator.bindProgress(token: state.token) { [weak model] in
+                guard let model else { return (0, 0) }
+                return (model.currentItemIndex, model.answers.values.filter { $0.isAnswered }.count)
+            }
             let delayNs = UInt64(max(0, survey.timeDelayMs + RENDER_DELAY_MS)) * 1_000_000
             try? await Task.sleep(nanoseconds: delayNs)
             visible = true

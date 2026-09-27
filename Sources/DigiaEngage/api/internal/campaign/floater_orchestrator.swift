@@ -166,6 +166,8 @@ final class FloaterOrchestrator: ObservableObject {
     /// is 0 for a `startExpanded` showing.
     private var everExpanded = false
     private var completed = false
+    /// The showing whose window a renderer has drawn — see `markDrawn`.
+    private var drawnToken: Int64?
 
     private var autoDismissTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
@@ -269,16 +271,29 @@ final class FloaterOrchestrator: ObservableObject {
         return accepted
     }
 
-    /// The window is on screen. Idempotent — only the first call counts. `token`
+    /// The media is ready to paint. Idempotent — only the first call counts. `token`
     /// identifies the showing that requested the load; a slow response arriving
     /// after its campaign ended would otherwise reveal whichever floater is on
     /// screen now, before *its* media was ready.
+    ///
+    /// Media being ready only lets the window draw (`awaitingMedia` false). The
+    /// impression waits for `markDrawn`, from the renderer itself (SR62), so a
+    /// PiP no host draws records nothing and stays under the acceptance watchdog.
     func markVisible(token: Int64) {
-        guard let active = state, active.token == token else { return }
+        guard state?.token == token else { return }
         mediaReadyTask?.cancel()
         mediaReadyTask = nil
         guard awaitingMedia else { return }
         awaitingMedia = false
+    }
+
+    /// The renderer drew the window for `token`. Idempotent — only the first
+    /// call per showing counts.
+    func markDrawn(token: Int64) {
+        guard let active = state, active.token == token, !awaitingMedia, !closing,
+              drawnToken != token
+        else { return }
+        drawnToken = token
         if surface == .expanded {
             everExpanded = true
             expandedStartedAtMs = expandedStartedAtMs ?? now()
@@ -602,7 +617,7 @@ final class FloaterOrchestrator: ObservableObject {
         // A showing that never painted reports no Digia analytics — no Viewed or
         // Dismissed. The CEP slot is released separately so an accepted campaign
         // cannot strand the queue.
-        onDismissed(active, reason, metricsSnapshot(), !awaitingMedia)
+        onDismissed(active, reason, metricsSnapshot(), drawnToken == active.token)
 
         let exit = active.config.collapsed.exitAnimation
         // Full screen fills the display, so animating it "out" to nothing looks like

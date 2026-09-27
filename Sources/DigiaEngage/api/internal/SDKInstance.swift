@@ -68,8 +68,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // delivery, and a test that sets `idGenerator` afterwards would
         // otherwise be silently ignored.
         idGenerator: { [weak self] in self?.idGenerator() ?? UUID().uuidString },
-        onCancelSurface: { [weak self] cepCampaignId in
-            self?.dismissSurfaces(forCepCampaignId: cepCampaignId)
+        onCancelSurface: { [weak self] payload in
+            self?.dismissSurfaces(for: payload)
         }
     )
     private let hostActionExecutor = HostActionExecutor()
@@ -736,10 +736,18 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // back to this presentation.
         switch routeOrganicTrigger(controller.trigger) {
         case .accepted(let payload, let kind):
-            coordinator.accept(controller, kind: kind)
-            if awaitsAnchorLayout(payload) { coordinator.awaitAnchor(payload) }
+            let campaign = findCampaign(payload)
+            let dueDelay = Self.firstAppearanceDelay(campaign)
+            coordinator.accept(
+                controller, kind: kind, dueDelay: dueDelay,
+                surfaceKind: campaign.flatMap(Self.healthSurfaceKind))
+            if awaitsAnchorLayout(payload) { coordinator.awaitAnchor(payload, dueDelay: dueDelay) }
         case .dropped(let reason, let detail):
-            if reason == .surfaceBusy, let blocker = lastSurfaceBlocker {
+            // A4 (SR64): a blocker that was never displayed is not named, so
+            // HealthSink (which requires a blocker key) sends nothing for it.
+            if reason == .surfaceBusy, let blocker = lastSurfaceBlocker,
+               blocker.hasDisplayed || dwellTracker.elapsedMs(blocker.cepCampaignId) != nil
+            {
                 controller.dropExtras = HealthReasons.surfaceBusyExtras(
                     blockingCampaignKey: blocker.campaignKey,
                     blockingKind: blocker.kind.wire,
@@ -753,33 +761,71 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Whether this campaign cannot appear until a named anchor resolves — the
     /// anchor watchdog's one arming condition.
     private func awaitsAnchorLayout(_ payload: CEPTriggerPayload) -> Bool {
-        guard let guide = findCampaign(payload)?.guideConfig, !guide.isAnchorless else {
-            return false
-        }
+        guard let guide = findCampaign(payload)?.guideConfig else { return false }
+        // A3 (SR63): an anchorless guide also waits on something that may never
+        // come (its page and image); `reportGuideShown` resolves it.
+        if guide.isAnchorless { return true }
         return guide.steps.first?.target.anchorKey != nil
+    }
+
+    /// The authored wait before a campaign is due to appear (R3-D9): a guide's
+    /// first-step `delayInMs`, a survey's start delay. Added to the watchdog
+    /// windows so they count from the due time.
+    private static func firstAppearanceDelay(_ campaign: CampaignModel?) -> TimeInterval {
+        switch campaign?.config {
+        case .guide(let guide)?:
+            return TimeInterval(max(0, guide.steps.first?.delayInMs ?? 0)) / 1_000
+        case .survey(let survey)?:
+            return TimeInterval(max(0, survey.timeDelayMs)) / 1_000
+        default:
+            return 0
+        }
+    }
+
+    /// The `surface_kind` a `timeout` drop sends to HealthSink (R3-D10).
+    private static func healthSurfaceKind(_ campaign: CampaignModel) -> String? {
+        switch campaign.config {
+        case .nudge: return "nudge"
+        case .survey: return "survey"
+        case .guide: return "guide"
+        case .floater, .floaterStory:
+            return campaign.floaterStoryConfig != nil ? "story_floater" : "pip"
+        case .inline, .banner, .inlineCanvas, .story: return nil
+        }
     }
 
     /// The ordered teardown a cancelled or timed-out presentation runs — the
     /// same surfaces `onCampaignInvalidated` used to take down under v1, now
     /// reached through ``CampaignPresentation/cancel()``.
-    private func dismissSurfaces(forCepCampaignId campaignID: String) {
-        if activeExternalGuide?.payload.cepCampaignId == campaignID {
+    ///
+    /// A stamped payload matches only its own delivery (its `presentationId`),
+    /// so a watchdog firing late can't take down a newer delivery of the same
+    /// CEP campaign (SR60). An unstamped one (a live test) matches by id.
+    private func dismissSurfaces(for payload: CEPTriggerPayload) {
+        let campaignID = payload.cepCampaignId
+        func owns(_ other: CEPTriggerPayload?) -> Bool {
+            guard let other, other.cepCampaignId == campaignID else { return false }
+            return payload.presentationId == nil || other.presentationId == payload.presentationId
+        }
+        if owns(activeExternalGuide?.payload) {
             activeExternalGuide = nil
         }
-        if controller.activeNudge?.payload.cepCampaignId == campaignID {
+        if owns(controller.activeNudge?.payload) {
             controller.dismissNudge()
         }
-        if surveyOrchestrator.state?.payload.cepCampaignId == campaignID {
+        if owns(surveyOrchestrator.state?.payload) {
             surveyOrchestrator.dismiss()
         }
-        if floaterStoryOrchestrator.state?.payload.cepCampaignId == campaignID {
+        if owns(floaterStoryOrchestrator.state?.payload) {
             floaterStoryOrchestrator.dismiss(.invalidated)
         }
-        if floaterOrchestrator.state?.payload.cepCampaignId == campaignID {
+        if owns(floaterOrchestrator.state?.payload) {
             floaterOrchestrator.dismiss(.invalidated)
         }
         inlineController.removeCampaign(campaignID)
-        guideOrchestrator.dismissIfActive(payloadId: campaignID)
+        if owns(guideOrchestrator.state?.payload) {
+            guideOrchestrator.dismissIfActive(payloadId: campaignID)
+        }
         // Forget the impression mark so a re-trigger impresses to Digia afresh.
         events.resetImpression(campaignID)
     }
@@ -1327,7 +1373,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .survey:
             if let state = surveyOrchestrator.state, state.payload.cepCampaignId == id {
                 if displayed {
-                    markSurveyDismissed(reason: .superseded)
+                    // R3-D5 (SR69): the fields a user close sends, from the renderer.
+                    let progress = surveyOrchestrator.progress()
+                    markSurveyDismissed(
+                        abandonedAtItem: progress?.abandonedAtItem,
+                        answeredCount: progress?.answeredCount,
+                        reason: .superseded
+                    )
                 } else {
                     surveyOrchestrator.dismiss()
                     _ = dwellTracker.consumeDwellMs(id)
@@ -1566,7 +1618,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                         campaign: key
                     )
                     context.onDropped(
-                        DropReason.invalidConfig, message: "another floater is already on screen")
+                        DropReason.invalidConfig,
+                        message: floaterStoryOrchestrator.lastStartFailureReason
+                            ?? "story floater start failed")
                     return .dropped(
                         reason: .invalidConfig,
                         detail: floaterStoryOrchestrator.lastStartFailureReason
@@ -1721,19 +1775,21 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 testContext: testContext
             )
         }
-        if campaign.guideConfig != nil {
-            // No per-kind timer here any more — the context's own
-            // per-invocation watchdog (armed in its initializer) is what
-            // gives up if the guide host never renders it, and this just
-            // adds the guide-specific teardown that firing implies: a guide
-            // that silently never appeared must not linger in
-            // `guideOrchestrator.state`.
-            testContext.onWatchdogFired = { [weak self] in
-                guard let self, self.guideOrchestrator.state?.payload.cepCampaignId == cepCampaignId
-                else { return }
-                self.guideOrchestrator.dismiss()
+        // A live test shows a guide at once (no step delay); a survey still
+        // waits out its start delay, so the window counts from then (R3-D11).
+        if campaign.guideConfig == nil {
+            testContext.delayWatchdog(by: Self.firstAppearanceDelay(campaign))
+        }
+        // The context's own per-invocation watchdog (armed in its initializer)
+        // gives up if nothing ever draws the test; this adds the teardown that
+        // firing implies (R3-D11, SR65): a test that silently never appeared
+        // must not linger on the surface.
+        testContext.onWatchdogFired = { [weak self] in
+            guard let self else { return }
+            if self.guideOrchestrator.state?.payload.cepCampaignId == cepCampaignId {
                 self.guideCompletionFired = false
             }
+            self.dismissSurfaces(for: payload)
         }
     }
 
@@ -2028,10 +2084,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     ) {
         guard let state = surveyOrchestrator.state else { return }
         let completed = completedSurveyToken == state.token
+        let reason = completed ? DismissReason.completed : reason
         surveyOrchestrator.dismiss()
         events.toBoth(
-            .dismissed(reason: completed ? .completed : reason, completed: completed),
+            .dismissed(reason: reason, completed: completed),
             SurveyEvent.Dismissed(
+                dismissReason: reason.wire,
                 abandonedAtItem: completed ? nil : abandonedAtItem,
                 itemTotal: state.config.questionCount,
                 answeredCount: answeredCount,
@@ -2198,7 +2256,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         controller.dismissNudge()
         events.toBoth(
             .dismissed(reason: reason),
-            NudgeEvent.Dismissed(dwellMs: dwellTracker.consumeDwellMs(nudge.payload.cepCampaignId)),
+            NudgeEvent.Dismissed(
+                dismissReason: reason.wire,
+                dwellMs: dwellTracker.consumeDwellMs(nudge.payload.cepCampaignId)
+            ),
             payload: nudge.payload
         )
     }

@@ -48,6 +48,10 @@ enum HealthReasons {
         // A setup mistake the customer fixes, not breakage (surface rule §2.5):
         // one campaign turned away by another that holds the surface.
         "surface_busy",
+        // Breakage (R3-D10): an accepted campaign nothing drew within the
+        // acceptance window. Only the organic acceptance watchdog emits it as a
+        // drop record; a live test's timeout is an ACK, never a record.
+        "timeout",
     ]
 
     /// Which `extras` keys each reason may send as `detail` — and nothing else.
@@ -84,6 +88,7 @@ enum HealthReasons {
         "not_ready": [],
         "initialization_failed": [],
         "surface_busy": ["blocking_campaign_key", "blocking_kind"],
+        "timeout": ["surface_kind"],
     ]
 
     /// Reasons that identify *no* campaign, and so dedup on the symbol alone.

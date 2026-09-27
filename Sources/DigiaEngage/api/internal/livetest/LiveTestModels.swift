@@ -30,8 +30,9 @@ final class LiveTestContext {
     /// Inside the dashboard's own 15s guess window on purpose: a PM should read
     /// a reason the device actually knows rather than a timeout the dashboard
     /// inferred. The backend's 30s alarm sits outside both and catches only the
-    /// case no device can ever answer — an app that died mid-test.
-    static let watchdogTimeout: TimeInterval = 10
+    /// case no device can ever answer — an app that died mid-test. 5s counted
+    /// from when the test is due to appear (R3-D11, see ``delayWatchdog(by:)``).
+    static let watchdogTimeout: TimeInterval = 5
 
     let testInvocationId: String
     private let reporter: LiveTestAckReporter
@@ -79,6 +80,15 @@ final class LiveTestContext {
         watchdogDetail = "no matching slot for this campaign mounted within \(Int(timeout))s"
     }
 
+    /// Re-arms the watchdog so it counts from when the campaign is due to
+    /// appear: `delay` is its authored wait (a survey's start delay). Called
+    /// right after routing accepted it; a no-op once terminal.
+    func delayWatchdog(by delay: TimeInterval) {
+        guard delay > 0, !terminalReported else { return }
+        disarm()
+        armWatchdog(after: timeout + delay)
+    }
+
     /// The campaign is confirmed visible on screen.
     func reportShown() {
         guard !terminalReported else { return }
@@ -111,8 +121,8 @@ final class LiveTestContext {
         disarm()
     }
 
-    private func armWatchdog() {
-        let timeout = self.timeout
+    private func armWatchdog(after window: TimeInterval? = nil) {
+        let timeout = window ?? self.timeout
         watchdogTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
             guard let self, !Task.isCancelled else { return }

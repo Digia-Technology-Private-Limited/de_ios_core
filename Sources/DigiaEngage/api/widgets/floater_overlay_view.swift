@@ -387,7 +387,11 @@ private struct FloaterSessionView: View {
                 }
             }
         }
-        .onAppear { runEntryAnimation() }
+        .onAppear {
+            runEntryAnimation()
+            // The impression is the first drawn frame, not the media load (SR62).
+            orchestrator.markDrawn(token: state.token)
+        }
         .onChange(of: orchestrator.closing) { closing in
             if closing { runExitAnimation() }
         }

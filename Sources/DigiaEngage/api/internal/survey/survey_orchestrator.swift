@@ -44,5 +44,23 @@ final class SurveyOrchestrator: ObservableObject {
 
     func dismiss() {
         state = nil
+        progressReader = nil
+    }
+
+    /// The renderer's progress for the showing it draws, read when something
+    /// other than the renderer ends the survey (a supersede), so that dismiss
+    /// carries the same `abandoned_at_item` / `answered_count` a user close does.
+    private var progressReader: (token: Int64, read: () -> (abandonedAtItem: Int, answeredCount: Int))?
+
+    /// Called by the renderer for the showing `token`.
+    func bindProgress(token: Int64, read: @escaping () -> (abandonedAtItem: Int, answeredCount: Int)) {
+        guard state?.token == token else { return }
+        progressReader = (token, read)
+    }
+
+    /// The active showing's progress, or nil when no renderer has drawn it.
+    func progress() -> (abandonedAtItem: Int, answeredCount: Int)? {
+        guard let reader = progressReader, reader.token == state?.token else { return nil }
+        return reader.read()
     }
 }
