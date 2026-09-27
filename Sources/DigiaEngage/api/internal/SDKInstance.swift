@@ -1280,6 +1280,17 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             settleSuperseded(occupant)
             return nil
         case .busy(let blocker):
+            if case .inline = incoming, blocker.campaignKey == campaignKey {
+                // D4: a CEP redelivering the campaign its slot already holds.
+                // Dropped quietly: no blocker, so HealthSink never reports
+                // "X blocked by X"; what is shown stays.
+                let detail = "same campaign already in slot"
+                lastCampaignDropReason = detail
+                lastSurfaceBlocker = nil
+                log.d("Dropped — \(detail)", campaign: campaignKey)
+                context.onDropped(DropReason.surfaceBusy, message: detail)
+                return .dropped(reason: .surfaceBusy, detail: detail)
+            }
             let detail = "\(blocker.kind.wire) on screen (\(blocker.campaignKey))"
             lastCampaignDropReason = detail
             lastSurfaceBlocker = blocker
@@ -1295,18 +1306,46 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// every displacement goes through (SR06).
     private func settleSuperseded(_ occupant: SurfaceOccupant) {
         let id = occupant.cepCampaignId
+        // First (SR46): a test's dashboard row gets `failed: superseded`, never
+        // a relayed `dismissed` from the teardown below. As Flutter and Android.
+        supersedeLiveTest(id)
+        // D5 (SR44): the CEP hears `superseded` once; Digia's dismiss event,
+        // with that type's usual fields, only for one that was displayed
+        // (its dwell started at the impression). `hasDisplayed` is inline-only.
+        let displayed = dwellTracker.elapsedMs(id) != nil
         switch occupant.kind {
         case .nudge:
-            if controller.activeNudge?.payload.cepCampaignId == id {
-                markNudgeDismissed(reason: .superseded)
+            if let nudge = controller.activeNudge, nudge.payload.cepCampaignId == id {
+                if displayed {
+                    markNudgeDismissed(reason: .superseded)
+                } else {
+                    controller.dismissNudge()
+                    _ = dwellTracker.consumeDwellMs(id)
+                    events.toCep(.dismissed(reason: .superseded), payload: nudge.payload)
+                }
             }
         case .survey:
-            if surveyOrchestrator.state?.payload.cepCampaignId == id {
-                markSurveyDismissed(reason: .superseded)
+            if let state = surveyOrchestrator.state, state.payload.cepCampaignId == id {
+                if displayed {
+                    markSurveyDismissed(reason: .superseded)
+                } else {
+                    surveyOrchestrator.dismiss()
+                    _ = dwellTracker.consumeDwellMs(id)
+                    clearQuestionViewedAt(token: state.token)
+                    events.toCep(.dismissed(reason: .superseded), payload: state.payload)
+                }
             }
         case .guide:
-            if guideOrchestrator.state?.payload.cepCampaignId == id {
-                dismissGuide(reason: .superseded, completed: false)
+            if let state = guideOrchestrator.state, state.payload.cepCampaignId == id {
+                if displayed {
+                    dismissGuide(reason: .superseded, completed: false)
+                } else {
+                    guideOrchestrator.dismiss()
+                    _ = dwellTracker.consumeDwellMs(id)
+                    guideCompletionFired = false
+                    pendingGuideDismissReason = nil
+                    events.toCep(.dismissed(reason: .superseded), payload: state.payload)
+                }
             }
         case .floaterExpanded, .floaterCollapsed:
             if floaterOrchestrator.state?.payload.cepCampaignId == id {
@@ -1317,7 +1356,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .inline(let slot):
             inlineController.dismissCampaign(slot, reason: .superseded)
         }
-        supersedeLiveTest(id)
     }
 
     private func route(
