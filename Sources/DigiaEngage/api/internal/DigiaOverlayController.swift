@@ -42,10 +42,10 @@ final class DigiaOverlayController: ObservableObject {
     }
 
     /// Starts on appearance and stays owned by this nudge when child views appear.
+    /// Any authored auto-dismiss is honored on every surface. The dashboard
+    /// authors it for full-screen nudges only; the SDK stays ready for more.
     func startNudgeAutoDismiss() {
-        guard nudgeAutoDismissTask == nil, let nudge = activeNudge,
-              nudge.config.canvas != nil,
-              nudge.config.surface.isFullScreen else { return }
+        guard nudgeAutoDismissTask == nil, let nudge = activeNudge else { return }
         let afterMs = nudge.config.surface.autoDismissAfterMs
         guard afterMs > 0 else { return }
         let nanoseconds = UInt64(afterMs) * 1_000_000

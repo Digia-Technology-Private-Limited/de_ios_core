@@ -193,6 +193,7 @@ enum GuideEvent {
 
     /// Guide abandoned (rolls up step-level dismiss).
     struct Dismissed: EngageAnalyticsEvent {
+        let dismissReason: String
         var abandonedAtItem: Int?
         var itemTotal: Int?
         var dwellMs: Int64?
@@ -200,6 +201,7 @@ enum GuideEvent {
         var eventName: String { "Digia Experience Dismissed" }
         var properties: [String: Any] {
             nonNull([
+                ("dismiss_reason", dismissReason),
                 ("abandoned_at_item", abandonedAtItem),
                 ("item_total", itemTotal),
                 ("dwell_ms", dwellMs),

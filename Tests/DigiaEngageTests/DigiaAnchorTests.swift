@@ -197,7 +197,7 @@ extension DigiaEngageTests {
         second.removeFromSuperview()
     }
 
-    @Test("anchor leaves while its step shows: Digia step event, then user_close to both (A40)")
+    @Test("anchor leaves while its step shows: Digia step event, then target_lost to both (A40)")
     func removedAnchorWhileStepShowsMatchesFlutter() async throws {
         let (sdk, window) = try await makeGuideInstance(stepCount: 2)
         let recorder = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
@@ -208,14 +208,19 @@ extension DigiaEngageTests {
         await nextTurn()
 
         #expect(sdk.guideOrchestrator.state == nil)
-        #expect(recorder.outcome == .dismissed(reason: .userClose, completed: false))
+        #expect(recorder.outcome == .dismissed(reason: .targetLost, completed: false))
         #expect(try digiaEventNames(sdk) == [
             "Digia Experience Viewed", "Digia Step Viewed",
             "Digia Step Dismissed", "Digia Experience Dismissed",
         ])
+        let entries = try #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
+        let dismissed = entries.first {
+            $0.payload["event_name"] as? String == "Digia Experience Dismissed"
+        }?.payload["properties"] as? [String: Any]
+        #expect(dismissed?["dismiss_reason"] as? String == "target_lost")
     }
 
-    @Test("anchor of a multi-step guide's last step leaves: Digia completion with dwell, no frequency stop, still user_close (A40, A51)")
+    @Test("anchor of a multi-step guide's last step leaves: Digia completion with dwell, no frequency stop, still target_lost (A40, A51)")
     func removedAnchorOnLastStepCompletesForDigia() async throws {
         let (sdk, window) = try await makeGuideInstance(
             stepCount: 2, frequency: ["stopOn": "experienceCompleted"]
@@ -229,7 +234,7 @@ extension DigiaEngageTests {
         anchor.removeFromSuperview()
         await nextTurn()
 
-        #expect(recorder.outcome == .dismissed(reason: .userClose, completed: false))
+        #expect(recorder.outcome == .dismissed(reason: .targetLost, completed: false))
         let names = try digiaEventNames(sdk)
         #expect(names.suffix(2) == ["Digia Experience Completed", "Digia Experience Dismissed"])
         #expect(!names.contains("Digia Step Dismissed"))
@@ -241,6 +246,7 @@ extension DigiaEngageTests {
         #expect(props("Digia Experience Completed")?["time_to_complete_ms"] != nil)
         #expect(props("Digia Experience Completed")?["item_total"] as? Int == 2)
         #expect(props("Digia Experience Dismissed")?["dwell_ms"] != nil)
+        #expect(props("Digia Experience Dismissed")?["dismiss_reason"] as? String == "target_lost")
         let frequency = try #require(sdk.services?.frequencyManager)
         #expect(frequency.blockReason(
             campaignKey: "a40-guide", policy: FrequencyPolicy(stopOn: "experienceCompleted")
@@ -265,7 +271,7 @@ extension DigiaEngageTests {
         #expect(completed?["item_total"] as? Int == 2)
     }
 
-    @Test("anchor leaves before the step shows: user_close to the CEP only, nothing to Digia (A40)")
+    @Test("anchor leaves before the step shows: cancelled to the CEP only, nothing to Digia (A40)")
     func removedAnchorBeforeStepShowsTellsCepOnly() async throws {
         let (sdk, window) = try await makeGuideInstance(stepCount: 1, delayInMs: 5_000)
         let recorder = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
@@ -275,14 +281,14 @@ extension DigiaEngageTests {
         await nextTurn()
 
         #expect(sdk.guideOrchestrator.state == nil)
-        // The CEP is told dismissed(userClose); the coordinator settles a
+        // The CEP is told dismissed(cancelled); the coordinator settles a
         // presentation that never displayed as a cancelled drop.
         #expect(!recorder.displayed)
         #expect(recorder.dropReason == .cancelled)
-        #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (user_close)"))
+        #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (cancelled)"))
         #expect(try digiaEventNames(sdk).isEmpty)
     }
-    @Test("rectangle anchor unregistered by key during the delay: user_close to the CEP only, next turn (A52)")
+    @Test("rectangle anchor unregistered by key during the delay: cancelled to the CEP only, next turn (A52)")
     func keylessUnregisterDuringDelayTellsCepOnly() async throws {
         let (sdk, window) = try await makeGuideInstance(stepCount: 1, delayInMs: 5_000)
         try #require(window.subviews.first as? DigiaAnchorView)?.removeFromSuperview()
@@ -295,7 +301,7 @@ extension DigiaEngageTests {
 
         #expect(sdk.guideOrchestrator.state == nil)
         #expect(!recorder.displayed)
-        #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (user_close)"))
+        #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (cancelled)"))
         #expect(try digiaEventNames(sdk).isEmpty)
     }
 }
