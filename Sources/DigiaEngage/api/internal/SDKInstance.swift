@@ -2086,6 +2086,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let completed = completedSurveyToken == state.token
         let reason = completed ? DismissReason.completed : reason
         surveyOrchestrator.dismiss()
+        if completed {
+            // Completed wins (R3-D12, SR71): the CEP hears `completed`, the
+            // Digia Completed already sent stands, and no Digia dismiss follows,
+            // however it is closed afterwards (thank-you close, supersede, screen exit).
+            _ = dwellTracker.consumeDwellMs(state.payload.cepCampaignId)
+            events.toCep(.dismissed(reason: .completed, completed: true), payload: state.payload)
+            clearQuestionViewedAt(token: state.token)
+            return
+        }
         events.toBoth(
             .dismissed(reason: reason, completed: completed),
             SurveyEvent.Dismissed(
@@ -2773,6 +2782,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             )
         }
         guideOrchestrator.dismiss()
+        if completed {
+            // Completed wins (R3-D12, SR71): `completed` to the CEP, the Digia
+            // Completed already sent stands, and no Digia dismiss follows.
+            events.toCep(.dismissed(reason: .completed, completed: true), payload: payload)
+            guideCompletionFired = false
+            return
+        }
         events.toBoth(
             .dismissed(
                 reason: completed ? .completed : reason,

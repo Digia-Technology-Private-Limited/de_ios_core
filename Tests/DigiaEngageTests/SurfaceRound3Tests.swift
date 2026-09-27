@@ -128,7 +128,31 @@ struct SurfaceRound3Tests {
         #expect(dismissed.first?.props["dismiss_reason"] as? String == "cta_action")
     }
 
-    @Test("survey dismiss carries user_close, or completed once submitted")
+    @Test("a guide completed by its CTA → CEP completed, Digia Completed, no Digia dismiss (SR71)")
+    func completedGuideSendsNoDismiss() async throws {
+        var json = guideJson("g")
+        var template = try #require(json["templateConfig"] as? [String: Any])
+        var steps = try #require(template["steps"] as? [[String: Any]])
+        var second = steps[0]
+        second["stepId"] = "step-2"
+        steps.append(second)
+        template["steps"] = steps
+        json["templateConfig"] = template
+        let sdk = try await makeSdk([json])
+        let guide = deliver(sdk, "g", "cep-1")
+        sdk.reportGuideShown()
+
+        sdk.advanceGuide()
+        sdk.reportGuideShown()
+        sdk.advanceGuide()
+
+        #expect(guide.dismissReason == .completed)
+        let names = try await digiaEvents(sdk).map(\.name)
+        #expect(names.contains("Digia Experience Completed"))
+        #expect(!names.contains("Digia Experience Dismissed"))
+    }
+
+    @Test("survey dismiss carries user_close; a completed survey sends no Digia dismiss (SR71)")
     func surveyDismissReason() async throws {
         let sdk = try await makeSdk([surveyJson("s1"), surveyJson("s2")])
         let first = deliver(sdk, "s1", "cep-1")
@@ -144,7 +168,7 @@ struct SurfaceRound3Tests {
         let reasons = try await digiaEvents(sdk)
             .filter { $0.name == "Digia Experience Dismissed" }
             .map { $0.props["dismiss_reason"] as? String }
-        #expect(reasons == ["user_close", "completed"])
+        #expect(reasons == ["user_close"])
     }
 }
 
