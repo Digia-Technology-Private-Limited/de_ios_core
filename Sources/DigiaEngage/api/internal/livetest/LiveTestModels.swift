@@ -34,6 +34,10 @@ final class LiveTestContext {
     /// from when the test is due to appear (R3-D11, see ``delayWatchdog(by:)``).
     static let watchdogTimeout: TimeInterval = 5
 
+    /// An inline test's window: a PM may need to scroll a list to reach the
+    /// slot (R4-D4). Every other kind keeps ``watchdogTimeout``.
+    static let inlineWatchdogTimeout: TimeInterval = 10
+
     let testInvocationId: String
     private let reporter: LiveTestAckReporter
     private let onTerminal: () -> Void
@@ -46,7 +50,7 @@ final class LiveTestContext {
     /// default — something took the campaign and never showed it —  and
     /// ``expectSlotToMount()`` narrows it for the one case with a better answer.
     private var watchdogCode: DiagnosticReason = DropReason.timeout
-    private var watchdogDetail: String?
+    private var expectsSlot = false
 
     /// Extra teardown to run only if the watchdog itself fires — never on an
     /// explicit `reportShown`/`reportFailed`. The one caller today uses it to
@@ -77,16 +81,18 @@ final class LiveTestContext {
     /// the screen the user is looking at.
     func expectSlotToMount() {
         watchdogCode = DropReason.anchorNotRegistered
-        watchdogDetail = "no matching slot for this campaign mounted within \(Int(timeout))s"
+        expectsSlot = true
     }
 
     /// Re-arms the watchdog so it counts from when the campaign is due to
-    /// appear: `delay` is its authored wait (a survey's start delay). Called
-    /// right after routing accepted it; a no-op once terminal.
-    func delayWatchdog(by delay: TimeInterval) {
-        guard delay > 0, !terminalReported else { return }
+    /// appear: `delay` is its authored wait (a survey's start delay, 0 for
+    /// every other kind). `window` replaces the default one (an inline test's
+    /// 10 s, R4-D4). Called right after routing accepted it, for every kind
+    /// (R3-10); a no-op once terminal.
+    func delayWatchdog(by delay: TimeInterval, window: TimeInterval? = nil) {
+        guard !terminalReported else { return }
         disarm()
-        armWatchdog(after: timeout + delay)
+        armWatchdog(after: (window ?? timeout) + max(0, delay))
     }
 
     /// The campaign is confirmed visible on screen.
@@ -127,7 +133,9 @@ final class LiveTestContext {
             try? await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
             guard let self, !Task.isCancelled else { return }
             let code = self.watchdogCode
-            let message = self.watchdogDetail ?? "nothing rendered within \(Int(timeout))s"
+            let message = self.expectsSlot
+                ? "no matching slot for this campaign mounted within \(Int(timeout))s"
+                : "nothing rendered within \(Int(timeout))s"
             self.reportFailed(code, message: message)
             self.onWatchdogFired?()
         }

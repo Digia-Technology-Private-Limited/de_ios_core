@@ -784,6 +784,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
+    private static func isInlineKind(_ campaign: CampaignModel) -> Bool {
+        switch campaign.config {
+        case .inline, .banner, .inlineCanvas, .story: return true
+        default: return false
+        }
+    }
+
     /// The `surface_kind` a `timeout` drop sends to HealthSink (R3-D10).
     private static func healthSurfaceKind(_ campaign: CampaignModel) -> String? {
         switch campaign.config {
@@ -1792,11 +1799,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 testContext: testContext
             )
         }
-        // A live test shows a guide at once (no step delay); a survey still
-        // waits out its start delay, so the window counts from then (R3-D11).
-        if campaign.guideConfig == nil {
-            testContext.delayWatchdog(by: Self.firstAppearanceDelay(campaign))
-        }
+        // Re-armed at acceptance for every kind (R3-10). A live test shows a
+        // guide at once (no step delay); a survey still waits out its start
+        // delay, so the window counts from then (R3-D11). Inline tests get 10 s
+        // (R4-D4).
+        testContext.delayWatchdog(
+            by: campaign.guideConfig == nil ? Self.firstAppearanceDelay(campaign) : 0,
+            window: Self.isInlineKind(campaign) ? LiveTestContext.inlineWatchdogTimeout : nil
+        )
         // The context's own per-invocation watchdog (armed in its initializer)
         // gives up if nothing ever draws the test; this adds the teardown that
         // firing implies (R3-D11, SR65): a test that silently never appeared
