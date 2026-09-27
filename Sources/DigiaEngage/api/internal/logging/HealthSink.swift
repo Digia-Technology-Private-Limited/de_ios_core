@@ -214,6 +214,11 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         let wire = reason.wire
         guard HealthReasons.reasons.contains(wire) else { return false }
         guard record.extras[HealthReasons.liveTestBlockerKey] != "true" else { return false }
+        // A surface_busy with no blocker can't say who blocked it (§2.5), and a
+        // same-campaign redelivery carries none on purpose (D4). As Flutter and
+        // Android.
+        if wire == "surface_busy",
+           (record.extras["blocking_campaign_key"] ?? "").isEmpty { return false }
         lock.lock()
         defer { lock.unlock() }
         guard sent < cap else { return false }
