@@ -219,6 +219,9 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         // Android.
         if wire == "surface_busy",
            (record.extras["blocking_campaign_key"] ?? "").isEmpty { return false }
+        // Only the organic acceptance watchdog stamps `surface_kind`, and only
+        // when the app stayed in the foreground (R3-06, R4-D3). As Flutter.
+        if wire == "timeout", (record.extras["surface_kind"] ?? "").isEmpty { return false }
         lock.lock()
         defer { lock.unlock() }
         guard sent < cap else { return false }

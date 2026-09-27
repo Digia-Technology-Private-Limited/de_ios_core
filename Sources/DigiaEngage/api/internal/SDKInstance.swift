@@ -824,12 +824,17 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         if owns(floaterOrchestrator.state?.payload) {
             floaterOrchestrator.dismiss(.invalidated)
         }
-        inlineController.removeCampaign(campaignID)
+        // Id-keyed below, so only when this delivery really is in a slot: a
+        // non-inline timeout must not clear an inline slot, or its impression
+        // mark, that shares the CEP id (CleverTap repeats ids) (R3-07).
+        if inlineController.slotOccupants.contains(where: { owns($0.payload) }) {
+            inlineController.removeCampaign(campaignID)
+            // Forget the impression mark so a re-trigger impresses to Digia afresh.
+            events.resetImpression(campaignID)
+        }
         if owns(guideOrchestrator.state?.payload) {
             guideOrchestrator.dismissIfActive(payloadId: campaignID)
         }
-        // Forget the impression mark so a re-trigger impresses to Digia afresh.
-        events.resetImpression(campaignID)
     }
 
     func setCurrentScreen(_ name: String) {
