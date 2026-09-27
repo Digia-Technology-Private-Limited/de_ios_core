@@ -85,6 +85,23 @@ final class PresentationCoordinator {
 
     private var live: [String: LiveEntry] = [:]
 
+    /// Bumped each time the app leaves the foreground. An acceptance window
+    /// that saw it change (or started in the background) was not a fair test of
+    /// the surface, so its `timeout` stays off HealthSink (R4-D3).
+    private var backgroundEpoch = 0
+    private var isAppInForeground = true
+
+    /// The app left the foreground (`didEnterBackground`).
+    func noteAppLeftForeground() {
+        isAppInForeground = false
+        backgroundEpoch += 1
+    }
+
+    /// The app is back in the foreground (`willEnterForeground`).
+    func noteAppEnteredForeground() {
+        isAppInForeground = true
+    }
+
     /// Presentations that have not settled yet. Diagnostics and tests.
     var liveCount: Int { live.count }
 
@@ -133,6 +150,8 @@ final class PresentationCoordinator {
         entry.kind = kind
         guard kind.armsAcceptanceWatchdog else { return }
         let window = acceptanceTimeout + max(0, dueDelay)
+        let armedEpoch = backgroundEpoch
+        let armedInForeground = isAppInForeground
         entry.acceptance = Task { @MainActor [weak self] in
             guard let self else { return }
             try? await Task.sleep(nanoseconds: nanoseconds(window))
@@ -143,7 +162,14 @@ final class PresentationCoordinator {
                     + "timeout=\(Int(window * 1000))ms)",
                 campaign: controller.trigger.campaignKey
             )
-            if let surfaceKind { controller.dropExtras = ["surface_kind": surfaceKind] }
+            // HealthSink requires `surface_kind`; leaving it off keeps a window
+            // the app spent partly in the background out of the breakage
+            // report (R4-D3). The console and timeline still show the drop.
+            let stayedForeground = armedInForeground && self.isAppInForeground
+                && self.backgroundEpoch == armedEpoch
+            if let surfaceKind, stayedForeground {
+                controller.dropExtras = ["surface_kind": surfaceKind]
+            }
             // Settle first, then take it off the surface (R3-D1), as the anchor
             // watchdog does: the settle is the decision and can't be undone by
             // whatever the teardown emits.
