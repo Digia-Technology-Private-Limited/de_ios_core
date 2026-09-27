@@ -220,7 +220,7 @@ extension DigiaEngageTests {
         #expect(dismissed?["dismiss_reason"] as? String == "target_lost")
     }
 
-    @Test("anchor of a multi-step guide's last step leaves: Digia completion with dwell, no frequency stop, still target_lost (A40, A51)")
+    @Test("anchor of a multi-step guide's last step leaves: Digia completion with dwell, no frequency stop, CEP completed, no Digia dismiss (A40, A51, R4-D2)")
     func removedAnchorOnLastStepCompletesForDigia() async throws {
         let (sdk, window) = try await makeGuideInstance(
             stepCount: 2, frequency: ["stopOn": "experienceCompleted"]
@@ -234,9 +234,10 @@ extension DigiaEngageTests {
         anchor.removeFromSuperview()
         await nextTurn()
 
-        #expect(recorder.outcome == .dismissed(reason: .targetLost, completed: false))
+        #expect(recorder.outcome == .dismissed(reason: .completed, completed: true))
         let names = try digiaEventNames(sdk)
-        #expect(names.suffix(2) == ["Digia Experience Completed", "Digia Experience Dismissed"])
+        #expect(names.last == "Digia Experience Completed")
+        #expect(!names.contains("Digia Experience Dismissed"))
         #expect(!names.contains("Digia Step Dismissed"))
         let entries = try #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
         let props = { (name: String) in
@@ -245,8 +246,6 @@ extension DigiaEngageTests {
         }
         #expect(props("Digia Experience Completed")?["time_to_complete_ms"] != nil)
         #expect(props("Digia Experience Completed")?["item_total"] as? Int == 2)
-        #expect(props("Digia Experience Dismissed")?["dwell_ms"] != nil)
-        #expect(props("Digia Experience Dismissed")?["dismiss_reason"] as? String == "target_lost")
         let frequency = try #require(sdk.services?.frequencyManager)
         #expect(frequency.blockReason(
             campaignKey: "a40-guide", policy: FrequencyPolicy(stopOn: "experienceCompleted")

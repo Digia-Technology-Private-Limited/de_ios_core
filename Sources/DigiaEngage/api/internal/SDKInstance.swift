@@ -1390,7 +1390,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .guide:
             if let state = guideOrchestrator.state, state.payload.cepCampaignId == id {
                 if displayed {
-                    dismissGuide(reason: .superseded, completed: false)
+                    // No `completed:` override, so a completion the CTA already
+                    // fired wins (R3-02, R4-D2): CEP `completed`, no Digia dismiss.
+                    dismissGuide(reason: .superseded)
                 } else {
                     guideOrchestrator.dismiss()
                     _ = dwellTracker.consumeDwellMs(id)
@@ -2738,8 +2740,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     ///   `dismissed` with the caller's reason, or `cancelled` when the SDK ended
     ///   an unseen guide; Digia records nothing for an unseen guide.
     /// - shown: a lost target in place, a screen exit after a host screen change.
-    ///   On the last step of a multi-step guide that is a completion for Digia,
-    ///   but the lifecycle event stays `dismissed` with the real reason.
+    ///   On the last step of a multi-step guide that is a completion: Digia
+    ///   Completed, CEP `completed`, no Digia dismiss (R4-D2, ADR-004).
     private func dismissGuideForRemovedAnchor(_ state: ActiveGuideState, reason: DismissReason? = nil) {
         guard dwellTracker.elapsedMs(state.payload.cepCampaignId) != nil else {
             guideOrchestrator.dismiss()
@@ -2755,7 +2757,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         pendingGuideDismissReason =
             reason ?? ((_currentScreen == screenAtGuideStep) ? .targetLost : .screenExit)
-        dismissGuide(completed: false)
+        // A completion (just above, or an earlier CTA) wins (R4-D2): the CEP
+        // hears `completed` and no Digia dismiss follows.
+        dismissGuide()
     }
 
     /// Displayed-guide reason in Flutter's `_finish` order: a completion, then
