@@ -51,10 +51,10 @@ enum PresentationKind {
     ///
     /// No acceptance watchdog: an inline campaign is legitimately `pending`
     /// until the user scrolls to its slot — possibly never — so a timeout would
-    /// settle a perfectly healthy campaign. Nothing is at risk in waiting,
-    /// because no CEP holds a lock on an inline campaign: CleverTap's Native
-    /// Display never occupies the in-app slot, and WebEngage inline opens its
-    /// gate at the impression.
+    /// settle a perfectly healthy campaign. The CEP's hold still goes back at
+    /// acceptance: core releases it the moment routing accepts the delivery
+    /// (WE-04), because a CEP that locks per in-app would otherwise stay locked
+    /// until the slot is seen.
     case inline
 
     /// Whether a presentation of this kind must appear within the acceptance
