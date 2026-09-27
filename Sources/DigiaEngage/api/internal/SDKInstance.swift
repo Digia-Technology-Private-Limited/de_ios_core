@@ -1045,7 +1045,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 campaignKey: survey.payload.campaignKey,
                 campaignType: "survey",
                 campaign: campaignStore.find(survey.payload.campaignKey),
-                dismiss: { markSurveyDismissed(reason: .screenExit) }
+                dismiss: {
+                    // The fields a user close sends, from the renderer (R3-11).
+                    let progress = surveyOrchestrator.progress()
+                    markSurveyDismissed(
+                        abandonedAtItem: progress?.abandonedAtItem,
+                        answeredCount: progress?.answeredCount,
+                        reason: .screenExit
+                    )
+                }
             )
         }
 
