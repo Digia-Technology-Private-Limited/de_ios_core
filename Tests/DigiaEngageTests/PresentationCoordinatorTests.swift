@@ -16,7 +16,7 @@ struct PresentationCoordinatorTests {
     private func makeCoordinator(
         acceptance: TimeInterval = 60,
         anchor: TimeInterval = 60,
-        onCancelSurface: @escaping (String) -> Void = { _ in }
+        onCancelSurface: @escaping (CEPTriggerPayload) -> Void = { _ in }
     ) -> PresentationCoordinator {
         var minted = 0
         return PresentationCoordinator(
@@ -107,7 +107,7 @@ struct PresentationCoordinatorTests {
     @Test("a settle the coordinator never saw still cleans up")
     func ownerCancelCleansUp() async {
         var cancelled: [String] = []
-        let coordinator = makeCoordinator(onCancelSurface: { cancelled.append($0) })
+        let coordinator = makeCoordinator(onCancelSurface: { cancelled.append($0.cepCampaignId) })
         let controller = coordinator.open(payload("a"), owner: "clevertap")
         coordinator.accept(controller, kind: .modal)
 
@@ -173,6 +173,41 @@ struct PresentationCoordinatorTests {
         #expect(coordinator.liveCount == 0)
     }
 
+    @Test("SR60 — the acceptance watchdog settles first, then clears that delivery's surface")
+    func acceptanceWatchdogClearsSurface() async throws {
+        var cancelled: [CEPTriggerPayload] = []
+        var settledBeforeTeardown = false
+        var controller: PresentationController?
+        let coordinator = makeCoordinator(
+            acceptance: 0.02,
+            onCancelSurface: { payload in
+                settledBeforeTeardown = controller?.isSettled == true
+                cancelled.append(payload)
+            })
+        controller = coordinator.open(payload("a"), owner: "clevertap")
+        let c = try #require(controller)
+        coordinator.accept(c, kind: .modal, surfaceKind: "nudge")
+
+        try await waitUntil { !cancelled.isEmpty }
+
+        #expect(settledBeforeTeardown)
+        #expect(cancelled.map(\.presentationId) == [c.id])
+        #expect(c.dropExtras == ["surface_kind": "nudge"])
+    }
+
+    @Test("SR60 — the window counts from the due time")
+    func acceptanceWindowAddsDueDelay() async throws {
+        let coordinator = makeCoordinator(acceptance: 0.02)
+        let controller = coordinator.open(payload("a"), owner: "clevertap")
+        coordinator.accept(controller, kind: .modal, dueDelay: 0.5)
+
+        try await Task.sleep(nanoseconds: 150_000_000)
+        #expect(!controller.isSettled)
+
+        try await waitUntil { controller.isSettled }
+        #expect(controller.presentation.outcome.settledValue?.reasonValue == "timeout")
+    }
+
     @Test("G7 — a timely impression disarms the acceptance watchdog")
     func acceptanceWatchdogDisarms() async throws {
         let coordinator = makeCoordinator(acceptance: 0.02)
@@ -217,7 +252,7 @@ struct PresentationCoordinatorTests {
     func anchorWatchdogFiresWhileDisplaying() async throws {
         var cancelled: [String] = []
         let coordinator = makeCoordinator(
-            anchor: 0.02, onCancelSurface: { cancelled.append($0) })
+            anchor: 0.02, onCancelSurface: { cancelled.append($0.cepCampaignId) })
         let controller = coordinator.open(payload("g"), owner: "clevertap")
         coordinator.accept(controller, kind: .modal)
         coordinator.awaitAnchor(controller.trigger)

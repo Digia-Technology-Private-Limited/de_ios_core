@@ -115,6 +115,8 @@ struct SurfaceRoutingTests {
         defer { DigiaLogger.unregisterSink(sink) }
         try start([nudgeJson("welcome"), nudgeJson("sale")])
         _ = deliver("welcome", "cep-1")
+        // A never-displayed blocker is not named (SR64).
+        sdk.reportNudgeImpression()
         _ = deliver("sale", "cep-2")
 
         var record: TimelineRecord?

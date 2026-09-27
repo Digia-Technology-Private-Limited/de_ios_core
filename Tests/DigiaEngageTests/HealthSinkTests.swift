@@ -437,6 +437,28 @@ struct HealthSinkSurfaceBusyTests {
         #expect(sink.accepts(busy("summer_sale", blocker: "welcome")))
     }
 
+    @Test("timeout sends surface_kind, once per campaign per launch (SR66)")
+    func timeoutAllowlisted() throws {
+        let sink = HealthSink()
+        let recorder = Recorder()
+        sink.activate(recorder.capture)
+        defer { sink.resetForTest() }
+        func timeout(_ key: String) -> TimelineRecord {
+            TimelineRecord(
+                timestamp: Date(timeIntervalSince1970: 0), severity: .debug, tag: "DIGIA",
+                message: "Dropped — timeout", stage: .render, reason: DropReason.timeout,
+                campaignKey: key, extras: ["surface_kind": "pip", "other": "x"])
+        }
+
+        send(sink, timeout("summer_sale"))
+        send(sink, timeout("summer_sale"))
+        send(sink, timeout("welcome"))
+
+        #expect(recorder.payloads.map(\.campaignKey) == ["summer_sale", "welcome"])
+        #expect(recorder.payloads.first?.reason == "timeout")
+        #expect(recorder.payloads.first?.detail == ["surface_kind": "pip"])
+    }
+
     @Test("a surface_busy with no blocker key is refused (SR47)")
     func missingBlockerRefused() {
         let sink = HealthSink()

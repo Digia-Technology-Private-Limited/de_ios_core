@@ -194,6 +194,27 @@ struct LiveTestReliabilityTests {
     }
 
     @MainActor
+    @Test("the watchdog is 5 s, counted from the due time (SR65)")
+    func watchdogCountsFromDueTime() async throws {
+        #expect(LiveTestContext.watchdogTimeout == 5)
+        let sender = FakeSender(outcomes: [.success(200)])
+        let reporter = LiveTestAckReporter(sender: sender)
+        reporter.configure(config: DigiaConfig(apiKey: "test-key"))
+        var terminalFired = false
+        let context = LiveTestContext(
+            testInvocationId: "inv-1", reporter: reporter,
+            onTerminal: { terminalFired = true }, timeout: 0.02)
+        context.delayWatchdog(by: 0.5)
+
+        try await Task.sleep(nanoseconds: 150_000_000)
+        #expect(!terminalFired)
+        await sender.waitForAttempts(1)
+        await sender.waitForAttempts(1)
+        #expect(terminalFired)
+        withExtendedLifetime(context) {}
+    }
+
+    @MainActor
     @Test("expectSlotToMount narrows the watchdog's verdict")
     func watchdogNarrowedForInline() async {
         let sender = FakeSender(outcomes: [.success(200)])
