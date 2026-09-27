@@ -436,4 +436,15 @@ struct HealthSinkSurfaceBusyTests {
         #expect(!sink.accepts(busy("summer_sale", blocker: "t1", liveTest: true)))
         #expect(sink.accepts(busy("summer_sale", blocker: "welcome")))
     }
+
+    @Test("a surface_busy with no blocker key is refused (SR47)")
+    func missingBlockerRefused() {
+        let sink = HealthSink()
+        var record = busy("summer_sale", blocker: "welcome")
+        record = TimelineRecord(
+            timestamp: record.timestamp, severity: record.severity, tag: record.tag,
+            message: record.message, stage: record.stage, reason: record.reason,
+            campaignKey: record.campaignKey, extras: [:])
+        #expect(!sink.accepts(record))
+    }
 }
