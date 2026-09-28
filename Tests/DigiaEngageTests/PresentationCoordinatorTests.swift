@@ -144,7 +144,7 @@ struct PresentationCoordinatorTests {
 
     @Test("inline hands the hold back at acceptance, before any impression")
     func inlineReleasesHoldAtAcceptance() {
-        // WE-04: the slot may never be reached, so the hold cannot wait for it.
+        // The slot may never be reached, so the hold cannot wait for it.
         let coordinator = makeCoordinator()
         let inline = coordinator.open(payload("i"), owner: "clevertap")
         coordinator.accept(inline, kind: .inline)
@@ -246,7 +246,7 @@ struct PresentationCoordinatorTests {
         try await Task.sleep(nanoseconds: 120_000_000)
 
         // Legitimately pending until the user scrolls to its slot — possibly
-        // never. Its hold still went back at acceptance (WE-04).
+        // never. Its hold still went back at acceptance.
         #expect(!controller.isSettled)
     }
 

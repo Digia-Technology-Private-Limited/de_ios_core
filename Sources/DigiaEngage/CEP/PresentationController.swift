@@ -112,7 +112,7 @@ public final class PresentationController {
     /// Frees the CEP's hold at acceptance, before any impression.
     ///
     /// Only for an inline presentation: its slot may never be reached, so the
-    /// hold cannot wait for an impression (WE-04). Idempotent; the display-time
+    /// hold cannot wait for an impression. Idempotent; the display-time
     /// release is then a no-op.
     public func releaseHoldAtAcceptance() { backing.releaseHoldAtAcceptance() }
 

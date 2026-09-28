@@ -95,7 +95,7 @@ public protocol CampaignPresentation: AnyObject {
     /// modal experience core settles the two together; a non-blocking
     /// experience (PIP, floater) releases this early and keeps running; an
     /// inline experience releases it at acceptance, before any impression
-    /// (WE-04). A `clicked` signal stays legal until ``outcome``. Bind CEP
+    /// A `clicked` signal stays legal until ``outcome``. Bind CEP
     /// unblock here, unconditionally — no branch on which arm the outcome
     /// took, and no check for whether it displayed.
     ///

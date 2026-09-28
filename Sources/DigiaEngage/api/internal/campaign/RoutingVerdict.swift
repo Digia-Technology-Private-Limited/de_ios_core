@@ -53,7 +53,7 @@ enum PresentationKind {
     /// until the user scrolls to its slot — possibly never — so a timeout would
     /// settle a perfectly healthy campaign. The CEP's hold still goes back at
     /// acceptance: core releases it the moment routing accepts the delivery
-    /// (WE-04), because a CEP that locks per in-app would otherwise stay locked
+    /// because a CEP that locks per in-app would otherwise stay locked
     /// until the slot is seen.
     case inline
 
