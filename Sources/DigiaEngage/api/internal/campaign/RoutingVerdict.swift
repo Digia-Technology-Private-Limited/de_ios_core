@@ -31,8 +31,8 @@ enum RoutingVerdict {
 ///
 /// Two independent questions have the same three answers, so they are one enum
 /// rather than two booleans that can contradict each other: does this
-/// presentation owe us an appearance on a deadline, and does the CEP get its
-/// hold back when it appears or when it ends?
+/// presentation owe us an appearance on a deadline, and when does the CEP get
+/// its hold back — at acceptance, at appearance, or at the end?
 enum PresentationKind {
     /// Blocks the surface until it closes — a nudge, a survey, a guide.
     ///
@@ -61,6 +61,6 @@ enum PresentationKind {
     /// window or be settled `dropped('timeout')`.
     var armsAcceptanceWatchdog: Bool { self != .inline }
 
-    /// Whether the CEP's hold ends at the impression rather than the outcome.
+    /// Whether the CEP's hold ends before the outcome: at the impression, except inline which already ended at acceptance.
     var releasesHoldOnDisplay: Bool { self != .modal }
 }

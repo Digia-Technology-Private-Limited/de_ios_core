@@ -275,7 +275,7 @@ final class PresentationCoordinator {
         case .impressed:
             entry.disarm()
             controller.markDisplaying()
-            // A non-blocking experience hands the CEP's slot back the moment it
+            // A floating experience hands the CEP's slot back the moment it
             // appears, not when it finally ends. Doing it here rather than at
             // each surface is what keeps the rule in one place.
             if entry.kind.releasesHoldOnDisplay { controller.releaseHold() }
