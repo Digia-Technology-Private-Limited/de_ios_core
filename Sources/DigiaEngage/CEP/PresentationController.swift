@@ -114,7 +114,7 @@ public final class PresentationController {
     /// Only for an inline presentation: its slot may never be reached, so the
     /// hold cannot wait for an impression. Idempotent; the display-time
     /// release is then a no-op.
-    public func releaseHoldAtAcceptance() { backing.releaseHoldAtAcceptance() }
+    func releaseHoldAtAcceptance() { backing.releaseHoldAtAcceptance() }
 
     /// Settles the presentation with its terminal `outcome`.
     ///

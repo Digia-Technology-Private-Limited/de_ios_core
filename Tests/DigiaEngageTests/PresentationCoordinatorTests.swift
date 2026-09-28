@@ -133,7 +133,6 @@ struct PresentationCoordinatorTests {
         #expect(!modal.isHoldReleased, "acceptance alone must not free a modal hold")
         #expect(!floating.isHoldReleased)
 
-        #expect(!floating.isHoldReleased)
         coordinator.handle(.impressed, payload: modal.trigger)
         coordinator.handle(.impressed, payload: floating.trigger)
 
