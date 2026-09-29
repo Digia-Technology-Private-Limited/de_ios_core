@@ -23,18 +23,17 @@ final class SDKServices {
         storage: LocalStorage,
         networkClient: any NetworkClient
     ) {
-        let identityManager = IdentityManager(storage: storage.scoped("identity"))
+        let identityManager = IdentityManager(
+            storage: storage.scoped("identity"),
+            idGenerator: IdentityManager.systemIdGenerator
+        )
         self.identityManager = identityManager
         let sessionManager = SessionManager(
             storage: storage.scoped("session"),
-            timeoutMs: Int64(config.analyticsConfig.sessionTimeoutMs)
+            timeoutMs: Int64(config.analyticsConfig.sessionTimeoutMs),
+            observeLifecycle: true
         )
         self.sessionManager = sessionManager
-        // A new or cleared user starts a new session (D2), whatever the
-        // analytics setting.
-        identityManager.addUserChangedListener { [weak sessionManager] in
-            sessionManager?.reset()
-        }
         let requestHeaders = SDKRequestHeaders.make(config: config, deviceId: identityManager.deviceId)
         self.requestHeaders = requestHeaders
         let staticContext = AnalyticsService.buildStaticContext(
@@ -50,13 +49,11 @@ final class SDKServices {
             storage: storage.scoped("session")
         )
         self.sessionReporter = sessionReporter
-        // Session telemetry is analytics: opting out of one stops the other.
-        // The session itself still rotates (D2); it just isn't reported.
-        if config.analyticsConfig.enabled {
-            sessionManager.addRotationListener { [weak sessionReporter] in
-                sessionReporter?.report()
-            }
-        }
+        SessionIdentityWiring(
+            identityManager: identityManager,
+            sessionManager: sessionManager,
+            sessionReporter: config.analyticsConfig.enabled ? sessionReporter : nil
+        ).attach()
         // Frequency capping reads the same sessionId the backend sees, so
         // `session` windows track the reported session.
         self.frequencyManager = FrequencyManager(

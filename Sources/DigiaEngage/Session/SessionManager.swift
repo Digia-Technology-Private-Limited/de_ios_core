@@ -144,7 +144,7 @@ final class SessionManager: @unchecked Sendable {
         rotationListeners.append(listener)
     }
 
-    private func onBackground() {
+    func onBackground() {
         lock.lock()
         let now = clock()
         _lastActivityMs = now

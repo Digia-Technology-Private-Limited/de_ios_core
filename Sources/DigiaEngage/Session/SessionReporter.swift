@@ -38,11 +38,14 @@ final class SessionReporter: @unchecked Sendable {
     private var tail: Task<Void, Never>?
 
     /// Retries pending reports, oldest first, then reports the current session.
-    func report() {
+    /// Returns the scheduled work (nil when no body could be built), so a
+    /// caller can await it; production callers ignore it.
+    @discardableResult
+    func report() -> Task<Void, Never>? {
         // Built now, not when the queued operation runs: a later rotation must
         // not rewrite which session this report is about.
-        guard let body = makeBody() else { return }
-        serialize { reporter in
+        guard let body = makeBody() else { return nil }
+        return serialize { reporter in
             guard await reporter.flushPending() else {
                 // Still failing: queue this report behind the others, in order.
                 reporter.appendPending(body)
@@ -53,20 +56,24 @@ final class SessionReporter: @unchecked Sendable {
     }
 
     /// Retries reports that failed earlier, without reporting a new session.
-    func flush() {
+    /// Returns the scheduled work, so a caller can await it.
+    @discardableResult
+    func flush() -> Task<Void, Never> {
         serialize { reporter in
             _ = await reporter.flushPending()
         }
     }
 
-    private func serialize(_ operation: @escaping @Sendable (SessionReporter) async -> Void) {
+    private func serialize(_ operation: @escaping @Sendable (SessionReporter) async -> Void) -> Task<Void, Never> {
         lock.withLock {
             let previous = tail
-            tail = Task { [weak self] in
+            let task = Task { [weak self] in
                 await previous?.value
                 guard let self else { return }
                 await operation(self)
             }
+            tail = task
+            return task
         }
     }
 

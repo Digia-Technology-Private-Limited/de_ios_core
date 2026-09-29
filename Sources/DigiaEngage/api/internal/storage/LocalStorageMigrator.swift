@@ -13,6 +13,14 @@ enum LocalStorageMigrator {
         standardDefaults: UserDefaults = .standard
     ) {
         guard let targetDefaults else { return }
+        migrateIfNeeded(
+            targetDefaults: UserDefaultsMigrationStore(targetDefaults),
+            standardDefaults: UserDefaultsMigrationStore(standardDefaults)
+        )
+    }
+
+    /// The migration itself, over any store that can also list its keys.
+    static func migrateIfNeeded(targetDefaults: MigrationStore, standardDefaults: MigrationStore) {
         let currentVersion = targetDefaults.integer(forKey: keyStorageVersion)
         guard currentVersion < currentStorageVersion else { return }
 
@@ -44,7 +52,7 @@ enum LocalStorageMigrator {
         }
 
         // 3. Frequency Capping Migration (freq:<campaignKey>)
-        let allKeys = standardDefaults.dictionaryRepresentation().keys
+        let allKeys = standardDefaults.allKeys
         for key in allKeys where key.hasPrefix("freq:") {
             let campaignKey = String(key.dropFirst("freq:".count))
             if let value = standardDefaults.string(forKey: key) {
@@ -53,7 +61,7 @@ enum LocalStorageMigrator {
         }
 
         // 4. Debug Overlay
-        if standardDefaults.object(forKey: "digia_debug_overlay_bubble_visible") != nil {
+        if standardDefaults.hasValue(forKey: "digia_debug_overlay_bubble_visible") {
             targetDefaults.set(
                 standardDefaults.bool(forKey: "digia_debug_overlay_bubble_visible"),
                 forKey: "debug.overlay_visible"
@@ -61,25 +69,25 @@ enum LocalStorageMigrator {
         }
 
         // 5. Capture Profile
-        if standardDefaults.object(forKey: "digia_anchorless_capture_enabled") != nil {
+        if standardDefaults.hasValue(forKey: "digia_anchorless_capture_enabled") {
             targetDefaults.set(
                 standardDefaults.bool(forKey: "digia_anchorless_capture_enabled"),
                 forKey: "capture.enabled"
             )
         }
-        if standardDefaults.object(forKey: "digia_anchorless_capture_include_text") != nil {
+        if standardDefaults.hasValue(forKey: "digia_anchorless_capture_include_text") {
             targetDefaults.set(
                 standardDefaults.bool(forKey: "digia_anchorless_capture_include_text"),
                 forKey: "capture.include_text"
             )
         }
-        if standardDefaults.object(forKey: "digia_anchorless_capture_include_media") != nil {
+        if standardDefaults.hasValue(forKey: "digia_anchorless_capture_include_media") {
             targetDefaults.set(
                 standardDefaults.bool(forKey: "digia_anchorless_capture_include_media"),
                 forKey: "capture.include_media"
             )
         }
-        if standardDefaults.object(forKey: "digia_anchorless_capture_include_structure") != nil {
+        if standardDefaults.hasValue(forKey: "digia_anchorless_capture_include_structure") {
             targetDefaults.set(
                 standardDefaults.bool(forKey: "digia_anchorless_capture_include_structure"),
                 forKey: "capture.include_structure"
@@ -87,7 +95,7 @@ enum LocalStorageMigrator {
         }
 
         // 6. Component Registry
-        if standardDefaults.object(forKey: "digia_component_registry_recording_enabled") != nil {
+        if standardDefaults.hasValue(forKey: "digia_component_registry_recording_enabled") {
             targetDefaults.set(
                 standardDefaults.bool(forKey: "digia_component_registry_recording_enabled"),
                 forKey: "registry.recording_enabled"
@@ -95,7 +103,7 @@ enum LocalStorageMigrator {
         }
 
         // 7. Live Testing
-        if standardDefaults.object(forKey: "digia_live_testing_enabled") != nil {
+        if standardDefaults.hasValue(forKey: "digia_live_testing_enabled") {
             targetDefaults.set(
                 standardDefaults.bool(forKey: "digia_live_testing_enabled"),
                 forKey: "live_test.enabled"
@@ -122,7 +130,7 @@ enum LocalStorageMigrator {
         ] + allKeys.filter { $0.hasPrefix("freq:") }
 
         for key in legacyKeys {
-            standardDefaults.removeObject(forKey: key)
+            standardDefaults.removeValue(forKey: key)
         }
 
         // Written whatever the copy results: there is no retry (D10).
@@ -140,7 +148,7 @@ enum LocalStorageMigrator {
 
     /// Copies a legacy identity value unless the new location already holds
     /// one; a copy that does not read back is logged and dropped.
-    private static func copyIdentity(_ value: String, forKey key: String, to target: UserDefaults) {
+    private static func copyIdentity(_ value: String, forKey key: String, to target: MigrationStore) {
         if let existing = target.string(forKey: key), !existing.isEmpty { return }
         target.set(value, forKey: key)
         if target.string(forKey: key) != value {
@@ -176,4 +184,38 @@ enum LocalStorageMigrator {
         else { return nil }
         return String(data: data, encoding: .utf8)
     }
+}
+
+/// The raw, unprefixed key-value store the migrator reads and writes.
+protocol MigrationStore: AnyObject {
+    var allKeys: [String] { get }
+    func hasValue(forKey key: String) -> Bool
+    func string(forKey key: String) -> String?
+    func data(forKey key: String) -> Data?
+    func bool(forKey key: String) -> Bool
+    func integer(forKey key: String) -> Int
+    func set(_ value: String, forKey key: String)
+    func set(_ value: Bool, forKey key: String)
+    func set(_ value: Int, forKey key: String)
+    func removeValue(forKey key: String)
+}
+
+/// The production `MigrationStore`: a thin pass-through to `UserDefaults`.
+final class UserDefaultsMigrationStore: MigrationStore {
+    private let defaults: UserDefaults
+
+    init(_ defaults: UserDefaults) {
+        self.defaults = defaults
+    }
+
+    var allKeys: [String] { Array(defaults.dictionaryRepresentation().keys) }
+    func hasValue(forKey key: String) -> Bool { defaults.object(forKey: key) != nil }
+    func string(forKey key: String) -> String? { defaults.string(forKey: key) }
+    func data(forKey key: String) -> Data? { defaults.data(forKey: key) }
+    func bool(forKey key: String) -> Bool { defaults.bool(forKey: key) }
+    func integer(forKey key: String) -> Int { defaults.integer(forKey: key) }
+    func set(_ value: String, forKey key: String) { defaults.set(value, forKey: key) }
+    func set(_ value: Bool, forKey key: String) { defaults.set(value, forKey: key) }
+    func set(_ value: Int, forKey key: String) { defaults.set(value, forKey: key) }
+    func removeValue(forKey key: String) { defaults.removeObject(forKey: key) }
 }

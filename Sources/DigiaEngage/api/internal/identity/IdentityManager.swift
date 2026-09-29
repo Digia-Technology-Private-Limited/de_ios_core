@@ -20,29 +20,14 @@ final class IdentityManager: @unchecked Sendable {
 
     init(
         storage: LocalStorage,
-        idGenerator: (@Sendable () -> String)? = nil
+        idGenerator: @Sendable () -> String = IdentityManager.systemIdGenerator
     ) {
         self.storage = storage
 
         if let existing = storage.string(forKey: Self.keyDeviceId)?.trimmingCharacters(in: .whitespacesAndNewlines), !existing.isEmpty {
             self.deviceId = existing
         } else {
-            let newId: String
-            if let idGenerator {
-                newId = idGenerator()
-            } else {
-                #if canImport(UIKit)
-                let idfv: String?
-                if Thread.isMainThread {
-                    idfv = MainActor.assumeIsolated { UIDevice.current.identifierForVendor?.uuidString }
-                } else {
-                    idfv = DispatchQueue.main.sync { UIDevice.current.identifierForVendor?.uuidString }
-                }
-                newId = idfv ?? UUID().uuidString
-                #else
-                newId = UUID().uuidString
-                #endif
-            }
+            let newId = idGenerator()
             storage.set(newId, forKey: Self.keyDeviceId)
             self.deviceId = newId
         }
@@ -52,6 +37,22 @@ final class IdentityManager: @unchecked Sendable {
         } else {
             self.cachedUserId = nil
         }
+    }
+
+    /// The production device ID source: the vendor identifier, read on the
+    /// main thread, or a random UUID when it is unavailable.
+    static func systemIdGenerator() -> String {
+        #if canImport(UIKit)
+        let idfv: String?
+        if Thread.isMainThread {
+            idfv = MainActor.assumeIsolated { UIDevice.current.identifierForVendor?.uuidString }
+        } else {
+            idfv = DispatchQueue.main.sync { UIDevice.current.identifierForVendor?.uuidString }
+        }
+        return idfv ?? UUID().uuidString
+        #else
+        return UUID().uuidString
+        #endif
     }
 
     var userId: String? {
