@@ -84,6 +84,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// Used to compute `time_to_answer_ms` on QuestionAnswered.
     private var questionViewedAt: [String: Date] = [:]
     private var analyticsService: AnalyticsService?
+    private var userContextManager = UserContextManager()
+    private var userContextTask: Task<Void, Never>?
+    private var selfTriggerCount: Int64 = 0
     /// Whether the floating "Digia" debug bubble is shown. See
     /// `DigiaDebugOverlayController`.
     private let debugOverlayController = DigiaDebugOverlayController()
@@ -201,6 +204,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             config: config, deviceId: AnalyticsIdentityManager().resolveAnonymousId()
         )
         analyticsService = AnalyticsService.create(config: config, requestHeaders: requestHeaders)
+        userContextManager.configure(apiKey: config.apiKey, restoredUserId: analyticsService?.identity.userId)
+        userContextTask?.cancel()
+        userContextTask = Task { await userContextManager.refresh() }
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
 
         font = DigiaFont(fontFamily: config.fontFamily)
@@ -300,6 +306,13 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                 plugin.setup(delegate: self)
             }
         }
+
+        let readyTask = userContextTask
+        Task { @MainActor [weak self] in
+            _ = await readyTask?.value
+            guard let self, self.sdkState == .ready else { return }
+            self.fireTriggers(matching: { if case .appStart = $0 { return true }; return false }, reason: "app start")
+        }
     }
 
     /// RN-only entrypoint: JS already fetched campaigns for its own rendering needs,
@@ -360,6 +373,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         }
         if screenUpdateRevision == revision {
             activePlugin?.forwardScreen(screenName)
+        }
+        if let arrived = _currentScreen, !arrived.isEmpty {
+            fireTriggers(matching: {
+                if case let .screen(names) = $0 { return names.contains(arrived) }
+                return false
+            }, reason: "screen '\(arrived)'")
         }
     }
 
@@ -707,6 +726,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     /// branches on which one this is.
     @MainActor
     private protocol RoutingContext {
+        var enforcesAudience: Bool { get }
         func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool
         func onInlineRouted(payload: CEPTriggerPayload)
         func onDropped(_ code: LiveTestFailureCode, message: String)
@@ -715,6 +735,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     @MainActor
     private struct OrganicRoutingContext: RoutingContext {
         let frequencyManager: FrequencyManager?
+
+        var enforcesAudience: Bool { true }
 
         func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool {
             guard
@@ -749,6 +771,8 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         init(testContext: LiveTestContext) {
             self.testContext = testContext
         }
+
+        var enforcesAudience: Bool { false }
 
         func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool { false }
 
@@ -794,8 +818,7 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
         context: RoutingContext
     ) -> Bool {
         let key = campaign.campaignKey
-        if !campaign.targetScreenNames.isEmpty
-            && !campaign.targetScreenNames.contains(_currentScreen ?? "")
+        if !campaign.allowsScreen(_currentScreen)
         {
             lastCampaignDropReason =
                 "screen not targeted: currentScreen=\(_currentScreen ?? "<unset>") targetScreenNames=\(campaign.targetScreenNames)"
@@ -810,6 +833,12 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
                     + "targetScreenNames=\(campaign.targetScreenNames)"
             )
             context.onDropped(.noMatchingScreen, message: "screen not targeted")
+            return false
+        }
+        if context.enforcesAudience && !campaign.allowsUser(userContextManager.eligibleCampaigns) {
+            lastCampaignDropReason = "user not in audience: campaignKey=\(key)"
+            DigiaLog.warning("[SDKInstance] Campaign dropped — user not in audience: campaignKey=\(key)")
+            context.onDropped(.notInAudience, message: "user not in audience")
             return false
         }
 
@@ -1416,10 +1445,55 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
 
     func setUserId(_ userId: String) {
         analyticsService?.setUserId(userId)
+        userContextManager.onUserIdChanged(userId)
     }
 
     func clearUserId() {
         analyticsService?.clearUserId()
+        userContextManager.onUserIdChanged(nil)
+    }
+
+    func setUserAttributes(_ attributes: [String: String]) {
+        guard !attributes.isEmpty else { return }
+        userContextManager.setUserAttributes(attributes)
+    }
+
+    func trackEvent(
+        eventName: String,
+        properties: [String: Any] = [:],
+        value: Double? = nil,
+        currency: String? = nil
+    ) {
+        analyticsService?.trackAppEvent(
+            eventName: eventName, properties: properties, value: value, currency: currency)
+        fireTriggers(matching: {
+            if case let .appEvent(name) = $0 { return name == eventName }
+            return false
+        }, reason: "event '\(eventName)'")
+    }
+
+    private func fireTriggers(
+        matching matches: (CampaignTrigger) -> Bool, reason: String
+    ) {
+        guard sdkState == .ready else { return }
+        for campaign in campaignStore.all() {
+            guard let trigger = campaign.trigger, matches(trigger) else { continue }
+            logVerbose("campaign '\(campaign.campaignKey)' fired by \(reason).")
+            routeSelfTriggered(campaign)
+        }
+    }
+
+    private func routeSelfTriggered(_ campaign: CampaignModel) {
+        selfTriggerCount += 1
+        let payload = CEPTriggerPayload(
+            cepCampaignId: selfTriggeredCepId(campaignId: campaign.id, firing: selfTriggerCount),
+            campaignKey: campaign.campaignKey,
+            cepMetadata: [:],
+            variables: userContextManager.resolvedAttributes
+        )
+        _ = route(
+            campaign, payload: payload,
+            context: OrganicRoutingContext(frequencyManager: frequencyManager))
     }
 
     /// Removes inline content (carousel/story/payload) for each key in `placementKeys`.

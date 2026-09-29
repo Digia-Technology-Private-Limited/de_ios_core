@@ -192,6 +192,24 @@ public enum Digia {
         SDKInstance.shared.clearUserId()
     }
 
+    /// Supplies attributes about the current user, for campaigns to interpolate.
+    /// Calls merge: each call adds to what is already held, never replacing it.
+    public static func setUserAttributes(_ attributes: [String: String]) {
+        SDKInstance.shared.setUserAttributes(attributes)
+    }
+
+    /// Records an event the app performed. Only declared events are stored
+    /// server-side; an undeclared event still fires local campaign triggers.
+    public static func trackEvent(
+        _ eventName: String,
+        properties: [String: Any] = [:],
+        value: Double? = nil,
+        currency: String? = nil
+    ) {
+        SDKInstance.shared.trackEvent(
+            eventName: eventName, properties: properties, value: value, currency: currency)
+    }
+
     /// Clears inline content (carousels/stories) for the given `placementKeys`. Once
     /// loaded, inline content is retained indefinitely — hosts should call this on
     /// logout so a stale user's content doesn't linger across the account switch.

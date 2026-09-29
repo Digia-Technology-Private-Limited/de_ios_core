@@ -40,6 +40,7 @@ final class EngageEventEmitter {
         }
 
         func toCep(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
+            if isSelfTriggeredCepId(payload.cepCampaignId) { return }
             eventLog.info(
                 "[DigiaEvent] Event fired → CEP: \(String(describing: event), privacy: .public) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public)"
             )
@@ -55,7 +56,7 @@ final class EngageEventEmitter {
 
         func onFirstImpression(payload: CEPTriggerPayload, event: EngageAnalyticsEvent) {
             toDigia(event, payload: payload)
-            toCep(.impressed, payload: payload)
+            if !isSelfTriggeredCepId(payload.cepCampaignId) { toCep(.impressed, payload: payload) }
         }
     }
 
