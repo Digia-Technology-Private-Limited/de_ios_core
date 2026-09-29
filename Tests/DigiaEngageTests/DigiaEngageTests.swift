@@ -271,7 +271,7 @@ struct DigiaEngageTests {
         let plugin = TestPlugin(identifier: "plugin")
         var renderRequested = false
         Digia.register(plugin)
-        SDKInstance.shared.onGuideRenderRequest = { _ in renderRequested = true }
+        SDKInstance.shared.onGuideRenderRequest = { _, _ in renderRequested = true }
         defer { SDKInstance.shared.onGuideRenderRequest = nil }
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
@@ -294,7 +294,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.resetForTesting()
         let plugin = TestPlugin(identifier: "plugin")
         Digia.register(plugin)
-        SDKInstance.shared.onGuideRenderRequest = { _ in }
+        SDKInstance.shared.onGuideRenderRequest = { _, _ in }
         defer { SDKInstance.shared.onGuideRenderRequest = nil }
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
