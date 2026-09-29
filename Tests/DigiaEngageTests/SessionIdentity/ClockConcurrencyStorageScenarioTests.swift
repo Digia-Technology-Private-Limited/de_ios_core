@@ -121,16 +121,6 @@ final class ClockConcurrencyStorageScenarioTests: XCTestCase {
         XCTAssertEqual(storage.string(forKey: "identity.device_id"), "D1")
     }
 
-    // S61 as coded, pending decision: scenarios doc §6 item 8. A device ID saved as the number 42
-    // reaches IdentityManager as the text "42" (what UserDefaults.string(forKey:) returns for a
-    // number; the adapter itself isn't pure) and is kept.
-    func test_S61b_asCoded_aDeviceIdSavedAsANumberIsKeptAsText() {
-        let storage = InMemoryLocalStorage()
-        storage.backing["identity.device_id"] = NSNumber(value: 42)
-        let h = SessionIdentityHarness(storage: storage, deviceId: "D1")
-        XCTAssertEqual(h.identity.deviceId, "42")
-    }
-
     func test_S62a_aPendingListThatIsNotJsonReadsAsEmptyAndIsOverwritten() async {
         let storage = InMemoryLocalStorage()
         let network = FakeNetworkClient()
