@@ -68,7 +68,7 @@ final class SessionManager: @unchecked Sendable {
                 object: nil,
                 queue: nil
             ) { [weak self] _ in
-                self?.maybeExpire()
+                self?.touch()
             }
             let bObs = center.addObserver(
                 forName: UIApplication.didEnterBackgroundNotification,
