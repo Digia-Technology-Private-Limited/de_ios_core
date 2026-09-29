@@ -93,10 +93,11 @@ public protocol CampaignPresentation: AnyObject {
     ///
     /// Settles exactly once, never fails, and never after ``outcome``. For a
     /// modal experience core settles the two together; a non-blocking
-    /// experience (PIP, floater) releases this early and keeps running, and a
-    /// `clicked` signal stays legal until ``outcome``. Bind CEP unblock here,
-    /// unconditionally — no branch on which arm the outcome took, and no check
-    /// for whether it displayed.
+    /// experience (PIP, floater) releases this early and keeps running; an
+    /// inline experience releases it at acceptance, before any impression.
+    /// A `clicked` signal stays legal until ``outcome``. Bind CEP
+    /// unblock here, unconditionally — no branch on which arm the outcome
+    /// took, and no check for whether it displayed.
     ///
     /// **Why a promise and not a ``PresentationSignal``.** A signal is
     /// fire-and-forget: a listener attached after emission misses it, and

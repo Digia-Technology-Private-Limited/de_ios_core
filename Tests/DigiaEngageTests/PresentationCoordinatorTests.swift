@@ -122,24 +122,40 @@ struct PresentationCoordinatorTests {
 
     // MARK: - PresentationKind
 
-    @Test("modal holds the CEP to its outcome; floating and inline hand it back at the impression")
+    @Test("modal holds the CEP to its outcome; floating hands it back at the impression")
     func kindDecidesWhenTheHoldEnds() {
         let coordinator = makeCoordinator()
         let modal = coordinator.open(payload("m"), owner: "clevertap")
         let floating = coordinator.open(payload("f"), owner: "clevertap")
-        let inline = coordinator.open(payload("i"), owner: "clevertap")
         coordinator.accept(modal, kind: .modal)
         coordinator.accept(floating, kind: .floating)
-        coordinator.accept(inline, kind: .inline)
+
+        #expect(!modal.isHoldReleased, "acceptance alone must not free a modal hold")
+        #expect(!floating.isHoldReleased)
 
         coordinator.handle(.impressed, payload: modal.trigger)
         coordinator.handle(.impressed, payload: floating.trigger)
-        coordinator.handle(.impressed, payload: inline.trigger)
 
         #expect(!modal.isHoldReleased)
         #expect(floating.isHoldReleased)
-        #expect(inline.isHoldReleased)
         #expect(!floating.isSettled)
+    }
+
+    @Test("inline hands the hold back at acceptance, before any impression")
+    func inlineReleasesHoldAtAcceptance() {
+        // The slot may never be reached, so the hold cannot wait for it.
+        let coordinator = makeCoordinator()
+        let inline = coordinator.open(payload("i"), owner: "clevertap")
+        coordinator.accept(inline, kind: .inline)
+
+        #expect(inline.isHoldReleased)
+        #expect(!inline.isSettled)
+
+        // The later lifecycle still works: impression then dismissal.
+        coordinator.handle(.impressed, payload: inline.trigger)
+        #expect(inline.state == .displaying)
+        coordinator.handle(.dismissed(reason: .userClose), payload: inline.trigger)
+        #expect(inline.isSettled)
     }
 
     @Test("a click after the hold went back is still delivered")
@@ -229,7 +245,7 @@ struct PresentationCoordinatorTests {
         try await Task.sleep(nanoseconds: 120_000_000)
 
         // Legitimately pending until the user scrolls to its slot — possibly
-        // never, and no CEP holds a lock on one.
+        // never. Its hold still went back at acceptance.
         #expect(!controller.isSettled)
     }
 

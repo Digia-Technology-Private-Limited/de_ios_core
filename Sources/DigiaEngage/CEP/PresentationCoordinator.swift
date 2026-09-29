@@ -22,7 +22,9 @@ private let log = DigiaLogger()
 ///        routing verdict ──────────┤
 ///          dropped ────────────────┼──► settle(dropped) ── hold released
 ///          accepted ───────────────┴──► accept() ── (+ acceptance watchdog
-///                                                    unless inline, + anchor
+///                                                    unless inline, + hold
+///                                                    released at once when
+///                                                    inline, + anchor
 ///                                                    watchdog when one is owed)
 ///   render surface ── toCep(event) ──► handle() ─────┘
 ///          impressed ─► markDisplaying    clicked ─► emitClicked
@@ -148,6 +150,10 @@ final class PresentationCoordinator {
     ) {
         guard !controller.isSettled, let entry = live[controller.id] else { return }
         entry.kind = kind
+        // An inline campaign may never reach its slot, so its hold goes back at
+        // acceptance, not at the impression — otherwise WebEngage's
+        // render lock stays held until the slot is seen, possibly forever.
+        if kind == .inline { controller.releaseHoldAtAcceptance() }
         guard kind.armsAcceptanceWatchdog else { return }
         let window = acceptanceTimeout + max(0, dueDelay)
         let armedEpoch = backgroundEpoch
@@ -269,7 +275,7 @@ final class PresentationCoordinator {
         case .impressed:
             entry.disarm()
             controller.markDisplaying()
-            // A non-blocking experience hands the CEP's slot back the moment it
+            // A floating experience hands the CEP's slot back the moment it
             // appears, not when it finally ends. Doing it here rather than at
             // each surface is what keeps the rule in one place.
             if entry.kind.releasesHoldOnDisplay { controller.releaseHold() }
