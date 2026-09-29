@@ -61,6 +61,7 @@ final class ClockConcurrencyStorageScenarioTests: XCTestCase {
         for _ in 0..<50 {
             let h = SessionIdentityHarness(clock: TestClock(10, 0))
             h.clock.set(10, 40)
+            h.clock.readPauseMicros = 200
             let session = h.session
             DispatchQueue.concurrentPerform(iterations: 8) { _ in session.touch() }
             await h.settle()

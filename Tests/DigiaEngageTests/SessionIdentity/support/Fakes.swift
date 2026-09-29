@@ -29,7 +29,17 @@ final class TestClock: @unchecked Sendable {
 
     func setRaw(_ ms: Int64) { lock.withLock { value = ms } }
 
-    var closure: () -> Int64 { { [self] in now } }
+    /// Race tests only (S58): a short real pause on every read. The session reads the clock
+    /// inside its lock, just before the expiry check, so without the lock every racing thread
+    /// would reach that check together; with it, they queue. Set before the threads start.
+    var readPauseMicros: UInt32 = 0
+
+    var closure: () -> Int64 {
+        { [self] in
+            if readPauseMicros > 0 { usleep(readPauseMicros) }
+            return now
+        }
+    }
 }
 
 /// The raw values behind one store, shared by the `LocalStorage` and `MigrationStore` fakes
