@@ -67,8 +67,8 @@ final class SessionStartScenarioTests: XCTestCase {
         XCTAssertEqual(h.network.attemptedSessions, [seen[0]], "S2 is reported once")
     }
 
-    // S5 (known bug SI-B2, plan §5.2): asserts the INTENDED rule, coming back to the foreground
-    // counts as activity (session-unification.md §2.1). Expected to fail on iOS today.
+    // S5 (known bug SI-B2, plan §5.2, fixed in 010c768): coming back to the foreground counts as
+    // activity (session-unification.md §2.1). The foreground observer calls `touch()`.
     // Left out: the cold-start example (09:00 open, 09:45 first event), because a 45-minute gap
     // still expires even under the intended rule; see the report.
     func test_S5_comingBackToTheForegroundCountsAsActivity() {
@@ -77,7 +77,7 @@ final class SessionStartScenarioTests: XCTestCase {
 
         h.session.onBackground()           // 10:00, saved
         h.clock.set(10, 20)
-        h.session.maybeExpire()            // the foreground step
+        h.session.touch()                  // the foreground step
         XCTAssertEqual(h.session.sessionId, s1)
 
         h.clock.set(10, 31)

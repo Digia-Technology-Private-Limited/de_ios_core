@@ -2,7 +2,7 @@ import XCTest
 
 @testable import DigiaEngage
 
-/// Scenarios doc §3.3: foreground and background. The foreground step is `maybeExpire()` and the
+/// Scenarios doc §3.3: foreground and background. The foreground step is `touch()` and the
 /// background step is `onBackground()`, the two calls the lifecycle observers make.
 final class ForegroundBackgroundScenarioTests: XCTestCase {
 
@@ -34,7 +34,7 @@ final class ForegroundBackgroundScenarioTests: XCTestCase {
 
         h.session.onBackground()
         h.clock.set(10, 45)
-        h.session.maybeExpire()
+        h.session.touch()                  // the foreground step
         await h.settle()
 
         let s2 = h.session.sessionId
@@ -53,7 +53,7 @@ final class ForegroundBackgroundScenarioTests: XCTestCase {
         h.clock.set(10, 20)
         h.session.onBackground()
         h.clock.set(10, 35)
-        h.session.maybeExpire()
+        h.session.touch()                  // the foreground step
         await h.settle()
 
         XCTAssertEqual(h.session.sessionId, s1)
