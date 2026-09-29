@@ -46,12 +46,12 @@ final class SessionReporter: @unchecked Sendable {
         // not rewrite which session this report is about.
         guard let body = makeBody() else { return nil }
         return serialize { reporter in
-            guard await reporter.flushPending() else {
-                // Still failing: queue this report behind the others, in order.
-                reporter.appendPending(body)
-                return
-            }
-            await reporter.dispatch(body)
+            // Saved before it is sent, so a process death mid-send can't lose it
+            // (the server drops repeats by session_id). It queues behind older
+            // reports; the flush removes it once delivered, and a failure simply
+            // leaves it there.
+            reporter.appendPending(body)
+            _ = await reporter.flushPending()
         }
     }
 
@@ -100,18 +100,6 @@ final class SessionReporter: @unchecked Sendable {
             }
         }
         return true
-    }
-
-    private func dispatch(_ body: String) async {
-        switch await post(body) {
-        case .sent:
-            log.d("Session posted")
-        case let .rejected(status):
-            log.e("Session post rejected — not retried (status=\(status))")
-        case let .failed(cause):
-            appendPending(body)
-            log.d("Session post failed — kept for retry (cause=\(cause))")
-        }
     }
 
     private func makeBody() -> String? {
