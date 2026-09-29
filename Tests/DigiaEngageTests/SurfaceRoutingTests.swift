@@ -159,6 +159,26 @@ struct SurfaceRoutingTests {
         #expect(rendered == ["classic"])
     }
 
+    @Test("nudge over an RN classic guide → surface_busy until the guide settles")
+    func nudgeOverClassicGuide() throws {
+        try start([classicGuideJson("classic"), nudgeJson("n")])
+        sdk.markInitializedForTesting(with: DigiaConfig(apiKey: "k", wrapperBinding: "react_native"))
+        var presentationId = ""
+        sdk.onGuideRenderRequest = { presentationId = $0.presentationId }
+        defer { sdk.onGuideRenderRequest = nil }
+
+        _ = deliver("classic", "cep-1")
+        sdk.reportExternalGuideLifecycle(presentationId: presentationId, event: .displaying)
+        let blocked = deliver("n", "cep-2")
+        sdk.reportExternalGuideLifecycle(
+            presentationId: presentationId, event: .settled(.dismissed(reason: .userClose, completed: false)))
+        let shown = deliver("n", "cep-3")
+
+        #expect(blocked.dropReason == .surfaceBusy)
+        #expect(!shown.isSettled)
+        #expect(sdk.controller.activeNudge?.payload.cepCampaignId == "cep-3")
+    }
+
     // MARK: - Live test
 
     @Test("test over a test nudge → old dismissed and its row superseded, new shown")

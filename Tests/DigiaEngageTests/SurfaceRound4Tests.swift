@@ -50,7 +50,7 @@ struct SurfaceRound4Tests {
 
     // MARK: - SR91
 
-    @Test("a displayed classic guide never times out, even after activeExternalGuide moved on")
+    @Test("a displayed classic guide never times out; a second guide is surface_busy")
     func classicGuideDisplayingDisarmsWatchdog() async throws {
         let sdk = try await makeSdk(
             [classicGuideJson("a"), classicGuideJson("b")], wrapperBinding: "react_native")
@@ -60,15 +60,15 @@ struct SurfaceRound4Tests {
         sdk.onGuideRenderRequest = { ids.append($0.presentationId) }
 
         let first = deliver(sdk, "a", "cep-a")
+        // An RN guide on screen is a guide occupant, so a second guide is busy.
         let second = deliver(sdk, "b", "cep-b")
-        try #require(ids.count == 2)
+        try #require(ids.count == 1)
         sdk.reportExternalGuideLifecycle(presentationId: ids[0], event: .displaying)
         try await Task.sleep(nanoseconds: 400_000_000)
 
         #expect(first.displayed)
         #expect(!first.isSettled)
-        // The control: the one that never displayed still times out.
-        #expect(second.dropReason == .timeout)
+        #expect(second.dropReason == .surfaceBusy)
     }
 
     // MARK: - SR94

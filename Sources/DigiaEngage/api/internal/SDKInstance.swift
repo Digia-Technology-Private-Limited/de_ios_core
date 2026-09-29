@@ -1286,7 +1286,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Every campaign routing accepted that has not settled yet (SR03), read
     /// from the orchestrators at the moment of routing. A floater animating out
     /// has already ended and is not an occupant. An RN classic guide
-    /// (`activeExternalGuide`) is deliberately not one (plan §2.4).
+    /// (`activeExternalGuide`) is a guide occupant (plan §2.4, owner decision).
     private func surfaceOccupants() -> [SurfaceOccupant] {
         var result: [SurfaceOccupant] = []
         func add(_ kind: SurfaceKind, _ payload: CEPTriggerPayload) {
@@ -1302,6 +1302,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         if let nudge = controller.activeNudge { add(.nudge, nudge.payload) }
         if let survey = surveyOrchestrator.state { add(.survey, survey.payload) }
         if let guide = guideOrchestrator.state { add(.guide, guide.payload) }
+        if let external = activeExternalGuide { add(.guide, external.payload) }
         if let floater = floaterOrchestrator.state, !floaterOrchestrator.closing {
             add(floaterOrchestrator.surface == .expanded ? .floaterExpanded : .floaterCollapsed, floater.payload)
         }
@@ -1422,6 +1423,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     pendingGuideDismissReason = nil
                     events.toCep(.dismissed(reason: .superseded), payload: state.payload)
                 }
+            } else if let external = activeExternalGuide, external.payload.cepCampaignId == id {
+                activeExternalGuide = nil
+                events.toCep(.dismissed(reason: .superseded), payload: external.payload)
             }
         case .floaterExpanded, .floaterCollapsed:
             if floaterOrchestrator.state?.payload.cepCampaignId == id {
@@ -1519,7 +1523,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     return .dropped(reason: .frequencyCapped, detail: nil)
                 }
                 // G1 (plan §2.4): an arriving classic guide goes through the
-                // rule like any guide. It is still not counted as an occupant.
+                // rule like any guide.
                 if let busy = admitToSurface(.guide, campaignKey: key, context: context) {
                     return busy
                 }
@@ -3118,6 +3122,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// acceptance watchdog — simply resolves to nothing here. That is a
     /// designed race, never an error, so it never traps.
     func reportExternalGuideLifecycle(presentationId: String, event: ExternalGuideLifecycleEvent) {
+        // A terminal report frees the surface even when no live presentation matches.
+        if case .settled = event, activeExternalGuide?.payload.presentationId == presentationId {
+            activeExternalGuide = nil
+        }
         guard let controller = coordinator.controller(forPresentationId: presentationId) else {
             log.d(
                 "reportExternalGuideLifecycle: no-op — unknown or already-settled presentation",
