@@ -13,7 +13,7 @@ final class RequestHeaderScenarioTests: XCTestCase {
     )
 
     private func publish(_ h: SessionIdentityHarness) {
-        ref.set(h.session, requestHeaders: SDKRequestHeaders.make(config: DigiaConfig(apiKey: "key"), deviceId: h.identity.deviceId))
+        ref.set(h.session, identity: h.identity, requestHeaders: SDKRequestHeaders.make(config: DigiaConfig(apiKey: "key"), deviceId: h.identity.deviceId))
     }
 
     private func header(_ name: String, in callSite: [String: String] = [:]) -> String? {
@@ -33,8 +33,7 @@ final class RequestHeaderScenarioTests: XCTestCase {
         XCTAssertEqual(header("X-Digia-Session-Id"), s2, "the very next request, including an S1 analytics batch")
     }
 
-    // S48 (known bug: iOS X-Digia-User-Id missing, plan §5.2): asserts the INTENDED behavior.
-    // Expected to fail on iOS today.
+    // S48 (iOS X-Digia-User-Id, plan §5.2): every request carries the user ID while a user is set.
     func test_S48_everyRequestCarriesTheDeviceIdAndTheUserIdOnlyWhileAUserIsSet() {
         let h = SessionIdentityHarness(clock: TestClock(10, 0), deviceId: "D1")
         publish(h)

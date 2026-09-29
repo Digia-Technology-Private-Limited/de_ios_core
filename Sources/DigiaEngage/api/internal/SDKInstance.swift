@@ -326,7 +326,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         DigiaEndpoints.configure(config)
         let services = SDKServices(config: config, storage: storage, networkClient: networkClient)
         self.services = services
-        currentSession.set(services.sessionManager, requestHeaders: services.requestHeaders)
+        currentSession.set(services.sessionManager, identity: services.identityManager, requestHeaders: services.requestHeaders)
         // Session telemetry is analytics: with analytics disabled no session
         // is reported. A resumed session was reported by the launch that
         // started it.
