@@ -731,7 +731,8 @@ struct DigiaEngageTests {
         SDKInstance.shared.dismissGuide()
 
         #expect(recorder.signals == [.displayed])
-        #expect(recorder.dismissReason == .userClose)
+        // The last step's CTA completes the guide; completed wins (SR71).
+        #expect(recorder.dismissReason == .completed)
     }
 
     @Test("screen changes dismiss an accepted targeted survey")

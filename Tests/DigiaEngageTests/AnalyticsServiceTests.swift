@@ -267,8 +267,8 @@ struct AnalyticsServiceTests {
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p2"))
-        // second capture reaches flushBatchSize — dispatch Task is enqueued; release actor to let it run
-        try await sleepMillis(50)
+        // The second capture reaches flushBatchSize and enqueues the dispatch Task.
+        try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
@@ -283,8 +283,7 @@ struct AnalyticsServiceTests {
         )
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
-        // timer scheduled for 50ms — wait well past it
-        try await sleepMillis(300)
+        try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
@@ -302,7 +301,7 @@ struct AnalyticsServiceTests {
         #expect(service.queue.size == 1)
 
         service.flush()
-        try await sleepMillis(50)
+        try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
@@ -340,12 +339,13 @@ struct AnalyticsServiceTests {
             config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 2),
             sender: fakeSender
         )
-        service.retryScheduleMs = [50]  // long enough to add a second event before it fires
+        // Long enough to add a second event before it fires, whatever else the main actor is doing.
+        service.retryScheduleMs = [1_000]
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
-        // let the flush attempt run and fail (500); retry is now pending
-        try await sleepMillis(5)
+        // The flush attempt fails (500); the retry is now pending.
+        try await waitUntil { service.retryAttempt == 1 }
         #expect(fakeSender.callCount == 1)
 
         // This second capture reaches flushBatchSize (2) — without the guard this
@@ -355,8 +355,8 @@ struct AnalyticsServiceTests {
         #expect(fakeSender.callCount == 1)  // no early dispatch — still just the one attempt
         #expect(service.queue.size == 2)
 
-        // let the originally scheduled retry fire — picks up both events together
-        try await sleepMillis(100)
+        // The originally scheduled retry fires and picks up both events together.
+        try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 }
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 2)
     }
@@ -373,10 +373,7 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
 
-        for _ in 0..<20 {
-            if fakeSender.callCount == 10 { break }
-            try await sleepMillis(50)
-        }
+        try await waitUntil { fakeSender.callCount == 10 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 10)
@@ -394,10 +391,7 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
 
-        for _ in 0..<20 {
-            if throwingSender.callCount == 10 { break }
-            try await sleepMillis(50)
-        }
+        try await waitUntil { throwingSender.callCount == 10 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(throwingSender.callCount == 10)
@@ -418,7 +412,7 @@ struct AnalyticsServiceTests {
             name: UIApplication.didEnterBackgroundNotification,
             object: nil
         )
-        try await sleepMillis(50)
+        try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
@@ -446,7 +440,7 @@ struct AnalyticsServiceTests {
             defaults: defaults
         )
 
-        try await sleepMillis(300)
+        try await waitUntil { fakeSender.callCount == 1 }
         _ = service2  // keep alive until timer fires
 
         #expect(fakeSender.callCount == 1)
@@ -579,7 +573,7 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Clicked(elementId: "cta"), payload: buildPayload("p2"))
 
         service.flush()
-        try await sleepMillis(50)
+        try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
