@@ -788,6 +788,7 @@ private struct RatingScale: View {
                         .frame(width: resolvedSymbolSize, height: resolvedSymbolSize)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(value)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
