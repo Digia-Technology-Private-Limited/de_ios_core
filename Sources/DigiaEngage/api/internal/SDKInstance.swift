@@ -1193,10 +1193,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         logVerbose(
             "deliver cepCampaignId='\(payload.cepCampaignId)' "
                 + "campaignKey='\(payload.campaignKey)'")
-        if payload.corrupt {
-            logError("campaign dropped — corrupt CEP payload cepCampaignId='\(payload.cepCampaignId)'")
-            return .dropped(reason: .invalidConfig, detail: "corrupt CEP payload")
-        }
         // Route purely by the campaignKey resolved from the store (mirrors
         // Android) — fall back to cepCampaignId when no campaignKey was supplied.
         let key = payload.campaignKey.trimmingCharacters(in: .whitespacesAndNewlines)
