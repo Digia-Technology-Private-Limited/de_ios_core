@@ -26,10 +26,6 @@ public struct CEPTriggerPayload: Sendable, Equatable {
     /// placeholders declared in the Digia dashboard.
     public let variables: [String: String]?
 
-    /// True when the CEP payload carried a Digia key but could not be parsed.
-    /// Core drops a corrupt trigger with `invalid_config`.
-    public let corrupt: Bool
-
     /// The core-minted id of the delivery this payload belongs to, stamped by
     /// ``PresentationCoordinator`` before routing ever sees it.
     ///
@@ -49,14 +45,12 @@ public struct CEPTriggerPayload: Sendable, Equatable {
         cepCampaignId: String,
         campaignKey: String,
         cepMetadata: [String: String],
-        variables: [String: String]? = nil,
-        corrupt: Bool = false
+        variables: [String: String]? = nil
     ) {
         self.cepCampaignId = cepCampaignId
         self.campaignKey = campaignKey
         self.cepMetadata = cepMetadata
         self.variables = variables
-        self.corrupt = corrupt
     }
 }
 
