@@ -124,9 +124,9 @@ struct LiveTestReliabilityTests {
         reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         reporter.postShown("inv-1")
-        // Give it time well past the two short pauses; a fourth attempt would
-        // mean the give-up bound was not honoured.
-        try? await Task.sleep(nanoseconds: 200_000_000)
+        await sender.waitForAttempts(3)
+        // A fourth attempt in this window would mean the give-up bound was not honoured.
+        try? await Task.sleep(nanoseconds: 100_000_000)
 
         #expect(await sender.count == 3)
     }
@@ -140,6 +140,7 @@ struct LiveTestReliabilityTests {
         reporter.configure(config: DigiaConfig(apiKey: "test-key"))
 
         reporter.postShown("inv-1")
+        await sender.waitForAttempts(1)
         try? await Task.sleep(nanoseconds: 100_000_000)
 
         // The same bytes would be refused again — retrying only delays the
@@ -244,6 +245,7 @@ struct LiveTestReliabilityTests {
             testInvocationId: "inv-1", reporter: reporter, onTerminal: {}, timeout: 0.02
         )
         context.reportShown()
+        await sender.waitForAttempts(1)
         // Long enough that a still-armed watchdog would have fired a second,
         // conflicting ACK.
         try? await Task.sleep(nanoseconds: 60_000_000)
@@ -348,11 +350,10 @@ private actor FakeSender: NetworkClient {
         return EmptySub()
     }
 
-    /// Polls until at least `count` attempts have landed, or gives up after a
-    /// short bound — used instead of a fixed sleep so the pin/status tests
-    /// (no retries) don't need to guess a delay.
+    /// Polls until at least `count` attempts have landed, or gives up after 5 s.
+    /// The bound is wide because a loaded full-suite run delays the post's Task.
     func waitForAttempts(_ count: Int) async {
-        for _ in 0..<50 {
+        for _ in 0..<500 {
             if attempts >= count { return }
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
