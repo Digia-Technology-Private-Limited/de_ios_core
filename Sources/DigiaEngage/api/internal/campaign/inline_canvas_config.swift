@@ -268,6 +268,7 @@ struct InlineCanvasConfig: Equatable {
         designTokens: DesignTokenCatalog = .empty
     ) -> InlineCanvasConfig? {
         guard let slotKey = json.nonBlankString("slotKey"),
+              !slotKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let canvasJson = json.object("canvas")
         else { return nil }
 
@@ -301,6 +302,7 @@ struct InlineCanvasConfig: Equatable {
         stateful: StatefulTimerConfig
     ) -> InlineCanvasConfig? {
         guard let slotKey = json.nonBlankString("slotKey"),
+              !slotKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let representative = stateful.rules.compactMap(\.canvas).first
         else { return nil }
         let marginJSON = json.object("layout")?.object("margin") ?? [:]

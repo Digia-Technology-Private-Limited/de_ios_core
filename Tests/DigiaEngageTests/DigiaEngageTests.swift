@@ -391,6 +391,9 @@ struct DigiaEngageTests {
     @Test("screen changes dismiss an accepted externally rendered guide")
     func screenChangesDismissExternalGuide() throws {
         SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
         let plugin = TestPlugin(id: "plugin")
         var renderRequested = false
         Digia.register(plugin)
@@ -1213,7 +1216,12 @@ private func anchorlessGuideCampaign() -> CampaignModel? {
             "steps": [1, 2].map { step in
                 [
                     "stepId": "step-\(step)",
-                    "target": ["type": "anchorless", "version": 1, "pageKey": "home"],
+                    "target": [
+                        "type": "anchorless", "version": 1, "pageKey": "home",
+                        "imageUrl": "https://example.com/home.png",
+                        "horizontal": ["frame": "window", "rule": ["kind": "stretch", "startInset": 0, "endInset": 0]],
+                        "vertical": ["frame": "window", "rule": ["kind": "stretch", "topInset": 0, "bottomInset": 0]],
+                    ] as [String: Any],
                     "layoutMode": "canvas",
                     "canvas": [
                         "version": 2,
