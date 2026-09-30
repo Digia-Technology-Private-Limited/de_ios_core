@@ -62,4 +62,10 @@ public enum DigiaTestKit {
     public static func resetForTest() {
         DigiaEndpoints.resetForTest()
     }
+
+    /// Rotates the active analytics session for deterministic Test Kit flows.
+    /// No-ops before SDK initialization.
+    public static func rotateSession() {
+        SDKInstance.shared.services?.sessionManager.reset()
+    }
 }

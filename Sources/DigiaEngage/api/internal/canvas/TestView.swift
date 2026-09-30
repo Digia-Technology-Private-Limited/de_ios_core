@@ -16,7 +16,9 @@ struct TestView<Content: View>: View {
         if id.isEmpty {
             content()
         } else {
-            content().accessibilityIdentifier(id)
+            content()
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier(id)
         }
         #else
         content()
