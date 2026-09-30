@@ -20,7 +20,7 @@ struct SDKInstanceEarlyInitTests {
 
     private func deliver(_ sdk: SDKInstance, _ campaignKey: String) -> PresentationRecorder {
         PresentationRecorder(
-            sdk.deliver(CEPTriggerPayload(cepCampaignId: "cep-1", campaignKey: campaignKey, cepMetadata: [:]))
+            sdk.deliverAttached(CEPTriggerPayload(cepCampaignId: "cep-1", campaignKey: campaignKey, cepMetadata: [:]))
         )
     }
 

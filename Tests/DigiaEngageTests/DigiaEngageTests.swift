@@ -91,7 +91,7 @@ struct DigiaEngageTests {
         let campaign = try #require(nudgeCampaign(key: "global-nudge"))
         SDKInstance.shared.setCampaignsForTesting([campaign])
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "nudge-1", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -126,7 +126,7 @@ struct DigiaEngageTests {
         ]))
         SDKInstance.shared.setCampaignsForTesting([campaign])
 
-        _ = SDKInstance.shared.deliver(
+        _ = SDKInstance.shared.deliverAttached(
             CEPTriggerPayload(cepCampaignId: "carousel-campaign", campaignKey: "carousel-campaign", cepMetadata: [:]))
 
         #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner")?.cepCampaignId == "carousel-campaign")
@@ -168,7 +168,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCurrentScreen("help")
 
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:])))
 
@@ -184,7 +184,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
 
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:])))
 
@@ -201,7 +201,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCurrentScreen(" Help ")
 
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:])))
         SDKInstance.shared.setCurrentScreen("Home")
@@ -220,7 +220,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCurrentScreen("Help")
 
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "nudge-1", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -250,13 +250,13 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([helpCampaign, homeCampaign])
         SDKInstance.shared.setCurrentScreen("Help")
         let helpRecorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "help-1", campaignKey: helpCampaign.campaignKey,
                     cepMetadata: [:])))
         plugin.onForwardScreen = { screen in
             if screen == "Home" {
-                _ = SDKInstance.shared.deliver(
+                _ = SDKInstance.shared.deliverAttached(
                     CEPTriggerPayload(
                         cepCampaignId: "home-1",
                         campaignKey: homeCampaign.campaignKey,
@@ -279,7 +279,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "nudge-1", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -311,7 +311,7 @@ struct DigiaEngageTests {
         let campaign = try #require(nudgeCampaign(key: "global-nudge"))
         SDKInstance.shared.setCampaignsForTesting([campaign])
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "global-1", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -331,7 +331,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "guide-1", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -375,7 +375,7 @@ struct DigiaEngageTests {
         let anchor = DigiaAnchorView(frame: CGRect(x: 10, y: 10, width: 100, height: 40))
         anchor.anchorKey = "help-anchor"
         window.addSubview(anchor)
-        _ = SDKInstance.shared.deliver(
+        _ = SDKInstance.shared.deliverAttached(
             CEPTriggerPayload(
                 cepCampaignId: "anchor-guide-1", campaignKey: campaign.campaignKey,
                 cepMetadata: [:]))
@@ -403,7 +403,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "rn-guide-1", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -425,11 +425,11 @@ struct DigiaEngageTests {
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
-        _ = SDKInstance.shared.deliver(
+        _ = SDKInstance.shared.deliverAttached(
             CEPTriggerPayload(
                 cepCampaignId: "old-guide", campaignKey: campaign.campaignKey, cepMetadata: [:]))
         let newGuide = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "new-guide", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -513,7 +513,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "rn-guide-id-check", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -539,7 +539,7 @@ struct DigiaEngageTests {
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
-        _ = SDKInstance.shared.deliver(
+        _ = SDKInstance.shared.deliverAttached(
             CEPTriggerPayload(
                 cepCampaignId: "rn-guide-json-check", campaignKey: campaign.campaignKey,
                 cepMetadata: [:]))
@@ -569,7 +569,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "rn-guide-verbs", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -607,7 +607,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "rn-guide-dropped", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -638,7 +638,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "rn-guide-public-api", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -680,7 +680,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "rn-guide-stale", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -713,7 +713,7 @@ struct DigiaEngageTests {
         let campaign = try #require(anchorlessGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "anchorless-guide", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -744,7 +744,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "survey-1", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -765,7 +765,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "survey-1", campaignKey: campaign.campaignKey,
                     cepMetadata: [:])))
@@ -806,7 +806,7 @@ struct DigiaEngageTests {
         ]))
         SDKInstance.shared.setCampaignsForTesting([campaign])
 
-        _ = SDKInstance.shared.deliver(
+        _ = SDKInstance.shared.deliverAttached(
             CEPTriggerPayload(cepCampaignId: "story-campaign", campaignKey: "story-campaign", cepMetadata: [:]))
 
         #expect(SDKInstance.shared.inlineController.getCampaign("story_strip")?.cepCampaignId == "story-campaign")
@@ -830,7 +830,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.setCampaignsForTesting([campaign])
 
         let recorder = PresentationRecorder(
-            SDKInstance.shared.deliver(
+            SDKInstance.shared.deliverAttached(
                 CEPTriggerPayload(
                     cepCampaignId: "carousel-campaign", campaignKey: "carousel-campaign",
                     cepMetadata: [:])))
@@ -871,7 +871,7 @@ struct DigiaEngageTests {
         ]))
         SDKInstance.shared.setCampaignsForTesting([campaign])
 
-        _ = SDKInstance.shared.deliver(
+        _ = SDKInstance.shared.deliverAttached(
             CEPTriggerPayload(cepCampaignId: "bridge-event", campaignKey: "welcome_survey", cepMetadata: [:]))
 
         #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.cepCampaignId == "bridge-event")

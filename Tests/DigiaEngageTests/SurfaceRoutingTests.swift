@@ -14,7 +14,7 @@ extension DigiaEngageTests {
 
         private func deliver(_ campaignKey: String, _ cepCampaignId: String) -> PresentationRecorder {
             PresentationRecorder(
-                sdk.deliver(
+                sdk.deliverAttached(
                     CEPTriggerPayload(cepCampaignId: cepCampaignId, campaignKey: campaignKey, cepMetadata: [:])
                 )
             )

@@ -16,7 +16,7 @@ extension DigiaEngageTests {
             -> PresentationRecorder
         {
             PresentationRecorder(
-                SDKInstance.shared.deliver(
+                SDKInstance.shared.deliverAttached(
                     CEPTriggerPayload(
                         cepCampaignId: cepCampaignId,
                         campaignKey: campaignKey,
@@ -47,6 +47,20 @@ extension DigiaEngageTests {
             #expect(recorder.dropReason == .notInitialized)
             #expect(recorder.isHoldReleased)
             SDKInstance.shared.resetForTesting()
+        }
+
+        @Test("a delivery with no plugin attached is dropped plugin_detached and nothing renders (#42)")
+        func droppedWhenNoPluginAttached() throws {
+            SDKInstance.shared.resetForTesting()
+            SDKInstance.shared.setCampaignsForTesting([try #require(hostNudgeCampaign(key: "known"))])
+
+            // A stale plugin's host reference: the SDK is ready, but no plugin owns the slot.
+            let recorder = PresentationRecorder(SDKInstance.shared.deliver(
+                CEPTriggerPayload(cepCampaignId: "cep-stale", campaignKey: "known", cepMetadata: [:])
+            ))
+            #expect(recorder.dropReason == .pluginDetached)
+            #expect(recorder.isHoldReleased)
+            #expect(SDKInstance.shared.controller.activeNudge == nil)
         }
 
         @Test("a key the store does not have is unknown_campaign_key")
