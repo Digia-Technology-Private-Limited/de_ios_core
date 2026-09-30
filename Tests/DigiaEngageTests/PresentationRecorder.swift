@@ -91,3 +91,20 @@ final class PresentationRecorder {
         return nil
     }
 }
+
+/// A plugin that only occupies the slot, so `deliver` sees an owner.
+final class StubCEPPlugin: DigiaCEPPlugin {
+    let id = "stub"
+    func attach(host: DigiaCEPHost) {}
+    func detach() {}
+}
+
+extension SDKInstance {
+    /// `deliver` as an attached plugin would call it. A delivery with no plugin
+    /// is dropped `plugin_detached` (issue #42), so register one first if none is.
+    @MainActor
+    func deliverAttached(_ trigger: CEPTriggerPayload) -> CampaignPresentation {
+        if activePlugin == nil { register(StubCEPPlugin()) }
+        return deliver(trigger)
+    }
+}

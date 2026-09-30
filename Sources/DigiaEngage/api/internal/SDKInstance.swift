@@ -54,7 +54,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     @Published private(set) var captureFlashRevision = 0
     var isCaptureSupported: Bool { config?.wrapperBinding == "react_native" }
 
-    private var activePlugin: DigiaCEPPlugin?
+    private(set) var activePlugin: DigiaCEPPlugin?
 
     /// Mints presentation ids. Injected so a test can make them deterministic;
     /// production needs them UUID-grade, because the id is also the first-party
@@ -678,6 +678,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // arrived and we turned it away" are the two answers a campaign creator
         // most needs to tell apart.
         observeDelivery(controller)
+        if activePlugin == nil && pendingAttach == nil {
+            // A CEP callback that outlived its plugin, as Android and Flutter: settle
+            // before the state gate so the caller gets its slot back and nothing renders.
+            controller.settle(.dropped(reason: .pluginDetached, detail: "no plugin is attached"))
+            return controller.presentation
+        }
         routeOrDrop(controller)
         return controller.presentation
     }

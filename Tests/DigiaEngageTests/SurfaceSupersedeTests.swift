@@ -23,7 +23,7 @@ extension DigiaEngageTests {
 
         private func deliver(_ sdk: SDKInstance, _ key: String, _ cepId: String) -> PresentationRecorder {
             PresentationRecorder(
-                sdk.deliver(CEPTriggerPayload(cepCampaignId: cepId, campaignKey: key, cepMetadata: [:])))
+                sdk.deliverAttached(CEPTriggerPayload(cepCampaignId: cepId, campaignKey: key, cepMetadata: [:])))
         }
 
         private func liveTest(_ sdk: SDKInstance, _ invocationId: String, _ campaign: [String: Any]) {

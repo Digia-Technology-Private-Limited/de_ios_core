@@ -60,7 +60,7 @@ extension DigiaEngageTests {
             ]))
             SDKInstance.shared.setCampaignsForTesting([campaign])
 
-            let recorder = PresentationRecorder(SDKInstance.shared.deliver(CEPTriggerPayload(
+            let recorder = PresentationRecorder(SDKInstance.shared.deliverAttached(CEPTriggerPayload(
                 cepCampaignId: "cep-banner",
                 campaignKey: "banner-campaign",
                 cepMetadata: [:]
