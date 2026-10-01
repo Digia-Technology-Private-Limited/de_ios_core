@@ -141,10 +141,11 @@ struct CampaignModel: Equatable {
             // distinct subtypes only to guarantee the widget is present and
             // undeletable.
             case "canvas", "canvasCarousel", "canvasStory":
-                guard let canvasConfig = InlineCanvasConfig.fromJson(
+                guard var canvasConfig = InlineCanvasConfig.fromJson(
                     templateConfig,
                     designTokens: designTokens
                 ) else { return nil }
+                canvasConfig.variableSchemas = NudgeConfig.parseVariableSchemas(templateConfig)
                 config = .inlineCanvas(canvasConfig)
             default:
                 guard let carouselConfig = InlineCarouselConfig.fromJson(templateConfig) else { return nil }
@@ -296,8 +297,8 @@ struct CampaignModel: Equatable {
     ) -> GuideConfigModel? {
         if let guideJson = json.object("guideConfig") {
             // Variables may live on guideConfig or on the sibling templateConfig
-            let templateJson = json.object("templateConfig")
-            let schemas = NudgeConfig.parseVariableSchemas(templateJson ?? guideJson)
+            let templateSchemas = json.object("templateConfig").map(NudgeConfig.parseVariableSchemas) ?? []
+            let schemas = templateSchemas.isEmpty ? NudgeConfig.parseVariableSchemas(guideJson) : templateSchemas
             return parseGuideSteps(
                 guideJson,
                 fallbackId: fallbackId,
