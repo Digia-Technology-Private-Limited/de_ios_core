@@ -89,7 +89,7 @@ final class AnalyticsService {
         payload: CEPTriggerPayload,
         campaignId: String?,
         campaignType: String?,
-        presentationId: String? = nil
+        impressionId: String? = nil
     ) {
         guard config.enabled else {
             log.d("Event dropped — analytics disabled (event=\(event.eventName))")
@@ -105,7 +105,7 @@ final class AnalyticsService {
             campaignId: campaignId,
             campaignKey: payload.campaignKey,
             campaignType: campaignType,
-            presentationId: presentationId,
+            impressionId: impressionId,
             properties: event.properties
         )
     }
@@ -177,7 +177,7 @@ final class AnalyticsService {
         campaignId: String?,
         campaignKey: String?,
         campaignType: String?,
-        presentationId: String? = nil,
+        impressionId: String? = nil,
         properties: [String: Any] = [:]
     ) {
         let eventId = UUID().uuidString
@@ -200,7 +200,7 @@ final class AnalyticsService {
         // cannot do that job: the same campaign can be delivered many times in
         // a session. Absent, not null, when there is none — a live test, or a
         // surface outliving its presentation.
-        if let presentationId { payloadMap["presentation_id"] = presentationId }
+        if let impressionId { payloadMap["impression_id"] = impressionId }
         if let uid = identityManager.userId { payloadMap["user_id"] = uid }
         if let elementId = properties["element_id"] as? String {
             payloadMap["element_id"] = elementId

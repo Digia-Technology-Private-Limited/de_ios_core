@@ -190,8 +190,8 @@ struct AnalyticsServiceTests {
         #expect(entries[0].payload["element_id"] == nil)
     }
 
-    @Test("presentation_id groups the events of one showing, and is absent when there is none")
-    func presentationIdIsStamped() {
+    @Test("impression_id groups the events of one showing, and is absent when there is none")
+    func impressionIdIsStamped() {
         let service = makeService()
         let payload = buildPayload("test")
 
@@ -200,7 +200,7 @@ struct AnalyticsServiceTests {
             payload: payload,
             campaignId: "c1",
             campaignType: "nudge",
-            presentationId: "pres-1"
+            impressionId: "imp-1"
         )
         service.capture(
             NudgeEvent.Dismissed(),
@@ -213,10 +213,10 @@ struct AnalyticsServiceTests {
         #expect(entries.count == 2)
         // The key events from one showing are grouped by. `campaign_key` cannot
         // do that job: one campaign can be delivered many times in a session.
-        #expect(entries[0].payload["presentation_id"] as? String == "pres-1")
+        #expect(entries[0].payload["impression_id"] as? String == "imp-1")
         // Absent, not null, when there is none — a live test, or a surface
         // outliving its presentation.
-        #expect(entries[1].payload["presentation_id"] == nil)
+        #expect(entries[1].payload["impression_id"] == nil)
     }
 
     @Test("click analytics preserve action URL")
@@ -490,14 +490,14 @@ struct AnalyticsServiceTests {
 
         // No column exists on the health payload that isn't part of the one
         // envelope every first-party event already uses. `campaign_id` /
-        // `campaign_type` / `presentation_id` / `user_id` are optional on
+        // `campaign_type` / `impression_id` / `user_id` are optional on
         // both — absent, not null, when there is nothing to put there — so a
         // health event naturally has fewer populated keys than a normal event
         // that happens to resolve a campaign id; the assertion that matters is
         // that the health payload invents nothing new.
         let knownEnvelopeKeys: Set<String> = [
             "event_id", "event_name", "occurred_at", "anonymous_id", "session_id",
-            "campaign_id", "campaign_key", "campaign_type", "presentation_id", "user_id",
+            "campaign_id", "campaign_key", "campaign_type", "impression_id", "user_id",
             "properties",
         ]
         #expect(Set(healthEvent.keys).isSubset(of: knownEnvelopeKeys))
