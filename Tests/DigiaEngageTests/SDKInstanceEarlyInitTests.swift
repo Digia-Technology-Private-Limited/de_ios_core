@@ -83,8 +83,8 @@ struct SDKInstanceEarlyInitTests {
         #expect(failing.sdkState == .failed)
     }
 
-    @Test("a trigger before ready settles dropped at once, with the reason for the state it met")
-    func dropsBeforeReady() async throws {
+    @Test("a trigger before initialize() drops at once; one while fetching is held and presented")
+    func gateBeforeReady() async throws {
         let network = HeldBundleNetworkClient()
         let sdk = makeInstance(network: network)
 
@@ -94,17 +94,16 @@ struct SDKInstanceEarlyInitTests {
         #expect(beforeInit.dropReason == .notInitialized)
         #expect(beforeInit.isHoldReleased)
 
-        // Initializing: the fetch is still running.
+        // Initializing: the fetch is still running, so the trigger is held.
         try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
         let whileFetching = deliver(sdk, "launch")
-        #expect(whileFetching.isSettled)
-        #expect(whileFetching.dropReason == .notReady)
-        #expect(whileFetching.isHoldReleased)
+        #expect(!whileFetching.isSettled)
+        #expect(sdk.controller.activeNudge == nil)
 
-        // Nothing was held: the fetch landing shows nothing.
         network.release(.success(Self.bundle(campaignKey: "launch")))
         try await waitUntilReady(sdk)
-        #expect(sdk.controller.activeNudge == nil)
+        #expect(!whileFetching.isSettled)
+        #expect(sdk.controller.activeNudge != nil)
     }
 
     @Test("a fetch failure leaves the SDK failed, drops initialization_failed, and a second initialize() recovers")
@@ -112,10 +111,13 @@ struct SDKInstanceEarlyInitTests {
         let failing = HeldBundleNetworkClient()
         let sdk = makeInstance(network: failing)
         try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
+        let held = deliver(sdk, "launch")
 
         failing.release(.failure(URLError(.notConnectedToInternet)))
         try await waitUntil(sdk, .failed)
         #expect(sdk.campaignStore.isEmpty)
+        #expect(held.dropReason == .initializationFailed)
+        #expect(held.isHoldReleased)
 
         let afterFailure = deliver(sdk, "launch")
         #expect(afterFailure.isSettled)
@@ -131,7 +133,7 @@ struct SDKInstanceEarlyInitTests {
         #expect(!sdk.campaignStore.isEmpty)
     }
 
-    @Test("register right after scheduling the init Task: the plugin's synchronous replay drops not_ready")
+    @Test("register right after scheduling the init Task: the plugin's synchronous replay is held")
     func registerBeforeInitTaskRuns() async throws {
         let network = HeldBundleNetworkClient()
         let sdk = makeInstance(network: network)
@@ -147,11 +149,12 @@ struct SDKInstanceEarlyInitTests {
             try await Task.sleep(nanoseconds: 10_000_000)
         }
         let replay = try #require(plugin.replay)
-        #expect(replay.isSettled)
-        #expect(replay.dropReason == .notReady)
+        #expect(!replay.isSettled)
 
         network.release(.success(Self.bundle(campaignKey: "launch")))
         try await initTask.value
+        try await waitUntilReady(sdk)
+        #expect(sdk.controller.activeNudge != nil)
     }
 
     private static func bundle(campaignKey: String) -> NetworkResponse {
