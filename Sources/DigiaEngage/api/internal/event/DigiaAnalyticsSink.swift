@@ -4,7 +4,7 @@ import Foundation
 ///
 /// Resolves the campaign from the store by `campaignKey` for attribution context
 /// (campaign id/type live on the `CampaignModel`, not the trigger payload), then
-/// and the delivery's `presentation_id`, then hands the event to
+/// and the delivery's `impression_id`, then hands the event to
 /// ``AnalyticsService``, which nests
 /// ``EngageAnalyticsEvent/properties`` under the wire `properties` key.
 /// Ported from Android `internal/event/DigiaAnalyticsSink.kt`.
@@ -31,7 +31,7 @@ final class DigiaAnalyticsSink {
             campaignType: campaign?.campaignType,
             // Read straight off the payload: the coordinator stamped it there at
             // `deliver()`, and the payload is what every surface hands back.
-            presentationId: payload.presentationId
+            impressionId: payload.presentationId
         )
     }
 }
