@@ -5,6 +5,10 @@
 /// are stamped with its ownership and its signals never reach another plugin.
 @MainActor
 public protocol DigiaCEPHost: AnyObject {
+    /// Whether Core is READY. A plugin that attaches late reads this instead of
+    /// waiting for ``DigiaCEPPlugin/onHostReady()``.
+    var isReady: Bool { get }
+
     /// Delivers a CEP trigger into the Digia engine.
     ///
     /// A total function: it never fails, and always returns a handle. A

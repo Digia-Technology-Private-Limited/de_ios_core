@@ -52,6 +52,9 @@ enum HealthReasons {
         // acceptance window. Only the organic acceptance watchdog emits it as a
         // drop record; a live test's timeout is an ACK, never a record.
         "timeout",
+        // A CEP plugin's pending buffer (#71): held too long, or pushed out when full.
+        "pending_expired",
+        "superseded",
     ]
 
     /// Which `extras` keys each reason may send as `detail` — and nothing else.
@@ -89,6 +92,8 @@ enum HealthReasons {
         "initialization_failed": [],
         "surface_busy": ["blocking_campaign_key", "blocking_kind"],
         "timeout": ["surface_kind"],
+        "pending_expired": ["cep"],
+        "superseded": ["cep"],
     ]
 
     /// Reasons that identify *no* campaign, and so dedup on the symbol alone.
