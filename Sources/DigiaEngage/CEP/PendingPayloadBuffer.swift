@@ -83,22 +83,24 @@ public final class PendingPayloadBuffer<Item> {
         entries.contains { predicate($0.item) }
     }
 
-    /// Holds `item`.
-    public func add(_ item: Item) {
+    /// Holds `item`. Pass `heldAt` from ``drain()`` on requeue so the TTL counts total time held.
+    public func add(_ item: Item, heldAt: Date? = nil) {
         if case .inline(let id) = order {
             let key = id(item)
             entries.removeAll { id($0.item) == key }
         }
-        entries.append((item, now()))
+        let heldAt = heldAt ?? now()
+        let index = entries.firstIndex { $0.heldAt > heldAt } ?? entries.endIndex
+        entries.insert((item, heldAt), at: index)
         if entries.count > capacity {
             onDrop(entries.removeFirst().item, DropReason.superseded)
         }
         scheduleExpiry()
     }
 
-    /// Removes and returns every item in flush order.
-    public func drain() -> [Item] {
-        let items = entries.map(\.item)
+    /// Removes and returns every item with its first hold time, in flush order.
+    public func drain() -> [(item: Item, heldAt: Date)] {
+        let items = entries
         clear()
         switch order {
         case .newestFirst: return items.reversed()

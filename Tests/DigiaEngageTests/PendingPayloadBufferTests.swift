@@ -50,8 +50,8 @@ struct PendingPayloadBufferTests {
     @Test("flush is newest first")
     func newestFirst() {
         let buffer = makeBuffer { _, _ in }
-        ["a", "b", "c"].forEach(buffer.add)
-        #expect(buffer.drain() == ["c", "b", "a"])
+        ["a", "b", "c"].forEach { buffer.add($0) }
+        #expect(buffer.drain().map(\.item) == ["c", "b", "a"])
         #expect(buffer.isEmpty)
         #expect(clock.pending == 0)
     }
@@ -60,8 +60,8 @@ struct PendingPayloadBufferTests {
     func inlineDedup() {
         var dropped: [String] = []
         let buffer = makeBuffer(order: .inline(id: { String($0.prefix(1)) })) { item, _ in dropped.append(item) }
-        ["a1", "b1", "a2", "c1"].forEach(buffer.add)
-        #expect(buffer.drain() == ["b1", "a2", "c1"])
+        ["a1", "b1", "a2", "c1"].forEach { buffer.add($0) }
+        #expect(buffer.drain().map(\.item) == ["b1", "a2", "c1"])
         #expect(dropped.isEmpty)
     }
 
@@ -69,7 +69,7 @@ struct PendingPayloadBufferTests {
     func capacity() {
         var dropped: [(String, String)] = []
         let buffer = makeBuffer { dropped.append(($0, $1.wire)) }
-        (1...21).map(String.init).forEach(buffer.add)
+        (1...21).map(String.init).forEach { buffer.add($0) }
         #expect(buffer.count == 20)
         #expect(dropped.count == 1)
         #expect(dropped.first?.0 == "1")
@@ -100,17 +100,30 @@ struct PendingPayloadBufferTests {
         buffer.add("a")
         clock.advance(10)
         buffer.add("b")
-        #expect(buffer.drain() == ["b", "a"])
+        #expect(buffer.drain().map(\.item) == ["b", "a"])
         #expect(dropped.isEmpty)
         clock.advance(600)
         #expect(dropped.isEmpty)
+    }
+
+    @Test("a requeued item keeps its first hold time, so TTL caps total time held")
+    func requeueKeepsHoldTime() {
+        var dropped: [String] = []
+        let buffer = makeBuffer { item, _ in dropped.append(item) }
+        buffer.add("a")
+        clock.advance(200)
+        buffer.add("b")
+        for entry in buffer.drain() { buffer.add(entry.item, heldAt: entry.heldAt) }
+        clock.advance(100)
+        #expect(dropped == ["a"])
+        #expect(buffer.drain().map(\.item) == ["b"])
     }
 
     @Test("dropAll drops every item with the given reason and stops the timer")
     func dropAll() {
         var dropped: [(String, String)] = []
         let buffer = makeBuffer { dropped.append(($0, $1.wire)) }
-        ["a", "b"].forEach(buffer.add)
+        ["a", "b"].forEach { buffer.add($0) }
         buffer.dropAll(DropReason.initializationFailed)
         #expect(dropped.map(\.0) == ["a", "b"])
         #expect(dropped.allSatisfy { $0.1 == "initialization_failed" })

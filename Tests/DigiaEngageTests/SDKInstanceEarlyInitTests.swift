@@ -270,7 +270,7 @@ private final class BufferingPlugin: DigiaCEPPlugin {
     func onHostReady() {
         readyCalls += 1
         failed = false
-        buffer.drain().forEach(deliver)
+        buffer.drain().map(\.item).forEach(deliver)
     }
 
     func onHostInitFailed() {
