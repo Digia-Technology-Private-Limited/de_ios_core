@@ -62,4 +62,17 @@ final class StartupReportScenarioTests: XCTestCase {
         XCTAssertEqual(h.network.attemptedSessions, ["S1"], "sent once, then gone from the pending list")
     }
 
+    func test_S39_theStartupReportCarriesTheSavedUser() async throws {
+        let h = InitializeHarness(clock: TestClock(10, 0))
+        h.seedUser("asha")
+        h.seedSession("yesterday", lastActivityMs: TestClock.at(10, 0) - 24 * 3_600_000)
+        h.launch()
+        try await h.initialize()
+        await h.settle()
+
+        XCTAssertEqual(h.network.attempts.count, 1)
+        XCTAssertEqual(h.network.attempts.first?.userId, "asha")
+        XCTAssertEqual(h.services.identityManager.userId, "asha")
+    }
+
 }
