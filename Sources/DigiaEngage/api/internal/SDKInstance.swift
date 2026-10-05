@@ -112,6 +112,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Nil before that: anything needed earlier is owned directly below.
     private(set) var services: SDKServices?
 
+    var anonymousId: String { services?.identityManager.deviceId ?? "" }
+
     // Pre-init collaborators: `SDKInstance`-owned buffers used before
     // `initialize()` (anchor buffering, the debug screens, capture toggles),
     // so they live here rather than in `services` (D1). `init` is their
