@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 /// Notifies once when the network comes back, so pending session reports can
-/// be flushed (issue #74). The reporter watches only while reports wait to be sent.
+/// be flushed. The reporter watches only while reports wait to be sent.
 protocol ConnectivityMonitor: AnyObject, Sendable {
     /// Starts watching until `stop()`. Repeated calls are no-ops.
     func start(onRecovered: @escaping @Sendable () -> Void)
