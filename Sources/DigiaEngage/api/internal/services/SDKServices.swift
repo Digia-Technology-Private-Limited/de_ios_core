@@ -13,6 +13,8 @@ final class SDKServices {
     let identityManager: IdentityManager
     let sessionManager: SessionManager
     let sessionReporter: SessionReporter
+    /// The session-and-identity rules; already attached by `init`.
+    let sessionIdentityWiring: SessionIdentityWiring
     let analyticsService: AnalyticsService?
     let frequencyManager: FrequencyManager
     let submissionReporter: SubmissionReporter
@@ -49,11 +51,13 @@ final class SDKServices {
             storage: storage.scoped("session")
         )
         self.sessionReporter = sessionReporter
-        SessionIdentityWiring(
+        let sessionIdentityWiring = SessionIdentityWiring(
             identityManager: identityManager,
             sessionManager: sessionManager,
             sessionReporter: config.analyticsConfig.enabled ? sessionReporter : nil
-        ).attach()
+        )
+        sessionIdentityWiring.attach()
+        self.sessionIdentityWiring = sessionIdentityWiring
         // Frequency capping reads the same sessionId the backend sees, so
         // `session` windows track the reported session.
         self.frequencyManager = FrequencyManager(

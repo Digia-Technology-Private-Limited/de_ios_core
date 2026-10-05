@@ -327,16 +327,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let services = SDKServices(config: config, storage: storage, networkClient: networkClient)
         self.services = services
         currentSession.set(services.sessionManager, identity: services.identityManager, requestHeaders: services.requestHeaders)
-        // Session telemetry is analytics: with analytics disabled no session
-        // is reported. A resumed session was reported by the launch that
-        // started it.
-        if config.analyticsConfig.enabled {
-            if services.sessionManager.resumedAtStartup {
-                services.sessionReporter.flush()
-            } else {
-                services.sessionReporter.report()
-            }
-        }
+        // The startup session is reported before the buffered user change
+        // below can rotate it.
+        services.sessionIdentityWiring.reportStartup()
 
         // Apply the user change buffered before services existed.
         switch pendingUserChange {

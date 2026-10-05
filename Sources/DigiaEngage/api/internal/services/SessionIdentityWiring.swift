@@ -25,4 +25,18 @@ struct SessionIdentityWiring {
             }
         }
     }
+
+    /// Reports the startup session, only when a reporter is given (session
+    /// telemetry is analytics). A resumed session was reported by the launch
+    /// that started it, so only its pending reports are flushed. Call before
+    /// a buffered user change is applied, so each session is reported once,
+    /// in order.
+    func reportStartup() {
+        guard let sessionReporter else { return }
+        if sessionManager.resumedAtStartup {
+            sessionReporter.flush()
+        } else {
+            sessionReporter.report()
+        }
+    }
 }
