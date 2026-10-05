@@ -165,14 +165,14 @@ struct SDKInstanceEarlyInitTests {
         #expect(plugin.host?.isReady == false)
 
         plugin.receive("launch")
-        #expect(plugin.buffer.count == 1)
+        #expect(plugin.buffer.length == 1)
         #expect(plugin.readyCalls == 0)
 
         network.release(.success(Self.bundle(campaignKey: "launch")))
         try await waitUntilReady(sdk)
         #expect(plugin.readyCalls == 1)
         #expect(plugin.host?.isReady == true)
-        #expect(plugin.buffer.isEmpty)
+        #expect(plugin.buffer.length == 0)
         #expect(plugin.delivered.count == 1)
         #expect(plugin.delivered.first?.dropReason == nil)
     }
@@ -189,7 +189,7 @@ struct SDKInstanceEarlyInitTests {
         sdk.register(plugin)
         #expect(plugin.host?.isReady == true)
         plugin.receive("launch")
-        #expect(plugin.buffer.isEmpty)
+        #expect(plugin.buffer.length == 0)
         #expect(plugin.delivered.count == 1)
         #expect(plugin.readyCalls == 0)
     }
@@ -207,7 +207,7 @@ struct SDKInstanceEarlyInitTests {
         try await waitUntil(sdk, .failed)
         #expect(early.failedCalls == 1)
         #expect(early.readyCalls == 0)
-        #expect(early.buffer.isEmpty)
+        #expect(early.buffer.length == 0)
         #expect(early.dropped == ["initialization_failed"])
 
         let late = BufferingPlugin()
@@ -256,9 +256,9 @@ private final class BufferingPlugin: DigiaCEPPlugin {
     var failed = false
     var delivered: [PresentationRecorder] = []
     var dropped: [String] = []
-    lazy var buffer = PendingPayloadBuffer<CEPTriggerPayload> { [unowned self] _, reason in
+    lazy var buffer = PendingPayloadBuffer(onDrop: { [unowned self] _, reason in
         dropped.append(reason.wire)
-    }
+    })
 
     func attach(host: DigiaCEPHost) {
         self.host = host
@@ -270,7 +270,7 @@ private final class BufferingPlugin: DigiaCEPPlugin {
     func onHostReady() {
         readyCalls += 1
         failed = false
-        buffer.drain().map(\.item).forEach(deliver)
+        buffer.takeAll().forEach(deliver)
     }
 
     func onHostInitFailed() {
@@ -288,7 +288,8 @@ private final class BufferingPlugin: DigiaCEPPlugin {
     private func deliver(_ trigger: CEPTriggerPayload) {
         guard let host else { return }
         let presentation = host.deliver(trigger)
-        if presentation.outcome.settledValue?.isHostNotReady == true { return buffer.add(trigger) }
+        if case .dropped(let reason, _)? = presentation.outcome.settledValue,
+           reason == .notReady || reason == .notInitialized, !failed { return buffer.add(trigger) }
         delivered.append(PresentationRecorder(presentation))
     }
 }

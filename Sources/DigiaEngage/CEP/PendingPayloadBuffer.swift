@@ -9,140 +9,106 @@ public enum PendingPayloadReason: String, CaseIterable, DiagnosticReason {
     public var wire: String { rawValue }
 }
 
-extension PresentationOutcome {
-    /// True for a drop that means Core is not READY yet. A plugin puts such a
-    /// payload back in its ``PendingPayloadBuffer`` and does not settle it with the CEP.
-    public var isHostNotReady: Bool {
-        guard case .dropped(let reason, _) = self else { return false }
-        return reason == .notReady || reason == .notInitialized
-    }
-}
-
-/// Holds CEP payloads in a plugin while Core is not READY.
+/// Holds a plugin's CEP triggers while Core is not READY.
 ///
-/// Each plugin creates its own instance. Core never reads it. Main-actor
-/// confined, so it needs no lock. In memory only.
-///
-/// - Bound: at most ``capacity`` items. When full, the oldest drops with
-///   ``DropReason/superseded``.
-/// - TTL: an active timer drops each item older than ``ttl`` with
-///   ``PendingPayloadReason/pendingExpired``.
-/// - Order: ``drain()`` returns newest first. ``Order/inline(id:)`` returns
-///   arrival order with one item per id; a newer item replaces an older one
-///   with no drop event.
+/// Each plugin owns one instance and flushes it from
+/// ``DigiaCEPPlugin/onHostReady()``. Core never reads it. A newer trigger
+/// replaces a held one with the same `cepCampaignId`, with no drop. A full
+/// buffer drops the oldest as ``DropReason/superseded``; a timer drops a
+/// trigger held longer than 5 minutes as ``PendingPayloadReason/pendingExpired``.
+/// Main-actor confined, so no lock.
 @MainActor
-public final class PendingPayloadBuffer<Item> {
+public final class PendingPayloadBuffer {
+    private static let capacity = 20
+    private static let ttl: TimeInterval = 5 * 60
 
-    public enum Order {
-        case newestFirst
-        case inline(id: (Item) -> String)
-    }
-
-    /// Cancels a scheduled timer.
-    public typealias Cancel = () -> Void
-    /// Runs `work` on the main actor after `delay` seconds.
-    public typealias Scheduler = (_ delay: TimeInterval, _ work: @escaping @MainActor () -> Void) -> Cancel
-
-    public static var defaultCapacity: Int { 20 }
-    public static var defaultTTL: TimeInterval { 300 }
-
-    public let capacity: Int
-    public let ttl: TimeInterval
-
-    private let order: Order
+    private let onDrop: (CEPTriggerPayload, DiagnosticReason) -> Void
+    private let arrivalOrder: Bool
     private let now: () -> Date
-    private let schedule: Scheduler
-    private let onDrop: (Item, DiagnosticReason) -> Void
+    private let createTimer: (TimeInterval, @escaping @MainActor () -> Void) -> () -> Void
 
-    private var entries: [(item: Item, heldAt: Date)] = []
-    private var cancelTimer: Cancel?
+    // Arrival order, oldest first.
+    private var entries: [(trigger: CEPTriggerPayload, heldAt: Date)] = []
+    private var cancelTimer: (() -> Void)?
 
-    /// - Parameter onDrop: called for each item the buffer drops. The plugin
-    ///   logs it and settles it with the CEP.
-    public init(
-        order: Order = .newestFirst,
-        capacity: Int = defaultCapacity,
-        ttl: TimeInterval = defaultTTL,
-        now: @escaping () -> Date = Date.init,
-        schedule: @escaping Scheduler = PendingPayloadBuffer.mainQueueScheduler,
-        onDrop: @escaping (Item, DiagnosticReason) -> Void
+    /// Creates a buffer. `onDrop` settles a removed trigger with the CEP.
+    ///
+    /// `arrivalOrder` flushes oldest first, for known-inline triggers.
+    public convenience init(
+        onDrop: @escaping (CEPTriggerPayload, DiagnosticReason) -> Void,
+        arrivalOrder: Bool = false
     ) {
-        self.order = order
-        self.capacity = capacity
-        self.ttl = ttl
-        self.now = now
-        self.schedule = schedule
+        self.init(onDrop: onDrop, arrivalOrder: arrivalOrder, now: Date.init, createTimer: mainQueueTimer)
+    }
+
+    /// `now` and `createTimer` replace the clock in tests.
+    init(
+        onDrop: @escaping (CEPTriggerPayload, DiagnosticReason) -> Void,
+        arrivalOrder: Bool,
+        now: @escaping () -> Date,
+        createTimer: @escaping (TimeInterval, @escaping @MainActor () -> Void) -> () -> Void
+    ) {
         self.onDrop = onDrop
+        self.arrivalOrder = arrivalOrder
+        self.now = now
+        self.createTimer = createTimer
     }
 
-    public var count: Int { entries.count }
-    public var isEmpty: Bool { entries.isEmpty }
+    /// The number of held triggers.
+    public var length: Int { entries.count }
 
-    /// Whether a held item matches `predicate`.
-    public func contains(where predicate: (Item) -> Bool) -> Bool {
-        entries.contains { predicate($0.item) }
-    }
-
-    /// Holds `item`. Pass `heldAt` from ``drain()`` on requeue so the TTL counts total time held.
-    public func add(_ item: Item, heldAt: Date? = nil) {
-        if case .inline(let id) = order {
-            let key = id(item)
-            entries.removeAll { id($0.item) == key }
+    /// Holds `trigger`. A replaced copy keeps its first hold time, so a re-pull
+    /// does not extend the 5 minutes.
+    public func add(_ trigger: CEPTriggerPayload) {
+        var heldAt = now()
+        if let index = entries.firstIndex(where: { $0.trigger.cepCampaignId == trigger.cepCampaignId }) {
+            heldAt = entries.remove(at: index).heldAt
         }
-        let heldAt = heldAt ?? now()
-        let index = entries.firstIndex { $0.heldAt > heldAt } ?? entries.endIndex
-        entries.insert((item, heldAt), at: index)
-        if entries.count > capacity {
-            onDrop(entries.removeFirst().item, DropReason.superseded)
+        if entries.count >= Self.capacity {
+            onDrop(entries.removeFirst().trigger, DropReason.superseded)
         }
-        scheduleExpiry()
+        entries.append((trigger, heldAt))
+        schedule()
     }
 
-    /// Removes and returns every item with its first hold time, in flush order.
-    public func drain() -> [(item: Item, heldAt: Date)] {
-        let items = entries
-        clear()
-        switch order {
-        case .newestFirst: return items.reversed()
-        case .inline: return items
-        }
-    }
-
-    /// Drops every item with `reason`, for example `initialization_failed` or `plugin_detached`.
-    public func dropAll(_ reason: DiagnosticReason) {
-        let items = entries.map(\.item)
-        clear()
-        for item in items { onDrop(item, reason) }
-    }
-
-    private func clear() {
+    /// Removes and returns every held trigger in flush order: newest first, so
+    /// the freshest modal takes the surface; inline triggers keep arrival order.
+    public func takeAll() -> [CEPTriggerPayload] {
+        let triggers = entries.map(\.trigger)
         entries.removeAll()
-        cancelTimer?()
-        cancelTimer = nil
+        schedule()
+        return arrivalOrder ? triggers : triggers.reversed()
     }
 
-    private func scheduleExpiry() {
+    /// Removes every held trigger with `reason`.
+    public func dropAll(_ reason: DiagnosticReason) {
+        for trigger in takeAll() {
+            onDrop(trigger, reason)
+        }
+    }
+
+    private func schedule() {
         cancelTimer?()
         cancelTimer = nil
-        guard let oldest = entries.first else { return }
-        let delay = max(0, oldest.heldAt.addingTimeInterval(ttl).timeIntervalSince(now()))
-        cancelTimer = schedule(delay) { [weak self] in self?.expire() }
+        guard let oldest = entries.map(\.heldAt).min() else { return }
+        let due = oldest.addingTimeInterval(Self.ttl).timeIntervalSince(now())
+        cancelTimer = createTimer(max(0, due)) { [weak self] in self?.expire() }
     }
 
     private func expire() {
-        let cutoff = now().addingTimeInterval(-ttl)
-        let expired = entries.prefix { $0.heldAt <= cutoff }.map(\.item)
-        entries.removeFirst(expired.count)
-        scheduleExpiry()
-        for item in expired { onDrop(item, PendingPayloadReason.pendingExpired) }
+        let cutoff = now().addingTimeInterval(-Self.ttl)
+        let expired = entries.filter { $0.heldAt <= cutoff }.map(\.trigger)
+        entries.removeAll { $0.heldAt <= cutoff }
+        schedule()
+        for trigger in expired {
+            onDrop(trigger, PendingPayloadReason.pendingExpired)
+        }
     }
+}
 
-    /// The production scheduler: `DispatchQueue.main.asyncAfter`.
-    public nonisolated static func mainQueueScheduler(
-        _ delay: TimeInterval, _ work: @escaping @MainActor () -> Void
-    ) -> Cancel {
-        let item = DispatchWorkItem { MainActor.assumeIsolated(work) }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
-        return { item.cancel() }
-    }
+/// Runs `work` on the main queue after `delay` seconds and returns its cancel.
+private func mainQueueTimer(_ delay: TimeInterval, _ work: @escaping @MainActor () -> Void) -> () -> Void {
+    let item = DispatchWorkItem { MainActor.assumeIsolated(work) }
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
+    return { item.cancel() }
 }

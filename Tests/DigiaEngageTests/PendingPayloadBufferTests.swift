@@ -34,108 +34,111 @@ struct PendingPayloadBufferTests {
 
     private let clock = FakeClock()
 
+    private func trigger(_ id: String) -> CEPTriggerPayload {
+        CEPTriggerPayload(cepCampaignId: id, campaignKey: id, cepMetadata: [:])
+    }
+
     private func makeBuffer(
-        order: PendingPayloadBuffer<String>.Order = .newestFirst,
+        arrivalOrder: Bool = false,
         onDrop: @escaping (String, DiagnosticReason) -> Void
-    ) -> PendingPayloadBuffer<String> {
+    ) -> PendingPayloadBuffer {
         let clock = clock
         return PendingPayloadBuffer(
-            order: order,
+            onDrop: { onDrop($0.cepCampaignId, $1) },
+            arrivalOrder: arrivalOrder,
             now: { clock.now },
-            schedule: { clock.schedule($0, $1) },
-            onDrop: onDrop
+            createTimer: { clock.schedule($0, $1) }
         )
     }
+
+    private func ids(_ triggers: [CEPTriggerPayload]) -> [String] { triggers.map(\.cepCampaignId) }
 
     @Test("flush is newest first")
     func newestFirst() {
         let buffer = makeBuffer { _, _ in }
-        ["a", "b", "c"].forEach { buffer.add($0) }
-        #expect(buffer.drain().map(\.item) == ["c", "b", "a"])
-        #expect(buffer.isEmpty)
+        ["a", "b", "c"].forEach { buffer.add(trigger($0)) }
+        #expect(ids(buffer.takeAll()) == ["c", "b", "a"])
+        #expect(buffer.length == 0)
         #expect(clock.pending == 0)
     }
 
-    @Test("inline order flushes in arrival order with one item per id, and a replace is not a drop")
-    func inlineDedup() {
+    @Test("arrival order flushes oldest first")
+    func arrivalOrder() {
+        let buffer = makeBuffer(arrivalOrder: true) { _, _ in }
+        ["a", "b", "c"].forEach { buffer.add(trigger($0)) }
+        #expect(ids(buffer.takeAll()) == ["a", "b", "c"])
+    }
+
+    @Test("a trigger with the same cepCampaignId replaces the held one, with no drop")
+    func replaceSameId() {
         var dropped: [String] = []
-        let buffer = makeBuffer(order: .inline(id: { String($0.prefix(1)) })) { item, _ in dropped.append(item) }
-        ["a1", "b1", "a2", "c1"].forEach { buffer.add($0) }
-        #expect(buffer.drain().map(\.item) == ["b1", "a2", "c1"])
+        let buffer = makeBuffer(arrivalOrder: true) { id, _ in dropped.append(id) }
+        ["a", "b", "a", "c"].forEach { buffer.add(trigger($0)) }
+        #expect(ids(buffer.takeAll()) == ["b", "a", "c"])
         #expect(dropped.isEmpty)
     }
 
-    @Test("21 payloads: the oldest drops with superseded")
+    @Test("21 triggers: the oldest drops with superseded")
     func capacity() {
         var dropped: [(String, String)] = []
         let buffer = makeBuffer { dropped.append(($0, $1.wire)) }
-        (1...21).map(String.init).forEach { buffer.add($0) }
-        #expect(buffer.count == 20)
+        (1...21).map(String.init).forEach { buffer.add(trigger($0)) }
+        #expect(buffer.length == 20)
         #expect(dropped.count == 1)
         #expect(dropped.first?.0 == "1")
         #expect(dropped.first?.1 == "superseded")
     }
 
-    @Test("a payload held for more than 5 minutes expires with pending_expired; younger ones stay")
+    @Test("a trigger held for more than 5 minutes expires with pending_expired; younger ones stay")
     func expiry() {
         var dropped: [(String, String)] = []
         let buffer = makeBuffer { dropped.append(($0, $1.wire)) }
-        buffer.add("old")
+        buffer.add(trigger("old"))
         clock.advance(120)
-        buffer.add("young")
+        buffer.add(trigger("young"))
         clock.advance(180)
         #expect(dropped.map(\.0) == ["old"])
         #expect(dropped.first?.1 == "pending_expired")
-        #expect(buffer.count == 1)
+        #expect(buffer.length == 1)
         clock.advance(120)
         #expect(dropped.map(\.0) == ["old", "young"])
-        #expect(buffer.isEmpty)
+        #expect(buffer.length == 0)
         #expect(clock.pending == 0)
+    }
+
+    @Test("a replaced trigger keeps its first hold time")
+    func replaceKeepsHoldTime() {
+        var dropped: [String] = []
+        let buffer = makeBuffer { id, _ in dropped.append(id) }
+        buffer.add(trigger("a"))
+        clock.advance(200)
+        buffer.add(trigger("a"))
+        clock.advance(100)
+        #expect(dropped == ["a"])
     }
 
     @Test("init takes 10 s: nothing expires and everything flushes")
     func slowInit() {
         var dropped: [String] = []
-        let buffer = makeBuffer { item, _ in dropped.append(item) }
-        buffer.add("a")
+        let buffer = makeBuffer { id, _ in dropped.append(id) }
+        buffer.add(trigger("a"))
         clock.advance(10)
-        buffer.add("b")
-        #expect(buffer.drain().map(\.item) == ["b", "a"])
+        buffer.add(trigger("b"))
+        #expect(ids(buffer.takeAll()) == ["b", "a"])
         #expect(dropped.isEmpty)
         clock.advance(600)
         #expect(dropped.isEmpty)
     }
 
-    @Test("a requeued item keeps its first hold time, so TTL caps total time held")
-    func requeueKeepsHoldTime() {
-        var dropped: [String] = []
-        let buffer = makeBuffer { item, _ in dropped.append(item) }
-        buffer.add("a")
-        clock.advance(200)
-        buffer.add("b")
-        for entry in buffer.drain() { buffer.add(entry.item, heldAt: entry.heldAt) }
-        clock.advance(100)
-        #expect(dropped == ["a"])
-        #expect(buffer.drain().map(\.item) == ["b"])
-    }
-
-    @Test("dropAll drops every item with the given reason and stops the timer")
+    @Test("dropAll drops every trigger with the given reason and stops the timer")
     func dropAll() {
         var dropped: [(String, String)] = []
         let buffer = makeBuffer { dropped.append(($0, $1.wire)) }
-        ["a", "b"].forEach { buffer.add($0) }
+        ["a", "b"].forEach { buffer.add(trigger($0)) }
         buffer.dropAll(DropReason.initializationFailed)
-        #expect(dropped.map(\.0) == ["a", "b"])
+        #expect(dropped.map(\.0) == ["b", "a"])
         #expect(dropped.allSatisfy { $0.1 == "initialization_failed" })
         #expect(clock.pending == 0)
-    }
-
-    @Test("isHostNotReady is true only for not_ready and not_initialized drops")
-    func hostNotReadyOutcome() {
-        #expect(PresentationOutcome.dropped(reason: .notReady, detail: nil).isHostNotReady)
-        #expect(PresentationOutcome.dropped(reason: .notInitialized, detail: nil).isHostNotReady)
-        #expect(!PresentationOutcome.dropped(reason: .initializationFailed, detail: nil).isHostNotReady)
-        #expect(!PresentationOutcome.dismissed(reason: .userClose, completed: true).isHostNotReady)
     }
 
     @Test("pending_expired wire string")
