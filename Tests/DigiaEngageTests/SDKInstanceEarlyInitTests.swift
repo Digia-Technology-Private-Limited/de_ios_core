@@ -154,6 +154,68 @@ struct SDKInstanceEarlyInitTests {
         try await initTask.value
     }
 
+    @Test("a plugin registered before init buffers, and flushes once on READY")
+    func bufferingPluginFlushesOnReady() async throws {
+        let network = HeldBundleNetworkClient()
+        let sdk = makeInstance(network: network)
+        let plugin = BufferingPlugin()
+        sdk.register(plugin)
+        try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
+        #expect(plugin.attached)
+        #expect(plugin.host?.isReady == false)
+
+        plugin.receive("launch")
+        #expect(plugin.buffer.length == 1)
+        #expect(plugin.readyCalls == 0)
+
+        network.release(.success(Self.bundle(campaignKey: "launch")))
+        try await waitUntilReady(sdk)
+        #expect(plugin.readyCalls == 1)
+        #expect(plugin.host?.isReady == true)
+        #expect(plugin.buffer.length == 0)
+        #expect(plugin.delivered.count == 1)
+        #expect(plugin.delivered.first?.dropReason == nil)
+    }
+
+    @Test("a plugin that attaches after READY sees isReady and gets no onHostReady")
+    func attachWhenReady() async throws {
+        let network = HeldBundleNetworkClient()
+        let sdk = makeInstance(network: network)
+        network.release(.success(Self.bundle(campaignKey: "launch")))
+        try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
+        try await waitUntilReady(sdk)
+
+        let plugin = BufferingPlugin()
+        sdk.register(plugin)
+        #expect(plugin.host?.isReady == true)
+        plugin.receive("launch")
+        #expect(plugin.buffer.length == 0)
+        #expect(plugin.delivered.count == 1)
+        #expect(plugin.readyCalls == 0)
+    }
+
+    @Test("FAILED calls onHostInitFailed on the attached plugin, and on a plugin that attaches later")
+    func failedNotifiesPlugin() async throws {
+        let network = HeldBundleNetworkClient()
+        let sdk = makeInstance(network: network)
+        let early = BufferingPlugin()
+        sdk.register(early)
+        try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
+        early.receive("launch")
+
+        network.release(.failure(URLError(.notConnectedToInternet)))
+        try await waitUntil(sdk, .failed)
+        #expect(early.failedCalls == 1)
+        #expect(early.readyCalls == 0)
+        #expect(early.buffer.length == 0)
+        #expect(early.dropped == ["initialization_failed"])
+
+        let late = BufferingPlugin()
+        sdk.register(late)
+        #expect(late.failedCalls == 1)
+        #expect(late.host?.isReady == false)
+    }
+
     private static func bundle(campaignKey: String) -> NetworkResponse {
         let campaign: [String: Any] = [
             "id": "\(campaignKey)-id",
@@ -182,6 +244,54 @@ private final class ReplayOnAttachPlugin: DigiaCEPPlugin {
     }
 
     func detach() {}
+}
+
+/// A minimal plugin that uses `PendingPayloadBuffer` the way the CEP plugins do.
+private final class BufferingPlugin: DigiaCEPPlugin {
+    let id = "buffering"
+    var host: DigiaCEPHost?
+    var attached = false
+    var readyCalls = 0
+    var failedCalls = 0
+    var failed = false
+    var delivered: [PresentationRecorder] = []
+    var dropped: [String] = []
+    lazy var buffer = PendingPayloadBuffer(onDrop: { [unowned self] _, reason in
+        dropped.append(reason.wire)
+    })
+
+    func attach(host: DigiaCEPHost) {
+        self.host = host
+        attached = true
+    }
+
+    func detach() { buffer.dropAll(DropReason.pluginDetached) }
+
+    func onHostReady() {
+        readyCalls += 1
+        failed = false
+        buffer.takeAll().forEach(deliver)
+    }
+
+    func onHostInitFailed() {
+        failedCalls += 1
+        failed = true
+        buffer.dropAll(DropReason.initializationFailed)
+    }
+
+    func receive(_ campaignKey: String) {
+        let trigger = CEPTriggerPayload(cepCampaignId: "cep-\(campaignKey)", campaignKey: campaignKey, cepMetadata: [:])
+        guard let host, host.isReady || failed else { return buffer.add(trigger) }
+        deliver(trigger)
+    }
+
+    private func deliver(_ trigger: CEPTriggerPayload) {
+        guard let host else { return }
+        let presentation = host.deliver(trigger)
+        if case .dropped(let reason, _)? = presentation.outcome.settledValue,
+           reason == .notReady || reason == .notInitialized, !failed { return buffer.add(trigger) }
+        delivered.append(PresentationRecorder(presentation))
+    }
 }
 
 /// Holds the campaign-bundle request until the test releases it; every other

@@ -43,7 +43,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             core: DigiaSdkVersion.value
         )
     }
-    @Published private(set) var sdkState: SDKState = .notInitialized
+    @Published private(set) var sdkState: SDKState = .notInitialized {
+        didSet {
+            guard sdkState != oldValue, let plugin = activePlugin, plugin !== pendingAttach else { return }
+            if sdkState == .ready { plugin.onHostReady() }
+            if sdkState == .failed { plugin.onHostInitFailed() }
+        }
+    }
     @Published private(set) var isHostMounted = false
     @Published private(set) var captureModeEnabled: Bool
     @Published private(set) var captureTextEnabled: Bool
@@ -654,12 +660,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         guard activePlugin === plugin else { return }
         if pendingAttach === plugin { pendingAttach = nil }
         plugin.attach(host: self)
+        if sdkState == .failed { plugin.onHostInitFailed() }
         if let screen = _currentScreen {
             plugin.onScreenChanged(screen)
         }
     }
 
     // MARK: - DigiaCEPHost
+
+    var isReady: Bool { sdkState == .ready }
 
     /// Delivers a CEP trigger into the Digia engine.
     ///

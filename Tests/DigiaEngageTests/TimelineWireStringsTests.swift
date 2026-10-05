@@ -78,12 +78,16 @@ struct TimelineWireStringsTests {
                 "initialization_failed",
                 "surface_busy",
                 "timeout",
+                "pending_expired",
+                "superseded",
             ])
     }
 
     @Test("HealthReasons detail-key projections")
     func healthReasonsDetailKeys() {
         #expect(HealthReasons.detailKeys["timeout"] == ["surface_kind"])
+        #expect(HealthReasons.detailKeys["pending_expired"] == ["cep"])
+        #expect(HealthReasons.detailKeys["superseded"] == ["cep"])
         #expect(HealthReasons.detailKeys["unknown_campaign_key"] == [])
         #expect(HealthReasons.detailKeys["malformed_campaign_skipped"] == [])
         #expect(HealthReasons.detailKeys["unknown_design_token"] == ["token", "kind"])

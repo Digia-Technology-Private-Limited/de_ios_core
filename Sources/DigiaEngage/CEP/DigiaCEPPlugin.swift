@@ -25,10 +25,11 @@ public protocol DigiaCEPPlugin: AnyObject {
     /// Called once by `Digia.register()`. Store the `host` and start listening
     /// to the CEP SDK.
     ///
-    /// CEP events that arrive before this runs are the plugin's own problem to
-    /// buffer. Once attached, a delivery made before the SDK is ready settles at
-    /// once as dropped (`not_initialized`, `not_ready` or
-    /// `initialization_failed`); core never holds one.
+    /// Core never holds a trigger. While ``DigiaCEPHost/isReady`` is false the
+    /// plugin holds its own payloads in a ``PendingPayloadBuffer`` and flushes
+    /// them in ``onHostReady()``. A delivery made before the SDK is ready
+    /// settles at once as dropped (`not_initialized`, `not_ready` or
+    /// `initialization_failed`).
     func attach(host: DigiaCEPHost)
 
     /// Called by `Digia.unregister()`, or when a replacement plugin is
@@ -46,6 +47,15 @@ public protocol DigiaCEPPlugin: AnyObject {
     /// Receives Digia's rich first-party analytics events, for campaigns this
     /// plugin owns only. Optional — the default is a no-op.
     func trackEvent(_ eventName: String, properties: [String: Any])
+
+    /// Called on the attached plugin when Core becomes READY. Flush buffered
+    /// payloads here. Optional — the default is a no-op.
+    func onHostReady()
+
+    /// Called on the attached plugin when initialization fails, and right after
+    /// ``attach(host:)`` if it has already failed. Drop buffered payloads with
+    /// `initialization_failed` and stop buffering. Optional — the default is a no-op.
+    func onHostInitFailed()
 }
 
 /// The optional half of the protocol.
@@ -56,4 +66,6 @@ public protocol DigiaCEPPlugin: AnyObject {
 extension DigiaCEPPlugin {
     public func onScreenChanged(_ screenName: String) {}
     public func trackEvent(_ eventName: String, properties: [String: Any]) {}
+    public func onHostReady() {}
+    public func onHostInitFailed() {}
 }

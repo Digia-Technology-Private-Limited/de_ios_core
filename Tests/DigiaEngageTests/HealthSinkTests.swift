@@ -58,6 +58,8 @@ struct HealthSinkTests {
         #expect(sink.accepts(record(TimelineReason.malformedCampaignSkipped)))
         #expect(sink.accepts(record(DropReason.unknownCampaignKey)))
         #expect(sink.accepts(record(DropReason.invalidConfig)))
+        #expect(sink.accepts(record(PendingPayloadReason.pendingExpired)))
+        #expect(sink.accepts(record(DropReason.superseded)))
         // Not on the allowlist — e.g. a plain lifecycle beat.
         #expect(!sink.accepts(record(TimelineReason.displayed)))
         #expect(!sink.accepts(record(DropReason.frequencyCapped)))
@@ -306,6 +308,18 @@ struct HealthSinkTests {
 
         sink.emit(record(TimelineReason.malformedCampaignSkipped, campaignKey: "cmp_a"))
         #expect(recorder.payloads[0].detail == nil)
+    }
+
+    @Test("pending buffer drops send only the CEP name as detail")
+    func pendingBufferDetail() {
+        let sink = HealthSink()
+        let recorder = Recorder()
+        sink.activate(recorder.capture)
+
+        let extras = ["cep": "clevertap", "unit": "u-1"]
+        sink.emit(record(PendingPayloadReason.pendingExpired, campaignKey: "cmp_a", extras: extras))
+        sink.emit(record(DropReason.superseded, campaignKey: "cmp_b", extras: extras))
+        #expect(recorder.payloads.map(\.detail) == [["cep": "clevertap"], ["cep": "clevertap"]])
     }
 
     // MARK: - build_mode
