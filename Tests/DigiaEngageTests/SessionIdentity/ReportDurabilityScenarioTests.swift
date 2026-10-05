@@ -80,6 +80,35 @@ final class ReportDurabilityScenarioTests: XCTestCase {
         XCTAssertEqual(pendingSessionIds(storage), (6...25).map { "S\($0)" })
     }
 
+    func test_S23_aReportCarriesTheSessionAndUserAsTheyWereWhenItWasMade() async {
+        let h = SessionIdentityHarness(storage: storage, clock: TestClock(10, 0), network: network)
+        network.answerAll(.noResponse)
+        h.session.reset()                       // S1, kept
+        await h.settle()
+        let s1 = h.session.sessionId
+        let before = network.attempts.count
+
+        network.answerAll(.status(200))
+        let started = expectation(description: "re-send of S1 started")
+        network.holdNext { started.fulfill() }
+        h.reporter.flush()                      // the slow re-send of S1
+        await fulfillment(of: [started], timeout: 5)
+
+        h.clock.set(10, 5)
+        h.identity.setUserId("asha")            // S2's report is made now, then waits behind it
+        let s2 = h.session.sessionId
+
+        h.clock.set(10, 6)
+        h.identity.clearUserId()                // rotates to S3 while S2 waits
+        let s3 = h.session.sessionId
+        network.release()
+        await h.settle()
+
+        let sent = Array(network.attempts.dropFirst(before))
+        XCTAssertEqual(sent.map(\.sessionId), [s1, s2, s3])
+        XCTAssertEqual(sent.map(\.userId), [nil, "asha", nil])
+    }
+
     // S28. Deferred part: that a resumed launch calls flush() is the startup decision in SDKInstance.
     // Tested here: a flush sends the pending report and reports no new session.
     func test_S28_aFlushOnAResumedLaunchSendsPendingReportsWithoutANewOne() async {
