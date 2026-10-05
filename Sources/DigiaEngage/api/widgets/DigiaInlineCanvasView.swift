@@ -4,7 +4,7 @@ import UIKit
 private struct TimerRenderIdentity: Equatable {
     let campaignID: String
     let stateID: String?
-    let applicationActive: Bool
+    let visible: Bool
 }
 
 /// Hosts an authored Canvas inside a `DigiaSlot`.
@@ -18,6 +18,7 @@ struct DigiaInlineCanvasView: View {
     let payload: CEPTriggerPayload
     @State private var applicationActive = UIApplication.shared.applicationState == .active
     @State private var tick: UInt64 = 0
+    @State private var visible = false
 
     var body: some View {
         let _ = tick
@@ -44,10 +45,9 @@ struct DigiaInlineCanvasView: View {
         .task(id: TimerRenderIdentity(
             campaignID: payload.cepCampaignId,
             stateID: resolved?.stateID,
-            applicationActive: applicationActive
+            visible: visible
         )) {
-            if applicationActive, UIApplication.shared.applicationState == .active,
-               !Task.isCancelled, let resolved, resolved.canvas != nil {
+            if visible, !Task.isCancelled, let resolved, resolved.canvas != nil {
                 SDKInstance.shared.reportInlineTimerStateRender(
                     payload: payload,
                     config: config,
@@ -55,6 +55,7 @@ struct DigiaInlineCanvasView: View {
                 )
             }
         }
+        .background(SlotVisibilityReader(visible: $visible))
         .onAppear {
             applicationActive = UIApplication.shared.applicationState == .active
         }
