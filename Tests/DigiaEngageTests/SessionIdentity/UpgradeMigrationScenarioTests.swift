@@ -12,8 +12,12 @@ final class UpgradeMigrationScenarioTests: XCTestCase {
     private lazy var targetStore = FakeMigrationStore(target)
     private lazy var legacyStore = FakeMigrationStore(legacy)
 
+    /// A caches directory of this test's own, so the migration never touches the real one.
+    private let caches = FileManager.default.temporaryDirectory
+        .appendingPathComponent("digia-migrator-\(UUID().uuidString)", isDirectory: true)
+
     private func migrate() {
-        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetStore, standardDefaults: legacyStore)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetStore, standardDefaults: legacyStore, cachesDirectory: caches)
     }
 
     private func launch(clock: TestClock = TestClock(10, 0)) -> SessionIdentityHarness {

@@ -4,6 +4,10 @@ import Testing
 
 @Suite("LocalStorageMigrator Tests")
 struct LocalStorageMigratorTests {
+    /// A caches directory of this test's own, so no test deletes the real one.
+    private let caches = FileManager.default.temporaryDirectory
+        .appendingPathComponent("digia-migrator-\(UUID().uuidString)", isDirectory: true)
+
     private func makeIsolatedDefaults() -> (UserDefaults, UserDefaults) {
         let targetName = "test.target.\(UUID().uuidString)"
         let standardName = "test.standard.\(UUID().uuidString)"
@@ -32,7 +36,7 @@ struct LocalStorageMigratorTests {
         standardDefaults.set(Data(queueJson(["A", "B"]).utf8), forKey: "digia_analytics_queue")
         targetDefaults.set(queueJson(["B", "C"]), forKey: "analytics.queue")
 
-        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults, cachesDirectory: caches)
 
         #expect(queuedEventIds(targetDefaults) == ["A", "B", "C"])
     }
@@ -45,7 +49,7 @@ struct LocalStorageMigratorTests {
         standardDefaults.set(Data(queueJson(legacy).utf8), forKey: "digia_analytics_queue")
         targetDefaults.set(queueJson(unified), forKey: "analytics.queue")
 
-        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults, cachesDirectory: caches)
 
         let cap = AnalyticsConfig().queueMaxEvents
         #expect(cap == 5_000)
@@ -56,11 +60,11 @@ struct LocalStorageMigratorTests {
     func queueMigrationIdempotent() {
         let (targetDefaults, standardDefaults) = makeIsolatedDefaults()
         standardDefaults.set(Data(queueJson(["A"]).utf8), forKey: "digia_analytics_queue")
-        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults, cachesDirectory: caches)
         let afterFirst = targetDefaults.string(forKey: "analytics.queue")
 
         standardDefaults.set(Data(queueJson(["Z"]).utf8), forKey: "digia_analytics_queue")
-        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults, cachesDirectory: caches)
 
         #expect(targetDefaults.string(forKey: "analytics.queue") == afterFirst)
         #expect(targetDefaults.integer(forKey: "storage.version") == 1)
@@ -87,7 +91,7 @@ struct LocalStorageMigratorTests {
         standardDefaults.set("Tester iPhone", forKey: "digia_live_testing_device_name")
 
         // Perform migration
-        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults, cachesDirectory: caches)
 
         // Verify target defaults have migrated values
         #expect(targetDefaults.integer(forKey: "storage.version") == 1)
@@ -127,7 +131,7 @@ struct LocalStorageMigratorTests {
         let (targetDefaults, standardDefaults) = makeIsolatedDefaults()
         standardDefaults.set("dev-id-789", forKey: "digia_engage_device_id")
 
-        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults, cachesDirectory: caches)
 
         #expect(targetDefaults.string(forKey: "identity.device_id") == "dev-id-789")
         #expect(targetDefaults.string(forKey: "identity.anonymous_id") == nil)
@@ -144,7 +148,7 @@ struct LocalStorageMigratorTests {
         standardDefaults.set("legacy-user", forKey: "digia_user_id")
 
         target.failIdentityWrites = true
-        LocalStorageMigrator.migrateIfNeeded(targetDefaults: target, standardDefaults: standardDefaults)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: target, standardDefaults: standardDefaults, cachesDirectory: caches)
 
         #expect(target.integer(forKey: "storage.version") == 1)
         #expect(standardDefaults.object(forKey: "digia_anonymous_id") == nil)
@@ -152,7 +156,7 @@ struct LocalStorageMigratorTests {
 
         target.failIdentityWrites = false
         target.set("new-device", forKey: "identity.device_id")
-        LocalStorageMigrator.migrateIfNeeded(targetDefaults: target, standardDefaults: standardDefaults)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: target, standardDefaults: standardDefaults, cachesDirectory: caches)
 
         #expect(target.string(forKey: "identity.device_id") == "new-device")
         #expect(target.string(forKey: "identity.user_id") == nil)
@@ -164,7 +168,7 @@ struct LocalStorageMigratorTests {
         targetDefaults.set("N", forKey: "identity.device_id")
         standardDefaults.set("L", forKey: "digia_anonymous_id")
 
-        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults, cachesDirectory: caches)
 
         #expect(targetDefaults.string(forKey: "identity.device_id") == "N")
         #expect(standardDefaults.object(forKey: "digia_anonymous_id") == nil)
@@ -176,7 +180,7 @@ struct LocalStorageMigratorTests {
         let queueJson = "[{\"event_id\":\"str_1\"}]"
         standardDefaults.set(queueJson, forKey: "digia_analytics_queue")
 
-        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults, cachesDirectory: caches)
 
         #expect(targetDefaults.string(forKey: "analytics.queue") == queueJson)
         #expect(standardDefaults.string(forKey: "digia_analytics_queue") == nil)
@@ -189,7 +193,7 @@ struct LocalStorageMigratorTests {
         targetDefaults.set("already-migrated", forKey: "identity.device_id")
         standardDefaults.set("old-id", forKey: "digia_anonymous_id")
 
-        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults, cachesDirectory: caches)
 
         // Target should be untouched
         #expect(targetDefaults.string(forKey: "identity.device_id") == "already-migrated")
@@ -200,15 +204,14 @@ struct LocalStorageMigratorTests {
     @Test("Deletes orphaned video cache directory during migration")
     func testVideoCacheDirectoryCleanup() {
         let (targetDefaults, standardDefaults) = makeIsolatedDefaults()
-        if let cachesUrl = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            let legacyDir = cachesUrl.appendingPathComponent("digia-engage-story-video-files")
-            try? FileManager.default.createDirectory(at: legacyDir, withIntermediateDirectories: true)
-            #expect(FileManager.default.fileExists(atPath: legacyDir.path))
+        let legacyDir = caches.appendingPathComponent("digia-engage-story-video-files")
+        try? FileManager.default.createDirectory(at: legacyDir, withIntermediateDirectories: true)
+        #expect(FileManager.default.fileExists(atPath: legacyDir.path))
 
-            LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults)
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults, cachesDirectory: caches)
 
-            #expect(!FileManager.default.fileExists(atPath: legacyDir.path))
-        }
+        #expect(!FileManager.default.fileExists(atPath: legacyDir.path))
+        try? FileManager.default.removeItem(at: caches)
     }
 }
 

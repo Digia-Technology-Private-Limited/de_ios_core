@@ -10,17 +10,29 @@ enum LocalStorageMigrator {
 
     static func migrateIfNeeded(
         targetDefaults: UserDefaults? = UserDefaults(suiteName: suiteName) ?? .standard,
-        standardDefaults: UserDefaults = .standard
+        standardDefaults: UserDefaults = .standard,
+        cachesDirectory: URL? = LocalStorageMigrator.defaultCachesDirectory
     ) {
         guard let targetDefaults else { return }
         migrateIfNeeded(
             targetDefaults: UserDefaultsMigrationStore(targetDefaults),
-            standardDefaults: UserDefaultsMigrationStore(standardDefaults)
+            standardDefaults: UserDefaultsMigrationStore(standardDefaults),
+            cachesDirectory: cachesDirectory
         )
     }
 
+    /// The app's caches directory, where the legacy video cache lived. Tests
+    /// pass a temporary directory instead, so they never touch the real one.
+    static var defaultCachesDirectory: URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+    }
+
     /// The migration itself, over any store that can also list its keys.
-    static func migrateIfNeeded(targetDefaults: MigrationStore, standardDefaults: MigrationStore) {
+    static func migrateIfNeeded(
+        targetDefaults: MigrationStore,
+        standardDefaults: MigrationStore,
+        cachesDirectory: URL? = LocalStorageMigrator.defaultCachesDirectory
+    ) {
         let currentVersion = targetDefaults.integer(forKey: keyStorageVersion)
         guard currentVersion < currentStorageVersion else { return }
 
@@ -140,8 +152,8 @@ enum LocalStorageMigrator {
         // TEMPORARY MIGRATION CLEANUP: Delete orphaned legacy video cache directory.
         // Can be safely removed in a future release once older app versions cycle out.
         // ─────────────────────────────────────────────────────────────────────────────
-        if let cachesUrl = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            let legacyDir = cachesUrl.appendingPathComponent("digia-engage-story-video-files")
+        if let cachesDirectory {
+            let legacyDir = cachesDirectory.appendingPathComponent("digia-engage-story-video-files")
             try? FileManager.default.removeItem(at: legacyDir)
         }
     }
