@@ -21,17 +21,20 @@ struct SlotVisibilityReader: UIViewRepresentable {
     final class ProbeView: UIView {
         var onChange: ((Bool) -> Void)?
         private var reported: Bool?
-        private var activeObserver: NSObjectProtocol?
+        private var appActive = UIApplication.shared.applicationState == .active
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            // Selector observers are removed with the view, so nothing leaks.
+            let center = NotificationCenter.default
+            center.addObserver(self, selector: #selector(becameActive), name: UIApplication.didBecomeActiveNotification, object: nil)
+            center.addObserver(self, selector: #selector(resignedActive), name: UIApplication.willResignActiveNotification, object: nil)
+        }
+
+        required init?(coder: NSCoder) { nil }
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            activeObserver = window == nil ? nil : NotificationCenter.default.addObserver(
-                forName: UIApplication.didBecomeActiveNotification,
-                object: nil,
-                queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated { self?.check() }
-            }
             check()
         }
 
@@ -40,8 +43,18 @@ struct SlotVisibilityReader: UIViewRepresentable {
             check()
         }
 
+        @objc private func becameActive() {
+            appActive = true
+            check()
+        }
+
+        @objc private func resignedActive() {
+            appActive = false
+            check()
+        }
+
         func check() {
-            var shown = window != nil && UIApplication.shared.applicationState == .active
+            var shown = window != nil && appActive
             var view: UIView? = self
             while shown, let current = view {
                 shown = !current.isHidden
