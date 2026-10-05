@@ -54,7 +54,8 @@ final class DeviceIdScenarioTests: XCTestCase {
         XCTAssertEqual(h.network.attempts.count, 8, "seven in the first process, one for the login after the update")
         XCTAssertEqual(Set(h.network.attempts.map(\.anonymousId)), [d1], "session reports' anonymous_id")
         let events = try XCTUnwrap(h.services.analyticsService).queue.peek(maxCount: 1000).map(\.payload)
-        XCTAssertFalse(events.isEmpty)
+        let probes = events.filter { ($0["properties"] as? [String: Any])?["reason"] as? String == "probe" }
+        XCTAssertEqual(probes.count, 2, "both processes' probe events are in the checked set")
         XCTAssertEqual(Set(events.map { $0["anonymous_id"] as? String }), [d1], "every event's anonymous_id")
     }
 }
