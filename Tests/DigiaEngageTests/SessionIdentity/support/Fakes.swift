@@ -247,8 +247,8 @@ final class NoopSubscription: CancellableSubscription, @unchecked Sendable {
     func cancel() {}
 }
 
-/// A `ConnectivityMonitoring` the test starts and drives.
-final class FakeConnectivityMonitor: ConnectivityMonitoring, @unchecked Sendable {
+/// A `ConnectivityMonitor` the test starts and drives.
+final class FakeConnectivityMonitor: ConnectivityMonitor, @unchecked Sendable {
     private let lock = NSLock()
     private var recovery: (@Sendable () -> Void)?
 
@@ -359,7 +359,7 @@ func makeReporter(
     network: FakeNetworkClient,
     session: SessionIdBox,
     userId: String? = nil,
-    connectivity: ConnectivityMonitoring? = nil
+    connectivity: ConnectivityMonitor? = nil
 ) -> SessionReporter {
     SessionReporter(
         sessionId: { session.value },

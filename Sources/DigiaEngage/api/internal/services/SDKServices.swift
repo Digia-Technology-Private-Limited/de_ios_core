@@ -24,7 +24,7 @@ final class SDKServices {
         config: DigiaConfig,
         storage: LocalStorage,
         networkClient: any NetworkClient,
-        connectivityMonitor: (any ConnectivityMonitoring)? = nil,
+        connectivityMonitor: (any ConnectivityMonitor)? = nil,
         clock: @escaping () -> Int64 = SessionManager.systemClock
     ) {
         let identityManager = IdentityManager(

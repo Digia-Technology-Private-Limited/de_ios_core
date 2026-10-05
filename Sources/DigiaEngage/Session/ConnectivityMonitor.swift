@@ -3,7 +3,7 @@ import Network
 
 /// Notifies once when the network comes back, so pending session reports can
 /// be flushed (issue #74). The reporter watches only while reports wait to be sent.
-protocol ConnectivityMonitoring: AnyObject, Sendable {
+protocol ConnectivityMonitor: AnyObject, Sendable {
     /// Starts watching until `stop()`. Repeated calls are no-ops.
     func start(onRecovered: @escaping @Sendable () -> Void)
     /// Cancels the platform monitor. Safe when not started.
@@ -11,7 +11,7 @@ protocol ConnectivityMonitoring: AnyObject, Sendable {
 }
 
 /// `NWPathMonitor` source: one notice per offline-to-online transition.
-final class NWPathConnectivityMonitor: ConnectivityMonitoring, @unchecked Sendable {
+final class SystemConnectivityMonitor: ConnectivityMonitor, @unchecked Sendable {
     private let lock = NSLock()
     private var monitor: NWPathMonitor?
     private var onRecovered: (@Sendable () -> Void)?

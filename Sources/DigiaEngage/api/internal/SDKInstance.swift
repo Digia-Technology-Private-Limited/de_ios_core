@@ -332,7 +332,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             config: config,
             storage: storage,
             networkClient: networkClient,
-            connectivityMonitor: NWPathConnectivityMonitor(),
+            connectivityMonitor: SystemConnectivityMonitor(),
             clock: clock
         )
         self.services = services

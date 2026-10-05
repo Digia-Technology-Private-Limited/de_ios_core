@@ -11,7 +11,7 @@ final class SessionReporter: @unchecked Sendable {
     private let context: [String: Any]
     private let networkClient: any NetworkClient
     private let storage: LocalStorage
-    private let connectivityMonitor: (any ConnectivityMonitoring)?
+    private let connectivityMonitor: (any ConnectivityMonitor)?
 
     init(
         sessionId: @escaping @Sendable () -> String,
@@ -20,7 +20,7 @@ final class SessionReporter: @unchecked Sendable {
         context: [String: Any],
         networkClient: any NetworkClient,
         storage: LocalStorage,
-        connectivityMonitor: (any ConnectivityMonitoring)? = nil
+        connectivityMonitor: (any ConnectivityMonitor)? = nil
     ) {
         self.sessionId = sessionId
         self.anonymousId = anonymousId
@@ -43,7 +43,7 @@ final class SessionReporter: @unchecked Sendable {
     /// True while [connectivityMonitor] watches for a recovery. Guarded by [lock].
     private var monitoring = false
     /// Set by [dispose]: a torn-down graph starts no new watch. Guarded by [lock].
-    private var isDisposed = false
+    private var disposed = false
 
     /// Retries pending reports, oldest first, then reports the current session.
     /// Returns the scheduled work (nil when no body could be built), so a
@@ -74,7 +74,7 @@ final class SessionReporter: @unchecked Sendable {
 
     /// Stops the connectivity watch; a torn-down graph sends nothing more.
     func dispose() {
-        lock.withLock { isDisposed = true }
+        lock.withLock { disposed = true }
         syncConnectivity(true)
     }
 
@@ -82,23 +82,15 @@ final class SessionReporter: @unchecked Sendable {
     /// flush leaves the list non-empty, stopped when the list is empty. The recovery
     /// callback serializes behind any in-flight send.
     private func syncConnectivity(_ complete: Bool) {
-        if complete {
-            let stop = lock.withLock { () -> Bool in
-                guard monitoring else { return false }
-                monitoring = false
-                return true
-            }
-            if stop { connectivityMonitor?.stop() }
-        } else {
-            let start = lock.withLock { () -> Bool in
-                guard !monitoring, !isDisposed else { return false }
+        lock.withLock {
+            if complete {
+                if monitoring {
+                    monitoring = false
+                    connectivityMonitor?.stop()
+                }
+            } else if !monitoring, !disposed {
                 monitoring = true
-                return true
-            }
-            if start {
                 connectivityMonitor?.start { [weak self] in self?.flush() }
-                // dispose() may have raced the start; stop again if so.
-                if lock.withLock({ isDisposed }) { connectivityMonitor?.stop() }
             }
         }
     }
@@ -127,7 +119,7 @@ final class SessionReporter: @unchecked Sendable {
     /// Posts pending reports in order. Returns true when none remain.
     private func flushPending() async -> Bool {
         // A torn-down graph posts nothing more, even from a queued recovery.
-        while !lock.withLock({ isDisposed }), let next = loadPending().first {
+        while !lock.withLock({ disposed }), let next = loadPending().first {
             switch await post(next) {
             case .sent:
                 removeFirstPending()
