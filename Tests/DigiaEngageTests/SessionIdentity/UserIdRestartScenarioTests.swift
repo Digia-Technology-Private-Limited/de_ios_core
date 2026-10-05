@@ -5,7 +5,7 @@ import XCTest
 /// Scenarios doc §3.8: user ID across restarts. A relaunch is a new graph over the same storage.
 final class UserIdRestartScenarioTests: XCTestCase {
 
-    // Deferred part: that the *startup* report is sent is the startup decision in SDKInstance.
+    // The startup report is covered by StartupReportScenarioTests.test_S39_theStartupReportCarriesTheSavedUser.
     // Tested: the user loads, loading doesn't rotate, and a report built now carries "asha".
     func test_S39_aSetUserIdSurvivesARestartWithoutRotating() async {
         let first = SessionIdentityHarness(clock: TestClock(10, 0))

@@ -5,7 +5,7 @@ import XCTest
 /// Scenarios doc §3.1: session start and the 30-minute inactivity rule.
 final class SessionStartScenarioTests: XCTestCase {
 
-    // S1. Deferred part: "reported once" depends on the startup-report decision in SDKInstance (plan §5.1).
+    // S1. "Reported once" is covered by StartupReportScenarioTests.test_S1_aFreshInstallReportsTheStartupSessionOnce.
     func test_S1_freshInstallStartsExactlyOneSession() {
         let h = SessionIdentityHarness(clock: TestClock(10, 0))
 

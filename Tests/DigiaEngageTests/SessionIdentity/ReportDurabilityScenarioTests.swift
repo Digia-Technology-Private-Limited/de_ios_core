@@ -109,7 +109,7 @@ final class ReportDurabilityScenarioTests: XCTestCase {
         XCTAssertEqual(sent.map(\.userId), [nil, "asha", nil])
     }
 
-    // S28. Deferred part: that a resumed launch calls flush() is the startup decision in SDKInstance.
+    // S28. The resumed launch itself is covered by StartupReportScenarioTests.test_S28_aResumedLaunchSendsThePendingReportAndNoNewOne.
     // Tested here: a flush sends the pending report and reports no new session.
     func test_S28_aFlushOnAResumedLaunchSendsPendingReportsWithoutANewOne() async {
         await seedPending(["S1"])
