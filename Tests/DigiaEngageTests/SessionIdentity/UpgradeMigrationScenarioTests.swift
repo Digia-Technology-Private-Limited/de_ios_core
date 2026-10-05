@@ -24,6 +24,16 @@ final class UpgradeMigrationScenarioTests: XCTestCase {
         SessionIdentityHarness(storage: InMemoryLocalStorage(target), clock: clock, deviceId: "NEW")
     }
 
+    /// The device header as the production client assembles it (`SDKInstance.shared`'s wiring).
+    private func deviceHeader(_ h: SessionIdentityHarness) -> String? {
+        let ref = CurrentSessionRef()
+        ref.set(
+            h.session, identity: h.identity,
+            requestHeaders: SDKRequestHeaders.make(config: DigiaConfig(apiKey: "key"), deviceId: h.identity.deviceId))
+        let client = URLSessionNetworkClient(sessionIdProvider: { ref.sessionId }, headerProvider: { ref.requestHeaders })
+        return client.assembleHeaders(for: [:]).first { $0.key.lowercased() == "x-digia-device-id" }?.value
+    }
+
     func test_S42_theFirstLaunchAfterAnUpgradeKeepsTheOldDeviceId() async {
         legacy["digia_anonymous_id"] = "A0"
         migrate()
@@ -32,8 +42,7 @@ final class UpgradeMigrationScenarioTests: XCTestCase {
         XCTAssertEqual(h.identity.deviceId, "A0")
         await h.reporter.report()?.value
         XCTAssertEqual(h.network.attempts.first?.anonymousId, "A0")
-        let headers = SDKRequestHeaders.make(config: DigiaConfig(apiKey: "key"), deviceId: h.identity.deviceId)
-        XCTAssertEqual(headers["X-Digia-Device-Id"], "A0")
+        XCTAssertEqual(deviceHeader(h), "A0")
     }
 
     func test_S42b_theSecondOldLocationIsUsedWhenTheFirstIsMissing() {
