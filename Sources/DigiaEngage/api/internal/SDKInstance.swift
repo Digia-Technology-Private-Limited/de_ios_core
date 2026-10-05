@@ -3032,16 +3032,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         )
     }
 
-    /// The honest drop reason for a guide that failed to produce a frame.
-    ///
-    /// The live-test path maps the same failures onto its own codes a few lines
-    /// below; these are the ones a plugin and the analytics backend see.
+    /// The unified anchorless-failure table: one reason drives the live-test
+    /// ACK, the campaign timeline and the CEP outcome on every stack. `nil` is
+    /// an image-load failure; its watchdog makes `timeout` the honest reason.
     private static func dropReason(for failure: AnchorlessFailure?) -> DropReason {
         switch failure {
         case .pageKeyMismatch: return .screenNotTargeted
         case .invalidTarget, .invalidGeometry: return .anchorNotRegistered
         case .unsupportedLayout: return .invalidConfig
-        case nil: return .error
+        case nil: return .timeout
         }
     }
 
