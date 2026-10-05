@@ -14,4 +14,10 @@ struct NudgeSurfaceConfigTests {
         #expect(resolved.getRed(nil, green: nil, blue: nil, alpha: &alpha))
         #expect(abs(alpha - 77.0 / 255.0) < 0.001)
     }
+
+    @Test("parses autoDismissAfterMs from container config")
+    func parsesAutoDismissAfterMs() {
+        let surface = NudgeSurface.fromJson(["autoDismissAfterMs": 5000])
+        #expect(surface.autoDismissAfterMs == 5000)
+    }
 }

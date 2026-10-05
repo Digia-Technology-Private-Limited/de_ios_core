@@ -525,19 +525,21 @@ struct CampaignCanvasStage: View {
                     .allowsHitTesting(backgroundTakesTouches)
             }
             ForEach(canvas.children) { child in
-                CanvasChildView(child: child, isDark: isDark, onAction: dispatch)
-                    .transaction { transaction in
-                        if !animateWidgetsOnAppear {
-                            transaction.animation = nil
-                            transaction.disablesAnimations = true
+                TestView(id: child.id) {
+                    CanvasChildView(child: child, isDark: isDark, onAction: dispatch)
+                        .transaction { transaction in
+                            if !animateWidgetsOnAppear {
+                                transaction.animation = nil
+                                transaction.disablesAnimations = true
+                            }
                         }
-                    }
-                    .frame(
-                        width: child.rect.width, height: child.rect.height, alignment: .topLeading
-                    )
-                    .modifier(CanvasChildBoundsModifier(clips: child.clipsToAuthoredRect))
-                    .allowsHitTesting(child.isHitTestable)
-                    .offset(x: child.rect.x, y: child.rect.y)
+                        .frame(
+                            width: child.rect.width, height: child.rect.height, alignment: .topLeading
+                        )
+                        .modifier(CanvasChildBoundsModifier(clips: child.clipsToAuthoredRect))
+                        .allowsHitTesting(child.isHitTestable)
+                        .offset(x: child.rect.x, y: child.rect.y)
+                }
             }
         }
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)

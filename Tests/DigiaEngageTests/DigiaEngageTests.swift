@@ -418,6 +418,9 @@ struct DigiaEngageTests {
     @Test("stale terminal event does not disarm a newer external guide")
     func staleTerminalEventKeepsNewExternalGuideActive() throws {
         SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
         let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         SDKInstance.shared.onGuideRenderRequest = { _ in }
@@ -428,6 +431,10 @@ struct DigiaEngageTests {
         _ = SDKInstance.shared.deliver(
             CEPTriggerPayload(
                 cepCampaignId: "old-guide", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        SDKInstance.shared.captureAnalyticsEvent(
+            campaignKey: campaign.campaignKey,
+            eventName: "Digia Experience Dismissed",
+            props: ["payload_id": "old-guide", "step_index": 1, "step_total": 1])
         let newGuide = PresentationRecorder(
             SDKInstance.shared.deliver(
                 CEPTriggerPayload(
@@ -442,6 +449,8 @@ struct DigiaEngageTests {
             campaignKey: campaign.campaignKey,
             eventName: "Digia Experience Dismissed",
             props: ["step_index": 1, "step_total": 1])
+
+        #expect(!newGuide.isSettled)
         SDKInstance.shared.setCurrentScreen("Home")
 
         #expect(newGuide.isSettled)
