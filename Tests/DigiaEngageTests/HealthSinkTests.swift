@@ -58,7 +58,7 @@ struct HealthSinkTests {
         #expect(sink.accepts(record(TimelineReason.malformedCampaignSkipped)))
         #expect(sink.accepts(record(DropReason.unknownCampaignKey)))
         #expect(sink.accepts(record(DropReason.invalidConfig)))
-        #expect(sink.accepts(record(PendingPayloadReason.pendingExpired)))
+        #expect(sink.accepts(record(DropReason.pendingExpired)))
         #expect(sink.accepts(record(DropReason.superseded)))
         // Not on the allowlist — e.g. a plain lifecycle beat.
         #expect(!sink.accepts(record(TimelineReason.displayed)))
@@ -317,7 +317,7 @@ struct HealthSinkTests {
         sink.activate(recorder.capture)
 
         let extras = ["cep": "clevertap", "unit": "u-1"]
-        sink.emit(record(PendingPayloadReason.pendingExpired, campaignKey: "cmp_a", extras: extras))
+        sink.emit(record(DropReason.pendingExpired, campaignKey: "cmp_a", extras: extras))
         sink.emit(record(DropReason.superseded, campaignKey: "cmp_b", extras: extras))
         #expect(recorder.payloads.map(\.detail) == [["cep": "clevertap"], ["cep": "clevertap"]])
     }
