@@ -20,26 +20,41 @@ final class DeviceIdScenarioTests: XCTestCase {
         XCTAssertEqual(generated.value, "1", "the generator ran once, on the first launch")
     }
 
-    // Left out: every event's anonymous_id (AnalyticsService is main-actor) and the OS-update case.
-    func test_S35_theDeviceIdNeverChangesAndIsTheSameEverywhereItIsSent() async {
-        let h = SessionIdentityHarness(clock: TestClock(10, 0), deviceId: "D1")
-        h.identity.setUserId("asha")
-        h.identity.clearUserId()
-        h.identity.setUserId("ravi")
-        h.session.reset()
-        h.session.reset()
-        h.session.reset()
+    // The app update is a relaunch over the same storage: iOS reads the app version from the
+    // bundle, so a test can't change it.
+    @MainActor
+    func test_S35_theDeviceIdNeverChangesAndIsTheSameEverywhereItIsSent() async throws {
+        let h = InitializeHarness(clock: TestClock(10, 0))
+        try await h.initialize()
+        let d1 = h.services.identityManager.deviceId
+        XCTAssertFalse(d1.isEmpty)
+
+        h.sdk.setUserId("asha")
+        h.sdk.clearUserId()
+        h.sdk.setUserId("ravi")
+        h.services.sessionManager.reset()
+        h.services.sessionManager.reset()
+        h.services.sessionManager.reset()
+        try await h.initialize()                // a retried initialize
+        h.services.analyticsService?.captureHealth(
+            campaignKey: nil, reason: "probe", stage: nil, detail: nil, buildMode: "debug")
         await h.settle()
-        XCTAssertEqual(h.identity.deviceId, "D1")
+        XCTAssertEqual(h.header("X-Digia-Device-Id"), d1)
 
-        // A retried initialize or an app update: a new graph over the same storage.
-        let relaunch = SessionIdentityHarness(storage: h.storage, clock: h.clock, network: h.network, deviceId: "D9")
-        XCTAssertEqual(relaunch.identity.deviceId, "D1")
-        relaunch.session.reset()
-        await relaunch.settle()
+        h.clock.set(10, 1)                      // an app update: a new process over the same storage
+        h.launch()
+        try await h.initialize()
+        h.sdk.setUserId("asha")
+        h.services.analyticsService?.captureHealth(
+            campaignKey: nil, reason: "probe", stage: nil, detail: nil, buildMode: "debug")
+        await h.settle()
 
-        XCTAssertEqual(Set(h.network.attempts.map(\.anonymousId)), ["D1"], "session reports' anonymous_id")
-        let headers = SDKRequestHeaders.make(config: DigiaConfig(apiKey: "key"), deviceId: relaunch.identity.deviceId)
-        XCTAssertEqual(headers["X-Digia-Device-Id"], "D1")
+        XCTAssertEqual(h.services.identityManager.deviceId, d1)
+        XCTAssertEqual(h.header("X-Digia-Device-Id"), d1)
+        XCTAssertEqual(h.network.attempts.count, 8, "seven in the first process, one for the login after the update")
+        XCTAssertEqual(Set(h.network.attempts.map(\.anonymousId)), [d1], "session reports' anonymous_id")
+        let events = try XCTUnwrap(h.services.analyticsService).queue.peek(maxCount: 1000).map(\.payload)
+        XCTAssertFalse(events.isEmpty)
+        XCTAssertEqual(Set(events.map { $0["anonymous_id"] as? String }), [d1], "every event's anonymous_id")
     }
 }
