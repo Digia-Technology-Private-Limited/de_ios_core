@@ -58,6 +58,7 @@ final class StartupReportScenarioTests: XCTestCase {
         XCTAssertEqual(h.services.sessionManager.sessionId, "S1")
         XCTAssertEqual(h.network.attemptedSessions, ["S1"], "the pending report, and nothing new")
         XCTAssertEqual(h.network.attempts.first?.anonymousId, "D1")
+        XCTAssertEqual(h.network.attempts.first?.occurredAt, "2027-01-15T10:00:00.000Z", "the stored body, not a rebuilt one")
         await h.settle()
         XCTAssertEqual(h.network.attemptedSessions, ["S1"], "sent once, then gone from the pending list")
     }

@@ -159,6 +159,7 @@ struct SentReport: Equatable {
     let sessionId: String
     let userId: String?
     let anonymousId: String
+    let occurredAt: String?
 
     init?(body: Data?) {
         guard let body,
@@ -168,6 +169,7 @@ struct SentReport: Equatable {
         sessionId = sid
         userId = json["user_id"] as? String
         anonymousId = json["anonymous_id"] as? String ?? ""
+        occurredAt = json["occurred_at"] as? String
     }
 }
 
