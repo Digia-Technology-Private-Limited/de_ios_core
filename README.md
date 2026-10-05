@@ -76,7 +76,7 @@ Keep arbitrary hosts out of production configuration. A debug/noop harness can i
 server root before normal initialization; the root excludes `/api/v1`.
 
 ```swift
-try DigiaTestKit.useMockServer("http://localhost:9871")
+try DigiaTestKit.overrideBaseUrl("http://localhost:9871")
 try await Digia.initialize(DigiaConfig(apiKey: "local-testkit"))
 ```
 

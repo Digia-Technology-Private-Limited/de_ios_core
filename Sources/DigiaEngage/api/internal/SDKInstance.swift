@@ -1241,13 +1241,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     logNativeGuideStage("route", "result=dropped reason=js_renderer_missing campaign_key=\(key)")
                     return .dropped(reason: .hostNotMounted, detail: message)
                 }
-                guard activeExternalGuide == nil else {
-                    let message = "another guide is already on screen"
-                    lastCampaignDropReason = message
-                    context.onDropped(DropReason.surfaceBusy, message: message)
-                    logNativeGuideStage("route", "result=dropped reason=guide_active campaign_key=\(key)")
-                    return .dropped(reason: .surfaceBusy, detail: message)
-                }
                 if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
                     lastCampaignDropReason = "frequency capped"
                     return .dropped(reason: .frequencyCapped, detail: nil)
@@ -1280,6 +1273,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 log.e("Dropped — \(message)", campaign: key)
                 return .dropped(reason: .invalidConfig, detail: message)
             }
+            if guideOrchestrator.state != nil, !guideConfig.steps.isEmpty { dismissGuide() }
             guard guideOrchestrator.start(campaign, payload: payload) else {
                 lastCampaignDropReason = "another guide is already on screen"
                 context.onDropped(DropReason.surfaceBusy, message: "another guide is already on screen")

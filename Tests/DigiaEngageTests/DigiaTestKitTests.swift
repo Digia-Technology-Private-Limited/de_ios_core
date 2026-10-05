@@ -63,4 +63,10 @@ struct DigiaTestKitTests {
         try DigiaTestKit.overrideBaseUrl("http://127.0.0.1:8080")
         #expect(DigiaEndpoints.campaignBundle == "http://127.0.0.1:8080/api/v1/engage/sdk/getCampaignBundle")
     }
+
+    @Test("rotateSession safely no-ops before SDK initialization")
+    @MainActor
+    func rotateSessionNoOpsBeforeInit() {
+        DigiaTestKit.rotateSession()
+    }
 }

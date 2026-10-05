@@ -82,23 +82,6 @@ struct DigiaHostDeliveryTests {
         #expect(turnedAway.isHoldReleased)
     }
 
-    @Test("an active Canvas guide rejects a second guide without replacing it")
-    func canvasGuideSurfaceBusy() throws {
-        SDKInstance.shared.resetForTesting()
-        SDKInstance.shared.setCampaignsForTesting([
-            try #require(hostCanvasGuideCampaign(key: "guide-a")),
-            try #require(hostCanvasGuideCampaign(key: "guide-b")),
-        ])
-
-        let incumbent = deliver("guide-a", cepCampaignId: "cep-a")
-        let turnedAway = deliver("guide-b", cepCampaignId: "cep-b")
-
-        #expect(!incumbent.isSettled)
-        #expect(turnedAway.dropReason == .surfaceBusy)
-        #expect(turnedAway.isHoldReleased)
-        #expect(SDKInstance.shared.guideOrchestrator.state?.campaign.campaignKey == "guide-a")
-    }
-
     @Test("the presentation id is minted through the injected generator, read late")
     func idGeneratorIsReadThrough() throws {
         SDKInstance.shared.resetForTesting()
@@ -156,29 +139,6 @@ private func hostSurveyCampaign(key: String) -> CampaignModel? {
                 ],
             ],
             "nodes": [["id": "node-1", "blockId": "block-1"]],
-        ],
-    ])
-}
-
-private func hostCanvasGuideCampaign(key: String) -> CampaignModel? {
-    CampaignModel.fromJson([
-        "id": "\(key)-id",
-        "campaignKey": key,
-        "campaignType": "guide",
-        "templateConfig": [
-            "templateType": "tooltip",
-            "steps": [[
-                "id": "step-1",
-                "anchorKey": "help-anchor",
-                "layoutMode": "canvas",
-                "canvas": [
-                    "version": 2,
-                    "canvasWidth": 300,
-                    "canvasHeight": 150,
-                    "background": ["type": "solid", "color": "#FFFFFFFF"],
-                    "children": [],
-                ],
-            ]],
         ],
     ])
 }

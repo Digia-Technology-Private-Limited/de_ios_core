@@ -558,36 +558,6 @@ struct DigiaEngageTests {
         #expect(steps.first?["anchorKey"] as? String == "help-anchor")
     }
 
-    @Test("an externally rendered guide rejects a second guide while active")
-    func externalGuideRejectsSecondGuideWhileActive() throws {
-        SDKInstance.shared.resetForTesting()
-        defer { SDKInstance.shared.resetForTesting() }
-        SDKInstance.shared.markInitializedForTesting(
-            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
-        Digia.register(TestPlugin(id: "plugin"))
-        var renderRequestCount = 0
-        SDKInstance.shared.onGuideRenderRequest = { _ in renderRequestCount += 1 }
-        defer { SDKInstance.shared.onGuideRenderRequest = nil }
-        let campaign = try #require(targetedGuideCampaign())
-        SDKInstance.shared.setCampaignsForTesting([campaign])
-        SDKInstance.shared.setCurrentScreen("Help")
-
-        let incumbent = PresentationRecorder(
-            SDKInstance.shared.deliver(
-                CEPTriggerPayload(
-                    cepCampaignId: "rn-guide-primary", campaignKey: campaign.campaignKey,
-                    cepMetadata: [:])))
-        let turnedAway = PresentationRecorder(
-            SDKInstance.shared.deliver(
-                CEPTriggerPayload(
-                    cepCampaignId: "rn-guide-secondary", campaignKey: campaign.campaignKey,
-                    cepMetadata: [:])))
-
-        #expect(renderRequestCount == 1)
-        #expect(!incumbent.isSettled)
-        #expect(turnedAway.dropReason == .surfaceBusy)
-    }
-
     @Test("reportExternalGuideLifecycle drives markDisplaying, emitClicked and settle on the real controller")
     func reportExternalGuideLifecycleDrivesRealController() throws {
         SDKInstance.shared.resetForTesting()
