@@ -1,0 +1,29 @@
+{
+  "configurations" : [
+    {
+      "id" : "E2B7A8C1-4D3E-4F2A-9A1B-8C5D6E7F8A9B",
+      "name" : "Default Configuration",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+
+  },
+  "testTargets" : [
+    {
+      "selectedTags" : {
+        "tags" : [
+          "nudge"
+        ]
+      },
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "DigiaEngageTests",
+        "name" : "DigiaEngageTests"
+      }
+    }
+  ],
+  "version" : 1
+}

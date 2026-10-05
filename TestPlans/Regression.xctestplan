@@ -1,0 +1,24 @@
+{
+  "configurations" : [
+    {
+      "id" : "F9E8D7C6-B5A4-4D3E-2F1A-0B9C8D7E6F5A",
+      "name" : "Regression Configuration",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:",
+        "identifier" : "DigiaEngageTests",
+        "name" : "DigiaEngageTests"
+      }
+    }
+  ],
+  "version" : 1
+}
