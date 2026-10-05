@@ -10,6 +10,8 @@ final class SessionManager: @unchecked Sendable {
     /// disk at most this often (and always on background). In-process expiry
     /// reads the in-memory time, so only a cross-launch resume sees the lag.
     private static let persistIntervalMs: Int64 = 10_000
+    /// The wall clock, in milliseconds since the epoch.
+    static let systemClock: @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
 
     private let storage: LocalStorage
     private let clock: () -> Int64
@@ -30,7 +32,7 @@ final class SessionManager: @unchecked Sendable {
     init(
         storage: LocalStorage,
         timeoutMs: Int64 = 30 * 60 * 1000,
-        clock: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
+        clock: @escaping () -> Int64 = SessionManager.systemClock,
         observeLifecycle: Bool = true
     ) {
         self.storage = storage

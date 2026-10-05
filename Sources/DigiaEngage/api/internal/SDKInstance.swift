@@ -131,6 +131,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private var pendingUserChange: PendingUserChange?
     private let defaults: UserDefaults
     private let legacyDefaults: UserDefaults
+    /// The session clock handed to `SDKServices`. Only tests replace it.
+    private let clock: () -> Int64
 
     let controller = DigiaOverlayController()
     let inlineController = InlineCampaignController()
@@ -188,14 +190,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private var events: EngageEventEmitter!
 
     /// `shared` is the only production instance. Tests build their own with
-    /// isolated defaults and a fake network client.
+    /// isolated defaults, a fake network client and, to simulate time, a clock.
     init(
         defaults: UserDefaults,
         legacyDefaults: UserDefaults,
-        makeNetworkClient: (CurrentSessionRef) -> any NetworkClient
+        makeNetworkClient: (CurrentSessionRef) -> any NetworkClient,
+        clock: @escaping () -> Int64 = SessionManager.systemClock
     ) {
         self.defaults = defaults
         self.legacyDefaults = legacyDefaults
+        self.clock = clock
         LocalStorageMigrator.migrateIfNeeded(targetDefaults: defaults, standardDefaults: legacyDefaults)
         let defaultStorage = UserDefaultsLocalStorage(defaults: defaults)
         let defaultNetworkClient = makeNetworkClient(currentSession)
@@ -324,7 +328,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         HealthSink.shared.beginPending()
         DigiaLogger.configure(config.logLevel)
         DigiaEndpoints.configure(config)
-        let services = SDKServices(config: config, storage: storage, networkClient: networkClient)
+        let services = SDKServices(config: config, storage: storage, networkClient: networkClient, clock: clock)
         self.services = services
         currentSession.set(services.sessionManager, identity: services.identityManager, requestHeaders: services.requestHeaders)
         // The startup session is reported before the buffered user change

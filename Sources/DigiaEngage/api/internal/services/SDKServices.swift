@@ -23,7 +23,8 @@ final class SDKServices {
     init(
         config: DigiaConfig,
         storage: LocalStorage,
-        networkClient: any NetworkClient
+        networkClient: any NetworkClient,
+        clock: @escaping () -> Int64 = SessionManager.systemClock
     ) {
         let identityManager = IdentityManager(
             storage: storage.scoped("identity"),
@@ -33,6 +34,7 @@ final class SDKServices {
         let sessionManager = SessionManager(
             storage: storage.scoped("session"),
             timeoutMs: Int64(config.analyticsConfig.sessionTimeoutMs),
+            clock: clock,
             observeLifecycle: true
         )
         self.sessionManager = sessionManager
