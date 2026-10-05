@@ -8,6 +8,7 @@ public struct DigiaSlot<Placeholder: View>: View {
     private let placeholder: Placeholder
     @ObservedObject private var inlineController = SDKInstance.shared.inlineController
     @State private var impressedPayloadID: String?
+    @State private var visible = false
 
     public init(
         _ placementKey: String,
@@ -27,8 +28,9 @@ public struct DigiaSlot<Placeholder: View>: View {
             if let payload = inlineController.getCampaign(placementKey) {
                 slotContent(for: payload)
                     .id(payload.cepCampaignId)
-                    .task(id: payload.cepCampaignId) {
-                        reportFirstRenderIfNeeded(payload)
+                    .background(SlotVisibilityReader(visible: $visible))
+                    .task(id: "\(payload.cepCampaignId)-\(visible)") {
+                        if visible { reportFirstRenderIfNeeded(payload) }
                     }
             } else {
                 placeholder
