@@ -36,8 +36,9 @@ struct CEPInterfaceEnumValuesTests {
         #expect(DropReason.timeout.value == "timeout")
         #expect(DropReason.cancelled.value == "cancelled")
         #expect(DropReason.pluginDetached.value == "plugin_detached")
+        #expect(DropReason.pendingExpired.value == "pending_expired")
         #expect(DropReason.error.value == "error")
-        #expect(DropReason.allCases.count == 15)
+        #expect(DropReason.allCases.count == 16)
     }
 
     @Test("DismissReason values")

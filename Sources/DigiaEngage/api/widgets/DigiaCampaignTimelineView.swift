@@ -172,6 +172,7 @@ struct DigiaCampaignTimelineView: View {
         "not_initialized": "Not shown — Digia wasn't initialized",
         "not_ready": "Not shown — campaigns were still loading",
         "initialization_failed": "Not shown — campaigns couldn't be loaded",
+        "pending_expired": "Not shown — Digia was not ready in time",
         "unknown_campaign_key": "Not shown — no campaign with this key",
         // gating
         "frequency_capped": "Not shown — frequency cap reached",
