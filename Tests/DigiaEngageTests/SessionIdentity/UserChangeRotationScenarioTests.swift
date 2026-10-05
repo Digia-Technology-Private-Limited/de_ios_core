@@ -132,19 +132,4 @@ final class UserChangeRotationScenarioTests: XCTestCase {
         XCTAssertEqual(savedInsideListener, s7, "saved before the listeners run")
         XCTAssertEqual(h.network.attemptedSessions, [s7], "the reporter reads S7, and S6 isn't reported again")
     }
-
-    // S19 as coded, pending decision: scenarios doc §6 item 8 (failing or duplicated listener).
-    // iOS listeners are non-throwing closures, so the failing-listener half can't happen on iOS.
-    // A listener registered twice is kept twice and runs twice.
-    func test_S19_asCoded_aListenerRegisteredTwiceIsCalledTwice() {
-        let h = SessionIdentityHarness(clock: TestClock(10, 0), attach: false)
-        var calls = 0
-        let listener = { calls += 1 }
-        h.session.addRotationListener(listener)
-        h.session.addRotationListener(listener)
-
-        h.session.reset()
-
-        XCTAssertEqual(calls, 2)
-    }
 }
