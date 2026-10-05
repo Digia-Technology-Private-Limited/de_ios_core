@@ -75,4 +75,38 @@ final class StartupReportScenarioTests: XCTestCase {
         XCTAssertEqual(h.services.identityManager.userId, "asha")
     }
 
+    func test_S20_ashasDayReportsEachNewSessionOnceAndNothingElse() async throws {
+        let h = InitializeHarness(clock: TestClock(9, 0))
+        try await h.initialize()                        // 09:00 open: new session
+        await h.settle()
+        let morning = h.services.sessionManager.sessionId
+
+        h.clock.set(9, 10)                              // 09:10 relaunch: resumed
+        h.launch()
+        try await h.initialize()
+        await h.settle()
+        XCTAssertEqual(h.services.sessionManager.sessionId, morning)
+
+        h.clock.set(9, 40)                              // backgrounded for 50 minutes
+        h.services.sessionManager.onBackground()
+        h.clock.set(10, 30)                             // 10:30 back: new session
+        h.services.sessionManager.touch()
+        await h.settle()
+        let afternoon = h.services.sessionManager.sessionId
+
+        h.clock.set(10, 35)                             // 10:35 log in: new session
+        h.sdk.setUserId("asha")
+        await h.settle()
+        let loggedIn = h.services.sessionManager.sessionId
+
+        h.clock.set(10, 40)                             // 10:40 relaunch: resumed
+        h.launch()
+        try await h.initialize()
+        await h.settle()
+        XCTAssertEqual(h.services.sessionManager.sessionId, loggedIn)
+
+        XCTAssertEqual(h.network.attemptedSessions, [morning, afternoon, loggedIn])
+        XCTAssertEqual(h.network.attempts.map(\.userId), [nil, nil, "asha"])
+    }
+
 }
