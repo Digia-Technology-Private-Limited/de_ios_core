@@ -46,4 +46,20 @@ final class StartupReportScenarioTests: XCTestCase {
         XCTAssertEqual(h.network.attempts.first?.userId, "asha")
     }
 
+    func test_S28_aResumedLaunchSendsThePendingReportAndNoNewOne() async throws {
+        let h = InitializeHarness(clock: TestClock(10, 10))
+        h.seedDevice("D1")
+        h.seedSession("S1", lastActivityMs: TestClock.at(10, 5))
+        h.seedPending([["session_id": "S1", "anonymous_id": "D1", "occurred_at": "2027-01-15T10:00:00.000Z"]])
+        h.launch()
+        try await h.initialize()
+        try await h.waitForAttempts(1)          // not settle(): its own flush would send it too
+
+        XCTAssertEqual(h.services.sessionManager.sessionId, "S1")
+        XCTAssertEqual(h.network.attemptedSessions, ["S1"], "the pending report, and nothing new")
+        XCTAssertEqual(h.network.attempts.first?.anonymousId, "D1")
+        await h.settle()
+        XCTAssertEqual(h.network.attemptedSessions, ["S1"], "sent once, then gone from the pending list")
+    }
+
 }
