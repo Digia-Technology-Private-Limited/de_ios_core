@@ -42,6 +42,18 @@ struct IdentityManagerTests {
         #expect(manager.deviceId == existingId)
     }
 
+    @Test("S61 a device ID saved with the wrong type is ignored and replaced")
+    func wrongTypeDeviceIdIsReplaced() {
+        let (storage, defaults) = makeIsolatedStorage()
+        defaults.set(42, forKey: "identity.device_id")
+        let scopedStorage = storage.scoped("identity")
+
+        let manager = IdentityManager(storage: scopedStorage, idGenerator: { "fresh-id" })
+
+        #expect(manager.deviceId == "fresh-id")
+        #expect(scopedStorage.string(forKey: "device_id") == "fresh-id")
+    }
+
     @Test("User ID management: setUserId persists, trims, caches, and clearUserId removes it")
     func userIdLifecycle() {
         let (storage, _) = makeIsolatedStorage()

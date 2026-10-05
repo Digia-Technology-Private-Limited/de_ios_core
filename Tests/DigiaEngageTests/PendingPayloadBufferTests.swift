@@ -40,7 +40,7 @@ struct PendingPayloadBufferTests {
 
     private func makeBuffer(
         arrivalOrder: Bool = false,
-        onDrop: @escaping (String, DiagnosticReason) -> Void
+        onDrop: @escaping (String, DropReason) -> Void
     ) -> PendingPayloadBuffer {
         let clock = clock
         return PendingPayloadBuffer(
@@ -139,11 +139,5 @@ struct PendingPayloadBufferTests {
         #expect(dropped.map(\.0) == ["b", "a"])
         #expect(dropped.allSatisfy { $0.1 == "initialization_failed" })
         #expect(clock.pending == 0)
-    }
-
-    @Test("pending_expired wire string")
-    func wire() {
-        #expect(PendingPayloadReason.pendingExpired.wire == "pending_expired")
-        #expect(PendingPayloadReason.allCases.count == 1)
     }
 }

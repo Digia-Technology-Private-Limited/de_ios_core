@@ -103,15 +103,13 @@ final class ClockConcurrencyStorageScenarioTests: XCTestCase {
         XCTAssertNotEqual(h.session.sessionId, "S0")
     }
 
-    // S60 as coded, pending decision: scenarios doc §6 item 8. iOS doesn't trim the saved session
-    // ID, so a blank one is resumed (Flutter and Android start a new session).
-    func test_S60c_asCoded_aBlankSavedSessionIdIsResumedOnIOS() {
+    func test_S60c_aBlankSavedSessionIdStartsANewSession() {
         let storage = InMemoryLocalStorage()
         storage.set("   ", forKey: "session.session_id")
         storage.set(String(TestClock.at(9, 55)), forKey: "session.last_activity_ms")
         let h = SessionIdentityHarness(storage: storage, clock: TestClock(10, 0))
-        XCTAssertTrue(h.session.resumedAtStartup)
-        XCTAssertEqual(h.session.sessionId, "   ")
+        XCTAssertFalse(h.session.resumedAtStartup)
+        XCTAssertNotEqual(h.session.sessionId, "   ")
     }
 
     func test_S61a_aBlankSavedDeviceIdIsReplaced() {
@@ -136,9 +134,7 @@ final class ClockConcurrencyStorageScenarioTests: XCTestCase {
         XCTAssertEqual(pendingSessionIds(storage), ["S5"])
     }
 
-    // S62 as coded, pending decision: scenarios doc §6 item 8. iOS drops the whole list when one
-    // entry isn't text (Flutter and Android skip only that entry). New reports aren't blocked.
-    func test_S62b_asCoded_oneBadEntryDropsTheWholePendingListOnIOS() async {
+    func test_S62b_oneBadPendingEntryIsSkippedAndTheRestAreSent() async {
         let storage = InMemoryLocalStorage()
         let network = FakeNetworkClient()
         let good = String(data: try! JSONSerialization.data(withJSONObject: ["session_id": "S1", "anonymous_id": "D1"]), encoding: .utf8)!
@@ -149,7 +145,7 @@ final class ClockConcurrencyStorageScenarioTests: XCTestCase {
         await reporter.report()?.value
         withExtendedLifetime(reporter) {}   // the reporter's task holds it weakly
 
-        XCTAssertEqual(network.attemptedSessions, ["S2"], "S1 is lost; S2 is still sent")
+        XCTAssertEqual(network.attemptedSessions, ["S1", "S2"])
     }
 
     func test_S63_aDeviceIdThatCanNotBeSavedIsUsedOnceAndReplacedNextLaunch() {

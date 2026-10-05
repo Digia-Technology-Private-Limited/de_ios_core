@@ -1,28 +1,19 @@
 import Foundation
 
-/// The reason a ``PendingPayloadBuffer`` gives when a payload is held too long.
-public enum PendingPayloadReason: String, CaseIterable, DiagnosticReason {
-    /// The payload waited longer than the buffer's TTL for Core to become READY.
-    case pendingExpired = "pending_expired"
-
-    /// The pinned string form. Never derive this from the case name.
-    public var wire: String { rawValue }
-}
-
 /// Holds a plugin's CEP triggers while Core is not READY.
 ///
 /// Each plugin owns one instance and flushes it from
 /// ``DigiaCEPPlugin/onHostReady()``. Core never reads it. A newer trigger
 /// replaces a held one with the same `cepCampaignId`, with no drop. A full
 /// buffer drops the oldest as ``DropReason/superseded``; a timer drops a
-/// trigger held longer than 5 minutes as ``PendingPayloadReason/pendingExpired``.
+/// trigger held longer than 5 minutes as ``DropReason/pendingExpired``.
 /// Main-actor confined, so no lock.
 @MainActor
 public final class PendingPayloadBuffer {
     private static let capacity = 20
     private static let ttl: TimeInterval = 5 * 60
 
-    private let onDrop: (CEPTriggerPayload, DiagnosticReason) -> Void
+    private let onDrop: (CEPTriggerPayload, DropReason) -> Void
     private let arrivalOrder: Bool
     private let now: () -> Date
     private let createTimer: (TimeInterval, @escaping @MainActor () -> Void) -> () -> Void
@@ -35,7 +26,7 @@ public final class PendingPayloadBuffer {
     ///
     /// `arrivalOrder` flushes oldest first, for known-inline triggers.
     public convenience init(
-        onDrop: @escaping (CEPTriggerPayload, DiagnosticReason) -> Void,
+        onDrop: @escaping (CEPTriggerPayload, DropReason) -> Void,
         arrivalOrder: Bool = false
     ) {
         self.init(onDrop: onDrop, arrivalOrder: arrivalOrder, now: Date.init, createTimer: mainQueueTimer)
@@ -43,7 +34,7 @@ public final class PendingPayloadBuffer {
 
     /// `now` and `createTimer` replace the clock in tests.
     init(
-        onDrop: @escaping (CEPTriggerPayload, DiagnosticReason) -> Void,
+        onDrop: @escaping (CEPTriggerPayload, DropReason) -> Void,
         arrivalOrder: Bool,
         now: @escaping () -> Date,
         createTimer: @escaping (TimeInterval, @escaping @MainActor () -> Void) -> () -> Void
@@ -65,7 +56,7 @@ public final class PendingPayloadBuffer {
             heldAt = entries.remove(at: index).heldAt
         }
         if entries.count >= Self.capacity {
-            onDrop(entries.removeFirst().trigger, DropReason.superseded)
+            onDrop(entries.removeFirst().trigger, .superseded)
         }
         entries.append((trigger, heldAt))
         schedule()
@@ -81,7 +72,7 @@ public final class PendingPayloadBuffer {
     }
 
     /// Removes every held trigger with `reason`.
-    public func dropAll(_ reason: DiagnosticReason) {
+    public func dropAll(_ reason: DropReason) {
         for trigger in takeAll() {
             onDrop(trigger, reason)
         }
@@ -101,7 +92,7 @@ public final class PendingPayloadBuffer {
         entries.removeAll { $0.heldAt <= cutoff }
         schedule()
         for trigger in expired {
-            onDrop(trigger, PendingPayloadReason.pendingExpired)
+            onDrop(trigger, .pendingExpired)
         }
     }
 }
