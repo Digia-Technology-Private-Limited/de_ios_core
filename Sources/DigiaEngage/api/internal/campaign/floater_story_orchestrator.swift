@@ -223,13 +223,14 @@ final class FloaterStoryOrchestrator: ObservableObject {
         }
     }
 
-    /// The host reported a new current screen. A floater belongs to the exact screen it
-    /// opened on — see `FloaterOrchestrator.onScreenChanged` for why this deliberately
-    /// bypasses the shared `targetScreenNames` helper.
+    /// The host reported a new current screen. Ends the showing if the campaign targets
+    /// specific screens and the new screen is not in that list. Global floaters survive navigation.
     func onScreenChanged(_ screenName: String) {
-        guard let active = state, let ownScreen = active.screenName, ownScreen != screenName
-        else { return }
-        dismiss(.screenExit)
+        guard let active = state else { return }
+        let targets = active.campaign.targetScreenNames
+        if !targets.isEmpty && !targets.contains(screenName) {
+            dismiss(.screenExit)
+        }
     }
 
     /// Ends the showing, running the exit animation first when there is one. Idempotent.
