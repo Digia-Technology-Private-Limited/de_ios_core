@@ -24,6 +24,7 @@ final class SDKServices {
         config: DigiaConfig,
         storage: LocalStorage,
         networkClient: any NetworkClient,
+        connectivityMonitor: (any ConnectivityMonitoring)? = nil,
         clock: @escaping () -> Int64 = SessionManager.systemClock
     ) {
         let identityManager = IdentityManager(
@@ -50,7 +51,8 @@ final class SDKServices {
             userId: { [weak identityManager] in identityManager?.userId },
             context: staticContext,
             networkClient: networkClient,
-            storage: storage.scoped("session")
+            storage: storage.scoped("session"),
+            connectivityMonitor: connectivityMonitor
         )
         self.sessionReporter = sessionReporter
         let sessionIdentityWiring = SessionIdentityWiring(
@@ -90,5 +92,6 @@ final class SDKServices {
     /// Stops everything this container started. Called before it is dropped.
     func tearDown() {
         analyticsService?.clear()
+        sessionReporter.dispose()
     }
 }

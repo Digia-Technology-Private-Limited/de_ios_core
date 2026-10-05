@@ -11,6 +11,7 @@ final class SessionReporter: @unchecked Sendable {
     private let context: [String: Any]
     private let networkClient: any NetworkClient
     private let storage: LocalStorage
+    private let connectivityMonitor: (any ConnectivityMonitoring)?
 
     init(
         sessionId: @escaping @Sendable () -> String,
@@ -18,7 +19,8 @@ final class SessionReporter: @unchecked Sendable {
         userId: @escaping @Sendable () -> String?,
         context: [String: Any],
         networkClient: any NetworkClient,
-        storage: LocalStorage
+        storage: LocalStorage,
+        connectivityMonitor: (any ConnectivityMonitoring)? = nil
     ) {
         self.sessionId = sessionId
         self.anonymousId = anonymousId
@@ -26,6 +28,7 @@ final class SessionReporter: @unchecked Sendable {
         self.context = context
         self.networkClient = networkClient
         self.storage = storage
+        self.connectivityMonitor = connectivityMonitor
     }
 
     /// Pending reports kept for retry (D9). Past the cap the oldest is dropped.
@@ -36,6 +39,11 @@ final class SessionReporter: @unchecked Sendable {
     /// and flushes run one at a time, in call order, and never race on the
     /// persisted pending list.
     private var tail: Task<Void, Never>?
+
+    /// True while [connectivityMonitor] watches for a recovery. Guarded by [lock].
+    private var monitoring = false
+    /// Set by [dispose]: a torn-down graph starts no new watch. Guarded by [lock].
+    private var isDisposed = false
 
     /// Retries pending reports, oldest first, then reports the current session.
     /// Returns the scheduled work (nil when no body could be built), so a
@@ -51,7 +59,7 @@ final class SessionReporter: @unchecked Sendable {
             // reports; the flush removes it once delivered, and a failure simply
             // leaves it there.
             reporter.appendPending(body)
-            _ = await reporter.flushPending()
+            reporter.syncConnectivity(await reporter.flushPending())
         }
     }
 
@@ -60,7 +68,38 @@ final class SessionReporter: @unchecked Sendable {
     @discardableResult
     func flush() -> Task<Void, Never> {
         serialize { reporter in
-            _ = await reporter.flushPending()
+            reporter.syncConnectivity(await reporter.flushPending())
+        }
+    }
+
+    /// Stops the connectivity watch; a torn-down graph sends nothing more.
+    func dispose() {
+        lock.withLock { isDisposed = true }
+        syncConnectivity(true)
+    }
+
+    /// Watches for the network coming back exactly while reports wait: started when a
+    /// flush leaves the list non-empty, stopped when the list is empty. The recovery
+    /// callback serializes behind any in-flight send.
+    private func syncConnectivity(_ complete: Bool) {
+        if complete {
+            let stop = lock.withLock { () -> Bool in
+                guard monitoring else { return false }
+                monitoring = false
+                return true
+            }
+            if stop { connectivityMonitor?.stop() }
+        } else {
+            let start = lock.withLock { () -> Bool in
+                guard !monitoring, !isDisposed else { return false }
+                monitoring = true
+                return true
+            }
+            if start {
+                connectivityMonitor?.start { [weak self] in self?.flush() }
+                // dispose() may have raced the start; stop again if so.
+                if lock.withLock({ isDisposed }) { connectivityMonitor?.stop() }
+            }
         }
     }
 
@@ -87,7 +126,8 @@ final class SessionReporter: @unchecked Sendable {
 
     /// Posts pending reports in order. Returns true when none remain.
     private func flushPending() async -> Bool {
-        while let next = loadPending().first {
+        // A torn-down graph posts nothing more, even from a queued recovery.
+        while !lock.withLock({ isDisposed }), let next = loadPending().first {
             switch await post(next) {
             case .sent:
                 removeFirstPending()

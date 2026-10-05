@@ -328,7 +328,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         HealthSink.shared.beginPending()
         DigiaLogger.configure(config.logLevel)
         DigiaEndpoints.configure(config)
-        let services = SDKServices(config: config, storage: storage, networkClient: networkClient, clock: clock)
+        let services = SDKServices(
+            config: config,
+            storage: storage,
+            networkClient: networkClient,
+            connectivityMonitor: NWPathConnectivityMonitor(),
+            clock: clock
+        )
         self.services = services
         currentSession.set(services.sessionManager, identity: services.identityManager, requestHeaders: services.requestHeaders)
         // The startup session is reported before the buffered user change
