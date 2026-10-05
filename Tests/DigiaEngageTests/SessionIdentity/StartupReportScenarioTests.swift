@@ -108,5 +108,4 @@ final class StartupReportScenarioTests: XCTestCase {
         XCTAssertEqual(h.network.attemptedSessions, [morning, afternoon, loggedIn])
         XCTAssertEqual(h.network.attempts.map(\.userId), [nil, nil, "asha"])
     }
-
 }
