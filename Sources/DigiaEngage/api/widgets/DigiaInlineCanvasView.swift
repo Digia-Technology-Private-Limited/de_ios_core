@@ -97,6 +97,7 @@ struct DigiaInlineCanvasView: View {
             }
         )
         .environment(\.timerRemainingSeconds, remainingSeconds)
+        .environment(\.digiaVariables, variables)
         // Canvas widgets report what happened to them; this is where it becomes a campaign event.
         //
         // The widgets cannot do this themselves — a carousel has no idea which campaign it is part

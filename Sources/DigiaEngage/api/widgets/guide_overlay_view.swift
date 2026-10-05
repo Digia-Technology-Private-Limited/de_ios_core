@@ -182,7 +182,18 @@ private struct GuideStepOverlay: View {
                     dy: -CGFloat(config.overlay.cutout.padding) * canvasScale
                 )
                 : anchorRect
-            let placementAnchor = paddedAnchor
+            let placementAnchor: CGRect = {
+                if isSpotlight && !isAnchorless && config.overlay.cutout.shape.lowercased() == "circle" {
+                    let side = max(paddedAnchor.width, paddedAnchor.height)
+                    return CGRect(
+                        x: paddedAnchor.midX - side / 2,
+                        y: paddedAnchor.midY - side / 2,
+                        width: side,
+                        height: side
+                    )
+                }
+                return paddedAnchor
+            }()
             let canvasPlacement: GuideCanvasPlacement? = if !isAnchorless, let canvas = config.canvas {
                 guideCanvasPlacement(
                     canvas: canvas,
