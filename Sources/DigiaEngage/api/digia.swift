@@ -228,6 +228,11 @@ public enum Digia {
         SDKInstance.shared.clearUserId()
     }
 
+    /// The device ID for this install, or an empty string before `initialize`. Never creates an ID.
+    public static var anonymousId: String {
+        SDKInstance.shared.anonymousId
+    }
+
     /// Clears inline content (carousels/stories) for the given `placementKeys`. Once
     /// loaded, inline content is retained indefinitely — hosts should call this on
     /// logout so a stale user's content doesn't linger across the account switch.

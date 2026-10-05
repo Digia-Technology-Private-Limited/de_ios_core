@@ -5,7 +5,7 @@ import XCTest
 /// Scenarios doc §3.7: device ID.
 /// Left out on iOS: S36 (the ANDROID_ID check is Android-only; iOS's source choice is
 /// `identifierForVendor`, reachable only through UIDevice), S37 (a platform difference, not a unit
-/// test, per the scenarios doc) and S38 (iOS has no public device ID getter).
+/// test, per the scenarios doc). S38 is in `PreInitializeCallScenarioTests`.
 final class DeviceIdScenarioTests: XCTestCase {
 
     func test_S34_aDeviceIdIsCreatedOnceAndReadFromStorageAfterThat() {

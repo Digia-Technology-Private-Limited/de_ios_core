@@ -68,4 +68,12 @@ final class PreInitializeCallScenarioTests: XCTestCase {
         XCTAssertEqual(h.services.identityManager.userId, "asha")
         XCTAssertEqual(h.network.attempts.map(\.userId), [nil, "asha"])
     }
+
+    func test_S38_anonymousIdIsEmptyBeforeInitializeAndNeverCreatesAnId() async throws {
+        let h = InitializeHarness()
+        XCTAssertEqual(h.sdk.anonymousId, "")
+        XCTAssertNil(h.defaults.string(forKey: "identity.device_id"))
+        try await h.initialize()
+        XCTAssertEqual(h.sdk.anonymousId, h.services.identityManager.deviceId)
+    }
 }
