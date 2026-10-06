@@ -1,259 +1,49 @@
-▿ NudgeConfig
-  ▿ canvas: Optional<CampaignCanvas>
-    ▿ some: CampaignCanvas
-      ▿ background: CampaignCanvasPaint
-        ▿ solid: CampaignColor
-          - darkHex: "#FFFFFFFF"
-          - lightHex: "#FFFFFFFF"
-      ▿ children: 3 elements
-        ▿ CampaignCanvasChild
-          ▿ widget: (3 elements)
-            - id: "title"
-            ▿ rect: CampaignCanvasRect
-              - height: 50.4
-              - width: 337.5
-              - x: 18.75
-              - y: 42.0
-            ▿ widget: CampaignCanvasWidget
-              ▿ text: (3 elements)
-                ▿ box: CampaignCanvasBox
-                  - border: Optional<CampaignCanvasBorder>.none
-                  ▿ cornerRadius: CampaignCanvasCornerRadius
-                    - bottomLeft: 0.0
-                    - bottomRight: 0.0
-                    - topLeft: 0.0
-                    - topRight: 0.0
-                  - fill: CampaignCanvasPaint.none
-                  ▿ padding: CampaignCanvasEdgeInsets
-                    - bottom: 0.0
-                    - left: 0.0
-                    - right: 0.0
-                    - top: 0.0
-                  - shadow: Optional<CampaignCanvasShadow>.none
-                ▿ block: CampaignCanvasTextBlock
-                  - horizontalAlign: CampaignCanvasHorizontalAlign.left
-                  - maxLines: 0
-                  - overflow: "visible"
-                  - sizingMode: "wrap"
-                  ▿ spans: 1 element
-                    ▿ CampaignCanvasTextSpan
-                      - actions: 0 elements
-                      ▿ color: Optional<CampaignColor>
-                        ▿ some: CampaignColor
-                          - darkHex: "#FF111111"
-                          - lightHex: "#FF111111"
-                      - decoration: CampaignCanvasTextDecoration.none
-                      - decorationColor: Optional<CampaignColor>.none
-                      - decorationOffset: Optional<CGFloat>.none
-                      - decorationThickness: Optional<CGFloat>.none
-                      - highlightColor: Optional<CampaignColor>.none
-                      - italic: false
-                      - text: "Safe Area BottomSheet"
-                      ▿ typography: Optional<CampaignTypography>
-                        ▿ some: CampaignTypography
-                          - fontFamily: Optional<String>.none
-                          ▿ fontSize: Optional<CGFloat>
-                            - some: 22.0
-                          ▿ fontWeight: Optional<Int>
-                            - some: 700
-                          - letterSpacing: Optional<CGFloat>.none
-                          - lineHeight: Optional<CGFloat>.none
-                  - textAlign: CampaignCanvasHorizontalAlign.left
-                  - verticalAlign: CampaignCanvasVerticalAlign.top
-                - shadow: Optional<CampaignCanvasShadow>.none
-        ▿ CampaignCanvasChild
-          ▿ widget: (3 elements)
-            - id: "body"
-            ▿ rect: CampaignCanvasRect
-              - height: 92.4
-              - width: 337.5
-              - x: 18.75
-              - y: 105.0
-            ▿ widget: CampaignCanvasWidget
-              ▿ text: (3 elements)
-                ▿ box: CampaignCanvasBox
-                  - border: Optional<CampaignCanvasBorder>.none
-                  ▿ cornerRadius: CampaignCanvasCornerRadius
-                    - bottomLeft: 0.0
-                    - bottomRight: 0.0
-                    - topLeft: 0.0
-                    - topRight: 0.0
-                  - fill: CampaignCanvasPaint.none
-                  ▿ padding: CampaignCanvasEdgeInsets
-                    - bottom: 0.0
-                    - left: 0.0
-                    - right: 0.0
-                    - top: 0.0
-                  - shadow: Optional<CampaignCanvasShadow>.none
-                ▿ block: CampaignCanvasTextBlock
-                  - horizontalAlign: CampaignCanvasHorizontalAlign.left
-                  - maxLines: 0
-                  - overflow: "visible"
-                  - sizingMode: "wrap"
-                  ▿ spans: 1 element
-                    ▿ CampaignCanvasTextSpan
-                      - actions: 0 elements
-                      ▿ color: Optional<CampaignColor>
-                        ▿ some: CampaignColor
-                          - darkHex: "#FF333333"
-                          - lightHex: "#FF333333"
-                      - decoration: CampaignCanvasTextDecoration.none
-                      - decorationColor: Optional<CampaignColor>.none
-                      - decorationOffset: Optional<CGFloat>.none
-                      - decorationThickness: Optional<CGFloat>.none
-                      - highlightColor: Optional<CampaignColor>.none
-                      - italic: false
-                      - text: "Surface extends behind home indicator; content is inset safely."
-                      ▿ typography: Optional<CampaignTypography>
-                        ▿ some: CampaignTypography
-                          - fontFamily: Optional<String>.none
-                          ▿ fontSize: Optional<CGFloat>
-                            - some: 14.0
-                          ▿ fontWeight: Optional<Int>
-                            - some: 400
-                          - letterSpacing: Optional<CGFloat>.none
-                          - lineHeight: Optional<CGFloat>.none
-                  - textAlign: CampaignCanvasHorizontalAlign.left
-                  - verticalAlign: CampaignCanvasVerticalAlign.top
-                - shadow: Optional<CampaignCanvasShadow>.none
-        ▿ CampaignCanvasChild
-          ▿ widget: (3 elements)
-            - id: "button"
-            ▿ rect: CampaignCanvasRect
-              - height: 63.0
-              - width: 337.5
-              - x: 18.75
-              - y: 302.4
-            ▿ widget: CampaignCanvasWidget
-              ▿ button: (10 elements)
-                ▿ box: CampaignCanvasBox
-                  - border: Optional<CampaignCanvasBorder>.none
-                  ▿ cornerRadius: CampaignCanvasCornerRadius
-                    - bottomLeft: 0.0
-                    - bottomRight: 0.0
-                    - topLeft: 0.0
-                    - topRight: 0.0
-                  - fill: CampaignCanvasPaint.none
-                  ▿ padding: CampaignCanvasEdgeInsets
-                    - bottom: 0.0
-                    - left: 0.0
-                    - right: 0.0
-                    - top: 0.0
-                  - shadow: Optional<CampaignCanvasShadow>.none
-                ▿ label: CampaignCanvasTextBlock
-                  - horizontalAlign: CampaignCanvasHorizontalAlign.center
-                  - maxLines: 1
-                  - overflow: "ellipsis"
-                  - sizingMode: "wrap"
-                  ▿ spans: 1 element
-                    ▿ CampaignCanvasTextSpan
-                      - actions: 0 elements
-                      ▿ color: Optional<CampaignColor>
-                        ▿ some: CampaignColor
-                          - darkHex: "#FFFFFFFF"
-                          - lightHex: "#FFFFFFFF"
-                      - decoration: CampaignCanvasTextDecoration.none
-                      - decorationColor: Optional<CampaignColor>.none
-                      - decorationOffset: Optional<CGFloat>.none
-                      - decorationThickness: Optional<CGFloat>.none
-                      - highlightColor: Optional<CampaignColor>.none
-                      - italic: false
-                      - text: "Dismiss"
-                      ▿ typography: Optional<CampaignTypography>
-                        ▿ some: CampaignTypography
-                          - fontFamily: Optional<String>.none
-                          ▿ fontSize: Optional<CGFloat>
-                            - some: 16.0
-                          ▿ fontWeight: Optional<Int>
-                            - some: 600
-                          - letterSpacing: Optional<CGFloat>.none
-                          - lineHeight: Optional<CGFloat>.none
-                  - textAlign: CampaignCanvasHorizontalAlign.center
-                  - verticalAlign: CampaignCanvasVerticalAlign.center
-                ▿ cornerRadius: CampaignCanvasCornerRadius
-                  - bottomLeft: 10.0
-                  - bottomRight: 10.0
-                  - topLeft: 10.0
-                  - topRight: 10.0
-                ▿ style: CampaignCanvasButtonStyle
-                  ▿ fill: (1 element)
-                    ▿ fill: CampaignCanvasPaint
-                      ▿ solid: CampaignColor
-                        - darkHex: "#FF4945FF"
-                        - lightHex: "#FF4945FF"
-                - shadow: Optional<CampaignCanvasShadow>.none
-                - isPrimary: true
-                - isDestructive: false
-                - applyDestructiveStyling: true
-                ▿ actions: 1 element
-                  - EngageAction.dismiss
-                ▿ confirm: CampaignCanvasConfirmDialog
-                  - buttonFontWeight: 600
-                  - cancelLabel: "Cancel"
-                  - confirmLabel: "Yes"
-                  - message: Optional<String>.none
-                  - messageFontWeight: 400
-                  - title: Optional<String>.none
-                  - titleFontWeight: 700
-      - height: 420.0
-      - version: 2
-      - width: 375.0
-  - designWidth: 360.0
-  ▿ layout: NudgeColumn
-    - children: 0 elements
-    - crossAxisAlignment: NudgeCrossAxisAlignment.start
-    - mainAxisAlignment: NudgeMainAxisAlignment.start
-  ▿ surface: NudgeSurface
-    - autoDismissAfterMs: 0
-    - backdropDismissible: true
-    ▿ backgroundColor: Optional<Color>
-      ▿ some: white
-        ▿ provider: ColorBox<ResolvedColorProvider>
-          ▿ base: ResolvedColorProvider
-            ▿ color: #FFFFFFFF
-              ▿ base: #FFFFFFFF
-                - linearRed: 1.0
-                - linearGreen: 1.0
-                - linearBlue: 1.0
-                - opacity: 1.0
-              - _headroom: nan
-    - barrierColor: Optional<Color>.none
-    - bottomSafeAreaMode: BottomSafeAreaMode.insetContent
-    ▿ closeButton: NudgeCloseButtonConfig
-      ▿ backgroundColor: #00000014
-        ▿ provider: ColorBox<ResolvedColorProvider>
-          ▿ base: ResolvedColorProvider
-            ▿ color: #00000014
-              ▿ base: #00000014
-                - linearRed: 0.0
-                - linearGreen: 0.0
-                - linearBlue: 0.0
-                - opacity: 0.078431375
-              - _headroom: nan
-      - backgroundToken: Optional<CampaignColor>.none
-      ▿ iconColor: #66667AFF
-        ▿ provider: ColorBox<ResolvedColorProvider>
-          ▿ base: ResolvedColorProvider
-            ▿ color: #66667AFF
-              ▿ base: #66667AFF
-                - linearRed: 0.13286832
-                - linearGreen: 0.13286832
-                - linearBlue: 0.19461787
-                - opacity: 1.0
-              - _headroom: nan
-      - iconSize: 16.0
-      - iconToken: Optional<CampaignColor>.none
-      - marginRight: 12.0
-      - marginTop: 12.0
-      - placement: Optional<NudgeCloseButtonPlacement>.none
-    - cornerRadius: 18.0
-    - displayType: NudgeDisplayType.bottomSheet
-    - draggable: true
-    - minHorizontalMargin: 24.0
-    - padding: 20.0
-    - safeAreaMode: BottomSafeAreaMode.insetContent
-    - showCloseButton: false
-    - showHandle: true
-    - useSafeArea: false
-    - widthFraction: 0.86
-  - variableSchemas: 0 elements
+<UIWindow; frame = (0 0; 440 956); gestureRecognizers = <NSArray>; layer = <UIWindowLayer>>
+   | <UITransitionView; frame = (0 0; 440 956); autoresize = W+H; layer = <CALayer>>
+   |    | <UIDropShadowView; frame = (0 0; 440 956); autoresize = W+H; layer = <CALayer>>
+   |    |    | <UIView; frame = (0 0; 440 956); autoresize = W+H; backgroundColor = <UIDynamicSystemColor; name = systemBackgroundColor>; layer = <CALayer>>
+   |    |    |    | <_UIHostingView<NudgeOverlayView>; frame = (0 0; 440 956); gestureRecognizers = <NSArray>; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>>
+   | <UITransitionView; frame = (0 0; 440 956); autoresize = W+H; layer = <CALayer>>
+   |    | <PresentationHostingController.HostingView; frame = (0 0; 440 956); autoresize = W+H; gestureRecognizers = <NSArray>; layer = <CALayer>>
+   |    |    | <CALayer> (layer)
+   |    |    | <CALayer> (layer)
+   |    |    | <SwiftUI._UIInheritedView; frame = (0 463.333; 375 420); anchorPoint = (0, 0); autoresizesSubviews = NO; layer = <CALayer>>
+   |    |    |    | <SwiftUI._UIInheritedView; frame = (0 0; 440 492.8); transform = [1.1733333333333333, 0, 0, 1.1733333333333333, 0, 0]; anchorPoint = (0, 0); autoresizesSubviews = NO; layer = <CALayer>>
+   |    |    |    |    | <SwiftUI._UIInheritedView; frame = (18.6667 42; 337.667 50.3333); anchorPoint = (0, 0); clipsToBounds = YES; autoresizesSubviews = NO; userInteractionEnabled = NO; layer = <CALayer>>
+   |    |    |    |    |    | <CanvasRichTextPlatformViewHost; frame = (0 0; 240 27); anchorPoint = (0, 0); tintColor = UIExtendedSRGBColorSpace 0 0.533333 1 1; layer = <CALayer>>
+   |    |    |    |    |    |    | <CanvasRichTextContainerView; frame = (0 0; 240 27); autoresize = W+H; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>>
+   |    |    |    |    |    |    |    | <UITextView; frame = (0 0; 240 27); text = 'Safe Area BottomSheet'; userInteractionEnabled = NO; gestureRecognizers = <NSArray>; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>; contentOffset: {0, 0}; contentSize: {240, 27}; adjustedContentInset: {0, 0, 0, 0}>
+   |    |    |    |    |    |    |    |    | <_UITextLayoutView; frame = (0 0; 0 0); layer = <CALayer>>
+   |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 240 27); layer = <CALayer>>
+   |    |    |    |    |    |    |    |    | <<_UITextContainerView; frame = (0 0; 240 27); backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>> minSize = {0, 27}, maxSize = {240, 27}, textContainer = <NSTextContainer size = (240.000000,27.000000); widthTracksTextView = YES; heightTracksTextView = YES>; exclusionPaths =; lineBreakMode = 2>
+   |    |    |    |    |    |    |    |    |    | <_UITextViewCanvasView; frame = (0 0; 240 27); userInteractionEnabled = NO; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <_UITextTiledLayer>>
+   |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (234 -39; 3 36); alpha = 0; autoresize = LM; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 3 36); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (-39 21; 36 3); alpha = 0; autoresize = TM; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 36 3); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
+   |    |    |    |    | <SwiftUI._UIInheritedView; frame = (18.6667 105; 337.667 92.3333); anchorPoint = (0, 0); clipsToBounds = YES; autoresizesSubviews = NO; userInteractionEnabled = NO; layer = <CALayer>>
+   |    |    |    |    |    | <CanvasRichTextPlatformViewHost; frame = (0 0; 329 34); anchorPoint = (0, 0); tintColor = UIExtendedSRGBColorSpace 0 0.533333 1 1; layer = <CALayer>>
+   |    |    |    |    |    |    | <CanvasRichTextContainerView; frame = (0 0; 329 34); autoresize = W+H; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>>
+   |    |    |    |    |    |    |    | <UITextView; frame = (0 0; 329 34); text = 'Surface extends behind ho...'; userInteractionEnabled = NO; gestureRecognizers = <NSArray>; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>; contentOffset: {0, 0}; contentSize: {329, 34}; adjustedContentInset: {0, 0, 0, 0}>
+   |    |    |    |    |    |    |    |    | <_UITextLayoutView; frame = (0 0; 0 0); layer = <CALayer>>
+   |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 329 34); layer = <CALayer>>
+   |    |    |    |    |    |    |    |    | <<_UITextContainerView; frame = (0 0; 329 34); backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>> minSize = {0, 34}, maxSize = {329, 34}, textContainer = <NSTextContainer size = (329.000000,34.000000); widthTracksTextView = YES; heightTracksTextView = YES>; exclusionPaths =; lineBreakMode = 2>
+   |    |    |    |    |    |    |    |    |    | <_UITextViewCanvasView; frame = (0 0; 329 34); userInteractionEnabled = NO; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <_UITextTiledLayer>>
+   |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (323 -39; 3 36); alpha = 0; autoresize = LM; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 3 36); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (-39 28; 36 3); alpha = 0; autoresize = TM; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 36 3); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
+   |    |    |    |    | <CALayer> (layer)
+   |    |    |    |    | <SwiftUI._UIInheritedView; frame = (18.6667 302.333; 337.667 63); anchorPoint = (0, 0); clipsToBounds = YES; autoresizesSubviews = NO; layer = <CALayer>>
+   |    |    |    |    |    | <CanvasRichTextPlatformViewHost; frame = (139 21.6667; 60 20); anchorPoint = (0, 0); tintColor = UIExtendedSRGBColorSpace 0 0.533333 1 1; layer = <CALayer>>
+   |    |    |    |    |    |    | <CanvasRichTextContainerView; frame = (0 0; 60 20); autoresize = W+H; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>>
+   |    |    |    |    |    |    |    | <UITextView; frame = (0 0; 60 20); text = 'Dismiss'; userInteractionEnabled = NO; gestureRecognizers = <NSArray>; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>; contentOffset: {0, 0}; contentSize: {60, 20}; adjustedContentInset: {0, 0, 0, 0}>
+   |    |    |    |    |    |    |    |    | <_UITextLayoutView; frame = (0 0; 0 0); layer = <CALayer>>
+   |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 60 20); layer = <CALayer>>
+   |    |    |    |    |    |    |    |    | <<_UITextContainerView; frame = (0 0; 60 20); backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>> minSize = {0, 20}, maxSize = {60, 20}, textContainer = <NSTextContainer size = (60.000000,20.000000); widthTracksTextView = YES; heightTracksTextView = YES>; exclusionPaths =; lineBreakMode = 4>
+   |    |    |    |    |    |    |    |    |    | <_UITextViewCanvasView; frame = (0 0; 60 20); userInteractionEnabled = NO; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <_UITextTiledLayer>>
+   |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (54 -39; 3 36); alpha = 0; autoresize = LM; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 3 36); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (-39 14; 36 3); alpha = 0; autoresize = TM; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 36 3); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
+   |    |    | <CALayer> (layer)

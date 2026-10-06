@@ -152,7 +152,30 @@ struct BottomSheet {
         #expect(nudgeConfig.surface.closeButton.placement?.vertical == .top)
     }
 
-    // MARK: - 5. Visual Pixel Golden Snapshot
+    // MARK: - 5. View Hierarchy Snapshot (.hierarchy)
+
+    @Test("matches the production bottom-sheet view hierarchy snapshot", .tags(.golden, .smoke)) @MainActor
+    func testNudgeBottomSheetComponentHierarchy() throws {
+        let fixture = try loadCompactBottomSheetFixture()
+        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
+              let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+              nudgeConfig.canvas != nil else {
+            Issue.record("Failed to parse canvas nudge config")
+            return
+        }
+
+        let hostView = ComponentTestHost.makeRealBottomSheetHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax
+        )
+        defer {
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
+
+        assertHierarchy(matching: hostView)
+    }
+
+    // MARK: - 6. Visual Pixel Golden Snapshot
 
     @Test("matches the bottom-sheet visual golden", .tags(.golden)) @MainActor
     func testNudgeBottomSheetVisualImageGolden() throws {
@@ -179,7 +202,7 @@ struct BottomSheet {
         )
     }
 
-    // MARK: - 6. Device Scrim & Anchoring Golden (.image on device)
+    // MARK: - 7. Device Scrim & Anchoring Golden (.image on device)
 
     @Test("matches the production bottom-sheet device golden", .tags(.golden, .smoke)) @MainActor
     func testNudgeBottomSheetDeviceGolden() throws {
@@ -206,7 +229,7 @@ struct BottomSheet {
         )
     }
 
-    // MARK: - 7. Safe Area Mode Variants (insetContent, insetSurface, none)
+    // MARK: - 8. Safe Area Mode Variants (insetContent, insetSurface, none)
 
     @Test("matches the inset-content safe-area golden", .tags(.golden)) @MainActor
     func testNudgeBottomSheetSafeAreaInsetContentVariant() throws {
@@ -220,18 +243,15 @@ struct BottomSheet {
 
         #expect(nudgeConfig.surface.bottomSafeAreaMode == .insetContent)
 
-        assertSnapshot(
-            of: nudgeConfig,
-            as: .dump,
-            record: isSnapshotRecordingEnabled ? .all : nil
-        )
-
         let hostView = ComponentTestHost.makeRealBottomSheetHost(
             nudgeConfig: nudgeConfig,
             device: .iPhone17ProMax,
             style: .solid(.systemBackground)
         )
         defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
+
+        assertHierarchy(matching: hostView)
+
         assertVisualGolden(
             matching: ComponentTestHost.renderImage(of: hostView),
             precision: 0.999,
@@ -251,18 +271,15 @@ struct BottomSheet {
 
         #expect(nudgeConfig.surface.bottomSafeAreaMode == .insetSurface)
 
-        assertSnapshot(
-            of: nudgeConfig,
-            as: .dump,
-            record: isSnapshotRecordingEnabled ? .all : nil
-        )
-
         let hostView = ComponentTestHost.makeRealBottomSheetHost(
             nudgeConfig: nudgeConfig,
             device: .iPhone17ProMax,
             style: .solid(.systemBackground)
         )
         defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
+
+        assertHierarchy(matching: hostView)
+
         assertVisualGolden(
             matching: ComponentTestHost.renderImage(of: hostView),
             precision: 0.999,
@@ -282,18 +299,15 @@ struct BottomSheet {
 
         #expect(nudgeConfig.surface.bottomSafeAreaMode == .none)
 
-        assertSnapshot(
-            of: nudgeConfig,
-            as: .dump,
-            record: isSnapshotRecordingEnabled ? .all : nil
-        )
-
         let hostView = ComponentTestHost.makeRealBottomSheetHost(
             nudgeConfig: nudgeConfig,
             device: .iPhone17ProMax,
             style: .solid(.systemBackground)
         )
         defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
+
+        assertHierarchy(matching: hostView)
+
         assertVisualGolden(
             matching: ComponentTestHost.renderImage(of: hostView),
             precision: 0.999,

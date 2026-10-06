@@ -195,6 +195,11 @@ public func purgeHierarchyPointers(_ string: String) -> String {
         options: .regularExpression
     )
     result = result.replacingOccurrences(
+        of: "_TtGC7SwiftUI14_UIHostingView[^;>]+CampaignCanvasView_",
+        with: "_UIHostingView<CampaignCanvasView>",
+        options: .regularExpression
+    )
+    result = result.replacingOccurrences(
         of: "_TtCC7SwiftUI17HostingScrollView17PlatformContainer",
         with: "HostingScrollView.PlatformContainer",
         options: .regularExpression
@@ -207,6 +212,11 @@ public func purgeHierarchyPointers(_ string: String) -> String {
     result = result.replacingOccurrences(
         of: "_TtC7SwiftUI[^;>]+ColorShapeLayer",
         with: "ColorShapeLayer",
+        options: .regularExpression
+    )
+    result = result.replacingOccurrences(
+        of: "_TtCGC7SwiftUI29PresentationHostingController[^;>]+HostingView",
+        with: "PresentationHostingController.HostingView",
         options: .regularExpression
     )
 
