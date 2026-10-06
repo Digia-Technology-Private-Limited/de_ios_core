@@ -27,7 +27,7 @@ struct ActiveFloaterStoryState: Equatable {
     /// Dashboard defaults layered with the CEP trigger's values, resolved once at start.
     /// Every `{{ token }}` in the window and in the stories reads through this.
     var variableContext: VariableContext {
-        buildVariableContext(schemas: config.variableSchemas, cepVars: payload.variables, campaignKey: payload.campaignKey)
+        buildVariableContext(schemas: config.variableSchemas, cepVars: payload.variables)
     }
 }
 
@@ -114,6 +114,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
             return false
         }
 
+        reportMissingVariables(campaign.floaterStoryConfig?.variableSchemas ?? [], payload: payload)
         tokenCounter += 1
         state = ActiveFloaterStoryState(
             campaign: campaign,

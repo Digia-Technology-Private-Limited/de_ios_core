@@ -21,7 +21,7 @@ struct ActiveGuideState: Equatable {
     /// `GuideOverlayView` to interpolate `{{ placeholder }}` copy and arithmetic.
     var variableContext: VariableContext {
         let schemas = campaign.guideConfig?.variableSchemas ?? []
-        return buildVariableContext(schemas: schemas, cepVars: payload.variables, campaignKey: payload.campaignKey)
+        return buildVariableContext(schemas: schemas, cepVars: payload.variables)
     }
     var currentStep: GuideStepModel? { steps.indices.contains(stepIndex) ? steps[stepIndex] : nil }
     var hasNext: Bool { stepIndex < steps.count - 1 }
@@ -43,6 +43,7 @@ final class GuideOrchestrator: ObservableObject {
               !guideConfig.steps.isEmpty,
               state == nil
         else { return false }
+        reportMissingVariables(guideConfig.variableSchemas, payload: payload)
         tokenCounter &+= 1
         state = ActiveGuideState(token: tokenCounter, campaign: campaign, stepIndex: 0, payload: payload)
         return true

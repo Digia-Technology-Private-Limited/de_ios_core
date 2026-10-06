@@ -14,27 +14,28 @@ struct VariableContext: Equatable {
 }
 
 /// Builds a `VariableContext` from schemas, letting non-empty CEP values win (D3′).
-func buildVariableContext(
-    schemas: [VariableSchema],
-    cepVars: [String: String]?,
-    campaignKey: String? = nil
-) -> VariableContext {
+func buildVariableContext(schemas: [VariableSchema], cepVars: [String: String]?) -> VariableContext {
     var values: [String: String] = [:]
     var types: [String: String] = [:]
     for schema in schemas {
         let cep = cepVars?[schema.name] ?? ""
         values[schema.name] = (cep != "") ? cep : schema.fallbackValue
-        // Callers that rebuild each frame pass no key, so they stay silent.
-        if let campaignKey, cep == "", schema.fallbackValue == "" {
-            log.w(
-                "Variable has no CEP value and no fallback (variable=\(schema.name))",
-                campaign: campaignKey,
-                stage: .render,
-                reason: TimelineReason.missingVariable,
-                extras: ["variable": schema.name]
-            )
-        }
         types[schema.name] = schema.type
     }
     return VariableContext(values: values, types: types)
+}
+
+/// Reports each declared variable with no CEP value and no fallback. Call once per start, never from a view body.
+func reportMissingVariables(_ schemas: [VariableSchema], payload: CEPTriggerPayload) {
+    // A live test is a PM's preview, not fleet health.
+    guard !isLiveTestCepId(payload.cepCampaignId) else { return }
+    for schema in schemas where (payload.variables?[schema.name] ?? "") == "" && schema.fallbackValue == "" {
+        log.w(
+            "Variable has no CEP value and no fallback (variable=\(schema.name))",
+            campaign: payload.campaignKey,
+            stage: .render,
+            reason: TimelineReason.missingVariable,
+            extras: ["variable": schema.name]
+        )
+    }
 }

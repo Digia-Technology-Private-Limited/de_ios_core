@@ -114,7 +114,7 @@ struct ActiveFloaterState: Equatable {
     /// start. Every `{{ token }}` in the content — and in the media URL — reads
     /// through this.
     var variableContext: VariableContext {
-        buildVariableContext(schemas: config.variableSchemas, cepVars: payload.variables, campaignKey: payload.campaignKey)
+        buildVariableContext(schemas: config.variableSchemas, cepVars: payload.variables)
     }
 
     /// The media URL with variables resolved — per-user media is an authored
@@ -235,6 +235,7 @@ final class FloaterOrchestrator: ObservableObject {
             return false
         }
 
+        reportMissingVariables(campaign.floaterConfig?.variableSchemas ?? [], payload: payload)
         tokenCounter += 1
         let nowMs = now()
         let active = ActiveFloaterState(

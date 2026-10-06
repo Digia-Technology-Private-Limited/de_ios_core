@@ -28,6 +28,7 @@ final class SurveyOrchestrator: ObservableObject {
     ) -> Bool {
         guard !config.nodes.isEmpty, !config.blocks.isEmpty else { return false }
         if state != nil { return false }
+        reportMissingVariables(config.variableSchemas, payload: payload)
         tokenCounter += 1
         state = ActiveSurveyState(
             payload: payload,
@@ -36,8 +37,7 @@ final class SurveyOrchestrator: ObservableObject {
             startedAt: Date(),
             variableContext: buildVariableContext(
                 schemas: config.variableSchemas,
-                cepVars: payload.variables,
-                campaignKey: payload.campaignKey
+                cepVars: payload.variables
             )
         )
         return true

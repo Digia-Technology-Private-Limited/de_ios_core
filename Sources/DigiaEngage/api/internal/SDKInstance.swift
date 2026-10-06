@@ -773,6 +773,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             if reason == .invalidConfig, let cause = lastInvalidConfigCause {
                 controller.dropExtras = ["cause": cause]
             }
+            lastInvalidConfigCause = nil
             controller.settle(.dropped(reason: reason, detail: detail))
         }
     }
@@ -1612,9 +1613,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             // CEP trigger variables win over fallbacks (D3′).
             let variableContext = buildVariableContext(
                 schemas: nudgeConfig.variableSchemas,
-                cepVars: payload.variables,
-                campaignKey: payload.campaignKey
+                cepVars: payload.variables
             )
+            reportMissingVariables(nudgeConfig.variableSchemas, payload: payload)
             if let busy = admitToSurface(.nudge, campaignKey: key, context: context) {
                 return busy
             }

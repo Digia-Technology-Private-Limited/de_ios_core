@@ -44,7 +44,7 @@ private struct InlineCarouselView: View {
     @State private var isRecentering = false
 
     private var variables: VariableContext {
-        buildVariableContext(schemas: config.variableSchemas, cepVars: payload.variables, campaignKey: payload.campaignKey)
+        buildVariableContext(schemas: config.variableSchemas, cepVars: payload.variables)
     }
 
     var body: some View {
