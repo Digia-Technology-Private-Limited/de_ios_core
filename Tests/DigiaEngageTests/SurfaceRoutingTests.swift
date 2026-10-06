@@ -85,6 +85,39 @@ extension DigiaEngageTests {
             #expect(second.dropReason == .surfaceBusy)
         }
 
+        @Test("floater dismisses on screen change to off-target screen")
+        func floaterDismissesOnOffTargetScreen() throws {
+            try start([floaterJson("pip_target", targetScreens: ["Home", "Detail"])])
+            sdk.setCurrentScreen("Home")
+            _ = deliver("pip_target", "cep-1")
+            try #require(sdk.floaterOrchestrator.isShowing)
+
+            sdk.setCurrentScreen("Search")
+            #expect(!sdk.floaterOrchestrator.isShowing)
+        }
+
+        @Test("floater survives screen change to another target screen")
+        func floaterSurvivesScreenChangeToTargetScreen() throws {
+            try start([floaterJson("pip_target", targetScreens: ["Home", "Detail"])])
+            sdk.setCurrentScreen("Home")
+            _ = deliver("pip_target", "cep-1")
+            try #require(sdk.floaterOrchestrator.isShowing)
+
+            sdk.setCurrentScreen("Detail")
+            #expect(sdk.floaterOrchestrator.isShowing)
+        }
+
+        @Test("global floater survives screen change")
+        func globalFloaterSurvivesScreenChange() throws {
+            try start([floaterJson("pip_global")])
+            sdk.setCurrentScreen("Home")
+            _ = deliver("pip_global", "cep-1")
+            try #require(sdk.floaterOrchestrator.isShowing)
+
+            sdk.setCurrentScreen("Search")
+            #expect(sdk.floaterOrchestrator.isShowing)
+        }
+
         @Test("inline, same slot, never displayed → replaced, the old one superseded")
         func inlineSameSlotNeverDisplayed() throws {
             try start([inlineJson("i1"), inlineJson("i2")])
@@ -259,8 +292,8 @@ func nudgeJson(_ key: String, targetScreenNames: [String] = []) -> [String: Any]
     ]
 }
 
-func floaterJson(_ key: String) -> [String: Any] {
-    [
+func floaterJson(_ key: String, targetScreens: [String]? = nil) -> [String: Any] {
+    var dict: [String: Any] = [
         "id": "\(key)-id",
         "campaignKey": key,
         "campaignType": "floater",
@@ -270,6 +303,10 @@ func floaterJson(_ key: String) -> [String: Any] {
             "expanded": ["canvas": emptyCanvas],
         ] as [String: Any],
     ]
+    if let targetScreens = targetScreens {
+        dict["targetScreenNames"] = ["names": targetScreens]
+    }
+    return dict
 }
 
 func guideJson(_ key: String) -> [String: Any] {

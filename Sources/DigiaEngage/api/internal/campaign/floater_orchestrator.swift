@@ -672,17 +672,15 @@ final class FloaterOrchestrator: ObservableObject {
     /// the campaign, not an error path. A floater that opened while no screen was
     /// ever set has a `nil` `screenName` and is therefore not screen-scoped — it
     /// survives navigation and ends by close, timeout, or media end instead.
-    ///
-    /// Deliberately **not** the shared `dismissForScreenChangeIfNeeded` helper
-    /// nudge/survey/guide use: that checks the *current* `targetScreenNames` list
-    /// against the new screen, while a floater is bound to the *exact* screen it
-    /// appeared on — leaving it ends the campaign even if the new screen is also in
-    /// `targetScreenNames`. Reusing the shared helper here would silently loosen
-    /// that contract (matches the same deliberate divergence in Android's
-    /// `DigiaInstance.handleScreenChanged`).
+    /// Called when the host reports a new current screen. Ends the showing if the
+    /// campaign targets specific screens and the new screen is not in that list.
+    /// Global floaters survive navigation.
     func onScreenChanged(_ screenName: String) {
-        guard let active = state, let ownScreen = active.screenName, ownScreen != screenName else { return }
-        dismiss(.screenExit)
+        guard let active = state else { return }
+        let targets = active.campaign.targetScreenNames
+        if !targets.isEmpty && !targets.contains(screenName) {
+            dismiss(.screenExit)
+        }
     }
 
     /// Marks the showing as having achieved its goal. At most once per showing — the

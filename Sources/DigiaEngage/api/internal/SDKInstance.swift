@@ -1114,11 +1114,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
         }
 
-        // Not the shared `dismissForScreenChangeIfNeeded` helper above — a floater
-        // is bound to the *exact* screen it appeared on, not `targetScreenNames`
-        // generally, so it has its own `onScreenChanged` (see that method's kdoc).
+        // Floater and Floater Story orchestrators evaluate screen changes against their
+        // campaign's targetScreenNames allowlist via their own onScreenChanged methods.
         floaterOrchestrator.onScreenChanged(_currentScreen ?? "")
-        // Same contract for the story floater: it belongs to the screen it opened on.
         floaterStoryOrchestrator.onScreenChanged(_currentScreen ?? "")
     }
 
