@@ -311,8 +311,11 @@ final class PresentationCoordinator {
     /// only say "dismissed", which on a presentation that never displayed
     /// collapses to `cancelled`; the real reason is worth more to whoever reads
     /// the drop, and this is the one path that still has it in scope.
-    func drop(_ payload: CEPTriggerPayload, reason: DropReason, detail: String?) {
+    func drop(
+        _ payload: CEPTriggerPayload, reason: DropReason, detail: String?, extras: [String: String]? = nil
+    ) {
         guard let id = payload.presentationId, let entry = live[id] else { return }
+        if let extras { entry.controller.dropExtras = extras }
         entry.controller.settle(.dropped(reason: reason, detail: detail))
     }
 

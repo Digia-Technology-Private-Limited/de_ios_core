@@ -52,14 +52,21 @@ struct CampaignBundle {
         }
         let timeAnchor = TrustedTimeAnchor.capture(serverTimeMs)
         let campaigns = rawCampaigns.enumerated().compactMap { index, json in
-            if let campaign = CampaignModel.fromJson(
-                json,
-                designTokens: catalog,
-                devicePlatform: devicePlatform,
-                timeAnchor: timeAnchor
-            ) { return campaign }
+            let scope = CampaignParseScope(campaignKey: json["campaignKey"] as? String)
+            let parsed = CampaignParseScope.$current.withValue(scope) {
+                CampaignModel.fromJson(
+                    json,
+                    designTokens: catalog,
+                    devicePlatform: devicePlatform,
+                    timeAnchor: timeAnchor
+                )
+            }
+            if let parsed { return parsed }
+            // A nested parser already said why; a second report would count it twice.
+            guard !scope.reported else { return nil }
             log.e(
                 "Campaign skipped — could not be read (index=\(index))",
+                campaign: scope.campaignKey,
                 stage: .parse,
                 reason: TimelineReason.malformedCampaignSkipped
             )
@@ -73,5 +80,36 @@ struct CampaignBundle {
             healthEnabled: healthEnabled,
             healthSessionCap: healthSessionCap
         )
+    }
+}
+
+/// The campaign being parsed, so a nested parser can name it in a report.
+final class CampaignParseScope: @unchecked Sendable {
+    @TaskLocal static var current: CampaignParseScope?
+
+    let campaignKey: String?
+    /// Set once a nested parser has reported why this campaign fails.
+    private(set) var reported = false
+
+    init(campaignKey: String?) {
+        self.campaignKey = campaignKey
+    }
+
+    /// Logs a parse-stage record for the current campaign.
+    static func report(_ message: String, reason: DiagnosticReason, extras: [String: String]? = nil) {
+        current?.reported = true
+        log.e(message, campaign: current?.campaignKey, stage: .parse, reason: reason, extras: extras)
+    }
+
+    /// Reports a schema version newer than `supported`. Returns `true` when it did.
+    @discardableResult
+    static func reportVersion(_ version: Int, supported: Int) -> Bool {
+        guard version > supported else { return false }
+        report(
+            "Campaign skipped — schema version \(version) is newer than \(supported)",
+            reason: TimelineReason.schemaVersionTooNew,
+            extras: ["required": String(version), "supported": String(supported)]
+        )
+        return true
     }
 }

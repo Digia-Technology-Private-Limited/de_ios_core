@@ -36,7 +36,8 @@ final class SurveyOrchestrator: ObservableObject {
             startedAt: Date(),
             variableContext: buildVariableContext(
                 schemas: config.variableSchemas,
-                cepVars: payload.variables
+                cepVars: payload.variables,
+                campaignKey: payload.campaignKey
             )
         )
         return true

@@ -21,7 +21,7 @@ struct ActiveGuideState: Equatable {
     /// `GuideOverlayView` to interpolate `{{ placeholder }}` copy and arithmetic.
     var variableContext: VariableContext {
         let schemas = campaign.guideConfig?.variableSchemas ?? []
-        return buildVariableContext(schemas: schemas, cepVars: payload.variables)
+        return buildVariableContext(schemas: schemas, cepVars: payload.variables, campaignKey: payload.campaignKey)
     }
     var currentStep: GuideStepModel? { steps.indices.contains(stepIndex) ? steps[stepIndex] : nil }
     var hasNext: Bool { stepIndex < steps.count - 1 }

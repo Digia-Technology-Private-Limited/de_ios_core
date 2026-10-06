@@ -356,25 +356,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
         services.submissionReporter.configure(config: config)
         isDebugBuild = DigiaDebugDetection.isDebugBuild()
-        // Sink #4 joins the registry here and nowhere else: it sends through
-        // the pipeline that was just configured, and there was nothing to
-        // send with before this line. It joins *before* the campaign bundle
-        // is fetched on purpose — `fetch_failed_auth` is one of the failures
-        // it exists to report, so waiting for a successful fetch would blind
-        // it to the fetch that failed. The bundle's kill switch and cap land
-        // in `HealthSink.applyBundleConfig` a moment later.
-        HealthSink.shared.activate { [weak self] payload in
-            Task { @MainActor [weak self] in
-                self?.services?.analyticsService?.captureHealth(
-                    campaignKey: payload.campaignKey,
-                    reason: payload.reason,
-                    stage: payload.stage,
-                    detail: payload.detail,
-                    buildMode: payload.buildMode
-                )
-            }
-        }
-
         font = DigiaFont(fontFamily: config.fontFamily)
         CampaignCanvasTheme.shared.update(config.themeMode)
 
@@ -438,17 +419,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     /// Increments on reset so a fetch started before it cannot land after it.
     private var initGeneration = 0
+    /// The fixed `cause` token of the last `invalid_config` drop, so causes dedup apart.
+    private var lastInvalidConfigCause: String?
     private var fetchTask: Task<Void, Never>?
 
     private func applyFetchResult(_ fetched: Result<CampaignBundle, Error>) {
         var campaigns: [CampaignModel] = []
         switch fetched {
         case .success(let bundle):
-            // Applied as soon as the bundle answers — the earliest point this
-            // core can reach, though `fetch()` has already parsed every
-            // campaign (and so already fired this bundle's own parse-stage
-            // health reasons) by the time it returns here; see the platform
-            // note on `CampaignBundle.create`.
+            // Applied before the sink activates, so parse-stage records queued
+            // during `fetch()` obey this bundle's kill switch.
             HealthSink.shared.applyBundleConfig(
                 enabled: bundle.healthEnabled, sessionCap: bundle.healthSessionCap)
             campaigns = bundle.campaigns
@@ -470,9 +450,35 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             // Not ready with an empty store (SP7): every trigger drops
             // `initialization_failed` until the host calls `initialize()` again.
             sdkState = .failed
+            activateHealthSink()
             return
         }
+        activateHealthSink()
         completeInitialization(campaigns)
+    }
+
+    /// Lets queued health records flow, once the bundle's kill switch is known.
+    ///
+    /// Called after `applyBundleConfig`, so records queued during the fetch
+    /// never leave when the server said `sdkHealth: false`. A failed fetch keeps
+    /// the default, so `fetch_failed_auth` still reaches the backend.
+    private func activateHealthSink() {
+        guard let analytics = services?.analyticsService, analytics.isEnabled else {
+            // Nothing can send, so dedup and cap must not be spent.
+            HealthSink.shared.deactivate()
+            return
+        }
+        HealthSink.shared.activate { [weak self] payload in
+            Task { @MainActor [weak self] in
+                self?.services?.analyticsService?.captureHealth(
+                    campaignKey: payload.campaignKey,
+                    reason: payload.reason,
+                    stage: payload.stage,
+                    detail: payload.detail,
+                    buildMode: payload.buildMode
+                )
+            }
+        }
     }
 
     /// Configures the component registry and hands it the anchors buffered
@@ -763,6 +769,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     blockingKind: blocker.kind.wire,
                     blockerIsLiveTest: blocker.isLiveTest
                 )
+            }
+            if reason == .invalidConfig, let cause = lastInvalidConfigCause {
+                controller.dropExtras = ["cause": cause]
             }
             controller.settle(.dropped(reason: reason, detail: detail))
         }
@@ -1458,6 +1467,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             let reason = "\(campaign.campaignType) campaign delivered as a CleverTap custom template"
             lastCampaignDropReason = reason
             log.e("Dropped — \(reason)", campaign: key)
+            lastInvalidConfigCause = "channel_mismatch"
             context.onDropped(DropReason.invalidConfig, message: reason)
             return .dropped(reason: .invalidConfig, detail: reason)
         }
@@ -1505,6 +1515,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 let reason = "inline timer campaign has invalid runtime variables"
                 lastCampaignDropReason = reason
                 log.e("Dropped — \(reason)", campaign: key)
+                lastInvalidConfigCause = "timer_precondition"
                 context.onDropped(DropReason.invalidConfig, message: reason)
                 return .dropped(reason: .invalidConfig, detail: reason)
             }
@@ -1570,6 +1581,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             else {
                 let message = "campaign has no valid Canvas guide content"
                 lastCampaignDropReason = message
+                lastInvalidConfigCause = "no_valid_guide_step"
                 context.onDropped(DropReason.invalidConfig, message: message)
                 log.e("Dropped — \(message)", campaign: key)
                 return .dropped(reason: .invalidConfig, detail: message)
@@ -1583,6 +1595,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             guard guideOrchestrator.start(campaign, payload: payload) else {
                 let message = "guide could not start"
                 lastCampaignDropReason = message
+                lastInvalidConfigCause = "guide_start_failed"
                 context.onDropped(DropReason.invalidConfig, message: message)
                 logNativeGuideStage("route", "result=dropped reason=invalid_config campaign_key=\(key)")
                 return .dropped(reason: .invalidConfig, detail: message)
@@ -1599,7 +1612,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             // CEP trigger variables win over fallbacks (D3′).
             let variableContext = buildVariableContext(
                 schemas: nudgeConfig.variableSchemas,
-                cepVars: payload.variables
+                cepVars: payload.variables,
+                campaignKey: payload.campaignKey
             )
             if let busy = admitToSurface(.nudge, campaignKey: key, context: context) {
                 return busy
@@ -1622,6 +1636,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             guard !cfg.nodes.isEmpty, !cfg.blocks.isEmpty else {
                 let message = "survey has no content"
                 lastCampaignDropReason = message
+                lastInvalidConfigCause = "survey_empty"
                 context.onDropped(DropReason.invalidConfig, message: message)
                 return .dropped(reason: .invalidConfig, detail: message)
             }
@@ -1631,6 +1646,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             guard surveyOrchestrator.start(payload: payload, config: cfg) else {
                 let message = "survey could not start"
                 lastCampaignDropReason = message
+                lastInvalidConfigCause = "survey_start_failed"
                 context.onDropped(DropReason.invalidConfig, message: message)
                 return .dropped(reason: .invalidConfig, detail: message)
             }
@@ -1662,6 +1678,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                             + "(reason=\(floaterStoryOrchestrator.lastStartFailureReason ?? "unknown"))",
                         campaign: key
                     )
+                    // Another floater on screen is a busy surface, not a broken campaign.
+                    if floaterStoryOrchestrator.lastStartFailedBusy {
+                        let message = lastCampaignDropReason ?? "story floater start failed"
+                        context.onDropped(DropReason.surfaceBusy, message: message)
+                        return .dropped(reason: .surfaceBusy, detail: message)
+                    }
+                    lastInvalidConfigCause = "floater_start_failed"
                     context.onDropped(
                         DropReason.invalidConfig,
                         message: floaterStoryOrchestrator.lastStartFailureReason
@@ -1683,6 +1706,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                         + "reason=\(floaterOrchestrator.lastStartFailureReason ?? "unknown"))",
                     campaign: key
                 )
+                if floaterOrchestrator.lastStartFailedBusy {
+                    let message = lastCampaignDropReason ?? "floater start failed"
+                    context.onDropped(DropReason.surfaceBusy, message: message)
+                    return .dropped(reason: .surfaceBusy, detail: message)
+                }
+                lastInvalidConfigCause = "floater_start_failed"
                 context.onDropped(DropReason.invalidConfig, message: "another floater is already on screen")
                 return .dropped(
                     reason: .invalidConfig,
@@ -1742,12 +1771,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // a live test against an empty one resolved every design token to nil,
         // so a campaign styled with tokens arrived on the device with no colours
         // and no type — the one place a marketer looks at it before shipping.
-        guard let campaign = CampaignModel.fromJson(
-            campaignJson,
-            designTokens: currentDesignTokens,
-            devicePlatform: "ios",
-            timeAnchor: currentTimeAnchor
-        ) else {
+        // A live test is a PM's preview, so its parse must not reach fleet health.
+        let parsed = HealthSink.$muted.withValue(true) {
+            CampaignModel.fromJson(
+                campaignJson,
+                designTokens: currentDesignTokens,
+                devicePlatform: "ios",
+                timeAnchor: currentTimeAnchor
+            )
+        }
+        guard let campaign = parsed else {
             reporter.postFailed(
                 invocation.testInvocationId, code: TimelineReason.malformedCampaignSkipped,
                 message: "campaign object could not be parsed into a renderable campaign"
@@ -2992,7 +3025,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             coordinator.drop(
                 payload,
                 reason: Self.dropReason(for: failure),
-                detail: failure?.rawValue ?? "Anchorless Spotlight image could not be loaded"
+                detail: failure?.rawValue ?? "Anchorless Spotlight image could not be loaded",
+                extras: Self.healthExtras(for: failure)
             )
             guideCompletionFired = false
         } else {
@@ -3061,6 +3095,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .invalidTarget, .invalidGeometry: return .anchorNotRegistered
         case .unsupportedLayout: return .invalidConfig
         case nil: return .timeout
+        }
+    }
+
+    /// Health extras for an anchorless drop: `timeout` needs its surface, `invalid_config` its cause.
+    private static func healthExtras(for failure: AnchorlessFailure?) -> [String: String]? {
+        switch failure {
+        case .unsupportedLayout: return ["cause": "anchorless_layout"]
+        case nil: return ["surface_kind": "guide"]
+        default: return nil
         }
     }
 

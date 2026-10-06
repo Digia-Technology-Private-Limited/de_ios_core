@@ -27,7 +27,7 @@ struct ActiveFloaterStoryState: Equatable {
     /// Dashboard defaults layered with the CEP trigger's values, resolved once at start.
     /// Every `{{ token }}` in the window and in the stories reads through this.
     var variableContext: VariableContext {
-        buildVariableContext(schemas: config.variableSchemas, cepVars: payload.variables)
+        buildVariableContext(schemas: config.variableSchemas, cepVars: payload.variables, campaignKey: payload.campaignKey)
     }
 }
 
@@ -65,6 +65,8 @@ final class FloaterStoryOrchestrator: ObservableObject {
     private var autoDismissTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
     private(set) var lastStartFailureReason: String?
+    /// `true` when the last start failed only because a floater already shows.
+    private(set) var lastStartFailedBusy = false
 
     var now: () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
 
@@ -97,6 +99,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
     @discardableResult
     func start(_ campaign: CampaignModel, payload: CEPTriggerPayload, screenName: String?) -> Bool {
         lastStartFailureReason = nil
+        lastStartFailedBusy = false
         guard campaign.campaignType == "floater", campaign.floaterStoryConfig != nil else {
             lastStartFailureReason = "campaign is not a parsed story floater"
             return false
@@ -107,6 +110,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
         if closing { finishDismiss() }
         guard state == nil else {
             lastStartFailureReason = "another story floater is already on screen"
+            lastStartFailedBusy = true
             return false
         }
 

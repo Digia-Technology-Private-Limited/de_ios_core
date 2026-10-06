@@ -37,10 +37,13 @@ struct TimelineWireStringsTests {
         #expect(TimelineReason.unknownDesignToken.wire == "unknown_design_token")
         #expect(TimelineReason.designTokensUnreadable.wire == "design_tokens_unreadable")
         #expect(TimelineReason.campaignUnsupported.wire == "campaign_unsupported")
+        #expect(TimelineReason.schemaVersionTooNew.wire == "schema_version_too_new")
+        #expect(TimelineReason.unsupportedWidgetType.wire == "unsupported_widget_type")
+        #expect(TimelineReason.missingVariable.wire == "missing_variable")
         #expect(TimelineReason.cepTriggerReceived.wire == "cep_trigger_received")
         #expect(TimelineReason.displayed.wire == "displayed")
         #expect(TimelineReason.clicked.wire == "clicked")
-        #expect(TimelineReason.allCases.count == 15)
+        #expect(TimelineReason.allCases.count == 18)
     }
 
     /// The delivery enums *are* the timeline's reasons for a delivery — no
@@ -96,8 +99,8 @@ struct TimelineWireStringsTests {
         #expect(HealthReasons.detailKeys["unsupported_widget_type"] == ["widget_type"])
         #expect(HealthReasons.detailKeys["campaign_unsupported"] == ["precondition", "type"])
         #expect(HealthReasons.detailKeys["fetch_failed_auth"] == ["http_status"])
-        #expect(HealthReasons.detailKeys["invalid_config"] == [])
-        #expect(HealthReasons.detailKeys["missing_variable"] == [])
+        #expect(HealthReasons.detailKeys["invalid_config"] == ["cause"])
+        #expect(HealthReasons.detailKeys["missing_variable"] == ["variable"])
         #expect(HealthReasons.detailKeys["not_ready"] == [])
         #expect(HealthReasons.detailKeys["initialization_failed"] == [])
         #expect(HealthReasons.detailKeys["surface_busy"] == ["blocking_campaign_key", "blocking_kind"])
@@ -114,6 +117,8 @@ struct TimelineWireStringsTests {
         #expect(HealthReasons.dedupExtraKey == [
             "unknown_design_token": "token",
             "missing_variable": "variable",
+            "unsupported_widget_type": "widget_type",
+            "invalid_config": "cause",
             "surface_busy": "blocking_campaign_key",
         ])
         #expect(HealthReasons.liveTestBlockerKey == "blocking_live_test")

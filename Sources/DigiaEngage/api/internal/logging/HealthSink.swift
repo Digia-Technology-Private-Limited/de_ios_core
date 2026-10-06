@@ -101,6 +101,11 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
     /// reporter (SP10). Bounded by the session cap: every queued event counts
     /// toward `sent`.
     private var queued: [HealthEventPayload] = []
+    /// Set by the kill switch. Nothing registers the sink again this session.
+    private var killed = false
+
+    /// True while a live-test campaign parses: a PM's test is not fleet health.
+    @TaskLocal static var muted = false
 
     /// Whether the sink is currently in ``DigiaLogger``'s registry.
     var isRegistered: Bool {
@@ -125,7 +130,7 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
     func beginPending() {
         var shouldRegister = false
         lock.lock()
-        if !registered {
+        if !registered, !killed {
             registered = true
             buildMode = DigiaDebugDetection.isDebugBuild() ? "debug" : "release"
             shouldRegister = true
@@ -139,15 +144,17 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
     /// Registers the sink (if ``beginPending()`` did not already) and points it
     /// at `report`, then sends anything queued in pending mode, once, in order.
     ///
-    /// Called once init has an analytics pipeline configured, and deliberately
-    /// **before** the campaign bundle is fetched: `fetch_failed_auth` is one of
-    /// the four motivating failures, and a sink that waited for a successful
-    /// fetch could never report the fetch that failed. Until the bundle
-    /// answers, the defaults are in force — switch on, cap
-    /// ``defaultSessionCap``.
+    /// Called once the fetch has answered, after ``applyBundleConfig(enabled:sessionCap:)``,
+    /// so nothing queued leaves the device before the kill switch is read. A
+    /// failed fetch still activates: `fetch_failed_auth` waits in the queue.
+    /// After the kill switch this is a no-op.
     func activate(_ report: @escaping HealthReporter) {
         var shouldRegister = false
         lock.lock()
+        guard !killed else {
+            lock.unlock()
+            return
+        }
         self.report = report
         if !registered {
             registered = true
@@ -175,14 +182,18 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         var shouldDeactivate = false
         lock.lock()
         if let sessionCap, sessionCap >= 0 { cap = sessionCap }
-        if enabled == false { shouldDeactivate = true }
+        if enabled == false {
+            killed = true
+            shouldDeactivate = true
+        }
         lock.unlock()
         if shouldDeactivate { deactivate() }
     }
 
-    /// Unregisters the sink for the rest of the session.
+    /// Unregisters the sink and discards anything queued.
     func deactivate() {
         lock.lock()
+        queued.removeAll()
         guard registered else {
             lock.unlock()
             return
@@ -202,6 +213,7 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         cap = Self.defaultSessionCap
         report = nil
         queued.removeAll()
+        killed = false
         buildMode = "release"
         lock.unlock()
     }
@@ -213,7 +225,7 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         guard let reason = record.reason else { return false }
         let wire = reason.wire
         guard HealthReasons.reasons.contains(wire) else { return false }
-        guard record.extras[HealthReasons.liveTestBlockerKey] != "true" else { return false }
+        guard record.extras[HealthReasons.liveTestBlockerKey] != "true", !Self.muted else { return false }
         // A surface_busy with no blocker can't say who blocked it (§2.5), and a
         // same-campaign redelivery carries none on purpose (D4). As Flutter and
         // Android.
@@ -239,7 +251,11 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         let detail = projectedDetail(record, wire)
 
         lock.lock()
-        seen.insert(dedupKey(record, wire))
+        // Checked again under the lock: two threads can both pass `accepts`.
+        guard sent < cap, seen.insert(dedupKey(record, wire)).inserted else {
+            lock.unlock()
+            return
+        }
         sent += 1
         let payload = HealthEventPayload(
             campaignKey: record.campaignKey,
