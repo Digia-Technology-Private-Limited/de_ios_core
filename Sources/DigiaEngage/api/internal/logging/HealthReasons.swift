@@ -55,7 +55,6 @@ enum HealthReasons {
         // A CEP plugin's pending buffer (#71): held too long, or pushed out when full.
         "pending_expired",
         "superseded",
-        // Phase 2 (de_workspace#85).
         "unsupported_action_type",
         "action_handler_missing",
         "fetch_failed_response",

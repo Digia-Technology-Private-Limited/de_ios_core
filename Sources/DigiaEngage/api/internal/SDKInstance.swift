@@ -452,13 +452,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             return
         }
         activateHealthSink()
-        if activePlugin == nil, campaigns.contains(where: { !Self.isInlineKind($0) }) {
-            log.w(
-                "No CEP plugin registered — triggered campaigns cannot show",
-                stage: .session,
-                reason: TimelineReason.pluginNotRegistered
-            )
-        }
+        needsPlugin = campaigns.contains(where: { !Self.isInlineKind($0) })
         completeInitialization(campaigns)
     }
 
@@ -863,6 +857,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
+    /// The bundle has CEP-triggered campaigns that no plugin has yet been checked for.
+    private var needsPlugin = false
+
     func setCurrentScreen(_ name: String) {
         screenUpdateRevision += 1
         let revision = screenUpdateRevision
@@ -880,6 +877,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         if screenUpdateRevision == revision {
             activePlugin?.onScreenChanged(screenName)
+        }
+        // Checked at a screen change, not at fetch: hosts may register after `initialize()`.
+        if needsPlugin, activePlugin == nil, sdkState == .ready {
+            needsPlugin = false
+            log.w(
+                "No CEP plugin registered — triggered campaigns cannot show",
+                stage: .session,
+                reason: TimelineReason.pluginNotRegistered
+            )
         }
     }
 
