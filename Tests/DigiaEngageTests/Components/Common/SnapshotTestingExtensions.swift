@@ -200,6 +200,11 @@ public func purgeHierarchyPointers(_ string: String) -> String {
         options: .regularExpression
     )
     result = result.replacingOccurrences(
+        of: "_TtGC7SwiftUI14_UIHostingView[^;>]*DigiaSlot[^;>]*",
+        with: "_UIHostingView<DigiaSlot>",
+        options: .regularExpression
+    )
+    result = result.replacingOccurrences(
         of: "_TtCC7SwiftUI17HostingScrollView17PlatformContainer",
         with: "HostingScrollView.PlatformContainer",
         options: .regularExpression

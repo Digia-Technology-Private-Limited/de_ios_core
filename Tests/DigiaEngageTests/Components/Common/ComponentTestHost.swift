@@ -2,6 +2,7 @@ import Foundation
 import SnapshotTesting
 import SwiftUI
 import UIKit
+
 @testable import DigiaEngage
 
 /// Reusable host view controller factory and mounting utilities for component and device-level snapshot testing.
@@ -163,7 +164,9 @@ public enum ComponentTestHost {
         }
 
         let window: UIWindow
-        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
+        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+            .first
+        {
             window = UIWindow(windowScene: scene)
         } else {
             window = UIWindow(frame: CGRect(origin: .zero, size: size))
@@ -208,7 +211,8 @@ public enum ComponentTestHost {
     /// Dismisses the nudge and tears the window down.
     @MainActor
     public static func cleanupOverlayWindow(_ viewOrWindow: AnyObject?) {
-        let targetWindow: UIWindow? = (viewOrWindow as? UIWindow) ?? (viewOrWindow as? UIView)?.window
+        let targetWindow: UIWindow? =
+            (viewOrWindow as? UIWindow) ?? (viewOrWindow as? UIView)?.window
         SDKInstance.shared.controller.forceNudgeDismiss()
         drainRunLoop(for: 0.1)
         targetWindow?.rootViewController?.dismiss(animated: false)
@@ -257,18 +261,73 @@ public enum ComponentTestHost {
         makeRealOverlayWindow(nudgeConfig: nudgeConfig, device: device, style: style)
     }
 
+    /// Creates an isolated host window rendering an inline Canvas via DigiaSlot, exactly as in production.
+    @MainActor
+    public static func makeCanvasSlotHost(
+        config: InlineCanvasConfig,
+        slotWidth: CGFloat? = 360
+    ) -> UIView {
+        let payload = CEPTriggerPayload(
+            cepCampaignId: "test_inline_canvas_\(config.slotKey)",
+            campaignKey: "test_inline_canvas_key",
+            cepMetadata: [:]
+        )
+        SDKInstance.shared.inlineController.setCampaign(config.slotKey, payload: payload)
+        SDKInstance.shared.inlineController.setCanvasConfig(config.slotKey, config: config)
+
+        let slotView = DigiaSlot(config.slotKey)
+        let hostingController = UIHostingController(rootView: slotView)
+        if #available(iOS 16.4, *) {
+            hostingController.safeAreaRegions = []
+        }
+        hostingController.view.backgroundColor = UIColor.clear
+
+        let fittingWidth =
+            slotWidth ?? (CGFloat(config.designWidth) + CGFloat(config.margin.horizontal))
+        let fittingSize = hostingController.sizeThatFits(
+            in: CGSize(width: fittingWidth, height: .greatestFiniteMagnitude))
+        let frame = CGRect(origin: .zero, size: fittingSize)
+        hostingController.view.frame = frame
+
+        let window: UIWindow
+        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+            .first
+        {
+            window = UIWindow(windowScene: scene)
+        } else {
+            window = UIWindow(frame: frame)
+        }
+        window.frame = frame
+        window.rootViewController = hostingController
+        window.makeKeyAndVisible()
+        hostingController.view.layoutIfNeeded()
+
+        drainRunLoop(for: 0.2)
+        window.layoutIfNeeded()
+
+        return hostingController.view
+    }
+
+    /// Cleans up a DigiaSlot campaign and tears down the window.
+    @MainActor
+    public static func cleanupCanvasSlotHost(_ viewOrWindow: AnyObject?, slotKey: String) {
+        SDKInstance.shared.inlineController.dismissCampaign(slotKey)
+        cleanupOverlayWindow(viewOrWindow)
+    }
+
     // MARK: - Private Mock UI Builders
 
     private static func makeHomeIndicator(hostWidth: CGFloat, hostHeight: CGFloat) -> UIView {
         let indicatorWidth: CGFloat = 134
         let indicatorHeight: CGFloat = 5
         let indicatorBottomMargin: CGFloat = 8
-        let indicatorView = UIView(frame: CGRect(
-            x: (hostWidth - indicatorWidth) / 2,
-            y: hostHeight - indicatorHeight - indicatorBottomMargin,
-            width: indicatorWidth,
-            height: indicatorHeight
-        ))
+        let indicatorView = UIView(
+            frame: CGRect(
+                x: (hostWidth - indicatorWidth) / 2,
+                y: hostHeight - indicatorHeight - indicatorBottomMargin,
+                width: indicatorWidth,
+                height: indicatorHeight
+            ))
         indicatorView.backgroundColor = UIColor.label.withAlphaComponent(0.85)
         indicatorView.layer.cornerRadius = indicatorHeight / 2
         indicatorView.isUserInteractionEnabled = false
@@ -292,20 +351,22 @@ public enum ComponentTestHost {
         let navBar = UIView(frame: CGRect(x: 0, y: 0, width: width, height: totalHeaderHeight))
         navBar.backgroundColor = .white
 
-        let titleLabel = UILabel(frame: CGRect(x: 16, y: safeAreaTop + 8, width: width - 32, height: 28))
+        let titleLabel = UILabel(
+            frame: CGRect(x: 16, y: safeAreaTop + 8, width: width - 32, height: 28))
         titleLabel.text = title
         titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
         titleLabel.textColor = .black
         navBar.addSubview(titleLabel)
 
-        let navDivider = UIView(frame: CGRect(x: 0, y: totalHeaderHeight - 1, width: width, height: 1))
+        let navDivider = UIView(
+            frame: CGRect(x: 0, y: totalHeaderHeight - 1, width: width, height: 1))
         navDivider.backgroundColor = UIColor(white: 0.88, alpha: 1.0)
         navBar.addSubview(navDivider)
         container.addSubview(navBar)
 
         // 2. Mock Content Cards (Feed rows with white background)
         var cardY = totalHeaderHeight + 16
-        for i in 0..<3 {
+        for _ in 0..<3 {
             let cardHeight: CGFloat = 80
             let card = UIView(frame: CGRect(x: 16, y: cardY, width: width - 32, height: cardHeight))
             card.backgroundColor = .white
@@ -318,7 +379,8 @@ public enum ComponentTestHost {
             placeholderBar.layer.cornerRadius = 4
             card.addSubview(placeholderBar)
 
-            let subtitleBar = UIView(frame: CGRect(x: 16, y: 44, width: (width - 96) * 0.6, height: 10))
+            let subtitleBar = UIView(
+                frame: CGRect(x: 16, y: 44, width: (width - 96) * 0.6, height: 10))
             subtitleBar.backgroundColor = UIColor(white: 0.95, alpha: 1.0)
             subtitleBar.layer.cornerRadius = 3
             card.addSubview(subtitleBar)
@@ -330,7 +392,8 @@ public enum ComponentTestHost {
         // 3. Optional Bottom Tab Bar
         if showBottomBar {
             let barHeight: CGFloat = 49 + safeAreaBottom
-            let bottomBar = UIView(frame: CGRect(x: 0, y: height - barHeight, width: width, height: barHeight))
+            let bottomBar = UIView(
+                frame: CGRect(x: 0, y: height - barHeight, width: width, height: barHeight))
             bottomBar.backgroundColor = .white
 
             let barDivider = UIView(frame: CGRect(x: 0, y: 0, width: width, height: 1))
@@ -340,7 +403,8 @@ public enum ComponentTestHost {
             let tabTitles = ["Home", "Explore", "Profile"]
             let tabWidth = width / CGFloat(tabTitles.count)
             for (idx, tabTitle) in tabTitles.enumerated() {
-                let tabLabel = UILabel(frame: CGRect(x: CGFloat(idx) * tabWidth, y: 12, width: tabWidth, height: 18))
+                let tabLabel = UILabel(
+                    frame: CGRect(x: CGFloat(idx) * tabWidth, y: 12, width: tabWidth, height: 18))
                 tabLabel.text = tabTitle
                 tabLabel.textAlignment = .center
                 tabLabel.font = .systemFont(ofSize: 11, weight: idx == 0 ? .semibold : .regular)
