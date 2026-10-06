@@ -1450,6 +1450,17 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         context: RoutingContext
     ) -> RoutingVerdict {
         let key = campaign.campaignKey
+        // CleverTap-specific: inline and floater come only by Native Display, never by a
+        // `DigiaTemplate` in-app.
+        if campaign.campaignType == "inline" || campaign.campaignType == "floater",
+            payload.cepMetadata["templateName"] == "DigiaTemplate"
+        {
+            let reason = "\(campaign.campaignType) campaign delivered as a CleverTap custom template"
+            lastCampaignDropReason = reason
+            log.e("Dropped — \(reason)", campaign: key)
+            context.onDropped(DropReason.invalidConfig, message: reason)
+            return .dropped(reason: .invalidConfig, detail: reason)
+        }
         if !campaign.targetScreenNames.isEmpty
             && !campaign.targetScreenNames.contains(_currentScreen ?? "")
         {
