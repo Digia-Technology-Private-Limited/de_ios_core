@@ -214,6 +214,39 @@ extension DigiaEngageTests {
             #expect(sdk.controller.activeNudge?.payload.cepCampaignId == "cep-3")
         }
 
+        // MARK: - CleverTap custom template
+
+        private func template(_ campaignKey: String, _ cepCampaignId: String) -> PresentationRecorder {
+            PresentationRecorder(
+                sdk.deliver(
+                    CEPTriggerPayload(
+                        cepCampaignId: cepCampaignId, campaignKey: campaignKey,
+                        cepMetadata: ["templateName": "DigiaTemplate"])
+                )
+            )
+        }
+
+        @Test("a floater or inline sent as a CleverTap custom template → invalid_config")
+        func nonBlockingByTemplate() throws {
+            try start([floaterJson("pip"), inlineJson("i")])
+            let floater = template("pip", "cep-f")
+            let inline = template("i", "cep-i")
+
+            #expect(floater.dropReason == .invalidConfig)
+            #expect(inline.dropReason == .invalidConfig)
+            #expect(sdk.floaterOrchestrator.state == nil)
+            #expect(sdk.inlineController.getCampaign("home_hero") == nil)
+        }
+
+        @Test("a nudge sent as a CleverTap custom template routes as before")
+        func nudgeByTemplate() throws {
+            try start([nudgeJson("n")])
+            let nudge = template("n", "cep-n")
+
+            #expect(!nudge.isSettled)
+            #expect(sdk.controller.activeNudge?.payload.campaignKey == "n")
+        }
+
         // MARK: - Live test
 
         @Test("test over a test nudge → old dismissed and its row superseded, new shown")
