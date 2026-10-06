@@ -134,33 +134,27 @@ DigiaEngageTests/
 
 ---
 
-## 5. Running Tests with Xcode Test Plans
+## 5. Running Tests by Tag
 
-We use native **Xcode Test Plans** (`.xctestplan`) to categorize and run test suites without any `if/else` scripting. Test plans live in `ios/core/TestPlans/`:
-
-- **`Smoke.xctestplan`**: Curated P0 critical-path component tests (~0.2s).
-- **`Nudge.xctestplan`**: All Nudge UI, layout, and visual golden tests (~0.5s).
-- **`Regression.xctestplan`**: Full SDK test suite (450+ tests covering analytics, networking, session identity, and components).
-
-### Running Native Xcode Commands (No scripts needed)
-```bash
-# Run only Nudges
-xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -testPlan Nudge
-
-# Run Smoke gate
-xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -testPlan Smoke
-
-# Run full Regression
-xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -testPlan Regression
-```
+Every Swift Testing suite carries tags (declared in [`TestingTags.swift`](TestingTags.swift)): one **kind** (`unit`, `contract`, `component`, `golden`, `integration`), optional **gate** tags (`smoke`, `slow`), and one or more **areas** (`nudge`, `session`, `analytics`, ...). `xcodebuild` selects by tag natively, so no `.xctestplan` is needed.
 
 ### Using the Convenience Wrapper (`./run-tests.sh`)
-You can also use the thin wrapper that auto-detects the booted iOS simulator:
+The wrapper pins the iPhone 17 Pro Max simulator, validates the tag against `TestingTags.swift`, and fails if a filter matched no tests (xcodebuild alone reports success on zero tests):
 ```bash
-./run-tests.sh nudge
-./run-tests.sh smoke
-./run-tests.sh regression
+./run-tests.sh nudge      # one tag
+./run-tests.sh smoke      # default
+./run-tests.sh quick      # everything except `slow`
+./run-tests.sh all        # everything
 ```
+
+### Native Xcode commands
+```bash
+xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -only-testing-tags nudge
+xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -skip-testing-tags slow
+# One suite, without tags:
+xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -only-testing:DigiaEngageTests/NudgeDialogComponentTests
+```
+`XCTestCase` classes cannot carry tags; they run only under `all`/`quick` or `-only-testing:`.
 
 ---
 
@@ -169,20 +163,14 @@ You can also use the thin wrapper that auto-detects the booted iOS simulator:
 When visual designs intentionally change, update the golden baselines using the `RECORD_SNAPSHOTS` environment variable:
 
 ```bash
-# 1. Re-record goldens for the target suite:
-RECORD_SNAPSHOTS=true xcodebuild test \
-  -scheme DigiaEngage \
-  -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" \
-  -only-testing:DigiaEngageTests/NudgeDialogComponentTests
+# 1. Re-record goldens for a tag (the run always fails in record mode, by design):
+./run-tests.sh nudge record        # or: RECORD_SNAPSHOTS=true ./run-tests.sh nudge
 
 # 2. Verify git diff:
 git diff Tests/DigiaEngageTests/Components/
 
-# 3. Perform a fresh verification run (must pass without RECORD_SNAPSHOTS):
-xcodebuild test \
-  -scheme DigiaEngage \
-  -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" \
-  -only-testing:DigiaEngageTests/NudgeDialogComponentTests
+# 3. Perform a fresh verification run (must pass without record mode):
+./run-tests.sh nudge
 ```
 
 ---
