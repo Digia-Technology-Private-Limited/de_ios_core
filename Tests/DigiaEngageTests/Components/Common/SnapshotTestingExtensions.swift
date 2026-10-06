@@ -13,23 +13,6 @@ extension ViewImageConfig {
     )
 }
 
-// MARK: - Snapshotting Extensions
-
-extension Snapshotting where Value == UIView, Format == String {
-    /// Textual view hierarchy snapshotting that strips runtime memory pointers (e.g. `: 0x600001730140`)
-    /// and compiler-generated private symbol hashes (e.g. `P10$10ea6f94014CanvasRichText`) to guarantee
-    /// deterministic cross-run and cross-build diffs.
-    public static var sanitizedHierarchy: Snapshotting {
-        Snapshotting<String, String>.lines.pullback { view in
-            let raw = (view.perform(Selector(("recursiveDescription")))?
-                .takeUnretainedValue() as? String) ?? ""
-            return raw
-                .replacingOccurrences(of: #": 0x[0-9a-fA-F]+"#, with: "", options: .regularExpression)
-                .replacingOccurrences(of: #"\$[0-9a-fA-F]+"#, with: "$HASH", options: .regularExpression)
-        }
-    }
-}
-
 /// Helper to check if golden recording is enabled via environment variable
 public var isSnapshotRecordingEnabled: Bool {
     ProcessInfo.processInfo.environment["RECORD_SNAPSHOTS"] == "true"
@@ -54,9 +37,24 @@ public func assertVisualGolden(
     let cleanTestName = rawTestName.replacingOccurrences(of: "()", with: "")
     let recordMode = isSnapshotRecordingEnabled ? SnapshotTestingConfiguration.Record.all : nil
 
+    let imageSnapshotting = Snapshotting<UIView, UIImage>.image(
+        precision: precision,
+        perceptualPrecision: perceptualPrecision
+    )
+    var renderedImage: UIImage?
+    let capturingSnapshotting = Snapshotting<UIView, UIImage>(
+        pathExtension: imageSnapshotting.pathExtension,
+        diffing: imageSnapshotting.diffing
+    ) { view in
+        imageSnapshotting.snapshot(view).map { image in
+            renderedImage = image
+            return image
+        }
+    }
+
     let failure = verifySnapshot(
         of: view,
-        as: .image(precision: precision, perceptualPrecision: perceptualPrecision),
+        as: capturingSnapshotting,
         named: name,
         record: recordMode,
         fileID: fileID,
@@ -64,6 +62,14 @@ public func assertVisualGolden(
         testName: cleanTestName,
         line: line
     )
+
+    if failure == nil, let renderedImage {
+        recordGoldenAttachments(
+            actual: renderedImage,
+            testName: cleanTestName,
+            sourceFilePath: String(describing: filePath)
+        )
+    }
 
     if let failureMessage = failure {
         Issue.record("\(failureMessage)")
@@ -98,7 +104,58 @@ public func assertVisualGolden(
         line: line
     )
 
+    if failure == nil {
+        recordGoldenAttachments(
+            actual: image,
+            testName: cleanTestName,
+            sourceFilePath: String(describing: filePath)
+        )
+    }
+
     if let failureMessage = failure {
         Issue.record("\(failureMessage)")
+    }
+}
+
+@MainActor
+private func recordGoldenAttachments(
+    actual: UIImage,
+    testName: String,
+    sourceFilePath: String
+) {
+    Attachment.record(actual, named: "\(testName)-actual", as: .png)
+
+    let sourceURL = URL(fileURLWithPath: sourceFilePath)
+    let snapshotDirectory = sourceURL
+        .deletingLastPathComponent()
+        .appendingPathComponent("__Snapshots__", isDirectory: true)
+        .appendingPathComponent(sourceURL.deletingPathExtension().lastPathComponent, isDirectory: true)
+
+    guard let snapshotURLs = try? FileManager.default.contentsOfDirectory(
+        at: snapshotDirectory,
+        includingPropertiesForKeys: nil
+    ),
+        let referenceURL = snapshotURLs.first(where: {
+            $0.pathExtension == "png" && $0.lastPathComponent.hasPrefix("\(testName).")
+        }),
+        let referenceData = try? Data(contentsOf: referenceURL)
+    else {
+        return
+    }
+
+    let exactImageDiff = Diffing<UIImage>.image
+    let reference = exactImageDiff.fromData(referenceData)
+    Attachment.record(reference, named: "\(testName)-reference", as: .png)
+
+    guard let (_, diffAttachments) = exactImageDiff.diffV2(reference, actual) else {
+        return
+    }
+    for diffAttachment in diffAttachments {
+        guard case .data(let data, let attachmentName) = diffAttachment,
+              attachmentName == "difference.png"
+        else {
+            continue
+        }
+        Attachment.record(data, named: "\(testName)-difference.png")
     }
 }

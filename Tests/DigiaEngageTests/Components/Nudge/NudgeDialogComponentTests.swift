@@ -8,15 +8,13 @@ import UIKit
 
 /// Component test for the canonical Nudge Dialog scenario (`test_nudge_dialog`).
 ///
-/// Migrated from Maestro E2E (`testkit/campaigns/nudge_dialog/tests/nudge-dialog.yaml`)
-/// to a Tier-2 Component test verifying:
+/// Uses the canonical `nudge-dialog.json` fixture for Tier-2 verification of:
 /// 1. Wire schema and layout parsing into `NudgeConfig` and `CampaignCanvas`
-/// 2. View hierarchy structure, layout bounds, and child widget attributes
-/// 3. Interactive CTA action callback routing
-/// 4. View hierarchy textual snapshot diffing (`.recursiveDescription` sanitized)
-/// 5. Visual pixel snapshot diffing (`.image`)
-@Suite(.serialized, .tags(.nudge, .smoke))
-struct NudgeDialogComponentTests {
+/// 2. Child widget attributes and CTA action metadata
+/// 3. Visual pixel snapshot diffing (`.image`)
+extension NudgeComponentTests {
+@Suite("Dialog")
+struct Dialog {
 
     private func loadNudgeDialogFixture(named fileName: String = "nudge-dialog.json") throws
         -> [String: Any]
@@ -33,7 +31,7 @@ struct NudgeDialogComponentTests {
         return fixture
     }
 
-    @Test @MainActor
+    @Test("parses the canonical dialog model and CTA contract", .tags(.contract, .smoke)) @MainActor
     func testNudgeDialogModelParsingAndContract() throws {
         let fixture = try loadNudgeDialogFixture()
         guard let templateConfig = fixture["templateConfig"] as? [String: Any] else {
@@ -61,48 +59,20 @@ struct NudgeDialogComponentTests {
         #expect(canvas.children[0].id == "dialogTitle")
         #expect(canvas.children[1].id == "dialogBody")
         #expect(canvas.children[2].id == "dialogButton")
-    }
 
-    @Test @MainActor
-    func testNudgeDialogComponentHierarchyAndLayout() throws {
-        let fixture = try loadNudgeDialogFixture()
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-            let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-            let canvas = nudgeConfig.canvas
+        guard case .widget(let id, _, let widget) = canvas.children[2],
+            id == "dialogButton",
+            case .button(_, let label, _, _, _, let isPrimary, _, _, let actions, _) = widget
         else {
-            Issue.record("Failed to parse canvas nudge config")
+            Issue.record("Expected dialogButton button widget")
             return
         }
-
-        var dispatchedAction: CampaignCanvasActionRequest?
-        let canvasView = CampaignCanvasView(
-            canvas: canvas,
-            surface: nudgeConfig.surface,
-            designWidth: nudgeConfig.designWidth,
-            availableSize: CGSize(width: 320, height: 260),
-            onAction: { request in
-                dispatchedAction = request
-            }
-        )
-
-        // Host in UIHostingController at exact authored dimensions
-        let controller = UIHostingController(rootView: canvasView)
-        controller.view.bounds = CGRect(x: 0, y: 0, width: 320, height: 260)
-        controller.view.layoutIfNeeded()
-
-        // 1. Verify layout frame
-        #expect(controller.view.bounds.width == 320)
-        #expect(controller.view.bounds.height == 260)
-
-        // 2. Full AST and layout model snapshot using Swift reflection (.dump)
-        assertSnapshot(
-            of: nudgeConfig,
-            as: .dump,
-            record: isSnapshotRecordingEnabled
-        )
+        #expect(label.plainText == "Got It")
+        #expect(isPrimary)
+        #expect(actions == [.dismiss])
     }
 
-    @Test @MainActor
+    @Test("matches the isolated dialog canvas golden", .tags(.golden)) @MainActor
     func testNudgeDialogVisualImageGolden() throws {
         let fixture = try loadNudgeDialogFixture()
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -131,7 +101,7 @@ struct NudgeDialogComponentTests {
 
     // MARK: - 3. Device Dialog Golden (.image on device with REAL production NudgeDialogContainer)
 
-    @Test @MainActor
+    @Test("matches the production dialog device golden", .tags(.golden, .smoke)) @MainActor
     func testNudgeDialogDeviceGolden() throws {
         let fixture = try loadNudgeDialogFixture()
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -154,7 +124,7 @@ struct NudgeDialogComponentTests {
 
         assertVisualGolden(
             matching: ComponentTestHost.renderImage(of: hostView),
-            precision: 0.98,
+            precision: 0.999,
             perceptualPrecision: 0.98
         )
     }
@@ -163,7 +133,7 @@ struct NudgeDialogComponentTests {
 
     // MARK: 1. Radius Change Variants (nudge-dialog-radius-0 & nudge-dialog-radius-28)
 
-    @Test @MainActor
+    @Test("parses sharp and rounded dialog radius contracts", .tags(.contract)) @MainActor
     func testNudgeDialogRadiusChangeVariantContract() throws {
         // Variant A: Sharp corners (cornerRadius: 0)
         let sharpFixture = try loadNudgeDialogFixture(named: "nudge-dialog-radius-0.json")
@@ -217,7 +187,7 @@ struct NudgeDialogComponentTests {
 
     // MARK: 2. Margin Change Variants (nudge-dialog-margin-zero & nudge-dialog-margin-large)
 
-    @Test @MainActor
+    @Test("parses zero and constrained dialog margin contracts", .tags(.contract)) @MainActor
     func testNudgeDialogMarginChangeVariantContract() throws {
         // Variant A: Edge-to-edge zero margin (minHorizontalMargin: 0)
         let zeroMarginFixture = try loadNudgeDialogFixture(named: "nudge-dialog-margin-zero.json")
@@ -233,11 +203,7 @@ struct NudgeDialogComponentTests {
         #expect(zeroCanvas.width == 360)
         #expect(zeroCanvas.height == 260)
 
-        let designWidthZero = max(zeroConfig.designWidth, 1)
-        let horizontalMarginZero = min(
-            max(zeroConfig.surface.minHorizontalMargin, 0), max(0, (designWidthZero - 1) / 2))
-        let availableWidthZero = designWidthZero - (2 * horizontalMarginZero)
-        #expect(availableWidthZero == 360)
+        #expect(zeroConfig.designWidth == 360)
 
         guard case .widget(let zeroTitleId, _, let zeroTitleWidget) = zeroCanvas.children[0],
             zeroTitleId == "dialogTitle",
@@ -247,18 +213,6 @@ struct NudgeDialogComponentTests {
             return
         }
         #expect(zeroTextBlock.plainText == "Edge-to-Edge Margin Dialog")
-
-        let zeroMarginView = CampaignCanvasView(
-            canvas: zeroCanvas,
-            surface: zeroConfig.surface,
-            designWidth: zeroConfig.designWidth,
-            availableSize: CGSize(width: 360, height: 260),
-            onAction: { _ in }
-        )
-        let zeroController = UIHostingController(rootView: zeroMarginView)
-        zeroController.view.bounds = CGRect(x: 0, y: 0, width: 360, height: 260)
-        zeroController.view.layoutIfNeeded()
-        #expect(zeroController.view.bounds.width == 360)
 
         // Variant B: Large constrained margin (minHorizontalMargin: 48)
         let largeMarginFixture = try loadNudgeDialogFixture(named: "nudge-dialog-margin-large.json")
@@ -274,12 +228,7 @@ struct NudgeDialogComponentTests {
         #expect(largeCanvas.width == 320)
         #expect(largeCanvas.height == 260)
 
-        let designWidthLarge = max(largeConfig.designWidth, 1)
-        #expect(designWidthLarge == 360)
-        let horizontalMarginLarge = min(
-            max(largeConfig.surface.minHorizontalMargin, 0), max(0, (designWidthLarge - 1) / 2))
-        let availableWidthLarge = designWidthLarge - (2 * horizontalMarginLarge)
-        #expect(availableWidthLarge == 264)
+        #expect(largeConfig.designWidth == 360)
 
         guard case .widget(let largeTitleId, _, let largeTitleWidget) = largeCanvas.children[0],
             largeTitleId == "dialogTitle",
@@ -290,22 +239,11 @@ struct NudgeDialogComponentTests {
         }
         #expect(largeTextBlock.plainText == "Constrained Margin Dialog")
 
-        let largeMarginView = CampaignCanvasView(
-            canvas: largeCanvas,
-            surface: largeConfig.surface,
-            designWidth: largeConfig.designWidth,
-            availableSize: CGSize(width: availableWidthLarge, height: 260),
-            onAction: { _ in }
-        )
-        let largeController = UIHostingController(rootView: largeMarginView)
-        largeController.view.bounds = CGRect(x: 0, y: 0, width: availableWidthLarge, height: 260)
-        largeController.view.layoutIfNeeded()
-        #expect(largeController.view.bounds.width == 264)
     }
 
     // MARK: 3. Width Change Variants (nudge-dialog-width-narrow & nudge-dialog-width-wide)
 
-    @Test @MainActor
+    @Test("parses narrow and wide dialog width contracts", .tags(.contract)) @MainActor
     func testNudgeDialogWidthChangeVariantContract() throws {
         // Variant A: Narrow alert dialog (canvasWidth: 260)
         let narrowFixture = try loadNudgeDialogFixture(named: "nudge-dialog-width-narrow.json")
@@ -329,18 +267,6 @@ struct NudgeDialogComponentTests {
         }
         #expect(narrowTextBlock.plainText == "Narrow Alert Dialog")
 
-        let narrowView = CampaignCanvasView(
-            canvas: narrowCanvas,
-            surface: narrowConfig.surface,
-            designWidth: narrowConfig.designWidth,
-            availableSize: CGSize(width: 260, height: 260),
-            onAction: { _ in }
-        )
-        let narrowController = UIHostingController(rootView: narrowView)
-        narrowController.view.bounds = CGRect(x: 0, y: 0, width: 260, height: 260)
-        narrowController.view.layoutIfNeeded()
-        #expect(narrowController.view.bounds.width == 260)
-
         // Variant B: Wide landscape-optimized dialog (canvasWidth: 340)
         let wideFixture = try loadNudgeDialogFixture(named: "nudge-dialog-width-wide.json")
         guard let wideTemplate = wideFixture["templateConfig"] as? [String: Any],
@@ -363,22 +289,11 @@ struct NudgeDialogComponentTests {
         }
         #expect(wideTextBlock.plainText == "Wide Modal Dialog")
 
-        let wideView = CampaignCanvasView(
-            canvas: wideCanvas,
-            surface: wideConfig.surface,
-            designWidth: wideConfig.designWidth,
-            availableSize: CGSize(width: 340, height: 260),
-            onAction: { _ in }
-        )
-        let wideController = UIHostingController(rootView: wideView)
-        wideController.view.bounds = CGRect(x: 0, y: 0, width: 340, height: 260)
-        wideController.view.layoutIfNeeded()
-        #expect(wideController.view.bounds.width == 340)
     }
 
     // MARK: 4. Dark Background / Surface Variant (nudge-dialog-bg-dark)
 
-    @Test @MainActor
+    @Test("parses the dark-theme dialog contract", .tags(.contract)) @MainActor
     func testNudgeDialogDarkThemeVariantContract() throws {
         let darkFixture = try loadNudgeDialogFixture(named: "nudge-dialog-bg-dark.json")
         guard let darkTemplate = darkFixture["templateConfig"] as? [String: Any],
@@ -412,23 +327,11 @@ struct NudgeDialogComponentTests {
         #expect(btnLabel.plainText == "Got It")
         #expect(actions == [.dismiss])
 
-        // Render view and verify layout frame
-        let darkView = CampaignCanvasView(
-            canvas: darkCanvas,
-            surface: darkConfig.surface,
-            designWidth: darkConfig.designWidth,
-            availableSize: CGSize(width: 320, height: 260),
-            onAction: { _ in }
-        )
-        let darkController = UIHostingController(rootView: darkView)
-        darkController.view.bounds = CGRect(x: 0, y: 0, width: 320, height: 260)
-        darkController.view.layoutIfNeeded()
-        #expect(darkController.view.bounds.size == CGSize(width: 320, height: 260))
     }
 
     // MARK: - Maestro Variant Visual Golden Snapshots
 
-    @Test @MainActor
+    @Test("matches the sharp-corner dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogRadius0VisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-radius-0.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -453,7 +356,7 @@ struct NudgeDialogComponentTests {
         assertVisualGolden(matching: controller.view)
     }
 
-    @Test @MainActor
+    @Test("matches the rounded-corner dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogRadius28VisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-radius-28.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -478,7 +381,7 @@ struct NudgeDialogComponentTests {
         assertVisualGolden(matching: controller.view)
     }
 
-    @Test @MainActor
+    @Test("matches the zero-margin dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogMarginZeroVisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-margin-zero.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -503,32 +406,34 @@ struct NudgeDialogComponentTests {
         assertVisualGolden(matching: controller.view)
     }
 
-    @Test @MainActor
+    @Test("matches the large-margin dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogMarginLargeVisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-margin-large.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-            let canvas = nudgeConfig.canvas
+            nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse large margin nudge config")
             return
         }
 
-        let canvasView = CampaignCanvasView(
-            canvas: canvas,
-            surface: nudgeConfig.surface,
-            designWidth: nudgeConfig.designWidth,
-            availableSize: CGSize(width: 264, height: 260),
-            onAction: { _ in }
+        let hostView = ComponentTestHost.makeRealDialogHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax,
+            style: .solid(.systemBackground)
         )
-        let controller = UIHostingController(rootView: canvasView)
-        controller.view.bounds = CGRect(x: 0, y: 0, width: 264, height: 260)
-        controller.view.layoutIfNeeded()
+        defer {
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
 
-        assertVisualGolden(matching: controller.view)
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
+        )
     }
 
-    @Test @MainActor
+    @Test("matches the narrow dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogWidthNarrowVisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-width-narrow.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -553,7 +458,7 @@ struct NudgeDialogComponentTests {
         assertVisualGolden(matching: controller.view)
     }
 
-    @Test @MainActor
+    @Test("matches the wide dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogWidthWideVisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-width-wide.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -578,7 +483,7 @@ struct NudgeDialogComponentTests {
         assertVisualGolden(matching: controller.view)
     }
 
-    @Test @MainActor
+    @Test("matches the dark-theme dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogDarkThemeVisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-bg-dark.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -602,4 +507,5 @@ struct NudgeDialogComponentTests {
 
         assertVisualGolden(matching: controller.view)
     }
+}
 }

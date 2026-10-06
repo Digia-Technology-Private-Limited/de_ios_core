@@ -102,9 +102,9 @@ flowchart TD
 
 ```text
 DigiaEngageTests/
-├── Components/                             <-- [Tier 2] Visual Goldens & Hierarchy
+├── Components/                             <-- [Tier 2] Visual Goldens & Contracts
 │   ├── Common/
-│   │   ├── SnapshotTestingExtensions.swift <-- .sanitizedHierarchy strategy & env flags
+│   │   ├── SnapshotTestingExtensions.swift <-- Device profile & golden helpers
 │   │   └── FixtureLoader.swift             <-- Loads testkit/campaigns/... fixtures
 │   │
 │   ├── Nudge/
@@ -112,10 +112,8 @@ DigiaEngageTests/
 │   │   ├── NudgeBottomSheetComponentTests.swift
 │   │   └── __Snapshots__/                  <-- Co-located golden baselines
 │   │       ├── NudgeDialogComponentTests/
-│   │       │   ├── testNudgeDialogComponentHierarchyAndLayout.1.txt
 │   │       │   └── testNudgeDialogVisualImageGolden.1.png
 │   │       └── NudgeBottomSheetComponentTests/
-│   │           ├── testNudgeBottomSheetComponentHierarchyAndLayout.1.txt
 │   │           └── testNudgeBottomSheetVisualImageGolden.1.png
 │   │
 │   ├── Survey/                             <-- Canvas survey component tests
@@ -136,10 +134,10 @@ DigiaEngageTests/
 
 ## 5. Running Tests by Tag
 
-Every Swift Testing suite carries tags (declared in [`TestingTags.swift`](TestingTags.swift)): one **kind** (`unit`, `contract`, `component`, `golden`, `integration`), optional **gate** tags (`smoke`, `slow`), and one or more **areas** (`nudge`, `session`, `analytics`, ...). `xcodebuild` selects by tag natively, so no `.xctestplan` is needed.
+Tagged Swift Testing suites use tags declared in [`TestingTags.swift`](TestingTags.swift): one **kind** (`unit`, `contract`, `component`, `golden`, `integration`), optional **gate** tags (`smoke`, `slow`), and one or more **areas** (`nudge`, `session`, `analytics`, ...). `xcodebuild` selects by tag natively, so no `.xctestplan` is needed.
 
 ### Using the Convenience Wrapper (`./run-tests.sh`)
-The wrapper pins the iPhone 17 Pro Max simulator, validates the tag against `TestingTags.swift`, and fails if a filter matched no tests (xcodebuild alone reports success on zero tests):
+The wrapper pins the iPhone 17 Pro Max simulator, enables code coverage, validates the tag against `TestingTags.swift`, and fails if a filter matched no tests (xcodebuild alone reports success on zero tests):
 ```bash
 ./run-tests.sh nudge      # one tag
 ./run-tests.sh smoke      # default
@@ -149,10 +147,10 @@ The wrapper pins the iPhone 17 Pro Max simulator, validates the tag against `Tes
 
 ### Native Xcode commands
 ```bash
-xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -only-testing-tags nudge
-xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -skip-testing-tags slow
-# One suite, without tags:
-xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -only-testing:DigiaEngageTests/NudgeDialogComponentTests
+xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -enableCodeCoverage YES -only-testing-tags nudge
+xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -enableCodeCoverage YES -skip-testing-tags slow
+# One nested suite, without tags:
+xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -enableCodeCoverage YES -only-testing:DigiaEngageTests/NudgeComponentTests/Dialog
 ```
 `XCTestCase` classes cannot carry tags; they run only under `all`/`quick` or `-only-testing:`.
 
@@ -214,5 +212,7 @@ The lowest perceptual color precision 0.0 is less than required 0.98
 
 
 ### Snapshot Determinism Rules:
-- **Sanitized Hierarchy (`.sanitizedHierarchy`)**: Strips memory pointers (`: 0x...`) and private compiler mangled symbols (`$HASH`) from `recursiveDescription` so text snapshots do not flake across runs or build flags.
-- **Image Precision**: Golden pixel comparisons use `precision: 0.99` and `perceptualPrecision: 0.98` to tolerate micro subpixel anti-aliasing differences across minor OS simulator revisions.
+- **Model contracts**: Text snapshots represent parsed model state; they are not described as rendered view-hierarchy assertions.
+- **Image precision**: Isolated goldens use `precision: 0.99`; full-device Nudge goldens use `precision: 0.999` so small component regressions are not hidden by the large background. Both use `perceptualPrecision: 0.98` for minor anti-aliasing variation.
+- **Result attachments**: A successful visual golden records its committed reference and current rendered image as per-test PNG attachments; when they differ at all, the helper also forwards SnapshotTesting's `diffV2` `difference.png`. A failed golden uses only SnapshotTesting's native per-test `reference.png`, `failure.png`, and `difference.png` set, avoiding duplicate gallery images. Expand the individual test in Xcode's test report to inspect them.
+- **Coverage and insights**: `run-tests.sh` writes code coverage into the `.xcresult`. Xcode generates Insights only when it detects an actionable result, so a clean run can legitimately have an empty Insights section.

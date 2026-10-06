@@ -73,6 +73,7 @@ set +e
 TEST_RUNNER_RECORD_SNAPSHOTS="$RECORD" xcodebuild test \
   -scheme DigiaEngage \
   -destination "$DESTINATION" \
+  -enableCodeCoverage YES \
   ${TAG_FLAGS[@]+"${TAG_FLAGS[@]}"} 2>&1 | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
 set -e

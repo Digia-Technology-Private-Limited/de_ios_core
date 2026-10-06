@@ -2,6 +2,7 @@ import SwiftUI
 import Testing
 @testable import DigiaEngage
 
+@Suite("Nudge close button configuration", .tags(.nudge, .contract))
 struct NudgeCloseButtonConfigTests {
     private func config(container: [String: Any] = [:], spacing: Any = 24) throws -> NudgeConfig {
         try #require(NudgeConfig.fromJson([

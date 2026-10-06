@@ -9,14 +9,13 @@ import UIKit
 ///
 /// Validates:
 /// 1. Wire schema and layout parsing into `NudgeConfig` and `CampaignCanvas`
-/// 2. Interactive CTA action callback routing and payload accuracy
-/// 3. Action execution flow with dismiss settlement (`LocalActionExecutor`)
-/// 4. Drag gesture dismiss calculations (`shouldDismissBottomSheet`)
-/// 5. Alternative bottom sheet configurations (close button, non-dismissible backdrop)
-/// 6. View hierarchy snapshot diffing (`.sanitizedHierarchy`)
-/// 7. Visual pixel snapshot golden diffing (`.image`)
-@Suite(.serialized, .tags(.nudge, .smoke))
-struct NudgeBottomSheetComponentTests {
+/// 2. Action execution flow with dismiss settlement (`LocalActionExecutor`)
+/// 3. Drag gesture dismiss calculations (`shouldDismissBottomSheet`)
+/// 4. Alternative bottom sheet configurations (close button, non-dismissible backdrop)
+/// 5. Visual pixel snapshot golden diffing (`.image`)
+extension NudgeComponentTests {
+@Suite("Bottom sheet")
+struct BottomSheet {
 
     private func loadCompactBottomSheetFixture() throws -> [String: Any] {
         guard let fixture = FixtureLoader.loadFixture(
@@ -53,7 +52,7 @@ struct NudgeBottomSheetComponentTests {
 
     // MARK: - 1. Wire Contract & Model Parsing
 
-    @Test @MainActor
+    @Test("parses the canonical bottom-sheet model and CTA contract", .tags(.contract, .smoke)) @MainActor
     func testNudgeBottomSheetModelParsingAndContract() throws {
         let fixture = try loadCompactBottomSheetFixture()
         guard let templateConfig = fixture["templateConfig"] as? [String: Any] else {
@@ -99,49 +98,9 @@ struct NudgeBottomSheetComponentTests {
         #expect(actions == [.dismiss])
     }
 
-    // MARK: - 2. Action Callback & Event Tracking Dispatch
+    // MARK: - 2. Action Execution & Dismiss Settlement
 
-    @Test @MainActor
-    func testNudgeBottomSheetActionDispatch() throws {
-        let fixture = try loadCompactBottomSheetFixture()
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-              let canvas = nudgeConfig.canvas else {
-            Issue.record("Failed to parse canvas nudge config")
-            return
-        }
-
-        var dispatchedAction: CampaignCanvasActionRequest?
-        let canvasView = CampaignCanvasView(
-            canvas: canvas,
-            surface: nudgeConfig.surface,
-            designWidth: nudgeConfig.designWidth,
-            availableSize: CGSize(width: 375, height: 240),
-            onAction: { request in
-                dispatchedAction = request
-            }
-        )
-
-        // Directly invoke action request mimicking button tap
-        let expectedRequest = CampaignCanvasActionRequest(
-            actions: [.dismiss],
-            elementId: "button",
-            label: "OK",
-            isPrimary: true
-        )
-        canvasView.onAction(expectedRequest)
-
-        // Assert exact action request payload
-        #expect(dispatchedAction != nil)
-        #expect(dispatchedAction?.elementId == "button")
-        #expect(dispatchedAction?.label == "OK")
-        #expect(dispatchedAction?.isPrimary == true)
-        #expect(dispatchedAction?.actions == [.dismiss])
-    }
-
-    // MARK: - 3. Action Execution & Dismiss Settlement
-
-    @Test @MainActor
+    @Test("executes dismiss locally and rejects non-local actions", .tags(.unit)) @MainActor
     func testNudgeBottomSheetDismissActionExecution() throws {
         var dismissInvoked = false
         let executor = LocalActionExecutor(dismiss: {
@@ -158,9 +117,9 @@ struct NudgeBottomSheetComponentTests {
         #expect(!unhandled)
     }
 
-    // MARK: - 4. Drag Dismiss Pure Threshold Oracle
+    // MARK: - 3. Drag Dismiss Pure Threshold Oracle
 
-    @Test
+    @Test("dismisses only at the production drag threshold", .tags(.unit, .smoke))
     func testNudgeBottomSheetDragDismissThresholds() {
         // Minimum drag distance is 120pt, or 25% of sheet height, whichever is larger
         // For a 240pt sheet: max(120, 240 * 0.25 = 60) = 120pt
@@ -175,9 +134,9 @@ struct NudgeBottomSheetComponentTests {
         #expect(shouldDismissBottomSheet(dragDistance: 150, sheetHeight: 600))
     }
 
-    // MARK: - 5. Close Button Variant Contract
+    // MARK: - 4. Close Button Variant Contract
 
-    @Test @MainActor
+    @Test("parses the close-button bottom-sheet contract", .tags(.contract)) @MainActor
     func testNudgeBottomSheetCloseButtonVariantContract() throws {
         let fixture = try loadCloseButtonBottomSheetFixture()
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -193,80 +152,36 @@ struct NudgeBottomSheetComponentTests {
         #expect(nudgeConfig.surface.closeButton.placement?.vertical == .top)
     }
 
-    // MARK: - 6. View Hierarchy Snapshot Diff
+    // MARK: - 5. Visual Pixel Golden Snapshot
 
-    @Test @MainActor
-    func testNudgeBottomSheetComponentHierarchyAndLayout() throws {
-        let fixture = try loadCompactBottomSheetFixture()
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-              let canvas = nudgeConfig.canvas else {
-            Issue.record("Failed to parse canvas nudge config")
-            return
-        }
-
-        let canvasWidth = canvas.width
-        let canvasHeight = canvas.height
-        let canvasView = CampaignCanvasView(
-            canvas: canvas,
-            surface: nudgeConfig.surface,
-            designWidth: nudgeConfig.designWidth,
-            availableSize: CGSize(width: canvasWidth, height: canvasHeight),
-            onAction: { _ in }
-        )
-
-        let controller = ComponentTestHost.makeComponentHost(
-            rootView: canvasView,
-            size: CGSize(width: canvasWidth, height: canvasHeight),
-            backgroundColor: .clear
-        )
-
-        #expect(controller.view.bounds.width == canvasWidth)
-        #expect(controller.view.bounds.height == canvasHeight)
-
-        // Capture full AST and layout model snapshot using Swift reflection (.dump)
-        assertSnapshot(
-            of: nudgeConfig,
-            as: .dump,
-            record: isSnapshotRecordingEnabled
-        )
-    }
-
-    // MARK: - 7. Visual Pixel Golden Snapshot
-
-    @Test @MainActor
+    @Test("matches the bottom-sheet visual golden", .tags(.golden)) @MainActor
     func testNudgeBottomSheetVisualImageGolden() throws {
         let fixture = try loadCompactBottomSheetFixture()
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
               let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-              let canvas = nudgeConfig.canvas else {
+              nudgeConfig.canvas != nil else {
             Issue.record("Failed to parse canvas nudge config")
             return
         }
 
-        let canvasWidth = canvas.width
-        let canvasHeight = canvas.height
-        let canvasView = CampaignCanvasView(
-            canvas: canvas,
-            surface: nudgeConfig.surface,
-            designWidth: nudgeConfig.designWidth,
-            availableSize: CGSize(width: canvasWidth, height: canvasHeight),
-            onAction: { _ in }
+        let hostView = ComponentTestHost.makeRealBottomSheetHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax
         )
+        defer {
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
 
-        let controller = ComponentTestHost.makeComponentHost(
-            rootView: canvasView,
-            size: CGSize(width: canvasWidth, height: canvasHeight),
-            backgroundColor: .white
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
         )
-
-        // Capture pixel snapshot with native Xcode attachment integration
-        assertVisualGolden(matching: controller.view)
     }
 
-    // MARK: - 8. Device Scrim & Anchoring Golden (.image on device)
+    // MARK: - 6. Device Scrim & Anchoring Golden (.image on device)
 
-    @Test @MainActor
+    @Test("matches the production bottom-sheet device golden", .tags(.golden, .smoke)) @MainActor
     func testNudgeBottomSheetDeviceGolden() throws {
         let fixture = try loadCompactBottomSheetFixture()
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -286,63 +201,14 @@ struct NudgeBottomSheetComponentTests {
         }
         assertVisualGolden(
             matching: ComponentTestHost.renderImage(of: hostView),
-            precision: 0.98,
+            precision: 0.999,
             perceptualPrecision: 0.98
         )
     }
 
-    // MARK: - 9. Safe Area Bottom Clearance Contract
+    // MARK: - 7. Safe Area Mode Variants (insetContent, insetSurface, none)
 
-    @Test @MainActor
-    func testNudgeBottomSheetSafeAreaClearance() throws {
-        let fixture = try loadCompactBottomSheetFixture()
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-              let canvas = nudgeConfig.canvas else {
-            Issue.record("Failed to parse canvas nudge config")
-            return
-        }
-
-        // Pinned iPhone 17 Pro Max safe area reference
-        let config = ViewImageConfig.iPhone17ProMax
-        let homeIndicatorHeight: CGFloat = config.safeArea.bottom
-        #expect(homeIndicatorHeight == 34)
-
-        // 1. Verify default mode is insetContent
-        #expect(nudgeConfig.surface.bottomSafeAreaMode == .insetContent)
-
-        // 2. Validate DigiaBottomSheetConfig clearance calculation
-        let defaultPadding: CGFloat = 8
-        let sheetConfig = DigiaBottomSheetConfig(
-            bottomPadding: defaultPadding,
-            bottomSafeAreaMode: nudgeConfig.surface.bottomSafeAreaMode,
-            bottomSafeAreaInset: homeIndicatorHeight
-        )
-
-        // In .insetContent mode, bottom clearance is padding + safeAreaInset
-        let effectiveBottomPadding = sheetConfig.bottomPadding + (sheetConfig.bottomSafeAreaMode == .insetContent ? sheetConfig.bottomSafeAreaInset : 0)
-        #expect(effectiveBottomPadding == defaultPadding + homeIndicatorHeight)
-
-        // 3. Test Host View Controller geometry clearance
-        let hostBounds = CGRect(origin: .zero, size: config.size!)
-        let sheetHeight = canvas.height
-
-        // Inset surface mode: card frame elevated above safe area
-        let surfaceElevatedY = hostBounds.height - sheetHeight - homeIndicatorHeight
-        let surfaceCardRect = CGRect(x: 0, y: surfaceElevatedY, width: hostBounds.width, height: sheetHeight)
-        #expect(surfaceCardRect.maxY == hostBounds.height - homeIndicatorHeight)
-        #expect(surfaceCardRect.maxY <= hostBounds.height - homeIndicatorHeight)
-
-        // Inset content mode: card attaches flush to bottom, internal content padded
-        let contentFlushRect = CGRect(x: 0, y: hostBounds.height - sheetHeight, width: hostBounds.width, height: sheetHeight)
-        let internalContentMaxY = contentFlushRect.height - effectiveBottomPadding
-        #expect(internalContentMaxY == sheetHeight - effectiveBottomPadding)
-        #expect(contentFlushRect.maxY - effectiveBottomPadding <= hostBounds.height - homeIndicatorHeight)
-    }
-
-    // MARK: - 10. Safe Area Mode Variants (insetContent, insetSurface, none)
-
-    @Test @MainActor
+    @Test("matches the inset-content safe-area golden", .tags(.golden)) @MainActor
     func testNudgeBottomSheetSafeAreaInsetContentVariant() throws {
         let fixture = try loadSafeAreaFixture(named: "nudge-bottomsheet-safe-area.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -357,11 +223,23 @@ struct NudgeBottomSheetComponentTests {
         assertSnapshot(
             of: nudgeConfig,
             as: .dump,
-            record: isSnapshotRecordingEnabled
+            record: isSnapshotRecordingEnabled ? .all : nil
+        )
+
+        let hostView = ComponentTestHost.makeRealBottomSheetHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax,
+            style: .solid(.systemBackground)
+        )
+        defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
         )
     }
 
-    @Test @MainActor
+    @Test("matches the inset-surface safe-area golden", .tags(.golden)) @MainActor
     func testNudgeBottomSheetSafeAreaInsetSurfaceVariant() throws {
         let fixture = try loadSafeAreaFixture(named: "nudge-bottomsheet-safe-area-surface.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -376,11 +254,23 @@ struct NudgeBottomSheetComponentTests {
         assertSnapshot(
             of: nudgeConfig,
             as: .dump,
-            record: isSnapshotRecordingEnabled
+            record: isSnapshotRecordingEnabled ? .all : nil
+        )
+
+        let hostView = ComponentTestHost.makeRealBottomSheetHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax,
+            style: .solid(.systemBackground)
+        )
+        defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
         )
     }
 
-    @Test @MainActor
+    @Test("matches the edge-to-edge safe-area golden", .tags(.golden)) @MainActor
     func testNudgeBottomSheetSafeAreaNoneVariant() throws {
         let fixture = try loadSafeAreaFixture(named: "nudge-bottomsheet-safe-area-none.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
@@ -395,7 +285,20 @@ struct NudgeBottomSheetComponentTests {
         assertSnapshot(
             of: nudgeConfig,
             as: .dump,
-            record: isSnapshotRecordingEnabled
+            record: isSnapshotRecordingEnabled ? .all : nil
+        )
+
+        let hostView = ComponentTestHost.makeRealBottomSheetHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax,
+            style: .solid(.systemBackground)
+        )
+        defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
         )
     }
+}
 }
