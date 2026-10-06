@@ -159,3 +159,131 @@ private func recordGoldenAttachments(
         Attachment.record(data, named: "\(testName)-difference.png")
     }
 }
+
+// MARK: - Swift Testing Hierarchy Snapshot Assertions
+
+/// Normalizes a view hierarchy string by purging memory pointer addresses and cleaning up
+/// compiler-mangled Swift/SwiftUI internal type names so snapshots are readable and deterministic.
+public func purgeHierarchyPointers(_ string: String) -> String {
+    var result = string.replacingOccurrences(
+        of: ":?\\s*0x[\\da-fA-F]+(\\s*)",
+        with: "$1",
+        options: .regularExpression
+    )
+
+    // Remove volatile compiler-mangled baseClass attributes
+    result = result.replacingOccurrences(
+        of: "; baseClass = _Tt[^;>]+",
+        with: "",
+        options: .regularExpression
+    )
+
+    // Normalize compiler-mangled Swift type names to clean, stable identifiers
+    result = result.replacingOccurrences(
+        of: "_TtGC7SwiftUI21UIKitPlatformViewHost[^;>]+CanvasRichText__",
+        with: "CanvasRichTextPlatformViewHost",
+        options: .regularExpression
+    )
+    result = result.replacingOccurrences(
+        of: "_TtC11DigiaEngage[^;>]+CanvasRichTextContainerView",
+        with: "CanvasRichTextContainerView",
+        options: .regularExpression
+    )
+    result = result.replacingOccurrences(
+        of: "_TtGC7SwiftUI14_UIHostingView[^;>]+NudgeOverlayView_",
+        with: "_UIHostingView<NudgeOverlayView>",
+        options: .regularExpression
+    )
+    result = result.replacingOccurrences(
+        of: "_TtCC7SwiftUI17HostingScrollView17PlatformContainer",
+        with: "HostingScrollView.PlatformContainer",
+        options: .regularExpression
+    )
+    result = result.replacingOccurrences(
+        of: "_TtCC7SwiftUI17HostingScrollView22PlatformGroupContainer",
+        with: "HostingScrollView.PlatformGroupContainer",
+        options: .regularExpression
+    )
+    result = result.replacingOccurrences(
+        of: "_TtC7SwiftUI[^;>]+ColorShapeLayer",
+        with: "ColorShapeLayer",
+        options: .regularExpression
+    )
+
+    return result
+}
+
+extension Snapshotting where Value == UIView, Format == String {
+    /// A snapshot strategy for comparing view hierarchies based on their recursive description
+    /// without re-parenting views or corrupting live SwiftUI hosting trees.
+    public static var hierarchy: Snapshotting {
+        SimplySnapshotting.lines.pullback { view in
+            let description = (view.perform(Selector(("recursiveDescription")))?
+                .takeUnretainedValue() as? String) ?? ""
+            return purgeHierarchyPointers(description)
+        }
+    }
+}
+
+/// Asserts that a UIView matches its view hierarchy snapshot using Swift Testing.
+@MainActor
+public func assertHierarchy(
+    matching view: UIView,
+    named name: String? = nil,
+    fileID: StaticString = #fileID,
+    filePath: StaticString = #filePath,
+    function: StaticString = #function,
+    line: UInt = #line,
+    column: UInt = #column
+) {
+    let rawTestName = String(describing: function)
+    let cleanTestName = rawTestName.replacingOccurrences(of: "()", with: "")
+    let recordMode = isSnapshotRecordingEnabled ? SnapshotTestingConfiguration.Record.all : nil
+
+    let failure = verifySnapshot(
+        of: view,
+        as: .hierarchy,
+        named: name,
+        record: recordMode,
+        fileID: fileID,
+        file: filePath,
+        testName: cleanTestName,
+        line: line
+    )
+
+    if let failureMessage = failure {
+        Issue.record("\(failureMessage)")
+    }
+}
+
+/// Asserts that a UIViewController matches its controller hierarchy snapshot using Swift Testing.
+@MainActor
+public func assertHierarchy(
+    matching viewController: UIViewController,
+    named name: String? = nil,
+    fileID: StaticString = #fileID,
+    filePath: StaticString = #filePath,
+    function: StaticString = #function,
+    line: UInt = #line,
+    column: UInt = #column
+) {
+    let rawTestName = String(describing: function)
+    let cleanTestName = rawTestName.replacingOccurrences(of: "()", with: "")
+    let recordMode = isSnapshotRecordingEnabled ? SnapshotTestingConfiguration.Record.all : nil
+
+    let failure = verifySnapshot(
+        of: viewController,
+        as: .hierarchy,
+        named: name,
+        record: recordMode,
+        fileID: fileID,
+        file: filePath,
+        testName: cleanTestName,
+        line: line
+    )
+
+    if let failureMessage = failure {
+        Issue.record("\(failureMessage)")
+    }
+}
+

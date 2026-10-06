@@ -72,31 +72,54 @@ struct Dialog {
         #expect(actions == [.dismiss])
     }
 
-    @Test("matches the isolated dialog canvas golden", .tags(.golden)) @MainActor
-    func testNudgeDialogVisualImageGolden() throws {
+    // MARK: - 2. Hierarchy and Visual Golden Snapshots
+
+    @Test("matches the production dialog view hierarchy snapshot", .tags(.component)) @MainActor
+    func testNudgeDialogComponentHierarchy() throws {
         let fixture = try loadNudgeDialogFixture()
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-            let canvas = nudgeConfig.canvas
+            nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse canvas nudge config")
             return
         }
 
-        let canvasView = CampaignCanvasView(
-            canvas: canvas,
-            surface: nudgeConfig.surface,
-            designWidth: nudgeConfig.designWidth,
-            availableSize: CGSize(width: 320, height: 260),
-            onAction: { _ in }
+        let hostView = ComponentTestHost.makeRealDialogHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax
         )
+        defer {
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
 
-        let controller = UIHostingController(rootView: canvasView)
-        controller.view.bounds = CGRect(x: 0, y: 0, width: 320, height: 260)
-        controller.view.layoutIfNeeded()
+        assertHierarchy(matching: hostView)
+    }
 
-        // Visual pixel snapshot diffing with native Xcode attachment integration
-        assertVisualGolden(matching: controller.view)
+    @Test("matches the production dialog visual golden", .tags(.golden)) @MainActor
+    func testNudgeDialogVisualImageGolden() throws {
+        let fixture = try loadNudgeDialogFixture()
+        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
+            let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+            nudgeConfig.canvas != nil
+        else {
+            Issue.record("Failed to parse canvas nudge config")
+            return
+        }
+
+        let hostView = ComponentTestHost.makeRealDialogHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax
+        )
+        defer {
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
+
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
+        )
     }
 
     // MARK: - 3. Device Dialog Golden (.image on device with REAL production NudgeDialogContainer)
@@ -336,24 +359,26 @@ struct Dialog {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-radius-0.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-            let canvas = nudgeConfig.canvas
+            nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse sharp radius nudge config")
             return
         }
 
-        let canvasView = CampaignCanvasView(
-            canvas: canvas,
-            surface: nudgeConfig.surface,
-            designWidth: nudgeConfig.designWidth,
-            availableSize: CGSize(width: 320, height: 260),
-            onAction: { _ in }
+        let hostView = ComponentTestHost.makeRealDialogHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax,
+            style: .solid(.systemBackground)
         )
-        let controller = UIHostingController(rootView: canvasView)
-        controller.view.bounds = CGRect(x: 0, y: 0, width: 320, height: 260)
-        controller.view.layoutIfNeeded()
+        defer {
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
 
-        assertVisualGolden(matching: controller.view)
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
+        )
     }
 
     @Test("matches the rounded-corner dialog golden", .tags(.golden)) @MainActor
@@ -361,24 +386,26 @@ struct Dialog {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-radius-28.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-            let canvas = nudgeConfig.canvas
+            nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse rounded radius nudge config")
             return
         }
 
-        let canvasView = CampaignCanvasView(
-            canvas: canvas,
-            surface: nudgeConfig.surface,
-            designWidth: nudgeConfig.designWidth,
-            availableSize: CGSize(width: 320, height: 260),
-            onAction: { _ in }
+        let hostView = ComponentTestHost.makeRealDialogHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax,
+            style: .solid(.systemBackground)
         )
-        let controller = UIHostingController(rootView: canvasView)
-        controller.view.bounds = CGRect(x: 0, y: 0, width: 320, height: 260)
-        controller.view.layoutIfNeeded()
+        defer {
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
 
-        assertVisualGolden(matching: controller.view)
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
+        )
     }
 
     @Test("matches the zero-margin dialog golden", .tags(.golden)) @MainActor
@@ -386,24 +413,26 @@ struct Dialog {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-margin-zero.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-            let canvas = nudgeConfig.canvas
+            nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse zero margin nudge config")
             return
         }
 
-        let canvasView = CampaignCanvasView(
-            canvas: canvas,
-            surface: nudgeConfig.surface,
-            designWidth: nudgeConfig.designWidth,
-            availableSize: CGSize(width: 360, height: 260),
-            onAction: { _ in }
+        let hostView = ComponentTestHost.makeRealDialogHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax,
+            style: .solid(.systemBackground)
         )
-        let controller = UIHostingController(rootView: canvasView)
-        controller.view.bounds = CGRect(x: 0, y: 0, width: 360, height: 260)
-        controller.view.layoutIfNeeded()
+        defer {
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
 
-        assertVisualGolden(matching: controller.view)
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
+        )
     }
 
     @Test("matches the large-margin dialog golden", .tags(.golden)) @MainActor
@@ -438,24 +467,26 @@ struct Dialog {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-width-narrow.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-            let canvas = nudgeConfig.canvas
+            nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse narrow width nudge config")
             return
         }
 
-        let canvasView = CampaignCanvasView(
-            canvas: canvas,
-            surface: nudgeConfig.surface,
-            designWidth: nudgeConfig.designWidth,
-            availableSize: CGSize(width: 260, height: 260),
-            onAction: { _ in }
+        let hostView = ComponentTestHost.makeRealDialogHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax,
+            style: .solid(.systemBackground)
         )
-        let controller = UIHostingController(rootView: canvasView)
-        controller.view.bounds = CGRect(x: 0, y: 0, width: 260, height: 260)
-        controller.view.layoutIfNeeded()
+        defer {
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
 
-        assertVisualGolden(matching: controller.view)
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
+        )
     }
 
     @Test("matches the wide dialog golden", .tags(.golden)) @MainActor
@@ -463,24 +494,26 @@ struct Dialog {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-width-wide.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-            let canvas = nudgeConfig.canvas
+            nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse wide width nudge config")
             return
         }
 
-        let canvasView = CampaignCanvasView(
-            canvas: canvas,
-            surface: nudgeConfig.surface,
-            designWidth: nudgeConfig.designWidth,
-            availableSize: CGSize(width: 340, height: 260),
-            onAction: { _ in }
+        let hostView = ComponentTestHost.makeRealDialogHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax,
+            style: .solid(.systemBackground)
         )
-        let controller = UIHostingController(rootView: canvasView)
-        controller.view.bounds = CGRect(x: 0, y: 0, width: 340, height: 260)
-        controller.view.layoutIfNeeded()
+        defer {
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
 
-        assertVisualGolden(matching: controller.view)
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
+        )
     }
 
     @Test("matches the dark-theme dialog golden", .tags(.golden)) @MainActor
@@ -488,24 +521,26 @@ struct Dialog {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-bg-dark.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-            let canvas = nudgeConfig.canvas
+            nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse dark background nudge config")
             return
         }
 
-        let canvasView = CampaignCanvasView(
-            canvas: canvas,
-            surface: nudgeConfig.surface,
-            designWidth: nudgeConfig.designWidth,
-            availableSize: CGSize(width: 320, height: 260),
-            onAction: { _ in }
+        let hostView = ComponentTestHost.makeRealDialogHost(
+            nudgeConfig: nudgeConfig,
+            device: .iPhone17ProMax,
+            style: .solid(.systemBackground)
         )
-        let controller = UIHostingController(rootView: canvasView)
-        controller.view.bounds = CGRect(x: 0, y: 0, width: 320, height: 260)
-        controller.view.layoutIfNeeded()
+        defer {
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
 
-        assertVisualGolden(matching: controller.view)
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
+        )
     }
 }
 }
