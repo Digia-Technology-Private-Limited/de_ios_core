@@ -59,7 +59,10 @@ struct HealthSinkTests {
         #expect(sink.accepts(record(DropReason.unknownCampaignKey)))
         #expect(sink.accepts(record(DropReason.invalidConfig)))
         #expect(sink.accepts(record(DropReason.pendingExpired)))
-        #expect(sink.accepts(record(DropReason.superseded)))
+        #expect(sink.accepts(record(DropReason.superseded, extras: ["cep": "webengage"])))
+        // A routing supersede or a replaced display carries no `cep`.
+        #expect(!sink.accepts(record(DropReason.superseded)))
+        #expect(!sink.accepts(record(DismissReason.superseded)))
         // Not on the allowlist — e.g. a plain lifecycle beat.
         #expect(!sink.accepts(record(TimelineReason.displayed)))
         #expect(!sink.accepts(record(DropReason.frequencyCapped)))
