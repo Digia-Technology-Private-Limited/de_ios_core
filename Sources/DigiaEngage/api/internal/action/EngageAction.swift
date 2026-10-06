@@ -1,5 +1,7 @@
 import Foundation
 
+private let log = DigiaLogger()
+
 enum EngageAction: Equatable {
     case openUrl(String)
     case openDeeplink(String)
@@ -66,7 +68,8 @@ struct EngageActionParser {
         let data = step["data"] as? [String: Any] ?? [:]
         // `Action.*` is the dashboard wire format; unprefixed names keep previously stored
         // guide and nudge action payloads readable while campaigns migrate to canonical steps.
-        switch step["type"] as? String ?? "" {
+        let type = step["type"] as? String ?? ""
+        switch type {
         case "Action.openUrl":
             guard let url = string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]) else { return nil }
             let launchMode = string(in: data, keys: ["launchMode", "launch_mode"])
@@ -97,10 +100,24 @@ struct EngageActionParser {
             let index = (raw as? NSNumber)?.intValue ?? Int("\(raw ?? "")") ?? 0
             return .showStory(max(0, index))
         case "Action.customKV":
-            guard let raw = data["payload"] as? [String: Any] else { return nil }
-            return customKV(from: raw)
-        default: return nil
+            guard let action = (data["payload"] as? [String: Any]).flatMap(customKV(from:)) else {
+                return unsupported(type)
+            }
+            return action
+        default: return unsupported(type)
         }
+    }
+
+    /// The CTA becomes a no-op. Reported so a dashboard/SDK mismatch is visible.
+    private func unsupported(_ type: String) -> EngageAction? {
+        log.w(
+            "Unsupported action step skipped (type=\(type))",
+            campaign: CampaignParseScope.current?.campaignKey,
+            stage: .parse,
+            reason: TimelineReason.unsupportedActionType,
+            extras: ["action_type": type]
+        )
+        return nil
     }
 
     private func customKV(from raw: [String: Any]) -> EngageAction? {

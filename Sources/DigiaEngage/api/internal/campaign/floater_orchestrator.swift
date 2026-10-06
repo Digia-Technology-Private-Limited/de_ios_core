@@ -312,11 +312,15 @@ final class FloaterOrchestrator: ObservableObject {
     /// the host app is worse for the user than no campaign at all. Teardown is
     /// silent — the window never painted, so there was no impression or frequency
     /// cost. The CEP slot is released through the dismissal callback without Digia analytics.
-    func abandonMedia(token: Int64, reason: String) {
+    /// `cause` is set only for a known content fault (4xx, invalid URL, decode); it reports to health.
+    func abandonMedia(token: Int64, reason: String, cause: String? = nil) {
         guard let active = state, active.token == token, awaitingMedia else { return }
         log.e(
             "Dropped — media could not be loaded (reason=\(reason))",
-            campaign: active.campaign.campaignKey
+            campaign: active.campaign.campaignKey,
+            stage: cause == nil ? nil : .render,
+            reason: cause == nil ? nil : TimelineReason.mediaLoadFailed,
+            extras: cause.map { ["media_kind": "\(active.config.media.kind)", "cause": $0] }
         )
         lastStartFailureReason = "media could not be loaded: \(reason)"
         onDismissed(active, .mediaEnd, metricsSnapshot(), false)
@@ -335,7 +339,7 @@ final class FloaterOrchestrator: ObservableObject {
         // poster to fall back to there is nothing this campaign could show, so drop
         // it rather than float an empty frame.
         if url.isEmpty || url.contains("{{") {
-            abandonMedia(token: token, reason: "no usable media url")
+            abandonMedia(token: token, reason: "no usable media url", cause: "invalid_url")
             return
         }
 
@@ -354,7 +358,7 @@ final class FloaterOrchestrator: ObservableObject {
 
     private func preparePlayer(_ active: ActiveFloaterState, url: String, token: Int64) {
         guard let parsed = URL(string: url) else {
-            abandonMedia(token: token, reason: "invalid media url")
+            abandonMedia(token: token, reason: "invalid media url", cause: "invalid_url")
             return
         }
         let config = active.config
@@ -415,7 +419,7 @@ final class FloaterOrchestrator: ObservableObject {
     private func preloadImage(url: String, token: Int64) {
         DigiaImagePipeline.configureIfNeeded()
         guard let parsed = URL(string: url) else {
-            abandonMedia(token: token, reason: "invalid media url")
+            abandonMedia(token: token, reason: "invalid media url", cause: "invalid_url")
             return
         }
         // Plain URLSession, not SDWebImage's imperative loader — the latter's core
@@ -426,13 +430,15 @@ final class FloaterOrchestrator: ObservableObject {
         // pre-warmed SDWebImage cache — a real but minor inefficiency (one extra
         // network round-trip), not a correctness issue, and worth revisiting once
         // this SDK has a working local build/test loop again.
-        let task = URLSession.shared.dataTask(with: parsed) { [weak self] data, _, _ in
+        let task = URLSession.shared.dataTask(with: parsed) { [weak self] data, response, _ in
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             Task { @MainActor in
                 guard let self, self.state?.token == token else { return }
                 if let data, (UIImage(data: data) != nil || SDImageSVGCoder.shared.decodedImage(with: data, options: nil) != nil) {
                     self.markVisible(token: token)
                 } else {
-                    self.abandonMedia(token: token, reason: "image failed to load")
+                    let cause = (400..<500).contains(status) ? "http_4xx" : (data == nil || status >= 500 ? nil : "decode")
+                    self.abandonMedia(token: token, reason: "image failed to load", cause: cause)
                 }
             }
         }
@@ -441,7 +447,7 @@ final class FloaterOrchestrator: ObservableObject {
 
     private func preloadLottie(url: String, token: Int64) {
         guard let parsed = URL(string: url) else {
-            abandonMedia(token: token, reason: "invalid media url")
+            abandonMedia(token: token, reason: "invalid media url", cause: "invalid_url")
             return
         }
         Task { [weak self] in

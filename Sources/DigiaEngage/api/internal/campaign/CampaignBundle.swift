@@ -46,7 +46,10 @@ struct CampaignBundle {
                 "Design tokens unreadable — falling back to literal values",
                 error: error.localizedDescription,
                 stage: .parse,
-                reason: TimelineReason.designTokensUnreadable
+                reason: TimelineReason.designTokensUnreadable,
+                extras: (error as? DesignTokenError).flatMap {
+                    if case .missingTheme(let theme) = $0 { ["theme": theme] } else { nil }
+                }
             )
             catalog = .empty
         }

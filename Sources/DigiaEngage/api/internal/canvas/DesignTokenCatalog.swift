@@ -5,7 +5,13 @@ private let log = DigiaLogger()
 
 enum DesignTokenError: LocalizedError {
     case invalid(String)
-    var errorDescription: String? { if case .invalid(let message) = self { message } else { nil } }
+    case missingTheme(String)
+    var errorDescription: String? {
+        switch self {
+        case .invalid(let message): message
+        case .missingTheme(let theme): "Missing '\(theme)' theme"
+        }
+    }
 }
 
 struct DesignTokenCatalog {
@@ -89,7 +95,7 @@ struct DesignTokenCatalog {
     }
 
     private static func themeColors(_ themes: [String: Any], theme: String) throws -> [String: Any] {
-        guard let value = themes[theme] as? [String: Any] else { throw DesignTokenError.invalid("Missing '\(theme)' theme") }
+        guard let value = themes[theme] as? [String: Any] else { throw DesignTokenError.missingTheme(theme) }
         var result: [String: Any] = [:]
         for entry in value["colors"] as? [[String: Any]] ?? [] {
             if let id = entry["id"] as? String, !id.isEmpty { result[id] = entry["value"] }

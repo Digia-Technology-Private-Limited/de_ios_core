@@ -452,6 +452,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             return
         }
         activateHealthSink()
+        if activePlugin == nil, campaigns.contains(where: { !Self.isInlineKind($0) }) {
+            log.w(
+                "No CEP plugin registered — triggered campaigns cannot show",
+                stage: .session,
+                reason: TimelineReason.pluginNotRegistered
+            )
+        }
         completeInitialization(campaigns)
     }
 
@@ -616,9 +623,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     ///
     /// A rejected key is the one init failure a customer can fix themselves.
     private static func fetchFailureReason(_ failure: CampaignFetchError?) -> TimelineReason {
-        failure?.statusCode == 401 || failure?.statusCode == 403
-            ? .fetchFailedAuth
-            : .fetchFailedNetwork
+        if failure?.statusCode == 401 || failure?.statusCode == 403 { return .fetchFailedAuth }
+        switch failure?.category {
+        case .httpStatus, .invalidResponse: return .fetchFailedResponse
+        default: return .fetchFailedNetwork
+        }
     }
 
     func register(_ plugin: DigiaCEPPlugin) {
@@ -2090,6 +2099,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             "reportSurveyCompleted: submitting campaignId=\(campaignId) answers=\(answers.count)")
         services?.submissionReporter.report(
             campaignId: campaignId,
+            campaignKey: state.payload.campaignKey,
             survey: state.config,
             answers: answers,
             startedAt: state.startedAt,

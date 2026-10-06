@@ -55,6 +55,16 @@ enum HealthReasons {
         // A CEP plugin's pending buffer (#71): held too long, or pushed out when full.
         "pending_expired",
         "superseded",
+        // Phase 2 (de_workspace#85).
+        "unsupported_action_type",
+        "action_handler_missing",
+        "fetch_failed_response",
+        "plugin_failed",
+        "plugin_not_registered",
+        "internal_error",
+        "survey_submission_failed",
+        "media_load_failed",
+        "cep_bridge_unavailable",
     ]
 
     /// Which `extras` keys each reason may send as `detail` — and nothing else.
@@ -81,7 +91,7 @@ enum HealthReasons {
         "unknown_campaign_key": [],
         "malformed_campaign_skipped": [],
         "unknown_design_token": ["token", "kind"],
-        "design_tokens_unreadable": [],
+        "design_tokens_unreadable": ["theme"],
         "schema_version_too_new": ["required", "supported"],
         "unsupported_widget_type": ["widget_type"],
         "campaign_unsupported": ["precondition", "type"],
@@ -94,16 +104,28 @@ enum HealthReasons {
         "timeout": ["surface_kind"],
         "pending_expired": ["cep"],
         "superseded": ["cep"],
+        "unsupported_action_type": ["action_type"],
+        "action_handler_missing": ["action_type"],
+        "fetch_failed_response": ["http_status"],
+        "plugin_failed": ["plugin", "callback"],
+        "plugin_not_registered": [],
+        "internal_error": ["exception_class"],
+        "survey_submission_failed": ["http_status"],
+        "media_load_failed": ["media_kind", "cause"],
+        "cep_bridge_unavailable": ["selector"],
     ]
 
     /// Reasons that identify *no* campaign, and so dedup on the symbol alone.
     ///
-    /// Both are bundle-wide facts: the fetch was rejected, or the whole token
-    /// catalog was unreadable. Keying them on a campaign would report one per
+    /// Each is an app-wide fact: a failed fetch, an unreadable token catalog,
+    /// or a host setup gap. Keying them on a campaign would report one per
     /// campaign for a failure that happened once.
     static let campaignlessReasons: Set<String> = [
         "design_tokens_unreadable",
         "fetch_failed_auth",
+        "fetch_failed_response",
+        "plugin_not_registered",
+        "action_handler_missing",
     ]
 
     /// The extra that makes one campaign's several instances of a reason
@@ -123,6 +145,10 @@ enum HealthReasons {
         // One report per (dropped campaign, blocker) per launch — "blocked by X
         // on N% of app opens".
         "surface_busy": "blocking_campaign_key",
+        "unsupported_action_type": "action_type",
+        "plugin_failed": "callback",
+        "internal_error": "exception_class",
+        "cep_bridge_unavailable": "selector",
     ]
 
     /// Extra marking a record whose blocker is a live test. Such a record stays

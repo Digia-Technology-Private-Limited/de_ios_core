@@ -132,7 +132,16 @@ final class HostActionExecutor {
     func execute(_ action: EngageAction) throws -> Bool {
         switch action {
         case .customKV(let payload):
-            try customKVHandler?(payload)
+            if let customKVHandler {
+                try customKVHandler(payload)
+            } else {
+                log.w(
+                    "customKV action has no host handler — skipped",
+                    stage: .interaction,
+                    reason: TimelineReason.actionHandlerMissing,
+                    extras: ["action_type": "customKV"]
+                )
+            }
         case .openDeeplink(let url):
             if let deepLinkHandler {
                 try deepLinkHandler(url)
