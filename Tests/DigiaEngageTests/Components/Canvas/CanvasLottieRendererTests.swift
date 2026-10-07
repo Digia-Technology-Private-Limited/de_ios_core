@@ -342,6 +342,30 @@ struct CanvasLottieRendererTests {
         )
     }
 
+    @Test(
+        "empty or invalid Lottie URL shows labelled placeholder visual golden",
+        .tags(.golden),
+        arguments: ["", "http://[invalid"]
+    )
+    func emptyOrInvalidLottieURLVisualGolden(url: String) async throws {
+        let runtime = CanvasLottieRuntime(playbackMode: .frozen(progress: 0))
+        let window = mount(lottie: lottieWidget(url: url), runtime: runtime)
+        defer { unmount(window) }
+        let rendered = await waitUntil {
+            guard let view = window.rootViewController?.view else { return false }
+            return Self.hasMoreThanOneColor(ComponentTestHost.renderImage(of: view))
+        }
+        try #require(rendered, "the empty-or-invalid Lottie placeholder never rendered")
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: window.rootViewController!.view),
+            precision: 0.999,
+            perceptualPrecision: 0.98,
+            named: url.isEmpty ? "empty" : "invalid"
+        )
+    }
+
     @Test("lottie renderer displays frozen animation at deterministic progress", .tags(.golden))
     func lottieRendererFrozenPlaybackVisualGolden() async throws {
         let runtime = CanvasLottieRuntime(playbackMode: .frozen(progress: 0.5))
@@ -563,6 +587,7 @@ struct CanvasLottieRendererTests {
         stage.animateWidgetsOnAppear = false
         let root = AnyView(
             stage
+                .ignoresSafeArea()
                 .environment(\.canvasLottieRuntime, runtime)
                 .environment(\.digiaVariables, variables)
         )
@@ -578,7 +603,7 @@ struct CanvasLottieRendererTests {
     private func mount(harness: LottieThemeHarness) -> UIWindow {
         mount(
             ComponentTestHost.makeComponentHost(
-                rootView: AnyView(harness),
+                rootView: AnyView(harness.ignoresSafeArea()),
                 size: CGSize(width: 320, height: 200),
                 backgroundColor: .white
             )
@@ -586,6 +611,9 @@ struct CanvasLottieRendererTests {
     }
 
     private func mount<Content: View>(_ controller: UIHostingController<Content>) -> UIWindow {
+        if #available(iOS 16.4, *) {
+            controller.safeAreaRegions = []
+        }
         let window: UIWindow
         if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
             window = UIWindow(windowScene: scene)

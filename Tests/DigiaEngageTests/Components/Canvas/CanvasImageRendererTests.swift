@@ -443,6 +443,26 @@ struct CanvasImageRendererTests {
         assertCanvasVisualGolden(canvas: canvas, slotKey: "canvas_image_asymmetric_corners_slot")
     }
 
+    @Test(
+        "empty or invalid image URL shows labelled placeholder visual golden",
+        .tags(.golden),
+        arguments: ["", "http://[invalid"]
+    )
+    func emptyOrInvalidImageURLVisualGolden(url: String) {
+        let widget = imageWidget(url: url)
+        let window = mount(image: widget)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        #expect(Self.hasMoreThanOneColor(image))
+        assertVisualGolden(
+            matching: image,
+            precision: 0.999,
+            perceptualPrecision: 0.98,
+            named: url.isEmpty ? "empty" : "invalid"
+        )
+    }
+
     private func prewarmedAssetURL(named fileName: String) throws -> String {
         try #require(ComponentTestHost.prewarmAssetImage(named: fileName))
         guard let workspaceUrl = FixtureLoader.workspaceURL() else {
@@ -549,6 +569,7 @@ struct CanvasImageRendererTests {
         stage.animateWidgetsOnAppear = false
         let root = AnyView(
             stage
+                .ignoresSafeArea()
                 .environment(\.digiaVariables, variables)
         )
         return mount(
@@ -574,6 +595,9 @@ struct CanvasImageRendererTests {
     }
 
     private func mount<Content: View>(_ controller: UIHostingController<Content>) -> UIWindow {
+        if #available(iOS 16.4, *) {
+            controller.safeAreaRegions = []
+        }
         let window: UIWindow
         if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
             window = UIWindow(windowScene: scene)
