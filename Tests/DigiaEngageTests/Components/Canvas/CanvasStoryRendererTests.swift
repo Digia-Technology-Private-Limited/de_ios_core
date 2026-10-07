@@ -182,58 +182,64 @@ struct CanvasStoryRendererTests {
         #expect(muteBg == .literal("#FFFFFFFF"))
     }
 
-    // MARK: - 3. Progress Segment Fraction & Arithmetic Oracle
+    // MARK: - 3. Progress Segment Fraction & Arithmetic
 
-    @Test("story progress segment fraction oracle calculates proper fill widths")
-    func storyProgressSegmentFractionOracle() {
-        func segmentFraction(segment: Int, active: Int, progress: CGFloat) -> CGFloat {
-            if segment < active {
-                return 1.0
-            } else if segment == active {
-                return min(max(progress, 0), 1)
-            } else {
-                return 0.0
-            }
-        }
-
+    @Test("story progress segment fraction calculates proper fill widths")
+    func storyProgressSegmentFraction() {
         // Scenario 1: Middle story (active = 1 of 4), half elapsed (progress = 0.5)
-        #expect(segmentFraction(segment: 0, active: 1, progress: 0.5) == 1.0)
-        #expect(segmentFraction(segment: 1, active: 1, progress: 0.5) == 0.5)
-        #expect(segmentFraction(segment: 2, active: 1, progress: 0.5) == 0.0)
-        #expect(segmentFraction(segment: 3, active: 1, progress: 0.5) == 0.0)
+        #expect(CanvasStoryProgressRenderer.fraction(for: 0, active: 1, elapsed: 0.5) == 1.0)
+        #expect(CanvasStoryProgressRenderer.fraction(for: 1, active: 1, elapsed: 0.5) == 0.5)
+        #expect(CanvasStoryProgressRenderer.fraction(for: 2, active: 1, elapsed: 0.5) == 0.0)
+        #expect(CanvasStoryProgressRenderer.fraction(for: 3, active: 1, elapsed: 0.5) == 0.0)
 
         // Scenario 2: First story (active = 0 of 3), clamped negative progress (-0.2 -> 0.0)
-        #expect(segmentFraction(segment: 0, active: 0, progress: -0.2) == 0.0)
-        #expect(segmentFraction(segment: 1, active: 0, progress: -0.2) == 0.0)
-        #expect(segmentFraction(segment: 2, active: 0, progress: -0.2) == 0.0)
+        #expect(CanvasStoryProgressRenderer.fraction(for: 0, active: 0, elapsed: -0.2) == 0.0)
+        #expect(CanvasStoryProgressRenderer.fraction(for: 1, active: 0, elapsed: -0.2) == 0.0)
+        #expect(CanvasStoryProgressRenderer.fraction(for: 2, active: 0, elapsed: -0.2) == 0.0)
 
         // Scenario 3: Last story (active = 2 of 3), clamped over-unity progress (1.4 -> 1.0)
-        #expect(segmentFraction(segment: 0, active: 2, progress: 1.4) == 1.0)
-        #expect(segmentFraction(segment: 1, active: 2, progress: 1.4) == 1.0)
-        #expect(segmentFraction(segment: 2, active: 2, progress: 1.4) == 1.0)
+        #expect(CanvasStoryProgressRenderer.fraction(for: 0, active: 2, elapsed: 1.4) == 1.0)
+        #expect(CanvasStoryProgressRenderer.fraction(for: 1, active: 2, elapsed: 1.4) == 1.0)
+        #expect(CanvasStoryProgressRenderer.fraction(for: 2, active: 2, elapsed: 1.4) == 1.0)
     }
 
-    // MARK: - 4. Story Chrome Symbols & Mute Oracle
+    @Test("story progress increment and hold to pause rules")
+    func storyProgressIncrementAndHoldToPause() {
+        let interval: TimeInterval = 1.0 / 30.0
+        let duration: Double = 5.0
 
-    @Test("story chrome buttons oracle verifies symbols for close and mute states")
-    func storyChromeButtonSymbolsOracle() {
-        func chromeSymbol(kind: CanvasStoryChromeButton.Kind, viewer: CanvasStoryViewerState?) -> String {
-            switch kind {
-            case .close:
-                return "xmark"
-            case .mute:
-                return (viewer?.muted ?? true) ? "speaker.slash.fill" : "speaker.wave.2.fill"
-            }
-        }
+        // Normal playback increments progress proportionally
+        let normalIncrement = CanvasStoryViewer.progressIncrement(
+            interval: interval, duration: duration, isPaused: false
+        )
+        let expectedIncrement = CGFloat(interval / duration)
+        #expect(abs(normalIncrement - expectedIncrement) < 0.0001)
 
+        // Hold-to-pause stops accumulation completely
+        let pausedIncrement = CanvasStoryViewer.progressIncrement(
+            interval: interval, duration: duration, isPaused: true
+        )
+        #expect(pausedIncrement == 0.0)
+
+        // Safe division against zero or negative authored duration
+        let zeroDurationIncrement = CanvasStoryViewer.progressIncrement(
+            interval: interval, duration: 0.0, isPaused: false
+        )
+        #expect(zeroDurationIncrement == CGFloat(interval / 0.1))
+    }
+
+    // MARK: - 4. Story Chrome Symbols & Mute
+
+    @Test("story chrome buttons verify symbols for close and mute states")
+    func storyChromeButtonSymbols() {
         // Close button is always "xmark"
-        #expect(chromeSymbol(kind: .close, viewer: nil) == "xmark")
-        #expect(chromeSymbol(kind: .close, viewer: CanvasStoryViewerState(muted: false)) == "xmark")
+        #expect(CanvasStoryChromeButton.symbol(for: .close, viewer: nil) == "xmark")
+        #expect(CanvasStoryChromeButton.symbol(for: .close, viewer: CanvasStoryViewerState(muted: false)) == "xmark")
 
         // Mute button reflects viewer state or defaults to muted
-        #expect(chromeSymbol(kind: .mute, viewer: nil) == "speaker.slash.fill")
-        #expect(chromeSymbol(kind: .mute, viewer: CanvasStoryViewerState(muted: true)) == "speaker.slash.fill")
-        #expect(chromeSymbol(kind: .mute, viewer: CanvasStoryViewerState(muted: false)) == "speaker.wave.2.fill")
+        #expect(CanvasStoryChromeButton.symbol(for: .mute, viewer: nil) == "speaker.slash.fill")
+        #expect(CanvasStoryChromeButton.symbol(for: .mute, viewer: CanvasStoryViewerState(muted: true)) == "speaker.slash.fill")
+        #expect(CanvasStoryChromeButton.symbol(for: .mute, viewer: CanvasStoryViewerState(muted: false)) == "speaker.wave.2.fill")
     }
 
     // MARK: - 5. Fit & Item Mapping Oracle
@@ -276,15 +282,15 @@ struct CanvasStoryRendererTests {
         #expect(item.thumbnailBoxFit == .contain)
     }
 
-    @Test("story rail card dimensions oracle derives card width from authored ratio")
-    func storyRailCardDimensionOracle() {
+    @Test("story rail card dimensions derives card width from authored ratio")
+    func storyRailCardDimension() {
         let railHeight: CGFloat = 160
         let cardAspectRatio: CGFloat = 0.72
-        let cardWidth = railHeight * cardAspectRatio
+        let cardWidth = CanvasStoryRailRenderer.cardWidth(railHeight: railHeight, cardAspectRatio: cardAspectRatio)
         #expect(abs(cardWidth - 115.2) < 0.001)
 
         let squareAspectRatio: CGFloat = 1.0
-        #expect(abs((railHeight * squareAspectRatio) - 160.0) < 0.001)
+        #expect(abs(CanvasStoryRailRenderer.cardWidth(railHeight: railHeight, cardAspectRatio: squareAspectRatio) - 160.0) < 0.001)
     }
 
     // MARK: - 6. Visual Golden Tests
@@ -427,6 +433,9 @@ struct CanvasStoryRendererTests {
 
     @Test("story rail renderer renders horizontal card rail with aspect ratio and rounded corners")
     func storyRailVisualGolden() throws {
+        let strawberryUrl = try prewarmedAssetURL(named: "strawberry.jpg")
+        let whatsappUrl = try prewarmedAssetURL(named: "cloudinary-whatsapp.jpg")
+
         let canvas = try CampaignCanvasParser().parse([
             "version": 2,
             "canvasWidth": 360,
@@ -441,9 +450,9 @@ struct CanvasStoryRendererTests {
                         "type": "digia/canvasStory",
                         "props": [
                             "pages": [
-                                makeStoryPageJSON(url: "local://card1", durationSeconds: 5.0),
-                                makeStoryPageJSON(url: "local://card2", durationSeconds: 5.0),
-                                makeStoryPageJSON(url: "local://card3", durationSeconds: 5.0)
+                                makeStoryPageJSON(url: strawberryUrl, durationSeconds: 5.0),
+                                makeStoryPageJSON(url: whatsappUrl, durationSeconds: 5.0),
+                                makeStoryPageJSON(url: strawberryUrl, durationSeconds: 5.0)
                             ],
                             "cardAspectRatio": 0.72,
                             "cardCornerRadius": 12,
@@ -458,13 +467,317 @@ struct CanvasStoryRendererTests {
 
         let window = mount(canvas: canvas)
         defer { unmount(window) }
-        ComponentTestHost.drainRunLoop(for: 0.1)
+        ComponentTestHost.drainRunLoop(for: 0.5)
+        window.rootViewController?.overrideUserInterfaceStyle = .dark
+        ComponentTestHost.drainRunLoop(for: 0.4)
+        window.rootViewController?.overrideUserInterfaceStyle = .light
+        ComponentTestHost.drainRunLoop(for: 0.5)
+        window.layoutIfNeeded()
 
         let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
         assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
     }
 
+    @Test("story viewer full screen renders background media, overlay page canvas, and top chrome controls")
+    func storyViewerFullScreenVisualGolden() throws {
+        let strawberryUrl = try prewarmedAssetURL(named: "strawberry.jpg")
+        let whatsappUrl = try prewarmedAssetURL(named: "cloudinary-whatsapp.jpg")
+
+        let pageCanvasJSON: [String: Any] = [
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 180,
+            "background": ["type": "solid", "color": ["value": "#CC0F172A"]],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "story-title",
+                    "rect": ["x": 0.08, "y": 0.12, "width": 0.84, "height": 0.24],
+                    "widget": [
+                        "type": "digia/text",
+                        "props": [
+                            "spans": [
+                                [
+                                    "text": "Organic Strawberries",
+                                    "color": "#FFFFFFFF",
+                                    "typography": ["fontSize": 20, "fontWeight": 700]
+                                ]
+                            ]
+                        ]
+                    ]
+                ],
+                [
+                    "kind": "widget",
+                    "id": "story-desc",
+                    "rect": ["x": 0.08, "y": 0.40, "width": 0.84, "height": 0.20],
+                    "widget": [
+                        "type": "digia/text",
+                        "props": [
+                            "spans": [
+                                [
+                                    "text": "Freshly harvested from organic farms.",
+                                    "color": "#FF94A3B8",
+                                    "typography": ["fontSize": 13, "fontWeight": 400]
+                                ]
+                            ]
+                        ]
+                    ]
+                ],
+                [
+                    "kind": "widget",
+                    "id": "story-cta",
+                    "rect": ["x": 0.08, "y": 0.65, "width": 0.84, "height": 0.26],
+                    "widget": [
+                        "type": "digia/button",
+                        "props": [
+                            "label": [
+                                "spans": [
+                                    [
+                                        "text": "Shop Fresh",
+                                        "color": "#FFFFFFFF",
+                                        "fontSize": 14,
+                                        "fontWeight": 700
+                                    ]
+                                ]
+                            ],
+                            "style": [
+                                "variant": "fill",
+                                "fill": ["type": "solid", "color": "#FF4F46E5"]
+                            ],
+                            "cornerRadius": 10
+                        ]
+                    ]
+                ]
+            ]
+        ]
+
+        let chromeCanvasJSON: [String: Any] = [
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 50,
+            "background": ["type": "solid", "color": ["value": "#00000000"]],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "story-progress",
+                    "rect": ["x": 0.04, "y": 0.10, "width": 0.92, "height": 0.16],
+                    "widget": [
+                        "type": "digia/storyProgress",
+                        "props": [
+                            "activeColor": "#FFFFFFFF",
+                            "trackColor": "#66FFFFFF",
+                            "barHeight": 4,
+                            "gap": 4
+                        ]
+                    ]
+                ],
+                [
+                    "kind": "widget",
+                    "id": "story-mute-btn",
+                    "rect": ["x": 0.74, "y": 0.30, "width": 0.10, "height": 0.65],
+                    "widget": [
+                        "type": "digia/storyMute",
+                        "props": [
+                            "visible": true,
+                            "iconColor": "#FFFFFFFF",
+                            "backgroundColor": "#66000000"
+                        ]
+                    ]
+                ],
+                [
+                    "kind": "widget",
+                    "id": "story-close-btn",
+                    "rect": ["x": 0.86, "y": 0.30, "width": 0.10, "height": 0.65],
+                    "widget": [
+                        "type": "digia/storyClose",
+                        "props": [
+                            "visible": true,
+                            "iconColor": "#FFFFFFFF",
+                            "backgroundColor": "#66000000"
+                        ]
+                    ]
+                ]
+            ]
+        ]
+
+        let parsedWidget = try parsedStoryWidget([
+            "showRail": true,
+            "restartOnCompleted": false,
+            "startMuted": true,
+            "defaultDurationSeconds": 1000.0
+        ], pages: [
+            [
+                "thumbnailType": "image",
+                "thumbnailUrl": strawberryUrl,
+                "thumbnailFit": "cover",
+                "pageFit": "cover",
+                "durationSeconds": 1000.0,
+                "canvas": pageCanvasJSON
+            ],
+            [
+                "thumbnailType": "image",
+                "thumbnailUrl": whatsappUrl,
+                "thumbnailFit": "cover",
+                "pageFit": "cover",
+                "durationSeconds": 1000.0,
+                "canvas": makeNestedCanvasJSON(height: 180)
+            ],
+            [
+                "thumbnailType": "image",
+                "thumbnailUrl": strawberryUrl,
+                "thumbnailFit": "cover",
+                "pageFit": "cover",
+                "durationSeconds": 1000.0,
+                "canvas": makeNestedCanvasJSON(height: 180)
+            ]
+        ], chrome: chromeCanvasJSON)
+
+        guard case .story(
+            _, let pages, _, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
+        ) = parsedWidget else {
+            Issue.record("Expected .story widget")
+            return
+        }
+
+        let viewer = CanvasStoryViewer(
+            pages: pages,
+            chrome: chrome,
+            initialIndex: 1,
+            restartOnCompleted: restartOnCompleted,
+            startMuted: startMuted,
+            isDark: false,
+            onAction: { _ in },
+            onDismiss: {},
+            showsOverlays: true,
+            safeAreaInsets: EdgeInsets(top: 47, leading: 0, bottom: 34, trailing: 0)
+        )
+
+        let (window, _) = ComponentTestHost.mount(
+            rootView: viewer,
+            size: CGSize(width: 390, height: 844),
+            backgroundColor: .black
+        )
+        defer { ComponentTestHost.unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.5)
+        window.rootViewController?.overrideUserInterfaceStyle = .dark
+        ComponentTestHost.drainRunLoop(for: 0.4)
+        window.rootViewController?.overrideUserInterfaceStyle = .light
+        ComponentTestHost.drainRunLoop(for: 0.5)
+        window.layoutIfNeeded()
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    // MARK: - 7. Navigation & Interaction Mechanics
+
+    @Test("story navigation outcome on CanvasStoryViewer models tap back, advance, and completion bounds")
+    func storyStepNavigationOutcome() {
+        let totalPages = 3
+
+        // 1. Tapping left at page 0: delta -1 -> restarts current page
+        #expect(CanvasStoryViewer.navigationOutcome(
+            currentIndex: 0,
+            delta: -1,
+            pageCount: totalPages,
+            restartOnCompleted: false
+        ) == .restartCurrent)
+
+        // 2. Tapping right at page 0 -> advances to page 1
+        #expect(CanvasStoryViewer.navigationOutcome(
+            currentIndex: 0,
+            delta: 1,
+            pageCount: totalPages,
+            restartOnCompleted: false
+        ) == .advance(to: 1))
+
+        // 3. Tapping left at page 1 -> moves back to page 0
+        #expect(CanvasStoryViewer.navigationOutcome(
+            currentIndex: 1,
+            delta: -1,
+            pageCount: totalPages,
+            restartOnCompleted: false
+        ) == .advance(to: 0))
+
+        // 4. Tapping right at page 1 -> advances to page 2 (last page)
+        #expect(CanvasStoryViewer.navigationOutcome(
+            currentIndex: 1,
+            delta: 1,
+            pageCount: totalPages,
+            restartOnCompleted: false
+        ) == .advance(to: 2))
+
+        // 5. Tapping right at page 2 (last page, restartOnCompleted = false) -> completes and signals dismiss
+        #expect(CanvasStoryViewer.navigationOutcome(
+            currentIndex: 2,
+            delta: 1,
+            pageCount: totalPages,
+            restartOnCompleted: false
+        ) == .complete(loopToStart: false))
+
+        // 6. Tapping right at page 2 (last page, restartOnCompleted = true) -> completes and loops to page 0
+        #expect(CanvasStoryViewer.navigationOutcome(
+            currentIndex: 2,
+            delta: 1,
+            pageCount: totalPages,
+            restartOnCompleted: true
+        ) == .complete(loopToStart: true))
+    }
+
+    @Test("story chrome button dispatches close and mute callbacks")
+    func storyChromeButtonDispatchesCallbacks() {
+        var closeCalled = false
+        var muteCalled = false
+
+        let closeCallback = CanvasStoryCallback(run: { closeCalled = true })
+        let muteCallback = CanvasStoryCallback(run: { muteCalled = true })
+
+        CanvasStoryChromeButton.performAction(kind: .close, close: closeCallback, toggleMute: muteCallback)
+        #expect(closeCalled == true)
+        #expect(muteCalled == false)
+
+        closeCalled = false
+        muteCalled = false
+        CanvasStoryChromeButton.performAction(kind: .mute, close: closeCallback, toggleMute: muteCallback)
+        #expect(closeCalled == false)
+        #expect(muteCalled == true)
+
+        // Nil-safety when callbacks are not provided
+        CanvasStoryChromeButton.performAction(kind: .close, close: nil, toggleMute: nil)
+        CanvasStoryChromeButton.performAction(kind: .mute, close: nil, toggleMute: nil)
+    }
+
+    @Test("story viewer distinguishes dismissal from completion analytics")
+    func storyViewerAnalyticsAndDismissal() {
+        // Scenario 1: Early dismissal on page 1 of 3
+        let earlyDismiss = CanvasStoryViewer.dismissalInteraction(currentIndex: 1, pageCount: 3, completedReported: false)
+        #expect(earlyDismiss == .storyPageDismissed(index: 1, total: 3))
+
+        // Scenario 2: Close after already completed does not double-report
+        let completedDismiss = CanvasStoryViewer.dismissalInteraction(currentIndex: 2, pageCount: 3, completedReported: true)
+        #expect(completedDismiss == nil)
+
+        // Scenario 3: First completion reports storyCompleted
+        let completion = CanvasStoryViewer.completionInteraction(pageCount: 3, timeToCompleteMs: 4200, completedReported: false)
+        #expect(completion == .storyCompleted(total: 3, timeToCompleteMs: 4200))
+
+        // Scenario 4: Subsequent completion does not double-report
+        let repeatedCompletion = CanvasStoryViewer.completionInteraction(pageCount: 3, timeToCompleteMs: 8400, completedReported: true)
+        #expect(repeatedCompletion == nil)
+    }
+
     // MARK: - Test Helpers
+
+    private func prewarmedAssetURL(named fileName: String) throws -> String {
+        try #require(ComponentTestHost.prewarmAssetImage(named: fileName))
+        guard let workspaceUrl = FixtureLoader.workspaceURL() else {
+            Issue.record("Workspace URL not available")
+            throw DesignTokenError.invalid("Workspace URL not available")
+        }
+        let assetOrigin = workspaceUrl.appendingPathComponent("testkit/mock-server").absoluteString
+        let cleanOrigin = assetOrigin.hasSuffix("/") ? String(assetOrigin.dropLast()) : assetOrigin
+        return "\(cleanOrigin)/assets/\(fileName)"
+    }
 
     private func parsedStoryWidget(
         _ props: [String: Any],

@@ -300,9 +300,24 @@ struct CanvasCarouselRenderer: View {
     @State private var lastReportedDisplayIndex: Int?
     @Environment(\.canvasInteractions) private var reportInteraction
 
-    private func realIndex(_ displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int {
+    package static func realIndex(_ displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int {
         guard loopEnabled else { return displayIndex }
         return (((displayIndex - 1) % slideCount) + slideCount) % slideCount
+    }
+
+    package static func recenteringTarget(displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int? {
+        guard loopEnabled, slideCount > 1 else { return nil }
+        let displayCount = slideCount + 2
+        if displayIndex == 0 {
+            return displayCount - 2
+        } else if displayIndex == displayCount - 1 {
+            return 1
+        }
+        return nil
+    }
+
+    private func realIndex(_ displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int {
+        Self.realIndex(displayIndex, slideCount: slideCount, loopEnabled: loopEnabled)
     }
 
     var body: some View {
@@ -411,8 +426,7 @@ struct CanvasCarouselRenderer: View {
                                 )
                                 advancedAutomatically = false
 
-                                if loopEnabled, displayIndex == 0 || displayIndex == displayCount - 1 {
-                                    let target = displayIndex == 0 ? displayCount - 2 : 1
+                                if let target = Self.recenteringTarget(displayIndex: displayIndex, slideCount: slides.count, loopEnabled: loopEnabled) {
                                     isRecentering = true
                                     DispatchQueue.main.async {
                                         var transaction = Transaction()
@@ -466,6 +480,20 @@ struct CanvasCarouselRenderer: View {
         )
     }
 
+    package static func shouldStartAutoPlay(autoPlay: Bool, slideCount: Int) -> Bool {
+        autoPlay && slideCount > 1
+    }
+
+    package static func nextAutoPlayIndex(
+        currentIndex: Int?,
+        displayCount: Int,
+        loopEnabled: Bool
+    ) -> Int? {
+        let current = currentIndex ?? (loopEnabled ? 1 : 0)
+        if !loopEnabled && current >= displayCount - 1 { return nil }
+        return min(current + 1, displayCount - 1)
+    }
+
     private func startAutoPlay(
         autoPlay: Bool,
         autoPlayInterval: TimeInterval,
@@ -475,12 +503,14 @@ struct CanvasCarouselRenderer: View {
         loopEnabled: Bool
     ) {
         stopAutoPlay()
-        guard autoPlay, slideCount > 1 else { return }
+        guard Self.shouldStartAutoPlay(autoPlay: autoPlay, slideCount: slideCount) else { return }
         let timer = Timer(timeInterval: autoPlayInterval, repeats: true) { _ in
             Task { @MainActor in
-                let current = scrollPosition ?? (loopEnabled ? 1 : 0)
-                if !loopEnabled && current >= displayCount - 1 { return }
-                let next = min(current + 1, displayCount - 1)
+                guard let next = Self.nextAutoPlayIndex(
+                    currentIndex: scrollPosition,
+                    displayCount: displayCount,
+                    loopEnabled: loopEnabled
+                ) else { return }
                 // Flagged before the change, so the `onChange` it triggers knows
                 // the slide arrived on a timer rather than under a finger.
                 advancedAutomatically = true
@@ -511,6 +541,10 @@ struct CanvasStoryRailRenderer: View {
     @State private var openIndex: Int?
     @Environment(\.canvasInteractions) private var reportInteraction
 
+    package static func cardWidth(railHeight: CGFloat, cardAspectRatio: CGFloat) -> CGFloat {
+        railHeight * cardAspectRatio
+    }
+
     var body: some View {
         guard case .story(
             _, let pages, let cardAspectRatio, let cardCornerRadius, let cardSpacing,
@@ -527,7 +561,7 @@ struct CanvasStoryRailRenderer: View {
                     // A card is as tall as the rail's own box, so its width
                     // follows from the authored ratio. Nothing reads a card-height
                     // property, because there isn't one.
-                    let cardWidth = proxy.size.height * cardAspectRatio
+                    let cardWidth = Self.cardWidth(railHeight: proxy.size.height, cardAspectRatio: cardAspectRatio)
                     StoryThumbnailRailView(
                         items: pages.map(canvasStoryItem),
                         mode: thumbnailVideoPlayback.asInlineStoryMode,
@@ -795,45 +829,83 @@ struct CanvasStoryViewer: View {
         reportInteraction(.storyPageViewed(index: pageIndex, total: pages.count))
     }
 
+    package enum NavigationOutcome: Equatable {
+        case restartCurrent
+        case advance(to: Int)
+        case complete(loopToStart: Bool)
+    }
+
+    package static func navigationOutcome(
+        currentIndex: Int,
+        delta: Int,
+        pageCount: Int,
+        restartOnCompleted: Bool
+    ) -> NavigationOutcome {
+        let next = currentIndex + delta
+        if next < 0 { return .restartCurrent }
+        if next >= pageCount { return .complete(loopToStart: restartOnCompleted) }
+        return .advance(to: next)
+    }
+
     /// Advances or rewinds, restarting the elapsed bar either way.
     private func step(_ delta: Int) {
-        let next = index + delta
-        // A tap on the left goes back a page, every single time. It used to
-        // restart the current page instead whenever more than 15% of it had
-        // elapsed — the "I missed that" convention — which in practice meant it
-        // never went back at all: a page runs for seconds, so all but the very
-        // first frames of a tap land past that threshold and the viewer just
-        // replayed the page the user was already on. Android's viewer has always
-        // done a plain `index - 1`, and this is now the same rule.
-        //
-        // The first page is the one exception, and only because there is nothing
-        // behind it: `next` goes negative and it restarts in place.
-        if next < 0 { start(); return }
-        if next >= pages.count {
-            // Reaching the end is the completion, whether or not the story then restarts — and at
-            // most once per showing, so a looping story does not report a completion per lap.
-            if !completedReported {
+        switch Self.navigationOutcome(
+            currentIndex: index,
+            delta: delta,
+            pageCount: pages.count,
+            restartOnCompleted: restartOnCompleted
+        ) {
+        case .restartCurrent:
+            start()
+        case .advance(let next):
+            index = next
+            start()
+        case .complete(let loopToStart):
+            if let interaction = Self.completionInteraction(
+                pageCount: pages.count,
+                timeToCompleteMs: Int(Date().timeIntervalSince(openedAt) * 1000),
+                completedReported: completedReported
+            ) {
                 completedReported = true
-                reportInteraction(
-                    .storyCompleted(
-                        total: pages.count,
-                        timeToCompleteMs: Int(Date().timeIntervalSince(openedAt) * 1000)
-                    )
-                )
+                reportInteraction(interaction)
             }
-            if restartOnCompleted { index = 0; start() } else { onDismiss() }
-            return
+            if loopToStart {
+                index = 0
+                start()
+            } else {
+                onDismiss()
+            }
         }
-        index = next
-        start()
+    }
+
+    package static func dismissalInteraction(
+        currentIndex: Int,
+        pageCount: Int,
+        completedReported: Bool
+    ) -> CanvasInteraction? {
+        guard !completedReported else { return nil }
+        return .storyPageDismissed(index: currentIndex, total: pageCount)
+    }
+
+    package static func completionInteraction(
+        pageCount: Int,
+        timeToCompleteMs: Int,
+        completedReported: Bool
+    ) -> CanvasInteraction? {
+        guard !completedReported else { return nil }
+        return .storyCompleted(total: pageCount, timeToCompleteMs: timeToCompleteMs)
     }
 
     /// Closing before the end is a dismissal; closing *at* the end is the completion already
     /// reported by `step`. Distinguishing them is what makes drop-off measurable — a viewer that
     /// always reported a dismissal would show 100% abandonment.
     private func dismissWithReport() {
-        if !completedReported {
-            reportInteraction(.storyPageDismissed(index: index, total: pages.count))
+        if let interaction = Self.dismissalInteraction(
+            currentIndex: index,
+            pageCount: pages.count,
+            completedReported: completedReported
+        ) {
+            reportInteraction(interaction)
         }
         onDismiss()
     }
@@ -872,6 +944,15 @@ struct CanvasStoryViewer: View {
         startAuthoredTimer()
     }
 
+    package static func progressIncrement(
+        interval: TimeInterval,
+        duration: Double,
+        isPaused: Bool
+    ) -> CGFloat {
+        guard !isPaused else { return 0 }
+        return CGFloat(interval / max(0.1, duration))
+    }
+
     private func startAuthoredTimer() {
         ticker?.invalidate()
         let current = page
@@ -881,8 +962,11 @@ struct CanvasStoryViewer: View {
         ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
             Task { @MainActor in
                 guard mediaKey == currentMediaKey else { return }
-                guard !paused else { return }
-                progress += CGFloat(interval / max(0.1, current.duration))
+                progress += Self.progressIncrement(
+                    interval: interval,
+                    duration: current.duration,
+                    isPaused: paused
+                )
                 if progress >= 1 { step(1) }
             }
         }
@@ -900,6 +984,10 @@ struct CanvasStoryProgressRenderer: View {
 
     @Environment(\.canvasStoryViewer) private var viewer
 
+    package static func fraction(for segment: Int, active: Int, elapsed: CGFloat) -> CGFloat {
+        segment < active ? 1 : (segment == active ? min(max(elapsed, 0), 1) : 0)
+    }
+
     var body: some View {
         let count = max(1, viewer?.pageCount ?? 1)
         let active = viewer?.index ?? 0
@@ -913,9 +1001,7 @@ struct CanvasStoryProgressRenderer: View {
                         // Stories already seen read as full, the current one
                         // animates, and the rest stay empty — the shape of the
                         // strip is what tells the viewer where they are.
-                        let fraction: CGFloat = segment < active
-                            ? 1
-                            : (segment == active ? min(max(elapsed, 0), 1) : 0)
+                        let fraction: CGFloat = Self.fraction(for: segment, active: active, elapsed: elapsed)
                         RoundedRectangle(cornerRadius: cornerRadius)
                             .fill(canvasColor(activeColor, isDark, .white))
                             .frame(width: proxy.size.width * fraction)
@@ -946,6 +1032,21 @@ struct CanvasStoryChromeButton: View {
     @Environment(\.canvasStoryClose) private var close
     @Environment(\.canvasStoryToggleMute) private var toggleMute
 
+    package static func symbol(for kind: Kind, viewer: CanvasStoryViewerState?) -> String {
+        switch kind {
+        case .close: "xmark"
+        case .mute: (viewer?.muted ?? true) ? "speaker.slash.fill" : "speaker.wave.2.fill"
+        }
+    }
+
+    package static func performAction(
+        kind: Kind,
+        close: CanvasStoryCallback?,
+        toggleMute: CanvasStoryCallback?
+    ) {
+        (kind == .close ? close : toggleMute)?.run()
+    }
+
     var body: some View {
         if visible {
             GeometryReader { proxy in
@@ -958,15 +1059,14 @@ struct CanvasStoryChromeButton: View {
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height)
                 .contentShape(Capsule())
-                .onTapGesture { (kind == .close ? close : toggleMute)?.run() }
+                .onTapGesture {
+                    Self.performAction(kind: kind, close: close, toggleMute: toggleMute)
+                }
             }
         }
     }
 
     private var symbol: String {
-        switch kind {
-        case .close: "xmark"
-        case .mute: (viewer?.muted ?? true) ? "speaker.slash.fill" : "speaker.wave.2.fill"
-        }
+        Self.symbol(for: kind, viewer: viewer)
     }
 }

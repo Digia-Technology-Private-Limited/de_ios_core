@@ -266,7 +266,84 @@ struct CanvasCarouselRendererTests {
         #expect(request.step?.total == 5)
     }
 
-    // MARK: - 5. Visual Golden Tests
+    // MARK: - 5. Infinite Scroll & Real Index Resolution
+ 
+    @Test("carousel infinite scroll recentering and real index resolution on CanvasCarouselRenderer")
+    func carouselInfiniteScrollRecenteringAndRealIndex() {
+        // Scenario 1: 3 slides with infinite loop (displayCount = 5)
+        let slides3 = 3
+        // Boundary 0 (duplicate of slide 2) -> silently recenters to target index 3 (real slide 2)
+        #expect(CanvasCarouselRenderer.recenteringTarget(displayIndex: 0, slideCount: slides3, loopEnabled: true) == 3)
+        #expect(CanvasCarouselRenderer.realIndex(0, slideCount: slides3, loopEnabled: true) == 2)
+
+        // Interior indices (1, 2, 3) -> valid positions, no recentering
+        #expect(CanvasCarouselRenderer.recenteringTarget(displayIndex: 1, slideCount: slides3, loopEnabled: true) == nil)
+        #expect(CanvasCarouselRenderer.realIndex(1, slideCount: slides3, loopEnabled: true) == 0)
+
+        #expect(CanvasCarouselRenderer.recenteringTarget(displayIndex: 2, slideCount: slides3, loopEnabled: true) == nil)
+        #expect(CanvasCarouselRenderer.realIndex(2, slideCount: slides3, loopEnabled: true) == 1)
+
+        #expect(CanvasCarouselRenderer.recenteringTarget(displayIndex: 3, slideCount: slides3, loopEnabled: true) == nil)
+        #expect(CanvasCarouselRenderer.realIndex(3, slideCount: slides3, loopEnabled: true) == 2)
+
+        // Boundary 4 (duplicate of slide 0) -> silently recenters to target index 1 (real slide 0)
+        #expect(CanvasCarouselRenderer.recenteringTarget(displayIndex: 4, slideCount: slides3, loopEnabled: true) == 1)
+        #expect(CanvasCarouselRenderer.realIndex(4, slideCount: slides3, loopEnabled: true) == 0)
+
+        // Scenario 2: 5 slides with infinite loop (displayCount = 7)
+        let slides5 = 5
+        #expect(CanvasCarouselRenderer.recenteringTarget(displayIndex: 0, slideCount: slides5, loopEnabled: true) == 5)
+        #expect(CanvasCarouselRenderer.realIndex(0, slideCount: slides5, loopEnabled: true) == 4)
+
+        #expect(CanvasCarouselRenderer.recenteringTarget(displayIndex: 6, slideCount: slides5, loopEnabled: true) == 1)
+        #expect(CanvasCarouselRenderer.realIndex(6, slideCount: slides5, loopEnabled: true) == 0)
+
+        #expect(CanvasCarouselRenderer.recenteringTarget(displayIndex: 3, slideCount: slides5, loopEnabled: true) == nil)
+        #expect(CanvasCarouselRenderer.realIndex(3, slideCount: slides5, loopEnabled: true) == 2)
+
+        // Scenario 3: Loop disabled (finite carousel) -> no recentering, 1:1 real index mapping
+        #expect(CanvasCarouselRenderer.recenteringTarget(displayIndex: 0, slideCount: slides3, loopEnabled: false) == nil)
+        #expect(CanvasCarouselRenderer.realIndex(0, slideCount: slides3, loopEnabled: false) == 0)
+
+        #expect(CanvasCarouselRenderer.recenteringTarget(displayIndex: 2, slideCount: slides3, loopEnabled: false) == nil)
+        #expect(CanvasCarouselRenderer.realIndex(2, slideCount: slides3, loopEnabled: false) == 2)
+
+        // Scenario 4: Single slide with loopEnabled true -> cannot loop a single slide, no recentering
+        #expect(CanvasCarouselRenderer.recenteringTarget(displayIndex: 0, slideCount: 1, loopEnabled: true) == nil)
+        #expect(CanvasCarouselRenderer.realIndex(0, slideCount: 1, loopEnabled: true) == 0)
+    }
+
+    // MARK: - 6. Autoplay Progression & Eligibility
+
+    @Test("carousel autoplay progression and eligibility on CanvasCarouselRenderer")
+    func carouselAutoPlayProgressionAndEligibility() {
+        // Eligibility rules: requires autoPlay true and at least 2 slides
+        #expect(CanvasCarouselRenderer.shouldStartAutoPlay(autoPlay: true, slideCount: 3) == true)
+        #expect(CanvasCarouselRenderer.shouldStartAutoPlay(autoPlay: false, slideCount: 3) == false)
+        #expect(CanvasCarouselRenderer.shouldStartAutoPlay(autoPlay: true, slideCount: 1) == false)
+        #expect(CanvasCarouselRenderer.shouldStartAutoPlay(autoPlay: false, slideCount: 1) == false)
+
+        // Infinite loop progression (displayCount = 5 for 3 slides: [clone2, s0, s1, s2, clone0])
+        let loopDisplayCount = 5
+        // Uninitialized position starts at slide 0 (index 1) and advances to 2
+        #expect(CanvasCarouselRenderer.nextAutoPlayIndex(currentIndex: nil, displayCount: loopDisplayCount, loopEnabled: true) == 2)
+        // From slide 0 (displayIndex 1) advances to slide 1 (displayIndex 2)
+        #expect(CanvasCarouselRenderer.nextAutoPlayIndex(currentIndex: 1, displayCount: loopDisplayCount, loopEnabled: true) == 2)
+        // From slide 1 (displayIndex 2) advances to slide 2 (displayIndex 3)
+        #expect(CanvasCarouselRenderer.nextAutoPlayIndex(currentIndex: 2, displayCount: loopDisplayCount, loopEnabled: true) == 3)
+        // From slide 2 (displayIndex 3) advances to clone0 (displayIndex 4) which triggers seamless recentering
+        #expect(CanvasCarouselRenderer.nextAutoPlayIndex(currentIndex: 3, displayCount: loopDisplayCount, loopEnabled: true) == 4)
+
+        // Finite carousel progression (displayCount = 3: [s0, s1, s2])
+        let finiteDisplayCount = 3
+        #expect(CanvasCarouselRenderer.nextAutoPlayIndex(currentIndex: nil, displayCount: finiteDisplayCount, loopEnabled: false) == 1)
+        #expect(CanvasCarouselRenderer.nextAutoPlayIndex(currentIndex: 0, displayCount: finiteDisplayCount, loopEnabled: false) == 1)
+        #expect(CanvasCarouselRenderer.nextAutoPlayIndex(currentIndex: 1, displayCount: finiteDisplayCount, loopEnabled: false) == 2)
+        // Reaching the end halts autoplay (returns nil)
+        #expect(CanvasCarouselRenderer.nextAutoPlayIndex(currentIndex: 2, displayCount: finiteDisplayCount, loopEnabled: false) == nil)
+    }
+
+    // MARK: - 7. Visual Golden Tests
 
     @Test("carousel renderer renders multi-slide strip and active dot indicators")
     func carouselRendererVisualGolden() throws {
