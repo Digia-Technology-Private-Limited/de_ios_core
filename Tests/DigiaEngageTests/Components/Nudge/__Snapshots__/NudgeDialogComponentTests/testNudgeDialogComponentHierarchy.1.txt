@@ -5,47 +5,55 @@
    |    |    |    | <_UIHostingView<NudgeOverlayView>; frame = (0 0; 440 956); gestureRecognizers = <NSArray>; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>>
    |    |    |    |    | <CALayer> (layer)
    |    |    |    |    | <HostingScrollView.PlatformContainer; frame = (36 0; 368 956); anchorPoint = (0, 0); tintColor = UIExtendedSRGBColorSpace 0 0.533333 1 1; layer = <CALayer>>
-   |    |    |    |    |    | <SwiftUI.HostingScrollView; baseClass = UIScrollView; frame = (0 0; 368 956); clipsToBounds = YES; gestureRecognizers = <NSArray>; layer = <CALayer>; contentOffset: {0, 0}; contentSize: {368, 325}; adjustedContentInset: {0, 0, 0, 0}>
+   |    |    |    |    |    | <SwiftUI.HostingScrollView; baseClass = UIScrollView; frame = (0 0; 368 956); clipsToBounds = YES; gestureRecognizers = <NSArray>; layer = <CALayer>; contentOffset: {0, 0}; contentSize: {368, 325}; adjustedContentInset: {0, 0, 0, 0} topEdge=<style=automatic backgroundCapture=sampled>>
+   |    |    |    |    |    |    | <_UITouchPassthroughView; frame = (0 0; 368 956); layer = <CALayer>>
+   |    |    |    |    |    |    |    | <_TtCC5UIKit20ScrollEdgeEffectView12BackdropView; identifier = 'Background source for'; frame = (0 0; 368 102); userInteractionEnabled = NO; layer = <CABackdropLayer>>
    |    |    |    |    |    |    | <HostingScrollView.PlatformGroupContainer; frame = (0 0; 368 325); layer = <CALayer>>
    |    |    |    |    |    |    |    | <SwiftUI._UIInheritedView; frame = (0 26; 368 299); anchorPoint = (0, 0); clipsToBounds = YES; autoresizesSubviews = NO; layer = <CALayer>>
    |    |    |    |    |    |    |    |    | <SwiftUI._UIInheritedView; frame = (0 0; 368 299); transform = [1.1499999999999999, 0, 0, 1.1499999999999999, 0, 0]; anchorPoint = (0, 0); autoresizesSubviews = NO; layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    | <CALayer> (layer)
    |    |    |    |    |    |    |    |    |    | <SwiftUI._UIInheritedView; frame = (16 26; 288 46.6667); anchorPoint = (0, 0); clipsToBounds = YES; autoresizesSubviews = NO; userInteractionEnabled = NO; layer = <CALayer>>
-   |    |    |    |    |    |    |    |    |    |    | <CanvasRichTextPlatformViewHost; frame = (0 0; 187 27); anchorPoint = (0, 0); tintColor = UIExtendedSRGBColorSpace 0 0.533333 1 1; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    |    | <CanvasRichTextPlatformViewHost; frame = (0 0; 187 27); anchorPoint = (0, 0); layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    | <CanvasRichTextContainerView; frame = (0 0; 187 27); autoresize = W+H; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    | <UITextView; frame = (0 0; 187 27); text = 'Dialog Test Nudge'; userInteractionEnabled = NO; gestureRecognizers = <NSArray>; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>; contentOffset: {0, 0}; contentSize: {187, 27}; adjustedContentInset: {0, 0, 0, 0}>
    |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UITextLayoutView; frame = (0 0; 0 0); layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 187 27); layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    |    | <<_UITextContainerView; frame = (0 0; 187 27); backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>> minSize = {0, 27}, maxSize = {187, 27}, textContainer = <NSTextContainer size = (187.000000,27.000000); widthTracksTextView = YES; heightTracksTextView = YES>; exclusionPaths =; lineBreakMode = 2>
    |    |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UITextViewCanvasView; frame = (0 0; 187 27); userInteractionEnabled = NO; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <_UITextTiledLayer>>
-   |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (181 -39; 3 36); alpha = 0; autoresize = LM; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (181 -39; 3 36); alpha = 0; autoresize = LM; gestureRecognizers = <NSArray>; layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 3 36); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
-   |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (-39 21; 36 3); alpha = 0; autoresize = TM; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (-39 21; 36 3); alpha = 0; autoresize = TM; gestureRecognizers = <NSArray>; layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 36 3); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    | <SwiftUI._UIInheritedView; frame = (16 91; 288 65); anchorPoint = (0, 0); clipsToBounds = YES; autoresizesSubviews = NO; userInteractionEnabled = NO; layer = <CALayer>>
-   |    |    |    |    |    |    |    |    |    |    | <CanvasRichTextPlatformViewHost; frame = (0 0; 243 34); anchorPoint = (0, 0); tintColor = UIExtendedSRGBColorSpace 0 0.533333 1 1; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    |    | <CanvasRichTextPlatformViewHost; frame = (0 0; 243 34); anchorPoint = (0, 0); layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    | <CanvasRichTextContainerView; frame = (0 0; 243 34); autoresize = W+H; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    | <UITextView; frame = (0 0; 243 34); text = 'A centered dialog nudge w...'; userInteractionEnabled = NO; gestureRecognizers = <NSArray>; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>; contentOffset: {0, 0}; contentSize: {243, 34}; adjustedContentInset: {0, 0, 0, 0}>
    |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UITextLayoutView; frame = (0 0; 0 0); layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 243 34); layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    |    | <<_UITextContainerView; frame = (0 0; 243 34); backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>> minSize = {0, 34}, maxSize = {243, 34}, textContainer = <NSTextContainer size = (243.000000,34.000000); widthTracksTextView = YES; heightTracksTextView = YES>; exclusionPaths =; lineBreakMode = 2>
    |    |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UITextViewCanvasView; frame = (0 0; 243 34); userInteractionEnabled = NO; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <_UITextTiledLayer>>
-   |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (237 -39; 3 36); alpha = 0; autoresize = LM; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (237 -39; 3 36); alpha = 0; autoresize = LM; gestureRecognizers = <NSArray>; layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 3 36); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
-   |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (-39 28; 36 3); alpha = 0; autoresize = TM; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (-39 28; 36 3); alpha = 0; autoresize = TM; gestureRecognizers = <NSArray>; layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 36 3); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    | <CALayer> (layer)
    |    |    |    |    |    |    |    |    |    | <SwiftUI._UIInheritedView; frame = (16 176.667; 288 57.3333); anchorPoint = (0, 0); clipsToBounds = YES; autoresizesSubviews = NO; layer = <CALayer>>
-   |    |    |    |    |    |    |    |    |    |    | <CanvasRichTextPlatformViewHost; frame = (123 18.6667; 42 20); anchorPoint = (0, 0); tintColor = UIExtendedSRGBColorSpace 0 0.533333 1 1; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    |    | <CanvasRichTextPlatformViewHost; frame = (123 18.6667; 42 20); anchorPoint = (0, 0); layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    | <CanvasRichTextContainerView; frame = (0 0; 42 20); autoresize = W+H; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    | <UITextView; frame = (0 0; 42 20); text = 'Got It'; userInteractionEnabled = NO; gestureRecognizers = <NSArray>; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>; contentOffset: {0, 0}; contentSize: {42, 20}; adjustedContentInset: {0, 0, 0, 0}>
    |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UITextLayoutView; frame = (0 0; 0 0); layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 42 20); layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    |    | <<_UITextContainerView; frame = (0 0; 42 20); backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>> minSize = {0, 20}, maxSize = {42, 20}, textContainer = <NSTextContainer size = (42.000000,20.000000); widthTracksTextView = YES; heightTracksTextView = YES>; exclusionPaths =; lineBreakMode = 4>
    |    |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UITextViewCanvasView; frame = (0 0; 42 20); userInteractionEnabled = NO; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <_UITextTiledLayer>>
-   |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (36 -39; 3 36); alpha = 0; autoresize = LM; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (36 -39; 3 36); alpha = 0; autoresize = LM; gestureRecognizers = <NSArray>; layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 3 36); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
-   |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (-39 14; 36 3); alpha = 0; autoresize = TM; layer = <CALayer>>
+   |    |    |    |    |    |    |    |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (-39 14; 36 3); alpha = 0; autoresize = TM; gestureRecognizers = <NSArray>; layer = <CALayer>>
    |    |    |    |    |    |    |    |    |    |    |    |    |    |    | <UIView; frame = (0 0; 36 3); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
+   |    |    |    |    |    |    | <_UITouchPassthroughView; frame = (0 0; 368 956); layer = <CALayer>>
+   |    |    |    |    |    |    |    | <UIKit.ScrollEdgeEffectView; frame = (0 0; 368 102); layer = <CALayer>> edge = top lumaStyle = (interfaceStyle = Light) elements =
+   |    |    |    |    |    |    |    |    | <CALayer> (layer)
+   |    |    |    |    |    |    |    |    |    | <CABackdropLayer> (layer)
+   |    |    |    |    |    |    |    |    |    |    | <CAGradientLayer> (layer)
+   |    |    |    |    |    |    |    |    |    | <CABackdropLayer> (layer)
    |    |    |    |    | <CALayer> (layer)
    |    |    |    |    | <ColorShapeLayer> (layer)

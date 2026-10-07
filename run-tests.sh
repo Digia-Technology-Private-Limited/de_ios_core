@@ -24,7 +24,7 @@ else
   RECORD="false"
 fi
 
-PINNED_DEVICE_NAME="iPhone 17 Pro Max"
+PINNED_DEVICE_NAME="iPhone 18 Pro"
 
 # 1. Resolve Pinned Simulator
 BOOTED_PINNED_ID=$(xcrun simctl list devices booted | grep "$PINNED_DEVICE_NAME" | grep -E -o '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}' | head -n 1 || true)

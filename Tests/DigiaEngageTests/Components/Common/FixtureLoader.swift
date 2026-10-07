@@ -18,24 +18,8 @@ public enum FixtureLoader {
     ) -> [String: Any]? {
         let actualFileName = fileName.hasSuffix(".json") ? fileName : "\(fileName).json"
 
-        // Walk up from current file to find de_workspace root
-        var currentUrl = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
-        var workspaceUrl: URL? = nil
-
-        for _ in 0..<10 {
-            let candidate = currentUrl.appendingPathComponent("testkit/campaigns")
-            if FileManager.default.fileExists(atPath: candidate.path) {
-                workspaceUrl = currentUrl
-                break
-            }
-            let parent = currentUrl.deletingLastPathComponent()
-            if parent.path == currentUrl.path { break }
-            currentUrl = parent
-        }
-
-        if let workspaceUrl = workspaceUrl {
-            let fixtureUrl = workspaceUrl
-                .appendingPathComponent("testkit/campaigns")
+        if let campaignsUrl = campaignsDirectory(file: file) {
+            let fixtureUrl = campaignsUrl
                 .appendingPathComponent(campaignType)
                 .appendingPathComponent("fixtures")
                 .appendingPathComponent(actualFileName)
@@ -54,6 +38,37 @@ public enum FixtureLoader {
             return json
         }
 
+        return nil
+    }
+
+    /// Names (without `.json`) of every fixture in `testkit/campaigns/<campaignType>/fixtures/`,
+    /// sorted, so a fixture added to the Test Kit is picked up without a code change. Empty when
+    /// the Test Kit isn't found.
+    public static func fixtureNames(campaignType: String, file: StaticString = #filePath) -> [String] {
+        guard let campaignsUrl = campaignsDirectory(file: file),
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: campaignsUrl.appendingPathComponent(campaignType).appendingPathComponent("fixtures"),
+                includingPropertiesForKeys: nil
+              )
+        else { return [] }
+        return files
+            .filter { $0.pathExtension == "json" }
+            .map { $0.deletingPathExtension().lastPathComponent }
+            .sorted()
+    }
+
+    /// Walks up from the calling source file to the de_workspace root's `testkit/campaigns`.
+    private static func campaignsDirectory(file: StaticString) -> URL? {
+        var currentUrl = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
+        for _ in 0..<10 {
+            let candidate = currentUrl.appendingPathComponent("testkit/campaigns")
+            if FileManager.default.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+            let parent = currentUrl.deletingLastPathComponent()
+            if parent.path == currentUrl.path { break }
+            currentUrl = parent
+        }
         return nil
     }
 }
