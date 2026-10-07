@@ -660,47 +660,15 @@ struct CanvasTextRendererTests {
         variables: VariableContext? = nil,
         onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
     ) -> UIWindow {
-        var stage = CampaignCanvasStage(
-            canvas: canvas,
-            authoredCornerRadius: 0,
+        ComponentTestHost.mountCanvas(
+            canvas,
             isDark: isDark,
-            showBackground: true,
+            variables: variables,
             onAction: onAction
-        )
-        stage.animateWidgetsOnAppear = false
-        var hostedView = AnyView(stage.ignoresSafeArea())
-        if let variables {
-            hostedView = AnyView(hostedView.environment(\.digiaVariables, variables))
-        }
-        let controller = ComponentTestHost.makeComponentHost(
-            rootView: hostedView,
-            size: CGSize(width: canvas.width, height: canvas.height),
-            backgroundColor: .white
-        )
-        let window: UIWindow
-        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
-            window = UIWindow(windowScene: scene)
-        } else {
-            window = UIWindow(frame: controller.view.bounds)
-        }
-        window.frame = controller.view.bounds
-        window.rootViewController = controller
-        window.makeKeyAndVisible()
-        controller.beginAppearanceTransition(true, animated: false)
-        controller.endAppearanceTransition()
-        controller.view.layoutIfNeeded()
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        return window
+        ).window
     }
 
     private func unmount(_ window: UIWindow) {
-        if let root = window.rootViewController {
-            root.beginAppearanceTransition(false, animated: false)
-            root.endAppearanceTransition()
-        }
-        window.rootViewController = nil
-        window.isHidden = true
-        window.resignKey()
-        ComponentTestHost.drainRunLoop(for: 0.02)
+        ComponentTestHost.unmount(window)
     }
 }

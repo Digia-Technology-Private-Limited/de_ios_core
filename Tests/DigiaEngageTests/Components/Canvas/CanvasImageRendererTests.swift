@@ -296,7 +296,7 @@ struct CanvasImageRendererTests {
             ]
         ])
 
-        assertCanvasVisualGolden(canvas: canvas, slotKey: "canvas_image_renderer_golden_slot")
+        assertCanvasVisualGolden(canvas: canvas)
     }
 
     @Test("image renderer handles aspect fit contain within styled container", .tags(.golden)) @MainActor
@@ -344,7 +344,7 @@ struct CanvasImageRendererTests {
             ]
         ])
 
-        assertCanvasVisualGolden(canvas: canvas, slotKey: "canvas_image_fit_contain_slot")
+        assertCanvasVisualGolden(canvas: canvas)
     }
 
     @Test("image renderer handles template tintColor styling", .tags(.golden)) @MainActor
@@ -393,7 +393,7 @@ struct CanvasImageRendererTests {
             ]
         ])
 
-        assertCanvasVisualGolden(canvas: canvas, slotKey: "canvas_image_tint_color_slot", height: 200)
+        assertCanvasVisualGolden(canvas: canvas)
     }
 
     @Test("image renderer handles asymmetric corner geometry with border stroke", .tags(.golden)) @MainActor
@@ -440,7 +440,7 @@ struct CanvasImageRendererTests {
             ]
         ])
 
-        assertCanvasVisualGolden(canvas: canvas, slotKey: "canvas_image_asymmetric_corners_slot")
+        assertCanvasVisualGolden(canvas: canvas)
     }
 
     @Test(
@@ -474,29 +474,29 @@ struct CanvasImageRendererTests {
         return "\(cleanOrigin)/assets/\(fileName)"
     }
 
+    private func mount(
+        canvas: CampaignCanvas,
+        isDark: Bool? = nil,
+        variables: VariableContext? = nil
+    ) -> (UIWindow, UIHostingController<AnyView>) {
+        ComponentTestHost.mountCanvas(canvas, isDark: isDark, variables: variables)
+    }
+
     private func assertCanvasVisualGolden(
         canvas: CampaignCanvas,
-        slotKey: String,
-        width: CGFloat = 360,
-        height: CGFloat = 220,
         function: StaticString = #function
     ) {
-        let config = InlineCanvasConfig(
-            slotKey: slotKey,
-            designWidth: Double(width),
-            cornerRadius: 0,
-            margin: InlineCanvasMargin(),
-            canvas: canvas
-        )
-        let hostView = ComponentTestHost.makeCanvasSlotHost(
-            config: config,
-            slotWidth: width,
-            drainDuration: 1.0,
-            rendersLoadedMedia: true
-        )
-        defer { ComponentTestHost.cleanupCanvasSlotHost(hostView, slotKey: config.slotKey) }
+        let (window, controller) = mount(canvas: canvas)
+        defer { unmount(window) }
 
-        let image = ComponentTestHost.renderImage(of: hostView)
+        ComponentTestHost.drainRunLoop(for: 0.5)
+        controller.overrideUserInterfaceStyle = .dark
+        ComponentTestHost.drainRunLoop(for: 0.4)
+        controller.overrideUserInterfaceStyle = .light
+        ComponentTestHost.drainRunLoop(for: 0.5)
+        window.layoutIfNeeded()
+
+        let image = ComponentTestHost.renderImage(of: controller.view)
         assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98, function: function)
     }
 
@@ -559,26 +559,8 @@ struct CanvasImageRendererTests {
                 )
             ]
         )
-        var stage = CampaignCanvasStage(
-            canvas: canvas,
-            authoredCornerRadius: 0,
-            isDark: isDark,
-            showBackground: true,
-            onAction: { _ in }
-        )
-        stage.animateWidgetsOnAppear = false
-        let root = AnyView(
-            stage
-                .ignoresSafeArea()
-                .environment(\.digiaVariables, variables)
-        )
-        return mount(
-            ComponentTestHost.makeComponentHost(
-                rootView: root,
-                size: CGSize(width: 320, height: 200),
-                backgroundColor: .white
-            )
-        )
+        let (window, _) = mount(canvas: canvas, isDark: isDark, variables: variables)
+        return window
     }
 
     private static func hasMoreThanOneColor(_ image: UIImage) -> Bool {
@@ -595,34 +577,11 @@ struct CanvasImageRendererTests {
     }
 
     private func mount<Content: View>(_ controller: UIHostingController<Content>) -> UIWindow {
-        if #available(iOS 16.4, *) {
-            controller.safeAreaRegions = []
-        }
-        let window: UIWindow
-        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
-            window = UIWindow(windowScene: scene)
-        } else {
-            window = UIWindow(frame: controller.view.bounds)
-        }
-        window.frame = controller.view.bounds
-        window.rootViewController = controller
-        window.makeKeyAndVisible()
-        controller.beginAppearanceTransition(true, animated: false)
-        controller.endAppearanceTransition()
-        controller.view.layoutIfNeeded()
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        return window
+        ComponentTestHost.mount(controller)
     }
 
     private func unmount(_ window: UIWindow) {
-        if let root = window.rootViewController {
-            root.beginAppearanceTransition(false, animated: false)
-            root.endAppearanceTransition()
-        }
-        window.rootViewController = nil
-        window.isHidden = true
-        window.resignKey()
-        ComponentTestHost.drainRunLoop(for: 0.02)
+        ComponentTestHost.unmount(window)
     }
 }
 

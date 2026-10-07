@@ -437,13 +437,11 @@ struct CanvasLottieRendererTests {
         )
         stage.animateWidgetsOnAppear = false
         let rootView = stage.ignoresSafeArea().environment(\.canvasLottieRuntime, runtime)
-        let controller = ComponentTestHost.makeComponentHost(
+        return ComponentTestHost.mount(
             rootView: AnyView(rootView),
             size: CGSize(width: canvas.width, height: canvas.height),
             backgroundColor: .white
         )
-        let window = mount(controller)
-        return (window, controller)
     }
 
     // MARK: - Helpers
@@ -611,34 +609,11 @@ struct CanvasLottieRendererTests {
     }
 
     private func mount<Content: View>(_ controller: UIHostingController<Content>) -> UIWindow {
-        if #available(iOS 16.4, *) {
-            controller.safeAreaRegions = []
-        }
-        let window: UIWindow
-        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
-            window = UIWindow(windowScene: scene)
-        } else {
-            window = UIWindow(frame: controller.view.bounds)
-        }
-        window.frame = controller.view.bounds
-        window.rootViewController = controller
-        window.makeKeyAndVisible()
-        controller.beginAppearanceTransition(true, animated: false)
-        controller.endAppearanceTransition()
-        controller.view.layoutIfNeeded()
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        return window
+        ComponentTestHost.mount(controller)
     }
 
     private func unmount(_ window: UIWindow) {
-        if let root = window.rootViewController {
-            root.beginAppearanceTransition(false, animated: false)
-            root.endAppearanceTransition()
-        }
-        window.rootViewController = nil
-        window.isHidden = true
-        window.resignKey()
-        ComponentTestHost.drainRunLoop(for: 0.02)
+        ComponentTestHost.unmount(window)
     }
 
     private func waitUntil(timeout: TimeInterval = 10.0, condition: @escaping () -> Bool) async -> Bool {

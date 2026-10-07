@@ -362,6 +362,136 @@ public enum ComponentTestHost {
         cleanupOverlayWindow(viewOrWindow)
     }
 
+    // MARK: - Direct Window Lifecycle Mounting
+
+    /// Mounts a view controller as the root of an active UIWindow for testing.
+    ///
+    /// Manages window scenes, appearance transitions, safe areas, layout, and runloop draining.
+    @MainActor
+    @discardableResult
+    public static func mount<Content: View>(
+        _ controller: UIHostingController<Content>,
+        drainDuration: TimeInterval = 0.05
+    ) -> UIWindow {
+        if #available(iOS 16.4, *) {
+            controller.safeAreaRegions = []
+        }
+        let window: UIWindow
+        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
+            window = UIWindow(windowScene: scene)
+        } else {
+            window = UIWindow(frame: controller.view.bounds)
+        }
+        window.frame = controller.view.bounds
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.beginAppearanceTransition(true, animated: false)
+        controller.endAppearanceTransition()
+        controller.view.layoutIfNeeded()
+        drainRunLoop(for: drainDuration)
+        return window
+    }
+
+    /// Tears down and cleans up a test UIWindow and its root view controller.
+    @MainActor
+    public static func unmount(_ window: UIWindow, drainDuration: TimeInterval = 0.02) {
+        if let root = window.rootViewController {
+            root.beginAppearanceTransition(false, animated: false)
+            root.endAppearanceTransition()
+        }
+        window.rootViewController = nil
+        window.isHidden = true
+        window.resignKey()
+        drainRunLoop(for: drainDuration)
+    }
+
+    /// Creates and mounts a UIHostingController inside a UIWindow at exact dimensions.
+    @MainActor
+    public static func mount<Content: View>(
+        rootView: Content,
+        size: CGSize,
+        backgroundColor: UIColor = .white,
+        drainDuration: TimeInterval = 0.05
+    ) -> (window: UIWindow, controller: UIHostingController<Content>) {
+        let controller = makeComponentHost(
+            rootView: rootView,
+            size: size,
+            backgroundColor: backgroundColor
+        )
+        let window = mount(controller, drainDuration: drainDuration)
+        return (window, controller)
+    }
+
+    /// Host view wrapper for CampaignCanvasStage that reacts to color scheme changes during snapshot testing.
+    public struct CanvasStageHost: View {
+        @Environment(\.colorScheme) private var colorScheme
+        public let canvas: CampaignCanvas
+        public let authoredCornerRadius: CGFloat
+        public let isDark: Bool?
+        public let showBackground: Bool
+        public let onAction: (CampaignCanvasActionRequest) -> Void
+
+        public init(
+            canvas: CampaignCanvas,
+            authoredCornerRadius: CGFloat = 0,
+            isDark: Bool? = nil,
+            showBackground: Bool = true,
+            onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
+        ) {
+            self.canvas = canvas
+            self.authoredCornerRadius = authoredCornerRadius
+            self.isDark = isDark
+            self.showBackground = showBackground
+            self.onAction = onAction
+        }
+
+        public var body: some View {
+            var stage = CampaignCanvasStage(
+                canvas: canvas,
+                authoredCornerRadius: authoredCornerRadius,
+                isDark: isDark ?? (colorScheme == .dark),
+                showBackground: showBackground,
+                onAction: onAction
+            )
+            stage.animateWidgetsOnAppear = false
+            return stage.ignoresSafeArea()
+        }
+    }
+
+    /// Mounts a CampaignCanvas in an isolated UIWindow with a UIHostingController.
+    @MainActor
+    public static func mountCanvas(
+        _ canvas: CampaignCanvas,
+        authoredCornerRadius: CGFloat = 0,
+        isDark: Bool? = nil,
+        showBackground: Bool = true,
+        variables: VariableContext? = nil,
+        backgroundColor: UIColor = .white,
+        drainDuration: TimeInterval = 0.05,
+        onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
+    ) -> (window: UIWindow, controller: UIHostingController<AnyView>) {
+        let stageHost = CanvasStageHost(
+            canvas: canvas,
+            authoredCornerRadius: authoredCornerRadius,
+            isDark: isDark,
+            showBackground: showBackground,
+            onAction: onAction
+        )
+        let root: AnyView
+        if let variables {
+            root = AnyView(stageHost.environment(\.digiaVariables, variables))
+        } else {
+            root = AnyView(stageHost)
+        }
+        let (window, controller) = mount(
+            rootView: root,
+            size: CGSize(width: canvas.width, height: canvas.height),
+            backgroundColor: backgroundColor,
+            drainDuration: drainDuration
+        )
+        return (window, controller)
+    }
+
     // MARK: - Private Mock UI Builders
 
     private static func makeHomeIndicator(hostWidth: CGFloat, hostHeight: CGFloat) -> UIView {
