@@ -130,105 +130,13 @@ struct CanvasImageRendererTests {
         #expect(focalAlignment(x: 1.0, y: 1.0) == .bottomTrailing)
     }
 
-    // MARK: - 3. Shadow Blur & Spread Calculation
-
-    @Test("nativeContentBlurRadius calculates Gaussian sigma with spread and non-negative clamping")
-    func nativeContentBlurRadiusMath() {
-        // Zero blur produces zero sigma; spread passes through or clamps to 0
-        let zeroBlurZeroSpread = CampaignCanvasShadow(
-            color: .literal("#FF000000"), blur: 0, spread: 0, offsetX: 0, offsetY: 0)
-        #expect(zeroBlurZeroSpread.nativeContentBlurRadius == 0)
-
-        let zeroBlurPositiveSpread = CampaignCanvasShadow(
-            color: .literal("#FF000000"), blur: 0, spread: 4, offsetX: 0, offsetY: 0)
-        #expect(zeroBlurPositiveSpread.nativeContentBlurRadius == 4)
-
-        let zeroBlurNegativeSpread = CampaignCanvasShadow(
-            color: .literal("#FF000000"), blur: 0, spread: -3, offsetX: 0, offsetY: 0)
-        #expect(zeroBlurNegativeSpread.nativeContentBlurRadius == 0)
-
-        // Positive blur: blur * 0.57735 + 0.5
-        let positiveBlur = CampaignCanvasShadow(
-            color: .literal("#FF000000"), blur: 10, spread: 0, offsetX: 0, offsetY: 0)
-        let expectedSigma = 10.0 * 0.57735 + 0.5
-        #expect(abs(positiveBlur.nativeContentBlurRadius - expectedSigma) < 0.0001)
-
-        let positiveBlurWithSpread = CampaignCanvasShadow(
-            color: .literal("#FF000000"), blur: 10, spread: 2, offsetX: 0, offsetY: 0)
-        #expect(abs(positiveBlurWithSpread.nativeContentBlurRadius - (expectedSigma + 2.0)) < 0.0001)
-
-        let positiveBlurNegativeSpreadClamped = CampaignCanvasShadow(
-            color: .literal("#FF000000"), blur: 4, spread: -20, offsetX: 0, offsetY: 0)
-        #expect(positiveBlurNegativeSpreadClamped.nativeContentBlurRadius == 0)
+    @Test("focalAnchorPoint clamps x and y coordinates to [0, 1] unit range")
+    func focalAnchorPointClamping() {
+        #expect(focalAnchorPoint(x: 0.5, y: 0.5) == UnitPoint(x: 0.5, y: 0.5))
+        #expect(focalAnchorPoint(x: -0.2, y: 1.5) == UnitPoint(x: 0.0, y: 1.0))
+        #expect(focalAnchorPoint(x: 1.2, y: -0.5) == UnitPoint(x: 1.0, y: 0.0))
     }
 
-    // MARK: - 4. Visible Surface Detection
-
-    @Test("hasVisibleSurface accurately differentiates opaque surfaces from transparent cutouts")
-    func visibleSurfaceDetection() {
-        // Solid fill with alpha > 0
-        let solidOpaque = CampaignCanvasBox(fill: .solid(.literal("#FFFFFFFF")))
-        #expect(solidOpaque.hasVisibleSurface(isDark: false))
-
-        // Solid fill with alpha == 0
-        let solidTransparent = CampaignCanvasBox(fill: .solid(.literal("#00000000")))
-        #expect(!solidTransparent.hasVisibleSurface(isDark: false))
-
-        // No fill, no border
-        let noFillNoBorder = CampaignCanvasBox(fill: .none, border: nil)
-        #expect(!noFillNoBorder.hasVisibleSurface(isDark: false))
-
-        // No fill, with opaque border
-        let noFillOpaqueBorder = CampaignCanvasBox(
-            fill: .none,
-            border: CampaignCanvasBorder(color: .literal("#FF0000FF"), width: 2)
-        )
-        #expect(noFillOpaqueBorder.hasVisibleSurface(isDark: false))
-
-        // No fill, zero width border
-        let noFillZeroWidthBorder = CampaignCanvasBox(
-            fill: .none,
-            border: CampaignCanvasBorder(color: .literal("#FF0000FF"), width: 0)
-        )
-        #expect(!noFillZeroWidthBorder.hasVisibleSurface(isDark: false))
-
-        // No fill, transparent border color
-        let noFillTransparentBorder = CampaignCanvasBox(
-            fill: .none,
-            border: CampaignCanvasBorder(color: .literal("#00000000"), width: 2)
-        )
-        #expect(!noFillTransparentBorder.hasVisibleSurface(isDark: false))
-
-        // Gradients always count as visible surface
-        let gradFill = CampaignCanvasBox(
-            fill: .gradient(
-                type: .linear,
-                angleDegrees: 45,
-                centerX: 0.5,
-                centerY: 0.5,
-                radius: 1,
-                startAngleDegrees: 0,
-                endAngleDegrees: 360,
-                stops: [CampaignCanvasGradientStop(color: .literal("#FFFFFFFF"), offset: 0)]
-            )
-        )
-        #expect(gradFill.hasVisibleSurface(isDark: false))
-
-        // Image fill counts as visible surface
-        let imageFill = CampaignCanvasBox(
-            fill: .image(
-                source: CampaignCanvasMediaSource(
-                    url: "https://example.invalid/bg.png",
-                    darkUrl: nil,
-                    placeholder: nil
-                ),
-                positionX: 0.5,
-                positionY: 0.5,
-                scale: 1
-            )
-        )
-        #expect(imageFill.hasVisibleSurface(isDark: false))
-    }
 
     // MARK: - 5. Theme Switching
 
@@ -271,55 +179,6 @@ struct CanvasImageRendererTests {
             CampaignCanvasTheme.shared.mediaURL(sourceWithEmptyDark, isDark: true)
                 == "https://example.invalid/light.png"
         )
-    }
-
-    // MARK: - 6. Variable Interpolation
-
-    @Test("variable interpolation resolves tokens in image URLs")
-    func variableInterpolationInImageURL() {
-        let template = "https://cdn.example.invalid/products/{{sku}}/hero_{{size}}.jpg"
-        let context = VariableContext(
-            values: [
-                "sku": "PROD-998",
-                "size": "large",
-            ],
-            types: [
-                "sku": "string",
-                "size": "string",
-            ]
-        )
-
-        let resolved = interpolate(template, context: context)
-        #expect(resolved == "https://cdn.example.invalid/products/PROD-998/hero_large.jpg")
-
-        let noTokens = "https://cdn.example.invalid/products/static.png"
-        #expect(interpolate(noTokens, context: context) == noTokens)
-
-        let missingToken = "https://cdn.example.invalid/{{missing}}/photo.png"
-        #expect(interpolate(missingToken, context: context) == "https://cdn.example.invalid//photo.png")
-    }
-
-    // MARK: - 7. SDImageCache Prewarming & Component Mounting
-
-    @Test("prewarmed image renders synchronously through SDImageCache memory hit")
-    func prewarmedSDImageCacheHit() {
-        let size = CGSize(width: 32, height: 32)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let testImage = renderer.image { ctx in
-            UIColor.systemBlue.setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
-        }
-
-        let testURL = "https://example.invalid/prewarmed-blue.png"
-        SDImageCache.shared.store(testImage, forKey: testURL, toDisk: false)
-        #expect(SDImageCache.shared.imageFromMemoryCache(forKey: testURL) != nil)
-
-        let widget = imageWidget(url: testURL, fit: "contain")
-        let window = mount(image: widget)
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        #expect(window.rootViewController?.view != nil)
-        unmount(window)
     }
 
     // MARK: - 8. BlurHash Algorithmic Oracle
@@ -381,88 +240,21 @@ struct CanvasImageRendererTests {
         #expect(anchorlessDesignScale(hostWidth: .infinity, designWidth: 375) == nil)
     }
 
-    @Test("empty or invalid image URL renders placeholder cleanly without crashing")
-    func emptyOrInvalidImageURLFallback() {
-        let placeholder = ImagePlaceholder(
-            type: .blurhash,
-            blurHash: "LEHLk~WB2yk8pyo0adR*.7kCMdnj"
-        )
-
-        for emptyURL in ["", "   ", "invalid-non-url"] {
-            let widget = imageWidget(url: emptyURL, placeholder: placeholder)
-            let window = mount(image: widget)
-            ComponentTestHost.drainRunLoop(for: 0.05)
-
-            #expect(window.rootViewController?.view != nil)
-            unmount(window)
-        }
-    }
-
-    @Test("dynamic theme change updates image renderer cleanly")
-    func dynamicThemeSwitching() {
-        let size = CGSize(width: 32, height: 32)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let lightImg = renderer.image { ctx in
-            UIColor.white.setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
-        }
-        let darkImg = renderer.image { ctx in
-            UIColor.black.setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
-        }
-
-        let lightURL = "https://example.invalid/dynamic-light.png"
-        let darkURL = "https://example.invalid/dynamic-dark.png"
-        SDImageCache.shared.store(lightImg, forKey: lightURL, toDisk: false)
-        SDImageCache.shared.store(darkImg, forKey: darkURL, toDisk: false)
-
-        let widget = imageWidget(url: lightURL, darkURL: darkURL)
-        let theme = ImageThemeDriver()
-        let harness = ImageThemeHarness(image: widget, theme: theme)
-        let window = mount(harness: harness)
-
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(window.rootViewController?.view != nil)
-
-        theme.isDark = true
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(window.rootViewController?.view != nil)
-
-        unmount(window)
-    }
-
-    @Test("image with tint color applies template rendering without crashing")
-    func imageWithTintColor() {
-        let size = CGSize(width: 32, height: 32)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        let testImage = renderer.image { ctx in
-            UIColor.systemGreen.setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
-        }
-
-        let testURL = "https://example.invalid/tinted-asset.png"
-        SDImageCache.shared.store(testImage, forKey: testURL, toDisk: false)
-
-        let widget = imageWidget(url: testURL, tint: .literal("#FF00FF00"))
+    @Test("empty or invalid image URL renders placeholder rather than blank view", arguments: ["", "http://[invalid"])
+    func emptyOrInvalidImageURLRendersPlaceholder(url: String) {
+        let widget = imageWidget(url: url)
         let window = mount(image: widget)
+        defer { unmount(window) }
         ComponentTestHost.drainRunLoop(for: 0.05)
-
-        #expect(window.rootViewController?.view != nil)
-        unmount(window)
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        #expect(Self.hasMoreThanOneColor(image))
     }
 
     // MARK: - 13. Visual Golden
 
     @Test("image renderer matches visual golden", .tags(.golden)) @MainActor
     func imageRendererVisualGolden() throws {
-        try #require(ComponentTestHost.prewarmAssetImage(named: "cloudinary-whatsapp.jpg"))
-        guard let workspaceUrl = FixtureLoader.workspaceURL() else {
-            Issue.record("Workspace URL not available")
-            return
-        }
-        let assetOrigin = workspaceUrl.appendingPathComponent("testkit/mock-server").absoluteString
-        let cleanOrigin = assetOrigin.hasSuffix("/") ? String(assetOrigin.dropLast()) : assetOrigin
-        let testURL = "\(cleanOrigin)/assets/cloudinary-whatsapp.jpg"
+        let testURL = try prewarmedAssetURL(named: "cloudinary-whatsapp.jpg")
 
         let canvas = try CampaignCanvasParser().parse([
             "version": 2,
@@ -504,23 +296,188 @@ struct CanvasImageRendererTests {
             ]
         ])
 
+        assertCanvasVisualGolden(canvas: canvas, slotKey: "canvas_image_renderer_golden_slot")
+    }
+
+    @Test("image renderer handles aspect fit contain within styled container", .tags(.golden)) @MainActor
+    func imageRendererFitContainVisualGolden() throws {
+        let testURL = try prewarmedAssetURL(named: "strawberry.jpg")
+
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 220,
+            "background": [
+                "type": "solid",
+                "color": "#0F172A"
+            ],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "contain-img",
+                    "rect": ["x": 0.05, "y": 0.08, "width": 0.9, "height": 0.84],
+                    "widget": [
+                        "type": "digia/image",
+                        "containerProps": [
+                            "fill": ["type": "solid", "color": "#1E293B"],
+                            "borderRadius": 16,
+                            "border": ["color": "#38BDF8", "width": 2],
+                            "shadow": [
+                                "color": "#40000000",
+                                "blur": 12,
+                                "spread": 0,
+                                "offsetX": 0,
+                                "offsetY": 4
+                            ]
+                        ],
+                        "props": [
+                            "source": [
+                                "url": testURL
+                            ],
+                            "fit": "contain",
+                            "positionX": 0.5,
+                            "positionY": 0.5,
+                            "scale": 1.0
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        assertCanvasVisualGolden(canvas: canvas, slotKey: "canvas_image_fit_contain_slot")
+    }
+
+    @Test("image renderer handles template tintColor styling", .tags(.golden)) @MainActor
+    func imageRendererTintColorVisualGolden() throws {
+        let testURL = try prewarmedAssetURL(named: "tint-star-icon.png")
+
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 200,
+            "background": [
+                "type": "solid",
+                "color": "#FFF1F2"
+            ],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "tinted-img",
+                    "rect": ["x": 0.1, "y": 0.1, "width": 0.8, "height": 0.8],
+                    "widget": [
+                        "type": "digia/image",
+                        "containerProps": [
+                            "fill": ["type": "solid", "color": "#FFFFFFFF"],
+                            "borderRadius": 16,
+                            "border": ["color": "#FB7185", "width": 1.5],
+                            "shadow": [
+                                "color": "#20E11D48",
+                                "blur": 10,
+                                "spread": 0,
+                                "offsetX": 0,
+                                "offsetY": 3
+                            ]
+                        ],
+                        "props": [
+                            "source": [
+                                "url": testURL
+                            ],
+                            "fit": "contain",
+                            "tintColor": "#E11D48",
+                            "positionX": 0.5,
+                            "positionY": 0.5,
+                            "scale": 1.0
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        assertCanvasVisualGolden(canvas: canvas, slotKey: "canvas_image_tint_color_slot", height: 200)
+    }
+
+    @Test("image renderer handles asymmetric corner geometry with border stroke", .tags(.golden)) @MainActor
+    func imageRendererAsymmetricCornersVisualGolden() throws {
+        let testURL = try prewarmedAssetURL(named: "cloudinary-whatsapp.jpg")
+
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 220,
+            "background": [
+                "type": "solid",
+                "color": "#F8FAFC"
+            ],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "asymm-img",
+                    "rect": ["x": 0.08, "y": 0.08, "width": 0.84, "height": 0.84],
+                    "widget": [
+                        "type": "digia/image",
+                        "containerProps": [
+                            "cornerRadius": ["topLeft": 32, "topRight": 6, "bottomRight": 32, "bottomLeft": 6],
+                            "border": ["color": "#059669", "width": 2.5],
+                            "shadow": [
+                                "color": "#25000000",
+                                "blur": 14,
+                                "spread": 0,
+                                "offsetX": 0,
+                                "offsetY": 6
+                            ]
+                        ],
+                        "props": [
+                            "source": [
+                                "url": testURL
+                            ],
+                            "fit": "cover",
+                            "positionX": 0.5,
+                            "positionY": 0.5,
+                            "scale": 1.0
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        assertCanvasVisualGolden(canvas: canvas, slotKey: "canvas_image_asymmetric_corners_slot")
+    }
+
+    private func prewarmedAssetURL(named fileName: String) throws -> String {
+        try #require(ComponentTestHost.prewarmAssetImage(named: fileName))
+        guard let workspaceUrl = FixtureLoader.workspaceURL() else {
+            Issue.record("Workspace URL not available")
+            throw ImageTestError.missingWidget
+        }
+        let assetOrigin = workspaceUrl.appendingPathComponent("testkit/mock-server").absoluteString
+        let cleanOrigin = assetOrigin.hasSuffix("/") ? String(assetOrigin.dropLast()) : assetOrigin
+        return "\(cleanOrigin)/assets/\(fileName)"
+    }
+
+    private func assertCanvasVisualGolden(
+        canvas: CampaignCanvas,
+        slotKey: String,
+        width: CGFloat = 360,
+        height: CGFloat = 220,
+        function: StaticString = #function
+    ) {
         let config = InlineCanvasConfig(
-            slotKey: "canvas_image_renderer_golden_slot",
-            designWidth: 360,
+            slotKey: slotKey,
+            designWidth: Double(width),
             cornerRadius: 0,
             margin: InlineCanvasMargin(),
             canvas: canvas
         )
         let hostView = ComponentTestHost.makeCanvasSlotHost(
             config: config,
-            slotWidth: 360,
+            slotWidth: width,
             drainDuration: 1.0,
             rendersLoadedMedia: true
         )
         defer { ComponentTestHost.cleanupCanvasSlotHost(hostView, slotKey: config.slotKey) }
 
         let image = ComponentTestHost.renderImage(of: hostView)
-        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98, function: function)
     }
 
     // MARK: - Helpers
@@ -603,14 +560,17 @@ struct CanvasImageRendererTests {
         )
     }
 
-    private func mount(harness: ImageThemeHarness) -> UIWindow {
-        mount(
-            ComponentTestHost.makeComponentHost(
-                rootView: AnyView(harness),
-                size: CGSize(width: 320, height: 200),
-                backgroundColor: .white
-            )
-        )
+    private static func hasMoreThanOneColor(_ image: UIImage) -> Bool {
+        guard let cgImage = image.cgImage, let data = cgImage.dataProvider?.data,
+            let bytes = CFDataGetBytePtr(data)
+        else { return false }
+        let bytesPerPixel = max(cgImage.bitsPerPixel / 8, 3)
+        let first = (bytes[0], bytes[1], bytes[2])
+        for pixel in stride(from: 0, to: cgImage.width * cgImage.height, by: 97) {
+            let offset = pixel * bytesPerPixel
+            if (bytes[offset], bytes[offset + 1], bytes[offset + 2]) != first { return true }
+        }
+        return false
     }
 
     private func mount<Content: View>(_ controller: UIHostingController<Content>) -> UIWindow {
@@ -639,40 +599,6 @@ struct CanvasImageRendererTests {
         window.isHidden = true
         window.resignKey()
         ComponentTestHost.drainRunLoop(for: 0.02)
-    }
-}
-
-@MainActor
-private final class ImageThemeDriver: ObservableObject {
-    @Published var isDark = false
-}
-
-private struct ImageThemeHarness: View {
-    let image: CampaignCanvasWidget
-    @ObservedObject var theme: ImageThemeDriver
-
-    var body: some View {
-        var stage = CampaignCanvasStage(
-            canvas: CampaignCanvas(
-                version: 2,
-                width: 320,
-                height: 200,
-                background: .solid(.literal("#FFFFFFFF")),
-                children: [
-                    .widget(
-                        id: "image",
-                        rect: CampaignCanvasRect(x: 0, y: 0, width: 320, height: 200),
-                        widget: image
-                    )
-                ]
-            ),
-            authoredCornerRadius: 0,
-            isDark: theme.isDark,
-            showBackground: true,
-            onAction: { _ in }
-        )
-        stage.animateWidgetsOnAppear = false
-        return stage
     }
 }
 

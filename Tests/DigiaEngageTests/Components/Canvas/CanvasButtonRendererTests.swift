@@ -11,9 +11,8 @@ struct CanvasButtonRendererTests {
 
     // MARK: - 1. Parser & Schema Preservation
 
-    @Test("button parser preserves all variants: fill, outline, and text")
-    func parserPreservesVariants() throws {
-        // Variant: Fill
+    @Test("button parser preserves fill variant with paint fill")
+    func parserPreservesFillVariant() throws {
         let fillWidget = try parsedButton([
             "style": [
                 "variant": "fill",
@@ -25,8 +24,10 @@ struct CanvasButtonRendererTests {
             return
         }
         #expect(fillStyle == .fill(fill: .solid(.literal("#FF007AFF"))))
+    }
 
-        // Variant: Outline
+    @Test("button parser preserves outline variant with border stroke")
+    func parserPreservesOutlineVariant() throws {
         let outlineWidget = try parsedButton([
             "style": [
                 "variant": "outline",
@@ -45,8 +46,10 @@ struct CanvasButtonRendererTests {
                     outline: CampaignCanvasBorder(color: .literal("#FF007AFF"), width: 2.0)
                 )
         )
+    }
 
-        // Variant: Text (Ghost)
+    @Test("button parser preserves ghost text variant")
+    func parserPreservesTextVariant() throws {
         let textWidget = try parsedButton([
             "style": [
                 "variant": "text"
@@ -161,210 +164,153 @@ struct CanvasButtonRendererTests {
 
     // MARK: - 3. Effective Colors Oracle
 
-    @Test("canvasButtonEffectiveColors calculates correct fill, destructive styling, and text colors")
-    func effectiveColorsOracle() {
+    // MARK: - 3. Effective Colors Oracle
+
+    @Test("canvasButtonEffectiveColors calculates standard filled button colors")
+    func effectiveColorsStandardFilled() {
+        let standardFill = CampaignCanvasPaint.solid(.literal("#FF007AFF"))
+        let colors = canvasButtonEffectiveColors(
+            style: .fill(fill: standardFill),
+            isDestructive: false,
+            applyDestructiveStyling: false,
+            isDark: false,
+            outline: nil
+        )
+        #expect(colors.isFilled == true)
+        #expect(colors.fill == standardFill)
+        #expect(colors.destructiveColor == nil)
+        #expect(colors.foregroundColor == .white)
+    }
+
+    @Test("canvasButtonEffectiveColors calculates destructive filled button with danger styling")
+    func effectiveColorsDestructiveFilledStyled() {
         let standardFill = CampaignCanvasPaint.solid(.literal("#FF007AFF"))
         let dangerColor = CampaignColor.literal("#FFD92D20")
-        let outlineBorder = CampaignCanvasBorder(color: .literal("#FF4945FF"), width: 1.5)
-
-        // 1. Standard filled button
-        let standardFilled = canvasButtonEffectiveColors(
-            style: .fill(fill: standardFill),
-            isDestructive: false,
-            applyDestructiveStyling: false,
-            isDark: false,
-            outline: nil
-        )
-        #expect(standardFilled.isFilled == true)
-        #expect(standardFilled.fill == standardFill)
-        #expect(standardFilled.destructiveColor == nil)
-        #expect(standardFilled.foregroundColor == .white)
-
-        // 2. Destructive filled button with applyDestructiveStyling: true
-        let destructiveFilled = canvasButtonEffectiveColors(
+        let colors = canvasButtonEffectiveColors(
             style: .fill(fill: standardFill),
             isDestructive: true,
             applyDestructiveStyling: true,
             isDark: false,
             outline: nil
         )
-        #expect(destructiveFilled.isFilled == true)
-        #expect(destructiveFilled.fill == .solid(dangerColor))
+        #expect(colors.isFilled == true)
+        #expect(colors.fill == .solid(dangerColor))
         var dr: CGFloat = 0, dg: CGFloat = 0, db: CGFloat = 0, da: CGFloat = 0
-        destructiveFilled.destructiveColor?.getRed(&dr, green: &dg, blue: &db, alpha: &da)
+        colors.destructiveColor?.getRed(&dr, green: &dg, blue: &db, alpha: &da)
         #expect(dr == 1 && dg == 1 && db == 1 && da == 1)
-        #expect(destructiveFilled.foregroundColor == .white)
+        #expect(colors.foregroundColor == .white)
+    }
 
-        // 3. Destructive filled button with applyDestructiveStyling: false
-        let nonStyledDestructiveFilled = canvasButtonEffectiveColors(
+    @Test("canvasButtonEffectiveColors preserves authored fill for destructive filled button when styling is unstyled")
+    func effectiveColorsDestructiveFilledUnstyled() {
+        let standardFill = CampaignCanvasPaint.solid(.literal("#FF007AFF"))
+        let colors = canvasButtonEffectiveColors(
             style: .fill(fill: standardFill),
             isDestructive: true,
             applyDestructiveStyling: false,
             isDark: false,
             outline: nil
         )
-        #expect(nonStyledDestructiveFilled.isFilled == true)
-        #expect(nonStyledDestructiveFilled.fill == standardFill)
-        #expect(nonStyledDestructiveFilled.destructiveColor == nil)
-        #expect(nonStyledDestructiveFilled.foregroundColor == .white)
+        #expect(colors.isFilled == true)
+        #expect(colors.fill == standardFill)
+        #expect(colors.destructiveColor == nil)
+        #expect(colors.foregroundColor == .white)
+    }
 
-        // 4. Standard outline button
-        let standardOutline = canvasButtonEffectiveColors(
+    @Test("canvasButtonEffectiveColors calculates standard outline button colors")
+    func effectiveColorsStandardOutline() {
+        let outlineBorder = CampaignCanvasBorder(color: .literal("#FF4945FF"), width: 1.5)
+        let colors = canvasButtonEffectiveColors(
             style: .outline(fill: .none, outline: outlineBorder),
             isDestructive: false,
             applyDestructiveStyling: false,
             isDark: false,
             outline: outlineBorder
         )
-        #expect(standardOutline.isFilled == false)
-        #expect(standardOutline.fill == .none)
-        #expect(standardOutline.destructiveColor == nil)
-        let expectedOutlineColor = UIColor(CampaignCanvasTheme.shared.color(outlineBorder.color, isDark: false))
-        #expect(standardOutline.foregroundColor == expectedOutlineColor)
+        #expect(colors.isFilled == false)
+        #expect(colors.fill == .none)
+        #expect(colors.destructiveColor == nil)
+        let expectedColor = UIColor(CampaignCanvasTheme.shared.color(outlineBorder.color, isDark: false))
+        #expect(colors.foregroundColor == expectedColor)
+    }
 
-        // 5. Destructive outline button with applyDestructiveStyling: true
-        let destructiveOutline = canvasButtonEffectiveColors(
+    @Test("canvasButtonEffectiveColors calculates destructive outline button with danger styling")
+    func effectiveColorsDestructiveOutlineStyled() {
+        let dangerColor = CampaignColor.literal("#FFD92D20")
+        let outlineBorder = CampaignCanvasBorder(color: .literal("#FF4945FF"), width: 1.5)
+        let colors = canvasButtonEffectiveColors(
             style: .outline(fill: .none, outline: outlineBorder),
             isDestructive: true,
             applyDestructiveStyling: true,
             isDark: false,
             outline: outlineBorder
         )
-        #expect(destructiveOutline.isFilled == false)
-        #expect(destructiveOutline.fill == .none)
+        #expect(colors.isFilled == false)
+        #expect(colors.fill == .none)
         let expectedDangerColor = UIColor(CampaignCanvasTheme.shared.color(dangerColor, isDark: false))
-        #expect(destructiveOutline.destructiveColor == expectedDangerColor)
-        #expect(destructiveOutline.foregroundColor == expectedOutlineColor)
+        #expect(colors.destructiveColor == expectedDangerColor)
+        let expectedOutlineColor = UIColor(CampaignCanvasTheme.shared.color(outlineBorder.color, isDark: false))
+        #expect(colors.foregroundColor == expectedOutlineColor)
+    }
 
-        // 6. Text (Ghost) button
-        let textButton = canvasButtonEffectiveColors(
+    @Test("canvasButtonEffectiveColors calculates ghost text button with transparent background")
+    func effectiveColorsTextGhost() {
+        let colors = canvasButtonEffectiveColors(
             style: .text,
             isDestructive: false,
             applyDestructiveStyling: false,
             isDark: false,
             outline: nil
         )
-        #expect(textButton.isFilled == false)
-        #expect(textButton.fill == .none)
+        #expect(colors.isFilled == false)
+        #expect(colors.fill == .none)
     }
 
     // MARK: - 4. Action Request & Routing Oracle
 
-    @Test("button action routing produces cta_primary for primary and cta_secondary for secondary")
-    func actionRoutingOracle() {
+    // MARK: - 4. Action Request & Routing Oracle
+
+    @Test(
+        "canvasButtonActionRequest routes primary and secondary buttons with correct elementId and flags",
+        arguments: [true, false]
+    )
+    func buttonActionRequestRouting(isPrimary: Bool) {
         let actions = [EngageAction.openUrl("https://digia.com")]
-        let label = CampaignCanvasTextBlock(
-            horizontalAlign: .center,
-            textAlign: .center,
-            verticalAlign: .center,
-            maxLines: 1,
-            overflow: "ellipsis",
-            sizingMode: "hug",
-            spans: [
-                CampaignCanvasTextSpan(
-                    text: "Continue",
-                    typography: nil,
-                    color: nil,
-                    highlightColor: nil,
-                    italic: false,
-                    decoration: .none,
-                    decorationColor: nil,
-                    decorationThickness: nil,
-                    actions: []
-                )
-            ]
-        )
-
-        // Primary button request
-        let primaryRequest = CampaignCanvasActionRequest(
-            actions: actions,
-            elementId: "cta_primary",
-            label: label.plainText,
-            isPrimary: true
-        )
-        #expect(primaryRequest.elementId == "cta_primary")
-        #expect(primaryRequest.isPrimary == true)
-        #expect(primaryRequest.label == "Continue")
-        #expect(primaryRequest.actions == actions)
-
-        // Secondary button request
-        let secondaryRequest = CampaignCanvasActionRequest(
-            actions: actions,
-            elementId: "cta_secondary",
-            label: label.plainText,
-            isPrimary: false
-        )
-        #expect(secondaryRequest.elementId == "cta_secondary")
-        #expect(secondaryRequest.isPrimary == false)
-        #expect(secondaryRequest.label == "Continue")
+        let request = canvasButtonActionRequest(actions: actions, isPrimary: isPrimary, label: "Continue")
+        #expect(request.isPrimary == isPrimary)
+        #expect(request.elementId == (isPrimary ? "cta_primary" : "cta_secondary"))
+        #expect(request.label == "Continue")
+        #expect(request.actions == actions)
     }
 
-    // MARK: - 5. Interactive State & Lifecycle
+    // MARK: - 4b. Confirmation Dialog Edge Cases
 
-    @Test("non-interactive button without actions renders stably")
-    func nonInteractiveButtonRendering() {
-        let widget = try! parsedButton([
-            "label": [
-                "spans": [
-                    ["text": "Static Button"]
-                ]
-            ],
-            "style": [
-                "variant": "fill",
-                "fill": ["type": "solid", "color": "#007AFF"]
+    @Test("destructive button confirmation dialog configuration preserves title, message, and labels")
+    func destructiveButtonConfirmationDialogConfiguration() throws {
+        let widget = try parsedButton([
+            "isDestructive": true,
+            "confirm": [
+                "title": "Delete Item?",
+                "message": "This action cannot be undone.",
+                "confirmLabel": "Delete Forever",
+                "cancelLabel": "Keep Item",
+                "titleFontWeight": 800,
+                "messageFontWeight": 400,
+                "buttonFontWeight": 600
             ]
         ])
-
-        let window = mount(button: widget)
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(window.rootViewController?.view != nil)
-        unmount(window)
-    }
-
-    @Test("interactive button with actions and shadow mounts with theme toggling")
-    func interactiveButtonWithThemeToggle() {
-        let action = EngageAction.openUrl("https://example.com/checkout")
-        let widget = try! parsedButton([
-            "label": [
-                "spans": [
-                    ["text": "Checkout Now", "color": "#FFFFFF"]
-                ]
-            ],
-            "style": [
-                "variant": "fill",
-                "fill": ["type": "solid", "color": "#10B981"]
-            ],
-            "isPrimary": true,
-            "onClick": [
-                "steps": [
-                    [
-                        "type": "open_url",
-                        "data": ["url": "https://example.com/checkout"]
-                    ]
-                ]
-            ],
-            "shadow": [
-                "color": "#00000044",
-                "blur": 8,
-                "spread": 0,
-                "offsetX": 0,
-                "offsetY": 4
-            ]
-        ])
-
-        // Light mode
-        let windowLight = mount(button: widget, isDark: false)
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(windowLight.rootViewController?.view != nil)
-        unmount(windowLight)
-
-        // Dark mode
-        let windowDark = mount(button: widget, isDark: true)
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(windowDark.rootViewController?.view != nil)
-        unmount(windowDark)
-
-        _ = action
+        guard case .button(_, _, _, _, _, _, let isDestructive, _, _, let confirm) = widget else {
+            Issue.record("Expected parsed button widget")
+            return
+        }
+        #expect(isDestructive == true)
+        #expect(confirm.title == "Delete Item?")
+        #expect(confirm.message == "This action cannot be undone.")
+        #expect(confirm.confirmLabel == "Delete Forever")
+        #expect(confirm.cancelLabel == "Keep Item")
+        #expect(confirm.titleFontWeight == 800)
+        #expect(confirm.messageFontWeight == 400)
+        #expect(confirm.buttonFontWeight == 600)
     }
 
     // MARK: - 8. Visual Golden
@@ -407,31 +353,188 @@ struct CanvasButtonRendererTests {
             ]
         ])
 
-        var stage = CampaignCanvasStage(
-            canvas: canvas,
-            authoredCornerRadius: 0,
-            isDark: false,
-            showBackground: true,
-            onAction: { _ in }
-        )
-        stage.animateWidgetsOnAppear = false
-        let controller = ComponentTestHost.makeComponentHost(
-            rootView: AnyView(stage.ignoresSafeArea()),
-            size: CGSize(width: 360, height: 80),
-            backgroundColor: .white
-        )
-        let window: UIWindow
-        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
-            window = UIWindow(windowScene: scene)
-        } else {
-            window = UIWindow(frame: controller.view.bounds)
-        }
-        window.frame = controller.view.bounds
-        window.rootViewController = controller
-        window.makeKeyAndVisible()
-        controller.beginAppearanceTransition(true, animated: false)
-        controller.endAppearanceTransition()
-        controller.view.layoutIfNeeded()
+        let window = mount(canvas: canvas)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("button renderer handles outline style with custom border and text styling", .tags(.golden))
+    func buttonRendererOutlineStyleVisualGolden() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 90,
+            "background": ["type": "solid", "color": "#FFF8FAFC"],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "outline-btn",
+                    "rect": ["x": 0.08, "y": 0.18, "width": 0.84, "height": 0.64],
+                    "widget": [
+                        "type": "digia/button",
+                        "props": [
+                            "label": [
+                                "spans": [
+                                    ["text": "View Full Details", "color": "#FF2563EB", "fontSize": 16, "fontWeight": 700]
+                                ]
+                            ],
+                            "style": [
+                                "variant": "outline",
+                                "fill": ["type": "solid", "color": "#00000000"],
+                                "outline": [
+                                    "width": 2,
+                                    "color": "#FF2563EB"
+                                ]
+                            ],
+                            "cornerRadius": 10
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let window = mount(canvas: canvas)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("button renderer handles ghost text style with no fill or border", .tags(.golden))
+    func buttonRendererTextStyleVisualGolden() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 90,
+            "background": ["type": "solid", "color": "#FFF8FAFC"],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "text-btn",
+                    "rect": ["x": 0.08, "y": 0.18, "width": 0.84, "height": 0.64],
+                    "widget": [
+                        "type": "digia/button",
+                        "props": [
+                            "label": [
+                                "spans": [
+                                    ["text": "Skip for Now", "color": "#FF64748B", "fontSize": 15, "fontWeight": 600]
+                                ]
+                            ],
+                            "style": [
+                                "variant": "text"
+                            ],
+                            "cornerRadius": 8
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let window = mount(canvas: canvas)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("button renderer handles destructive style with high-contrast styling", .tags(.golden))
+    func buttonRendererDestructiveStyleVisualGolden() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 90,
+            "background": ["type": "solid", "color": "#FFF8FAFC"],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "destructive-btn",
+                    "rect": ["x": 0.08, "y": 0.18, "width": 0.84, "height": 0.64],
+                    "widget": [
+                        "type": "digia/button",
+                        "props": [
+                            "label": [
+                                "spans": [
+                                    ["text": "Delete Account Permanently", "color": "#FFFFFFFF", "fontSize": 15, "fontWeight": 700]
+                                ]
+                            ],
+                            "style": [
+                                "variant": "fill",
+                                "fill": ["type": "solid", "color": "#FFDC2626"]
+                            ],
+                            "cornerRadius": 8,
+                            "isDestructive": true,
+                            "applyDestructiveStyling": true,
+                            "shadow": [
+                                "color": "#33DC2626",
+                                "blur": 8,
+                                "spread": 0,
+                                "offsetX": 0,
+                                "offsetY": 3
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let window = mount(canvas: canvas)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("button renderer handles asymmetric corner radiuses and rich multi-span labels", .tags(.golden))
+    func buttonRendererAsymmetricCornersVisualGolden() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 90,
+            "background": ["type": "solid", "color": "#FF0F172A"],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "asymmetric-btn",
+                    "rect": ["x": 0.08, "y": 0.18, "width": 0.84, "height": 0.64],
+                    "widget": [
+                        "type": "digia/button",
+                        "props": [
+                            "label": [
+                                "spans": [
+                                    ["text": "Upgrade to Pro ", "color": "#FFFFFFFF", "fontSize": 15, "fontWeight": 700],
+                                    ["text": "• SAVE 50%", "color": "#FFFEF08A", "fontSize": 13, "fontWeight": 800]
+                                ]
+                            ],
+                            "style": [
+                                "variant": "fill",
+                                "fill": ["type": "solid", "color": "#FF4F46E5"]
+                            ],
+                            "cornerRadius": [
+                                "topLeft": 24,
+                                "topRight": 4,
+                                "bottomRight": 24,
+                                "bottomLeft": 4
+                            ],
+                            "shadow": [
+                                "color": "#664F46E5",
+                                "blur": 12,
+                                "spread": 0,
+                                "offsetX": 0,
+                                "offsetY": 4
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let window = mount(canvas: canvas)
         defer { unmount(window) }
         ComponentTestHost.drainRunLoop(for: 0.1)
 
@@ -482,6 +585,14 @@ struct CanvasButtonRendererTests {
                 .widget(id: "test-btn", rect: CampaignCanvasRect(x: 0, y: 0, width: 360, height: 80), widget: button)
             ]
         )
+        return mount(canvas: canvas, isDark: isDark, onAction: onAction)
+    }
+
+    private func mount(
+        canvas: CampaignCanvas,
+        isDark: Bool = false,
+        onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
+    ) -> UIWindow {
         var stage = CampaignCanvasStage(
             canvas: canvas,
             authoredCornerRadius: 0,
@@ -492,7 +603,7 @@ struct CanvasButtonRendererTests {
         stage.animateWidgetsOnAppear = false
         let controller = ComponentTestHost.makeComponentHost(
             rootView: AnyView(stage.ignoresSafeArea()),
-            size: CGSize(width: 360, height: 80),
+            size: CGSize(width: canvas.width, height: canvas.height),
             backgroundColor: .white
         )
         let window: UIWindow

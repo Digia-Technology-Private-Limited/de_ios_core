@@ -151,34 +151,36 @@ struct CanvasTextRendererTests {
         #expect(shadow == nil)
     }
 
-    @Test("text parser clamps decoration thickness and offset boundaries")
-    func parserClampsDecorationValues() throws {
+    @Test("text parser clamps decoration thickness boundaries to [1, 8]")
+    func parserClampsDecorationThickness() throws {
         let widget = try parsedText([
             "spans": [
-                [
-                    "text": "Clamped",
-                    "decoration": "underline",
-                    "decorationThickness": 99,
-                    "decorationOffset": -40
-                ],
-                [
-                    "text": "Clamped Min",
-                    "decoration": "underline",
-                    "decorationThickness": -5,
-                    "decorationOffset": 50
-                ]
+                ["text": "Max", "decoration": "underline", "decorationThickness": 99],
+                ["text": "Min", "decoration": "underline", "decorationThickness": -5]
             ]
         ])
-
         guard case .text(_, let block, _) = widget else {
             Issue.record("Expected a parsed text widget")
             return
         }
+        #expect(block.spans[0].decorationThickness == 8)
+        #expect(block.spans[1].decorationThickness == 1)
+    }
 
-        #expect(block.spans[0].decorationThickness == 8) // max 8
-        #expect(block.spans[0].decorationOffset == -16) // min -16
-        #expect(block.spans[1].decorationThickness == 1) // min 1
-        #expect(block.spans[1].decorationOffset == 16) // max 16
+    @Test("text parser clamps decoration offset boundaries to [-16, 16]")
+    func parserClampsDecorationOffset() throws {
+        let widget = try parsedText([
+            "spans": [
+                ["text": "Min", "decoration": "underline", "decorationOffset": -40],
+                ["text": "Max", "decoration": "underline", "decorationOffset": 50]
+            ]
+        ])
+        guard case .text(_, let block, _) = widget else {
+            Issue.record("Expected a parsed text widget")
+            return
+        }
+        #expect(block.spans[0].decorationOffset == -16)
+        #expect(block.spans[1].decorationOffset == 16)
     }
 
     @Test("text parser ignores empty and blank spans safely")
@@ -220,30 +222,32 @@ struct CanvasTextRendererTests {
         #expect(canvasGlyphShadowBlurRadius(blur: 4, spread: -100) == 0)
     }
 
-    @Test("canvasGlyphShadowOutsets calculates directional drawing padding accurately")
-    func glyphShadowOutsetsOracle() {
-        // Nil or zero shadow returns zero insets
+    @Test("canvasGlyphShadowOutsets returns zero for nil or zero shadow")
+    func glyphShadowOutsetsZeroOrNil() {
         #expect(canvasGlyphShadowOutsets(shadow: nil) == .zero)
 
         let zeroShadow = CampaignCanvasShadow(
             color: .literal("#00000000"), blur: 0, spread: 0, offsetX: 0, offsetY: 0)
         #expect(canvasGlyphShadowOutsets(shadow: zeroShadow) == .zero)
+    }
 
-        // Symmetrical offsets
+    @Test("canvasGlyphShadowOutsets calculates symmetrical padding when offsets are zero")
+    func glyphShadowOutsetsSymmetric() {
         let symShadow = CampaignCanvasShadow(
             color: .literal("#000000FF"), blur: 5, spread: 0, offsetX: 0, offsetY: 0)
-        let outsetsSym = canvasGlyphShadowOutsets(shadow: symShadow)
-        #expect(outsetsSym.top > 0)
-        #expect(outsetsSym.top == outsetsSym.bottom)
-        #expect(outsetsSym.left == outsetsSym.right)
+        let outsets = canvasGlyphShadowOutsets(shadow: symShadow)
+        #expect(outsets.top > 0)
+        #expect(outsets.top == outsets.bottom)
+        #expect(outsets.left == outsets.right)
+    }
 
-        // Directional offsetX: positive offsetX shifts shadow right, requiring more right outset
+    @Test("canvasGlyphShadowOutsets shifts directional drawing padding based on offsets")
+    func glyphShadowOutsetsDirectional() {
         let rightShadow = CampaignCanvasShadow(
             color: .literal("#000000FF"), blur: 5, spread: 0, offsetX: 10, offsetY: 0)
         let outsetsRight = canvasGlyphShadowOutsets(shadow: rightShadow)
         #expect(outsetsRight.right > outsetsRight.left)
 
-        // Directional offsetY: positive offsetY shifts shadow down, requiring more bottom outset
         let downShadow = CampaignCanvasShadow(
             color: .literal("#000000FF"), blur: 5, spread: 0, offsetX: 0, offsetY: 10)
         let outsetsDown = canvasGlyphShadowOutsets(shadow: downShadow)
@@ -275,139 +279,102 @@ struct CanvasTextRendererTests {
         #expect(br.alignment == Alignment(horizontal: .trailing, vertical: .bottom))
     }
 
-    // MARK: - 4. Variable Interpolation
+    // MARK: - 4. Rich Text Link Routing
 
-    @Test("variable interpolation substitutes authored tokens in span text")
-    func variableInterpolationInSpans() {
-        let template = "Welcome back {{user_name}}! You have {{credit_balance}} credits."
-        let context = VariableContext(
-            values: [
-                "user_name": "Alice",
-                "credit_balance": "450"
-            ],
-            types: [
-                "user_name": "string",
-                "credit_balance": "number"
-            ]
+    @Test("rich text coordinator triggers onSpan callback for in-bounds digia-canvas link")
+    func richTextCoordinatorTriggersOnSpanForValidCanvasScheme() {
+        let coordinator = CanvasRichText.Coordinator()
+        let span = CampaignCanvasTextSpan(
+            text: "Terms",
+            typography: nil,
+            color: nil,
+            highlightColor: nil,
+            italic: false,
+            decoration: .underline,
+            decorationColor: nil,
+            decorationThickness: nil,
+            actions: [.openUrl("https://example.com/terms")]
+        )
+        coordinator.spans = [span]
+
+        var triggeredSpan: CampaignCanvasTextSpan?
+        coordinator.onSpan = { triggeredSpan = $0 }
+
+        let handled = coordinator.textView(
+            UITextView(),
+            shouldInteractWith: URL(string: "digia-canvas://span/0")!,
+            in: NSRange(location: 0, length: 0),
+            interaction: .invokeDefaultAction
         )
 
-        let resolved = interpolate(template, context: context)
-        #expect(resolved == "Welcome back Alice! You have 450 credits.")
-
-        let missing = interpolate("Hi {{missing_key}}", context: context)
-        #expect(missing == "Hi ")
+        #expect(handled == false)
+        #expect(triggeredSpan == span)
     }
 
-    // MARK: - 5. Theme Color Resolution
+    @Test("rich text coordinator ignores out-of-bounds link index")
+    func richTextCoordinatorIgnoresOutOfBoundsIndex() {
+        let coordinator = CanvasRichText.Coordinator()
+        coordinator.spans = [
+            CampaignCanvasTextSpan(text: "Single", typography: nil, color: nil, highlightColor: nil, italic: false, decoration: .none, decorationColor: nil, decorationThickness: nil, actions: [])
+        ]
 
-    @Test("theme colors resolve dynamically between light and dark modes")
-    func themeColorResolution() {
-        let color = CampaignColor(
-            lightHex: "#111111FF",
-            darkHex: "#EEEEEEFF"
+        var triggered = false
+        coordinator.onSpan = { _ in triggered = true }
+
+        let handled = coordinator.textView(
+            UITextView(),
+            shouldInteractWith: URL(string: "digia-canvas://span/99")!,
+            in: NSRange(location: 0, length: 0),
+            interaction: .invokeDefaultAction
         )
 
-        let lightResolved = CampaignCanvasTheme.shared.color(color, isDark: false)
-        let darkResolved = CampaignCanvasTheme.shared.color(color, isDark: true)
-
-        #expect(lightResolved != darkResolved)
+        #expect(handled == false)
+        #expect(triggered == false)
     }
 
-    // MARK: - 6. Interactive Actions & Span Links
+    @Test("rich text coordinator ignores foreign URL scheme")
+    func richTextCoordinatorIgnoresForeignScheme() {
+        let coordinator = CanvasRichText.Coordinator()
+        coordinator.spans = [
+            CampaignCanvasTextSpan(text: "External", typography: nil, color: nil, highlightColor: nil, italic: false, decoration: .none, decorationColor: nil, decorationThickness: nil, actions: [])
+        ]
 
-    @Test("span with onClick actions dispatches action request with canvasTextSpanElementID")
-    func spanActionDispatch() {
-        var dispatched: CampaignCanvasActionRequest?
-        let action = EngageAction.openUrl("https://example.com/learn-more")
+        var triggered = false
+        coordinator.onSpan = { _ in triggered = true }
 
-        let block = CampaignCanvasTextBlock(
-            horizontalAlign: .left,
-            textAlign: .left,
-            verticalAlign: .top,
-            maxLines: 0,
-            overflow: "visible",
-            sizingMode: "wrap",
-            spans: [
-                CampaignCanvasTextSpan(
-                    text: "Click here",
-                    typography: nil,
-                    color: .literal("#0000FFFF"),
-                    highlightColor: nil,
-                    italic: false,
-                    decoration: .underline,
-                    decorationColor: nil,
-                    decorationThickness: nil,
-                    actions: [action]
-                )
-            ]
+        let handled = coordinator.textView(
+            UITextView(),
+            shouldInteractWith: URL(string: "https://example.com/terms")!,
+            in: NSRange(location: 0, length: 0),
+            interaction: .invokeDefaultAction
         )
 
-        let widget = CampaignCanvasWidget.text(box: .none, block: block, shadow: nil)
-        let window = mount(text: widget, onAction: { request in
-            dispatched = request
-        })
-        ComponentTestHost.drainRunLoop(for: 0.05)
-
-        // Simulate rich text link interaction:
-        // A click on span 0 emits elementId = canvasTextSpanElementID
-        let request = CampaignCanvasActionRequest(
-            actions: block.spans[0].actions,
-            elementId: canvasTextSpanElementID,
-            label: block.spans[0].text
-        )
-        #expect(request.elementId == "canvas_text_span")
-        #expect(request.label == "Click here")
-        #expect(request.actions == [action])
-
-        unmount(window)
-        _ = dispatched
+        #expect(handled == false)
+        #expect(triggered == false)
     }
 
-    // MARK: - 7. Component Mounting & Lifecycle
+    @Test("rich text coordinator ignores non-numeric canvas link path")
+    func richTextCoordinatorIgnoresNonNumericPath() {
+        let coordinator = CanvasRichText.Coordinator()
+        coordinator.spans = [
+            CampaignCanvasTextSpan(text: "Invalid", typography: nil, color: nil, highlightColor: nil, italic: false, decoration: .none, decorationColor: nil, decorationThickness: nil, actions: [])
+        ]
 
-    @Test("text widget mounts stably across sizing modes and variable context")
-    func componentMounting() {
-        let block = CampaignCanvasTextBlock(
-            horizontalAlign: .center,
-            textAlign: .center,
-            verticalAlign: .center,
-            maxLines: 2,
-            overflow: "ellipsis",
-            sizingMode: "fixed",
-            spans: [
-                CampaignCanvasTextSpan(
-                    text: "Hi {{name}}",
-                    typography: CampaignTypography(
-                        fontFamily: nil, fontSize: 16, fontWeight: 600, lineHeight: 22, letterSpacing: 0.5
-                    ),
-                    color: .literal("#000000FF"),
-                    highlightColor: .literal("#FFFF0044"),
-                    italic: false,
-                    decoration: .none,
-                    decorationColor: nil,
-                    decorationThickness: nil,
-                    actions: []
-                )
-            ]
+        var triggered = false
+        coordinator.onSpan = { _ in triggered = true }
+
+        let handled = coordinator.textView(
+            UITextView(),
+            shouldInteractWith: URL(string: "digia-canvas://span/notanumber")!,
+            in: NSRange(location: 0, length: 0),
+            interaction: .invokeDefaultAction
         )
 
-        let shadow = CampaignCanvasShadow(
-            color: .literal("#00000044"), blur: 4, spread: 1, offsetX: 0, offsetY: 2)
-        let widget = CampaignCanvasWidget.text(box: .none, block: block, shadow: shadow)
-
-        let context = VariableContext(
-            values: ["name": "Jordan"],
-            types: ["name": "string"]
-        )
-
-        let window = mount(text: widget, variables: context)
-        ComponentTestHost.drainRunLoop(for: 0.05)
-
-        #expect(window.rootViewController?.view != nil)
-        unmount(window)
+        #expect(handled == false)
+        #expect(triggered == false)
     }
 
-    // MARK: - 8. Visual Golden
+    // MARK: - 5. Visual Golden
 
     @Test("text renderer matches visual golden", .tags(.golden))
     func textRendererVisualGolden() throws {
@@ -442,6 +409,197 @@ struct CanvasTextRendererTests {
         ])
 
         let window = mount(text: textWidget)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("text renderer handles truncation and maxLines with ellipsis", .tags(.golden))
+    func textRendererTruncationWithEllipsisVisualGolden() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 140,
+            "background": ["type": "solid", "color": "#FFF1F5F9"],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "single-line-truncation",
+                    "rect": ["x": 0.05, "y": 0.1, "width": 0.9, "height": 0.35],
+                    "widget": [
+                        "type": "digia/text",
+                        "containerProps": [
+                            "fill": ["type": "solid", "color": "#FFFFFFFF"],
+                            "borderRadius": 8,
+                            "padding": ["top": 8, "bottom": 8, "left": 12, "right": 12],
+                            "border": ["color": "#FFE2E8F0", "width": 1]
+                        ],
+                        "props": [
+                            "maxLines": 1,
+                            "overflow": "ellipsis",
+                            "spans": [
+                                [
+                                    "text": "Flash Sale: Unbelievable discounts across all departments available for the next 24 hours only!",
+                                    "typography": ["fontSize": 14, "fontWeight": "W700"],
+                                    "color": "#FF0F172A"
+                                ]
+                            ]
+                        ]
+                    ]
+                ],
+                [
+                    "kind": "widget",
+                    "id": "two-line-truncation",
+                    "rect": ["x": 0.05, "y": 0.52, "width": 0.9, "height": 0.42],
+                    "widget": [
+                        "type": "digia/text",
+                        "containerProps": [
+                            "fill": ["type": "solid", "color": "#FFFFFFFF"],
+                            "borderRadius": 8,
+                            "padding": ["top": 8, "bottom": 8, "left": 12, "right": 12],
+                            "border": ["color": "#FFE2E8F0", "width": 1]
+                        ],
+                        "props": [
+                            "maxLines": 2,
+                            "overflow": "ellipsis",
+                            "spans": [
+                                [
+                                    "text": "Offer Terms: Promotional vouchers cannot be combined with any other discount or reward point redemption. Valid while supplies last. Subject to standard terms of purchase and merchant review.",
+                                    "typography": ["fontSize": 12, "fontWeight": "W400", "lineHeight": 16],
+                                    "color": "#FF64748B"
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let window = mount(canvas: canvas)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("text renderer renders rich decorations including highlights, underlines, and strikethroughs", .tags(.golden))
+    func textRendererRichDecorationsVisualGolden() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 120,
+            "background": ["type": "solid", "color": "#FFFFFFFF"],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "rich-text-decorations",
+                    "rect": ["x": 0.05, "y": 0.1, "width": 0.9, "height": 0.8],
+                    "widget": [
+                        "type": "digia/text",
+                        "containerProps": [
+                            "fill": ["type": "solid", "color": "#FFF8FAFC"],
+                            "borderRadius": 12,
+                            "padding": ["top": 12, "bottom": 12, "left": 16, "right": 16],
+                            "border": ["color": "#FFE2E8F0", "width": 1]
+                        ],
+                        "props": [
+                            "maxLines": 3,
+                            "spans": [
+                                [
+                                    "text": "Special Deal: ",
+                                    "typography": ["fontSize": 14, "fontWeight": "W700"],
+                                    "color": "#FF0F172A"
+                                ],
+                                [
+                                    "text": "Limited Stock ",
+                                    "typography": ["fontSize": 13, "fontWeight": "W600"],
+                                    "color": "#FF854D0E",
+                                    "highlightColor": "#FFFEF08A"
+                                ],
+                                [
+                                    "text": "was $99.99 ",
+                                    "typography": ["fontSize": 12, "fontWeight": "W400"],
+                                    "color": "#FFDC2626",
+                                    "decoration": "lineThrough",
+                                    "decorationColor": "#FFDC2626",
+                                    "decorationThickness": 1.5
+                                ],
+                                [
+                                    "text": "now $49.99. ",
+                                    "typography": ["fontSize": 14, "fontWeight": "W800"],
+                                    "color": "#FF16A34A"
+                                ],
+                                [
+                                    "text": "Shop today!",
+                                    "typography": ["fontSize": 13, "fontWeight": "W500"],
+                                    "color": "#FF2563EB",
+                                    "italic": true,
+                                    "decoration": "underline",
+                                    "decorationColor": "#FF2563EB",
+                                    "decorationThickness": 2,
+                                    "decorationOffset": 3
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let window = mount(canvas: canvas)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("text renderer renders right-aligned and bottom-aligned text extremes", .tags(.golden))
+    func textRendererAlignmentExtremesVisualGolden() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 110,
+            "background": ["type": "solid", "color": "#FF0F172A"],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "aligned-text",
+                    "rect": ["x": 0.05, "y": 0.08, "width": 0.9, "height": 0.84],
+                    "widget": [
+                        "type": "digia/text",
+                        "containerProps": [
+                            "fill": ["type": "solid", "color": "#FF1E293B"],
+                            "borderRadius": 10,
+                            "padding": ["top": 10, "bottom": 10, "left": 14, "right": 14],
+                            "border": ["color": "#FF334155", "width": 1]
+                        ],
+                        "props": [
+                            "horizontalAlign": "right",
+                            "textAlign": "right",
+                            "verticalAlign": "bottom",
+                            "spans": [
+                                [
+                                    "text": "Premium Tier Member\n",
+                                    "typography": ["fontSize": 15, "fontWeight": "W700"],
+                                    "color": "#FFF8FAFC"
+                                ],
+                                [
+                                    "text": "Account ID: #849204 • Verified",
+                                    "typography": ["fontSize": 12, "fontWeight": "W400"],
+                                    "color": "#FF94A3B8"
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let window = mount(canvas: canvas)
         defer { unmount(window) }
         ComponentTestHost.drainRunLoop(for: 0.1)
 
@@ -493,6 +651,15 @@ struct CanvasTextRendererTests {
                 .widget(id: "test-text", rect: CampaignCanvasRect(x: 0, y: 0, width: 360, height: 120), widget: text)
             ]
         )
+        return mount(canvas: canvas, isDark: isDark, variables: variables, onAction: onAction)
+    }
+
+    private func mount(
+        canvas: CampaignCanvas,
+        isDark: Bool = false,
+        variables: VariableContext? = nil,
+        onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
+    ) -> UIWindow {
         var stage = CampaignCanvasStage(
             canvas: canvas,
             authoredCornerRadius: 0,
@@ -507,7 +674,7 @@ struct CanvasTextRendererTests {
         }
         let controller = ComponentTestHost.makeComponentHost(
             rootView: hostedView,
-            size: CGSize(width: 360, height: 120),
+            size: CGSize(width: canvas.width, height: canvas.height),
             backgroundColor: .white
         )
         let window: UIWindow

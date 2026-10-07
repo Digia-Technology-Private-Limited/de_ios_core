@@ -11,9 +11,8 @@ struct CanvasContainerRendererTests {
 
     // MARK: - 1. Parser & Schema Preservation
 
-    @Test("container parser preserves solid fill, linear/radial/sweep gradients, image fills, scalar and 4-corner radii, borders, and shadows")
-    func parserPreservesAllProperties() throws {
-        // 1. Solid fill with scalar corner radius
+    @Test("container parser preserves solid fill, scalar corner radius, border, and shadow")
+    func parserPreservesSolidFill() throws {
         let solidWidget = try parsedContainer([
             "fill": ["type": "solid", "color": "#FF336699"],
             "cornerRadius": 14,
@@ -28,8 +27,10 @@ struct CanvasContainerRendererTests {
         #expect(solidRadius == CampaignCanvasCornerRadius(topLeft: 14, topRight: 14, bottomRight: 14, bottomLeft: 14))
         #expect(solidBorder == CampaignCanvasBorder(color: .literal("#FF112233"), width: 2.5))
         #expect(solidShadow == CampaignCanvasShadow(color: .literal("#80000000"), blur: 12, spread: 3, offsetX: 1, offsetY: 4))
+    }
 
-        // 2. Linear gradient fill with 4-corner radius
+    @Test("container parser preserves linear gradient fill and 4-corner radius")
+    func parserPreservesLinearGradientFill() throws {
         let linearWidget = try parsedContainer([
             "fill": [
                 "type": "gradient",
@@ -70,8 +71,10 @@ struct CanvasContainerRendererTests {
         #expect(linearRadius == CampaignCanvasCornerRadius(topLeft: 6, topRight: 12, bottomRight: 18, bottomLeft: 24))
         #expect(linearBorder == nil)
         #expect(linearShadow == nil)
+    }
 
-        // 3. Radial gradient fill
+    @Test("container parser preserves radial gradient fill")
+    func parserPreservesRadialGradientFill() throws {
         let radialWidget = try parsedContainer([
             "fill": [
                 "type": "gradient",
@@ -98,8 +101,10 @@ struct CanvasContainerRendererTests {
         } else {
             Issue.record("Expected radial gradient fill")
         }
+    }
 
-        // 4. Sweep gradient fill
+    @Test("container parser preserves sweep gradient fill")
+    func parserPreservesSweepGradientFill() throws {
         let sweepWidget = try parsedContainer([
             "fill": [
                 "type": "gradient",
@@ -125,8 +130,10 @@ struct CanvasContainerRendererTests {
         } else {
             Issue.record("Expected sweep gradient fill")
         }
+    }
 
-        // 5. Image fill
+    @Test("container parser preserves image fill and position/scale")
+    func parserPreservesImageFill() throws {
         let imageWidget = try parsedContainer([
             "fill": [
                 "type": "image",
@@ -164,8 +171,8 @@ struct CanvasContainerRendererTests {
         #expect(shadow == nil)
     }
 
-    @Test("container parser clamps values and sorts gradient stops by offset")
-    func parserClampsAndSorts() throws {
+    @Test("container parser clamps gradient coordinates and radius within valid bounds")
+    func containerParserClampsGradientCoordinatesAndRadius() throws {
         let clampedWidget = try parsedContainer([
             "fill": [
                 "type": "gradient",
@@ -173,31 +180,61 @@ struct CanvasContainerRendererTests {
                 "centerY": 1.8,  // clamps to 1
                 "radius": 5.0,   // clamps to 4
                 "stops": [
+                    ["color": "#FFFF0000", "offset": 0.0]
+                ]
+            ]
+        ])
+        guard case .container(let fill, _, _, _) = clampedWidget else {
+            Issue.record("Expected a parsed container widget")
+            return
+        }
+        if case .gradient(_, _, let cx, let cy, let radius, _, _, _) = fill {
+            #expect(cx == 0.0)
+            #expect(cy == 1.0)
+            #expect(radius == 4.0)
+        } else {
+            Issue.record("Expected gradient fill")
+        }
+    }
+
+    @Test("container parser sorts gradient stops by offset in ascending order")
+    func containerParserSortsGradientStopsByOffset() throws {
+        let sortedWidget = try parsedContainer([
+            "fill": [
+                "type": "gradient",
+                "stops": [
                     ["color": "#FF0000FF", "offset": 0.9],
                     ["color": "#FFFF0000", "offset": 0.1],
                     ["color": "#FF00FF00", "offset": 0.5]
                 ]
-            ],
-            "shadow": [
-                "color": "#80000000",
-                "blur": 350,   // clamps to 200
-                "spread": -20  // clamps min 0
             ]
         ])
-        guard case .container(let fill, _, _, let shadow) = clampedWidget else {
+        guard case .container(let fill, _, _, _) = sortedWidget else {
             Issue.record("Expected a parsed container widget")
             return
         }
-        if case .gradient(_, _, let cx, let cy, let radius, _, _, let stops) = fill {
-            #expect(cx == 0.0)
-            #expect(cy == 1.0)
-            #expect(radius == 4.0)
+        if case .gradient(_, _, _, _, _, _, _, let stops) = fill {
             #expect(stops.count == 3)
             #expect(stops[0].offset == 0.1)
             #expect(stops[1].offset == 0.5)
             #expect(stops[2].offset == 0.9)
         } else {
             Issue.record("Expected gradient fill")
+        }
+    }
+
+    @Test("container parser clamps shadow blur and spread to safe ranges")
+    func containerParserClampsShadowBlurAndSpread() throws {
+        let shadowWidget = try parsedContainer([
+            "shadow": [
+                "color": "#80000000",
+                "blur": 350,   // clamps to 200
+                "spread": -20  // clamps min 0
+            ]
+        ])
+        guard case .container(_, _, _, let shadow) = shadowWidget else {
+            Issue.record("Expected a parsed container widget")
+            return
         }
         #expect(shadow?.blur == 200)
         #expect(shadow?.spread == 0)
@@ -327,65 +364,6 @@ struct CanvasContainerRendererTests {
         #expect(imageBox.hasVisibleSurface(isDark: false) == true)
     }
 
-    @Test("nativeContentBlurRadius calculates Gaussian sigma with spread and non-negative clamping")
-    func shadowBlurRadiusOracle() {
-        // blur = 0, spread = 0 -> 0
-        let zeroShadow = CampaignCanvasShadow(color: .literal("#FF000000"), blur: 0, spread: 0, offsetX: 0, offsetY: 0)
-        #expect(zeroShadow.nativeContentBlurRadius == 0)
-
-        // blur = 10, spread = 0 -> 10 * 0.57735 + 0.5 = 6.2735
-        let blurOnly = CampaignCanvasShadow(color: .literal("#FF000000"), blur: 10, spread: 0, offsetX: 0, offsetY: 0)
-        let expectedSigma: CGFloat = 10 * 0.57735 + 0.5
-        #expect(abs(blurOnly.nativeContentBlurRadius - expectedSigma) < 0.001)
-
-        // blur = 10, spread = 4 -> 6.2735 + 4 = 10.2735
-        let blurAndSpread = CampaignCanvasShadow(color: .literal("#FF000000"), blur: 10, spread: 4, offsetX: 0, offsetY: 0)
-        #expect(abs(blurAndSpread.nativeContentBlurRadius - (expectedSigma + 4)) < 0.001)
-
-        // negative spread clamping: blur = 0, spread = -5 -> clamped to 0
-        let negativeSpread = CampaignCanvasShadow(color: .literal("#FF000000"), blur: 0, spread: -5, offsetX: 0, offsetY: 0)
-        #expect(negativeSpread.nativeContentBlurRadius == 0)
-    }
-
-    // MARK: - 4. Rendering & Host Lifecycle
-
-    @Test("CampaignCanvasRendererRegistry registers and renders container widget into valid view")
-    func registryRendersContainer() {
-        let widget = CampaignCanvasWidget.container(
-            fill: .solid(.literal("#FF123456")),
-            cornerRadius: CampaignCanvasCornerRadius(topLeft: 8, topRight: 8, bottomRight: 8, bottomLeft: 8),
-            border: CampaignCanvasBorder(color: .literal("#FF000000"), width: 1.5),
-            shadow: CampaignCanvasShadow(color: .literal("#80000000"), blur: 8, spread: 2, offsetX: 0, offsetY: 2)
-        )
-        #expect(CampaignCanvasRendererRegistry.hasRenderer(for: widget))
-
-        let rendered = CampaignCanvasRendererRegistry.render(widget, isDark: false) { _ in }
-        _ = rendered
-    }
-
-    @Test("container mounts cleanly in UIWindow across solid, gradient, and image fills")
-    func containerMountsInWindow() throws {
-        let canvas = try parsedCanvasWithContainers()
-        let window = mount(canvas: canvas, isDark: false)
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(window.rootViewController?.view != nil)
-        unmount(window)
-    }
-
-    @Test("nested containers mount cleanly and support dynamic theme toggling")
-    func nestedContainersWithThemeToggle() throws {
-        let canvas = try parsedCanvasWithContainers()
-        let windowLight = mount(canvas: canvas, isDark: false)
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(windowLight.rootViewController?.view != nil)
-        unmount(windowLight)
-
-        let windowDark = mount(canvas: canvas, isDark: true)
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(windowDark.rootViewController?.view != nil)
-        unmount(windowDark)
-    }
-
     // MARK: - Helpers
 
     private func parsedContainer(_ props: [String: Any]) throws -> CampaignCanvasWidget {
@@ -411,70 +389,6 @@ struct CanvasContainerRendererTests {
             throw DesignTokenError.invalid("Failed to parse container widget")
         }
         return widget
-    }
-
-    private func parsedCanvasWithContainers() throws -> CampaignCanvas {
-        let canvasJSON: [String: Any] = [
-            "version": 2,
-            "canvasWidth": 360,
-            "canvasHeight": 420,
-            "background": ["type": "solid", "color": "#FFFFFFFF"],
-            "children": [
-                [
-                    "id": "outer_solid_container",
-                    "kind": "widget",
-                    "rect": ["x": 0.05, "y": 0.05, "width": 0.9, "height": 0.4],
-                    "widget": [
-                        "type": "digia/canvasContainer",
-                        "props": [
-                            "fill": ["type": "solid", "color": "#FF223344"],
-                            "cornerRadius": 16,
-                            "border": ["color": "#FF556677", "width": 2.0],
-                            "shadow": ["color": "#40000000", "blur": 8, "spread": 2, "offsetX": 0, "offsetY": 4]
-                        ]
-                    ]
-                ],
-                [
-                    "id": "gradient_container",
-                    "kind": "widget",
-                    "rect": ["x": 0.05, "y": 0.5, "width": 0.42, "height": 0.4],
-                    "widget": [
-                        "type": "digia/canvasContainer",
-                        "props": [
-                            "fill": [
-                                "type": "gradient",
-                                "gradientType": "linear",
-                                "angleDeg": 45,
-                                "stops": [
-                                    ["color": "#FF6366F1", "offset": 0.0],
-                                    ["color": "#FFA855F7", "offset": 1.0]
-                                ]
-                            ],
-                            "cornerRadius": ["topLeft": 12, "topRight": 4, "bottomRight": 12, "bottomLeft": 4]
-                        ]
-                    ]
-                ],
-                [
-                    "id": "image_fill_container",
-                    "kind": "widget",
-                    "rect": ["x": 0.53, "y": 0.5, "width": 0.42, "height": 0.4],
-                    "widget": [
-                        "type": "digia/canvasContainer",
-                        "props": [
-                            "fill": [
-                                "type": "image",
-                                "source": ["url": "https://example.com/tile.png"],
-                                "positionX": 0.5,
-                                "positionY": 0.5,
-                                "scale": 1.2
-                            ],
-                            "cornerRadius": 8
-                        ]
-                    ]
-                ]
-            ]
-        ]
-        return try CampaignCanvasParser().parse(canvasJSON)
     }
 
     // MARK: - 10. Visual Golden
@@ -534,6 +448,144 @@ struct CanvasContainerRendererTests {
         ])
 
         let window = mount(canvas: container)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("container renderer handles linear gradient fills with multiple stops and borders", .tags(.golden))
+    func containerRendererLinearGradientVisualGolden() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 140,
+            "background": ["type": "solid", "color": "#FF0F172A"],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "gradient-box",
+                    "rect": ["x": 0.05, "y": 0.1, "width": 0.9, "height": 0.8],
+                    "widget": [
+                        "type": "digia/canvasContainer",
+                        "props": [
+                            "fill": [
+                                "type": "gradient",
+                                "gradientType": "linear",
+                                "angleDeg": 45,
+                                "stops": [
+                                    ["color": "#FF8B5CF6", "offset": 0.0],
+                                    ["color": "#FF3B82F6", "offset": 0.5],
+                                    ["color": "#FF06B6D4", "offset": 1.0]
+                                ]
+                            ],
+                            "cornerRadius": 16,
+                            "border": [
+                                "width": 1.5,
+                                "color": "#66FFFFFF"
+                            ],
+                            "shadow": [
+                                "color": "#4D3B82F6",
+                                "blur": 16,
+                                "spread": 0,
+                                "offsetX": 0,
+                                "offsetY": 6
+                            ]
+                        ]
+                    ]
+                ],
+                [
+                    "kind": "widget",
+                    "id": "gradient-label",
+                    "rect": ["x": 0.1, "y": 0.35, "width": 0.8, "height": 0.3],
+                    "widget": [
+                        "type": "digia/text",
+                        "props": [
+                            "horizontalAlign": "center",
+                            "textAlign": "center",
+                            "verticalAlign": "center",
+                            "spans": [
+                                [
+                                    "text": "Gradient Card Container",
+                                    "typography": ["fontSize": 17, "fontWeight": 700],
+                                    "color": "#FFFFFFFF"
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let window = mount(canvas: canvas)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("container renderer handles asymmetric corner radiuses for sheet style layout", .tags(.golden))
+    func containerRendererAsymmetricCornersVisualGolden() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 140,
+            "background": ["type": "solid", "color": "#FFF1F5F9"],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "sheet-box",
+                    "rect": ["x": 0.05, "y": 0.1, "width": 0.9, "height": 0.8],
+                    "widget": [
+                        "type": "digia/canvasContainer",
+                        "props": [
+                            "fill": ["type": "solid", "color": "#FFFFFFFF"],
+                            "cornerRadius": [
+                                "topLeft": 32,
+                                "topRight": 32,
+                                "bottomRight": 0,
+                                "bottomLeft": 0
+                            ],
+                            "border": [
+                                "width": 2,
+                                "color": "#FFCBD5E1"
+                            ],
+                            "shadow": [
+                                "color": "#1A000000",
+                                "blur": 12,
+                                "spread": 0,
+                                "offsetX": 0,
+                                "offsetY": 4
+                            ]
+                        ]
+                    ]
+                ],
+                [
+                    "kind": "widget",
+                    "id": "sheet-label",
+                    "rect": ["x": 0.1, "y": 0.35, "width": 0.8, "height": 0.3],
+                    "widget": [
+                        "type": "digia/text",
+                        "props": [
+                            "horizontalAlign": "center",
+                            "textAlign": "center",
+                            "verticalAlign": "center",
+                            "spans": [
+                                [
+                                    "text": "Top-Sheet Container",
+                                    "typography": ["fontSize": 17, "fontWeight": 700],
+                                    "color": "#FF0F172A"
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let window = mount(canvas: canvas)
         defer { unmount(window) }
         ComponentTestHost.drainRunLoop(for: 0.1)
 

@@ -11,9 +11,8 @@ struct CanvasControlRendererTests {
 
     // MARK: - 1. Divider Subsystem: Parser & Properties
 
-    @Test("divider parser preserves axis, style pattern, stroke cap, insets, dash pattern, and token colors")
-    func dividerParserPreservesAllProperties() throws {
-        // 1. Horizontal solid divider with stroke cap butt and non-zero inset
+    @Test("divider parser preserves horizontal solid configuration with stroke cap butt and insets")
+    func dividerParserHorizontalSolid() throws {
         let hWidget = try parsedDivider([
             "type": "horizontal",
             "style": "solid",
@@ -32,8 +31,10 @@ struct CanvasControlRendererTests {
         #expect(inset == 12)
         #expect(dashPattern == [8, 4])
         #expect(color == .literal("#FF224466"))
+    }
 
-        // 2. Vertical dashed divider with round cap and custom dash pattern
+    @Test("divider parser preserves vertical dashed configuration and clamps negative insets")
+    func dividerParserVerticalDashed() throws {
         let vWidget = try parsedDivider([
             "type": "vertical",
             "style": "dashed",
@@ -52,8 +53,10 @@ struct CanvasControlRendererTests {
         #expect(vInset == 0) // clamped
         #expect(vDashPattern == [8, 4])
         #expect(vColor == .literal("#FFAABBCC"))
+    }
 
-        // 3. Dotted divider with square cap and fallback color
+    @Test("divider parser preserves dotted configuration with square cap and fallback color")
+    func dividerParserDottedSquareCap() throws {
         let dottedWidget = try parsedDivider([
             "type": "horizontal",
             "style": "dotted",
@@ -70,21 +73,24 @@ struct CanvasControlRendererTests {
 
     // MARK: - 2. Divider Subsystem: Oracles
 
-    @Test("canvasDividerDashPattern oracle computes exact dash lengths for solid, dotted, and dashed patterns")
-    func dividerDashPatternOracle() {
-        // Solid divider always returns []
+    @Test("canvasDividerDashPattern for solid pattern returns empty dash lengths")
+    func dividerDashPatternSolid() {
         #expect(canvasDividerDashPattern(pattern: .solid, thickness: 2, dashPattern: [10, 5]).isEmpty)
         #expect(canvasDividerDashPattern(pattern: .solid, thickness: 10, dashPattern: []).isEmpty)
+    }
 
-        // Dotted divider produces [0, max(thickness, gap)]
+    @Test("canvasDividerDashPattern for dotted pattern produces zero-length dash with maximum of thickness and gap")
+    func dividerDashPatternDotted() {
         // Case A: empty authored dash pattern falls back to gap 4
         #expect(canvasDividerDashPattern(pattern: .dotted, thickness: 2, dashPattern: []) == [0, 4])
         // Case B: thickness larger than gap
         #expect(canvasDividerDashPattern(pattern: .dotted, thickness: 8, dashPattern: [0, 4]) == [0, 8])
         // Case C: authored gap larger than thickness
         #expect(canvasDividerDashPattern(pattern: .dotted, thickness: 2, dashPattern: [0, 10]) == [0, 10])
+    }
 
-        // Dashed divider returns exact authored pattern
+    @Test("canvasDividerDashPattern for dashed pattern returns authored pattern directly")
+    func dividerDashPatternDashed() {
         #expect(canvasDividerDashPattern(pattern: .dashed, thickness: 3, dashPattern: [6, 3]) == [6, 3])
         #expect(canvasDividerDashPattern(pattern: .dashed, thickness: 1, dashPattern: [12, 4, 2, 4]) == [12, 4, 2, 4])
     }
@@ -96,41 +102,10 @@ struct CanvasControlRendererTests {
         #expect(CampaignCanvasStrokeCap.square.lineCap == .square)
     }
 
-    // MARK: - 3. Divider Subsystem: Mounting & Theme Switching
-
-    @Test("horizontal and vertical dividers mount in UIWindow with dark and light themes")
-    func dividerMountingAndTheme() {
-        let hDivider = try! parsedDivider([
-            "type": "horizontal",
-            "style": "dashed",
-            "strokeCap": "round",
-            "inset": 10,
-            "dashPattern": [8, 4],
-            "color": "#FF336699"
-        ])
-        let windowH = mount(widget: hDivider, isDark: false)
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(windowH.rootViewController?.view != nil)
-        unmount(windowH)
-
-        let vDivider = try! parsedDivider([
-            "type": "vertical",
-            "style": "dotted",
-            "strokeCap": "square",
-            "inset": 4,
-            "color": "#FFFF0000"
-        ])
-        let windowV = mount(widget: vDivider, isDark: true)
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(windowV.rootViewController?.view != nil)
-        unmount(windowV)
-    }
-
     // MARK: - 4. Progress Subsystem: Parser & Properties
 
-    @Test("progress parser preserves value modes, range bounds, paints, corner radius, and clamps animation duration")
-    func progressParserPreservesAllProperties() throws {
-        // Percent mode
+    @Test("progress parser preserves percent mode with paints and corner radius")
+    func progressParserPercentMode() throws {
         let pctWidget = try parsedProgress([
             "valueMode": "percent",
             "percent": "65",
@@ -154,8 +129,10 @@ struct CanvasControlRendererTests {
         #expect(radius == CampaignCanvasCornerRadius(topLeft: 6, topRight: 6, bottomRight: 6, bottomLeft: 6))
         #expect(anim.enabled == true)
         #expect(anim.durationMs == 800)
+    }
 
-        // Range mode with animation duration clamping
+    @Test("progress parser preserves range mode and clamps excessive animation duration")
+    func progressParserRangeMode() throws {
         let rangeWidget = try parsedProgress([
             "valueMode": "range",
             "rangeStart": "10",
@@ -235,6 +212,35 @@ struct CanvasControlRendererTests {
         #expect(divZero == 0.0)
     }
 
+    @Test("canvasProgressTarget oracle handles inverted countdown ranges and non-numeric fallbacks")
+    func progressInvertedRangeAndFallbackOracle() {
+        // Inverted range: start 100 -> end 0 (countdown from 100 to 0)
+        // At 100: (100 - 100) / (0 - 100) = 0.0
+        let invStart = canvasProgressTarget(valueMode: .range, percent: "0", rangeStart: "100", rangeCurrent: "100", rangeEnd: "0", variables: nil)
+        #expect(invStart == 0.0)
+
+        // At 25: (25 - 100) / (0 - 100) = -75 / -100 = 0.75
+        let inv25 = canvasProgressTarget(valueMode: .range, percent: "0", rangeStart: "100", rangeCurrent: "25", rangeEnd: "0", variables: nil)
+        #expect(abs(inv25 - 0.75) < 0.001)
+
+        // At 0: (0 - 100) / (0 - 100) = 1.0
+        let invEnd = canvasProgressTarget(valueMode: .range, percent: "0", rangeStart: "100", rangeCurrent: "0", rangeEnd: "0", variables: nil)
+        #expect(invEnd == 1.0)
+
+        // Inverted range clamping: 120 (beyond start) clamps to 0.0; -20 (beyond end) clamps to 1.0
+        let invBeyondStart = canvasProgressTarget(valueMode: .range, percent: "0", rangeStart: "100", rangeCurrent: "120", rangeEnd: "0", variables: nil)
+        #expect(invBeyondStart == 0.0)
+        let invBeyondEnd = canvasProgressTarget(valueMode: .range, percent: "0", rangeStart: "100", rangeCurrent: "-20", rangeEnd: "0", variables: nil)
+        #expect(invBeyondEnd == 1.0)
+
+        // Non-numeric strings in range mode fall back safely to 0
+        let invalidStart = canvasProgressTarget(valueMode: .range, percent: "0", rangeStart: "bad_start", rangeCurrent: "bad_current", rangeEnd: "bad_end", variables: nil)
+        #expect(invalidStart == 0.0)
+
+        let invalidCurrent = canvasProgressTarget(valueMode: .range, percent: "0", rangeStart: "10", rangeCurrent: "invalid", rangeEnd: "50", variables: nil)
+        #expect(invalidCurrent == 0.0)
+    }
+
     @Test("canvasProgressTarget oracle interpolates dynamic variables in percent and range modes")
     func progressVariableInterpolationOracle() {
         let context = VariableContext(
@@ -271,23 +277,6 @@ struct CanvasControlRendererTests {
             variables: context
         )
         #expect(abs(range - 0.75) < 0.001)
-    }
-
-    // MARK: - 6. Progress Subsystem: Mounting & Lifecycle
-
-    @Test("progress bar mounts and renders safely in UIWindow")
-    func progressMounting() {
-        let widget = try! parsedProgress([
-            "valueMode": "percent",
-            "percent": "40",
-            "indicator": ["type": "solid", "color": "#FF10B981"],
-            "track": ["type": "solid", "color": "#FFE5E7EB"],
-            "cornerRadius": 4
-        ])
-        let window = mount(widget: widget)
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(window.rootViewController?.view != nil)
-        unmount(window)
     }
 
     // MARK: - 7. Timer Subsystem: Parser & Layout
@@ -480,6 +469,59 @@ struct CanvasControlRendererTests {
         #expect(roundedRes[1] == (.minutes, 2))
     }
 
+    @Test("timerUnitValues oracle calculates 86399s vs 86400s threshold transitions and unit rollups")
+    func timerUnitValuesThresholdTransitionOracle() {
+        let allUnits: [CampaignTimerUnit: CampaignTimerUnitVisibility] = [
+            .days: .show,
+            .hours: .show,
+            .minutes: .show,
+            .seconds: .show
+        ]
+        let autoHideDays: [CampaignTimerUnit: CampaignTimerUnitVisibility] = [
+            .days: .autoHide,
+            .hours: .show,
+            .minutes: .show,
+            .seconds: .show
+        ]
+        let daysOnly: [CampaignTimerUnit: CampaignTimerUnitVisibility] = [
+            .days: .show,
+            .hours: .hide,
+            .minutes: .hide,
+            .seconds: .hide
+        ]
+
+        // 86,399s is 0d 23h 59m 59s
+        let at86399 = timerUnitValues(remainingSeconds: 86399, visibility: allUnits)
+        #expect(at86399[0] == (.days, 0))
+        #expect(at86399[1] == (.hours, 23))
+        #expect(at86399[2] == (.minutes, 59))
+        #expect(at86399[3] == (.seconds, 59))
+
+        // 86,399s with autoHide days suppresses days
+        let autoHide86399 = timerUnitValues(remainingSeconds: 86399, visibility: autoHideDays)
+        #expect(!autoHide86399.contains { $0.0 == .days })
+        #expect(autoHide86399.count == 3)
+        #expect(autoHide86399[0] == (.hours, 23))
+
+        // 86,400s flips to 1d 0h 0m 0s and reveals autoHide days
+        let at86400 = timerUnitValues(remainingSeconds: 86400, visibility: autoHideDays)
+        #expect(at86400.count == 4)
+        #expect(at86400[0] == (.days, 1))
+        #expect(at86400[1] == (.hours, 0))
+        #expect(at86400[2] == (.minutes, 0))
+        #expect(at86400[3] == (.seconds, 0))
+
+        // When only days is visible, ceiling rounding rounds 86399s up to 1 day
+        let daysCeiling = timerUnitValues(remainingSeconds: 86399, visibility: daysOnly)
+        #expect(daysCeiling.count == 1)
+        #expect(daysCeiling[0] == (.days, 1))
+
+        // 86401s with only days visible rolls up to 2 days
+        let daysRolledUp = timerUnitValues(remainingSeconds: 86401, visibility: daysOnly)
+        #expect(daysRolledUp.count == 1)
+        #expect(daysRolledUp[0] == (.days, 2))
+    }
+
     @Test("timerLineHeight oracle handles multiplier vs absolute point sizes and invalid values")
     func timerLineHeightOracle() {
         // Multiplier (<= 4) scales with fontSize
@@ -506,34 +548,115 @@ struct CanvasControlRendererTests {
         #expect(timerLineHeight(typoNaN, fallbackSize: 20) == nil)
     }
 
-    // MARK: - 9. Timer Subsystem: Mounting & Lifecycle
+    // MARK: - 9. Timer Subsystem: Countdown Text Formatting
 
-    @Test("timer with environment remaining seconds mounts and renders safely in UIWindow")
-    func timerMounting() throws {
-        guard let widget = try parsedTimer([
-            "preset": "unitBoxes",
-            "separator": ":",
-            "units": [
-                "days": "autoHide",
-                "hours": true,
-                "minutes": true,
-                "seconds": true
-            ],
-            "style": [
-                "digitColor": "#FFFFFFFF",
-                "labelColor": "#FFB9C6DA",
-                "boxFill": ["type": "solid", "color": "#FF0F172A"],
-                "cornerRadius": 6
-            ]
-        ]) else {
-            Issue.record("Failed to parse timer")
-            return
-        }
+    @Test("canvasTimerCountdownText formats remaining unit values into padded two-digit text spans with colons")
+    func timerCountdownTextFormatsTimeBlocks() {
+        let style = CampaignCanvasTimerUnitStyle(
+            digitTextStyle: CampaignCanvasTextSpan(
+                text: "",
+                typography: nil,
+                color: CampaignColor.literal("#FFFFFFFF"),
+                highlightColor: nil,
+                italic: false,
+                decoration: .none,
+                decorationColor: nil,
+                decorationThickness: nil,
+                actions: []
+            ),
+            digitTypography: nil,
+            digitColor: CampaignColor.literal("#FFFFFFFF"),
+            labelTypography: nil,
+            labelColor: nil,
+            boxFill: .none,
+            cornerRadius: .zero
+        )
+        var layout = CampaignCanvasTimerLayout()
+        layout.separatorEnabled = true
 
-        let window = mount(widget: widget, timerRemainingSeconds: 7200)
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(window.rootViewController?.view != nil)
-        unmount(window)
+        let block = canvasTimerCountdownText(
+            values: [(.hours, 1), (.minutes, 1), (.seconds, 5)],
+            style: style,
+            layout: layout
+        )
+        #expect(block.spans.map { $0.text } == ["01", ":", "01", ":", "05"])
+        #expect(block.plainText == "01:01:05")
+    }
+
+    @Test("canvasTimerCountdownText suppresses separator spans when separatorEnabled is false")
+    func timerCountdownTextSeparatorSuppression() {
+        let style = CampaignCanvasTimerUnitStyle(
+            digitTextStyle: CampaignCanvasTextSpan(
+                text: "",
+                typography: nil,
+                color: CampaignColor.literal("#FFFFFFFF"),
+                highlightColor: nil,
+                italic: false,
+                decoration: .none,
+                decorationColor: nil,
+                decorationThickness: nil,
+                actions: []
+            ),
+            digitTypography: nil,
+            digitColor: CampaignColor.literal("#FFFFFFFF"),
+            labelTypography: nil,
+            labelColor: nil,
+            boxFill: .none,
+            cornerRadius: .zero
+        )
+        var layout = CampaignCanvasTimerLayout()
+        layout.separatorEnabled = false
+
+        let block = canvasTimerCountdownText(
+            values: [(.hours, 1), (.minutes, 30)],
+            style: style,
+            layout: layout
+        )
+        #expect(block.spans.map { $0.text } == ["01", "30"])
+    }
+
+    @Test("canvasTimerCountdownText applies custom separatorColor and falls back to base digit color")
+    func timerCountdownTextSeparatorColor() {
+        let style = CampaignCanvasTimerUnitStyle(
+            digitTextStyle: CampaignCanvasTextSpan(
+                text: "",
+                typography: nil,
+                color: CampaignColor.literal("#FFFFFFFF"),
+                highlightColor: nil,
+                italic: false,
+                decoration: .none,
+                decorationColor: nil,
+                decorationThickness: nil,
+                actions: []
+            ),
+            digitTypography: nil,
+            digitColor: CampaignColor.literal("#FFFFFFFF"),
+            labelTypography: nil,
+            labelColor: nil,
+            boxFill: .none,
+            cornerRadius: .zero
+        )
+
+        var customLayout = CampaignCanvasTimerLayout()
+        customLayout.separatorEnabled = true
+        customLayout.separatorColor = CampaignColor.literal("#FFEF4444")
+        let customBlock = canvasTimerCountdownText(
+            values: [(.minutes, 5), (.seconds, 0)],
+            style: style,
+            layout: customLayout
+        )
+        #expect(customBlock.spans.count == 3)
+        #expect(customBlock.spans[1].text == ":")
+        #expect(customBlock.spans[1].color == CampaignColor.literal("#FFEF4444"))
+
+        var fallbackLayout = CampaignCanvasTimerLayout()
+        fallbackLayout.separatorEnabled = true
+        let fallbackBlock = canvasTimerCountdownText(
+            values: [(.minutes, 5), (.seconds, 0)],
+            style: style,
+            layout: fallbackLayout
+        )
+        #expect(fallbackBlock.spans[1].color == CampaignColor.literal("#FFFFFFFF"))
     }
 
     // MARK: - 10. TapRegion Subsystem: Parser & Geometry
@@ -638,50 +761,6 @@ struct CanvasControlRendererTests {
         #expect(passiveEmptyChild.isHitTestable == true)
     }
 
-    // MARK: - 12. TapRegion Subsystem: Dispatch & Mounting
-
-    @Test("canvas with tap region mounts in UIWindow and simulates tap action request dispatch")
-    func tapRegionMountAndDispatch() throws {
-        var dispatched: CampaignCanvasActionRequest?
-        let action = EngageAction.openUrl("https://digia.com/promo")
-
-        let canvas = try parsedCanvas(children: [
-            [
-                "kind": "tapRegion",
-                "id": "card-overlay",
-                "rect": ["x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0],
-                "isPrimary": true,
-                "onClick": [
-                    "steps": [
-                        [
-                            "type": "open_url",
-                            "data": ["url": "https://digia.com/promo"]
-                        ]
-                    ]
-                ]
-            ]
-        ])
-
-        let window = mount(canvas: canvas, onAction: { request in
-            dispatched = request
-        })
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(window.rootViewController?.view != nil)
-
-        // Verify tap action dispatch contract:
-        // A tap on this region produces a CampaignCanvasActionRequest with actions, id, and isPrimary
-        guard case .tapRegion(let id, _, let actions, let isPrimary) = canvas.children.first else {
-            Issue.record("Expected tapRegion child")
-            unmount(window)
-            return
-        }
-        let request = CampaignCanvasActionRequest(actions: actions, elementId: id, isPrimary: isPrimary)
-        #expect(request.elementId == "card-overlay")
-        #expect(request.isPrimary == true)
-        #expect(request.actions == [action])
-
-        unmount(window)
-    }
 
     // MARK: - 13. Visual Goldens
 
@@ -718,8 +797,8 @@ struct CanvasControlRendererTests {
         assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
     }
 
-    @Test("progress bar and divider renderer matches visual golden", .tags(.golden))
-    func progressBarAndDividerVisualGolden() throws {
+    @Test("progress bar renderer matches visual golden", .tags(.golden))
+    func progressBarVisualGolden() throws {
         let canvas = try CampaignCanvasParser().parse([
             "version": 2,
             "canvasWidth": 360,
@@ -729,7 +808,7 @@ struct CanvasControlRendererTests {
                 [
                     "kind": "widget",
                     "id": "progress",
-                    "rect": ["x": 0.05, "y": 0.2, "width": 0.9, "height": 0.15],
+                    "rect": ["x": 0.05, "y": 0.4, "width": 0.9, "height": 0.2],
                     "widget": [
                         "type": "digia/linearProgressBar",
                         "props": [
@@ -740,11 +819,30 @@ struct CanvasControlRendererTests {
                             "cornerRadius": 6
                         ]
                     ]
-                ],
+                ]
+            ]
+        ])
+
+        let window = mount(canvas: canvas)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("divider renderer matches visual golden", .tags(.golden))
+    func dividerVisualGolden() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 120,
+            "background": ["type": "solid", "color": "#FFFFFFFF"],
+            "children": [
                 [
                     "kind": "widget",
                     "id": "divider",
-                    "rect": ["x": 0.05, "y": 0.65, "width": 0.9, "height": 0.05],
+                    "rect": ["x": 0.05, "y": 0.45, "width": 0.9, "height": 0.1],
                     "widget": [
                         "type": "digia/styledHorizontalDivider",
                         "props": [
@@ -754,6 +852,171 @@ struct CanvasControlRendererTests {
                             "inset": 0,
                             "dashPattern": [8, 4],
                             "color": "#FF64748B"
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let window = mount(canvas: canvas)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("timer renderer renders zero state gracefully without collapsing digits", .tags(.golden))
+    func timerRendererZeroStateVisualGolden() throws {
+        guard let widget = try parsedTimer([
+            "preset": "unitBoxes",
+            "separator": ":",
+            "units": [
+                "days": false,
+                "hours": true,
+                "minutes": true,
+                "seconds": true
+            ],
+            "labels": [
+                "hours": "HRS",
+                "minutes": "MIN",
+                "seconds": "SEC"
+            ],
+            "digitColor": "#FFFFFFFF",
+            "labelColor": "#FF94A3B8",
+            "boxFill": ["type": "solid", "color": "#FF0F172A"],
+            "cornerRadius": 8
+        ]) else {
+            Issue.record("Failed to parse timer")
+            return
+        }
+
+        let window = mount(widget: widget, timerRemainingSeconds: 0)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("timer renderer handles minutes and seconds only with custom styling and separator", .tags(.golden))
+    func timerRendererMinutesSecondsOnlyVisualGolden() throws {
+        guard let widget = try parsedTimer([
+            "preset": "unitBoxes",
+            "separator": ":",
+            "separatorEnabled": true,
+            "separatorColor": "#FFEF4444",
+            "units": [
+                "days": false,
+                "hours": false,
+                "minutes": true,
+                "seconds": true
+            ],
+            "labels": [
+                "minutes": "MIN",
+                "seconds": "SEC"
+            ],
+            "digitColor": "#FFFFFFFF",
+            "labelColor": "#FFCBD5E1",
+            "boxFill": ["type": "solid", "color": "#FF334155"],
+            "cornerRadius": 14
+        ]) else {
+            Issue.record("Failed to parse timer")
+            return
+        }
+
+        let window = mount(widget: widget, timerRemainingSeconds: 754)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("progress bar renderer handles 0% and 100% boundary extremes", .tags(.golden))
+    func progressBarEmptyAndFullVisualGolden() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 120,
+            "background": ["type": "solid", "color": "#FFF8FAFC"],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "progress-empty",
+                    "rect": ["x": 0.05, "y": 0.18, "width": 0.9, "height": 0.18],
+                    "widget": [
+                        "type": "digia/linearProgressBar",
+                        "props": [
+                            "valueMode": "percent",
+                            "percent": "0",
+                            "indicator": ["type": "solid", "color": "#FF2563EB"],
+                            "track": ["type": "solid", "color": "#FFE2E8F0"],
+                            "cornerRadius": 6
+                        ]
+                    ]
+                ],
+                [
+                    "kind": "widget",
+                    "id": "progress-full",
+                    "rect": ["x": 0.05, "y": 0.62, "width": 0.9, "height": 0.18],
+                    "widget": [
+                        "type": "digia/linearProgressBar",
+                        "props": [
+                            "valueMode": "percent",
+                            "percent": "100",
+                            "indicator": ["type": "solid", "color": "#FF10B981"],
+                            "track": ["type": "solid", "color": "#FFE2E8F0"],
+                            "cornerRadius": 6
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        let window = mount(canvas: canvas)
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
+        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
+    }
+
+    @Test("divider renderer handles dotted patterns and vertical orientation", .tags(.golden))
+    func dividerPatternsAndVerticalAxisVisualGolden() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 120,
+            "background": ["type": "solid", "color": "#FFFFFFFF"],
+            "children": [
+                [
+                    "kind": "widget",
+                    "id": "dotted-divider",
+                    "rect": ["x": 0.05, "y": 0.2, "width": 0.9, "height": 0.05],
+                    "widget": [
+                        "type": "digia/styledHorizontalDivider",
+                        "props": [
+                            "type": "horizontal",
+                            "style": "dotted",
+                            "strokeCap": "round",
+                            "inset": 0,
+                            "dashPattern": [2, 6],
+                            "color": "#FF6366F1"
+                        ]
+                    ]
+                ],
+                [
+                    "kind": "widget",
+                    "id": "vertical-divider",
+                    "rect": ["x": 0.5, "y": 0.45, "width": 0.02, "height": 0.45],
+                    "widget": [
+                        "type": "digia/styledHorizontalDivider",
+                        "props": [
+                            "type": "vertical",
+                            "style": "solid",
+                            "strokeCap": "square",
+                            "color": "#FF94A3B8"
                         ]
                     ]
                 ]

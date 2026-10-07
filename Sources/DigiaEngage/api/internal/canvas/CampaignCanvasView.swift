@@ -883,30 +883,7 @@ private struct CanvasTimerRenderer: View {
         values: [(CampaignTimerUnit, Int64)], style: CampaignCanvasTimerUnitStyle,
         layout: CampaignCanvasTimerLayout
     ) -> CampaignCanvasTextBlock {
-        let base = style.digitTextStyle ?? CampaignCanvasTextSpan(
-            text: "", typography: nil, color: nil, highlightColor: nil, italic: false,
-            decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
-        )
-        func span(_ text: String, color: CampaignColor?) -> CampaignCanvasTextSpan {
-            CampaignCanvasTextSpan(
-                text: text, typography: base.typography, color: color,
-                highlightColor: base.highlightColor, italic: base.italic, decoration: base.decoration,
-                decorationColor: base.decorationColor, decorationThickness: base.decorationThickness,
-                actions: [], decorationOffset: base.decorationOffset
-            )
-        }
-        var spans: [CampaignCanvasTextSpan] = []
-        for (index, value) in values.enumerated() {
-            if index > 0 && layout.separatorEnabled != false {
-                spans.append(span(":", color: layout.separatorColor ?? base.color))
-            }
-            spans.append(span(String(format: "%02lld", value.1), color: base.color))
-        }
-        let block = timerTextBlock(spans, fallback: style.digitTypography, fallbackSize: 16, color: style.digitColor)
-        return CampaignCanvasTextBlock(
-            horizontalAlign: layout.alignment, textAlign: layout.alignment, verticalAlign: .center,
-            maxLines: 1, overflow: "clip", sizingMode: "hug", spans: block.spans
-        )
+        canvasTimerCountdownText(values: values, style: style, layout: layout)
     }
 
     @ViewBuilder
@@ -1046,6 +1023,37 @@ private struct CanvasTimerRenderer: View {
         }
         return block
     }
+}
+
+internal func canvasTimerCountdownText(
+    values: [(CampaignTimerUnit, Int64)],
+    style: CampaignCanvasTimerUnitStyle,
+    layout: CampaignCanvasTimerLayout
+) -> CampaignCanvasTextBlock {
+    let base = style.digitTextStyle ?? CampaignCanvasTextSpan(
+        text: "", typography: nil, color: nil, highlightColor: nil, italic: false,
+        decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
+    )
+    func span(_ text: String, color: CampaignColor?) -> CampaignCanvasTextSpan {
+        CampaignCanvasTextSpan(
+            text: text, typography: base.typography, color: color,
+            highlightColor: base.highlightColor, italic: base.italic, decoration: base.decoration,
+            decorationColor: base.decorationColor, decorationThickness: base.decorationThickness,
+            actions: [], decorationOffset: base.decorationOffset
+        )
+    }
+    var spans: [CampaignCanvasTextSpan] = []
+    for (index, value) in values.enumerated() {
+        if index > 0 && layout.separatorEnabled != false {
+            spans.append(span(":", color: layout.separatorColor ?? base.color))
+        }
+        spans.append(span(String(format: "%02lld", value.1), color: base.color))
+    }
+    let block = timerTextBlock(spans, fallback: style.digitTypography, fallbackSize: 16, color: style.digitColor)
+    return CampaignCanvasTextBlock(
+        horizontalAlign: layout.alignment, textAlign: layout.alignment, verticalAlign: .center,
+        maxLines: 1, overflow: "clip", sizingMode: "hug", spans: block.spans
+    )
 }
 
 private func timerTextBlock(
@@ -1265,7 +1273,7 @@ private struct CampaignCanvasTextView: View {
     }
 }
 
-private struct CanvasRichText: UIViewRepresentable {
+internal struct CanvasRichText: UIViewRepresentable {
     let attributed: NSAttributedString
     let fillWidth: Bool
     let maxLines: Int
@@ -1276,7 +1284,7 @@ private struct CanvasRichText: UIViewRepresentable {
     var spans: [CampaignCanvasTextSpan] = []
     var drawingOutsets: UIEdgeInsets = .zero
 
-    final class Coordinator: NSObject, UITextViewDelegate {
+    internal final class Coordinator: NSObject, UITextViewDelegate {
         var spans: [CampaignCanvasTextSpan] = []
         var onSpan: ((CampaignCanvasTextSpan) -> Void)?
         func textView(
@@ -1343,7 +1351,7 @@ private struct CanvasRichText: UIViewRepresentable {
     }
 }
 
-private final class CanvasRichTextContainerView: UIView {
+internal final class CanvasRichTextContainerView: UIView {
     let textView: UITextView
     var centerVertically = false
     var drawingOutsets: UIEdgeInsets = .zero {
@@ -1605,9 +1613,12 @@ private struct CanvasButtonRenderer: View {
     }
     private func emit() {
         onAction(
-            CampaignCanvasActionRequest(
-                actions: actions, elementId: isPrimary ? "cta_primary" : "cta_secondary",
-                label: label.plainText, isPrimary: isPrimary))
+            canvasButtonActionRequest(
+                actions: actions,
+                isPrimary: isPrimary,
+                label: label.plainText
+            )
+        )
     }
 }
 
@@ -2172,7 +2183,7 @@ private struct FocalCanvasImage: View {
                     alignment: focalAlignment(x: x, y: y)
                 )
                 .scaleEffect(
-                    max(0.1, scale), anchor: UnitPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+                    max(0.1, scale), anchor: focalAnchorPoint(x: x, y: y)
                 )
                 .clipped()
             }
@@ -2325,6 +2336,10 @@ internal func focalAlignment(x: CGFloat, y: CGFloat) -> Alignment {
         vertical: y < 0.34 ? .top : (y > 0.66 ? .bottom : .center))
 }
 
+internal func focalAnchorPoint(x: CGFloat, y: CGFloat) -> UnitPoint {
+    UnitPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
+}
+
 internal func canvasGlyphShadowBlurRadius(blur: CGFloat, spread: CGFloat) -> CGFloat {
     let blurDiameter = blur > 0 ? 2 * (blur * 0.57735 + 0.5) : 0
     return max(0, blurDiameter + spread)
@@ -2414,6 +2429,19 @@ internal func canvasButtonEffectiveColors(
         foregroundColor = UIColor(CampaignCanvasTheme.shared.color(color, isDark: isDark))
     }
     return (effectiveFill, isFilled, destructiveColor, foregroundColor)
+}
+
+internal func canvasButtonActionRequest(
+    actions: [EngageAction],
+    isPrimary: Bool,
+    label: String
+) -> CampaignCanvasActionRequest {
+    CampaignCanvasActionRequest(
+        actions: actions,
+        elementId: isPrimary ? "cta_primary" : "cta_secondary",
+        label: label,
+        isPrimary: isPrimary
+    )
 }
 
 
