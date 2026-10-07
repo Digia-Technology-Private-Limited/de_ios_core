@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UIKit
 @testable import DigiaEngage
 
 @MainActor
@@ -106,6 +107,48 @@ struct CanvasTapRegionRendererTests {
         )
         // All tapRegions in the model layer are hitTestable; pruning occurs during parser phase
         #expect(passiveEmptyChild.isHitTestable == true)
+    }
+
+    // MARK: - 3. TapRegion Subsystem: Action Request & Mount
+
+    @Test(
+        "canvasTapRegionActionRequest routes tap regions with correct elementId and flags",
+        arguments: [true, false]
+    )
+    func tapRegionActionRequestRouting(isPrimary: Bool) {
+        let actions = [EngageAction.openUrl("https://example.com")]
+        let request = canvasTapRegionActionRequest(
+            actions: actions,
+            elementId: "region-1",
+            isPrimary: isPrimary
+        )
+        #expect(request.isPrimary == isPrimary)
+        #expect(request.elementId == "region-1")
+        #expect(request.actions == actions)
+    }
+
+    @Test("tapRegion mounts in canvas stage host without crashing")
+    func tapRegionMountsInCanvasStage() throws {
+        let canvas = try parsedCanvas(children: [
+            [
+                "kind": "tapRegion",
+                "id": "hero-cta",
+                "rect": ["x": 0.1, "y": 0.2, "width": 0.5, "height": 0.4],
+                "isPrimary": true,
+                "onClick": [
+                    "steps": [
+                        [
+                            "type": "open_url",
+                            "data": ["url": "https://example.com"]
+                        ]
+                    ]
+                ]
+            ]
+        ])
+        let (window, _) = ComponentTestHost.mountCanvas(canvas)
+        defer { ComponentTestHost.unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.05)
+        #expect(window.rootViewController?.view != nil)
     }
 
     // MARK: - Test Helpers

@@ -650,7 +650,7 @@ private struct CanvasChildView: View {
             CampaignCanvasRendererRegistry.render(widget, isDark: isDark, onAction: onAction)
         case .tapRegion(let id, _, let actions, let isPrimary):
             Color.clear.contentShape(Rectangle()).onTapGesture {
-                onAction(CampaignCanvasActionRequest(actions: actions, elementId: id, isPrimary: isPrimary))
+                onAction(canvasTapRegionActionRequest(actions: actions, elementId: id, isPrimary: isPrimary))
             }
         }
     }
@@ -2443,5 +2443,18 @@ internal func canvasButtonActionRequest(
         isPrimary: isPrimary
     )
 }
+
+internal func canvasTapRegionActionRequest(
+    actions: [EngageAction],
+    elementId: String,
+    isPrimary: Bool
+) -> CampaignCanvasActionRequest {
+    CampaignCanvasActionRequest(
+        actions: actions,
+        elementId: elementId,
+        isPrimary: isPrimary
+    )
+}
+
 
 

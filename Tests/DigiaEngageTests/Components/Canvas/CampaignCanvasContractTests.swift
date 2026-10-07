@@ -142,6 +142,15 @@ struct CampaignCanvasContractTests {
         #expect(widgets.allSatisfy(CampaignCanvasRendererRegistry.hasRenderer))
     }
 
+    @Test(
+        "all 14 supported widgets have registered renderers in CampaignCanvasRendererRegistry",
+        arguments: allSampleWidgets
+    )
+    @MainActor
+    func allFourteenSupportedWidgetsHaveRegisteredRenderers(widget: CampaignCanvasWidget) {
+        #expect(CampaignCanvasRendererRegistry.hasRenderer(for: widget))
+    }
+
     @Test("child hit-testability reflects presence of actions")
     func childHitTestability() throws {
         let canvas = try parseContractFixture()
@@ -353,5 +362,159 @@ struct CampaignCanvasContractTests {
         let json = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         return try CampaignCanvasParser().parse(json)
     }
+
+    private static func sampleTextBlock() -> CampaignCanvasTextBlock {
+        CampaignCanvasTextBlock(
+            horizontalAlign: .left,
+            textAlign: .left,
+            verticalAlign: .top,
+            maxLines: 0,
+            overflow: "none",
+            sizingMode: "auto",
+            spans: []
+        )
+    }
+
+    private static func sampleMediaSource(_ url: String = "https://example.com/media") -> CampaignCanvasMediaSource {
+        CampaignCanvasMediaSource(url: url, darkUrl: nil, placeholder: nil)
+    }
+
+    private static let allSampleWidgets: [CampaignCanvasWidget] = [
+        .text(box: .none, block: sampleTextBlock(), shadow: nil),
+        .image(
+            box: .none,
+            source: sampleMediaSource("https://example.com/img.png"),
+            fit: "cover",
+            positionX: 0.5,
+            positionY: 0.5,
+            scale: 1,
+            tintColor: nil
+        ),
+        .button(
+            box: .none,
+            label: sampleTextBlock(),
+            cornerRadius: .zero,
+            style: .fill(fill: .none),
+            shadow: nil,
+            isPrimary: true,
+            isDestructive: false,
+            applyDestructiveStyling: false,
+            actions: [],
+            confirm: CampaignCanvasConfirmDialog()
+        ),
+        .progress(
+            box: .none,
+            valueMode: .percent,
+            percent: "50",
+            rangeStart: "0",
+            rangeCurrent: "50",
+            rangeEnd: "100",
+            indicator: .none,
+            track: .none,
+            cornerRadius: .zero,
+            animateOnAppear: CampaignCanvasAppearAnimation(enabled: false, durationMs: 0)
+        ),
+        .lottie(
+            box: .none,
+            source: sampleMediaSource("https://example.com/anim.json"),
+            autoplay: true,
+            loop: true,
+            fit: "contain"
+        ),
+        .video(
+            box: .none,
+            source: sampleMediaSource("https://example.com/video.mp4"),
+            autoplay: true,
+            loop: true,
+            muted: true,
+            showControls: false,
+            fit: "cover"
+        ),
+        .container(
+            fill: .none,
+            cornerRadius: .zero,
+            border: nil,
+            shadow: nil
+        ),
+        .divider(
+            box: .none,
+            axis: .horizontal,
+            pattern: .solid,
+            strokeCap: .butt,
+            inset: 0,
+            dashPattern: [],
+            color: CampaignColor.literal("#000000")
+        ),
+        .carousel(
+            box: .none,
+            slides: [],
+            viewportFraction: 0.8,
+            itemSpacing: 8,
+            autoPlay: false,
+            autoPlayInterval: 3,
+            animationDuration: 0.3,
+            infiniteScroll: false,
+            cornerRadius: 0,
+            showIndicator: true,
+            dotWidth: 8,
+            dotHeight: 8,
+            dotSpacing: 4,
+            dotColor: nil,
+            activeDotColor: nil,
+            indicatorEffect: "scale"
+        ),
+        .story(
+            box: .none,
+            pages: [],
+            cardAspectRatio: 9 / 16,
+            cardCornerRadius: 8,
+            cardSpacing: 8,
+            showRail: true,
+            thumbnailVideoPlayback: .sequential,
+            restartOnCompleted: false,
+            startMuted: true,
+            chrome: CampaignCanvas(version: 2, width: 100, height: 100, background: .none, children: [])
+        ),
+        .storyProgress(
+            box: .none,
+            activeColor: nil,
+            trackColor: nil,
+            barHeight: 2,
+            cornerRadius: 1,
+            gap: 4
+        ),
+        .storyClose(
+            box: .none,
+            visible: true,
+            iconColor: nil,
+            backgroundColor: nil
+        ),
+        .storyMute(
+            box: .none,
+            visible: true,
+            iconColor: nil,
+            backgroundColor: nil
+        ),
+        .timer(
+            box: .none,
+            preset: "default",
+            separator: ":",
+            units: [:],
+            labels: [:],
+            labelSpans: [:],
+            textWidgets: [:],
+            style: CampaignCanvasTimerUnitStyle(
+                digitTextStyle: nil,
+                digitTypography: nil,
+                digitColor: nil,
+                labelTypography: nil,
+                labelColor: nil,
+                boxFill: .none,
+                cornerRadius: .zero
+            ),
+            unitOverrides: [:],
+            layout: CampaignCanvasTimerLayout()
+        )
+    ]
 }
 
