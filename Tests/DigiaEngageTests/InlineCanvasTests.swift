@@ -3,7 +3,7 @@ import Foundation
 import Testing
 
 @MainActor
-@Suite("Inline canvas", .serialized)
+@Suite("Inline canvas", .serialized, .tags(.canvas, .inline, .contract))
 struct InlineCanvasTests {
 
     @Test("reads slot, chrome and the shared canvas block")
@@ -87,7 +87,7 @@ struct InlineCanvasTests {
 /// `DigiaSlot` resolves the kinds in a fixed order with carousel first, so a
 /// config left behind by a previous campaign in the same slot silently wins.
 @MainActor
-@Suite("Inline slot config exclusivity", .serialized)
+@Suite("Inline slot config exclusivity", .serialized, .tags(.canvas, .inline, .unit))
 struct InlineSlotConfigExclusivityTests {
     private let slot = "home_rail"
 

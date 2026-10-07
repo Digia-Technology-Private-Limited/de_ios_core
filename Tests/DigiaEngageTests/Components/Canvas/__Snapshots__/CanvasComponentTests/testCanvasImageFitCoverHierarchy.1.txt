@@ -1,0 +1,18 @@
+<_UIHostingView<DigiaSlot>; frame = (0 0; 360 216.667); autoresize = W+H; gestureRecognizers = <NSArray>; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>>
+   | <SwiftUI._UIInheritedView; frame = (16 8; 328 200.667); anchorPoint = (0, 0); clipsToBounds = YES; autoresizesSubviews = NO; layer = <CALayer>>
+   |    | <SwiftUI._UIInheritedView; frame = (0 0; 328 200.444); transform = [0.91111111111111109, 0, 0, 0.91111111111111109, 0, 0]; anchorPoint = (0, 0); autoresizesSubviews = NO; layer = <CALayer>>
+   |    |    | <CALayer> (layer)
+   |    |    | <CALayer> (layer)
+   |    |    |    | <SwiftUI.ImageLayer> (layer)
+   |    |    | <SwiftUI._UIInheritedView; frame = (28.6667 160.667; 302.667 48.3333); anchorPoint = (0, 0); clipsToBounds = YES; autoresizesSubviews = NO; userInteractionEnabled = NO; layer = <CALayer>>
+   |    |    |    | <CanvasRichTextPlatformViewHost; frame = (67.3333 14; 168 20); anchorPoint = (0, 0); tintColor = UIExtendedSRGBColorSpace 0 0.533333 1 1; layer = <CALayer>>
+   |    |    |    |    | <CanvasRichTextContainerView; frame = (0 0; 168 20); autoresize = W+H; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>>
+   |    |    |    |    |    | <UITextView; frame = (0 0; 168 20); text = 'Image Fit Cover Mode'; userInteractionEnabled = NO; gestureRecognizers = <NSArray>; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>; contentOffset: {0, 0}; contentSize: {168, 20}; adjustedContentInset: {0, 0, 0, 0}>
+   |    |    |    |    |    |    | <_UITextLayoutView; frame = (0 0; 0 0); layer = <CALayer>>
+   |    |    |    |    |    |    | <UIView; frame = (0 0; 168 20); layer = <CALayer>>
+   |    |    |    |    |    |    | <<_UITextContainerView; frame = (0 0; 168 20); backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <CALayer>> minSize = {0, 20}, maxSize = {168, 20}, textContainer = <NSTextContainer size = (168.000000,20.000000); widthTracksTextView = YES; heightTracksTextView = YES>; exclusionPaths =; lineBreakMode = 4>
+   |    |    |    |    |    |    |    | <_UITextViewCanvasView; frame = (0 0; 168 20); userInteractionEnabled = NO; backgroundColor = UIExtendedGrayColorSpace 0 0; layer = <_UITextTiledLayer>>
+   |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (162 -19; 3 36); alpha = 0; autoresize = LM; layer = <CALayer>>
+   |    |    |    |    |    |    |    | <UIView; frame = (0 0; 3 36); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>
+   |    |    |    |    |    |    | <_UIScrollViewScrollIndicator; frame = (3 14; 162 3); alpha = 0; autoresize = TM; layer = <CALayer>>
+   |    |    |    |    |    |    |    | <UIView; frame = (0 0; 162 3); backgroundColor = UIExtendedGrayColorSpace 0 0.35; layer = <CALayer>>

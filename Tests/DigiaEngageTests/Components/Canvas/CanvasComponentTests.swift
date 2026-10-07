@@ -100,4 +100,57 @@ struct CanvasComponentTests {
 
         assertHierarchy(matching: hostView)
     }
+
+    // MARK: - 4. Image Canvas (Fit Cover)
+
+    @Test("matches the image fit-cover canvas visual golden", .tags(.golden)) @MainActor
+    func testCanvasImageFitCoverVisualGolden() throws {
+        try #require(ComponentTestHost.prewarmAssetImage(named: "cloudinary-whatsapp.jpg"))
+        let config = try loadCanvasConfig(named: "canvas-image-fit-cover.json")
+        let hostView = ComponentTestHost.makeCanvasSlotHost(
+            config: config, drainDuration: 1.0, rendersLoadedMedia: true)
+        defer { ComponentTestHost.cleanupCanvasSlotHost(hostView, slotKey: config.slotKey) }
+
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
+        )
+    }
+
+    @Test("matches the image fit-cover canvas view hierarchy snapshot", .tags(.golden)) @MainActor
+    func testCanvasImageFitCoverHierarchy() throws {
+        try #require(ComponentTestHost.prewarmAssetImage(named: "cloudinary-whatsapp.jpg"))
+        let config = try loadCanvasConfig(named: "canvas-image-fit-cover.json")
+        let hostView = ComponentTestHost.makeCanvasSlotHost(
+            config: config, drainDuration: 1.0, rendersLoadedMedia: true)
+        defer { ComponentTestHost.cleanupCanvasSlotHost(hostView, slotKey: config.slotKey) }
+
+        assertHierarchy(matching: hostView)
+    }
+
+    // MARK: - 5. Embedded Video Player Canvas
+
+    @Test("matches the video player canvas visual golden", .tags(.golden)) @MainActor
+    func testCanvasVideoPlayerVisualGolden() throws {
+        let config = try loadCanvasConfig(named: "canvas-video-player.json")
+        let hostView = ComponentTestHost.makeCanvasSlotHost(config: config, drainDuration: 1.0)
+        defer { ComponentTestHost.cleanupCanvasSlotHost(hostView, slotKey: config.slotKey) }
+
+        assertVisualGolden(
+            matching: ComponentTestHost.renderImage(of: hostView),
+            precision: 0.999,
+            perceptualPrecision: 0.98
+        )
+    }
+
+    @Test("matches the video player canvas view hierarchy snapshot", .tags(.golden)) @MainActor
+    func testCanvasVideoPlayerHierarchy() throws {
+        let config = try loadCanvasConfig(named: "canvas-video-player.json")
+        let hostView = ComponentTestHost.makeCanvasSlotHost(config: config, drainDuration: 1.0)
+        defer { ComponentTestHost.cleanupCanvasSlotHost(hostView, slotKey: config.slotKey) }
+
+        assertHierarchy(matching: hostView)
+    }
 }
+

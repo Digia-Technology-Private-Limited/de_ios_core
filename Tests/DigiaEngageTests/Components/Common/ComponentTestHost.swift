@@ -1,4 +1,5 @@
 import Foundation
+import SDWebImage
 import SnapshotTesting
 import SwiftUI
 import UIKit
@@ -230,16 +231,50 @@ public enum ComponentTestHost {
         let format = UIGraphicsImageRendererFormat()
         format.preferredRange = .standard
         return UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { context in
-            view.layer.render(in: context.cgContext)
+            // Render the presentation tree: it is what the user sees. Animations that are paused or
+            // time-offset (Lottie's Core Animation engine freezes a frame this way) exist only there;
+            // the model tree and `drawHierarchy` of an off-screen window both show them blank.
+            (view.layer.presentation() ?? view.layer).render(in: context.cgContext)
         }
     }
 
     @MainActor
-    private static func drainRunLoop(for seconds: TimeInterval) {
+    public static func drainRunLoop(for seconds: TimeInterval) {
         let until = Date().addingTimeInterval(seconds)
         while Date() < until {
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            CATransaction.flush()
         }
+    }
+
+    /// Pre-warms SDImageCache with an image asset from testkit/mock-server/assets/
+    @MainActor
+    @discardableResult
+    public static func prewarmAssetImage(named fileName: String) -> Bool {
+        guard let workspaceUrl = FixtureLoader.workspaceURL() else { return false }
+        let assetFile = workspaceUrl.appendingPathComponent("testkit/mock-server/assets").appendingPathComponent(fileName)
+        let assetOrigin = workspaceUrl.appendingPathComponent("testkit/mock-server").absoluteString
+        let cleanOrigin = assetOrigin.hasSuffix("/") ? String(assetOrigin.dropLast()) : assetOrigin
+        let urlString = "\(cleanOrigin)/assets/\(fileName)"
+
+        guard let image = UIImage(contentsOfFile: assetFile.path) else { return false }
+        SDImageCache.shared.store(image, forKey: urlString, toDisk: false)
+        return SDImageCache.shared.imageFromMemoryCache(forKey: urlString) != nil
+    }
+
+    /// Pre-warms the one-pixel PNG served virtually by the Test Kit for image-1/2/3.png.
+    @MainActor
+    @discardableResult
+    public static func prewarmVirtualTestKitImage(named fileName: String) -> Bool {
+        guard let workspaceUrl = FixtureLoader.workspaceURL(),
+              let data = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="),
+              let image = UIImage(data: data)
+        else { return false }
+        let assetOrigin = workspaceUrl.appendingPathComponent("testkit/mock-server").absoluteString
+        let cleanOrigin = assetOrigin.hasSuffix("/") ? String(assetOrigin.dropLast()) : assetOrigin
+        let urlString = "\(cleanOrigin)/assets/\(fileName)"
+        SDImageCache.shared.store(image, forKey: urlString, toDisk: false)
+        return SDImageCache.shared.imageFromMemoryCache(forKey: urlString) != nil
     }
 
     /// Renders the complete production overlay and presents its bottom sheet through the SDK controller.
@@ -265,7 +300,9 @@ public enum ComponentTestHost {
     @MainActor
     public static func makeCanvasSlotHost(
         config: InlineCanvasConfig,
-        slotWidth: CGFloat? = 360
+        slotWidth: CGFloat? = 360,
+        drainDuration: TimeInterval = 0.2,
+        rendersLoadedMedia: Bool = false
     ) -> UIView {
         let payload = CEPTriggerPayload(
             cepCampaignId: "test_inline_canvas_\(config.slotKey)",
@@ -302,7 +339,17 @@ public enum ComponentTestHost {
         window.makeKeyAndVisible()
         hostingController.view.layoutIfNeeded()
 
-        drainRunLoop(for: 0.2)
+        drainRunLoop(for: drainDuration)
+        if rendersLoadedMedia {
+            // A prewarmed image is a synchronous cache hit: WebImage publishes it from inside the
+            // view update that requested it, and SwiftUI drops that update. Flipping the trait
+            // environment makes every environment-reading view, including the image renderer,
+            // re-evaluate, which draws the already-loaded image.
+            hostingController.overrideUserInterfaceStyle = .dark
+            drainRunLoop(for: 0.4)
+            hostingController.overrideUserInterfaceStyle = .light
+            drainRunLoop(for: drainDuration)
+        }
         window.layoutIfNeeded()
 
         return hostingController.view

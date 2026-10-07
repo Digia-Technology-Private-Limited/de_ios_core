@@ -7,7 +7,7 @@ internal import Lottie
 internal import SDWebImageSwiftUI
 
 private let maxFloatingCanvasUpscale: CGFloat = 1.15
-private let canvasTextSpanElementID = "canvas_text_span"
+internal let canvasTextSpanElementID = "canvas_text_span"
 
 private struct TimerRemainingSecondsKey: EnvironmentKey {
     static let defaultValue: Int64? = nil
@@ -24,10 +24,78 @@ private struct CanvasVideoUsesStoryPlaybackKey: EnvironmentKey {
     static let defaultValue = false
 }
 
+/// The AVPlayer side effects a Canvas video performs.
+///
+/// The renderer, layout and `AVPlayerViewController` stay real in component tests. Only these
+/// process-bound effects are replaceable so autoplay, looping and teardown can be asserted without
+/// waiting for a remote stream or inferring behavior from a black video surface.
+struct CanvasVideoRuntime: @unchecked Sendable {
+    var makePlayer: @MainActor (AVPlayerItem) -> AVPlayer
+    var play: @MainActor (AVPlayer) -> Void
+    var pause: @MainActor (AVPlayer) -> Void
+    var restart: @MainActor (AVPlayer) -> Void
+
+    static let live = CanvasVideoRuntime(
+        makePlayer: { AVPlayer(playerItem: $0) },
+        play: { $0.play() },
+        pause: { $0.pause() },
+        restart: {
+            $0.seek(to: .zero)
+            $0.play()
+        }
+    )
+}
+
+private struct CanvasVideoRuntimeKey: EnvironmentKey {
+    static let defaultValue = CanvasVideoRuntime.live
+}
+
+/// The playback mode for Canvas Lottie animations.
+enum CanvasLottiePlaybackMode: Sendable, Equatable {
+    case live
+    case frozen(progress: CGFloat)
+}
+
+/// The runtime abstraction for Canvas Lottie animations.
+///
+/// In tests, playback can be frozen at a deterministic progress (e.g. 0.5) so snapshots
+/// don't race against continuous CADisplayLink rendering, or custom animation loaders can be supplied.
+struct CanvasLottieRuntime: @unchecked Sendable {
+    var loadSource: (@Sendable (URL) async throws -> LottieAnimationSource?)?
+    var playbackMode: CanvasLottiePlaybackMode
+
+    init(
+        loadSource: (@Sendable (URL) async throws -> LottieAnimationSource?)? = nil,
+        playbackMode: CanvasLottiePlaybackMode = .live
+    ) {
+        self.loadSource = loadSource
+        self.playbackMode = playbackMode
+    }
+
+    static let live = CanvasLottieRuntime(
+        loadSource: nil,
+        playbackMode: .live
+    )
+}
+
+private struct CanvasLottieRuntimeKey: EnvironmentKey {
+    static let defaultValue = CanvasLottieRuntime.live
+}
+
 extension EnvironmentValues {
     var canvasVideoUsesStoryPlayback: Bool {
         get { self[CanvasVideoUsesStoryPlaybackKey.self] }
         set { self[CanvasVideoUsesStoryPlaybackKey.self] = newValue }
+    }
+
+    var canvasVideoRuntime: CanvasVideoRuntime {
+        get { self[CanvasVideoRuntimeKey.self] }
+        set { self[CanvasVideoRuntimeKey.self] = newValue }
+    }
+
+    var canvasLottieRuntime: CanvasLottieRuntime {
+        get { self[CanvasLottieRuntimeKey.self] }
+        set { self[CanvasLottieRuntimeKey.self] = newValue }
     }
 }
 
@@ -1118,25 +1186,11 @@ private struct CampaignCanvasTextView: View {
 
     private var glyphShadowBlurRadius: CGFloat {
         guard let shadow else { return 0 }
-        // Flutter converts the authored radius to sigma; Core Graphics' shadow
-        // parameter behaves like a blur diameter, so feed it twice that sigma.
-        let blurDiameter = shadow.blur > 0 ? 2 * (shadow.blur * 0.57735 + 0.5) : 0
-        return max(0, blurDiameter + shadow.spread)
+        return canvasGlyphShadowBlurRadius(blur: shadow.blur, spread: shadow.spread)
     }
 
     private var glyphShadowOutsets: UIEdgeInsets {
-        guard let shadow,
-            shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0
-        else {
-            return .zero
-        }
-        let extent = max(shadow.blur * 2 + shadow.spread, glyphShadowBlurRadius * 2)
-        return UIEdgeInsets(
-            top: max(0, extent - shadow.offsetY),
-            left: max(0, extent - shadow.offsetX),
-            bottom: max(0, extent + shadow.offsetY),
-            right: max(0, extent + shadow.offsetX)
-        )
+        canvasGlyphShadowOutsets(shadow: shadow)
     }
 
     private var attributed: NSAttributedString {
@@ -1440,7 +1494,7 @@ private struct CanvasAlphaContentShadow<Content: View>: View {
 
 extension CampaignCanvasBox {
     @MainActor
-    fileprivate func hasVisibleSurface(isDark: Bool) -> Bool {
+    internal func hasVisibleSurface(isDark: Bool) -> Bool {
         let hasFill: Bool
         switch fill {
         case .solid(let color):
@@ -1462,7 +1516,7 @@ extension CampaignCanvasBox {
 }
 
 extension CampaignCanvasShadow {
-    fileprivate var nativeContentBlurRadius: CGFloat {
+    internal var nativeContentBlurRadius: CGFloat {
         // SwiftUI consumes a Gaussian radius here. NSShadow's text path uses a
         // diameter-like value, but doubling this radius makes image halos too soft.
         let sigma = blur > 0 ? blur * 0.57735 + 0.5 : 0
@@ -1533,23 +1587,19 @@ private struct CanvasButtonRenderer: View {
             )
         }.contentShape(CampaignCanvasRoundedShape(radius: cornerRadius))
     }
-    private var effectiveFill: CampaignCanvasPaint {
-        if isDestructive && applyDestructiveStyling && isFilled {
-            return .solid(danger)
-        }
-        return isFilled ? style.fill : .none
+    private var buttonColors: (fill: CampaignCanvasPaint, isFilled: Bool, destructiveColor: UIColor?, foregroundColor: UIColor) {
+        canvasButtonEffectiveColors(
+            style: style,
+            isDestructive: isDestructive,
+            applyDestructiveStyling: applyDestructiveStyling,
+            isDark: isDark,
+            outline: outline
+        )
     }
-    private var isFilled: Bool { if case .fill = style { true } else { false } }
-    private var destructiveColor: UIColor? {
-        guard isDestructive && applyDestructiveStyling else { return nil }
-        return UIColor(
-            isFilled ? Color.white : CampaignCanvasTheme.shared.color(danger, isDark: isDark))
-    }
-    private var foregroundColor: UIColor {
-        if isFilled { return .white }
-        let color = outline?.color ?? CampaignColor.literal("#FF4945FF")
-        return UIColor(CampaignCanvasTheme.shared.color(color, isDark: isDark))
-    }
+    private var effectiveFill: CampaignCanvasPaint { buttonColors.fill }
+    private var isFilled: Bool { buttonColors.isFilled }
+    private var destructiveColor: UIColor? { buttonColors.destructiveColor }
+    private var foregroundColor: UIColor { buttonColors.foregroundColor }
     private var outline: CampaignCanvasBorder? {
         if case .outline(_, let outline) = style { outline } else { nil }
     }
@@ -1583,16 +1633,14 @@ private struct CanvasProgressRenderer: View {
     @State private var displayed: CGFloat = 0
     @State private var appeared = false
     private var target: CGFloat {
-        let raw: Double
-        switch valueMode {
-        case .percent: raw = Double(interpolate(percent, context: variables)) ?? 0
-        case .range:
-            let start = Double(interpolate(rangeStart, context: variables)) ?? 0
-            let current = Double(interpolate(rangeCurrent, context: variables)) ?? 0
-            let end = Double(interpolate(rangeEnd, context: variables)) ?? 0
-            raw = end == start ? 0 : (current - start) / (end - start) * 100
-        }
-        return CGFloat(min(max(raw, 0), 100) / 100)
+        canvasProgressTarget(
+            valueMode: valueMode,
+            percent: percent,
+            rangeStart: rangeStart,
+            rangeCurrent: rangeCurrent,
+            rangeEnd: rangeEnd,
+            variables: variables
+        )
     }
     var body: some View {
         CampaignCanvasBoxView(box: box, isDark: isDark) {
@@ -1674,21 +1722,36 @@ private struct CanvasRemoteLottie: View {
     let autoplay: Bool
     let loop: Bool
     let fit: String
+    @Environment(\.canvasLottieRuntime) private var runtime
     @State private var failed = false
     var body: some View {
         Group {
-            if autoplay {
-                lottie.playing(loopMode: loop ? .loop : .playOnce)
+            switch runtime.playbackMode {
+            case .frozen(let progress):
+                lottie.paused(at: .progress(progress))
                     .resizable()
                     .configure(\.contentMode, to: fit.uiContentMode)
-            } else {
-                lottie.resizable().configure(\.contentMode, to: fit.uiContentMode)
+            case .live:
+                if autoplay {
+                    lottie.playing(loopMode: loop ? .loop : .playOnce)
+                        .resizable()
+                        .configure(\.contentMode, to: fit.uiContentMode)
+                } else {
+                    lottie.resizable().configure(\.contentMode, to: fit.uiContentMode)
+                }
             }
         }
     }
     private var lottie: LottieView<CanvasLottiePlaceholder> {
         LottieView {
             do {
+                if let customLoader = runtime.loadSource {
+                    if let source = try await customLoader(url) {
+                        return source
+                    }
+                    failed = true
+                    return nil
+                }
                 if url.pathExtension.lowercased() == "lottie" {
                     return try await DotLottieFile.loadedFrom(url: url).animationSource
                 }
@@ -1705,6 +1768,7 @@ private struct CanvasRemoteLottie: View {
         } placeholder: {
             CanvasLottiePlaceholder(failed: failed, placeholder: placeholder, fit: fit)
         }
+        .reloadAnimationTrigger(url)
     }
 }
 
@@ -1733,6 +1797,7 @@ private struct CanvasVideoRenderer: View {
     let isDark: Bool
     @Environment(\.digiaVariables) private var variables
     @Environment(\.canvasVideoUsesStoryPlayback) private var usesStoryPlayback
+    @Environment(\.canvasVideoRuntime) private var runtime
     @State private var player: AVPlayer?
     @State private var observer: NSObjectProtocol?
     private var url: String {
@@ -1764,18 +1829,18 @@ private struct CanvasVideoRenderer: View {
                 }
             }
         }
-        .onAppear { setup() }
-        .onChange(of: url) { _ in
+        .onAppear { setup(url: url) }
+        .onChange(of: url) { newURL in
             teardown()
-            setup()
+            setup(url: newURL)
         }
         .onDisappear { teardown() }
     }
-    private func setup() {
+    private func setup(url: String) {
         guard !usesStoryPlayback else { return }
         guard player == nil, let parsed = URL(string: url), !url.isEmpty else { return }
         let item = AVPlayerItem(url: parsed)
-        let value = AVPlayer(playerItem: item)
+        let value = runtime.makePlayer(item)
         value.isMuted = muted
         player = value
         if loop {
@@ -1783,15 +1848,14 @@ private struct CanvasVideoRenderer: View {
                 forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
             ) { _ in
                 MainActor.assumeIsolated {
-                    value.seek(to: .zero)
-                    value.play()
+                    runtime.restart(value)
                 }
             }
         }
-        if autoplay { value.play() }
+        if autoplay { runtime.play(value) }
     }
     private func teardown() {
-        player?.pause()
+        if let player { runtime.pause(player) }
         player = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
@@ -1882,11 +1946,8 @@ private struct CanvasDividerRenderer: View {
                         ? CGPoint(x: size.width - inset, y: size.height / 2)
                         : CGPoint(x: size.width / 2, y: size.height - inset))
                 let thickness = horizontal ? size.height : size.width
-                let dash: [CGFloat] =
-                    pattern == .solid
-                    ? []
-                    : (pattern == .dotted
-                        ? [0, max(thickness, dashPattern.dropFirst().first ?? 4)] : dashPattern)
+                let dash = canvasDividerDashPattern(
+                    pattern: pattern, thickness: thickness, dashPattern: dashPattern)
                 context.stroke(
                     path, with: .color(CampaignCanvasTheme.shared.color(color, isDark: isDark)),
                     style: StrokeStyle(lineWidth: thickness, lineCap: strokeCap.lineCap, dash: dash)
@@ -2218,7 +2279,7 @@ private struct CanvasPlaceholder: View {
 }
 
 extension CampaignCanvasHorizontalAlign {
-    fileprivate var uiTextAlignment: NSTextAlignment {
+    internal var uiTextAlignment: NSTextAlignment {
         switch self {
         case .left: .left
         case .center: .center
@@ -2227,7 +2288,7 @@ extension CampaignCanvasHorizontalAlign {
     }
 }
 extension CampaignCanvasTextBlock {
-    fileprivate var alignment: Alignment {
+    internal var alignment: Alignment {
         let horizontal: HorizontalAlignment =
             horizontalAlign == .left ? .leading : (horizontalAlign == .right ? .trailing : .center)
         let vertical: VerticalAlignment =
@@ -2236,7 +2297,7 @@ extension CampaignCanvasTextBlock {
     }
 }
 extension CampaignCanvasStrokeCap {
-    fileprivate var lineCap: CGLineCap {
+    internal var lineCap: CGLineCap {
         switch self {
         case .butt: .butt
         case .round: .round
@@ -2246,6 +2307,10 @@ extension CampaignCanvasStrokeCap {
 }
 extension String {
     fileprivate var uiContentMode: UIView.ContentMode {
+        canvasUIContentMode
+    }
+
+    internal var canvasUIContentMode: UIView.ContentMode {
         switch self {
         case "contain": .scaleAspectFit
         case "fill": .scaleToFill
@@ -2253,8 +2318,102 @@ extension String {
         }
     }
 }
-private func focalAlignment(x: CGFloat, y: CGFloat) -> Alignment {
+
+internal func focalAlignment(x: CGFloat, y: CGFloat) -> Alignment {
     Alignment(
         horizontal: x < 0.34 ? .leading : (x > 0.66 ? .trailing : .center),
         vertical: y < 0.34 ? .top : (y > 0.66 ? .bottom : .center))
 }
+
+internal func canvasGlyphShadowBlurRadius(blur: CGFloat, spread: CGFloat) -> CGFloat {
+    let blurDiameter = blur > 0 ? 2 * (blur * 0.57735 + 0.5) : 0
+    return max(0, blurDiameter + spread)
+}
+
+internal func canvasGlyphShadowOutsets(shadow: CampaignCanvasShadow?) -> UIEdgeInsets {
+    guard let shadow,
+        shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0
+    else {
+        return .zero
+    }
+    let blurRadius = canvasGlyphShadowBlurRadius(blur: shadow.blur, spread: shadow.spread)
+    let extent = max(shadow.blur * 2 + shadow.spread, blurRadius * 2)
+    return UIEdgeInsets(
+        top: max(0, extent - shadow.offsetY),
+        left: max(0, extent - shadow.offsetX),
+        bottom: max(0, extent + shadow.offsetY),
+        right: max(0, extent + shadow.offsetX)
+    )
+}
+
+internal func canvasProgressTarget(
+    valueMode: CampaignCanvasProgressValueMode,
+    percent: String,
+    rangeStart: String,
+    rangeCurrent: String,
+    rangeEnd: String,
+    variables: VariableContext?
+) -> CGFloat {
+    let raw: Double
+    switch valueMode {
+    case .percent:
+        raw = Double(interpolate(percent, context: variables)) ?? 0
+    case .range:
+        let start = Double(interpolate(rangeStart, context: variables)) ?? 0
+        let current = Double(interpolate(rangeCurrent, context: variables)) ?? 0
+        let end = Double(interpolate(rangeEnd, context: variables)) ?? 0
+        raw = end == start ? 0 : (current - start) / (end - start) * 100
+    }
+    return CGFloat(min(max(raw, 0), 100) / 100)
+}
+
+internal func canvasDividerDashPattern(
+    pattern: CampaignCanvasDividerPattern,
+    thickness: CGFloat,
+    dashPattern: [CGFloat]
+) -> [CGFloat] {
+    switch pattern {
+    case .solid:
+        return []
+    case .dotted:
+        return [0, max(thickness, dashPattern.dropFirst().first ?? 4)]
+    case .dashed:
+        return dashPattern
+    }
+}
+
+@MainActor
+internal func canvasButtonEffectiveColors(
+    style: CampaignCanvasButtonStyle,
+    isDestructive: Bool,
+    applyDestructiveStyling: Bool,
+    isDark: Bool,
+    outline: CampaignCanvasBorder?
+) -> (fill: CampaignCanvasPaint, isFilled: Bool, destructiveColor: UIColor?, foregroundColor: UIColor) {
+    let isFilled: Bool
+    if case .fill = style { isFilled = true } else { isFilled = false }
+    let danger = CampaignColor.literal("#FFD92D20")
+    let effectiveFill: CampaignCanvasPaint
+    if isDestructive && applyDestructiveStyling && isFilled {
+        effectiveFill = .solid(danger)
+    } else {
+        effectiveFill = isFilled ? style.fill : .none
+    }
+    let destructiveColor: UIColor?
+    if isDestructive && applyDestructiveStyling {
+        destructiveColor = UIColor(
+            isFilled ? Color.white : CampaignCanvasTheme.shared.color(danger, isDark: isDark))
+    } else {
+        destructiveColor = nil
+    }
+    let foregroundColor: UIColor
+    if isFilled {
+        foregroundColor = .white
+    } else {
+        let color = outline?.color ?? CampaignColor.literal("#FF4945FF")
+        foregroundColor = UIColor(CampaignCanvasTheme.shared.color(color, isDark: isDark))
+    }
+    return (effectiveFill, isFilled, destructiveColor, foregroundColor)
+}
+
+

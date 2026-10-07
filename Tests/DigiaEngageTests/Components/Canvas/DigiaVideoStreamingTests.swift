@@ -2,7 +2,7 @@ import Foundation
 @testable import DigiaEngage
 import Testing
 
-@Suite("Digia video streaming")
+@Suite("Digia video streaming", .tags(.canvas, .media, .unit))
 struct DigiaVideoStreamingTests {
     @Test("derives the AVFoundation MIME override from the video extension", arguments: [
         ("https://cdn.example.com/story.mp4?token=abc", "video/mp4"),

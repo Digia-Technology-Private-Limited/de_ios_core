@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import DigiaEngage
 
-@Suite("Campaign Canvas v2 contract")
+@Suite("Campaign Canvas v2 contract", .serialized, .tags(.canvas, .contract))
 struct CampaignCanvasContractTests {
     @Test("design tokens canonicalize themes and nested typography wrappers")
     func designTokens() throws {
