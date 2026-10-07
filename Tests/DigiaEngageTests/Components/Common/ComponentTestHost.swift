@@ -466,6 +466,7 @@ public enum ComponentTestHost {
         isDark: Bool? = nil,
         showBackground: Bool = true,
         variables: VariableContext? = nil,
+        timerRemainingSeconds: Int64? = nil,
         backgroundColor: UIColor = .white,
         drainDuration: TimeInterval = 0.05,
         onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
@@ -477,11 +478,12 @@ public enum ComponentTestHost {
             showBackground: showBackground,
             onAction: onAction
         )
-        let root: AnyView
+        var root: AnyView = AnyView(stageHost)
         if let variables {
-            root = AnyView(stageHost.environment(\.digiaVariables, variables))
-        } else {
-            root = AnyView(stageHost)
+            root = AnyView(root.environment(\.digiaVariables, variables))
+        }
+        if let timerRemainingSeconds {
+            root = AnyView(root.environment(\.timerRemainingSeconds, timerRemainingSeconds))
         }
         let (window, controller) = mount(
             rootView: root,
