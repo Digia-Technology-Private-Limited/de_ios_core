@@ -467,6 +467,7 @@ public enum ComponentTestHost {
         showBackground: Bool = true,
         variables: VariableContext? = nil,
         timerRemainingSeconds: Int64? = nil,
+        storyViewerState: CanvasStoryViewerState? = nil,
         backgroundColor: UIColor = .white,
         drainDuration: TimeInterval = 0.05,
         onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
@@ -484,6 +485,9 @@ public enum ComponentTestHost {
         }
         if let timerRemainingSeconds {
             root = AnyView(root.environment(\.timerRemainingSeconds, timerRemainingSeconds))
+        }
+        if let storyViewerState {
+            root = AnyView(root.environment(\.canvasStoryViewer, storyViewerState))
         }
         let (window, controller) = mount(
             rootView: root,
