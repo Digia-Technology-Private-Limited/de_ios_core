@@ -280,4 +280,19 @@ struct EngageActionExecutorTests {
         #expect(fallbacks.isEmpty)
         #expect(copied == ["Shoes"])
     }
+
+    @Test("executes dismiss locally and rejects non-local actions", .tags(.unit))
+    func localActionExecutorDismissAndRejection() {
+        var dismissInvoked = false
+        let executor = LocalActionExecutor(dismiss: {
+            dismissInvoked = true
+        })
+
+        let handled = executor.execute(.dismiss)
+        #expect(handled)
+        #expect(dismissInvoked)
+
+        let unhandled = executor.execute(.openUrl("https://digia.cloud"))
+        #expect(!unhandled)
+    }
 }

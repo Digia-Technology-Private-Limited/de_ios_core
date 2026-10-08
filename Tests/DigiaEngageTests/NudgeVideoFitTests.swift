@@ -2,7 +2,7 @@ import AVFoundation
 import Testing
 @testable import DigiaEngage
 
-@Suite("Nudge video fit", .tags(.nudge, .contract))
+@Suite("Nudge video fit", .tags(.nudge, .contract, .media))
 struct NudgeVideoFitTests {
     @Test("defaults to cover and parses contain")
     func parsesSupportedFits() throws {

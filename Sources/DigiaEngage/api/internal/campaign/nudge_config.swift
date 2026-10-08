@@ -295,7 +295,7 @@ struct NudgeConfig: Equatable {
         return result
     }
 
-    private static func stringifyVariable(_ value: Any?) -> String? {
+    static func stringifyVariable(_ value: Any?) -> String? {
         switch value {
         case let string as String:
             return string

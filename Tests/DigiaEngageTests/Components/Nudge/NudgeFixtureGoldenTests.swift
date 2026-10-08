@@ -12,9 +12,8 @@ import UIKit
 /// `RECORD_SNAPSHOTS=true ./run-tests.sh nudge`). Each fixture is decoded by `NudgeConfig.fromJson`
 /// and presented through the production `NudgeOverlayView`, like the hand-written goldens.
 /// Fixtures those tests already cover are left out so no fixture has two goldens.
-extension NudgeComponentTests {
-@Suite("Test Kit fixture goldens")
-struct FixtureGoldens {
+@Suite("Test Kit fixture goldens", .serialized, .tags(.nudge))
+struct NudgeFixtureGoldenTests {
 
     /// Fixtures with a golden in `NudgeBottomSheetComponentTests` / `NudgeDialogComponentTests`.
     private static let coveredElsewhere: Set<String> = [
@@ -95,5 +94,4 @@ struct FixtureGoldens {
         }
         return image
     }
-}
 }

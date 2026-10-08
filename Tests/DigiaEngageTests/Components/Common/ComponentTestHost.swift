@@ -1,4 +1,5 @@
 import Foundation
+import SDWebImage
 import SnapshotTesting
 import SwiftUI
 import UIKit
@@ -230,16 +231,50 @@ public enum ComponentTestHost {
         let format = UIGraphicsImageRendererFormat()
         format.preferredRange = .standard
         return UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { context in
-            view.layer.render(in: context.cgContext)
+            // Render the presentation tree: it is what the user sees. Animations that are paused or
+            // time-offset (Lottie's Core Animation engine freezes a frame this way) exist only there;
+            // the model tree and `drawHierarchy` of an off-screen window both show them blank.
+            (view.layer.presentation() ?? view.layer).render(in: context.cgContext)
         }
     }
 
     @MainActor
-    private static func drainRunLoop(for seconds: TimeInterval) {
+    public static func drainRunLoop(for seconds: TimeInterval) {
         let until = Date().addingTimeInterval(seconds)
         while Date() < until {
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+            CATransaction.flush()
         }
+    }
+
+    /// Pre-warms SDImageCache with an image asset from testkit/mock-server/assets/
+    @MainActor
+    @discardableResult
+    public static func prewarmAssetImage(named fileName: String) -> Bool {
+        guard let workspaceUrl = FixtureLoader.workspaceURL() else { return false }
+        let assetFile = workspaceUrl.appendingPathComponent("testkit/mock-server/assets").appendingPathComponent(fileName)
+        let assetOrigin = workspaceUrl.appendingPathComponent("testkit/mock-server").absoluteString
+        let cleanOrigin = assetOrigin.hasSuffix("/") ? String(assetOrigin.dropLast()) : assetOrigin
+        let urlString = "\(cleanOrigin)/assets/\(fileName)"
+
+        guard let image = UIImage(contentsOfFile: assetFile.path) else { return false }
+        SDImageCache.shared.store(image, forKey: urlString, toDisk: false)
+        return SDImageCache.shared.imageFromMemoryCache(forKey: urlString) != nil
+    }
+
+    /// Pre-warms the one-pixel PNG served virtually by the Test Kit for image-1/2/3.png.
+    @MainActor
+    @discardableResult
+    public static func prewarmVirtualTestKitImage(named fileName: String) -> Bool {
+        guard let workspaceUrl = FixtureLoader.workspaceURL(),
+              let data = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="),
+              let image = UIImage(data: data)
+        else { return false }
+        let assetOrigin = workspaceUrl.appendingPathComponent("testkit/mock-server").absoluteString
+        let cleanOrigin = assetOrigin.hasSuffix("/") ? String(assetOrigin.dropLast()) : assetOrigin
+        let urlString = "\(cleanOrigin)/assets/\(fileName)"
+        SDImageCache.shared.store(image, forKey: urlString, toDisk: false)
+        return SDImageCache.shared.imageFromMemoryCache(forKey: urlString) != nil
     }
 
     /// Renders the complete production overlay and presents its bottom sheet through the SDK controller.
@@ -265,7 +300,9 @@ public enum ComponentTestHost {
     @MainActor
     public static func makeCanvasSlotHost(
         config: InlineCanvasConfig,
-        slotWidth: CGFloat? = 360
+        slotWidth: CGFloat? = 360,
+        drainDuration: TimeInterval = 0.2,
+        rendersLoadedMedia: Bool = false
     ) -> UIView {
         let payload = CEPTriggerPayload(
             cepCampaignId: "test_inline_canvas_\(config.slotKey)",
@@ -302,7 +339,17 @@ public enum ComponentTestHost {
         window.makeKeyAndVisible()
         hostingController.view.layoutIfNeeded()
 
-        drainRunLoop(for: 0.2)
+        drainRunLoop(for: drainDuration)
+        if rendersLoadedMedia {
+            // A prewarmed image is a synchronous cache hit: WebImage publishes it from inside the
+            // view update that requested it, and SwiftUI drops that update. Flipping the trait
+            // environment makes every environment-reading view, including the image renderer,
+            // re-evaluate, which draws the already-loaded image.
+            hostingController.overrideUserInterfaceStyle = .dark
+            drainRunLoop(for: 0.4)
+            hostingController.overrideUserInterfaceStyle = .light
+            drainRunLoop(for: drainDuration)
+        }
         window.layoutIfNeeded()
 
         return hostingController.view
@@ -313,6 +360,159 @@ public enum ComponentTestHost {
     public static func cleanupCanvasSlotHost(_ viewOrWindow: AnyObject?, slotKey: String) {
         SDKInstance.shared.inlineController.dismissCampaign(slotKey)
         cleanupOverlayWindow(viewOrWindow)
+    }
+
+    // MARK: - Direct Window Lifecycle Mounting
+
+    /// Mounts a view controller as the root of an active UIWindow for testing.
+    ///
+    /// Manages window scenes, appearance transitions, safe areas, layout, and runloop draining.
+    @MainActor
+    @discardableResult
+    public static func mount<Content: View>(
+        _ controller: UIHostingController<Content>,
+        drainDuration: TimeInterval = 0.05
+    ) -> UIWindow {
+        enableAccessibilityAutomation()
+        if #available(iOS 16.4, *) {
+            controller.safeAreaRegions = []
+        }
+        let window: UIWindow
+        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
+            window = UIWindow(windowScene: scene)
+        } else {
+            window = UIWindow(frame: controller.view.bounds)
+        }
+        window.frame = controller.view.bounds
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.beginAppearanceTransition(true, animated: false)
+        controller.endAppearanceTransition()
+        controller.view.layoutIfNeeded()
+        drainRunLoop(for: drainDuration)
+        return window
+    }
+
+    /// SwiftUI only builds its accessibility tree while accessibility automation is on (XCUITest
+    /// turns it on; unit tests don't). Tests that find and `accessibilityActivate()` a SwiftUI
+    /// `Button` need it, or the lookup finds no elements.
+    private static let accessibilityAutomationEnabled: Bool = {
+        guard let handle = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW),
+              let symbol = dlsym(handle, "_AXSSetAutomationEnabled") else { return false }
+        typealias SetEnabled = @convention(c) (Int32) -> Void
+        unsafeBitCast(symbol, to: SetEnabled.self)(1)
+        return true
+    }()
+
+    @MainActor
+    private static func enableAccessibilityAutomation() {
+        _ = accessibilityAutomationEnabled
+    }
+
+    /// Tears down and cleans up a test UIWindow and its root view controller.
+    @MainActor
+    public static func unmount(_ window: UIWindow, drainDuration: TimeInterval = 0.02) {
+        if let root = window.rootViewController {
+            root.beginAppearanceTransition(false, animated: false)
+            root.endAppearanceTransition()
+        }
+        window.rootViewController = nil
+        window.isHidden = true
+        window.resignKey()
+        drainRunLoop(for: drainDuration)
+    }
+
+    /// Creates and mounts a UIHostingController inside a UIWindow at exact dimensions.
+    @MainActor
+    public static func mount<Content: View>(
+        rootView: Content,
+        size: CGSize,
+        backgroundColor: UIColor = .white,
+        drainDuration: TimeInterval = 0.05
+    ) -> (window: UIWindow, controller: UIHostingController<Content>) {
+        let controller = makeComponentHost(
+            rootView: rootView,
+            size: size,
+            backgroundColor: backgroundColor
+        )
+        let window = mount(controller, drainDuration: drainDuration)
+        return (window, controller)
+    }
+
+    /// Host view wrapper for CampaignCanvasStage that reacts to color scheme changes during snapshot testing.
+    public struct CanvasStageHost: View {
+        @Environment(\.colorScheme) private var colorScheme
+        public let canvas: CampaignCanvas
+        public let authoredCornerRadius: CGFloat
+        public let isDark: Bool?
+        public let showBackground: Bool
+        public let onAction: (CampaignCanvasActionRequest) -> Void
+
+        public init(
+            canvas: CampaignCanvas,
+            authoredCornerRadius: CGFloat = 0,
+            isDark: Bool? = nil,
+            showBackground: Bool = true,
+            onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
+        ) {
+            self.canvas = canvas
+            self.authoredCornerRadius = authoredCornerRadius
+            self.isDark = isDark
+            self.showBackground = showBackground
+            self.onAction = onAction
+        }
+
+        public var body: some View {
+            var stage = CampaignCanvasStage(
+                canvas: canvas,
+                authoredCornerRadius: authoredCornerRadius,
+                isDark: isDark ?? (colorScheme == .dark),
+                showBackground: showBackground,
+                onAction: onAction
+            )
+            stage.animateWidgetsOnAppear = false
+            return stage.ignoresSafeArea()
+        }
+    }
+
+    /// Mounts a CampaignCanvas in an isolated UIWindow with a UIHostingController.
+    @MainActor
+    public static func mountCanvas(
+        _ canvas: CampaignCanvas,
+        authoredCornerRadius: CGFloat = 0,
+        isDark: Bool? = nil,
+        showBackground: Bool = true,
+        variables: VariableContext? = nil,
+        timerRemainingSeconds: Int64? = nil,
+        storyViewerState: CanvasStoryViewerState? = nil,
+        backgroundColor: UIColor = .white,
+        drainDuration: TimeInterval = 0.05,
+        onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
+    ) -> (window: UIWindow, controller: UIHostingController<AnyView>) {
+        let stageHost = CanvasStageHost(
+            canvas: canvas,
+            authoredCornerRadius: authoredCornerRadius,
+            isDark: isDark,
+            showBackground: showBackground,
+            onAction: onAction
+        )
+        var root: AnyView = AnyView(stageHost)
+        if let variables {
+            root = AnyView(root.environment(\.digiaVariables, variables))
+        }
+        if let timerRemainingSeconds {
+            root = AnyView(root.environment(\.timerRemainingSeconds, timerRemainingSeconds))
+        }
+        if let storyViewerState {
+            root = AnyView(root.environment(\.canvasStoryViewer, storyViewerState))
+        }
+        let (window, controller) = mount(
+            rootView: root,
+            size: CGSize(width: canvas.width, height: canvas.height),
+            backgroundColor: backgroundColor,
+            drainDuration: drainDuration
+        )
+        return (window, controller)
     }
 
     // MARK: - Private Mock UI Builders

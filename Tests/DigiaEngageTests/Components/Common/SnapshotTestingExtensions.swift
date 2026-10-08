@@ -16,6 +16,7 @@ extension ViewImageConfig {
 /// Helper to check if golden recording is enabled via environment variable
 public var isSnapshotRecordingEnabled: Bool {
     ProcessInfo.processInfo.environment["RECORD_SNAPSHOTS"] == "true"
+        || ProcessInfo.processInfo.environment["TEST_RUNNER_RECORD_SNAPSHOTS"] == "true"
 }
 
 // MARK: - Swift Testing Visual Golden Assertions
@@ -34,7 +35,7 @@ public func assertVisualGolden(
     column: UInt = #column
 ) {
     let rawTestName = String(describing: function)
-    let cleanTestName = rawTestName.replacingOccurrences(of: "()", with: "")
+    let cleanTestName = sanitizeSnapshotTestName(rawTestName)
     let recordMode = isSnapshotRecordingEnabled ? SnapshotTestingConfiguration.Record.all : nil
 
     let imageSnapshotting = Snapshotting<UIView, UIImage>.image(
@@ -67,6 +68,7 @@ public func assertVisualGolden(
         recordGoldenAttachments(
             actual: renderedImage,
             testName: cleanTestName,
+            snapshotName: name,
             sourceFilePath: String(describing: filePath)
         )
     }
@@ -90,7 +92,7 @@ public func assertVisualGolden(
     column: UInt = #column
 ) {
     let rawTestName = String(describing: function)
-    let cleanTestName = rawTestName.replacingOccurrences(of: "()", with: "")
+    let cleanTestName = sanitizeSnapshotTestName(rawTestName)
     let recordMode = isSnapshotRecordingEnabled ? SnapshotTestingConfiguration.Record.all : nil
 
     let failure = verifySnapshot(
@@ -108,6 +110,7 @@ public func assertVisualGolden(
         recordGoldenAttachments(
             actual: image,
             testName: cleanTestName,
+            snapshotName: name,
             sourceFilePath: String(describing: filePath)
         )
     }
@@ -121,9 +124,12 @@ public func assertVisualGolden(
 private func recordGoldenAttachments(
     actual: UIImage,
     testName: String,
+    snapshotName: String?,
     sourceFilePath: String
 ) {
-    Attachment.record(actual, named: "\(testName)-actual", as: .png)
+    let identifier = snapshotName.map(sanitizeSnapshotPathComponent)
+    let attachmentStem = identifier.map { "\(testName)-\($0)" } ?? testName
+    Attachment.record(actual, named: "\(attachmentStem)-actual", as: .png)
 
     let sourceURL = URL(fileURLWithPath: sourceFilePath)
     let snapshotDirectory = sourceURL
@@ -135,8 +141,12 @@ private func recordGoldenAttachments(
         at: snapshotDirectory,
         includingPropertiesForKeys: nil
     ),
-        let referenceURL = snapshotURLs.first(where: {
-            $0.pathExtension == "png" && $0.lastPathComponent.hasPrefix("\(testName).")
+        let referenceURL = snapshotURLs.first(where: { url in
+            guard url.pathExtension == "png" else { return false }
+            if let identifier {
+                return url.deletingPathExtension().lastPathComponent == "\(testName).\(identifier)"
+            }
+            return url.lastPathComponent.hasPrefix("\(testName).")
         }),
         let referenceData = try? Data(contentsOf: referenceURL)
     else {
@@ -145,7 +155,7 @@ private func recordGoldenAttachments(
 
     let exactImageDiff = Diffing<UIImage>.image
     let reference = exactImageDiff.fromData(referenceData)
-    Attachment.record(reference, named: "\(testName)-reference", as: .png)
+    Attachment.record(reference, named: "\(attachmentStem)-reference", as: .png)
 
     guard let (_, diffAttachments) = exactImageDiff.diffV2(reference, actual) else {
         return
@@ -156,8 +166,23 @@ private func recordGoldenAttachments(
         else {
             continue
         }
-        Attachment.record(data, named: "\(testName)-difference.png")
+        Attachment.record(data, named: "\(attachmentStem)-difference.png")
     }
+}
+
+private func sanitizeSnapshotTestName(_ value: String) -> String {
+    let strippedFunctionSignature = value.replacingOccurrences(
+        of: "\\(.*\\)",
+        with: "",
+        options: .regularExpression
+    )
+    return sanitizeSnapshotPathComponent(strippedFunctionSignature)
+}
+
+private func sanitizeSnapshotPathComponent(_ value: String) -> String {
+    value
+        .replacingOccurrences(of: "\\W+", with: "-", options: .regularExpression)
+        .replacingOccurrences(of: "^-|-$", with: "", options: .regularExpression)
 }
 
 // MARK: - Swift Testing Hierarchy Snapshot Assertions
@@ -252,7 +277,7 @@ public func assertHierarchy(
     column: UInt = #column
 ) {
     let rawTestName = String(describing: function)
-    let cleanTestName = rawTestName.replacingOccurrences(of: "()", with: "")
+    let cleanTestName = sanitizeSnapshotTestName(rawTestName)
     let recordMode = isSnapshotRecordingEnabled ? SnapshotTestingConfiguration.Record.all : nil
 
     let failure = verifySnapshot(
@@ -283,7 +308,7 @@ public func assertHierarchy(
     column: UInt = #column
 ) {
     let rawTestName = String(describing: function)
-    let cleanTestName = rawTestName.replacingOccurrences(of: "()", with: "")
+    let cleanTestName = sanitizeSnapshotTestName(rawTestName)
     let recordMode = isSnapshotRecordingEnabled ? SnapshotTestingConfiguration.Record.all : nil
 
     let failure = verifySnapshot(
@@ -301,4 +326,3 @@ public func assertHierarchy(
         Issue.record("\(failureMessage)")
     }
 }
-
