@@ -717,7 +717,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             variables: variables
         )
         // A host that triggers campaigns itself runs without a CEP, so a missing plugin is expected.
-        needsPlugin = false
+        hostTriggersCampaigns = true
         let controller = coordinator.open(trigger, owner: Self.hostOwner)
         observeDelivery(controller)
         routeOrDrop(controller)
@@ -863,6 +863,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     /// The fetch returned campaigns, and the first screen change has not yet checked for a plugin.
     private var needsPlugin = false
+    private var hostTriggersCampaigns = false
 
     func setCurrentScreen(_ name: String) {
         screenUpdateRevision += 1
@@ -885,7 +886,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // Checked at a screen change, not at fetch: hosts may register after `initialize()`.
         if needsPlugin, sdkState == .ready {
             needsPlugin = false
-            guard activePlugin == nil else { return }
+            guard activePlugin == nil, !hostTriggersCampaigns else { return }
             log.w(
                 "No CEP plugin registered — triggered campaigns cannot show",
                 stage: .session,
