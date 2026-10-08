@@ -60,6 +60,8 @@ final class StoryVideoPlayback: ObservableObject {
     @Published private(set) var player: AVPlayer?
     @Published private(set) var poster: UIImage?
     @Published private(set) var showPlayerLayer = false
+    /// The campaign that a `media_load_failed` report names.
+    var campaignKey: String?
 
     private let urlString: String
     private let purpose: StoryVideoPlaybackPurpose
@@ -204,7 +206,7 @@ final class StoryVideoPlayback: ObservableObject {
             return
         }
         guard let remoteURL = URL(string: urlString) else {
-            handleTerminalFailure()
+            handleTerminalFailure(cause: "invalid_url")
             return
         }
 
@@ -282,7 +284,7 @@ final class StoryVideoPlayback: ObservableObject {
                 guard let self else { return }
                 switch item.status {
                 case .readyToPlay: self.prepareStart()
-                case .failed: self.handleTerminalFailure()
+                case .failed: self.handleTerminalFailure(cause: mediaFailureCause(playerItem: item))
                 default: break
                 }
             }
@@ -465,9 +467,10 @@ final class StoryVideoPlayback: ObservableObject {
         }
     }
 
-    private func handleTerminalFailure() {
+    private func handleTerminalFailure(cause: String? = nil) {
         guard !terminalFailureReported else { return }
         terminalFailureReported = true
+        reportMediaLoadFailed(.video, cause: cause, campaignKey: campaignKey)
         player?.pause()
         showPlayerLayer = false
         cancelPosterWork()

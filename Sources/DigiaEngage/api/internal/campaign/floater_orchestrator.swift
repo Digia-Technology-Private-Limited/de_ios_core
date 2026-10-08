@@ -317,11 +317,9 @@ final class FloaterOrchestrator: ObservableObject {
         guard let active = state, active.token == token, awaitingMedia else { return }
         log.e(
             "Dropped — media could not be loaded (reason=\(reason))",
-            campaign: active.campaign.campaignKey,
-            stage: cause == nil ? nil : .render,
-            reason: cause == nil ? nil : TimelineReason.mediaLoadFailed,
-            extras: cause.map { ["media_kind": "\(active.config.media.kind)", "cause": $0] }
+            campaign: active.campaign.campaignKey
         )
+        reportMediaLoadFailed(active.config.media.kind.healthKind, cause: cause, campaignKey: active.campaign.campaignKey)
         lastStartFailureReason = "media could not be loaded: \(reason)"
         onDismissed(active, .mediaEnd, metricsSnapshot(), false)
         finishDismiss()
@@ -380,7 +378,9 @@ final class FloaterOrchestrator: ObservableObject {
                         self.markVisible(token: token)
                         if config.media.autoplay { self.player?.play() }
                     case .failed:
-                        self.abandonMedia(token: token, reason: "video failed to load")
+                        self.abandonMedia(
+                            token: token, reason: "video failed to load", cause: mediaFailureCause(playerItem: item)
+                        )
                     default:
                         break
                     }
@@ -431,14 +431,15 @@ final class FloaterOrchestrator: ObservableObject {
         // network round-trip), not a correctness issue, and worth revisiting once
         // this SDK has a working local build/test loop again.
         let task = URLSession.shared.dataTask(with: parsed) { [weak self] data, response, _ in
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let status = (response as? HTTPURLResponse)?.statusCode
             Task { @MainActor in
                 guard let self, self.state?.token == token else { return }
                 if let data, (UIImage(data: data) != nil || SDImageSVGCoder.shared.decodedImage(with: data, options: nil) != nil) {
                     self.markVisible(token: token)
                 } else {
-                    let cause = (400..<500).contains(status) ? "http_4xx" : (data == nil || status >= 500 ? nil : "decode")
-                    self.abandonMedia(token: token, reason: "image failed to load", cause: cause)
+                    self.abandonMedia(
+                        token: token, reason: "image failed to load", cause: mediaFailureCause(httpStatus: status)
+                    )
                 }
             }
         }
@@ -451,17 +452,12 @@ final class FloaterOrchestrator: ObservableObject {
             return
         }
         Task { [weak self] in
-            let loaded: Bool
-            if parsed.pathExtension.lowercased() == "lottie" {
-                loaded = (try? await DotLottieFile.loadedFrom(url: parsed)) != nil
-            } else {
-                loaded = await LottieAnimation.loadedFrom(url: parsed) != nil
-            }
+            let loaded = await loadLottieSource(parsed)
             guard let self, self.state?.token == token else { return }
-            if loaded {
+            if loaded.source != nil {
                 self.markVisible(token: token)
             } else {
-                self.abandonMedia(token: token, reason: "lottie failed to load")
+                self.abandonMedia(token: token, reason: "lottie failed to load", cause: loaded.failureCause)
             }
         }
     }

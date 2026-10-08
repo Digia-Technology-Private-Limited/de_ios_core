@@ -24,6 +24,7 @@ struct DigiaInlineBannerView: View {
             bottom: config.margin.bottom,
             trailing: config.margin.right
         ))
+        .environment(\.digiaCampaignKey, payload.campaignKey)
     }
 
     @ViewBuilder
@@ -71,6 +72,7 @@ struct DigiaInlineBannerView: View {
             await SDKInstance.shared.executeActionFlow(
                 config.actions,
                 variables: variables,
+                campaignKey: payload.campaignKey,
                 localActionExecutor: LocalActionExecutor()
             )
         }

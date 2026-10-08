@@ -58,9 +58,7 @@ enum HealthReasons {
         "unsupported_action_type",
         "action_handler_missing",
         "fetch_failed_response",
-        "plugin_failed",
         "plugin_not_registered",
-        "internal_error",
         "survey_submission_failed",
         "media_load_failed",
         "cep_bridge_unavailable",
@@ -106,9 +104,7 @@ enum HealthReasons {
         "unsupported_action_type": ["action_type"],
         "action_handler_missing": ["action_type"],
         "fetch_failed_response": ["http_status"],
-        "plugin_failed": ["plugin", "callback"],
         "plugin_not_registered": [],
-        "internal_error": ["exception_class"],
         "survey_submission_failed": ["http_status"],
         "media_load_failed": ["media_kind", "cause"],
         "cep_bridge_unavailable": ["selector"],
@@ -124,7 +120,6 @@ enum HealthReasons {
         "fetch_failed_auth",
         "fetch_failed_response",
         "plugin_not_registered",
-        "action_handler_missing",
     ]
 
     /// The extra that makes one campaign's several instances of a reason
@@ -135,19 +130,18 @@ enum HealthReasons {
     /// different causes — two broken tokens, two unsupplied variables — and
     /// collapsing them would report the first and hide the rest, which is the
     /// opposite of what the backend is being asked.
-    static let dedupExtraKey: [String: String] = [
-        "unknown_design_token": "token",
-        "missing_variable": "variable",
-        "unsupported_widget_type": "widget_type",
+    static let dedupExtraKeys: [String: [String]] = [
+        "unknown_design_token": ["token"],
+        "missing_variable": ["variable"],
+        "unsupported_widget_type": ["widget_type"],
         // A fixed token per failed precondition, so two causes stay two reports.
-        "invalid_config": "cause",
+        "invalid_config": ["cause"],
         // One report per (dropped campaign, blocker) per launch — "blocked by X
         // on N% of app opens".
-        "surface_busy": "blocking_campaign_key",
-        "unsupported_action_type": "action_type",
-        "plugin_failed": "callback",
-        "internal_error": "exception_class",
-        "cep_bridge_unavailable": "selector",
+        "surface_busy": ["blocking_campaign_key"],
+        "unsupported_action_type": ["action_type"],
+        "cep_bridge_unavailable": ["selector"],
+        "media_load_failed": ["media_kind", "cause"],
     ]
 
     /// Extra marking a record whose blocker is a live test. Such a record stays

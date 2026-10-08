@@ -93,9 +93,7 @@ struct TimelineWireStringsTests {
                 "unsupported_action_type",
                 "action_handler_missing",
                 "fetch_failed_response",
-                "plugin_failed",
                 "plugin_not_registered",
-                "internal_error",
                 "survey_submission_failed",
                 "media_load_failed",
                 "cep_bridge_unavailable",
@@ -123,9 +121,7 @@ struct TimelineWireStringsTests {
         #expect(HealthReasons.detailKeys["unsupported_action_type"] == ["action_type"])
         #expect(HealthReasons.detailKeys["action_handler_missing"] == ["action_type"])
         #expect(HealthReasons.detailKeys["fetch_failed_response"] == ["http_status"])
-        #expect(HealthReasons.detailKeys["plugin_failed"] == ["plugin", "callback"])
         #expect(HealthReasons.detailKeys["plugin_not_registered"] == [])
-        #expect(HealthReasons.detailKeys["internal_error"] == ["exception_class"])
         #expect(HealthReasons.detailKeys["survey_submission_failed"] == ["http_status"])
         #expect(HealthReasons.detailKeys["media_load_failed"] == ["media_kind", "cause"])
         #expect(HealthReasons.detailKeys["cep_bridge_unavailable"] == ["selector"])
@@ -140,18 +136,17 @@ struct TimelineWireStringsTests {
     func healthReasonsDedupShape() {
         #expect(HealthReasons.campaignlessReasons == [
             "design_tokens_unreadable", "fetch_failed_auth", "fetch_failed_response",
-            "plugin_not_registered", "action_handler_missing",
+            "plugin_not_registered",
         ])
-        #expect(HealthReasons.dedupExtraKey == [
-            "unknown_design_token": "token",
-            "missing_variable": "variable",
-            "unsupported_widget_type": "widget_type",
-            "invalid_config": "cause",
-            "surface_busy": "blocking_campaign_key",
-            "unsupported_action_type": "action_type",
-            "plugin_failed": "callback",
-            "internal_error": "exception_class",
-            "cep_bridge_unavailable": "selector",
+        #expect(HealthReasons.dedupExtraKeys == [
+            "unknown_design_token": ["token"],
+            "missing_variable": ["variable"],
+            "unsupported_widget_type": ["widget_type"],
+            "invalid_config": ["cause"],
+            "surface_busy": ["blocking_campaign_key"],
+            "unsupported_action_type": ["action_type"],
+            "cep_bridge_unavailable": ["selector"],
+            "media_load_failed": ["media_kind", "cause"],
         ])
         #expect(HealthReasons.liveTestBlockerKey == "blocking_live_test")
     }

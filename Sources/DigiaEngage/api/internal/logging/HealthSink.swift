@@ -285,7 +285,7 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
     private func dedupKey(_ record: TimelineRecord, _ wire: String) -> String {
         if HealthReasons.campaignlessReasons.contains(wire) { return wire }
         var key = "\(wire)|\(record.campaignKey ?? "")"
-        if let extraKey = HealthReasons.dedupExtraKey[wire] {
+        for extraKey in HealthReasons.dedupExtraKeys[wire] ?? [] {
             key += "|\(record.extras[extraKey] ?? "")"
         }
         return key

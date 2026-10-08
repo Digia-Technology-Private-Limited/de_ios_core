@@ -71,7 +71,9 @@ struct EngageActionParser {
         let type = step["type"] as? String ?? ""
         switch type {
         case "Action.openUrl":
-            guard let url = string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]) else { return nil }
+            guard let url = string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]) else {
+                return unsupported(type)
+            }
             let launchMode = string(in: data, keys: ["launchMode", "launch_mode"])
                 ?? string(in: step, keys: ["launchMode", "launch_mode"])
                 ?? ""
@@ -79,14 +81,14 @@ struct EngageActionParser {
                 ? .openUrl(url) : .openDeeplink(url)
         case "open_url":
             return (string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]))
-                .map(EngageAction.openUrl)
+                .map(EngageAction.openUrl) ?? unsupported(type)
         case "deep_link":
             return (string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]))
-                .map(EngageAction.openDeeplink)
+                .map(EngageAction.openDeeplink) ?? unsupported(type)
         case "Action.copyToClipBoard", "copy":
-            return (text(from: data) ?? text(from: step)).map(EngageAction.copyToClipboard)
+            return (text(from: data) ?? text(from: step)).map(EngageAction.copyToClipboard) ?? unsupported(type)
         case "Action.share", "share":
-            return (text(from: data) ?? text(from: step)).map(EngageAction.share)
+            return (text(from: data) ?? text(from: step)).map(EngageAction.share) ?? unsupported(type)
         // `Action.hideInline` is an inline canvas closing itself: there is no
         // overlay to pop, so the host clears the slot for the session. Same
         // authored intent as the overlay spellings, so the same action.

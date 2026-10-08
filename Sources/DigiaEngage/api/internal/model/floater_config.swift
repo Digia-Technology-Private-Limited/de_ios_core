@@ -44,6 +44,14 @@ enum FloaterMediaKind: Equatable {
         }
     }
 
+    var healthKind: HealthMediaKind {
+        switch self {
+        case .video: .video
+        case .image, .gif: .image
+        case .lottie: .lottie
+        }
+    }
+
     /// Only a media kind with a timeline exposes play/pause and a progress bar — matches
     /// Android's `FloaterMediaKind.isPlayable` (video || lottie); a plain image/GIF has no
     /// "paused" state a user can toggle.

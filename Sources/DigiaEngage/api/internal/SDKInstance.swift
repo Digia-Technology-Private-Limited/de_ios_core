@@ -452,7 +452,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             return
         }
         activateHealthSink()
-        needsPlugin = campaigns.contains(where: { !Self.isInlineKind($0) })
+        needsPlugin = !campaigns.isEmpty
         completeInitialization(campaigns)
     }
 
@@ -498,11 +498,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     func executeActionFlow(
         _ actions: [EngageAction],
         variables: VariableContext?,
+        campaignKey: String?,
         localActionExecutor: LocalActionExecutor
     ) async {
         await actionExecutor.executeActionFlow(
             actions,
             variables: variables,
+            campaignKey: campaignKey,
             localActionExecutor: localActionExecutor
         )
     }
@@ -714,6 +716,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             cepMetadata: [:],
             variables: variables
         )
+        // A host that triggers campaigns itself runs without a CEP, so a missing plugin is expected.
+        needsPlugin = false
         let controller = coordinator.open(trigger, owner: Self.hostOwner)
         observeDelivery(controller)
         routeOrDrop(controller)
@@ -857,7 +861,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
-    /// The bundle has CEP-triggered campaigns that no plugin has yet been checked for.
+    /// The fetch returned campaigns, and the first screen change has not yet checked for a plugin.
     private var needsPlugin = false
 
     func setCurrentScreen(_ name: String) {
@@ -879,8 +883,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             activePlugin?.onScreenChanged(screenName)
         }
         // Checked at a screen change, not at fetch: hosts may register after `initialize()`.
-        if needsPlugin, activePlugin == nil, sdkState == .ready {
+        if needsPlugin, sdkState == .ready {
             needsPlugin = false
+            guard activePlugin == nil else { return }
             log.w(
                 "No CEP plugin registered — triggered campaigns cannot show",
                 stage: .session,
@@ -2603,6 +2608,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         Task {
             await executeActionFlow(
                 request.actions, variables: state.variableContext,
+                campaignKey: state.payload.campaignKey,
                 localActionExecutor: LocalActionExecutor(dismiss: { [weak self] in
                     self?.floaterStoryOrchestrator.dismiss(.userClose)
                 }, showStory: { [weak self] index in
