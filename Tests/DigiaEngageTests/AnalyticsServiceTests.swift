@@ -440,8 +440,7 @@ struct AnalyticsServiceTests {
             defaults: defaults
         )
 
-        try await waitUntil { fakeSender.callCount == 1 }
-        _ = service2  // keep alive until timer fires
+        try await waitUntil { fakeSender.callCount == 1 && service2.queue.size == 0 }
 
         #expect(fakeSender.callCount == 1)
         #expect(AnalyticsQueue(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("analytics")).size == 0)
