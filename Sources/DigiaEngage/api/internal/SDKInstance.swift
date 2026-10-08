@@ -1593,9 +1593,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 logNativeGuideStage("route", "result=dropped reason=frequency_capped campaign_key=\(key)")
                 return .dropped(reason: .frequencyCapped, detail: nil)
             }
-            guard !guideConfig.steps.isEmpty,
-                  guideConfig.steps.allSatisfy({ $0.widgetConfig.canvas != nil })
-            else {
+            // As Flutter: skip steps with no canvas, and show the rest.
+            var canvasGuide = guideConfig
+            canvasGuide.steps = guideConfig.steps.filter { $0.widgetConfig.canvas != nil }
+            guard !canvasGuide.steps.isEmpty else {
                 let message = "campaign has no valid Canvas guide content"
                 lastCampaignDropReason = message
                 context.onDropped(DropReason.invalidConfig, message: message)
@@ -1608,7 +1609,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
             // The rule has cleared the surface, so a refusal here is the
             // campaign itself (not a parsed guide), never another guide.
-            guard guideOrchestrator.start(campaign, payload: payload) else {
+            var canvasCampaign = campaign
+            canvasCampaign.config = .guide(canvasGuide)
+            guard guideOrchestrator.start(canvasCampaign, payload: payload) else {
                 let message = "guide could not start"
                 lastCampaignDropReason = message
                 context.onDropped(DropReason.invalidConfig, message: message)

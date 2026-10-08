@@ -28,7 +28,7 @@ struct CampaignModel: Equatable {
     let id: String
     let campaignKey: String
     let campaignType: String
-    let config: CampaignConfigModel
+    var config: CampaignConfigModel
     let targetScreenNames: [String]
     // Opaque capping policy from the dashboard; nil = "No cap" / inline.
     // Used natively for nudge + survey only (guides cap in JS on RN).
@@ -114,8 +114,14 @@ struct CampaignModel: Equatable {
                     templateConfig,
                     stateful: stateful
                 ) else {
-                    if timeAnchor != nil {
-                        let stateful = templateConfig["stateful"] as? [String: Any]
+                    let stateful = templateConfig["stateful"] as? [String: Any]
+                    if let stateful, !stateful.isAbsent("version"), !(stateful["version"] is NSNumber) {
+                        CampaignParseScope.report(
+                            "Campaign skipped — invalid inline timer config",
+                            reason: TimelineReason.campaignUnsupported,
+                            extras: ["type": "inlineCanvas"]
+                        )
+                    } else if timeAnchor != nil {
                         _ = CampaignParseScope.acceptsVersion(
                             stateful.map(StatefulTimerConfig.version) ?? 1, supported: 1)
                     } else {
