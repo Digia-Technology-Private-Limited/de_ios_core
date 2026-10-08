@@ -314,6 +314,7 @@ private struct NudgeButtonView: View {
             await SDKInstance.shared.executeActionFlow(
                 node.actions,
                 variables: variables,
+                campaignKey: SDKInstance.shared.controller.activeNudge?.payload.campaignKey,
                 localActionExecutor: LocalActionExecutor(dismiss: onDismiss)
             )
         }

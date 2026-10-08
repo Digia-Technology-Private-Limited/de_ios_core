@@ -83,6 +83,7 @@ struct SurveyRenderer: View {
                 SurveySession(state: state, orchestrator: orchestrator)
                     .id(state.token)
                     .environment(\.digiaVariables, state.variableContext)
+                    .environment(\.digiaCampaignKey, state.payload.campaignKey)
             }
         }
         // Default every raw Text/TextField/TextEditor to the SDK-wide family.

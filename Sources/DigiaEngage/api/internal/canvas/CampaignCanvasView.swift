@@ -1678,6 +1678,7 @@ private struct CanvasRemoteLottie: View {
     let autoplay: Bool
     let loop: Bool
     let fit: String
+    @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var failed = false
     var body: some View {
         Group {
@@ -1692,20 +1693,12 @@ private struct CanvasRemoteLottie: View {
     }
     private var lottie: LottieView<CanvasLottiePlaceholder> {
         LottieView {
-            do {
-                if url.pathExtension.lowercased() == "lottie" {
-                    return try await DotLottieFile.loadedFrom(url: url).animationSource
-                }
-                guard let source = await LottieAnimation.loadedFrom(url: url)?.animationSource
-                else {
-                    failed = true
-                    return nil
-                }
-                return source
-            } catch {
+            let loaded = await loadLottieSource(url)
+            if loaded.source == nil {
                 failed = true
-                return nil
+                reportMediaLoadFailed(.lottie, cause: loaded.failureCause, campaignKey: campaignKey)
             }
+            return loaded.source
         } placeholder: {
             CanvasLottiePlaceholder(failed: failed, placeholder: placeholder, fit: fit)
         }
@@ -1737,8 +1730,10 @@ private struct CanvasVideoRenderer: View {
     let isDark: Bool
     @Environment(\.digiaVariables) private var variables
     @Environment(\.canvasVideoUsesStoryPlayback) private var usesStoryPlayback
+    @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var player: AVPlayer?
     @State private var observer: NSObjectProtocol?
+    @State private var statusObservation: NSKeyValueObservation?
     private var url: String {
         interpolate(CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark), context: variables)
     }
@@ -1782,6 +1777,13 @@ private struct CanvasVideoRenderer: View {
         let value = AVPlayer(playerItem: item)
         value.isMuted = muted
         player = value
+        let campaignKey = campaignKey
+        statusObservation = item.observe(\.status) { item, _ in
+            guard item.status == .failed else { return }
+            Task { @MainActor in
+                reportMediaLoadFailed(.video, cause: mediaFailureCause(playerItem: item), campaignKey: campaignKey)
+            }
+        }
         if loop {
             observer = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
@@ -1797,6 +1799,7 @@ private struct CanvasVideoRenderer: View {
     private func teardown() {
         player?.pause()
         player = nil
+        statusObservation = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
     }
@@ -2066,6 +2069,7 @@ private struct FocalCanvasImage: View {
     var tint: CampaignColor? = nil
     var failureLabel: String? = nil
     @Environment(\.digiaVariables) private var variables
+    @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var failedURL: String?
 
     init(
@@ -2105,7 +2109,10 @@ private struct FocalCanvasImage: View {
                         placeholder: source.placeholder,
                         contentMode: fit == "contain" ? .fit : .fill)
                 }
-                .onFailure { _ in failedURL = resolved }
+                .onFailure { error in
+                    failedURL = resolved
+                    reportMediaLoadFailed(.image, cause: mediaFailureCause(imageError: error), campaignKey: campaignKey)
+                }
                 .modifier(CanvasImageFit(fit: fit))
                 .foregroundStyle(
                     tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) } ?? .clear

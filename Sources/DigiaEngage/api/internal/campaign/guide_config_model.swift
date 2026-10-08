@@ -35,7 +35,7 @@ struct GuideConfigModel: Equatable {
     let id: String
     let multiStep: Bool
     let designWidth: CGFloat
-    let steps: [GuideStepModel]
+    var steps: [GuideStepModel]
     /// Dashboard-declared variable schemas; resolved against CEP trigger variables
     /// at render time via `buildVariableContext()`.
     let variableSchemas: [VariableSchema]

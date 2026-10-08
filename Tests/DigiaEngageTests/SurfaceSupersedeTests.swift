@@ -17,7 +17,7 @@ extension DigiaEngageTests {
                 defaults: suite(), legacyDefaults: suite(), makeNetworkClient: { _ in MockNetworkClient() }
             )
             try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
-            sdk.setCampaignsForTesting(try campaigns.map { try #require(CampaignModel.fromJson($0)) })
+            sdk.setCampaignsForTesting(try campaigns.map { try #require(try CampaignModel.fromJson($0)) })
             return sdk
         }
 

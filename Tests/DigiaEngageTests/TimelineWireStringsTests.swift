@@ -43,7 +43,14 @@ struct TimelineWireStringsTests {
         #expect(TimelineReason.cepTriggerReceived.wire == "cep_trigger_received")
         #expect(TimelineReason.displayed.wire == "displayed")
         #expect(TimelineReason.clicked.wire == "clicked")
-        #expect(TimelineReason.allCases.count == 18)
+        #expect(TimelineReason.fetchFailedResponse.wire == "fetch_failed_response")
+        #expect(TimelineReason.pluginNotRegistered.wire == "plugin_not_registered")
+        #expect(TimelineReason.unsupportedActionType.wire == "unsupported_action_type")
+        #expect(TimelineReason.mediaLoadFailed.wire == "media_load_failed")
+        #expect(TimelineReason.actionHandlerMissing.wire == "action_handler_missing")
+        #expect(TimelineReason.surveySubmissionFailed.wire == "survey_submission_failed")
+        #expect(CEPPluginReason.bridgeUnavailable.wire == "cep_bridge_unavailable")
+        #expect(TimelineReason.allCases.count == 24)
     }
 
     /// The delivery enums *are* the timeline's reasons for a delivery — no
@@ -83,6 +90,13 @@ struct TimelineWireStringsTests {
                 "timeout",
                 "pending_expired",
                 "superseded",
+                "unsupported_action_type",
+                "action_handler_missing",
+                "fetch_failed_response",
+                "plugin_not_registered",
+                "survey_submission_failed",
+                "media_load_failed",
+                "cep_bridge_unavailable",
             ])
     }
 
@@ -94,7 +108,7 @@ struct TimelineWireStringsTests {
         #expect(HealthReasons.detailKeys["unknown_campaign_key"] == [])
         #expect(HealthReasons.detailKeys["malformed_campaign_skipped"] == [])
         #expect(HealthReasons.detailKeys["unknown_design_token"] == ["token", "kind"])
-        #expect(HealthReasons.detailKeys["design_tokens_unreadable"] == [])
+        #expect(HealthReasons.detailKeys["design_tokens_unreadable"] == ["theme"])
         #expect(HealthReasons.detailKeys["schema_version_too_new"] == ["required", "supported"])
         #expect(HealthReasons.detailKeys["unsupported_widget_type"] == ["widget_type"])
         #expect(HealthReasons.detailKeys["campaign_unsupported"] == ["precondition", "type"])
@@ -104,6 +118,13 @@ struct TimelineWireStringsTests {
         #expect(HealthReasons.detailKeys["not_ready"] == [])
         #expect(HealthReasons.detailKeys["initialization_failed"] == [])
         #expect(HealthReasons.detailKeys["surface_busy"] == ["blocking_campaign_key", "blocking_kind"])
+        #expect(HealthReasons.detailKeys["unsupported_action_type"] == ["action_type"])
+        #expect(HealthReasons.detailKeys["action_handler_missing"] == ["action_type"])
+        #expect(HealthReasons.detailKeys["fetch_failed_response"] == ["http_status"])
+        #expect(HealthReasons.detailKeys["plugin_not_registered"] == [])
+        #expect(HealthReasons.detailKeys["survey_submission_failed"] == ["http_status"])
+        #expect(HealthReasons.detailKeys["media_load_failed"] == ["media_kind", "cause"])
+        #expect(HealthReasons.detailKeys["cep_bridge_unavailable"] == ["selector"])
         // Every allowlisted reason has an explicit projection, even if empty —
         // an absent entry and an empty list must never be conflated.
         for reason in HealthReasons.reasons {
@@ -113,13 +134,20 @@ struct TimelineWireStringsTests {
 
     @Test("HealthReasons dedup shape")
     func healthReasonsDedupShape() {
-        #expect(HealthReasons.campaignlessReasons == ["design_tokens_unreadable", "fetch_failed_auth"])
-        #expect(HealthReasons.dedupExtraKey == [
-            "unknown_design_token": "token",
-            "missing_variable": "variable",
-            "unsupported_widget_type": "widget_type",
-            "invalid_config": "cause",
-            "surface_busy": "blocking_campaign_key",
+        #expect(HealthReasons.campaignlessReasons == [
+            "design_tokens_unreadable", "fetch_failed_auth", "fetch_failed_response",
+            "plugin_not_registered",
+        ])
+        #expect(HealthReasons.dedupExtraKeys == [
+            "unknown_design_token": ["token"],
+            "missing_variable": ["variable"],
+            "unsupported_widget_type": ["widget_type"],
+            "invalid_config": ["cause"],
+            "surface_busy": ["blocking_campaign_key"],
+            "unsupported_action_type": ["action_type"],
+            "action_handler_missing": ["action_type"],
+            "cep_bridge_unavailable": ["selector"],
+            "media_load_failed": ["media_kind", "cause"],
         ])
         #expect(HealthReasons.liveTestBlockerKey == "blocking_live_test")
     }

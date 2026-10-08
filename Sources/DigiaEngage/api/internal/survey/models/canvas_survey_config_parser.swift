@@ -30,14 +30,19 @@ enum CanvasSurveyConfigParser {
         case result
     }
 
+    /// 1 when absent; a value that is not a number is also read as 1, as before.
+    private static func schemaVersion(_ raw: JSONValue?) -> Int {
+        SurveyParse.int(raw) ?? 1
+    }
+
     static func from(
         _ json: [String: JSONValue],
         fallbackId: String,
         designTokens: DesignTokenCatalog = .empty,
         variableSchemas: [VariableSchema] = []
-    ) -> SurveyConfigModel? {
+    ) throws -> SurveyConfigModel? {
         guard SurveyParse.string(json["templateType"]) == "survey",
-              !CampaignParseScope.reportVersion(SurveyParse.int(json["schemaVersion"]) ?? 0, supported: 1),
+              try CampaignParseScope.acceptsVersion(schemaVersion(json["schemaVersion"]), supported: 1),
               let scenesArr = SurveyParse.array(json["scenes"]),
               let flow = SurveyParse.object(json["flow"]),
               let flowNodesArr = SurveyParse.array(flow["nodes"]) else { return nil }

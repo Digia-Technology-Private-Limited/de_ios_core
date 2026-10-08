@@ -192,7 +192,7 @@ struct CampaignCanvasContractTests {
 
     @Test("reset shadow color falls back without dropping the campaign")
     func resetShadowColorFallsBack() throws {
-        let parsed = CampaignModel.fromJson(
+        let parsed = try CampaignModel.fromJson(
             [
                 "id": "shadow-reset",
                 "campaignKey": "shadow-reset",

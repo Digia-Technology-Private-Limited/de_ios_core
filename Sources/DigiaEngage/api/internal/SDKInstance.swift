@@ -452,6 +452,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             return
         }
         activateHealthSink()
+        needsPlugin = !campaigns.isEmpty
         completeInitialization(campaigns)
     }
 
@@ -497,11 +498,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     func executeActionFlow(
         _ actions: [EngageAction],
         variables: VariableContext?,
+        campaignKey: String?,
         localActionExecutor: LocalActionExecutor
     ) async {
         await actionExecutor.executeActionFlow(
             actions,
             variables: variables,
+            campaignKey: campaignKey,
             localActionExecutor: localActionExecutor
         )
     }
@@ -616,9 +619,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     ///
     /// A rejected key is the one init failure a customer can fix themselves.
     private static func fetchFailureReason(_ failure: CampaignFetchError?) -> TimelineReason {
-        failure?.statusCode == 401 || failure?.statusCode == 403
-            ? .fetchFailedAuth
-            : .fetchFailedNetwork
+        if failure?.statusCode == 401 || failure?.statusCode == 403 { return .fetchFailedAuth }
+        switch failure?.category {
+        case .httpStatus, .invalidResponse: return .fetchFailedResponse
+        default: return .fetchFailedNetwork
+        }
     }
 
     func register(_ plugin: DigiaCEPPlugin) {
@@ -711,6 +716,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             cepMetadata: [:],
             variables: variables
         )
+        // A host that triggers campaigns itself runs without a CEP, so a missing plugin is expected.
+        hostTriggersCampaigns = true
         let controller = coordinator.open(trigger, owner: Self.hostOwner)
         observeDelivery(controller)
         routeOrDrop(controller)
@@ -854,6 +861,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
+    /// The fetch returned campaigns, and the first screen change has not yet checked for a plugin.
+    private var needsPlugin = false
+    private var hostTriggersCampaigns = false
+
     func setCurrentScreen(_ name: String) {
         screenUpdateRevision += 1
         let revision = screenUpdateRevision
@@ -871,6 +882,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         if screenUpdateRevision == revision {
             activePlugin?.onScreenChanged(screenName)
+        }
+        // Checked at a screen change, not at fetch: hosts may register after `initialize()`.
+        if needsPlugin, sdkState == .ready {
+            needsPlugin = false
+            guard activePlugin == nil, !hostTriggersCampaigns else { return }
+            log.w(
+                "No CEP plugin registered — triggered campaigns cannot show",
+                stage: .session,
+                reason: TimelineReason.pluginNotRegistered
+            )
         }
     }
 
@@ -1532,6 +1553,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .guide(let guideConfig):
             if !guideConfig.isAnchorless,
                config?.wrapperBinding == "react_native",
+               !guideConfig.steps.isEmpty,
                guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
             {
                 guard let renderViaJs = onGuideRenderRequest else {
@@ -1571,16 +1593,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 logNativeGuideStage("route", "result=dropped reason=frequency_capped campaign_key=\(key)")
                 return .dropped(reason: .frequencyCapped, detail: nil)
             }
-            guard !guideConfig.steps.isEmpty,
-                  guideConfig.steps.allSatisfy({ $0.widgetConfig.canvas != nil })
-            else {
+            // As Flutter: skip steps with no canvas, and show the rest.
+            var canvasGuide = guideConfig
+            canvasGuide.steps = guideConfig.steps.filter { $0.widgetConfig.canvas != nil }
+            guard !canvasGuide.steps.isEmpty else {
                 let message = "campaign has no valid Canvas guide content"
                 lastCampaignDropReason = message
                 context.onDropped(DropReason.invalidConfig, message: message)
                 log.e("Dropped — \(message)", campaign: key)
-                return .dropped(
-                    reason: .invalidConfig, detail: message,
-                    cause: guideConfig.steps.isEmpty ? "empty_content" : "wrong_config_type")
+                return .dropped(reason: .invalidConfig, detail: message, cause: "empty_content")
             }
             if let busy = admitToSurface(.guide, campaignKey: key, context: context) {
                 logNativeGuideStage("route", "result=dropped reason=surface_busy campaign_key=\(key)")
@@ -1588,7 +1609,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
             // The rule has cleared the surface, so a refusal here is the
             // campaign itself (not a parsed guide), never another guide.
-            guard guideOrchestrator.start(campaign, payload: payload) else {
+            var canvasCampaign = campaign
+            canvasCampaign.config = .guide(canvasGuide)
+            guard guideOrchestrator.start(canvasCampaign, payload: payload) else {
                 let message = "guide could not start"
                 lastCampaignDropReason = message
                 context.onDropped(DropReason.invalidConfig, message: message)
@@ -1766,7 +1789,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // and no type — the one place a marketer looks at it before shipping.
         // A live test is a PM's preview, so its parse and route must not reach fleet health.
         let parsed = HealthSink.$muted.withValue(true) {
-            CampaignModel.fromJson(
+            try? CampaignModel.fromJson(
                 campaignJson,
                 designTokens: currentDesignTokens,
                 devicePlatform: "ios",
@@ -1797,6 +1820,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
 
         if let guideConfig = campaign.guideConfig,
+           !guideConfig.steps.isEmpty,
            guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
         {
             reporter.postFailed(
@@ -2090,6 +2114,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             "reportSurveyCompleted: submitting campaignId=\(campaignId) answers=\(answers.count)")
         services?.submissionReporter.report(
             campaignId: campaignId,
+            campaignKey: state.payload.campaignKey,
             survey: state.config,
             answers: answers,
             startedAt: state.startedAt,
@@ -2587,6 +2612,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         Task {
             await executeActionFlow(
                 request.actions, variables: state.variableContext,
+                campaignKey: state.payload.campaignKey,
                 localActionExecutor: LocalActionExecutor(dismiss: { [weak self] in
                     self?.floaterStoryOrchestrator.dismiss(.userClose)
                 }, showStory: { [weak self] index in

@@ -8,7 +8,7 @@ struct InlineCanvasTests {
 
     @Test("reads slot, chrome and the shared canvas block")
     func parsesCanonicalConfig() throws {
-        let config = try #require(InlineCanvasConfig.fromJson(Self.templateConfig()))
+        let config = try #require(try InlineCanvasConfig.fromJson(Self.templateConfig()))
 
         #expect(config.slotKey == "home_hero")
         #expect(config.designWidth == 360)
@@ -23,20 +23,20 @@ struct InlineCanvasTests {
     func fallsBackToCanvasWidth() throws {
         var json = Self.templateConfig()
         json.removeValue(forKey: "designWidth")
-        let config = try #require(InlineCanvasConfig.fromJson(json))
+        let config = try #require(try InlineCanvasConfig.fromJson(json))
         #expect(config.designWidth == 360)
     }
 
     @Test("rejects a payload with no slot to render into")
-    func rejectsBlankSlotKey() {
-        #expect(InlineCanvasConfig.fromJson(Self.templateConfig(slotKey: "   ")) == nil)
+    func rejectsBlankSlotKey() throws {
+        #expect(try InlineCanvasConfig.fromJson(Self.templateConfig(slotKey: "   ")) == nil)
     }
 
     @Test("rejects a canvas version this build cannot read")
     func rejectsUnknownCanvasVersion() {
         // Collapsing the slot beats rendering a half-understood card: the app
         // shows its own content instead.
-        #expect(InlineCanvasConfig.fromJson(Self.templateConfig(canvasVersion: 3)) == nil)
+        #expect(throws: ReportedParseFailure.self) { try InlineCanvasConfig.fromJson(Self.templateConfig(canvasVersion: 3)) }
     }
 
     @Test("hideInline parses into the shared dismiss action")

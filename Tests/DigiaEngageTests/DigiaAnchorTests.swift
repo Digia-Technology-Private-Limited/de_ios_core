@@ -344,7 +344,7 @@ private func makeGuideInstance(
         "templateConfig": ["templateType": "tooltip", "steps": steps] as [String: Any],
     ]
     if let frequency { json["frequency"] = frequency }
-    let campaign = try #require(CampaignModel.fromJson(json))
+    let campaign = try #require(try CampaignModel.fromJson(json))
     sdk.setCampaignsForTesting([campaign])
     sdk.setCurrentScreen("Help")
     let window = makeWindow()

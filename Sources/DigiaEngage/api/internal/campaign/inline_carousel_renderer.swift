@@ -5,7 +5,10 @@ internal import SDWebImageSwiftUI
 @MainActor
 enum InlineCarouselRenderer {
     static func makeView(_ config: InlineCarouselConfig, payload: CEPTriggerPayload) -> AnyView {
-        AnyView(InlineCarouselView(config: config, payload: payload))
+        AnyView(
+            InlineCarouselView(config: config, payload: payload)
+                .environment(\.digiaCampaignKey, payload.campaignKey)
+        )
     }
 }
 
@@ -188,6 +191,7 @@ private struct InlineCarouselView: View {
             await SDKInstance.shared.executeActionFlow(
                 actions,
                 variables: variables,
+                campaignKey: payload.campaignKey,
                 localActionExecutor: LocalActionExecutor()
             )
         }
@@ -219,6 +223,7 @@ private struct InlineCarouselItemImage: View {
     let width: CGFloat
     let height: CGFloat
     let cornerRadius: CGFloat
+    @Environment(\.digiaCampaignKey) private var campaignKey
 
     init(item: CarouselItem, width: CGFloat, height: CGFloat, cornerRadius: CGFloat) {
         DigiaImagePipeline.configureIfNeeded()
@@ -257,6 +262,7 @@ private struct InlineCarouselItemImage: View {
                 contentMode: placeholderContentMode
             )
         }
+        .onFailure { reportMediaLoadFailed(.image, cause: mediaFailureCause(imageError: $0), campaignKey: campaignKey) }
     }
 }
 

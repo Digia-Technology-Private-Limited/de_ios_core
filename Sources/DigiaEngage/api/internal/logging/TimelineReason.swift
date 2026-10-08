@@ -49,6 +49,12 @@ enum TimelineReason: String, CaseIterable, DiagnosticReason {
     /// The campaign fetch was rejected — a wrong or expired API key.
     case fetchFailedAuth = "fetch_failed_auth"
 
+    /// Digia answered the fetch with an error status or a body this SDK cannot read.
+    case fetchFailedResponse = "fetch_failed_response"
+
+    /// The bundle has CEP-triggered campaigns, but no CEP plugin is registered.
+    case pluginNotRegistered = "plugin_not_registered"
+
     // MARK: parse
 
     /// One campaign in the bundle could not be read and was skipped. The rest
@@ -76,6 +82,9 @@ enum TimelineReason: String, CaseIterable, DiagnosticReason {
     /// A declared variable got no CEP value and has no fallback, so it renders empty.
     case missingVariable = "missing_variable"
 
+    /// A CTA step of a type this SDK cannot run. The step is skipped.
+    case unsupportedActionType = "unsupported_action_type"
+
     // MARK: trigger
 
     /// A CEP handed us a trigger payload.
@@ -91,11 +100,28 @@ enum TimelineReason: String, CaseIterable, DiagnosticReason {
     /// The experience reached the screen.
     case displayed = "displayed"
 
+    /// Campaign media could not load (4xx, invalid URL, or undecodable).
+    case mediaLoadFailed = "media_load_failed"
+
     // MARK: interaction
 
     /// The user tapped it. Which element is in `extras`.
     case clicked = "clicked"
 
+    /// A custom-KV CTA ran with no host handler set.
+    case actionHandlerMissing = "action_handler_missing"
+
+    /// The survey answers could not be posted; Digia rejected them.
+    case surveySubmissionFailed = "survey_submission_failed"
+
     /// The pinned string form. Never derive this from the case name.
     var wire: String { rawValue }
+}
+
+/// Reasons a CEP plugin logs about its own CEP SDK. Public because plugins live in other modules.
+public enum CEPPluginReason: String, CaseIterable, DiagnosticReason {
+    /// A private CEP API the plugin needs is missing, often after a CEP SDK upgrade.
+    case bridgeUnavailable = "cep_bridge_unavailable"
+
+    public var wire: String { rawValue }
 }

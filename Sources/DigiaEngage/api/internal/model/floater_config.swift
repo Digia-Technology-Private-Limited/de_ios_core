@@ -44,6 +44,14 @@ enum FloaterMediaKind: Equatable {
         }
     }
 
+    var healthKind: HealthMediaKind {
+        switch self {
+        case .video: .video
+        case .image, .gif: .image
+        case .lottie: .lottie
+        }
+    }
+
     /// Only a media kind with a timeline exposes play/pause and a progress bar — matches
     /// Android's `FloaterMediaKind.isPlayable` (video || lottie); a plain image/GIF has no
     /// "paused" state a user can toggle.
@@ -299,13 +307,15 @@ struct FloaterExpandedConfig: Equatable {
     /// `FloaterExpandedConfig.fromJson` / Flutter's `PipExpanded.fromJson`).
     static func fromJson(
         _ json: [String: Any]?, designTokens: DesignTokenCatalog = .empty
-    ) -> FloaterExpandedConfig? {
+    ) throws -> FloaterExpandedConfig? {
         guard let j = json, let canvasJson = j.object("canvas"), !canvasJson.isEmpty else {
             return nil
         }
         let canvas: CampaignCanvas
         do {
             canvas = try CampaignCanvasParser(designTokens: designTokens).parse(canvasJson)
+        } catch let reported as ReportedParseFailure {
+            throw reported
         } catch {
             log.e("Floater rejected — canvas parse failed", error: error.localizedDescription)
             return nil
@@ -439,12 +449,12 @@ struct FloaterConfig: Equatable {
     /// media, or no expanded canvas to open.
     static func fromJson(
         _ templateConfig: [String: Any], designTokens: DesignTokenCatalog = .empty
-    ) -> FloaterConfig? {
+    ) throws -> FloaterConfig? {
         guard let media = FloaterMediaConfig.fromJson(templateConfig.object("media")) else {
             return nil
         }
         guard
-            let expanded = FloaterExpandedConfig.fromJson(
+            let expanded = try FloaterExpandedConfig.fromJson(
                 templateConfig.object("expanded"), designTokens: designTokens
             )
         else { return nil }
