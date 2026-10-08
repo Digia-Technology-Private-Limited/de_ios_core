@@ -108,9 +108,15 @@ struct CampaignFetcher {
             serverTimeMs: serverTimeMs ?? (acceptBridgedServerTime
                 ? (root["serverTimeMs"] as? NSNumber)?.int64Value
                 : nil),
-            healthEnabled: bundle.bool("sdkHealth", default: true),
+            healthEnabled: healthEnabled(bundle["sdkHealth"]) ?? true,
             healthSessionCap: healthSessionCap(bundle["sdkHealthSessionCap"])
         )
+    }
+
+    /// The kill switch, read strictly: only a JSON boolean counts, so `0` or `"false"` cannot mute health.
+    private static func healthEnabled(_ raw: Any?) -> Bool? {
+        guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
     }
 
     /// The per-session health-event cap, read defensively. `nil` means the

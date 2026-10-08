@@ -86,8 +86,8 @@ enum HealthReasons {
         "unsupported_widget_type": ["widget_type"],
         "campaign_unsupported": ["precondition", "type"],
         "fetch_failed_auth": ["http_status"],
-        "invalid_config": [],
-        "missing_variable": [],
+        "invalid_config": ["cause"],
+        "missing_variable": ["variable"],
         "not_ready": [],
         "initialization_failed": [],
         "surface_busy": ["blocking_campaign_key", "blocking_kind"],
@@ -117,6 +117,9 @@ enum HealthReasons {
     static let dedupExtraKey: [String: String] = [
         "unknown_design_token": "token",
         "missing_variable": "variable",
+        "unsupported_widget_type": "widget_type",
+        // A fixed token per failed precondition, so two causes stay two reports.
+        "invalid_config": "cause",
         // One report per (dropped campaign, blocker) per launch — "blocked by X
         // on N% of app opens".
         "surface_busy": "blocking_campaign_key",

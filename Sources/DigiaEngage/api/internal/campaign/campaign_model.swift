@@ -114,13 +114,14 @@ struct CampaignModel: Equatable {
                     templateConfig,
                     stateful: stateful
                 ) else {
-                    log.e(
-                        "Campaign skipped — invalid inline timer config",
-                        campaign: campaignKey,
-                        stage: .parse,
-                        reason: TimelineReason.campaignUnsupported,
-                        extras: ["type": "inlineCanvas"]
-                    )
+                    let version = (templateConfig["stateful"] as? [String: Any])?.int("version", default: -1) ?? -1
+                    if !CampaignParseScope.reportVersion(version, supported: 1), timeAnchor == nil {
+                        CampaignParseScope.report(
+                            "Campaign skipped — timer needs server time, and the fetch had none",
+                            reason: TimelineReason.campaignUnsupported,
+                            extras: ["precondition": "server_time_missing"]
+                        )
+                    }
                     return nil
                 }
                 canvasConfig.variableSchemas = schemas
@@ -175,7 +176,11 @@ struct CampaignModel: Equatable {
                 config = .floater(floaterConfig)
             }
         default:
-            // Any unknown type is skipped.
+            CampaignParseScope.report(
+                "Campaign skipped — unknown campaign type (type=\(campaignType))",
+                reason: TimelineReason.campaignUnsupported,
+                extras: ["type": campaignType]
+            )
             return nil
         }
 
@@ -233,13 +238,24 @@ struct CampaignModel: Equatable {
                   let target = step["target"] as? [String: Any],
                   target["type"] as? String == "anchorless"
             else { continue }
-            guard target.int("version", default: -1) == 1 else { return nil }
+            let version = target.int("version", default: -1)
+            guard version == 1 else {
+                CampaignParseScope.reportVersion(version, supported: 1)
+                return nil
+            }
             guard let variants = target["variants"] else { continue }
             guard let devicePlatform,
                   let variantMap = variants as? [String: Any],
                   let variant = variantMap[devicePlatform] as? [String: Any],
                   variant["devicePlatform"] as? String == devicePlatform
-            else { return nil }
+            else {
+                CampaignParseScope.report(
+                    "Campaign skipped — no anchorless variant for this platform",
+                    reason: TimelineReason.campaignUnsupported,
+                    extras: ["precondition": "platform_variant_missing"]
+                )
+                return nil
+            }
 
             var selected = variant
             selected["type"] = "anchorless"

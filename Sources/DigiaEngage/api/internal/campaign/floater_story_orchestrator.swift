@@ -65,6 +65,8 @@ final class FloaterStoryOrchestrator: ObservableObject {
     private var autoDismissTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
     private(set) var lastStartFailureReason: String?
+    /// `true` when the last start failed only because a floater already shows.
+    private(set) var lastStartFailedBusy = false
 
     var now: () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
 
@@ -97,6 +99,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
     @discardableResult
     func start(_ campaign: CampaignModel, payload: CEPTriggerPayload, screenName: String?) -> Bool {
         lastStartFailureReason = nil
+        lastStartFailedBusy = false
         guard campaign.campaignType == "floater", campaign.floaterStoryConfig != nil else {
             lastStartFailureReason = "campaign is not a parsed story floater"
             return false
@@ -107,9 +110,11 @@ final class FloaterStoryOrchestrator: ObservableObject {
         if closing { finishDismiss() }
         guard state == nil else {
             lastStartFailureReason = "another story floater is already on screen"
+            lastStartFailedBusy = true
             return false
         }
 
+        reportMissingVariables(campaign.floaterStoryConfig?.variableSchemas ?? [], payload: payload)
         tokenCounter += 1
         state = ActiveFloaterStoryState(
             campaign: campaign,

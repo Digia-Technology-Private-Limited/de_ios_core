@@ -55,6 +55,7 @@ struct DesignTokenCatalog {
             guard let color = colors[token] else {
                 log.e(
                     "Unknown color token — falling back to the authored default (token=\(token))",
+                    campaign: CampaignParseScope.current?.campaignKey,
                     stage: .parse,
                     reason: TimelineReason.unknownDesignToken,
                     extras: ["token": token, "kind": "color"]
@@ -74,11 +75,12 @@ struct DesignTokenCatalog {
                 log.e(
                     "Unknown typography token — falling back to the base text style "
                         + "(token=\(token))",
+                    campaign: CampaignParseScope.current?.campaignKey,
                     stage: .parse,
                     reason: TimelineReason.unknownDesignToken,
                     extras: ["token": token, "kind": "typography"]
                 )
-                throw DesignTokenError.invalid("Unknown typography token '\(token)'")
+                return nil
             }
             return result
         }

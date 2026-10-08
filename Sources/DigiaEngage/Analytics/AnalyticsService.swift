@@ -9,6 +9,7 @@ private let log = DigiaLogger("analytics")
 @MainActor
 final class AnalyticsService {
     private let config: AnalyticsConfig
+    var isEnabled: Bool { config.enabled }
     let identityManager: IdentityManager
     let sessionManager: SessionManager
     let queue: AnalyticsQueue

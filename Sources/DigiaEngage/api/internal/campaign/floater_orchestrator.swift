@@ -173,6 +173,8 @@ final class FloaterOrchestrator: ObservableObject {
     private var exitTask: Task<Void, Never>?
     private var mediaReadyTask: Task<Void, Never>?
     private(set) var lastStartFailureReason: String?
+    /// `true` when the last start failed only because a floater already shows.
+    private(set) var lastStartFailedBusy = false
     private var statusObservation: NSKeyValueObservation?
     /// `addObserver(forName:object:queue:using:)` returns an opaque token that is
     /// *not* removable via `removeObserver(self, ...)` — that selector-based overload
@@ -218,6 +220,7 @@ final class FloaterOrchestrator: ObservableObject {
     @discardableResult
     func start(_ campaign: CampaignModel, payload: CEPTriggerPayload, screenName: String?) -> Bool {
         lastStartFailureReason = nil
+        lastStartFailedBusy = false
         guard campaign.campaignType == "floater", campaign.floaterConfig != nil else {
             lastStartFailureReason = "campaign is not a parsed floater"
             return false
@@ -228,9 +231,11 @@ final class FloaterOrchestrator: ObservableObject {
         if closing { finishDismiss() }
         if state != nil {
             lastStartFailureReason = "another floater is active"
+            lastStartFailedBusy = true
             return false
         }
 
+        reportMissingVariables(campaign.floaterConfig?.variableSchemas ?? [], payload: payload)
         tokenCounter += 1
         let nowMs = now()
         let active = ActiveFloaterState(

@@ -67,6 +67,15 @@ enum TimelineReason: String, CaseIterable, DiagnosticReason {
     /// diagnostics; it will never appear.
     case campaignUnsupported = "campaign_unsupported"
 
+    /// A campaign authored with a schema version newer than this SDK reads.
+    case schemaVersionTooNew = "schema_version_too_new"
+
+    /// A canvas widget of a type this SDK cannot draw. The widget is skipped.
+    case unsupportedWidgetType = "unsupported_widget_type"
+
+    /// A declared variable got no CEP value and has no fallback, so it renders empty.
+    case missingVariable = "missing_variable"
+
     // MARK: trigger
 
     /// A CEP handed us a trigger payload.
