@@ -5,10 +5,16 @@ import UIKit
 private let exposedFraction: CGFloat = 0.5
 
 /// Sends carousel Step Viewed for the slide on display, only while the slot is exposed. One gate
-/// lives per slot and payload, so a re-show of the same slide is quiet and a new payload starts over.
+/// lives per slot, so a re-show of the same slide is quiet. A new payload starts over.
 @MainActor
 final class CarouselStepGate {
-    private let payload: CEPTriggerPayload
+    var payload: CEPTriggerPayload {
+        didSet {
+            guard payload != oldValue else { return }
+            sentIndex = -1
+            send()
+        }
+    }
     private var index = -1
     private var total = 0
     private var auto = false
@@ -19,7 +25,11 @@ final class CarouselStepGate {
     }
 
     var exposed = false {
-        didSet { send() }
+        didSet {
+            // A slide reached while hidden was not seen to autoplay in.
+            auto = false
+            send()
+        }
     }
 
     func onStep(index: Int, total: Int, auto: Bool) {
@@ -42,15 +52,19 @@ final class CarouselStepGate {
 @MainActor
 struct CarouselStepScope<Content: View>: View {
     @State private var gate: CarouselStepGate
+    private let payload: CEPTriggerPayload
     private let content: (CarouselStepGate) -> Content
 
     init(payload: CEPTriggerPayload, @ViewBuilder content: @escaping (CarouselStepGate) -> Content) {
         _gate = State(initialValue: CarouselStepGate(payload: payload))
+        self.payload = payload
         self.content = content
     }
 
     var body: some View {
-        content(gate).background(SlotExposureReader { [gate] in gate.exposed = $0 })
+        content(gate)
+            .background(SlotExposureReader { [gate] in gate.exposed = $0 })
+            .onChange(of: payload) { [gate] in gate.payload = $0 }
     }
 }
 
