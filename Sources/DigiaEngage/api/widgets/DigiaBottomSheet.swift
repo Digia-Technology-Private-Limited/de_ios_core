@@ -79,7 +79,7 @@ struct DigiaBottomSheet<Content: View>: View {
                 config.scrimColor
                     .opacity(shown ? 1 : 0)
                     .contentShape(Rectangle())
-                    .onTapGesture { if config.allowBackdropDismiss { close() } }
+                    .onTapGesture { handleBackdropTap() }
 
                 presentedCard
             }
@@ -253,29 +253,41 @@ struct DigiaBottomSheet<Content: View>: View {
             )
     }
 
+    func handleBackdropTap() {
+        if config.allowBackdropDismiss { close() }
+    }
+
+    func handleDragChange(translationHeight: CGFloat) {
+        guard config.allowDragDismiss else { return }
+        dragOffset =
+            translationHeight > 0
+            ? translationHeight
+            : translationHeight * 0.2
+    }
+
+    func handleDragEnd(translationHeight: CGFloat) {
+        guard config.allowDragDismiss else { return }
+        if shouldDismissBottomSheet(
+            dragDistance: translationHeight,
+            sheetHeight: renderedSheetHeight
+        ) {
+            close()
+        } else {
+            withAnimation(animation) { dragOffset = 0 }
+        }
+    }
+
     private var dragGesture: some Gesture {
         DragGesture()
             .onChanged { value in
-                guard config.allowDragDismiss else { return }
-                dragOffset =
-                    value.translation.height > 0
-                    ? value.translation.height
-                    : value.translation.height * 0.2
+                handleDragChange(translationHeight: value.translation.height)
             }
             .onEnded { value in
-                guard config.allowDragDismiss else { return }
-                if shouldDismissBottomSheet(
-                    dragDistance: value.translation.height,
-                    sheetHeight: renderedSheetHeight
-                ) {
-                    close()
-                } else {
-                    withAnimation(animation) { dragOffset = 0 }
-                }
+                handleDragEnd(translationHeight: value.translation.height)
             }
     }
 
-    private func close() {
+    func close() {
         // The completion-closure overload of `withAnimation` needs iOS 17; below that,
         // fire `onDismiss()` after the spring's response time instead.
         if #available(iOS 17, *) {

@@ -2,7 +2,7 @@ import Foundation
 @testable import DigiaEngage
 import Testing
 
-@Suite("Nudge video aspect ratio")
+@Suite("Nudge video aspect ratio", .tags(.nudge, .contract, .media))
 struct NudgeVideoAspectRatioTests {
     @Test("positive ratio parses and clears stale fixed height")
     func parsesAspectRatio() throws {
