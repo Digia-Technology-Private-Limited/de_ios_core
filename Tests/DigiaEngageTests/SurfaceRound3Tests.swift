@@ -151,10 +151,13 @@ extension DigiaEngageTests {
             #expect(guide.dismissReason == .completed)
             let names = try await digiaEvents(sdk).map(\.name)
             #expect(names.contains("Digia Experience Completed"))
-            #expect(!names.contains("Digia Experience Dismissed"))
+            #expect(names.contains("Digia Experience Dismissed"))
+            let dismissed = try await digiaEvents(sdk).first { $0.name == "Digia Experience Dismissed" }
+            #expect(dismissed?.props["dismiss_reason"] as? String == "completed")
+            #expect(dismissed?.props["dwell_ms"] != nil)
         }
 
-        @Test("survey dismiss carries user_close; a completed survey sends no Digia dismiss (SR71)")
+        @Test("survey dismiss carries user_close; a completed survey sends Digia dismiss (SR71)")
         func surveyDismissReason() async throws {
             let sdk = try await makeSdk([surveyJson("s1"), surveyJson("s2")])
             let first = deliver(sdk, "s1", "cep-1")
@@ -170,7 +173,7 @@ extension DigiaEngageTests {
             let reasons = try await digiaEvents(sdk)
                 .filter { $0.name == "Digia Experience Dismissed" }
                 .map { $0.props["dismiss_reason"] as? String }
-            #expect(reasons == ["user_close"])
+            #expect(reasons == ["user_close", "completed"])
         }
     }
 }
