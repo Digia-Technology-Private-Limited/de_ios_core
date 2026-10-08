@@ -24,7 +24,7 @@ extension DigiaEngageTests {
                 sdk.markInitializedForTesting(
                     with: DigiaConfig(apiKey: "test_key", wrapperBinding: wrapperBinding))
             }
-            sdk.setCampaignsForTesting(try campaigns.map { try #require(CampaignModel.fromJson($0)) })
+            sdk.setCampaignsForTesting(try campaigns.map { try #require(try CampaignModel.fromJson($0)) })
             return sdk
         }
 

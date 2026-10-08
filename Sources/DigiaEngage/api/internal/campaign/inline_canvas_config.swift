@@ -106,7 +106,7 @@ struct StatefulTimerConfig: Equatable {
         _ json: [String: Any],
         designTokens: DesignTokenCatalog,
         timeAnchor: TrustedTimeAnchor?
-    ) -> StatefulTimerConfig? {
+    ) throws -> StatefulTimerConfig? {
         guard let timeAnchor,
               let stateful = json.object("stateful"),
               version(stateful) == 1,
@@ -148,7 +148,7 @@ struct StatefulTimerConfig: Equatable {
             if raw["canvas"] == nil || raw["canvas"] is NSNull { canvas = nil }
             else {
                 guard let rawCanvas = raw.object("canvas"),
-                      let parsed = try? CampaignCanvasParser(designTokens: designTokens).parse(rawCanvas)
+                      let parsed = try parseOrNil({ try CampaignCanvasParser(designTokens: designTokens).parse(rawCanvas) })
                 else { return nil }
                 canvas = parsed
             }
@@ -271,7 +271,7 @@ struct InlineCanvasConfig: Equatable {
     static func fromJson(
         _ json: [String: Any],
         designTokens: DesignTokenCatalog = .empty
-    ) -> InlineCanvasConfig? {
+    ) throws -> InlineCanvasConfig? {
         guard let slotKey = json.nonBlankString("slotKey"),
               !slotKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let canvasJson = json.object("canvas")
@@ -280,7 +280,7 @@ struct InlineCanvasConfig: Equatable {
         // A canvas version this build cannot read. Collapsing the slot is the
         // right failure: the app shows its own content instead of a
         // half-understood card.
-        guard let canvas = try? CampaignCanvasParser(designTokens: designTokens).parse(canvasJson)
+        guard let canvas = try parseOrNil({ try CampaignCanvasParser(designTokens: designTokens).parse(canvasJson) })
         else { return nil }
 
         let marginJson = json.object("layout")?.object("margin") ?? [:]

@@ -227,7 +227,7 @@ struct NudgeConfig: Equatable {
     /// Decodes a nudge `templateConfig` (`{ container, layout, variables }`).
     /// Returns nil when the content tree is missing — such a campaign has
     /// nothing to show.
-    static func fromJson(_ json: [String: Any], designTokens: DesignTokenCatalog = .empty) -> NudgeConfig? {
+    static func fromJson(_ json: [String: Any], designTokens: DesignTokenCatalog = .empty) throws -> NudgeConfig? {
         let rawDesignWidth = CGFloat(json.double("designWidth", default: Double(defaultCampaignCanvasDesignWidth)))
         let designWidth = rawDesignWidth.isFinite && rawDesignWidth > 0
             ? rawDesignWidth : defaultCampaignCanvasDesignWidth
@@ -237,6 +237,7 @@ struct NudgeConfig: Equatable {
         if json.string("layoutMode") == "canvas" {
             guard let rawCanvas = json["canvas"] as? [String: Any] else { return nil }
             do { canvas = try CampaignCanvasParser(designTokens: designTokens).parse(rawCanvas) }
+            catch let reported as ReportedParseFailure { throw reported }
             catch {
                 log.e("Nudge rejected — canvas parse failed", error: error.localizedDescription)
                 return nil

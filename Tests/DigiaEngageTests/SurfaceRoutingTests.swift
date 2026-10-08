@@ -22,7 +22,7 @@ extension DigiaEngageTests {
 
         private func start(_ campaigns: [[String: Any]]) throws {
             sdk.resetForTesting()
-            sdk.setCampaignsForTesting(try campaigns.map { try #require(CampaignModel.fromJson($0)) })
+            sdk.setCampaignsForTesting(try campaigns.map { try #require(try CampaignModel.fromJson($0)) })
         }
 
         private func liveTest(_ invocationId: String, _ campaign: [String: Any]) {

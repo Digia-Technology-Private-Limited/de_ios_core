@@ -1789,7 +1789,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // and no type — the one place a marketer looks at it before shipping.
         // A live test is a PM's preview, so its parse and route must not reach fleet health.
         let parsed = HealthSink.$muted.withValue(true) {
-            CampaignModel.fromJson(
+            try? CampaignModel.fromJson(
                 campaignJson,
                 designTokens: currentDesignTokens,
                 devicePlatform: "ios",

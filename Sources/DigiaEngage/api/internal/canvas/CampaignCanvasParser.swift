@@ -183,7 +183,7 @@ struct CampaignCanvasParser {
 
     func parse(_ json: [String: Any]) throws -> CampaignCanvas {
         let version = json.isAbsent("version") ? 2 : (json["version"] as? NSNumber)?.intValue ?? -1
-        guard CampaignParseScope.acceptsVersion(version, supported: 2) else {
+        guard try CampaignParseScope.acceptsVersion(version, supported: 2) else {
             throw DesignTokenError.invalid("Unsupported canvas version \(version)")
         }
         let width = positive(propertyNumber(json["canvasWidth"]) ?? 360, fallback: 360)

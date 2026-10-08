@@ -40,9 +40,9 @@ enum CanvasSurveyConfigParser {
         fallbackId: String,
         designTokens: DesignTokenCatalog = .empty,
         variableSchemas: [VariableSchema] = []
-    ) -> SurveyConfigModel? {
+    ) throws -> SurveyConfigModel? {
         guard SurveyParse.string(json["templateType"]) == "survey",
-              CampaignParseScope.acceptsVersion(schemaVersion(json["schemaVersion"]), supported: 1),
+              try CampaignParseScope.acceptsVersion(schemaVersion(json["schemaVersion"]), supported: 1),
               let scenesArr = SurveyParse.array(json["scenes"]),
               let flow = SurveyParse.object(json["flow"]),
               let flowNodesArr = SurveyParse.array(flow["nodes"]) else { return nil }
