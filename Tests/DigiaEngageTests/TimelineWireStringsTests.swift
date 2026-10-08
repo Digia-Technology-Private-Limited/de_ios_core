@@ -145,6 +145,7 @@ struct TimelineWireStringsTests {
             "invalid_config": ["cause"],
             "surface_busy": ["blocking_campaign_key"],
             "unsupported_action_type": ["action_type"],
+            "action_handler_missing": ["action_type"],
             "cep_bridge_unavailable": ["selector"],
             "media_load_failed": ["media_kind", "cause"],
         ])

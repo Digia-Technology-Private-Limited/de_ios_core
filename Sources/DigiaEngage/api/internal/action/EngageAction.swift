@@ -35,6 +35,15 @@ enum EngageAction: Equatable {
         }
     }
 
+    /// Whether a link, copy or share has an empty value.
+    var hasEmptyPayload: Bool {
+        switch self {
+        case .openUrl(let value), .openDeeplink(let value), .copyToClipboard(let value), .share(let value):
+            value.isEmpty
+        default: false
+        }
+    }
+
     var analyticsURL: String? {
         switch self {
         case .openUrl(let url), .openDeeplink(let url): url

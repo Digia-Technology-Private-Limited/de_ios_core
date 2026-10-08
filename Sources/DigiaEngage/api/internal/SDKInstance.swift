@@ -1553,6 +1553,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .guide(let guideConfig):
             if !guideConfig.isAnchorless,
                config?.wrapperBinding == "react_native",
+               !guideConfig.steps.isEmpty,
                guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
             {
                 guard let renderViaJs = onGuideRenderRequest else {
@@ -1599,9 +1600,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 lastCampaignDropReason = message
                 context.onDropped(DropReason.invalidConfig, message: message)
                 log.e("Dropped — \(message)", campaign: key)
-                return .dropped(
-                    reason: .invalidConfig, detail: message,
-                    cause: guideConfig.steps.isEmpty ? "empty_content" : "wrong_config_type")
+                return .dropped(reason: .invalidConfig, detail: message, cause: "empty_content")
             }
             if let busy = admitToSurface(.guide, campaignKey: key, context: context) {
                 logNativeGuideStage("route", "result=dropped reason=surface_busy campaign_key=\(key)")
@@ -1818,6 +1817,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
 
         if let guideConfig = campaign.guideConfig,
+           !guideConfig.steps.isEmpty,
            guideConfig.steps.allSatisfy({ $0.widgetConfig.layoutMode != "canvas" })
         {
             reporter.postFailed(

@@ -232,6 +232,8 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         if wire == "timeout", (record.extras["surface_kind"] ?? "").isEmpty { return false }
         // Only a plugin buffer stamps `cep`; a routing supersede or a replaced display is normal.
         if wire == "superseded", (record.extras["cep"] ?? "").isEmpty { return false }
+        // Only a classified config fault stamps `cause`. As Flutter.
+        if wire == "invalid_config", (record.extras["cause"] ?? "").isEmpty { return false }
         lock.lock()
         defer { lock.unlock() }
         guard sent < cap else { return false }

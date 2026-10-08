@@ -114,8 +114,11 @@ struct CampaignModel: Equatable {
                     templateConfig,
                     stateful: stateful
                 ) else {
-                    let version = (templateConfig["stateful"] as? [String: Any])?.int("version", default: -1) ?? -1
-                    if !CampaignParseScope.reportVersion(version, supported: 1), timeAnchor == nil {
+                    if timeAnchor != nil {
+                        let stateful = templateConfig["stateful"] as? [String: Any]
+                        _ = CampaignParseScope.acceptsVersion(
+                            stateful.map(StatefulTimerConfig.version) ?? 1, supported: 1)
+                    } else {
                         CampaignParseScope.report(
                             "Campaign skipped — timer needs server time, and the fetch had none",
                             reason: TimelineReason.campaignUnsupported,
@@ -238,11 +241,8 @@ struct CampaignModel: Equatable {
                   let target = step["target"] as? [String: Any],
                   target["type"] as? String == "anchorless"
             else { continue }
-            let version = target.int("version", default: -1)
-            guard version == 1 else {
-                CampaignParseScope.reportVersion(version, supported: 1)
-                return nil
-            }
+            let version = target.isAbsent("version") ? 1 : target.int("version", default: -1)
+            guard CampaignParseScope.acceptsVersion(version, supported: 1) else { return nil }
             guard let variants = target["variants"] else { continue }
             guard let devicePlatform,
                   let variantMap = variants as? [String: Any],
@@ -462,7 +462,6 @@ struct CampaignModel: Equatable {
             )
         }
 
-        if steps.isEmpty { return nil }
         let anchorlessTargets = steps.compactMap { step -> AnchorlessTarget? in
             if case let .anchorless(target) = step.target { return target }
             return nil

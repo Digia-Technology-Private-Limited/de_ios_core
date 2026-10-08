@@ -24,7 +24,15 @@ struct DesignTokenCatalog {
         let themes = json["themes"] as? [String: Any] ?? [:]
         let effective: [String]
         switch supported.count {
-        case 0: effective = []
+        case 0:
+            // Typography needs no theme, so it survives; color tokens fall back.
+            log.e(
+                "Design tokens declare no supported theme — falling back to authored colors",
+                stage: .parse,
+                reason: TimelineReason.designTokensUnreadable,
+                extras: ["theme": "none"]
+            )
+            effective = []
         case 1: effective = [supported[0], supported[0]]
         default:
             guard supported.contains("light"), supported.contains("dark") else {

@@ -199,6 +199,7 @@ final class EngageActionExecutor {
     ) async {
         do {
             let action = action.resolved(with: variables)
+            if action.hasEmptyPayload { return }
             if localActionExecutor.execute(action) { return }
             if globalActionExecutor.execute(action) { return }
             try hostActionExecutor.execute(action, campaignKey: campaignKey)

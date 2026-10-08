@@ -182,9 +182,8 @@ struct CampaignCanvasParser {
     }
 
     func parse(_ json: [String: Any]) throws -> CampaignCanvas {
-        let version = (json["version"] as? NSNumber)?.intValue ?? -1
-        guard version == 2 else {
-            CampaignParseScope.reportVersion(version, supported: 2)
+        let version = json.isAbsent("version") ? 2 : (json["version"] as? NSNumber)?.intValue ?? -1
+        guard CampaignParseScope.acceptsVersion(version, supported: 2) else {
             throw DesignTokenError.invalid("Unsupported canvas version \(version)")
         }
         let width = positive(propertyNumber(json["canvasWidth"]) ?? 360, fallback: 360)
@@ -222,13 +221,13 @@ struct CampaignCanvasParser {
         guard let json, let type = json["type"] as? String else { return nil }
         guard let parser = widgetParsers[type] else {
             // The campaign still shows without this widget, so the scope stays unreported.
-            log.w(
+            if !type.isEmpty { log.w(
                 "Canvas widget skipped — unsupported type (type=\(type))",
                 campaign: CampaignParseScope.current?.campaignKey,
                 stage: .parse,
                 reason: TimelineReason.unsupportedWidgetType,
                 extras: ["widget_type": type]
-            )
+            ) }
             return nil
         }
         let props = propertyObject(json["props"]) ?? [:]

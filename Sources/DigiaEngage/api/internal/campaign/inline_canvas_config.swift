@@ -97,6 +97,11 @@ struct StatefulTimerConfig: Equatable {
         )
     }
 
+    /// The `stateful.version`: 1 when absent, -1 when not a number.
+    static func version(_ stateful: [String: Any]) -> Int {
+        stateful.isAbsent("version") ? 1 : stateful.int("version", default: -1)
+    }
+
     static func fromJson(
         _ json: [String: Any],
         designTokens: DesignTokenCatalog,
@@ -104,7 +109,7 @@ struct StatefulTimerConfig: Equatable {
     ) -> StatefulTimerConfig? {
         guard let timeAnchor,
               let stateful = json.object("stateful"),
-              stateful.int("version", default: -1) == 1,
+              version(stateful) == 1,
               let sources = stateful["sources"] as? [[String: Any]], sources.count == 1,
               let source = sources.first,
               source["kind"] as? String == "timer",

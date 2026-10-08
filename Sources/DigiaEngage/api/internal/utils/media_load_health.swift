@@ -11,9 +11,10 @@ enum HealthMediaKind: String {
     case image, lottie, video
 }
 
-/// Reports a media content fault. A `nil` cause is a network or server fault, which is not reported.
+/// Reports a media content fault for a known campaign. A `nil` cause is a network
+/// or server fault, which is not reported.
 func reportMediaLoadFailed(_ kind: HealthMediaKind, cause: String?, campaignKey: String?) {
-    guard let cause else { return }
+    guard let cause, let campaignKey, !campaignKey.isEmpty else { return }
     log.e(
         "Media failed to load (media_kind=\(kind.rawValue), cause=\(cause))",
         campaign: campaignKey,

@@ -8,9 +8,14 @@ struct DigiaInlineBannerView: View {
         buildVariableContext(schemas: config.variableSchemas, cepVars: payload.variables)
     }
 
+    /// The actions whose payload resolves to a value.
+    private var actions: [EngageAction] {
+        config.actions.filter { !$0.resolved(with: variables).hasEmptyPayload }
+    }
+
     var body: some View {
         Group {
-            if config.actions.isEmpty {
+            if actions.isEmpty {
                 banner
             } else {
                 banner
@@ -66,11 +71,12 @@ struct DigiaInlineBannerView: View {
     }
 
     private func handleTap() {
-        let reportedAction = config.actions.first?.resolved(with: variables)
+        let tappable = actions
+        let reportedAction = tappable.first?.resolved(with: variables)
         SDKInstance.shared.reportBannerClicked(payload: payload, action: reportedAction)
         Task {
             await SDKInstance.shared.executeActionFlow(
-                config.actions,
+                tappable,
                 variables: variables,
                 campaignKey: payload.campaignKey,
                 localActionExecutor: LocalActionExecutor()

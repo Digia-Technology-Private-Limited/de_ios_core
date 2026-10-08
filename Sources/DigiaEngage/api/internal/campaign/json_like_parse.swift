@@ -17,6 +17,11 @@ extension Dictionary where Key == String, Value == Any {
         self[key] as? Bool ?? fallback
     }
 
+    /// Whether `key` is absent or JSON `null`.
+    func isAbsent(_ key: String) -> Bool {
+        self[key] == nil || self[key] is NSNull
+    }
+
     func int(_ key: String, default fallback: Int) -> Int {
         if let value = self[key] as? Int { return value }
         if let value = self[key] as? NSNumber { return value.intValue }

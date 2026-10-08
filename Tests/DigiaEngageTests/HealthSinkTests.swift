@@ -57,7 +57,9 @@ struct HealthSinkTests {
         let sink = HealthSink()
         #expect(sink.accepts(record(TimelineReason.malformedCampaignSkipped)))
         #expect(sink.accepts(record(DropReason.unknownCampaignKey)))
-        #expect(sink.accepts(record(DropReason.invalidConfig)))
+        #expect(sink.accepts(record(DropReason.invalidConfig, extras: ["cause": "start_failed"])))
+        // Only a classified config fault carries `cause`.
+        #expect(!sink.accepts(record(DropReason.invalidConfig)))
         #expect(sink.accepts(record(DropReason.pendingExpired)))
         #expect(sink.accepts(record(DropReason.superseded, extras: ["cep": "webengage"])))
         // A routing supersede or a replaced display carries no `cep`.

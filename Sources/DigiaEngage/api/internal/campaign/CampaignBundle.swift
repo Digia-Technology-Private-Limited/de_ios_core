@@ -46,10 +46,7 @@ struct CampaignBundle {
                 "Design tokens unreadable — falling back to literal values",
                 error: error.localizedDescription,
                 stage: .parse,
-                reason: TimelineReason.designTokensUnreadable,
-                extras: (error as? DesignTokenError).flatMap {
-                    if case .missingTheme(let theme) = $0 { ["theme": theme] } else { nil }
-                }
+                reason: TimelineReason.designTokensUnreadable
             )
             catalog = .empty
         }
@@ -104,15 +101,16 @@ final class CampaignParseScope: @unchecked Sendable {
         log.e(message, campaign: current?.campaignKey, stage: .parse, reason: reason, extras: extras)
     }
 
-    /// Reports a schema version newer than `supported`. Returns `true` when it did.
-    @discardableResult
-    static func reportVersion(_ version: Int, supported: Int) -> Bool {
-        guard version > supported else { return false }
-        report(
-            "Campaign skipped — schema version \(version) is newer than \(supported)",
-            reason: TimelineReason.schemaVersionTooNew,
-            extras: ["required": String(version), "supported": String(supported)]
-        )
-        return true
+    /// Whether `version` is readable. A newer version is reported; an older one
+    /// is left to the caller's `malformed_campaign_skipped`.
+    static func acceptsVersion(_ version: Int, supported: Int) -> Bool {
+        if version > supported {
+            report(
+                "Campaign skipped — schema version \(version) is newer than \(supported)",
+                reason: TimelineReason.schemaVersionTooNew,
+                extras: ["required": String(version), "supported": String(supported)]
+            )
+        }
+        return version == supported
     }
 }
