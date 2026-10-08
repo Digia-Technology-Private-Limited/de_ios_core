@@ -222,6 +222,8 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         // Only the organic acceptance watchdog stamps `surface_kind`, and only
         // when the app stayed in the foreground (R3-06, R4-D3). As Flutter.
         if wire == "timeout", (record.extras["surface_kind"] ?? "").isEmpty { return false }
+        // Only a plugin buffer stamps `cep`; a routing supersede or a replaced display is normal.
+        if wire == "superseded", (record.extras["cep"] ?? "").isEmpty { return false }
         lock.lock()
         defer { lock.unlock() }
         guard sent < cap else { return false }
