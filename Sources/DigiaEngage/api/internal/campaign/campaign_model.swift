@@ -115,13 +115,7 @@ struct CampaignModel: Equatable {
                     stateful: stateful
                 ) else {
                     let stateful = templateConfig["stateful"] as? [String: Any]
-                    if let stateful, !stateful.isAbsent("version"), !(stateful["version"] is NSNumber) {
-                        throw CampaignParseScope.report(
-                            "Campaign skipped — invalid inline timer config",
-                            reason: TimelineReason.campaignUnsupported,
-                            extras: ["type": "inlineCanvas"]
-                        )
-                    } else if timeAnchor != nil {
+                    if timeAnchor != nil {
                         _ = try CampaignParseScope.acceptsVersion(
                             stateful.map(StatefulTimerConfig.version) ?? 1, supported: 1)
                     } else {
