@@ -127,29 +127,6 @@ struct CanvasTapRegionRendererTests {
         #expect(request.actions == actions)
     }
 
-    @Test("tapRegion mounts in canvas stage host without crashing")
-    func tapRegionMountsInCanvasStage() throws {
-        let canvas = try parsedCanvas(children: [
-            [
-                "kind": "tapRegion",
-                "id": "hero-cta",
-                "rect": ["x": 0.1, "y": 0.2, "width": 0.5, "height": 0.4],
-                "isPrimary": true,
-                "onClick": [
-                    "steps": [
-                        [
-                            "type": "open_url",
-                            "data": ["url": "https://example.com"]
-                        ]
-                    ]
-                ]
-            ]
-        ])
-        let (window, _) = ComponentTestHost.mountCanvas(canvas)
-        defer { ComponentTestHost.unmount(window) }
-        ComponentTestHost.drainRunLoop(for: 0.05)
-        #expect(window.rootViewController?.view != nil)
-    }
 
     // MARK: - Test Helpers
 

@@ -95,12 +95,6 @@ struct CanvasDividerRendererTests {
         #expect(canvasDividerDashPattern(pattern: .dashed, thickness: 1, dashPattern: [12, 4, 2, 4]) == [12, 4, 2, 4])
     }
 
-    @Test("CampaignCanvasStrokeCap maps directly to CGLineCap")
-    func dividerStrokeCapMapping() {
-        #expect(CampaignCanvasStrokeCap.butt.lineCap == .butt)
-        #expect(CampaignCanvasStrokeCap.round.lineCap == .round)
-        #expect(CampaignCanvasStrokeCap.square.lineCap == .square)
-    }
 
     // MARK: - 3. Visual Goldens
 

@@ -339,6 +339,104 @@ struct CanvasCarouselRendererTests {
         assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
     }
 
+    // MARK: - 8. Autoplay Timer Behavioral Tests
+
+    @Test("carousel autoplay advances to next slide automatically on timer")
+    func carouselAutoPlayAdvancesSlide() async throws {
+        let widget = try parsedCarousel([
+            "autoPlay": true,
+            "autoPlayInterval": 100,
+            "animationDuration": 10,
+            "infiniteScroll": true
+        ], slides: [
+            makeSlideJSON(title: "Slide 0", colorHex: "#FF4F46E5"),
+            makeSlideJSON(title: "Slide 1", colorHex: "#FF10B981"),
+            makeSlideJSON(title: "Slide 2", colorHex: "#FFF59E0B")
+        ])
+
+        var interactions: [CanvasInteraction] = []
+        let view = CanvasCarouselRenderer(widget: widget, isDark: false, onAction: { _ in })
+            .environment(\.canvasInteractions, CanvasInteractionReporter { interactions.append($0) })
+
+        let (window, _) = ComponentTestHost.mount(
+            rootView: view,
+            size: CGSize(width: 360, height: 220)
+        )
+        defer { ComponentTestHost.unmount(window) }
+
+        // Initial mount reports slide 0 with auto: false
+        ComponentTestHost.drainRunLoop(for: 0.05)
+        #expect(interactions.contains(.carouselSlideViewed(index: 0, total: 3, auto: false)))
+
+        // Allow autoplay timer (0.1s) to advance to slide 1 with auto: true
+        for _ in 0..<10 {
+            pumpRunLoop(0.04)
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        #expect(interactions.contains(.carouselSlideViewed(index: 1, total: 3, auto: true)))
+    }
+
+    @Test("carousel autoplay does not advance when autoPlay is false")
+    func carouselAutoPlayDisabledDoesNotAdvance() async throws {
+        let widget = try parsedCarousel([
+            "autoPlay": false,
+            "autoPlayInterval": 100,
+            "animationDuration": 10,
+            "infiniteScroll": true
+        ], slides: [
+            makeSlideJSON(title: "Slide 0", colorHex: "#FF4F46E5"),
+            makeSlideJSON(title: "Slide 1", colorHex: "#FF10B981"),
+            makeSlideJSON(title: "Slide 2", colorHex: "#FFF59E0B")
+        ])
+
+        var interactions: [CanvasInteraction] = []
+        let view = CanvasCarouselRenderer(widget: widget, isDark: false, onAction: { _ in })
+            .environment(\.canvasInteractions, CanvasInteractionReporter { interactions.append($0) })
+
+        let (window, _) = ComponentTestHost.mount(
+            rootView: view,
+            size: CGSize(width: 360, height: 220)
+        )
+        defer { ComponentTestHost.unmount(window) }
+
+        for _ in 0..<10 {
+            pumpRunLoop(0.04)
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        // Only initial slide was viewed, no auto progression occurred
+        #expect(interactions == [.carouselSlideViewed(index: 0, total: 3, auto: false)])
+    }
+
+    @Test("carousel autoplay does not start for single slide")
+    func carouselAutoPlaySingleSlideDoesNotAdvance() async throws {
+        let widget = try parsedCarousel([
+            "autoPlay": true,
+            "autoPlayInterval": 100,
+            "animationDuration": 10
+        ], slides: [
+            makeSlideJSON(title: "Slide 0", colorHex: "#FF4F46E5")
+        ])
+
+        var interactions: [CanvasInteraction] = []
+        let view = CanvasCarouselRenderer(widget: widget, isDark: false, onAction: { _ in })
+            .environment(\.canvasInteractions, CanvasInteractionReporter { interactions.append($0) })
+
+        let (window, _) = ComponentTestHost.mount(
+            rootView: view,
+            size: CGSize(width: 360, height: 220)
+        )
+        defer { ComponentTestHost.unmount(window) }
+
+        for _ in 0..<10 {
+            pumpRunLoop(0.04)
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        #expect(interactions == [.carouselSlideViewed(index: 0, total: 1, auto: false)])
+    }
+
     // MARK: - Test Helpers
 
     private func parsedCarousel(
@@ -440,6 +538,11 @@ struct CanvasCarouselRendererTests {
         onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
     ) -> UIWindow {
         ComponentTestHost.mountCanvas(canvas, isDark: isDark, onAction: onAction).window
+    }
+
+    @MainActor
+    private func pumpRunLoop(_ seconds: TimeInterval = 0.05) {
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
 
     private func unmount(_ window: UIWindow) {

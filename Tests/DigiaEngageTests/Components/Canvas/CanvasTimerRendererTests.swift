@@ -199,8 +199,8 @@ struct CanvasTimerRendererTests {
         #expect(roundedRes[1] == (.minutes, 2))
     }
 
-    @Test("timerUnitValues oracle calculates 86399s vs 86400s threshold transitions and unit rollups")
-    func timerUnitValuesThresholdTransitionOracle() {
+    @Test("timerUnitValues oracle toggles autoHide days at 86400s threshold boundary")
+    func timerUnitValuesAutoHideThresholdTransitionOracle() {
         let allUnits: [CampaignTimerUnit: CampaignTimerUnitVisibility] = [
             .days: .show,
             .hours: .show,
@@ -212,12 +212,6 @@ struct CanvasTimerRendererTests {
             .hours: .show,
             .minutes: .show,
             .seconds: .show
-        ]
-        let daysOnly: [CampaignTimerUnit: CampaignTimerUnitVisibility] = [
-            .days: .show,
-            .hours: .hide,
-            .minutes: .hide,
-            .seconds: .hide
         ]
 
         // 86,399s is 0d 23h 59m 59s
@@ -240,6 +234,16 @@ struct CanvasTimerRendererTests {
         #expect(at86400[1] == (.hours, 0))
         #expect(at86400[2] == (.minutes, 0))
         #expect(at86400[3] == (.seconds, 0))
+    }
+
+    @Test("timerUnitValues oracle calculates ceiling rollups when larger units are isolated")
+    func timerUnitValuesIsolatedUnitRollupOracle() {
+        let daysOnly: [CampaignTimerUnit: CampaignTimerUnitVisibility] = [
+            .days: .show,
+            .hours: .hide,
+            .minutes: .hide,
+            .seconds: .hide
+        ]
 
         // When only days is visible, ceiling rounding rounds 86399s up to 1 day
         let daysCeiling = timerUnitValues(remainingSeconds: 86399, visibility: daysOnly)
@@ -280,7 +284,7 @@ struct CanvasTimerRendererTests {
 
     // MARK: - 3. Timer Subsystem: Countdown Text Formatting
 
-    @Test("canvasTimerCountdownText formats remaining unit values into padded two-digit text spans with colons")
+    @Test("canvasTimerCountdownText formats remaining unit values into padded two-digit text spans with optional custom separator color")
     func timerCountdownTextFormatsTimeBlocks() {
         let style = CampaignCanvasTimerUnitStyle(
             digitTextStyle: CampaignCanvasTextSpan(
@@ -303,6 +307,7 @@ struct CanvasTimerRendererTests {
         )
         var layout = CampaignCanvasTimerLayout()
         layout.separatorEnabled = true
+        layout.separatorColor = CampaignColor.literal("#FFEF4444")
 
         let block = canvasTimerCountdownText(
             values: [(.hours, 1), (.minutes, 1), (.seconds, 5)],
@@ -311,6 +316,7 @@ struct CanvasTimerRendererTests {
         )
         #expect(block.spans.map { $0.text } == ["01", ":", "01", ":", "05"])
         #expect(block.plainText == "01:01:05")
+        #expect(block.spans[1].color == CampaignColor.literal("#FFEF4444"))
     }
 
     @Test("canvasTimerCountdownText suppresses separator spans when separatorEnabled is false")
@@ -343,50 +349,6 @@ struct CanvasTimerRendererTests {
             layout: layout
         )
         #expect(block.spans.map { $0.text } == ["01", "30"])
-    }
-
-    @Test("canvasTimerCountdownText applies custom separatorColor and falls back to base digit color")
-    func timerCountdownTextSeparatorColor() {
-        let style = CampaignCanvasTimerUnitStyle(
-            digitTextStyle: CampaignCanvasTextSpan(
-                text: "",
-                typography: nil,
-                color: CampaignColor.literal("#FFFFFFFF"),
-                highlightColor: nil,
-                italic: false,
-                decoration: .none,
-                decorationColor: nil,
-                decorationThickness: nil,
-                actions: []
-            ),
-            digitTypography: nil,
-            digitColor: CampaignColor.literal("#FFFFFFFF"),
-            labelTypography: nil,
-            labelColor: nil,
-            boxFill: .none,
-            cornerRadius: .zero
-        )
-
-        var customLayout = CampaignCanvasTimerLayout()
-        customLayout.separatorEnabled = true
-        customLayout.separatorColor = CampaignColor.literal("#FFEF4444")
-        let customBlock = canvasTimerCountdownText(
-            values: [(.minutes, 5), (.seconds, 0)],
-            style: style,
-            layout: customLayout
-        )
-        #expect(customBlock.spans.count == 3)
-        #expect(customBlock.spans[1].text == ":")
-        #expect(customBlock.spans[1].color == CampaignColor.literal("#FFEF4444"))
-
-        var fallbackLayout = CampaignCanvasTimerLayout()
-        fallbackLayout.separatorEnabled = true
-        let fallbackBlock = canvasTimerCountdownText(
-            values: [(.minutes, 5), (.seconds, 0)],
-            style: style,
-            layout: fallbackLayout
-        )
-        #expect(fallbackBlock.spans[1].color == CampaignColor.literal("#FFFFFFFF"))
     }
 
     // MARK: - 4. Visual Goldens

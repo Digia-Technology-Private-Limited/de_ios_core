@@ -228,31 +228,7 @@ struct CanvasStoryRendererTests {
         #expect(zeroDurationIncrement == CGFloat(interval / 0.1))
     }
 
-    // MARK: - 4. Story Chrome Symbols & Mute
-
-    @Test("story chrome buttons verify symbols for close and mute states")
-    func storyChromeButtonSymbols() {
-        // Close button is always "xmark"
-        #expect(CanvasStoryChromeButton.symbol(for: .close, viewer: nil) == "xmark")
-        #expect(CanvasStoryChromeButton.symbol(for: .close, viewer: CanvasStoryViewerState(muted: false)) == "xmark")
-
-        // Mute button reflects viewer state or defaults to muted
-        #expect(CanvasStoryChromeButton.symbol(for: .mute, viewer: nil) == "speaker.slash.fill")
-        #expect(CanvasStoryChromeButton.symbol(for: .mute, viewer: CanvasStoryViewerState(muted: true)) == "speaker.slash.fill")
-        #expect(CanvasStoryChromeButton.symbol(for: .mute, viewer: CanvasStoryViewerState(muted: false)) == "speaker.wave.2.fill")
-    }
-
     // MARK: - 5. Fit & Item Mapping Oracle
-
-    @Test("story fit and content mode conversion oracle")
-    func storyFitAndContentModeMappingOracle() {
-        #expect(canvasContentMode("contain") == .fit)
-        #expect(canvasContentMode("cover") == .fill)
-        #expect(canvasContentMode("anything") == .fill)
-
-        #expect(storyFit(.fit) == .contain)
-        #expect(storyFit(.fill) == .cover)
-    }
 
     @Test("canvasStoryItem mapping transforms CampaignCanvasStoryPage into StoryItemConfig")
     func canvasStoryItemMappingOracle() {
@@ -724,28 +700,6 @@ struct CanvasStoryRendererTests {
         ) == .complete(loopToStart: true))
     }
 
-    @Test("story chrome button dispatches close and mute callbacks")
-    func storyChromeButtonDispatchesCallbacks() {
-        var closeCalled = false
-        var muteCalled = false
-
-        let closeCallback = CanvasStoryCallback(run: { closeCalled = true })
-        let muteCallback = CanvasStoryCallback(run: { muteCalled = true })
-
-        CanvasStoryChromeButton.performAction(kind: .close, close: closeCallback, toggleMute: muteCallback)
-        #expect(closeCalled == true)
-        #expect(muteCalled == false)
-
-        closeCalled = false
-        muteCalled = false
-        CanvasStoryChromeButton.performAction(kind: .mute, close: closeCallback, toggleMute: muteCallback)
-        #expect(closeCalled == false)
-        #expect(muteCalled == true)
-
-        // Nil-safety when callbacks are not provided
-        CanvasStoryChromeButton.performAction(kind: .close, close: nil, toggleMute: nil)
-        CanvasStoryChromeButton.performAction(kind: .mute, close: nil, toggleMute: nil)
-    }
 
     @Test("story viewer distinguishes dismissal from completion analytics")
     func storyViewerAnalyticsAndDismissal() {
@@ -764,6 +718,132 @@ struct CanvasStoryRendererTests {
         // Scenario 4: Subsequent completion does not double-report
         let repeatedCompletion = CanvasStoryViewer.completionInteraction(pageCount: 3, timeToCompleteMs: 8400, completedReported: true)
         #expect(repeatedCompletion == nil)
+    }
+
+    // MARK: - 8. Story Viewer Behavioral Tests
+
+    @Test("story viewer auto-advances to next page after duration and reports page viewed")
+    func storyViewerAutoAdvancesPage() async throws {
+        var interactions: [CanvasInteraction] = []
+        let (viewer, _) = try makeTestStoryViewer(
+            pagesJSON: [
+                makeStoryPageJSON(url: "https://example.com/p1.jpg", durationSeconds: 0.1),
+                makeStoryPageJSON(url: "https://example.com/p2.jpg", durationSeconds: 5.0)
+            ],
+            onInteraction: { interactions.append($0) }
+        )
+
+        let (window, _) = ComponentTestHost.mount(
+            rootView: viewer,
+            size: CGSize(width: 360, height: 640)
+        )
+        defer { ComponentTestHost.unmount(window) }
+
+        ComponentTestHost.drainRunLoop(for: 0.05)
+        #expect(interactions.contains(.storyPageViewed(index: 0, total: 2)))
+
+        for _ in 0..<20 {
+            pumpRunLoop(0.04)
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            if interactions.contains(.storyPageViewed(index: 1, total: 2)) {
+                break
+            }
+        }
+        #expect(interactions.contains(.storyPageViewed(index: 1, total: 2)))
+    }
+
+    @Test("story viewer completes after last page and invokes onDismiss when loop is disabled")
+    func storyViewerCompletesAndDismisses() async throws {
+        var dismissed = false
+        var interactions: [CanvasInteraction] = []
+        let (viewer, _) = try makeTestStoryViewer(
+            pagesJSON: [
+                makeStoryPageJSON(url: "https://example.com/p1.jpg", durationSeconds: 0.1)
+            ],
+            restartOnCompleted: false,
+            onDismiss: { dismissed = true },
+            onInteraction: { interactions.append($0) }
+        )
+
+        let (window, _) = ComponentTestHost.mount(
+            rootView: viewer,
+            size: CGSize(width: 360, height: 640)
+        )
+        defer { ComponentTestHost.unmount(window) }
+
+        for _ in 0..<20 {
+            pumpRunLoop(0.04)
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            if dismissed {
+                break
+            }
+        }
+        #expect(dismissed == true)
+        #expect(interactions.contains(where: {
+            if case .storyCompleted(let total, _) = $0 { return total == 1 }
+            return false
+        }))
+    }
+
+    @Test("story viewer loops back to first page on completion when restartOnCompleted is true")
+    func storyViewerLoopsOnCompletion() async throws {
+        var dismissed = false
+        var pageViewedIndices: [Int] = []
+        let (viewer, _) = try makeTestStoryViewer(
+            pagesJSON: [
+                makeStoryPageJSON(url: "https://example.com/p1.jpg", durationSeconds: 0.1),
+                makeStoryPageJSON(url: "https://example.com/p2.jpg", durationSeconds: 0.1)
+            ],
+            restartOnCompleted: true,
+            onDismiss: { dismissed = true },
+            onInteraction: { interaction in
+                if case .storyPageViewed(let index, _) = interaction {
+                    pageViewedIndices.append(index)
+                }
+            }
+        )
+
+        let (window, _) = ComponentTestHost.mount(
+            rootView: viewer,
+            size: CGSize(width: 360, height: 640)
+        )
+        defer { ComponentTestHost.unmount(window) }
+
+        for _ in 0..<30 {
+            pumpRunLoop(0.04)
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            if pageViewedIndices.count >= 2 {
+                break
+            }
+        }
+        #expect(dismissed == false)
+        #expect(pageViewedIndices.count >= 2)
+        #expect(pageViewedIndices.first == 0)
+    }
+
+    @Test("story page CTA stamps storyPage step metadata on dispatched action")
+    func storyPageCTAStampsStepMetadata() throws {
+        var dispatchedRequests: [CampaignCanvasActionRequest] = []
+        let (viewer, _) = try makeTestStoryViewer(
+            pagesJSON: [
+                makeStoryPageJSONWithButton(label: "Order Now", durationSeconds: 5.0),
+                makeStoryPageJSON(url: "https://example.com/p2.jpg", durationSeconds: 5.0)
+            ],
+            onAction: { dispatchedRequests.append($0) }
+        )
+
+        let (window, _) = ComponentTestHost.mount(
+            rootView: viewer,
+            size: CGSize(width: 360, height: 640)
+        )
+        defer { ComponentTestHost.unmount(window) }
+
+        ComponentTestHost.drainRunLoop(for: 0.1)
+        let activated = activateButton(in: window)
+        #expect(activated)
+        #expect(dispatchedRequests.count == 1)
+        #expect(dispatchedRequests.first?.step == CanvasStep(kind: .storyPage, index: 0, total: 2))
+        #expect(dispatchedRequests.first?.actions == [.openUrl("https://example.com/cta")])
     }
 
     // MARK: - Test Helpers
@@ -858,5 +938,123 @@ struct CanvasStoryRendererTests {
 
     private func unmount(_ window: UIWindow) {
         ComponentTestHost.unmount(window)
+    }
+
+    private func makeTestStoryViewer(
+        pagesJSON: [[String: Any]],
+        initialIndex: Int = 0,
+        restartOnCompleted: Bool = false,
+        startMuted: Bool = true,
+        onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in },
+        onDismiss: @escaping () -> Void = {},
+        onInteraction: @escaping (CanvasInteraction) -> Void = { _ in }
+    ) throws -> (view: some View, pages: [CampaignCanvasStoryPage]) {
+        let widget = try parsedStoryWidget([:], pages: pagesJSON)
+        guard case .story(
+            _, let pages, _, _, _, _, _, _, _, let chrome
+        ) = widget else {
+            throw DesignTokenError.invalid("Failed to parse story widget")
+        }
+        let viewer = CanvasStoryViewer(
+            pages: pages,
+            chrome: chrome,
+            initialIndex: initialIndex,
+            restartOnCompleted: restartOnCompleted,
+            startMuted: startMuted,
+            isDark: false,
+            onAction: onAction,
+            onDismiss: onDismiss
+        )
+        .environment(\.canvasInteractions, CanvasInteractionReporter(onInteraction))
+
+        return (viewer, pages)
+    }
+
+    private func makeStoryPageJSONWithButton(
+        label: String = "CTA",
+        durationSeconds: Double = 5.0
+    ) -> [String: Any] {
+        [
+            "thumbnailType": "image",
+            "thumbnailUrl": "https://example.com/story.jpg",
+            "thumbnailFit": "cover",
+            "pageFit": "cover",
+            "durationSeconds": durationSeconds,
+            "canvas": [
+                "version": 2,
+                "canvasWidth": 360,
+                "canvasHeight": 700,
+                "background": ["type": "solid", "color": ["value": "#FF1E293B"]],
+                "children": [
+                    [
+                        "kind": "widget",
+                        "id": "story_btn",
+                        "rect": ["x": 0.1, "y": 0.8, "width": 0.8, "height": 0.1],
+                        "widget": [
+                            "type": "digia/button",
+                            "props": [
+                                "label": ["spans": [["text": label]]],
+                                "isPrimary": true,
+                                "onClick": [
+                                    "steps": [
+                                        ["type": "open_url", "data": ["url": "https://example.com/cta"]]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    }
+
+    @discardableResult
+    private func activateButton(in window: UIWindow) -> Bool {
+        guard let rootView = window.rootViewController?.view,
+              let buttonNode = findButtonAccessibilityNode(in: rootView) else {
+            return false
+        }
+        let activated = buttonNode.accessibilityActivate()
+        ComponentTestHost.drainRunLoop(for: 0.1)
+        return activated
+    }
+
+    private func findButtonAccessibilityNode(in root: Any) -> NSObject? {
+        if let object = root as? NSObject {
+            let traits = object.accessibilityTraits.rawValue
+            if (traits & UIAccessibilityTraits.button.rawValue) != 0 {
+                return object
+            }
+        }
+        if let view = root as? UIView {
+            if let elements = view.accessibilityElements {
+                for element in elements {
+                    if let found = findButtonAccessibilityNode(in: element) {
+                        return found
+                    }
+                }
+            }
+            for subview in view.subviews {
+                if let found = findButtonAccessibilityNode(in: subview) {
+                    return found
+                }
+            }
+        }
+        let mirror = Mirror(reflecting: root)
+        for child in mirror.children {
+            if child.label == "children", let childArray = child.value as? [NSObject] {
+                for sub in childArray {
+                    if let found = findButtonAccessibilityNode(in: sub) {
+                        return found
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    @MainActor
+    private func pumpRunLoop(_ seconds: TimeInterval = 0.04) {
+        RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
 }

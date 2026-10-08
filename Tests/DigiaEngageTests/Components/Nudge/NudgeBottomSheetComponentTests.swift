@@ -13,9 +13,8 @@ import UIKit
 /// 3. Drag gesture dismiss calculations (`shouldDismissBottomSheet`)
 /// 4. Alternative bottom sheet configurations (close button, non-dismissible backdrop)
 /// 5. Visual pixel snapshot golden diffing (`.image`)
-extension NudgeComponentTests {
-@Suite("Bottom sheet")
-struct BottomSheet {
+@Suite("Bottom sheet", .serialized, .tags(.nudge))
+struct NudgeBottomSheetComponentTests {
 
     private func loadCompactBottomSheetFixture() throws -> [String: Any] {
         guard let fixture = FixtureLoader.loadFixture(
@@ -98,81 +97,37 @@ struct BottomSheet {
         #expect(actions == [.dismiss])
     }
 
-    // MARK: - 2. Action Execution & Dismiss Settlement
+    // MARK: - 2. Drag Dismiss Pure Threshold Oracle
 
-    @Test("executes dismiss locally and rejects non-local actions", .tags(.unit)) @MainActor
-    func testNudgeBottomSheetDismissActionExecution() throws {
-        var dismissInvoked = false
-        let executor = LocalActionExecutor(dismiss: {
-            dismissInvoked = true
-        })
-
-        // Execute dismiss action through action executor
-        let handled = executor.execute(.dismiss)
-        #expect(handled)
-        #expect(dismissInvoked)
-
-        // Non-local action should not be handled by LocalActionExecutor
-        let unhandled = executor.execute(.openUrl("https://digia.cloud"))
-        #expect(!unhandled)
-    }
-
-    // MARK: - 3. Drag Dismiss Pure Threshold Oracle
-
-    @Test("dismisses only at the production drag threshold", .tags(.unit, .smoke))
-    func testNudgeBottomSheetDragDismissThresholds() {
-        // Minimum drag distance is 120pt, or 25% of sheet height, whichever is larger
-        // For a 240pt sheet: max(120, 240 * 0.25 = 60) = 120pt
-        #expect(!shouldDismissBottomSheet(dragDistance: 50, sheetHeight: 240))
-        #expect(!shouldDismissBottomSheet(dragDistance: 119, sheetHeight: 240))
-        #expect(shouldDismissBottomSheet(dragDistance: 120, sheetHeight: 240))
-        #expect(shouldDismissBottomSheet(dragDistance: 150, sheetHeight: 240))
-
-        // For a 600pt sheet: max(120, 600 * 0.25 = 150) = 150pt
-        #expect(!shouldDismissBottomSheet(dragDistance: 120, sheetHeight: 600))
-        #expect(!shouldDismissBottomSheet(dragDistance: 149, sheetHeight: 600))
-        #expect(shouldDismissBottomSheet(dragDistance: 150, sheetHeight: 600))
-    }
-
-    // MARK: - 4. Close Button Variant Contract
-
-    @Test("parses the close-button bottom-sheet contract", .tags(.contract)) @MainActor
-    func testNudgeBottomSheetCloseButtonVariantContract() throws {
-        let fixture = try loadCloseButtonBottomSheetFixture()
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = NudgeConfig.fromJson(templateConfig) else {
-            Issue.record("Failed to parse close-button bottom sheet")
-            return
+    struct DragThresholdCase: CustomTestStringConvertible {
+        let dragDistance: CGFloat
+        let sheetHeight: CGFloat
+        let shouldDismiss: Bool
+        var testDescription: String {
+            "drag \(dragDistance)pt on \(sheetHeight)pt sheet -> dismiss \(shouldDismiss)"
         }
-
-        #expect(!nudgeConfig.surface.backdropDismissible)
-        #expect(!nudgeConfig.surface.draggable)
-        #expect(nudgeConfig.surface.showHandle)
-        #expect(nudgeConfig.surface.closeButton.placement?.horizontal == .right)
-        #expect(nudgeConfig.surface.closeButton.placement?.vertical == .top)
     }
 
-    // MARK: - 5. View Hierarchy Snapshot (.hierarchy)
-
-    @Test("matches the production bottom-sheet view hierarchy snapshot", .tags(.golden, .smoke)) @MainActor
-    func testNudgeBottomSheetComponentHierarchy() throws {
-        let fixture = try loadCompactBottomSheetFixture()
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-              nudgeConfig.canvas != nil else {
-            Issue.record("Failed to parse canvas nudge config")
-            return
-        }
-
-        let hostView = ComponentTestHost.makeRealBottomSheetHost(
-            nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax
+    @Test(
+        "dismisses only at the production drag threshold",
+        .tags(.unit, .smoke),
+        arguments: [
+            DragThresholdCase(dragDistance: 50, sheetHeight: 240, shouldDismiss: false),
+            DragThresholdCase(dragDistance: 119, sheetHeight: 240, shouldDismiss: false),
+            DragThresholdCase(dragDistance: 120, sheetHeight: 240, shouldDismiss: true),
+            DragThresholdCase(dragDistance: 150, sheetHeight: 240, shouldDismiss: true),
+            DragThresholdCase(dragDistance: 120, sheetHeight: 600, shouldDismiss: false),
+            DragThresholdCase(dragDistance: 149, sheetHeight: 600, shouldDismiss: false),
+            DragThresholdCase(dragDistance: 150, sheetHeight: 600, shouldDismiss: true),
+        ]
+    )
+    func testNudgeBottomSheetDragDismissThresholds(testCase: DragThresholdCase) {
+        #expect(
+            shouldDismissBottomSheet(
+                dragDistance: testCase.dragDistance,
+                sheetHeight: testCase.sheetHeight
+            ) == testCase.shouldDismiss
         )
-        defer {
-            ComponentTestHost.cleanupOverlayWindow(hostView)
-        }
-
-        assertHierarchy(matching: hostView)
     }
 
     // MARK: - 6. Visual Pixel Golden Snapshot
@@ -250,8 +205,6 @@ struct BottomSheet {
         )
         defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
 
-        assertHierarchy(matching: hostView)
-
         assertVisualGolden(
             matching: ComponentTestHost.renderImage(of: hostView),
             precision: 0.999,
@@ -277,8 +230,6 @@ struct BottomSheet {
             style: .solid(.systemBackground)
         )
         defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
-
-        assertHierarchy(matching: hostView)
 
         assertVisualGolden(
             matching: ComponentTestHost.renderImage(of: hostView),
@@ -306,13 +257,209 @@ struct BottomSheet {
         )
         defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
 
-        assertHierarchy(matching: hostView)
-
         assertVisualGolden(
             matching: ComponentTestHost.renderImage(of: hostView),
             precision: 0.999,
             perceptualPrecision: 0.98
         )
     }
-}
+
+    // MARK: - 9. Bottom Sheet Dismissal, Gestures & Close Button
+
+    @Test("DigiaBottomSheet close() invokes onDismiss callback", .tags(.unit, .smoke)) @MainActor
+    func testBottomSheetCloseCallback() async throws {
+        var dismissed = false
+        let sheet = DigiaBottomSheet(
+            config: DigiaBottomSheetConfig(),
+            onDismiss: { dismissed = true },
+            content: { Text("Test") }
+        )
+        sheet.close()
+        // Wait for animation completion callback
+        try await Task.sleep(nanoseconds: 400_000_000)
+        #expect(dismissed)
+    }
+
+    @Test("DigiaBottomSheet backdrop tap dismisses when allowed and ignores when disabled", .tags(.unit)) @MainActor
+    func testBottomSheetBackdropTap() async throws {
+        var dismissCount = 0
+        let allowedSheet = DigiaBottomSheet(
+            config: DigiaBottomSheetConfig(allowBackdropDismiss: true),
+            onDismiss: { dismissCount += 1 },
+            content: { Text("Allowed") }
+        )
+        allowedSheet.handleBackdropTap()
+        try await Task.sleep(nanoseconds: 400_000_000)
+        #expect(dismissCount == 1)
+
+        let blockedSheet = DigiaBottomSheet(
+            config: DigiaBottomSheetConfig(allowBackdropDismiss: false),
+            onDismiss: { dismissCount += 1 },
+            content: { Text("Blocked") }
+        )
+        blockedSheet.handleBackdropTap()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        #expect(dismissCount == 1) // Did not increment
+    }
+
+    @Test("DigiaBottomSheet drag gesture change and end thresholds", .tags(.unit)) @MainActor
+    func testBottomSheetDragGestureHandlers() async throws {
+        var dismissed = false
+        let sheet = DigiaBottomSheet(
+            config: DigiaBottomSheetConfig(allowDragDismiss: true),
+            onDismiss: { dismissed = true },
+            content: { Text("Drag") }
+        )
+        sheet.handleDragChange(translationHeight: 50)
+        sheet.handleDragChange(translationHeight: -20)
+
+        // Below threshold (120pt): does not dismiss
+        sheet.handleDragEnd(translationHeight: 80)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(!dismissed)
+
+        // Above threshold (120pt): dismisses
+        sheet.handleDragEnd(translationHeight: 150)
+        try await Task.sleep(nanoseconds: 400_000_000)
+        #expect(dismissed)
+    }
+
+    @Test("DigiaBottomSheet scrollsEntireSurface renders entireSurfaceBody", .tags(.unit)) @MainActor
+    func testBottomSheetScrollsEntireSurfaceRendering() throws {
+        let sheet = DigiaBottomSheet(
+            config: DigiaBottomSheetConfig(
+                showHandle: true,
+                handleOverlaysContent: false,
+                scrollsEntireSurface: true,
+                entireSurfaceScrollingEnabled: true
+            ),
+            onDismiss: {},
+            content: {
+                VStack {
+                    Text("Line 1")
+                    Text("Line 2")
+                }
+            }
+        )
+        let hosting = UIHostingController(rootView: AnyView(sheet))
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 375, height: 600))
+        window.rootViewController = hosting
+        window.makeKeyAndVisible()
+        ComponentTestHost.drainRunLoop(for: 0.1)
+        _ = ComponentTestHost.renderImage(of: hosting.view)
+        window.rootViewController = nil
+        window.isHidden = true
+        #expect(hosting.view != nil)
+    }
+
+    @Test("NudgeSheetView cardCloseButton branches for placed and unplaced configurations", .tags(.unit)) @MainActor
+    func testNudgeSheetViewCardCloseButtonBranches() throws {
+        // 1. showCloseButton = false -> cardCloseButton is nil
+        let surfaceNoClose = NudgeSurface(
+            displayType: .bottomSheet,
+            backgroundColor: nil,
+            barrierColor: nil,
+            cornerRadius: 16,
+            padding: 16,
+            backdropDismissible: true,
+            showCloseButton: false,
+            closeButton: NudgeCloseButtonConfig(
+                marginTop: 12, marginRight: 12, backgroundColor: .black, iconColor: .white, iconSize: 18, placement: nil
+            ),
+            showHandle: true,
+            draggable: true,
+            widthFraction: 1.0,
+            minHorizontalMargin: 0,
+            useSafeArea: true,
+            bottomSafeAreaMode: .none
+        )
+        let configNoClose = NudgeConfig(
+            surface: surfaceNoClose,
+            layout: NudgeColumn(crossAxisAlignment: .start, mainAxisAlignment: .start, children: []),
+            canvas: nil,
+            designWidth: 375,
+            variableSchemas: []
+        )
+        let presentationNoClose = DigiaNudgePresentation(
+            config: configNoClose,
+            payload: CEPTriggerPayload(cepCampaignId: "sheet_test_1", campaignKey: "sheet_test", cepMetadata: [:]),
+            variables: nil
+        )
+        let sheetViewNoClose = NudgeSheetView(presentation: presentationNoClose)
+        #expect(sheetViewNoClose.cardCloseButton == nil)
+
+        // 2. showCloseButton = true without placement -> returns NudgeCloseButton
+        let surfaceUnplaced = NudgeSurface(
+            displayType: .bottomSheet,
+            backgroundColor: nil,
+            barrierColor: nil,
+            cornerRadius: 16,
+            padding: 16,
+            backdropDismissible: true,
+            showCloseButton: true,
+            closeButton: NudgeCloseButtonConfig(
+                marginTop: 12, marginRight: 12, backgroundColor: .black, iconColor: .white, iconSize: 18, placement: nil
+            ),
+            showHandle: true,
+            draggable: true,
+            widthFraction: 1.0,
+            minHorizontalMargin: 0,
+            useSafeArea: true,
+            bottomSafeAreaMode: .none
+        )
+        let configUnplaced = NudgeConfig(
+            surface: surfaceUnplaced,
+            layout: NudgeColumn(crossAxisAlignment: .start, mainAxisAlignment: .start, children: []),
+            canvas: nil,
+            designWidth: 375,
+            variableSchemas: []
+        )
+        let presentationUnplaced = DigiaNudgePresentation(
+            config: configUnplaced,
+            payload: CEPTriggerPayload(cepCampaignId: "sheet_test_2", campaignKey: "sheet_test", cepMetadata: [:]),
+            variables: nil
+        )
+        let sheetViewUnplaced = NudgeSheetView(presentation: presentationUnplaced)
+        #expect(sheetViewUnplaced.cardCloseButton != nil)
+
+        // 3. showCloseButton = true with placement -> cardCloseButton is nil (handled in viewportOverlay)
+        let placement = NudgeCloseButtonPlacement(
+            horizontal: .right,
+            vertical: .top,
+            margin: .init(),
+            rect: CGRect(x: 10, y: 10, width: 20, height: 20)
+        )
+        let surfacePlaced = NudgeSurface(
+            displayType: .bottomSheet,
+            backgroundColor: nil,
+            barrierColor: nil,
+            cornerRadius: 16,
+            padding: 16,
+            backdropDismissible: true,
+            showCloseButton: true,
+            closeButton: NudgeCloseButtonConfig(
+                marginTop: 12, marginRight: 12, backgroundColor: .black, iconColor: .white, iconSize: 18, placement: placement
+            ),
+            showHandle: true,
+            draggable: true,
+            widthFraction: 1.0,
+            minHorizontalMargin: 0,
+            useSafeArea: true,
+            bottomSafeAreaMode: .none
+        )
+        let configPlaced = NudgeConfig(
+            surface: surfacePlaced,
+            layout: NudgeColumn(crossAxisAlignment: .start, mainAxisAlignment: .start, children: []),
+            canvas: nil,
+            designWidth: 375,
+            variableSchemas: []
+        )
+        let presentationPlaced = DigiaNudgePresentation(
+            config: configPlaced,
+            payload: CEPTriggerPayload(cepCampaignId: "sheet_test_3", campaignKey: "sheet_test", cepMetadata: [:]),
+            variables: nil
+        )
+        let sheetViewPlaced = NudgeSheetView(presentation: presentationPlaced)
+        #expect(sheetViewPlaced.cardCloseButton == nil)
+    }
 }

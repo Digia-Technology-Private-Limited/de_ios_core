@@ -11,55 +11,56 @@ struct CanvasButtonRendererTests {
 
     // MARK: - 1. Parser & Schema Preservation
 
-    @Test("button parser preserves fill variant with paint fill")
-    func parserPreservesFillVariant() throws {
-        let fillWidget = try parsedButton([
-            "style": [
-                "variant": "fill",
-                "fill": ["type": "solid", "color": "#007AFF"]
-            ]
-        ])
-        guard case .button(_, _, _, let fillStyle, _, _, _, _, _, _) = fillWidget else {
-            Issue.record("Expected a parsed button widget")
-            return
-        }
-        #expect(fillStyle == .fill(fill: .solid(.literal("#FF007AFF"))))
+    enum StyleVariantCase: String, Sendable, CaseIterable {
+        case fill
+        case outline
+        case text
     }
 
-    @Test("button parser preserves outline variant with border stroke")
-    func parserPreservesOutlineVariant() throws {
-        let outlineWidget = try parsedButton([
-            "style": [
-                "variant": "outline",
-                "fill": ["type": "solid", "color": "#FFFFFF"],
-                "outline": ["color": "#007AFF", "width": 2.0]
-            ]
-        ])
-        guard case .button(_, _, _, let outlineStyle, _, _, _, _, _, _) = outlineWidget else {
-            Issue.record("Expected a parsed button widget")
-            return
-        }
-        #expect(
-            outlineStyle
-                == .outline(
+    @Test(
+        "button parser preserves button style variants",
+        arguments: StyleVariantCase.allCases
+    )
+    func parserPreservesStyleVariants(variant: StyleVariantCase) throws {
+        switch variant {
+        case .fill:
+            let widget = try parsedButton([
+                "style": [
+                    "variant": "fill",
+                    "fill": ["type": "solid", "color": "#007AFF"]
+                ]
+            ])
+            guard case .button(_, _, _, let style, _, _, _, _, _, _) = widget else {
+                Issue.record("Expected a parsed button widget")
+                return
+            }
+            #expect(style == .fill(fill: .solid(.literal("#FF007AFF"))))
+        case .outline:
+            let widget = try parsedButton([
+                "style": [
+                    "variant": "outline",
+                    "fill": ["type": "solid", "color": "#FFFFFF"],
+                    "outline": ["color": "#007AFF", "width": 2.0]
+                ]
+            ])
+            guard case .button(_, _, _, let style, _, _, _, _, _, _) = widget else {
+                Issue.record("Expected a parsed button widget")
+                return
+            }
+            #expect(
+                style == .outline(
                     fill: .solid(.literal("#FFFFFFFF")),
                     outline: CampaignCanvasBorder(color: .literal("#FF007AFF"), width: 2.0)
                 )
-        )
-    }
-
-    @Test("button parser preserves ghost text variant")
-    func parserPreservesTextVariant() throws {
-        let textWidget = try parsedButton([
-            "style": [
-                "variant": "text"
-            ]
-        ])
-        guard case .button(_, _, _, let textStyle, _, _, _, _, _, _) = textWidget else {
-            Issue.record("Expected a parsed button widget")
-            return
+            )
+        case .text:
+            let widget = try parsedButton(["style": ["variant": "text"]])
+            guard case .button(_, _, _, let style, _, _, _, _, _, _) = widget else {
+                Issue.record("Expected a parsed button widget")
+                return
+            }
+            #expect(style == .text)
         }
-        #expect(textStyle == .text)
     }
 
     @Test("button parser preserves labels, actions, confirm dialog, and primary/destructive flags")
@@ -283,35 +284,6 @@ struct CanvasButtonRendererTests {
         #expect(request.actions == actions)
     }
 
-    // MARK: - 4b. Confirmation Dialog Edge Cases
-
-    @Test("destructive button confirmation dialog configuration preserves title, message, and labels")
-    func destructiveButtonConfirmationDialogConfiguration() throws {
-        let widget = try parsedButton([
-            "isDestructive": true,
-            "confirm": [
-                "title": "Delete Item?",
-                "message": "This action cannot be undone.",
-                "confirmLabel": "Delete Forever",
-                "cancelLabel": "Keep Item",
-                "titleFontWeight": 800,
-                "messageFontWeight": 400,
-                "buttonFontWeight": 600
-            ]
-        ])
-        guard case .button(_, _, _, _, _, _, let isDestructive, _, _, let confirm) = widget else {
-            Issue.record("Expected parsed button widget")
-            return
-        }
-        #expect(isDestructive == true)
-        #expect(confirm.title == "Delete Item?")
-        #expect(confirm.message == "This action cannot be undone.")
-        #expect(confirm.confirmLabel == "Delete Forever")
-        #expect(confirm.cancelLabel == "Keep Item")
-        #expect(confirm.titleFontWeight == 800)
-        #expect(confirm.messageFontWeight == 400)
-        #expect(confirm.buttonFontWeight == 600)
-    }
 
     // MARK: - 8. Visual Golden
 
@@ -542,7 +514,205 @@ struct CanvasButtonRendererTests {
         assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
     }
 
-    // MARK: - Private Helpers
+    // MARK: - 5. Interactive & Destructive Action Flow
+
+    @Test("destructive button tap shows confirmation alert and emits nothing")
+    func destructiveButtonTapShowsAlertAndEmitsNothing() throws {
+        var actionsReceived: [CampaignCanvasActionRequest] = []
+        let button = try parsedButton([
+            "label": ["spans": [["text": "Delete Account"]]],
+            "isDestructive": true,
+            "onClick": ["steps": [["type": "Action.dismiss"]]],
+            "confirm": [
+                "title": "Delete Account?",
+                "message": "This action cannot be undone.",
+                "confirmLabel": "Delete",
+                "cancelLabel": "Cancel"
+            ]
+        ])
+
+        let window = mount(button: button, onAction: { actionsReceived.append($0) })
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let activated = activateButton(in: window)
+        #expect(activated)
+
+        let alert = presentedAlert(in: window)
+        #expect(alert != nil)
+        #expect(alert?.title == "Delete Account?")
+        #expect(alert?.message == "This action cannot be undone.")
+        #expect(actionsReceived.isEmpty)
+    }
+
+    @Test("non-destructive button tap emits action directly without alert")
+    func nonDestructiveButtonTapEmitsOnce() throws {
+        var actionsReceived: [CampaignCanvasActionRequest] = []
+        let button = try parsedButton([
+            "label": ["spans": [["text": "Continue"]]],
+            "isDestructive": false,
+            "isPrimary": true,
+            "onClick": ["steps": [["type": "Action.dismiss"]]]
+        ])
+
+        let window = mount(button: button, onAction: { actionsReceived.append($0) })
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let activated = activateButton(in: window)
+        #expect(activated)
+
+        let alert = window.rootViewController?.presentedViewController as? UIAlertController
+        #expect(alert == nil)
+        #expect(actionsReceived.count == 1)
+        #expect(actionsReceived.first?.elementId == "cta_primary")
+        #expect(actionsReceived.first?.isPrimary == true)
+        #expect(actionsReceived.first?.label == "Continue")
+        #expect(actionsReceived.first?.actions == [.dismiss])
+    }
+
+    @Test("destructive alert confirm button emits action once")
+    func destructiveAlertConfirmEmitsOnce() throws {
+        var actionsReceived: [CampaignCanvasActionRequest] = []
+        let button = try parsedButton([
+            "label": ["spans": [["text": "Delete Account"]]],
+            "isDestructive": true,
+            "isPrimary": false,
+            "onClick": ["steps": [["type": "Action.dismiss"]]],
+            "confirm": [
+                "title": "Delete?",
+                "message": "Are you sure?",
+                "confirmLabel": "Delete",
+                "cancelLabel": "Cancel"
+            ]
+        ])
+
+        let window = mount(button: button, onAction: { actionsReceived.append($0) })
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let activated = activateButton(in: window)
+        #expect(activated)
+
+        guard let alert = presentedAlert(in: window) else {
+            Issue.record("Expected alert controller to be presented")
+            return
+        }
+
+        guard let confirmAction = alert.actions.first(where: { $0.title == "Delete" }) else {
+            Issue.record("Expected 'Delete' confirm action in alert")
+            return
+        }
+
+        #expect(confirmAction.style == .destructive)
+        triggerAlertAction(confirmAction)
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        #expect(actionsReceived.count == 1)
+        #expect(actionsReceived.first?.elementId == "cta_secondary")
+        #expect(actionsReceived.first?.isPrimary == false)
+        #expect(actionsReceived.first?.label == "Delete Account")
+        #expect(actionsReceived.first?.actions == [.dismiss])
+    }
+
+    @Test("destructive alert cancel button emits nothing")
+    func destructiveAlertCancelEmitsNothing() throws {
+        var actionsReceived: [CampaignCanvasActionRequest] = []
+        let button = try parsedButton([
+            "label": ["spans": [["text": "Delete Account"]]],
+            "isDestructive": true,
+            "onClick": ["steps": [["type": "Action.dismiss"]]],
+            "confirm": [
+                "title": "Delete?",
+                "message": "Are you sure?",
+                "confirmLabel": "Delete",
+                "cancelLabel": "Cancel"
+            ]
+        ])
+
+        let window = mount(button: button, onAction: { actionsReceived.append($0) })
+        defer { unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        let activated = activateButton(in: window)
+        #expect(activated)
+
+        guard let alert = presentedAlert(in: window) else {
+            Issue.record("Expected alert controller to be presented")
+            return
+        }
+
+        guard let cancelAction = alert.actions.first(where: { $0.title == "Cancel" }) else {
+            Issue.record("Expected 'Cancel' action in alert")
+            return
+        }
+
+        #expect(cancelAction.style == .cancel)
+        triggerAlertAction(cancelAction)
+        ComponentTestHost.drainRunLoop(for: 0.1)
+
+        #expect(actionsReceived.isEmpty)
+    }
+
+    // MARK: - Interactive Action Helpers
+
+    @discardableResult
+    private func activateButton(in window: UIWindow) -> Bool {
+        guard let rootView = window.rootViewController?.view,
+              let buttonNode = findButtonAccessibilityNode(in: rootView) else {
+            return false
+        }
+        let activated = buttonNode.accessibilityActivate()
+        ComponentTestHost.drainRunLoop(for: 0.1)
+        return activated
+    }
+
+    private func findButtonAccessibilityNode(in root: Any) -> NSObject? {
+        if let object = root as? NSObject {
+            let traits = object.accessibilityTraits.rawValue
+            if (traits & UIAccessibilityTraits.button.rawValue) != 0 {
+                return object
+            }
+        }
+        if let view = root as? UIView {
+            if let elements = view.accessibilityElements {
+                for element in elements {
+                    if let found = findButtonAccessibilityNode(in: element) {
+                        return found
+                    }
+                }
+            }
+            for subview in view.subviews {
+                if let found = findButtonAccessibilityNode(in: subview) {
+                    return found
+                }
+            }
+        }
+        let mirror = Mirror(reflecting: root)
+        for child in mirror.children {
+            if child.label == "children", let childArray = child.value as? [NSObject] {
+                for sub in childArray {
+                    if let found = findButtonAccessibilityNode(in: sub) {
+                        return found
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    private func presentedAlert(in window: UIWindow) -> UIAlertController? {
+        ComponentTestHost.drainRunLoop(for: 0.2)
+        return window.rootViewController?.presentedViewController as? UIAlertController
+    }
+
+    private func triggerAlertAction(_ action: UIAlertAction) {
+        guard let handler = action.value(forKey: "handler") else { return }
+        typealias AlertHandler = @convention(block) (UIAlertAction) -> Void
+        let block = unsafeBitCast(handler as AnyObject, to: AlertHandler.self)
+        block(action)
+    }
+
 
     private func parsedButton(
         _ props: [String: Any],

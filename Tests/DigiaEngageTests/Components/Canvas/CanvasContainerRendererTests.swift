@@ -11,20 +11,30 @@ struct CanvasContainerRendererTests {
 
     // MARK: - 1. Parser & Schema Preservation
 
-    @Test("container parser preserves solid fill, scalar corner radius, border, and shadow")
-    func parserPreservesSolidFill() throws {
+    @Test("container parser preserves solid fill and scalar corner radius")
+    func parserPreservesSolidFillAndCornerRadius() throws {
         let solidWidget = try parsedContainer([
             "fill": ["type": "solid", "color": "#FF336699"],
-            "cornerRadius": 14,
-            "border": ["color": "#FF112233", "width": 2.5],
-            "shadow": ["color": "#80000000", "blur": 12, "spread": 3, "offsetX": 1, "offsetY": 4]
+            "cornerRadius": 14
         ])
-        guard case .container(let solidFill, let solidRadius, let solidBorder, let solidShadow) = solidWidget else {
+        guard case .container(let solidFill, let solidRadius, _, _) = solidWidget else {
             Issue.record("Expected a parsed container widget")
             return
         }
         #expect(solidFill == .solid(.literal("#FF336699")))
         #expect(solidRadius == CampaignCanvasCornerRadius(topLeft: 14, topRight: 14, bottomRight: 14, bottomLeft: 14))
+    }
+
+    @Test("container parser preserves border and shadow properties")
+    func parserPreservesBorderAndShadow() throws {
+        let borderShadowWidget = try parsedContainer([
+            "border": ["color": "#FF112233", "width": 2.5],
+            "shadow": ["color": "#80000000", "blur": 12, "spread": 3, "offsetX": 1, "offsetY": 4]
+        ])
+        guard case .container(_, _, let solidBorder, let solidShadow) = borderShadowWidget else {
+            Issue.record("Expected a parsed container widget")
+            return
+        }
         #expect(solidBorder == CampaignCanvasBorder(color: .literal("#FF112233"), width: 2.5))
         #expect(solidShadow == CampaignCanvasShadow(color: .literal("#80000000"), blur: 12, spread: 3, offsetX: 1, offsetY: 4))
     }

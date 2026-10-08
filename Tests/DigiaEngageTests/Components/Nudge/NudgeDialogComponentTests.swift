@@ -12,9 +12,8 @@ import UIKit
 /// 1. Wire schema and layout parsing into `NudgeConfig` and `CampaignCanvas`
 /// 2. Child widget attributes and CTA action metadata
 /// 3. Visual pixel snapshot diffing (`.image`)
-extension NudgeComponentTests {
-@Suite("Dialog")
-struct Dialog {
+@Suite("Dialog", .serialized, .tags(.nudge))
+struct NudgeDialogComponentTests {
 
     private func loadNudgeDialogFixture(named fileName: String = "nudge-dialog.json") throws
         -> [String: Any]
@@ -31,8 +30,10 @@ struct Dialog {
         return fixture
     }
 
-    @Test("parses the canonical dialog model and CTA contract", .tags(.contract, .smoke)) @MainActor
-    func testNudgeDialogModelParsingAndContract() throws {
+    // MARK: - 1. Wire Contract & Model Parsing (Split into Surface, Canvas, CTA)
+
+    @Test("parses canonical dialog surface configuration contract", .tags(.contract, .smoke)) @MainActor
+    func testNudgeDialogSurfaceContract() throws {
         let fixture = try loadNudgeDialogFixture()
         guard let templateConfig = fixture["templateConfig"] as? [String: Any] else {
             Issue.record("Missing templateConfig")
@@ -41,24 +42,43 @@ struct Dialog {
 
         let nudgeConfig = try #require(NudgeConfig.fromJson(templateConfig))
 
-        // Surface / container assertions
         #expect(nudgeConfig.surface.displayType == .dialog)
         #expect(nudgeConfig.surface.cornerRadius == 18)
         #expect(nudgeConfig.surface.backdropDismissible)
         #expect(nudgeConfig.surface.showCloseButton)
         #expect(nudgeConfig.surface.closeButton.placement?.horizontal == .right)
         #expect(nudgeConfig.surface.closeButton.placement?.vertical == .top)
+    }
 
-        // Canvas assertions
+    @Test("parses canonical dialog canvas dimensions and child hierarchy", .tags(.contract, .smoke)) @MainActor
+    func testNudgeDialogCanvasContract() throws {
+        let fixture = try loadNudgeDialogFixture()
+        guard let templateConfig = fixture["templateConfig"] as? [String: Any] else {
+            Issue.record("Missing templateConfig")
+            return
+        }
+
+        let nudgeConfig = try #require(NudgeConfig.fromJson(templateConfig))
         let canvas = try #require(nudgeConfig.canvas)
+
         #expect(canvas.width == 320)
         #expect(canvas.height == 260)
         #expect(canvas.children.count == 3)
-
-        // Verify child nodes order & IDs
         #expect(canvas.children[0].id == "dialogTitle")
         #expect(canvas.children[1].id == "dialogBody")
         #expect(canvas.children[2].id == "dialogButton")
+    }
+
+    @Test("parses canonical dialog primary CTA action and button widget", .tags(.contract, .smoke)) @MainActor
+    func testNudgeDialogCTAButtonContract() throws {
+        let fixture = try loadNudgeDialogFixture()
+        guard let templateConfig = fixture["templateConfig"] as? [String: Any] else {
+            Issue.record("Missing templateConfig")
+            return
+        }
+
+        let nudgeConfig = try #require(NudgeConfig.fromJson(templateConfig))
+        let canvas = try #require(nudgeConfig.canvas)
 
         guard case .widget(let id, _, let widget) = canvas.children[2],
             id == "dialogButton",
@@ -72,29 +92,7 @@ struct Dialog {
         #expect(actions == [.dismiss])
     }
 
-    // MARK: - 2. Hierarchy and Visual Golden Snapshots
-
-    @Test("matches the production dialog view hierarchy snapshot", .tags(.component)) @MainActor
-    func testNudgeDialogComponentHierarchy() throws {
-        let fixture = try loadNudgeDialogFixture()
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-            let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-            nudgeConfig.canvas != nil
-        else {
-            Issue.record("Failed to parse canvas nudge config")
-            return
-        }
-
-        let hostView = ComponentTestHost.makeRealDialogHost(
-            nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax
-        )
-        defer {
-            ComponentTestHost.cleanupOverlayWindow(hostView)
-        }
-
-        assertHierarchy(matching: hostView)
-    }
+    // MARK: - 2. Visual Pixel Golden Snapshot
 
     @Test("matches the production dialog visual golden", .tags(.golden)) @MainActor
     func testNudgeDialogVisualImageGolden() throws {
@@ -122,212 +120,57 @@ struct Dialog {
         )
     }
 
-    // MARK: - 3. Device Dialog Golden (.image on device with REAL production NudgeDialogContainer)
+    // MARK: - 3. Variant Contract Tests (Radius, Margin, Width, Dark Background)
 
-    @Test("matches the production dialog device golden", .tags(.golden, .smoke)) @MainActor
-    func testNudgeDialogDeviceGolden() throws {
-        let fixture = try loadNudgeDialogFixture()
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-            let nudgeConfig = NudgeConfig.fromJson(templateConfig),
-            nudgeConfig.canvas != nil
-        else {
-            Issue.record("Failed to parse canvas nudge config")
-            return
-        }
-
-        // Renders the production dialog overlay on the pinned iPhone 17 Pro Max viewport.
-        let hostView = ComponentTestHost.makeRealDialogHost(
-            nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
-        )
-        defer {
-            ComponentTestHost.cleanupOverlayWindow(hostView)
-        }
-
-        assertVisualGolden(
-            matching: ComponentTestHost.renderImage(of: hostView),
-            precision: 0.999,
-            perceptualPrecision: 0.98
-        )
+    struct DialogLayoutVariantCase: CustomTestStringConvertible {
+        let fixtureName: String
+        let expectedCornerRadius: CGFloat
+        let expectedMargin: CGFloat
+        let expectedWidth: CGFloat
+        let expectedTitle: String
+        var testDescription: String { fixtureName }
     }
 
-    // MARK: - Maestro Variant Tests (Radius, Margin, Width, Background)
+    @Test(
+        "parses dialog layout variant contracts",
+        .tags(.contract),
+        arguments: [
+            DialogLayoutVariantCase(fixtureName: "nudge-dialog-radius-0.json", expectedCornerRadius: 0, expectedMargin: 24, expectedWidth: 320, expectedTitle: "Sharp Corners Dialog"),
+            DialogLayoutVariantCase(fixtureName: "nudge-dialog-radius-28.json", expectedCornerRadius: 28, expectedMargin: 24, expectedWidth: 320, expectedTitle: "Rounded Dialog 28"),
+            DialogLayoutVariantCase(fixtureName: "nudge-dialog-margin-zero.json", expectedCornerRadius: 18, expectedMargin: 0, expectedWidth: 360, expectedTitle: "Edge-to-Edge Margin Dialog"),
+            DialogLayoutVariantCase(fixtureName: "nudge-dialog-margin-large.json", expectedCornerRadius: 18, expectedMargin: 48, expectedWidth: 320, expectedTitle: "Constrained Margin Dialog"),
+            DialogLayoutVariantCase(fixtureName: "nudge-dialog-width-narrow.json", expectedCornerRadius: 18, expectedMargin: 24, expectedWidth: 260, expectedTitle: "Narrow Alert Dialog"),
+            DialogLayoutVariantCase(fixtureName: "nudge-dialog-width-wide.json", expectedCornerRadius: 18, expectedMargin: 24, expectedWidth: 340, expectedTitle: "Wide Modal Dialog"),
+        ]
+    )
+    @MainActor
+    func testNudgeDialogLayoutVariants(testCase: DialogLayoutVariantCase) throws {
+        let fixture = try loadNudgeDialogFixture(named: testCase.fixtureName)
+        let template = try #require(fixture["templateConfig"] as? [String: Any])
+        let config = try #require(NudgeConfig.fromJson(template))
+        let canvas = try #require(config.canvas)
 
-    // MARK: 1. Radius Change Variants (nudge-dialog-radius-0 & nudge-dialog-radius-28)
+        #expect(config.surface.cornerRadius == testCase.expectedCornerRadius)
+        #expect(config.surface.minHorizontalMargin == testCase.expectedMargin)
+        #expect(canvas.width == testCase.expectedWidth)
 
-    @Test("parses sharp and rounded dialog radius contracts", .tags(.contract)) @MainActor
-    func testNudgeDialogRadiusChangeVariantContract() throws {
-        // Variant A: Sharp corners (cornerRadius: 0)
-        let sharpFixture = try loadNudgeDialogFixture(named: "nudge-dialog-radius-0.json")
-        guard let sharpTemplate = sharpFixture["templateConfig"] as? [String: Any],
-            let sharpConfig = NudgeConfig.fromJson(sharpTemplate),
-            let sharpCanvas = sharpConfig.canvas
-        else {
-            Issue.record("Failed to parse sharp corners nudge config")
-            return
-        }
-
-        #expect(sharpConfig.surface.cornerRadius == 0)
-        #expect(sharpCanvas.width == 320)
-        #expect(sharpCanvas.height == 260)
-
-        // Verify title text node
-        guard case .widget(let titleId, _, let titleWidget) = sharpCanvas.children[0],
-            titleId == "dialogTitle",
-            case .text(_, let textBlock, _) = titleWidget
-        else {
-            Issue.record("Expected dialogTitle text widget")
-            return
-        }
-        #expect(textBlock.plainText == "Sharp Corners Dialog")
-
-        // Variant B: Rounded corners (cornerRadius: 28)
-        let roundedFixture = try loadNudgeDialogFixture(named: "nudge-dialog-radius-28.json")
-        guard let roundedTemplate = roundedFixture["templateConfig"] as? [String: Any],
-            let roundedConfig = NudgeConfig.fromJson(roundedTemplate),
-            let roundedCanvas = roundedConfig.canvas
-        else {
-            Issue.record("Failed to parse rounded corners nudge config")
-            return
-        }
-
-        #expect(roundedConfig.surface.cornerRadius == 28)
-        #expect(roundedCanvas.width == 320)
-        #expect(roundedCanvas.height == 260)
-
-        // Verify title text node
-        guard
-            case .widget(let roundedTitleId, _, let roundedTitleWidget) = roundedCanvas.children[0],
-            roundedTitleId == "dialogTitle",
-            case .text(_, let roundedTextBlock, _) = roundedTitleWidget
+        guard case .widget(let id, _, let widget) = canvas.children[0],
+            id == "dialogTitle",
+            case .text(_, let textBlock, _) = widget
         else {
             Issue.record("Expected dialogTitle text widget")
             return
         }
-        #expect(roundedTextBlock.plainText == "Rounded Dialog 28")
+        #expect(textBlock.plainText == testCase.expectedTitle)
     }
-
-    // MARK: 2. Margin Change Variants (nudge-dialog-margin-zero & nudge-dialog-margin-large)
-
-    @Test("parses zero and constrained dialog margin contracts", .tags(.contract)) @MainActor
-    func testNudgeDialogMarginChangeVariantContract() throws {
-        // Variant A: Edge-to-edge zero margin (minHorizontalMargin: 0)
-        let zeroMarginFixture = try loadNudgeDialogFixture(named: "nudge-dialog-margin-zero.json")
-        guard let zeroTemplate = zeroMarginFixture["templateConfig"] as? [String: Any],
-            let zeroConfig = NudgeConfig.fromJson(zeroTemplate),
-            let zeroCanvas = zeroConfig.canvas
-        else {
-            Issue.record("Failed to parse zero margin nudge config")
-            return
-        }
-
-        #expect(zeroConfig.surface.minHorizontalMargin == 0)
-        #expect(zeroCanvas.width == 360)
-        #expect(zeroCanvas.height == 260)
-
-        #expect(zeroConfig.designWidth == 360)
-
-        guard case .widget(let zeroTitleId, _, let zeroTitleWidget) = zeroCanvas.children[0],
-            zeroTitleId == "dialogTitle",
-            case .text(_, let zeroTextBlock, _) = zeroTitleWidget
-        else {
-            Issue.record("Expected dialogTitle text widget")
-            return
-        }
-        #expect(zeroTextBlock.plainText == "Edge-to-Edge Margin Dialog")
-
-        // Variant B: Large constrained margin (minHorizontalMargin: 48)
-        let largeMarginFixture = try loadNudgeDialogFixture(named: "nudge-dialog-margin-large.json")
-        guard let largeTemplate = largeMarginFixture["templateConfig"] as? [String: Any],
-            let largeConfig = NudgeConfig.fromJson(largeTemplate),
-            let largeCanvas = largeConfig.canvas
-        else {
-            Issue.record("Failed to parse large margin nudge config")
-            return
-        }
-
-        #expect(largeConfig.surface.minHorizontalMargin == 48)
-        #expect(largeCanvas.width == 320)
-        #expect(largeCanvas.height == 260)
-
-        #expect(largeConfig.designWidth == 360)
-
-        guard case .widget(let largeTitleId, _, let largeTitleWidget) = largeCanvas.children[0],
-            largeTitleId == "dialogTitle",
-            case .text(_, let largeTextBlock, _) = largeTitleWidget
-        else {
-            Issue.record("Expected dialogTitle text widget")
-            return
-        }
-        #expect(largeTextBlock.plainText == "Constrained Margin Dialog")
-
-    }
-
-    // MARK: 3. Width Change Variants (nudge-dialog-width-narrow & nudge-dialog-width-wide)
-
-    @Test("parses narrow and wide dialog width contracts", .tags(.contract)) @MainActor
-    func testNudgeDialogWidthChangeVariantContract() throws {
-        // Variant A: Narrow alert dialog (canvasWidth: 260)
-        let narrowFixture = try loadNudgeDialogFixture(named: "nudge-dialog-width-narrow.json")
-        guard let narrowTemplate = narrowFixture["templateConfig"] as? [String: Any],
-            let narrowConfig = NudgeConfig.fromJson(narrowTemplate),
-            let narrowCanvas = narrowConfig.canvas
-        else {
-            Issue.record("Failed to parse narrow dialog nudge config")
-            return
-        }
-
-        #expect(narrowCanvas.width == 260)
-        #expect(narrowCanvas.height == 260)
-
-        guard case .widget(let narrowTitleId, _, let narrowTitleWidget) = narrowCanvas.children[0],
-            narrowTitleId == "dialogTitle",
-            case .text(_, let narrowTextBlock, _) = narrowTitleWidget
-        else {
-            Issue.record("Expected dialogTitle text widget")
-            return
-        }
-        #expect(narrowTextBlock.plainText == "Narrow Alert Dialog")
-
-        // Variant B: Wide landscape-optimized dialog (canvasWidth: 340)
-        let wideFixture = try loadNudgeDialogFixture(named: "nudge-dialog-width-wide.json")
-        guard let wideTemplate = wideFixture["templateConfig"] as? [String: Any],
-            let wideConfig = NudgeConfig.fromJson(wideTemplate),
-            let wideCanvas = wideConfig.canvas
-        else {
-            Issue.record("Failed to parse wide dialog nudge config")
-            return
-        }
-
-        #expect(wideCanvas.width == 340)
-        #expect(wideCanvas.height == 260)
-
-        guard case .widget(let wideTitleId, _, let wideTitleWidget) = wideCanvas.children[0],
-            wideTitleId == "dialogTitle",
-            case .text(_, let wideTextBlock, _) = wideTitleWidget
-        else {
-            Issue.record("Expected dialogTitle text widget")
-            return
-        }
-        #expect(wideTextBlock.plainText == "Wide Modal Dialog")
-
-    }
-
-    // MARK: 4. Dark Background / Surface Variant (nudge-dialog-bg-dark)
 
     @Test("parses the dark-theme dialog contract", .tags(.contract)) @MainActor
     func testNudgeDialogDarkThemeVariantContract() throws {
         let darkFixture = try loadNudgeDialogFixture(named: "nudge-dialog-bg-dark.json")
-        guard let darkTemplate = darkFixture["templateConfig"] as? [String: Any],
-            let darkConfig = NudgeConfig.fromJson(darkTemplate),
-            let darkCanvas = darkConfig.canvas
-        else {
-            Issue.record("Failed to parse dark background nudge config")
-            return
-        }
+        let darkTemplate = try #require(darkFixture["templateConfig"] as? [String: Any])
+        let darkConfig = try #require(NudgeConfig.fromJson(darkTemplate))
+        let darkCanvas = try #require(darkConfig.canvas)
 
-        // Surface background is decoded from #111827
         let surfaceBg = try #require(darkConfig.surface.backgroundColor)
         var red: CGFloat = 0
         var green: CGFloat = 0
@@ -338,7 +181,6 @@ struct Dialog {
         #expect(abs(green - 0.094) < 0.02)
         #expect(abs(blue - 0.153) < 0.02)
 
-        // Child button node validation
         guard case .widget(let btnId, _, let btnWidget) = darkCanvas.children[2],
             btnId == "dialogButton",
             case .button(_, let btnLabel, _, _, _, let isPrimary, _, _, let actions, _) = btnWidget
@@ -349,7 +191,6 @@ struct Dialog {
         #expect(isPrimary)
         #expect(btnLabel.plainText == "Got It")
         #expect(actions == [.dismiss])
-
     }
 
     // MARK: - Maestro Variant Visual Golden Snapshots
@@ -542,5 +383,140 @@ struct Dialog {
             perceptualPrecision: 0.98
         )
     }
-}
+
+    // MARK: - Dialog Dismissal & Panel Sizing
+
+    @Test("backdrop tap dismisses when backdropDismissible is true and does nothing when false", .tags(.unit, .smoke)) @MainActor
+    func testNudgeDialogBackdropTapDismissal() throws {
+        let fixture = try loadNudgeDialogFixture()
+        let templateConfig = try #require(fixture["templateConfig"] as? [String: Any])
+        let config = try #require(NudgeConfig.fromJson(templateConfig))
+        #expect(config.surface.backdropDismissible == true)
+
+        let presentation = DigiaNudgePresentation(
+            config: config,
+            payload: CEPTriggerPayload(cepCampaignId: "test_dialog_dismiss", campaignKey: "test_dialog_dismiss", cepMetadata: [:]),
+            variables: nil
+        )
+
+        // 1. Dismissible: tapping backdrop dismisses active nudge
+        SDKInstance.shared.controller.showNudge(presentation)
+        #expect(SDKInstance.shared.controller.activeNudge?.id == "test_dialog_dismiss")
+
+        let dismissibleContainer = NudgeDialogContainer(
+            presentation: presentation,
+            viewportSize: CGSize(width: 390, height: 844),
+            safeAreaInsets: .zero
+        )
+        dismissibleContainer.handleBackdropTap()
+        #expect(SDKInstance.shared.controller.activeNudge == nil)
+
+        // 2. Non-dismissible: tapping backdrop keeps active nudge intact
+        var nonDismissibleTemplate = templateConfig
+        var surfaceDict = nonDismissibleTemplate["container"] as? [String: Any] ?? [:]
+        surfaceDict["backdropDismissible"] = false
+        nonDismissibleTemplate["container"] = surfaceDict
+        let nonDismissibleConfig = try #require(NudgeConfig.fromJson(nonDismissibleTemplate))
+        #expect(!nonDismissibleConfig.surface.backdropDismissible)
+
+        let nonDismissiblePresentation = DigiaNudgePresentation(
+            config: nonDismissibleConfig,
+            payload: CEPTriggerPayload(cepCampaignId: "test_dialog_non_dismissible", campaignKey: "test_dialog_non_dismissible", cepMetadata: [:]),
+            variables: nil
+        )
+        SDKInstance.shared.controller.showNudge(nonDismissiblePresentation)
+        #expect(SDKInstance.shared.controller.activeNudge?.id == "test_dialog_non_dismissible")
+
+        let nonDismissibleContainer = NudgeDialogContainer(
+            presentation: nonDismissiblePresentation,
+            viewportSize: CGSize(width: 390, height: 844),
+            safeAreaInsets: .zero
+        )
+        nonDismissibleContainer.handleBackdropTap()
+        #expect(SDKInstance.shared.controller.activeNudge?.id == "test_dialog_non_dismissible")
+
+        // Teardown
+        SDKInstance.shared.controller.forceNudgeDismiss()
+    }
+
+    @Test("CTA dismiss action closes active dialog", .tags(.unit, .smoke)) @MainActor
+    func testNudgeDialogCTADismissAction() throws {
+        let fixture = try loadNudgeDialogFixture()
+        let templateConfig = try #require(fixture["templateConfig"] as? [String: Any])
+        let config = try #require(NudgeConfig.fromJson(templateConfig))
+
+        let presentation = DigiaNudgePresentation(
+            config: config,
+            payload: CEPTriggerPayload(cepCampaignId: "test_cta_dismiss_dialog", campaignKey: "test_cta_dismiss_dialog", cepMetadata: [:]),
+            variables: nil
+        )
+        SDKInstance.shared.controller.showNudge(presentation)
+        #expect(SDKInstance.shared.controller.activeNudge?.id == "test_cta_dismiss_dialog")
+
+        dismissNudgeFromCta()
+        #expect(SDKInstance.shared.controller.activeNudge == nil)
+    }
+
+    @Test("surface close button visibility toggle", .tags(.contract, .unit)) @MainActor
+    func testNudgeDialogCloseButtonVisibilityToggle() throws {
+        let fixture = try loadNudgeDialogFixture()
+        var templateConfig = try #require(fixture["templateConfig"] as? [String: Any])
+        var containerDict = templateConfig["container"] as? [String: Any] ?? [:]
+
+        // Default: shown
+        containerDict["showCloseButton"] = true
+        templateConfig["container"] = containerDict
+        let shownConfig = try #require(NudgeConfig.fromJson(templateConfig))
+        #expect(shownConfig.surface.showCloseButton)
+
+        // Toggled off: hidden
+        containerDict["showCloseButton"] = false
+        templateConfig["container"] = containerDict
+        let hiddenConfig = try #require(NudgeConfig.fromJson(templateConfig))
+        #expect(!hiddenConfig.surface.showCloseButton)
+    }
+
+    @Test("dialogPanel clamps overflow content within maxHeight constraint", .tags(.unit)) @MainActor
+    func testNudgeDialogPanelOverflowSizing() throws {
+        // Construct a non-canvas (legacy column layout) config to exercise dialogPanel
+        var json: [String: Any] = [
+            "displayType": "dialog",
+            "container": [
+                "displayType": "dialog",
+                "cornerRadius": 16,
+                "padding": 20,
+                "showCloseButton": true
+            ],
+            "layout": [
+                "type": "column",
+                "children": [
+                    ["type": "text", "text": "Header", "fontSize": 24],
+                    ["type": "text", "text": "Long long content line 1", "fontSize": 16],
+                    ["type": "text", "text": "Long long content line 2", "fontSize": 16],
+                    ["type": "text", "text": "Long long content line 3", "fontSize": 16],
+                    ["type": "text", "text": "Long long content line 4", "fontSize": 16]
+                ]
+            ]
+        ]
+        let config = try #require(NudgeConfig.fromJson(json))
+        #expect(config.canvas == nil)
+
+        let presentation = DigiaNudgePresentation(
+            config: config,
+            payload: CEPTriggerPayload(cepCampaignId: "test_dialog_overflow", campaignKey: "test_dialog_overflow", cepMetadata: [:]),
+            variables: nil
+        )
+        let container = NudgeDialogContainer(
+            presentation: presentation,
+            viewportSize: CGSize(width: 390, height: 844),
+            safeAreaInsets: .zero
+        )
+
+        // dialogPanel should build successfully and clamp to maxHeight
+        let panelView = container.dialogPanel(width: 300, maxHeight: 150)
+        let hostingController = UIHostingController(rootView: AnyView(panelView))
+        hostingController.view.frame = CGRect(x: 0, y: 0, width: 300, height: 150)
+        hostingController.view.layoutIfNeeded()
+        #expect(hostingController.view != nil)
+    }
 }

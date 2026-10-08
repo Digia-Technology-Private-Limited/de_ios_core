@@ -119,8 +119,8 @@ struct CanvasProgressBarRendererTests {
         #expect(divZero == 0.0)
     }
 
-    @Test("canvasProgressTarget oracle handles inverted countdown ranges and non-numeric fallbacks")
-    func progressInvertedRangeAndFallbackOracle() {
+    @Test("canvasProgressTarget oracle handles inverted countdown ranges and directional clamping")
+    func progressInvertedRangeOracle() {
         // Inverted range: start 100 -> end 0 (countdown from 100 to 0)
         // At 100: (100 - 100) / (0 - 100) = 0.0
         let invStart = canvasProgressTarget(valueMode: .range, percent: "0", rangeStart: "100", rangeCurrent: "100", rangeEnd: "0", variables: nil)
@@ -139,7 +139,10 @@ struct CanvasProgressBarRendererTests {
         #expect(invBeyondStart == 0.0)
         let invBeyondEnd = canvasProgressTarget(valueMode: .range, percent: "0", rangeStart: "100", rangeCurrent: "-20", rangeEnd: "0", variables: nil)
         #expect(invBeyondEnd == 1.0)
+    }
 
+    @Test("canvasProgressTarget oracle falls back safely to zero for non-numeric range inputs")
+    func progressNonNumericFallbackOracle() {
         // Non-numeric strings in range mode fall back safely to 0
         let invalidStart = canvasProgressTarget(valueMode: .range, percent: "0", rangeStart: "bad_start", rangeCurrent: "bad_current", rangeEnd: "bad_end", variables: nil)
         #expect(invalidStart == 0.0)

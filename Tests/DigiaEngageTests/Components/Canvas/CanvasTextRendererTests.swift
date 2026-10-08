@@ -11,8 +11,8 @@ struct CanvasTextRendererTests {
 
     // MARK: - 1. Parser & Schema Preservation
 
-    @Test("text parser preserves single span with full typography, decorations, and colors")
-    func parserPreservesSingleSpan() throws {
+    @Test("text parser preserves block layout alignment and shadow properties")
+    func parserPreservesBlockLayoutAndShadow() throws {
         let widget = try parsedText([
             "horizontalAlign": "center",
             "textAlign": "center",
@@ -20,6 +20,38 @@ struct CanvasTextRendererTests {
             "maxLines": 3,
             "overflow": "ellipsis",
             "sizingMode": "fixed",
+            "spans": [["text": "Hello World"]],
+            "shadow": [
+                "color": "#00000033",
+                "blur": 8,
+                "spread": 2,
+                "offsetX": 1,
+                "offsetY": 3
+            ]
+        ])
+
+        guard case .text(_, let block, let shadow) = widget else {
+            Issue.record("Expected a parsed text widget")
+            return
+        }
+
+        #expect(block.horizontalAlign == .center)
+        #expect(block.textAlign == .center)
+        #expect(block.verticalAlign == .center)
+        #expect(block.maxLines == 3)
+        #expect(block.overflow == "ellipsis")
+        #expect(block.sizingMode == "fixed")
+
+        #expect(shadow?.color.lightHex == "#00000033")
+        #expect(shadow?.blur == 8)
+        #expect(shadow?.spread == 2)
+        #expect(shadow?.offsetX == 1)
+        #expect(shadow?.offsetY == 3)
+    }
+
+    @Test("text parser preserves single span with full typography, decorations, and colors")
+    func parserPreservesSingleSpan() throws {
+        let widget = try parsedText([
             "spans": [
                 [
                     "text": "Hello World",
@@ -44,29 +76,15 @@ struct CanvasTextRendererTests {
                         ]
                     ]
                 ]
-            ],
-            "shadow": [
-                "color": "#00000033",
-                "blur": 8,
-                "spread": 2,
-                "offsetX": 1,
-                "offsetY": 3
             ]
         ])
 
-        guard case .text(_, let block, let shadow) = widget else {
+        guard case .text(_, let block, _) = widget else {
             Issue.record("Expected a parsed text widget")
             return
         }
 
-        #expect(block.horizontalAlign == .center)
-        #expect(block.textAlign == .center)
-        #expect(block.verticalAlign == .center)
-        #expect(block.maxLines == 3)
-        #expect(block.overflow == "ellipsis")
-        #expect(block.sizingMode == "fixed")
         #expect(block.spans.count == 1)
-
         let span = block.spans[0]
         #expect(span.text == "Hello World")
         #expect(span.typography?.fontFamily == "Helvetica Neue")
@@ -82,12 +100,6 @@ struct CanvasTextRendererTests {
         #expect(span.decorationThickness == 2)
         #expect(span.decorationOffset == 4)
         #expect(span.actions == [.openUrl("https://example.com/tap")])
-
-        #expect(shadow?.color.lightHex == "#00000033")
-        #expect(shadow?.blur == 8)
-        #expect(shadow?.spread == 2)
-        #expect(shadow?.offsetX == 1)
-        #expect(shadow?.offsetY == 3)
     }
 
     @Test("text parser preserves multiple rich spans with mixed styling")
