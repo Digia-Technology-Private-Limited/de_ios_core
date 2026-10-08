@@ -16,6 +16,7 @@ private struct TimerRenderIdentity: Equatable {
 struct DigiaInlineCanvasView: View {
     let config: InlineCanvasConfig
     let payload: CEPTriggerPayload
+    let stepGate: CarouselStepGate
     @State private var applicationActive = UIApplication.shared.applicationState == .active
     @State private var tick: UInt64 = 0
     @State private var visible = false
@@ -109,9 +110,7 @@ struct DigiaInlineCanvasView: View {
         .environment(\.canvasInteractions, CanvasInteractionReporter { interaction in
             switch interaction {
             case let .carouselSlideViewed(index, total, auto):
-                SDKInstance.shared.reportCarouselStepViewed(
-                    payload: payload, itemIndex: index + 1, itemTotal: total, auto: auto
-                )
+                stepGate.onStep(index: index, total: total, auto: auto)
             case .storyOpened:
                 SDKInstance.shared.reportStoryOpened(payload)
             case let .storyPageViewed(index, total):

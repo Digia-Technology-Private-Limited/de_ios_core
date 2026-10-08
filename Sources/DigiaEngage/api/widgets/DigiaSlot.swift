@@ -41,13 +41,17 @@ public struct DigiaSlot<Placeholder: View>: View {
     @ViewBuilder
     private func slotContent(for payload: CEPTriggerPayload) -> some View {
         if let carouselConfig = inlineController.getCarouselConfig(placementKey) {
-            InlineCarouselRenderer.makeView(carouselConfig, payload: payload)
+            CarouselStepScope(payload: payload) { gate in
+                InlineCarouselRenderer.makeView(carouselConfig, payload: payload, stepGate: gate)
+            }
         } else if let bannerConfig = inlineController.getBannerConfig(placementKey) {
             DigiaInlineBannerView(config: bannerConfig, payload: payload)
         } else if let storyConfig = inlineController.getStoryConfig(placementKey) {
             DigiaInlineStoryView(config: storyConfig, payload: payload)
         } else if let canvasConfig = inlineController.getCanvasConfig(placementKey) {
-            DigiaInlineCanvasView(config: canvasConfig, payload: payload)
+            CarouselStepScope(payload: payload) { gate in
+                DigiaInlineCanvasView(config: canvasConfig, payload: payload, stepGate: gate)
+            }
         } else {
             // No renderable config resolved for this slot — clean up. CEP already
             // saw Impressed + Dismissed at route time (syncTemplate semantics).

@@ -4,9 +4,13 @@ internal import SDWebImageSwiftUI
 
 @MainActor
 enum InlineCarouselRenderer {
-    static func makeView(_ config: InlineCarouselConfig, payload: CEPTriggerPayload) -> AnyView {
+    static func makeView(
+        _ config: InlineCarouselConfig,
+        payload: CEPTriggerPayload,
+        stepGate: CarouselStepGate
+    ) -> AnyView {
         AnyView(
-            InlineCarouselView(config: config, payload: payload)
+            InlineCarouselView(config: config, payload: payload, stepGate: stepGate)
                 .environment(\.digiaCampaignKey, payload.campaignKey)
         )
     }
@@ -15,6 +19,7 @@ enum InlineCarouselRenderer {
 private struct InlineCarouselView: View {
     let config: InlineCarouselConfig
     let payload: CEPTriggerPayload
+    let stepGate: CarouselStepGate
     /// Index of the currently-settled page. `nil` only before the first layout pass.
     @State private var scrollPosition: Int?
     @State private var autoPlayTimer: Timer? = nil
@@ -125,13 +130,7 @@ private struct InlineCarouselView: View {
 
                     let auto = autoAdvanced
                     autoAdvanced = false
-                    // 1-based item position, matching Android's reportCarouselStepViewed.
-                    SDKInstance.shared.reportCarouselStepViewed(
-                        payload: payload,
-                        itemIndex: realIndex(idx) + 1,
-                        itemTotal: items.count,
-                        auto: auto
-                    )
+                    stepGate.onStep(index: realIndex(idx), total: items.count, auto: auto)
 
                     // Landed on a boundary clone: silently jump to its real counterpart
                     // (no animation, no analytics) one runloop tick later — mutating
