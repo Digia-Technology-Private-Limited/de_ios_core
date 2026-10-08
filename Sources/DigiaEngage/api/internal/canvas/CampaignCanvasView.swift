@@ -6,6 +6,7 @@ import UIKit
 internal import Lottie
 internal import SDWebImageSwiftUI
 
+private let log = DigiaLogger()
 private let maxFloatingCanvasUpscale: CGFloat = 1.15
 private let canvasTextSpanElementID = "canvas_text_span"
 
@@ -740,7 +741,10 @@ enum CampaignCanvasRendererRegistry {
         case .timer: key = "timer"
         }
         guard let renderer = renderers[key] else {
-            preconditionFailure("Missing Campaign Canvas renderer for \(key)")
+            let message = "Campaign Canvas renderer missing (widget=\(key))"
+            log.e(message)
+            assertionFailure(message)
+            return AnyView(EmptyView())
         }
         return renderer(widget, isDark, onAction)
     }
