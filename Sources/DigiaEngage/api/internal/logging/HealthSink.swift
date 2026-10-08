@@ -104,7 +104,7 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
     /// Set by the kill switch. Nothing registers the sink again this session.
     private var killed = false
 
-    /// True while a live-test campaign parses: a PM's test is not fleet health.
+    /// True while a live test parses or routes: a PM's test is not fleet health.
     @TaskLocal static var muted = false
 
     /// Whether the sink is currently in ``DigiaLogger``'s registry.
@@ -141,13 +141,9 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         }
     }
 
-    /// Registers the sink (if ``beginPending()`` did not already) and points it
-    /// at `report`, then sends anything queued in pending mode, once, in order.
-    ///
-    /// Called once the fetch has answered, after ``applyBundleConfig(enabled:sessionCap:)``,
-    /// so nothing queued leaves the device before the kill switch is read. A
-    /// failed fetch still activates: `fetch_failed_auth` waits in the queue.
-    /// After the kill switch this is a no-op.
+    /// Registers the sink and sends anything queued, once, in order.
+    /// Call after ``applyBundleConfig(enabled:sessionCap:)``, so the kill switch is read first.
+    /// A failed fetch still activates; after the kill switch this is a no-op.
     func activate(_ report: @escaping HealthReporter) {
         var shouldRegister = false
         lock.lock()

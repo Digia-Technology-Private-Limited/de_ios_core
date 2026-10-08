@@ -115,11 +115,11 @@ struct CampaignModel: Equatable {
                     stateful: stateful
                 ) else {
                     let version = (templateConfig["stateful"] as? [String: Any])?.int("version", default: -1) ?? -1
-                    if !CampaignParseScope.reportVersion(version, supported: 1) {
+                    if !CampaignParseScope.reportVersion(version, supported: 1), timeAnchor == nil {
                         CampaignParseScope.report(
-                            "Campaign skipped — invalid inline timer config",
+                            "Campaign skipped — timer needs server time, and the fetch had none",
                             reason: TimelineReason.campaignUnsupported,
-                            extras: ["type": "inlineCanvas"]
+                            extras: ["precondition": "server_time_missing"]
                         )
                     }
                     return nil

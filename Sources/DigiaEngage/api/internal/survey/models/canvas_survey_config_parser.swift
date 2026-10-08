@@ -37,6 +37,7 @@ enum CanvasSurveyConfigParser {
         variableSchemas: [VariableSchema] = []
     ) -> SurveyConfigModel? {
         guard SurveyParse.string(json["templateType"]) == "survey",
+              !CampaignParseScope.reportVersion(SurveyParse.int(json["schemaVersion"]) ?? 0, supported: 1),
               let scenesArr = SurveyParse.array(json["scenes"]),
               let flow = SurveyParse.object(json["flow"]),
               let flowNodesArr = SurveyParse.array(flow["nodes"]) else { return nil }

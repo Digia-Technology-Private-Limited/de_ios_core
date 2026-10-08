@@ -80,7 +80,7 @@ struct DesignTokenCatalog {
                     reason: TimelineReason.unknownDesignToken,
                     extras: ["token": token, "kind": "typography"]
                 )
-                throw DesignTokenError.invalid("Unknown typography token '\(token)'")
+                return nil
             }
             return result
         }

@@ -27,9 +27,7 @@ func buildVariableContext(schemas: [VariableSchema], cepVars: [String: String]?)
 
 /// Reports each declared variable with no CEP value and no fallback. Call once per start, never from a view body.
 func reportMissingVariables(_ schemas: [VariableSchema], payload: CEPTriggerPayload) {
-    // A live test is a PM's preview, not fleet health.
-    guard !isLiveTestCepId(payload.cepCampaignId) else { return }
-    for schema in schemas where (payload.variables?[schema.name] ?? "") == "" && schema.fallbackValue == "" {
+    for schema in schemas where (payload.variables?[schema.name] ?? "") == "" && !schema.hasFallback {
         log.w(
             "Variable has no CEP value and no fallback (variable=\(schema.name))",
             campaign: payload.campaignKey,
