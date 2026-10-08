@@ -100,7 +100,7 @@ enum TimelineReason: String, CaseIterable, DiagnosticReason {
     /// The experience reached the screen.
     case displayed = "displayed"
 
-    /// The floater's media could not load (4xx, invalid URL, or undecodable), so it never showed.
+    /// Campaign media could not load (4xx, invalid URL, or undecodable).
     case mediaLoadFailed = "media_load_failed"
 
     // MARK: interaction
