@@ -19,6 +19,8 @@ struct DigiaInlineCanvasView: View {
     @State private var applicationActive = UIApplication.shared.applicationState == .active
     @State private var tick: UInt64 = 0
     @State private var visible = false
+    /// The latest slide seen while the slot was hidden, sent once the slot shows.
+    @State private var hiddenStep: CanvasInteraction?
 
     var body: some View {
         let _ = tick
@@ -56,6 +58,11 @@ struct DigiaInlineCanvasView: View {
             }
         }
         .background(SlotVisibilityReader(visible: $visible))
+        .task(id: visible) {
+            guard visible, let step = hiddenStep else { return }
+            hiddenStep = nil
+            report(step)
+        }
         .onAppear {
             applicationActive = UIApplication.shared.applicationState == .active
         }
@@ -106,27 +113,35 @@ struct DigiaInlineCanvasView: View {
         // carousel it replaces emits, so the two are comparable and a migration doesn't reset the
         // funnel. Indices arrive 0-based and go out 1-based, which is the wire's convention.
         .environment(\.canvasInteractions, CanvasInteractionReporter { interaction in
-            switch interaction {
-            case let .carouselSlideViewed(index, total, auto):
-                SDKInstance.shared.reportCarouselStepViewed(
-                    payload: payload, itemIndex: index + 1, itemTotal: total, auto: auto
-                )
-            case .storyOpened:
-                SDKInstance.shared.reportStoryOpened(payload)
-            case let .storyPageViewed(index, total):
-                SDKInstance.shared.reportStoryStepViewed(
-                    payload, itemIndex: index + 1, itemTotal: total
-                )
-            case let .storyPageDismissed(index, _):
-                SDKInstance.shared.reportStoryStepDismissed(payload, itemIndex: index + 1)
-            case let .storyCompleted(total, timeToCompleteMs):
-                SDKInstance.shared.reportStoryCompleted(
-                    payload,
-                    itemTotal: total,
-                    timeToCompleteMs: timeToCompleteMs.map(Int64.init)
-                )
+            if case .carouselSlideViewed = interaction, !visible {
+                hiddenStep = interaction
+            } else {
+                report(interaction)
             }
         })
+    }
+
+    private func report(_ interaction: CanvasInteraction) {
+        switch interaction {
+        case let .carouselSlideViewed(index, total, auto):
+            SDKInstance.shared.reportCarouselStepViewed(
+                payload: payload, itemIndex: index + 1, itemTotal: total, auto: auto
+            )
+        case .storyOpened:
+            SDKInstance.shared.reportStoryOpened(payload)
+        case let .storyPageViewed(index, total):
+            SDKInstance.shared.reportStoryStepViewed(
+                payload, itemIndex: index + 1, itemTotal: total
+            )
+        case let .storyPageDismissed(index, _):
+            SDKInstance.shared.reportStoryStepDismissed(payload, itemIndex: index + 1)
+        case let .storyCompleted(total, timeToCompleteMs):
+            SDKInstance.shared.reportStoryCompleted(
+                payload,
+                itemTotal: total,
+                timeToCompleteMs: timeToCompleteMs.map(Int64.init)
+            )
+        }
     }
 
     private func perform(

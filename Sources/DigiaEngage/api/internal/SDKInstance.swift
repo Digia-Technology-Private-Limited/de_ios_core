@@ -2643,9 +2643,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     func reportCarouselStepViewed(
         payload: CEPTriggerPayload, itemIndex: Int, itemTotal: Int, auto: Bool
     ) {
-        events.toDigia(
-            CarouselEvent.StepViewed(itemIndex: itemIndex, itemTotal: itemTotal, auto: auto),
-            payload: payload
+        events.digiaCarouselStepViewed(
+            payload: payload,
+            event: CarouselEvent.StepViewed(itemIndex: itemIndex, itemTotal: itemTotal, auto: auto)
         )
     }
 

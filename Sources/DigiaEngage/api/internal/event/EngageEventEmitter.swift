@@ -107,6 +107,7 @@ final class EngageEventEmitter {
     /// `cepCampaignId`s that have already fired a Digia first-engagement click.
     private var digiaClicked: Set<String> = []
     private var timerImpressedStateByCampaign: [String: String] = [:]
+    private var lastCarouselStepByCampaign: [String: Int] = [:]
 
     init(
         cep: PresentationSink,
@@ -157,6 +158,13 @@ final class EngageEventEmitter {
         toDigia(event, payload: payload)
     }
 
+    /// Records a carousel Step Viewed unless it repeats the campaign's last reported slide.
+    func digiaCarouselStepViewed(payload: CEPTriggerPayload, event: CarouselEvent.StepViewed) {
+        guard lastCarouselStepByCampaign[payload.cepCampaignId] != event.itemIndex else { return }
+        lastCarouselStepByCampaign[payload.cepCampaignId] = event.itemIndex
+        toDigia(event, payload: payload)
+    }
+
     /// Whether this campaign has recorded its first-render impression — the
     /// surface rule's "displayed" (SR05).
     func hasImpressed(_ cepCampaignId: String) -> Bool {
@@ -185,6 +193,7 @@ final class EngageEventEmitter {
         digiaImpressed.remove(cepCampaignId)
         digiaClicked.remove(cepCampaignId)
         timerImpressedStateByCampaign.removeValue(forKey: cepCampaignId)
+        lastCarouselStepByCampaign.removeValue(forKey: cepCampaignId)
     }
 
     /// Forgets every impression + first-click mark.
@@ -192,5 +201,6 @@ final class EngageEventEmitter {
         digiaImpressed.removeAll()
         digiaClicked.removeAll()
         timerImpressedStateByCampaign.removeAll()
+        lastCarouselStepByCampaign.removeAll()
     }
 }
