@@ -248,8 +248,13 @@ final class AnalyticsService {
         isDispatching = true
         defer {
             isDispatching = false
+            // Events can be left behind two ways: a batch capped at maxBatchSize, and an event
+            // captured while this dispatch was in flight (its own dispatch was skipped as "already
+            // dispatching", and scheduleTimer is a no-op while dispatching). Neither has a timer, so
+            // arm one here at the configured interval, unless a retry is already pending and will
+            // pick them up.
             if queue.size > 0 && retryTask == nil && flushTimer == nil {
-                scheduleTimer(minDelayMs: config.flushBatchSize == 1 ? 0 : 15_000)
+                scheduleTimer()
             }
         }
 
@@ -313,7 +318,6 @@ final class AnalyticsService {
 
         guard !toRetry.isEmpty else {
             retryAttempt = 0
-            if queue.size > 0 { scheduleTimer(minDelayMs: 15_000) }
             return
         }
 
@@ -327,17 +331,9 @@ final class AnalyticsService {
         scheduleRetry(attempt: attempt)
     }
 
-    private func scheduleTimer(minDelayMs: Int? = nil) {
+    private func scheduleTimer(minDelayMs: Int = 0) {
         guard flushTimer == nil, !isDispatching else { return }
-        let effectiveMinDelay = minDelayMs ?? config.flushIntervalMs
-        let delayMs = min(config.flushIntervalMs, effectiveMinDelay)
-        if delayMs <= 0 {
-            Task { @MainActor [weak self] in
-                guard let self, !self.isCleared else { return }
-                await self.dispatchPending()
-            }
-            return
-        }
+        let delayMs = max(config.flushIntervalMs, minDelayMs)
         flushTimer = Timer.scheduledTimer(
             withTimeInterval: Double(delayMs) / 1_000,
             repeats: false

@@ -26,6 +26,8 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
     private var _callCount = 0
     var callCount: Int { _callCount }
     var responseFactory: (Int) -> Int
+    /// How long a track call takes to answer — lets a test capture while a send is in flight.
+    var responseDelayMs: UInt64 = 0
 
     init(responseFactory: @escaping (Int) -> Int = { _ in 200 }) {
         self.responseFactory = responseFactory
@@ -37,6 +39,7 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
         }
         _callCount += 1
         let status = responseFactory(_callCount)
+        if responseDelayMs > 0 { try await Task.sleep(nanoseconds: responseDelayMs * 1_000_000) }
         return NetworkResponse(statusCode: status, headers: [:], body: nil, isSuccessful: (200..<300).contains(status))
     }
 
@@ -287,6 +290,106 @@ struct AnalyticsServiceTests {
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
+    }
+
+    // ── Follow-up flushes ─────────────────────────────────────────────────────
+
+    @Test("events left over after a partial send are flushed on the next interval")
+    func leftoverAfterPartialSendFlushesOnInterval() async throws {
+        let fakeSender = FakeAnalyticsSender()
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 400, flushBatchSize: 3, maxBatchSize: 2),
+            sender: fakeSender
+        )
+
+        for i in 0..<3 {
+            service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p\(i)"))
+        }
+        // One batch of 2 goes out at once; one event is left behind.
+        try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 1 }
+        #expect(fakeSender.callCount == 1)
+
+        try await sleepMillis(150)
+        #expect(fakeSender.callCount == 1, "not before the configured interval")
+
+        try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 }
+        #expect(fakeSender.callCount == 2)
+    }
+
+    @Test("the follow-up flush waits the flush interval whatever the batch size")
+    func followUpWaitsTheIntervalWhateverTheBatchSize() async throws {
+        let fakeSender = FakeAnalyticsSender()
+        fakeSender.responseDelayMs = 150
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 500, flushBatchSize: 1),
+            sender: fakeSender
+        )
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("first"))
+        try await waitUntil { fakeSender.callCount == 1 }  // send #1 is in flight
+        // This capture's own dispatch is skipped ("already dispatching") and arms no timer.
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("second"))
+
+        try await waitUntil { service.queue.size == 1 && fakeSender.callCount == 1 }  // #1 finished
+        try await sleepMillis(200)
+        #expect(fakeSender.callCount == 1, "batch size 1 does not shorten the interval")
+
+        try await waitUntil { fakeSender.callCount == 2 }
+        #expect(fakeSender.callCount == 2)
+    }
+
+    @Test("after a failed send only the retry fires, not also a flush timer")
+    func afterFailureOnlyTheRetryFires() async throws {
+        let fakeSender = FakeAnalyticsSender { callNum in callNum == 1 ? 500 : 200 }
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 100, flushBatchSize: 10),
+            sender: fakeSender
+        )
+        service.retryScheduleMs = [1_000]
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
+        service.flush()
+        try await waitUntil { service.retryAttempt == 1 }
+        #expect(fakeSender.callCount == 1)
+
+        // A second timer at the 100 ms flush interval would have resent long before this.
+        try await sleepMillis(500)
+        #expect(fakeSender.callCount == 1, "only the retry may resend")
+
+        try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 }
+        #expect(fakeSender.callCount == 2)
+    }
+
+    // ── Test Kit mode ─────────────────────────────────────────────────────────
+
+    @Test("test kit mode sends each event at once while normal mode batches by the default interval")
+    func testKitModeSendsAtOnce() async throws {
+        func services(_ client: MockNetworkClient) -> SDKServices {
+            let storage = UserDefaultsLocalStorage(defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!)
+            return SDKServices(config: DigiaConfig(apiKey: "test_key"), storage: storage, networkClient: client)
+        }
+        func trackPosts(_ client: MockNetworkClient) -> Int {
+            client.recordedRequests.filter { $0.url.absoluteString == DigiaEndpoints.track }.count
+        }
+
+        // Normal mode: the default 30 s interval holds a lone event.
+        DigiaEndpoints.resetForTest()
+        let normalClient = MockNetworkClient()
+        let normal = services(normalClient)
+        normal.analyticsService?.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("n1"), campaignId: "c", campaignType: "nudge")
+        try await sleepMillis(300)
+        #expect(trackPosts(normalClient) == 0)
+        normal.analyticsService?.clear()
+
+        // Test Kit mode: the same default config sends it immediately.
+        try DigiaEndpoints.setTestRoot("http://127.0.0.1:9")
+        defer { DigiaEndpoints.resetForTest() }
+        let testClient = MockNetworkClient()
+        let testMode = services(testClient)
+        testMode.analyticsService?.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("t1"), campaignId: "c", campaignType: "nudge")
+        try await waitUntil { trackPosts(testClient) == 1 }
+        #expect(trackPosts(testClient) == 1)
+        testMode.analyticsService?.clear()
     }
 
     @Test("explicit flush() dispatches pending events")
