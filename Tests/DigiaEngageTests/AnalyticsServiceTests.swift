@@ -22,33 +22,59 @@ private extension AnalyticsService {
 /// letting it share this counter made `callCount` (and therefore
 /// `responseFactory`'s call-numbered branching) racy depending on whether the
 /// session call happened to fire before the dispatch under test.
-final class FakeAnalyticsSender: AnalyticsSender, @unchecked Sendable {
+final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
     private var _callCount = 0
     var callCount: Int { _callCount }
     var responseFactory: (Int) -> Int
+    /// How long a track call takes to answer — lets a test capture while a send is in flight.
+    var responseDelayMs: UInt64 = 0
 
     init(responseFactory: @escaping (Int) -> Int = { _ in 200 }) {
         self.responseFactory = responseFactory
     }
 
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
-        guard url == DigiaEndpoints.track else { return 200 }
+    func execute(request: NetworkRequest) async throws -> NetworkResponse {
+        guard request.url.absoluteString == DigiaEndpoints.track else {
+            return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+        }
         _callCount += 1
-        return responseFactory(_callCount)
+        let status = responseFactory(_callCount)
+        if responseDelayMs > 0 { try await Task.sleep(nanoseconds: responseDelayMs * 1_000_000) }
+        return NetworkResponse(statusCode: status, headers: [:], body: nil, isSuccessful: (200..<300).contains(status))
+    }
+
+    func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
+        NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+    }
+
+    func openSseStream(request: NetworkRequest, handler: SseStreamHandler) -> CancellableSubscription {
+        final class EmptySub: CancellableSubscription { func cancel() {} }
+        return EmptySub()
     }
 }
 
 /// Fake sender that always throws, to exercise the "ambiguous" (no status code
 /// at all — no connectivity, timeout, DNS failure) retry path. Only counts the
 /// track-dispatch endpoint, for the same reason as `FakeAnalyticsSender` above.
-final class ThrowingAnalyticsSender: AnalyticsSender, @unchecked Sendable {
+final class ThrowingAnalyticsSender: NetworkClient, @unchecked Sendable {
     private var _callCount = 0
     var callCount: Int { _callCount }
 
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
-        guard url == DigiaEndpoints.track else { return 200 }
+    func execute(request: NetworkRequest) async throws -> NetworkResponse {
+        guard request.url.absoluteString == DigiaEndpoints.track else {
+            return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+        }
         _callCount += 1
         throw URLError(.notConnectedToInternet)
+    }
+
+    func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
+        throw URLError(.notConnectedToInternet)
+    }
+
+    func openSseStream(request: NetworkRequest, handler: SseStreamHandler) -> CancellableSubscription {
+        final class EmptySub: CancellableSubscription { func cancel() {} }
+        return EmptySub()
     }
 }
 
@@ -56,6 +82,15 @@ final class ThrowingAnalyticsSender: AnalyticsSender, @unchecked Sendable {
 
 private func sleepMillis(_ ms: UInt64) async throws {
     try await Task.sleep(nanoseconds: ms * 1_000_000)
+}
+
+/// Polls `condition` (up to 5 s) instead of guessing how long the work takes:
+/// the main actor is shared with other suites and can be busy for a while.
+@MainActor
+private func waitUntil(_ condition: () -> Bool) async throws {
+    for _ in 0..<500 where !condition() {
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
 }
 
 @MainActor
@@ -72,17 +107,20 @@ struct AnalyticsServiceTests {
 
     private func makeService(
         config: AnalyticsConfig = AnalyticsConfig(flushIntervalMs: 10_000),
-        sender: any AnalyticsSender = FakeAnalyticsSender(),
+        sender: any NetworkClient = FakeAnalyticsSender(),
         defaults: UserDefaults? = nil
     ) -> AnalyticsService {
         let store = defaults ?? UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
+        let storage = UserDefaultsLocalStorage(defaults: store)
+        let identityManager = IdentityManager(storage: storage.scoped("identity"))
+        let sessionManager = SessionManager(storage: storage.scoped("session"), timeoutMs: Int64(config.sessionTimeoutMs), observeLifecycle: false)
         return AnalyticsService(
             config: config,
-            apiKey: "test-api-key",
-            identity: AnalyticsIdentityManager(defaults: store),
-            queue: AnalyticsQueue(defaults: store),
+            identityManager: identityManager,
+            sessionManager: sessionManager,
+            queue: AnalyticsQueue(storage: UserDefaultsLocalStorage(defaults: store).scoped("analytics")),
             staticContext: ["sdk_version": "1.0.0", "sdk_platform": "ios"],
-            sender: sender
+            networkClient: sender
         )
     }
 
@@ -91,30 +129,6 @@ struct AnalyticsServiceTests {
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
-
-    @Test("anonymous ID is generated and stable")
-    func anonymousIdIsStable() {
-        let service = makeService()
-        let id1 = service.identity.anonymousId
-        let id2 = service.identity.anonymousId
-        #expect(!id1.isEmpty)
-        #expect(id1 == id2)
-    }
-
-    @Test("setUserId persists and clearUserId rotates session")
-    func setUserIdAndClearUserId() {
-        let service = makeService()
-
-        service.setUserId("user-123")
-        #expect(service.identity.userId == "user-123")
-
-        let sessionBefore = service.identity.sessionId
-        service.clearUserId()
-
-        #expect(service.identity.userId == nil)
-        #expect(!service.identity.sessionId.isEmpty)
-        #expect(service.identity.sessionId != sessionBefore)
-    }
 
     @Test("queue drops oldest events when capacity is exceeded")
     func queueDropsOldestWhenFull() {
@@ -179,6 +193,35 @@ struct AnalyticsServiceTests {
         #expect(entries[0].payload["element_id"] == nil)
     }
 
+    @Test("impression_id groups the events of one showing, and is absent when there is none")
+    func impressionIdIsStamped() {
+        let service = makeService()
+        let payload = buildPayload("test")
+
+        service.capture(
+            NudgeEvent.Viewed(displayStyle: "dialog"),
+            payload: payload,
+            campaignId: "c1",
+            campaignType: "nudge",
+            impressionId: "imp-1"
+        )
+        service.capture(
+            NudgeEvent.Dismissed(),
+            payload: payload,
+            campaignId: "c1",
+            campaignType: "nudge"
+        )
+
+        let entries = service.queue.peek(maxCount: 10)
+        #expect(entries.count == 2)
+        // The key events from one showing are grouped by. `campaign_key` cannot
+        // do that job: one campaign can be delivered many times in a session.
+        #expect(entries[0].payload["impression_id"] as? String == "imp-1")
+        // Absent, not null, when there is none — a live test, or a surface
+        // outliving its presentation.
+        #expect(entries[1].payload["impression_id"] == nil)
+    }
+
     @Test("click analytics preserve action URL")
     func clickAnalyticsPreserveActionURL() {
         let service = makeService()
@@ -227,8 +270,8 @@ struct AnalyticsServiceTests {
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p2"))
-        // second capture reaches flushBatchSize — dispatch Task is enqueued; release actor to let it run
-        try await sleepMillis(50)
+        // The second capture reaches flushBatchSize and enqueues the dispatch Task.
+        try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
@@ -243,11 +286,110 @@ struct AnalyticsServiceTests {
         )
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
-        // timer scheduled for 50ms — wait well past it
-        try await sleepMillis(300)
+        try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
+    }
+
+    // ── Follow-up flushes ─────────────────────────────────────────────────────
+
+    @Test("events left over after a partial send are flushed on the next interval")
+    func leftoverAfterPartialSendFlushesOnInterval() async throws {
+        let fakeSender = FakeAnalyticsSender()
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 400, flushBatchSize: 3, maxBatchSize: 2),
+            sender: fakeSender
+        )
+
+        for i in 0..<3 {
+            service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p\(i)"))
+        }
+        // One batch of 2 goes out at once; one event is left behind.
+        try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 1 }
+        #expect(fakeSender.callCount == 1)
+
+        try await sleepMillis(150)
+        #expect(fakeSender.callCount == 1, "not before the configured interval")
+
+        try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 }
+        #expect(fakeSender.callCount == 2)
+    }
+
+    @Test("the follow-up flush waits the flush interval whatever the batch size")
+    func followUpWaitsTheIntervalWhateverTheBatchSize() async throws {
+        let fakeSender = FakeAnalyticsSender()
+        fakeSender.responseDelayMs = 150
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 500, flushBatchSize: 1),
+            sender: fakeSender
+        )
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("first"))
+        try await waitUntil { fakeSender.callCount == 1 }  // send #1 is in flight
+        // This capture's own dispatch is skipped ("already dispatching") and arms no timer.
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("second"))
+
+        try await waitUntil { service.queue.size == 1 && fakeSender.callCount == 1 }  // #1 finished
+        try await sleepMillis(200)
+        #expect(fakeSender.callCount == 1, "batch size 1 does not shorten the interval")
+
+        try await waitUntil { fakeSender.callCount == 2 }
+        #expect(fakeSender.callCount == 2)
+    }
+
+    @Test("after a failed send only the retry fires, not also a flush timer")
+    func afterFailureOnlyTheRetryFires() async throws {
+        let fakeSender = FakeAnalyticsSender { callNum in callNum == 1 ? 500 : 200 }
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 100, flushBatchSize: 10),
+            sender: fakeSender
+        )
+        service.retryScheduleMs = [1_000]
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
+        service.flush()
+        try await waitUntil { service.retryAttempt == 1 }
+        #expect(fakeSender.callCount == 1)
+
+        // A second timer at the 100 ms flush interval would have resent long before this.
+        try await sleepMillis(500)
+        #expect(fakeSender.callCount == 1, "only the retry may resend")
+
+        try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 }
+        #expect(fakeSender.callCount == 2)
+    }
+
+    // ── Test Kit mode ─────────────────────────────────────────────────────────
+
+    @Test("test kit mode sends each event at once while normal mode batches by the default interval")
+    func testKitModeSendsAtOnce() async throws {
+        func services(_ client: MockNetworkClient) -> SDKServices {
+            let storage = UserDefaultsLocalStorage(defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!)
+            return SDKServices(config: DigiaConfig(apiKey: "test_key"), storage: storage, networkClient: client)
+        }
+        func trackPosts(_ client: MockNetworkClient) -> Int {
+            client.recordedRequests.filter { $0.url.absoluteString == DigiaEndpoints.track }.count
+        }
+
+        // Normal mode: the default 30 s interval holds a lone event.
+        DigiaEndpoints.resetForTest()
+        let normalClient = MockNetworkClient()
+        let normal = services(normalClient)
+        normal.analyticsService?.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("n1"), campaignId: "c", campaignType: "nudge")
+        try await sleepMillis(300)
+        #expect(trackPosts(normalClient) == 0)
+        normal.analyticsService?.clear()
+
+        // Test Kit mode: the same default config sends it immediately.
+        try DigiaEndpoints.setTestRoot("http://127.0.0.1:9")
+        defer { DigiaEndpoints.resetForTest() }
+        let testClient = MockNetworkClient()
+        let testMode = services(testClient)
+        testMode.analyticsService?.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("t1"), campaignId: "c", campaignType: "nudge")
+        try await waitUntil { trackPosts(testClient) == 1 }
+        #expect(trackPosts(testClient) == 1)
+        testMode.analyticsService?.clear()
     }
 
     @Test("explicit flush() dispatches pending events")
@@ -262,7 +404,7 @@ struct AnalyticsServiceTests {
         #expect(service.queue.size == 1)
 
         service.flush()
-        try await sleepMillis(50)
+        try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
@@ -275,17 +417,19 @@ struct AnalyticsServiceTests {
             config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
             sender: fakeSender
         )
-        service.retryScheduleMs = [10, 20]  // fast retries for the test
+        // Long enough that the first attempt's outcome is observed before the
+        // retry fires, whatever else the main actor is doing.
+        service.retryScheduleMs = [1_000]
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
-        // let flush attempt run and fail (500) but not the retry yet (10ms)
-        try await sleepMillis(5)
+        // The first attempt fails (500); the event waits for the retry.
+        try await waitUntil { service.retryAttempt == 1 }
         #expect(service.retryAttempt == 1)
         #expect(service.queue.size == 1)
 
-        // let the retry fire and succeed
-        try await sleepMillis(200)
+        // The retry fires and succeeds.
+        try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 }
         #expect(service.queue.size == 0)
         #expect(service.retryAttempt == 0)
         #expect(fakeSender.callCount == 2)
@@ -298,12 +442,13 @@ struct AnalyticsServiceTests {
             config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 2),
             sender: fakeSender
         )
-        service.retryScheduleMs = [50]  // long enough to add a second event before it fires
+        // Long enough to add a second event before it fires, whatever else the main actor is doing.
+        service.retryScheduleMs = [1_000]
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
-        // let the flush attempt run and fail (500); retry is now pending
-        try await sleepMillis(5)
+        // The flush attempt fails (500); the retry is now pending.
+        try await waitUntil { service.retryAttempt == 1 }
         #expect(fakeSender.callCount == 1)
 
         // This second capture reaches flushBatchSize (2) — without the guard this
@@ -313,8 +458,8 @@ struct AnalyticsServiceTests {
         #expect(fakeSender.callCount == 1)  // no early dispatch — still just the one attempt
         #expect(service.queue.size == 2)
 
-        // let the originally scheduled retry fire — picks up both events together
-        try await sleepMillis(100)
+        // The originally scheduled retry fires and picks up both events together.
+        try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 }
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 2)
     }
@@ -331,8 +476,7 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
 
-        // 10 total attempts, ~2ms apart — wait past all of them
-        try await sleepMillis(300)
+        try await waitUntil { fakeSender.callCount == 10 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 10)
@@ -350,8 +494,7 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
 
-        // 10 total attempts, ~2ms apart — wait past all of them
-        try await sleepMillis(300)
+        try await waitUntil { throwingSender.callCount == 10 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(throwingSender.callCount == 10)
@@ -372,7 +515,7 @@ struct AnalyticsServiceTests {
             name: UIApplication.didEnterBackgroundNotification,
             object: nil
         )
-        try await sleepMillis(50)
+        try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
@@ -400,11 +543,10 @@ struct AnalyticsServiceTests {
             defaults: defaults
         )
 
-        try await sleepMillis(300)
-        _ = service2  // keep alive until timer fires
+        try await waitUntil { fakeSender.callCount == 1 && service2.queue.size == 0 }
 
         #expect(fakeSender.callCount == 1)
-        #expect(AnalyticsQueue(defaults: defaults).size == 0)
+        #expect(AnalyticsQueue(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("analytics")).size == 0)
     }
 
     @Test("dismissed event queues but does not self-flush")
@@ -423,6 +565,104 @@ struct AnalyticsServiceTests {
         #expect(fakeSender.callCount == 0)
     }
 
+    // MARK: - HealthSink envelope
+
+    /// The assertion that "no new ClickHouse column" is actually true: a
+    /// `sdk_health` event's top-level shape is byte-for-byte the same set of
+    /// keys a normal first-party event's is. Only `event_name` and the
+    /// contents of `properties` may differ — everything else (identity,
+    /// timestamps, `campaign_key`) comes from the same enqueue path for free.
+    @Test("sdk_health rides the existing envelope verbatim — no new top-level columns")
+    func healthEventEnvelopeMatchesNormalEvent() {
+        let service = makeService()
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("cmp_normal"))
+        service.captureHealth(
+            campaignKey: "cmp_health",
+            reason: "malformed_campaign_skipped",
+            stage: "parse",
+            detail: nil,
+            buildMode: "debug"
+        )
+
+        let entries = service.queue.peek(maxCount: 2)
+        #expect(entries.count == 2)
+        let normalEvent = entries[0].payload
+        let healthEvent = entries[1].payload
+
+        // No column exists on the health payload that isn't part of the one
+        // envelope every first-party event already uses. `campaign_id` /
+        // `campaign_type` / `impression_id` / `user_id` are optional on
+        // both — absent, not null, when there is nothing to put there — so a
+        // health event naturally has fewer populated keys than a normal event
+        // that happens to resolve a campaign id; the assertion that matters is
+        // that the health payload invents nothing new.
+        let knownEnvelopeKeys: Set<String> = [
+            "event_id", "event_name", "occurred_at", "anonymous_id", "session_id",
+            "campaign_id", "campaign_key", "campaign_type", "impression_id", "user_id",
+            "properties",
+        ]
+        #expect(Set(healthEvent.keys).isSubset(of: knownEnvelopeKeys))
+        // And it does carry every column that has no dependency on campaign
+        // resolution — the ones a normal event always has too.
+        let mandatoryKeys: Set<String> = [
+            "event_id", "event_name", "occurred_at", "anonymous_id", "session_id", "properties",
+        ]
+        #expect(mandatoryKeys.isSubset(of: Set(healthEvent.keys)))
+        #expect(mandatoryKeys.isSubset(of: Set(normalEvent.keys)))
+
+        // The only intended differences: the event name, and the presence of
+        // campaign_id/campaign_type (health events don't resolve either).
+        #expect(healthEvent["event_name"] as? String == "sdk_health")
+        #expect(normalEvent["event_name"] as? String != "sdk_health")
+        #expect(healthEvent["campaign_id"] == nil)
+        #expect(healthEvent["campaign_type"] == nil)
+        #expect(healthEvent["campaign_key"] as? String == "cmp_health")
+
+        // Identity and timestamp columns are populated exactly like a normal
+        // event's — they come from the same enqueue path.
+        #expect((healthEvent["event_id"] as? String)?.isEmpty == false)
+        #expect((healthEvent["occurred_at"] as? String)?.isEmpty == false)
+        #expect((healthEvent["anonymous_id"] as? String)?.isEmpty == false)
+        #expect((healthEvent["session_id"] as? String)?.isEmpty == false)
+
+        let healthProps = healthEvent["properties"] as? [String: Any]
+        #expect(healthProps?["reason"] as? String == "malformed_campaign_skipped")
+        #expect(healthProps?["stage"] as? String == "parse")
+        #expect(healthProps?["detail"] == nil)
+        #expect(healthProps?["build_mode"] as? String == "debug")
+        // The static context (sdk_version, sdk_platform, …) merges in for a
+        // health event exactly as it does for a normal one.
+        #expect(healthProps?["sdk_version"] as? String == "1.0.0")
+    }
+
+    @Test("captureHealth carries stage and detail only when present")
+    func captureHealthOptionalFields() {
+        let service = makeService()
+
+        service.captureHealth(
+            campaignKey: nil,
+            reason: "fetch_failed_auth",
+            stage: nil,
+            detail: ["http_status": "401"],
+            buildMode: "release"
+        )
+
+        let entry = service.queue.peek(maxCount: 1)[0].payload
+        #expect(entry["campaign_key"] == nil)
+        let props = entry["properties"] as? [String: Any]
+        #expect(props?["stage"] == nil)
+        #expect((props?["detail"] as? [String: String]) == ["http_status": "401"])
+    }
+
+    @Test("captureHealth is a no-op when analytics is disabled")
+    func captureHealthNoOpWhenDisabled() {
+        let service = makeService(config: AnalyticsConfig(enabled: false))
+        service.captureHealth(
+            campaignKey: "cmp", reason: "fetch_failed_auth", stage: nil, detail: nil, buildMode: "release")
+        #expect(service.queue.size == 0)
+    }
+
     @Test("partial failure (207) removes all batched events without retry")
     func partialFailureRemovesAllEvents() async throws {
         let fakeSender = FakeAnalyticsSender { _ in 207 }
@@ -435,7 +675,7 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Clicked(elementId: "cta"), payload: buildPayload("p2"))
 
         service.flush()
-        try await sleepMillis(50)
+        try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)

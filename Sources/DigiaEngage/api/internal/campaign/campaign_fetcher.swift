@@ -1,5 +1,8 @@
 import Foundation
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 enum CampaignFetchFailureCategory: Equatable { case transport, httpStatus, invalidResponse }
 
 struct CampaignFetchError: LocalizedError {
@@ -22,47 +25,33 @@ struct CampaignAPIResponse {
         self.headers = headers
     }
 }
-protocol CampaignAPI { func fetchCampaignBundle() async throws -> CampaignAPIResponse }
+struct CampaignFetcher {
+    private let networkClient: any NetworkClient
 
-private struct URLSessionCampaignAPI: CampaignAPI {
-    let requestHeaders: [String: String]
-    let session: URLSession
+    init(networkClient: any NetworkClient) {
+        self.networkClient = networkClient
+    }
 
-    func fetchCampaignBundle() async throws -> CampaignAPIResponse {
+    func fetch() async throws -> CampaignBundle {
         let endpoint = DigiaEndpoints.campaignBundle
         guard let url = URL(string: endpoint) else {
             throw CampaignFetchError(category: .transport, endpoint: endpoint, statusCode: nil, message: "Invalid campaign bundle URL", underlying: nil)
         }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        for (key, value) in requestHeaders { request.setValue(value, forHTTPHeaderField: key) }
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 10
-        request.httpBody = Data("{}".utf8)
+        log.d("Campaign bundle fetch started (endpoint=\(endpoint))")
+        let request = NetworkRequest(
+            url: url,
+            method: .post,
+            body: Data("{}".utf8),
+            connectTimeout: 10,
+            readTimeout: 10
+        )
+        let response: NetworkResponse
         do {
-            let (data, response) = try await session.data(for: request)
-            let http = response as? HTTPURLResponse
-            let headers = http?.allHeaderFields.reduce(into: [String: String]()) { result, entry in
-                guard let key = entry.key as? String else { return }
-                result[key] = String(describing: entry.value)
-            } ?? [:]
-            return CampaignAPIResponse(statusCode: http?.statusCode ?? -1, data: data, headers: headers)
+            response = try await networkClient.execute(request: request)
         } catch {
             throw CampaignFetchError(category: .transport, endpoint: endpoint, statusCode: nil, message: "Campaign bundle transport failed: \(error.localizedDescription)", underlying: error)
         }
-    }
-}
-
-struct CampaignFetcher {
-    let api: any CampaignAPI
-    init(requestHeaders: [String: String], session: URLSession = .shared) { api = URLSessionCampaignAPI(requestHeaders: requestHeaders, session: session) }
-    init(api: any CampaignAPI) { self.api = api }
-
-    func fetch() async throws -> CampaignBundle {
-        let endpoint = DigiaEndpoints.campaignBundle
-        DigiaLog.verbose("[CampaignFetcher] fetching: \(endpoint)")
-        let response = try await api.fetchCampaignBundle()
-        guard (200...299).contains(response.statusCode) else {
+        guard response.isSuccessful else {
             throw CampaignFetchError(category: .httpStatus, endpoint: endpoint, statusCode: response.statusCode, message: "Campaign bundle request failed: HTTP \(response.statusCode)", underlying: nil)
         }
         do {
@@ -70,7 +59,7 @@ struct CampaignFetcher {
                 $0.key.caseInsensitiveCompare("X-Digia-Server-Time-Ms") == .orderedSame
             }.flatMap { Int64($0.value) }
             return try Self.parse(
-                response.data,
+                response.body ?? Data(),
                 devicePlatform: "ios",
                 serverTimeMs: serverTime
             )
@@ -105,7 +94,11 @@ struct CampaignFetcher {
         case nil, is NSNull: designTokens = nil
         case let value as [String: Any]: designTokens = value
         default:
-            DigiaLog.warning("[CampaignFetcher] designTokens is not an object; using literals only")
+            log.e(
+                "Design tokens unreadable — not an object, falling back to literal values",
+                stage: .parse,
+                reason: TimelineReason.designTokensUnreadable
+            )
             designTokens = nil
         }
         return CampaignBundle.create(
@@ -114,7 +107,24 @@ struct CampaignFetcher {
             devicePlatform: devicePlatform,
             serverTimeMs: serverTimeMs ?? (acceptBridgedServerTime
                 ? (root["serverTimeMs"] as? NSNumber)?.int64Value
-                : nil)
+                : nil),
+            healthEnabled: healthEnabled(bundle["sdkHealth"]) ?? true,
+            healthSessionCap: healthSessionCap(bundle["sdkHealthSessionCap"])
         )
+    }
+
+    /// The kill switch, read strictly: only a JSON boolean counts, so `0` or `"false"` cannot mute health.
+    private static func healthEnabled(_ raw: Any?) -> Bool? {
+        guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+
+    /// The per-session health-event cap, read defensively. `nil` means the
+    /// server said nothing usable, and the SDK's own default
+    /// (``HealthSink/defaultSessionCap``) stands.
+    private static func healthSessionCap(_ raw: Any?) -> Int? {
+        guard let raw, !(raw is NSNull) else { return nil }
+        guard let number = raw as? NSNumber, number.doubleValue >= 0 else { return nil }
+        return number.intValue
     }
 }

@@ -1,7 +1,7 @@
 import AVFoundation
 import AVKit
-@_implementationOnly import Lottie
-@_implementationOnly import SDWebImageSwiftUI
+internal import Lottie
+internal import SDWebImageSwiftUI
 import SwiftUI
 import UIKit
 
@@ -314,6 +314,7 @@ private struct NudgeButtonView: View {
             await SDKInstance.shared.executeActionFlow(
                 node.actions,
                 variables: variables,
+                campaignKey: SDKInstance.shared.controller.activeNudge?.payload.campaignKey,
                 localActionExecutor: LocalActionExecutor(dismiss: onDismiss)
             )
         }
@@ -582,8 +583,10 @@ private struct NudgeVideoView: View {
             loopObserver = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
             ) { _ in
-                p.seek(to: .zero)
-                p.play()
+                MainActor.assumeIsolated {
+                    p.seek(to: .zero)
+                    p.play()
+                }
             }
         }
 

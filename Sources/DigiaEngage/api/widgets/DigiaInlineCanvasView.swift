@@ -4,7 +4,7 @@ import UIKit
 private struct TimerRenderIdentity: Equatable {
     let campaignID: String
     let stateID: String?
-    let applicationActive: Bool
+    let visible: Bool
 }
 
 /// Hosts an authored Canvas inside a `DigiaSlot`.
@@ -16,8 +16,10 @@ private struct TimerRenderIdentity: Equatable {
 struct DigiaInlineCanvasView: View {
     let config: InlineCanvasConfig
     let payload: CEPTriggerPayload
+    let stepGate: CarouselStepGate
     @State private var applicationActive = UIApplication.shared.applicationState == .active
     @State private var tick: UInt64 = 0
+    @State private var visible = false
 
     var body: some View {
         let _ = tick
@@ -44,10 +46,9 @@ struct DigiaInlineCanvasView: View {
         .task(id: TimerRenderIdentity(
             campaignID: payload.cepCampaignId,
             stateID: resolved?.stateID,
-            applicationActive: applicationActive
+            visible: visible
         )) {
-            if applicationActive, UIApplication.shared.applicationState == .active,
-               !Task.isCancelled, let resolved, resolved.canvas != nil {
+            if visible, !Task.isCancelled, let resolved, resolved.canvas != nil {
                 SDKInstance.shared.reportInlineTimerStateRender(
                     payload: payload,
                     config: config,
@@ -55,6 +56,7 @@ struct DigiaInlineCanvasView: View {
                 )
             }
         }
+        .background(SlotVisibilityReader(visible: $visible))
         .onAppear {
             applicationActive = UIApplication.shared.applicationState == .active
         }
@@ -97,6 +99,8 @@ struct DigiaInlineCanvasView: View {
             }
         )
         .environment(\.timerRemainingSeconds, remainingSeconds)
+        .environment(\.digiaVariables, variables)
+        .environment(\.digiaCampaignKey, payload.campaignKey)
         // Canvas widgets report what happened to them; this is where it becomes a campaign event.
         //
         // The widgets cannot do this themselves — a carousel has no idea which campaign it is part
@@ -106,9 +110,7 @@ struct DigiaInlineCanvasView: View {
         .environment(\.canvasInteractions, CanvasInteractionReporter { interaction in
             switch interaction {
             case let .carouselSlideViewed(index, total, auto):
-                SDKInstance.shared.reportCarouselStepViewed(
-                    payload: payload, itemIndex: index + 1, itemTotal: total, auto: auto
-                )
+                stepGate.onStep(index: index, total: total, auto: auto)
             case .storyOpened:
                 SDKInstance.shared.reportStoryOpened(payload)
             case let .storyPageViewed(index, total):
@@ -178,6 +180,7 @@ struct DigiaInlineCanvasView: View {
             await SDKInstance.shared.executeActionFlow(
                 request.actions,
                 variables: variables,
+                campaignKey: payload.campaignKey,
                 localActionExecutor: LocalActionExecutor(dismiss: dismiss)
             )
         }

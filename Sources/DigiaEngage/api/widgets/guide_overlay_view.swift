@@ -1,26 +1,28 @@
 import SwiftUI
 import Combine
 import UIKit
-@_implementationOnly import SDWebImageSVGCoder
+internal import SDWebImageSVGCoder
 
 @MainActor
 private enum AnchorlessImageLoader {
     private static let cache = NSCache<NSURL, UIImage>()
     private static let imageLoadTimeout: TimeInterval = 3
 
-    static func image(for url: URL) async -> UIImage? {
+    /// On failure, returns the health cause from the HTTP status.
+    static func image(for url: URL) async -> (image: UIImage?, failureCause: String?) {
         DigiaImagePipeline.configureIfNeeded()
-        if let cached = cache.object(forKey: url as NSURL) { return cached }
+        if let cached = cache.object(forKey: url as NSURL) { return (cached, nil) }
         var request = URLRequest(url: url)
         request.timeoutInterval = imageLoadTimeout
         guard let (data, response) = try? await URLSession.shared.data(for: request),
-              !Task.isCancelled,
-              let http = response as? HTTPURLResponse,
-              (200..<300).contains(http.statusCode),
+              !Task.isCancelled
+        else { return (nil, nil) }
+        let status = (response as? HTTPURLResponse)?.statusCode
+        guard let status, (200..<300).contains(status),
               let image = UIImage(data: data) ?? SDImageSVGCoder.shared.decodedImage(with: data, options: nil)
-        else { return nil }
+        else { return (nil, mediaFailureCause(httpStatus: status)) }
         cache.setObject(image, forKey: url as NSURL)
-        return image
+        return (image, nil)
     }
 
     static func prefetch(_ url: URL?) {
@@ -58,6 +60,7 @@ struct GuideOverlayView: View {
                         onDismiss: { SDKInstance.shared.dismissGuide() }
                     )
                     .environment(\.digiaVariables, state.variableContext)
+                    .environment(\.digiaCampaignKey, state.payload.campaignKey)
                     .id("\(state.token):\(state.stepIndex)")
                 case .notReady:
                     EmptyView()
@@ -148,6 +151,7 @@ private struct GuideStepOverlay: View {
     let onOutsideTap: () -> Void
     let onDismiss: () -> Void
 
+    @Environment(\.digiaCampaignKey) private var campaignKey
     @Environment(\.digiaVariables) private var variables
     @State private var bubbleSize: CGSize = .zero
     @State private var targetImage: UIImage?
@@ -182,7 +186,18 @@ private struct GuideStepOverlay: View {
                     dy: -CGFloat(config.overlay.cutout.padding) * canvasScale
                 )
                 : anchorRect
-            let placementAnchor = paddedAnchor
+            let placementAnchor: CGRect = {
+                if isSpotlight && !isAnchorless && config.overlay.cutout.shape.lowercased() == "circle" {
+                    let side = max(paddedAnchor.width, paddedAnchor.height)
+                    return CGRect(
+                        x: paddedAnchor.midX - side / 2,
+                        y: paddedAnchor.midY - side / 2,
+                        width: side,
+                        height: side
+                    )
+                }
+                return paddedAnchor
+            }()
             let canvasPlacement: GuideCanvasPlacement? = if !isAnchorless, let canvas = config.canvas {
                 guideCanvasPlacement(
                     canvas: canvas,
@@ -295,8 +310,10 @@ private struct GuideStepOverlay: View {
             imageLoaded = false
             guard let imageURL else { return }
             AnchorlessImageLoader.prefetch(nextImageURL)
-            guard let decoded = await AnchorlessImageLoader.image(for: imageURL) else {
+            let loaded = await AnchorlessImageLoader.image(for: imageURL)
+            guard let decoded = loaded.image else {
                 guard !Task.isCancelled else { return }
+                reportMediaLoadFailed(.image, cause: loaded.failureCause, campaignKey: campaignKey)
                 SDKInstance.shared.reportGuideRenderFailure(
                     nil,
                     guideToken: guideToken,
@@ -312,7 +329,13 @@ private struct GuideStepOverlay: View {
             delayElapsedForStep = nil
             let delayMs = step.delayInMs ?? 0
             if delayMs > 0 {
-                try? await Task.sleep(nanoseconds: guideDelayNanoseconds(delayMs))
+                // An anchored step's delay started with the step, not when its
+                // anchor became available (it may have been scrolled in after).
+                let remainingMs = AnchorRegistry.shared
+                    .remainingStepDelayMs(for: step.target.anchorKey) ?? delayMs
+                if remainingMs > 0 {
+                    try? await Task.sleep(nanoseconds: guideDelayNanoseconds(remainingMs))
+                }
                 guard !Task.isCancelled else { return }
                 delayElapsedForStep = stepIndex
             }
@@ -403,6 +426,7 @@ private struct GuideStepOverlay: View {
             await SDKInstance.shared.executeActionFlow(
                 guideActions(request.actions),
                 variables: variables,
+                campaignKey: SDKInstance.shared.guideOrchestrator.state?.payload.campaignKey,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: {
                         guard SDKInstance.shared.guideOrchestrator.state?.token == guideToken else { return }

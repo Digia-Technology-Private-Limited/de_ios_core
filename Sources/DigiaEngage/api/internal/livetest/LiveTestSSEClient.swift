@@ -1,5 +1,8 @@
 import Foundation
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger("liveTest")
+
 /// One parsed SSE event from the live-test connect stream.
 enum LiveTestSseEvent {
     case connected(sdkConnectionId: String, deviceId: String)
@@ -11,15 +14,12 @@ enum LiveTestSseEvent {
 /// `URLSession.bytes(for:)`; framing is handled by `SSEFrameParser`.
 @MainActor
 final class LiveTestSSEClient {
-    private let config: () -> DigiaConfig
-    private let deviceId: () -> String
-    private let requestHeaders: [String: String]
     private let deviceName: () -> String?
     private let onEvent: (LiveTestSseEvent) -> Void
     private let onConnectionStateChanged: (LiveTestConnectionState) -> Void
-    private let session: URLSession
+    private let networkClient: any NetworkClient
 
-    private var connectTask: Task<Void, Never>?
+    private var sseSubscription: (any CancellableSubscription)?
     private var reconnectTask: Task<Void, Never>?
     private var reconnectAttempt = 0
     private var stopped = true
@@ -27,28 +27,15 @@ final class LiveTestSSEClient {
     var isRunning: Bool { !stopped }
 
     init(
-        config: @escaping () -> DigiaConfig,
-        deviceId: @escaping () -> String,
-        requestHeaders: [String: String],
         deviceName: @escaping () -> String?,
         onEvent: @escaping (LiveTestSseEvent) -> Void,
         onConnectionStateChanged: @escaping (LiveTestConnectionState) -> Void,
-        session: URLSession? = nil
+        networkClient: any NetworkClient
     ) {
-        self.config = config
-        self.deviceId = deviceId
-        self.requestHeaders = requestHeaders
         self.deviceName = deviceName
         self.onEvent = onEvent
         self.onConnectionStateChanged = onConnectionStateChanged
-        if let session {
-            self.session = session
-        } else {
-            let sessionConfig = URLSessionConfiguration.default
-            // 45s: matches the backend's presence-lease TTL, well past its 15s heartbeat.
-            sessionConfig.timeoutIntervalForRequest = 45
-            self.session = URLSession(configuration: sessionConfig)
-        }
+        self.networkClient = networkClient
     }
 
     func start() {
@@ -63,77 +50,59 @@ final class LiveTestSSEClient {
         stopped = true
         reconnectTask?.cancel()
         reconnectTask = nil
-        connectTask?.cancel()
-        connectTask = nil
+        sseSubscription?.cancel()
+        sseSubscription = nil
         onConnectionStateChanged(.disconnected)
     }
 
     private func connect() {
         guard !stopped else { return }
         onConnectionStateChanged(.connecting)
-        connectTask = Task { [weak self] in
-            await self?.runConnection()
-        }
-    }
-
-    private func runConnection() async {
-        guard !stopped else { return }
-        let cfg = config()
         guard let url = URL(string: DigiaEndpoints.liveTestConnect) else {
             handleDisconnect("invalid live test URL")
             return
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        let body = deviceName().map { ["deviceName": $0] } ?? [:]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue(
-            requestHeaders["x-digia-sdk-version"],
-            forHTTPHeaderField: "x-digia-sdk-version"
-        )
-        request.setValue(
-            requestHeaders["X-Digia-Sdk-Environment"],
-            forHTTPHeaderField: "X-Digia-Sdk-Environment"
-        )
-        request.setValue(
-            requestHeaders["X-Digia-Os-Version"],
-            forHTTPHeaderField: "X-Digia-Os-Version"
-        )
-        request.setValue(requestHeaders["x-app-version"], forHTTPHeaderField: "x-app-version")
-        request.setValue(requestHeaders["x-app-build-number"], forHTTPHeaderField: "x-app-build-number")
-        request.setValue(requestHeaders["x-app-package-name"], forHTTPHeaderField: "x-app-package-name")
-        request.setValue(cfg.apiKey, forHTTPHeaderField: "X-Digia-Project-Id")
-        request.setValue(deviceId(), forHTTPHeaderField: "X-Digia-Device-Id")
-        // Always 'debug' — this client only ever runs in a debug build.
-        request.setValue("debug", forHTTPHeaderField: "X-Digia-Environment")
-        request.setValue("ios", forHTTPHeaderField: "X-Digia-Platform")
-        request.setValue(DigiaSdkVersion.value, forHTTPHeaderField: "X-Digia-Version")
-        request.setValue("Apple", forHTTPHeaderField: "X-Digia-Device-Make")
-        request.setValue(Self.deviceModel(), forHTTPHeaderField: "X-Digia-Device-Model")
+        let bodyDict = deviceName().map { ["deviceName": $0] } ?? [:]
+        let bodyData = try? JSONSerialization.data(withJSONObject: bodyDict)
 
-        do {
-            let (bytes, response) = try await session.bytes(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                handleDisconnect("unexpected status: \(status)")
-                return
-            }
+        // Protocol headers only; the client adds Project-Id, Device-Id and
+        // the device/SDK headers. Live test always connects as `debug`.
+        let headers = [
+            "Content-Type": "application/json",
+            "X-Digia-Environment": "debug",
+        ]
 
-            var parser = SSEFrameParser()
-            for try await byte in bytes {
-                if Task.isCancelled { return }
-                if let frame = parser.feed(byte) {
-                    dispatch(event: frame.event, data: frame.data)
+        let request = NetworkRequest(
+            url: url,
+            method: .post,
+            headers: headers,
+            body: bodyData,
+            connectTimeout: 45,
+            readTimeout: 45
+        )
+
+        let handler = LiveTestSseStreamHandler(
+            onEvent: { [weak self] event in
+                self?.dispatch(event: event.event, data: event.data)
+            },
+            onOpen: { [weak self] in
+                self?.reconnectAttempt = 0
+            },
+            onError: { [weak self] error in
+                guard let self else { return }
+                if let status = (error as? SseHTTPStatusError)?.statusCode, status == 401 || status == 403 {
+                    self.handleAuthRejected(status: status)
+                } else {
+                    self.handleDisconnect("connect failed: \(error)")
                 }
+            },
+            onClosed: { [weak self] in
+                self?.handleDisconnect("stream closed")
             }
-            // The server closed the stream without throwing.
-            handleDisconnect("stream closed")
-        } catch {
-            if Task.isCancelled || stopped { return }
-            handleDisconnect("connect failed: \(error)")
-        }
+        )
+
+        sseSubscription = networkClient.openSseStream(request: request, handler: handler)
     }
 
     private func dispatch(event: String?, data: String) {
@@ -146,6 +115,11 @@ final class LiveTestSSEClient {
         case "connected":
             reconnectAttempt = 0
             onConnectionStateChanged(.connected)
+            log.i(
+                "Stream connected (deviceId=\(json?["deviceId"] as? String ?? ""))",
+                stage: .session,
+                reason: TimelineReason.liveSessionConnected
+            )
             onEvent(
                 .connected(
                     sdkConnectionId: json?["sdkConnectionId"] as? String ?? "",
@@ -171,14 +145,35 @@ final class LiveTestSSEClient {
     }
 
     private func handleDisconnect(_ reason: String) {
-        connectTask = nil
+        sseSubscription?.cancel()
+        sseSubscription = nil
         if stopped {
             onConnectionStateChanged(.disconnected)
             return
         }
         onConnectionStateChanged(.error)
-        DigiaLog.warning("live test stream disconnected: \(reason)")
+        log.w(
+            "Stream disconnected — reconnecting (reason=\(reason))",
+            stage: .session,
+            reason: TimelineReason.liveSessionDisconnected
+        )
         scheduleReconnect()
+    }
+
+    /// Reconnecting cannot fix a rejected key, so the loop stops here. A later
+    /// `start()` (re-enable, or the app returning to foreground) tries again.
+    private func handleAuthRejected(status: Int) {
+        sseSubscription?.cancel()
+        sseSubscription = nil
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        stopped = true
+        onConnectionStateChanged(.error)
+        log.e(
+            "Stream rejected — not reconnecting (status=\(status))",
+            stage: .session,
+            reason: TimelineReason.liveSessionDisconnected
+        )
     }
 
     private func scheduleReconnect() {
@@ -191,14 +186,6 @@ final class LiveTestSSEClient {
             self.connect()
         }
     }
-
-    private static func deviceModel() -> String {
-        var sysInfo = utsname()
-        uname(&sysInfo)
-        return withUnsafePointer(to: &sysInfo.machine) {
-            $0.withMemoryRebound(to: CChar.self, capacity: 1) { String(cString: $0) }
-        }
-    }
 }
 
 /// Exponential backoff with jitter: 1s, 2s, 4s .. capped at 30s.
@@ -207,37 +194,46 @@ func reconnectDelayMs(attempt: Int, jitterMs: Int) -> Int {
     return min(max(baseMs, 1000), 30000) + jitterMs
 }
 
-/// Buffers raw SSE bytes into `(event, data)` frames on each blank-line boundary.
-/// Not built on `bytes.lines` (`AsyncLineSequence`) — it silently drops blank
-/// lines (`"a\n\nb"` yields `["a", "b"]`), so a parser waiting on `line.isEmpty` never fires.
-struct SSEFrameParser {
-    private var buffer = Data()
-    private var eventName: String?
-    private var dataLines: [String] = []
+private final class LiveTestSseStreamHandler: SseStreamHandler, @unchecked Sendable {
+    private let onEventHandler: @MainActor (SseEvent) -> Void
+    private let onOpenHandler: @MainActor () -> Void
+    private let onErrorHandler: @MainActor (Error) -> Void
+    private let onClosedHandler: @MainActor () -> Void
 
-    /// Returns a completed frame once a blank-line boundary closes one, else `nil`.
-    mutating func feed(_ byte: UInt8) -> (event: String?, data: String)? {
-        buffer.append(byte)
-        guard let newlineIndex = buffer.firstIndex(of: UInt8(ascii: "\n")) else { return nil }
-        let lineData = buffer[buffer.startIndex..<newlineIndex]
-        buffer.removeSubrange(buffer.startIndex...newlineIndex)
-        var line = String(decoding: lineData, as: UTF8.self)
-        if line.hasSuffix("\r") { line.removeLast() }
+    init(
+        onEvent: @escaping @MainActor (SseEvent) -> Void,
+        onOpen: @escaping @MainActor () -> Void,
+        onError: @escaping @MainActor (Error) -> Void,
+        onClosed: @escaping @MainActor () -> Void
+    ) {
+        self.onEventHandler = onEvent
+        self.onOpenHandler = onOpen
+        self.onErrorHandler = onError
+        self.onClosedHandler = onClosed
+    }
 
-        if line.isEmpty {
-            defer {
-                eventName = nil
-                dataLines = []
-            }
-            guard eventName != nil || !dataLines.isEmpty else { return nil }
-            return (eventName, dataLines.joined(separator: "\n"))
+    func onOpen() {
+        Task { @MainActor in
+            self.onOpenHandler()
         }
-        if line.hasPrefix(":") { return nil } // heartbeat comment
-        if line.hasPrefix("event:") {
-            eventName = line.dropFirst("event:".count).trimmingCharacters(in: .whitespaces)
-        } else if line.hasPrefix("data:") {
-            dataLines.append(line.dropFirst("data:".count).trimmingCharacters(in: .whitespaces))
+    }
+
+    func onEvent(_ event: SseEvent) {
+        Task { @MainActor in
+            self.onEventHandler(event)
         }
-        return nil
+    }
+
+    func onError(_ error: Error) {
+        Task { @MainActor in
+            self.onErrorHandler(error)
+        }
+    }
+
+    func onClosed() {
+        Task { @MainActor in
+            self.onClosedHandler()
+        }
     }
 }
+

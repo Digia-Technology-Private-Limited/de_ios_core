@@ -3,9 +3,10 @@ import AVKit
 import SwiftUI
 import UIKit
 
-@_implementationOnly import Lottie
-@_implementationOnly import SDWebImageSwiftUI
+internal import Lottie
+internal import SDWebImageSwiftUI
 
+private let log = DigiaLogger()
 private let maxFloatingCanvasUpscale: CGFloat = 1.15
 private let canvasTextSpanElementID = "canvas_text_span"
 
@@ -525,19 +526,21 @@ struct CampaignCanvasStage: View {
                     .allowsHitTesting(backgroundTakesTouches)
             }
             ForEach(canvas.children) { child in
-                CanvasChildView(child: child, isDark: isDark, onAction: dispatch)
-                    .transaction { transaction in
-                        if !animateWidgetsOnAppear {
-                            transaction.animation = nil
-                            transaction.disablesAnimations = true
+                TestView(id: child.id) {
+                    CanvasChildView(child: child, isDark: isDark, onAction: dispatch)
+                        .transaction { transaction in
+                            if !animateWidgetsOnAppear {
+                                transaction.animation = nil
+                                transaction.disablesAnimations = true
+                            }
                         }
-                    }
-                    .frame(
-                        width: child.rect.width, height: child.rect.height, alignment: .topLeading
-                    )
-                    .modifier(CanvasChildBoundsModifier(clips: child.clipsToAuthoredRect))
-                    .allowsHitTesting(child.isHitTestable)
-                    .offset(x: child.rect.x, y: child.rect.y)
+                        .frame(
+                            width: child.rect.width, height: child.rect.height, alignment: .topLeading
+                        )
+                        .modifier(CanvasChildBoundsModifier(clips: child.clipsToAuthoredRect))
+                        .allowsHitTesting(child.isHitTestable)
+                        .offset(x: child.rect.x, y: child.rect.y)
+                }
             }
         }
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
@@ -738,7 +741,10 @@ enum CampaignCanvasRendererRegistry {
         case .timer: key = "timer"
         }
         guard let renderer = renderers[key] else {
-            preconditionFailure("Missing Campaign Canvas renderer for \(key)")
+            let message = "Campaign Canvas renderer missing (widget=\(key))"
+            log.e(message)
+            assertionFailure(message)
+            return AnyView(EmptyView())
         }
         return renderer(widget, isDark, onAction)
     }
@@ -1672,6 +1678,7 @@ private struct CanvasRemoteLottie: View {
     let autoplay: Bool
     let loop: Bool
     let fit: String
+    @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var failed = false
     var body: some View {
         Group {
@@ -1686,20 +1693,12 @@ private struct CanvasRemoteLottie: View {
     }
     private var lottie: LottieView<CanvasLottiePlaceholder> {
         LottieView {
-            do {
-                if url.pathExtension.lowercased() == "lottie" {
-                    return try await DotLottieFile.loadedFrom(url: url).animationSource
-                }
-                guard let source = await LottieAnimation.loadedFrom(url: url)?.animationSource
-                else {
-                    failed = true
-                    return nil
-                }
-                return source
-            } catch {
+            let loaded = await loadLottieSource(url)
+            if loaded.source == nil {
                 failed = true
-                return nil
+                reportMediaLoadFailed(.lottie, cause: loaded.failureCause, campaignKey: campaignKey)
             }
+            return loaded.source
         } placeholder: {
             CanvasLottiePlaceholder(failed: failed, placeholder: placeholder, fit: fit)
         }
@@ -1731,8 +1730,10 @@ private struct CanvasVideoRenderer: View {
     let isDark: Bool
     @Environment(\.digiaVariables) private var variables
     @Environment(\.canvasVideoUsesStoryPlayback) private var usesStoryPlayback
+    @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var player: AVPlayer?
     @State private var observer: NSObjectProtocol?
+    @State private var statusObservation: NSKeyValueObservation?
     private var url: String {
         interpolate(CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark), context: variables)
     }
@@ -1776,12 +1777,21 @@ private struct CanvasVideoRenderer: View {
         let value = AVPlayer(playerItem: item)
         value.isMuted = muted
         player = value
+        let campaignKey = campaignKey
+        statusObservation = item.observe(\.status) { item, _ in
+            guard item.status == .failed else { return }
+            Task { @MainActor in
+                reportMediaLoadFailed(.video, cause: mediaFailureCause(playerItem: item), campaignKey: campaignKey)
+            }
+        }
         if loop {
             observer = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
             ) { _ in
-                value.seek(to: .zero)
-                value.play()
+                MainActor.assumeIsolated {
+                    value.seek(to: .zero)
+                    value.play()
+                }
             }
         }
         if autoplay { value.play() }
@@ -1789,6 +1799,7 @@ private struct CanvasVideoRenderer: View {
     private func teardown() {
         player?.pause()
         player = nil
+        statusObservation = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
     }
@@ -1813,8 +1824,8 @@ struct CanvasPlayerController: UIViewControllerRepresentable {
         value.videoGravity = gravity
         context.coordinator.readyObservation = value.observe(
             \.isReadyForDisplay, options: [.initial, .new]
-        ) { controller, _ in
-            guard controller.isReadyForDisplay else { return }
+        ) { _, change in
+            guard change.newValue == true else { return }
             Task { @MainActor in onReadyForDisplay() }
         }
         return value
@@ -2058,6 +2069,7 @@ private struct FocalCanvasImage: View {
     var tint: CampaignColor? = nil
     var failureLabel: String? = nil
     @Environment(\.digiaVariables) private var variables
+    @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var failedURL: String?
 
     init(
@@ -2097,7 +2109,10 @@ private struct FocalCanvasImage: View {
                         placeholder: source.placeholder,
                         contentMode: fit == "contain" ? .fit : .fill)
                 }
-                .onFailure { _ in failedURL = resolved }
+                .onFailure { error in
+                    failedURL = resolved
+                    reportMediaLoadFailed(.image, cause: mediaFailureCause(imageError: error), campaignKey: campaignKey)
+                }
                 .modifier(CanvasImageFit(fit: fit))
                 .foregroundStyle(
                     tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) } ?? .clear

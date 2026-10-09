@@ -1,6 +1,5 @@
 import SwiftUI
-
-@_implementationOnly import SDWebImageSwiftUI
+internal import SDWebImageSwiftUI
 
 /// Synthetic option id for a choice question's "Other" entry.
 let OTHER_CHOICE_ID = "__other__"
@@ -215,6 +214,7 @@ private struct StarRatingQuestion: View {
                         )
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("\(i)")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

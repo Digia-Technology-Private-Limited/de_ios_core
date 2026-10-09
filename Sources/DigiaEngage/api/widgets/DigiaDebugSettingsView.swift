@@ -29,6 +29,17 @@ public struct DigiaDebugSettingsView: View {
         NavigationView {
             List {
                 Section {
+                    // First row on purpose: the rest of this screen is
+                    // developer switches, and this is the one a campaign
+                    // creator is sent here to find.
+                    NavigationLink(destination: DigiaCampaignTimelineView()) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Campaign timeline")
+                            Text("What Digia did with your campaigns, newest first.")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                     SettingsToggleRow(
                         title: "Live testing",
                         subtitle: liveTest.connectionState.label(

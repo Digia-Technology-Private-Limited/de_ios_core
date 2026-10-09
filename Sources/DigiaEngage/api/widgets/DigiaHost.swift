@@ -18,13 +18,15 @@ public struct DigiaHost<Content: View>: View {
                 .onAppear { SDKInstance.shared.onHostMounted() }
                 .onDisappear { SDKInstance.shared.onHostUnmounted() }
 
+            // Above the floaters (3): a guide may show over a collapsed floater
+            // (surface rule), and must be drawn over it like a nudge or survey.
             GuideOverlayView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .zIndex(2)
+                .zIndex(3.5)
 
             // Between guide and survey/nudge: lets a survey/nudge that starts
             // while a floater is collapsed cover it "for free" via layering,
-            // without `isModalCampaignActive` needing to know about z-order at
+            // without the surface rule needing to know about z-order at
             // all — mirrors Android's identical `DigiaHost` ordering rationale
             // (`FloaterRenderer()` mounted before `SurveyRenderer`/`NudgeRenderer`).
             //

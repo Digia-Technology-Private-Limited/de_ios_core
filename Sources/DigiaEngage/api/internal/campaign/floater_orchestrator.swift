@@ -1,9 +1,12 @@
 import AVFoundation
-@_implementationOnly import Lottie
-@_implementationOnly import SDWebImageSVGCoder
+internal import Lottie
+internal import SDWebImageSVGCoder
 import Foundation
 import Combine
 import UIKit
+
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
 
 // Ported from Flutter's `pip_orchestrator.dart` / Android's `FloaterOrchestrator.kt` —
 // method names and semantics mirror both 1:1 so all three SDKs stay in parity. Owns
@@ -20,7 +23,7 @@ import UIKit
 // This orchestrator deliberately does **not** take a display lock while collapsed: a
 // floater can sit on a screen for minutes, and blocking every other campaign for
 // that long is not acceptable. It behaves modally only while expanded (enforced by
-// the caller, not this class — see `SDKInstance.isModalCampaignActive()`).
+// the caller, not this class — see `SurfaceRule`).
 
 enum FloaterSurface: Equatable {
     case collapsed, expanded
@@ -54,6 +57,24 @@ enum FloaterDismissReason: Equatable {
         case .sessionEnd: return "session_end"
         case .superseded: return "superseded"
         case .hostTeardown: return "host_teardown"
+        }
+    }
+
+    /// The floater's own vocabulary mapped onto the one three runtimes share.
+    ///
+    /// Two vocabularies on purpose: ``wire`` stays as specific as Digia
+    /// analytics needs, ``DismissReason`` is what a CEP plugin and the shared
+    /// backend enum understand. The mapping loses granularity, never accuracy,
+    /// and never on the analytics side.
+    var presentationReason: DismissReason {
+        switch self {
+        case .userClose: return .userClose
+        case .ctaTaken: return .ctaAction
+        case .screenExit: return .screenExit
+        case .autoTimeout, .mediaEnd: return .autoTimeout
+        case .invalidated, .hostTeardown: return .cancelled
+        case .sessionEnd: return .screenExit
+        case .superseded: return .superseded
         }
     }
 }
@@ -145,11 +166,15 @@ final class FloaterOrchestrator: ObservableObject {
     /// is 0 for a `startExpanded` showing.
     private var everExpanded = false
     private var completed = false
+    /// The showing whose window a renderer has drawn — see `markDrawn`.
+    private var drawnToken: Int64?
 
     private var autoDismissTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
     private var mediaReadyTask: Task<Void, Never>?
     private(set) var lastStartFailureReason: String?
+    /// `true` when the last start failed only because a floater already shows.
+    private(set) var lastStartFailedBusy = false
     private var statusObservation: NSKeyValueObservation?
     /// `addObserver(forName:object:queue:using:)` returns an opaque token that is
     /// *not* removable via `removeObserver(self, ...)` — that selector-based overload
@@ -195,6 +220,7 @@ final class FloaterOrchestrator: ObservableObject {
     @discardableResult
     func start(_ campaign: CampaignModel, payload: CEPTriggerPayload, screenName: String?) -> Bool {
         lastStartFailureReason = nil
+        lastStartFailedBusy = false
         guard campaign.campaignType == "floater", campaign.floaterConfig != nil else {
             lastStartFailureReason = "campaign is not a parsed floater"
             return false
@@ -205,9 +231,11 @@ final class FloaterOrchestrator: ObservableObject {
         if closing { finishDismiss() }
         if state != nil {
             lastStartFailureReason = "another floater is active"
+            lastStartFailedBusy = true
             return false
         }
 
+        reportMissingVariables(campaign.floaterConfig?.variableSchemas ?? [], payload: payload)
         tokenCounter += 1
         let nowMs = now()
         let active = ActiveFloaterState(
@@ -248,16 +276,29 @@ final class FloaterOrchestrator: ObservableObject {
         return accepted
     }
 
-    /// The window is on screen. Idempotent — only the first call counts. `token`
+    /// The media is ready to paint. Idempotent — only the first call counts. `token`
     /// identifies the showing that requested the load; a slow response arriving
     /// after its campaign ended would otherwise reveal whichever floater is on
     /// screen now, before *its* media was ready.
+    ///
+    /// Media being ready only lets the window draw (`awaitingMedia` false). The
+    /// impression waits for `markDrawn`, from the renderer itself (SR62), so a
+    /// PiP no host draws records nothing and stays under the acceptance watchdog.
     func markVisible(token: Int64) {
-        guard let active = state, active.token == token else { return }
+        guard state?.token == token else { return }
         mediaReadyTask?.cancel()
         mediaReadyTask = nil
         guard awaitingMedia else { return }
         awaitingMedia = false
+    }
+
+    /// The renderer drew the window for `token`. Idempotent — only the first
+    /// call per showing counts.
+    func markDrawn(token: Int64) {
+        guard let active = state, active.token == token, !awaitingMedia, !closing,
+              drawnToken != token
+        else { return }
+        drawnToken = token
         if surface == .expanded {
             everExpanded = true
             expandedStartedAtMs = expandedStartedAtMs ?? now()
@@ -271,11 +312,14 @@ final class FloaterOrchestrator: ObservableObject {
     /// the host app is worse for the user than no campaign at all. Teardown is
     /// silent — the window never painted, so there was no impression or frequency
     /// cost. The CEP slot is released through the dismissal callback without Digia analytics.
-    func abandonMedia(token: Int64, reason: String) {
+    /// `cause` is set only for a known content fault (4xx, invalid URL, decode); it reports to health.
+    func abandonMedia(token: Int64, reason: String, cause: String? = nil) {
         guard let active = state, active.token == token, awaitingMedia else { return }
-        DigiaLog.warning(
-            "floater campaign '\(active.campaign.campaignKey)' dropped: media could not be loaded (\(reason))."
+        log.e(
+            "Dropped — media could not be loaded (reason=\(reason))",
+            campaign: active.campaign.campaignKey
         )
+        reportMediaLoadFailed(active.config.media.kind.healthKind, cause: cause, campaignKey: active.campaign.campaignKey)
         lastStartFailureReason = "media could not be loaded: \(reason)"
         onDismissed(active, .mediaEnd, metricsSnapshot(), false)
         finishDismiss()
@@ -293,7 +337,7 @@ final class FloaterOrchestrator: ObservableObject {
         // poster to fall back to there is nothing this campaign could show, so drop
         // it rather than float an empty frame.
         if url.isEmpty || url.contains("{{") {
-            abandonMedia(token: token, reason: "no usable media url")
+            abandonMedia(token: token, reason: "no usable media url", cause: "invalid_url")
             return
         }
 
@@ -312,7 +356,7 @@ final class FloaterOrchestrator: ObservableObject {
 
     private func preparePlayer(_ active: ActiveFloaterState, url: String, token: Int64) {
         guard let parsed = URL(string: url) else {
-            abandonMedia(token: token, reason: "invalid media url")
+            abandonMedia(token: token, reason: "invalid media url", cause: "invalid_url")
             return
         }
         let config = active.config
@@ -334,7 +378,9 @@ final class FloaterOrchestrator: ObservableObject {
                         self.markVisible(token: token)
                         if config.media.autoplay { self.player?.play() }
                     case .failed:
-                        self.abandonMedia(token: token, reason: "video failed to load")
+                        self.abandonMedia(
+                            token: token, reason: "video failed to load", cause: mediaFailureCause(playerItem: item)
+                        )
                     default:
                         break
                     }
@@ -346,15 +392,19 @@ final class FloaterOrchestrator: ObservableObject {
             endTimeObserverToken = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main
             ) { [weak self] _ in
-                guard let self, self.state?.token == token else { return }
-                self.player?.seek(to: .zero)
-                self.player?.play()
+                MainActor.assumeIsolated {
+                    guard let self, self.state?.token == token else { return }
+                    self.player?.seek(to: .zero)
+                    self.player?.play()
+                }
             }
         } else {
             endTimeObserverToken = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main
             ) { [weak self] _ in
-                self?.onVideoEnded(token: token)
+                MainActor.assumeIsolated {
+                    self?.onVideoEnded(token: token)
+                }
             }
         }
 
@@ -369,7 +419,7 @@ final class FloaterOrchestrator: ObservableObject {
     private func preloadImage(url: String, token: Int64) {
         DigiaImagePipeline.configureIfNeeded()
         guard let parsed = URL(string: url) else {
-            abandonMedia(token: token, reason: "invalid media url")
+            abandonMedia(token: token, reason: "invalid media url", cause: "invalid_url")
             return
         }
         // Plain URLSession, not SDWebImage's imperative loader — the latter's core
@@ -380,13 +430,16 @@ final class FloaterOrchestrator: ObservableObject {
         // pre-warmed SDWebImage cache — a real but minor inefficiency (one extra
         // network round-trip), not a correctness issue, and worth revisiting once
         // this SDK has a working local build/test loop again.
-        let task = URLSession.shared.dataTask(with: parsed) { [weak self] data, _, _ in
+        let task = URLSession.shared.dataTask(with: parsed) { [weak self] data, response, _ in
+            let status = (response as? HTTPURLResponse)?.statusCode
             Task { @MainActor in
                 guard let self, self.state?.token == token else { return }
                 if let data, (UIImage(data: data) != nil || SDImageSVGCoder.shared.decodedImage(with: data, options: nil) != nil) {
                     self.markVisible(token: token)
                 } else {
-                    self.abandonMedia(token: token, reason: "image failed to load")
+                    self.abandonMedia(
+                        token: token, reason: "image failed to load", cause: mediaFailureCause(httpStatus: status)
+                    )
                 }
             }
         }
@@ -395,21 +448,16 @@ final class FloaterOrchestrator: ObservableObject {
 
     private func preloadLottie(url: String, token: Int64) {
         guard let parsed = URL(string: url) else {
-            abandonMedia(token: token, reason: "invalid media url")
+            abandonMedia(token: token, reason: "invalid media url", cause: "invalid_url")
             return
         }
         Task { [weak self] in
-            let loaded: Bool
-            if parsed.pathExtension.lowercased() == "lottie" {
-                loaded = (try? await DotLottieFile.loadedFrom(url: parsed)) != nil
-            } else {
-                loaded = await LottieAnimation.loadedFrom(url: parsed) != nil
-            }
+            let loaded = await loadLottieSource(parsed)
             guard let self, self.state?.token == token else { return }
-            if loaded {
+            if loaded.source != nil {
                 self.markVisible(token: token)
             } else {
-                self.abandonMedia(token: token, reason: "lottie failed to load")
+                self.abandonMedia(token: token, reason: "lottie failed to load", cause: loaded.failureCause)
             }
         }
     }
@@ -447,8 +495,14 @@ final class FloaterOrchestrator: ObservableObject {
         }
     }
 
+    /// Whether a nudge, survey or guide is on screen. A collapsed window can sit
+    /// under one (surface rule) but must not open over it. Set by `SDKInstance`.
+    var isCoveredByBlockingCampaign: () -> Bool = { false }
+
     func expand() {
-        guard let active = state, !closing, surface != .expanded else { return }
+        guard let active = state, !closing, surface != .expanded,
+              !isCoveredByBlockingCampaign()
+        else { return }
         surface = .expanded
         expandCount += 1
         everExpanded = true
@@ -570,7 +624,7 @@ final class FloaterOrchestrator: ObservableObject {
         // A showing that never painted reports no Digia analytics — no Viewed or
         // Dismissed. The CEP slot is released separately so an accepted campaign
         // cannot strand the queue.
-        onDismissed(active, reason, metricsSnapshot(), !awaitingMedia)
+        onDismissed(active, reason, metricsSnapshot(), drawnToken == active.token)
 
         let exit = active.config.collapsed.exitAnimation
         // Full screen fills the display, so animating it "out" to nothing looks like
@@ -625,17 +679,15 @@ final class FloaterOrchestrator: ObservableObject {
     /// the campaign, not an error path. A floater that opened while no screen was
     /// ever set has a `nil` `screenName` and is therefore not screen-scoped — it
     /// survives navigation and ends by close, timeout, or media end instead.
-    ///
-    /// Deliberately **not** the shared `dismissForScreenChangeIfNeeded` helper
-    /// nudge/survey/guide use: that checks the *current* `targetScreenNames` list
-    /// against the new screen, while a floater is bound to the *exact* screen it
-    /// appeared on — leaving it ends the campaign even if the new screen is also in
-    /// `targetScreenNames`. Reusing the shared helper here would silently loosen
-    /// that contract (matches the same deliberate divergence in Android's
-    /// `DigiaInstance.handleScreenChanged`).
+    /// Called when the host reports a new current screen. Ends the showing if the
+    /// campaign targets specific screens and the new screen is not in that list.
+    /// Global floaters survive navigation.
     func onScreenChanged(_ screenName: String) {
-        guard let active = state, let ownScreen = active.screenName, ownScreen != screenName else { return }
-        dismiss(.screenExit)
+        guard let active = state else { return }
+        let targets = active.campaign.targetScreenNames
+        if !targets.isEmpty && !targets.contains(screenName) {
+            dismiss(.screenExit)
+        }
     }
 
     /// Marks the showing as having achieved its goal. At most once per showing — the

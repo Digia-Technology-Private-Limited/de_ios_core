@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SwiftUI
 @testable import DigiaEngage
@@ -6,16 +7,47 @@ import Testing
 @MainActor
 @Suite("DigiaEngage", .serialized)
 struct DigiaEngageTests {
-    @Test("defaults config to production error logging")
+    @Test("defaults config to production, with the auto log level")
     func defaultsConfig() {
         let config = DigiaConfig(apiKey: "prod_123")
 
         #expect(config.apiKey == "prod_123")
-        #expect(config.logLevel == .error)
+        // An unset level is debug-loud / release-quiet, and records that the
+        // app did not choose it — the whole answer to a "nothing shows up"
+        // ticket. See `DigiaLogLevel.auto`.
+        #expect(config.logLevel == DigiaLogLevel.resolvedAuto)
+        #expect(config.isLogLevelExplicit == false)
         #expect(config.environment == .production)
     }
 
-    @Test("initialize is idempotent")
+    @Test("sdkVersion builds composite descriptor matching s|b|p|c pattern")
+    func buildsCompositeSdkVersion() {
+        #expect(
+            buildSdkVersion(
+                binding: "native",
+                platform: "ios",
+                wrapperVersion: nil,
+                core: "3.14.0"
+            ) == "s=1|b=native|p=ios|c=3.14.0"
+        )
+        #expect(
+            buildSdkVersion(
+                binding: "react_native",
+                platform: "ios",
+                wrapperVersion: "2.22.0",
+                core: "3.14.0"
+            ) == "s=1|b=react_native|p=ios|w=2.22.0|c=3.14.0"
+        )
+
+        SDKInstance.shared.resetForTesting()
+        #expect(Digia.sdkVersion == nil)
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "key_123")
+        )
+        #expect(Digia.sdkVersion == "s=1|b=native|p=ios|c=\(DigiaSdkVersion.value)")
+    }
+
+    @Test("initialize is idempotent once ready")
     func initializeIsIdempotent() async {
         let first = DigiaConfig(apiKey: "first")
         let second = DigiaConfig(apiKey: "second", environment: .sandbox)
@@ -24,6 +56,7 @@ struct DigiaEngageTests {
         // Seed config synchronously to avoid a network-call suspension point that would
         // allow concurrent tests to interfere via resetForTesting().
         SDKInstance.shared.markInitializedForTesting(with: first)
+        SDKInstance.shared.setCampaignsForTesting([])
 
         // A second initialize call should hit the guard and return immediately (no await inside).
         try? await Digia.initialize(second)
@@ -31,25 +64,57 @@ struct DigiaEngageTests {
         #expect(SDKInstance.shared.config == first)
     }
 
-    @Test("register replaces and tears down the previous plugin")
+    @Test("register replaces and detaches the previous plugin")
     func registerReplacesPlugin() {
         SDKInstance.shared.resetForTesting()
-        let first = TestPlugin(identifier: "first")
-        let second = TestPlugin(identifier: "second")
+        // Initialized, so `register` attaches synchronously (ST43).
+        SDKInstance.shared.markInitializedForTesting(with: DigiaConfig(apiKey: "key_123"))
+        let first = TestPlugin(id: "first")
+        let second = TestPlugin(id: "second")
 
         Digia.register(first)
         Digia.register(second)
 
-        #expect(first.teardownCount == 1)
-        #expect(first.setupCount == 1)
-        #expect(second.setupCount == 1)
-        #expect(second.teardownCount == 0)
+        #expect(first.detachCount == 1)
+        #expect(first.attachCount == 1)
+        #expect(second.attachCount == 1)
+        #expect(second.detachCount == 0)
     }
 
-    @Test("onCampaignTriggered routes inline carousel campaigns into the inline controller")
+    @Test("G6 — the outgoing plugin's presentations settle before it detaches")
+    func detachSettlesOwnedPresentationsFirst() throws {
+        SDKInstance.shared.resetForTesting()
+        // Initialized, so `register` attaches synchronously (ST43).
+        SDKInstance.shared.markInitializedForTesting(with: DigiaConfig(apiKey: "key_123"))
+        let first = TestPlugin(id: "first")
+        Digia.register(first)
+        let campaign = try #require(nudgeCampaign(key: "global-nudge"))
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "nudge-1", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+        #expect(!recorder.isSettled)
+
+        // The plugin learns it is going away *after* its presentations ended, so
+        // its outcome handlers still run while its bridge is alive. Reversing
+        // those two lines is the leak G6 exists to close.
+        var settledAtDetach: Bool?
+        first.onDetach = { settledAtDetach = recorder.isSettled }
+
+        Digia.register(TestPlugin(id: "second"))
+
+        #expect(settledAtDetach == true)
+        #expect(recorder.dropReason == .pluginDetached)
+        #expect(recorder.isHoldReleased)
+        #expect(first.detachCount == 1)
+    }
+
+    @Test("deliver routes inline carousel campaigns into the inline controller")
     func routesInlineCarouselCampaignsIntoInlineController() throws {
         SDKInstance.shared.resetForTesting()
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "carousel-id",
             "campaignKey": "carousel-campaign",
             "campaignType": "inline",
@@ -59,9 +124,9 @@ struct DigiaEngageTests {
                 "items": [["imageUrl": "https://example.com/a.png"]],
             ],
         ]))
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
 
-        SDKInstance.shared.onCampaignTriggered(
+        _ = SDKInstance.shared.deliver(
             CEPTriggerPayload(cepCampaignId: "carousel-campaign", campaignKey: "carousel-campaign", cepMetadata: [:]))
 
         #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner")?.cepCampaignId == "carousel-campaign")
@@ -70,7 +135,7 @@ struct DigiaEngageTests {
 
     @Test("campaign target screens are parsed")
     func parsesCampaignTargetScreens() throws {
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "targeted-id",
             "campaignKey": "help-inline",
             "campaignType": "inline",
@@ -88,7 +153,7 @@ struct DigiaEngageTests {
     @Test("campaign screen matching is case sensitive")
     func rejectsCampaignOnNonTargetedScreen() throws {
         SDKInstance.shared.resetForTesting()
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "targeted-id",
             "campaignKey": "help-inline",
             "campaignType": "inline",
@@ -99,14 +164,16 @@ struct DigiaEngageTests {
                 "items": [["imageUrl": "https://example.com/a.png"]],
             ],
         ]))
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("help")
 
-        let accepted = SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(
-                cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:]))
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:])))
 
-        #expect(!accepted)
+        #expect(recorder.dropReason == .screenNotTargeted)
+        #expect(recorder.isHoldReleased)
         #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") == nil)
     }
 
@@ -114,13 +181,14 @@ struct DigiaEngageTests {
     func rejectsTargetedCampaignWhenScreenIsUnset() throws {
         SDKInstance.shared.resetForTesting()
         let campaign = try #require(targetedInlineCampaign())
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
 
-        let accepted = SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(
-                cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:]))
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:])))
 
-        #expect(!accepted)
+        #expect(recorder.dropReason == .screenNotTargeted)
         #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") == nil)
     }
 
@@ -128,49 +196,52 @@ struct DigiaEngageTests {
     func usesLatestScreenWithoutDismissingAcceptedContent() throws {
         SDKInstance.shared.resetForTesting()
         let campaign = try #require(targetedInlineCampaign())
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Home")
         SDKInstance.shared.setCurrentScreen(" Help ")
 
-        let accepted = SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(
-                cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:]))
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "ct-1", campaignKey: "help-inline", cepMetadata: [:])))
         SDKInstance.shared.setCurrentScreen("Home")
 
-        #expect(accepted)
+        #expect(!recorder.isSettled)
         #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner")?.cepCampaignId == "ct-1")
     }
 
     @Test("screen changes dismiss an accepted targeted nudge")
     func screenChangesDismissTargetedNudge() throws {
         SDKInstance.shared.resetForTesting()
-        let plugin = TestPlugin(identifier: "plugin")
+        let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         let campaign = try #require(targetedNudgeCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
 
-        let accepted = SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(
-                cepCampaignId: "nudge-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "nudge-1", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
 
         SDKInstance.shared.setCurrentScreen(" Help ")
         #expect(SDKInstance.shared.controller.activeNudge?.payload.cepCampaignId == "nudge-1")
-        #expect(!plugin.events.contains { $0.0 == .dismissed })
+        #expect(!recorder.isSettled)
 
         SDKInstance.shared.setCurrentScreen("Home")
 
-        #expect(accepted)
         #expect(SDKInstance.shared.controller.activeNudge == nil)
-        #expect(plugin.events.contains { event, payload in
-            event == .dismissed && payload.cepCampaignId == "nudge-1"
-        })
+        // It never reported itself visible, so leaving the screen is a drop, not
+        // a dismissal — `dismissed` would claim an impression that never was.
+        #expect(recorder.dropReason == .cancelled)
+        #expect(recorder.isHoldReleased)
     }
 
     @Test("screen change dismisses the old campaign before forwarding the new screen")
     func dismissesBeforeForwardingScreen() throws {
         SDKInstance.shared.resetForTesting()
-        let plugin = TestPlugin(identifier: "plugin")
+        let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         let helpCampaign = try #require(nudgeCampaign(
             key: "help-nudge", targetScreenNames: ["Help"]))
@@ -178,12 +249,14 @@ struct DigiaEngageTests {
             key: "home-nudge", targetScreenNames: ["Home"]))
         SDKInstance.shared.setCampaignsForTesting([helpCampaign, homeCampaign])
         SDKInstance.shared.setCurrentScreen("Help")
-        _ = SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(
-                cepCampaignId: "help-1", campaignKey: helpCampaign.campaignKey, cepMetadata: [:]))
+        let helpRecorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "help-1", campaignKey: helpCampaign.campaignKey,
+                    cepMetadata: [:])))
         plugin.onForwardScreen = { screen in
             if screen == "Home" {
-                _ = SDKInstance.shared.onCampaignTriggered(
+                _ = SDKInstance.shared.deliver(
                     CEPTriggerPayload(
                         cepCampaignId: "home-1",
                         campaignKey: homeCampaign.campaignKey,
@@ -193,82 +266,135 @@ struct DigiaEngageTests {
 
         SDKInstance.shared.setCurrentScreen("Home")
 
-        #expect(plugin.events.contains { event, payload in
-            event == .dismissed && payload.cepCampaignId == "help-1"
-        })
+        #expect(helpRecorder.isSettled)
         #expect(SDKInstance.shared.controller.activeNudge?.payload.cepCampaignId == "home-1")
     }
 
     @Test("same-screen reentrancy dismisses once and forwards once")
     func reentrantScreenChangeIsSafe() throws {
         SDKInstance.shared.resetForTesting()
-        let plugin = TestPlugin(identifier: "plugin")
+        let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         let campaign = try #require(targetedNudgeCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
-        _ = SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(
-                cepCampaignId: "nudge-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "nudge-1", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
         var reentered = false
-        plugin.onNotifyEvent = { event, _ in
-            if event == .dismissed, !reentered {
-                reentered = true
-                SDKInstance.shared.setCurrentScreen("Home")
-            }
+        // Re-entered the moment the nudge leaves the screen — the same instant
+        // v1's `notifyEvent(.dismissed)` used to hand control back to a plugin.
+        // v2 settles the outcome on a promise instead, so the surface's own
+        // publisher is now the earliest synchronous observation point there is.
+        let reentry = SDKInstance.shared.controller.$activeNudge.sink { nudge in
+            guard nudge == nil, !reentered else { return }
+            reentered = true
+            SDKInstance.shared.setCurrentScreen("Home")
         }
+        defer { reentry.cancel() }
 
         SDKInstance.shared.setCurrentScreen("Home")
 
-        #expect(plugin.events.filter { event, payload in
-            event == .dismissed && payload.cepCampaignId == "nudge-1"
-        }.count == 1)
+        #expect(reentered)
+        #expect(recorder.isSettled)
+        #expect(SDKInstance.shared.controller.activeNudge == nil)
         #expect(plugin.forwardedScreens.filter { $0 == "Home" }.count == 1)
     }
 
     @Test("screen changes keep an accepted global nudge")
     func screenChangesKeepGlobalNudge() throws {
         SDKInstance.shared.resetForTesting()
-        let plugin = TestPlugin(identifier: "plugin")
+        let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         let campaign = try #require(nudgeCampaign(key: "global-nudge"))
         SDKInstance.shared.setCampaignsForTesting([campaign])
-        let accepted = SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(
-                cepCampaignId: "global-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "global-1", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
 
         SDKInstance.shared.setCurrentScreen("Home")
 
-        #expect(accepted)
         #expect(SDKInstance.shared.controller.activeNudge?.payload.cepCampaignId == "global-1")
-        #expect(!plugin.events.contains { $0.0 == .dismissed })
+        #expect(!recorder.isSettled)
     }
 
     @Test("screen changes dismiss an accepted targeted guide")
     func screenChangesDismissTargetedGuide() throws {
         SDKInstance.shared.resetForTesting()
-        let plugin = TestPlugin(identifier: "plugin")
+        let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
-        let accepted = SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(
-                cepCampaignId: "guide-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "guide-1", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
 
         SDKInstance.shared.setCurrentScreen("Home")
 
-        #expect(accepted)
         #expect(SDKInstance.shared.guideOrchestrator.state == nil)
-        #expect(plugin.events.contains { event, payload in
-            event == .dismissed && payload.cepCampaignId == "guide-1"
-        })
+        #expect(recorder.isSettled)
+        #expect(recorder.isHoldReleased)
+    }
+
+    @Test("removing the anchor of the visible guide step dismisses the guide one turn later")
+    func removingAnchorDismissesGuide() async throws {
+        SDKInstance.shared.resetForTesting()
+        Digia.register(TestPlugin(id: "plugin"))
+        let campaign = try #require(try CampaignModel.fromJson([
+            "id": "anchor-guide-id",
+            "campaignKey": "anchor-guide",
+            "campaignType": "guide",
+            "targetScreenNames": ["names": ["Help"]],
+            "templateConfig": [
+                "templateType": "tooltip",
+                "steps": [[
+                    "stepId": "step-1",
+                    "anchorKey": "help-anchor",
+                    "layoutMode": "canvas",
+                    "canvas": [
+                        "version": 2,
+                        "canvasWidth": 240,
+                        "canvasHeight": 120,
+                        "background": ["type": "solid", "color": ["value": "#FFFFFFFF"]],
+                        "children": [],
+                    ],
+                ] as [String: Any]],
+            ],
+        ]))
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.isHidden = false
+        let anchor = DigiaAnchorView(frame: CGRect(x: 10, y: 10, width: 100, height: 40))
+        anchor.anchorKey = "help-anchor"
+        window.addSubview(anchor)
+        _ = SDKInstance.shared.deliver(
+            CEPTriggerPayload(
+                cepCampaignId: "anchor-guide-1", campaignKey: campaign.campaignKey,
+                cepMetadata: [:]))
+        #expect(SDKInstance.shared.guideOrchestrator.state != nil)
+
+        anchor.removeFromSuperview()
+        #expect(SDKInstance.shared.guideOrchestrator.state != nil)
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        #expect(SDKInstance.shared.guideOrchestrator.state == nil)
     }
 
     @Test("screen changes dismiss an accepted externally rendered guide")
     func screenChangesDismissExternalGuide() throws {
         SDKInstance.shared.resetForTesting()
-        let plugin = TestPlugin(identifier: "plugin")
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
         var renderRequested = false
         Digia.register(plugin)
         SDKInstance.shared.onGuideRenderRequest = { _ in renderRequested = true }
@@ -276,35 +402,44 @@ struct DigiaEngageTests {
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
-        let accepted = SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(
-                cepCampaignId: "rn-guide-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-1", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
 
         SDKInstance.shared.setCurrentScreen("Home")
 
-        #expect(accepted)
         #expect(renderRequested)
-        #expect(plugin.events.contains { event, payload in
-            event == .dismissed && payload.cepCampaignId == "rn-guide-1"
-        })
+        #expect(recorder.isSettled)
+        #expect(recorder.isHoldReleased)
     }
 
     @Test("stale terminal event does not disarm a newer external guide")
     func staleTerminalEventKeepsNewExternalGuideActive() throws {
         SDKInstance.shared.resetForTesting()
-        let plugin = TestPlugin(identifier: "plugin")
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         SDKInstance.shared.onGuideRenderRequest = { _ in }
         defer { SDKInstance.shared.onGuideRenderRequest = nil }
         let campaign = try #require(targetedGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
-        _ = SDKInstance.shared.onCampaignTriggered(
+        _ = SDKInstance.shared.deliver(
             CEPTriggerPayload(
                 cepCampaignId: "old-guide", campaignKey: campaign.campaignKey, cepMetadata: [:]))
-        _ = SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(
-                cepCampaignId: "new-guide", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        SDKInstance.shared.captureAnalyticsEvent(
+            campaignKey: campaign.campaignKey,
+            eventName: "Digia Experience Dismissed",
+            props: ["payload_id": "old-guide", "step_index": 1, "step_total": 1])
+        let newGuide = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "new-guide", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
 
         SDKInstance.shared.captureAnalyticsEvent(
             campaignKey: campaign.campaignKey,
@@ -314,26 +449,285 @@ struct DigiaEngageTests {
             campaignKey: campaign.campaignKey,
             eventName: "Digia Experience Dismissed",
             props: ["step_index": 1, "step_total": 1])
+
+        #expect(!newGuide.isSettled)
         SDKInstance.shared.setCurrentScreen("Home")
 
-        #expect(plugin.events.contains { event, payload in
-            event == .dismissed && payload.cepCampaignId == "new-guide"
-        })
+        #expect(newGuide.isSettled)
+        #expect(newGuide.isHoldReleased)
+    }
+
+    @Test("triggerCampaign delivers a campaign with no CEP plugin attached")
+    func triggerCampaignWithNoPlugin() throws {
+        // The host is its own trigger source: no plugin registered, no CEP slot held.
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(with: DigiaConfig(apiKey: "test"))
+        let campaign = try #require(nudgeCampaign(key: "host-1"))
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+
+        let presentation = Digia.triggerCampaign("host-1")
+
+        #expect(SDKInstance.shared.controller.activeNudge?.payload.campaignKey == "host-1")
+        #expect(
+            presentation.outcome.settledValue == nil,
+            "an accepted delivery must not be settled at return")
+    }
+
+    @Test("triggerCampaign mints a distinct id per firing")
+    func triggerCampaignMintsDistinctIds() throws {
+        // Analytics dedups on this id. Reusing one across firings would make two
+        // impressions of the same campaign collapse into one on the dashboard.
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(with: DigiaConfig(apiKey: "test"))
+        let campaign = try #require(nudgeCampaign(key: "host-1"))
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+
+        let first = Digia.triggerCampaign("host-1")
+        let second = Digia.triggerCampaign("host-1")
+
+        #expect(first.trigger.cepCampaignId != second.trigger.cepCampaignId)
+    }
+
+    @Test("triggerCampaign drops an unpublished key rather than throwing")
+    func triggerCampaignUnknownKeyDrops() {
+        // A delivery path never fails at its caller — the campaign key comes from app code
+        // and a typo must cost one campaign, not the app.
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(with: DigiaConfig(apiKey: "test"))
+        SDKInstance.shared.setCampaignsForTesting([])
+
+        let presentation = Digia.triggerCampaign("no-such-campaign")
+
+        #expect(
+            presentation.outcome.settledValue
+                == .dropped(reason: .unknownCampaignKey, detail: "no campaign for key 'no-such-campaign'")
+        )
+    }
+
+    @Test("onGuideRenderRequest hands the RN bridge the real presentation id")
+    func guideRenderRequestReceivesRealPresentationId() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var receivedId: String?
+        SDKInstance.shared.onGuideRenderRequest = { receivedId = $0.presentationId }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-id-check", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+
+        let id = try #require(receivedId)
+        #expect(!id.isEmpty)
+        #expect(id == recorder.presentation.id)
+    }
+
+    @Test("the render request carries the guide's authored JSON")
+    func guideRenderRequestCarriesAuthoredJson() throws {
+        // The only source of guide content the RN renderer has: it keeps no campaign store
+        // of its own since N6a, so a request without this JSON renders nothing at all.
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var request: GuideRenderRequest?
+        SDKInstance.shared.onGuideRenderRequest = { request = $0 }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        _ = SDKInstance.shared.deliver(
+            CEPTriggerPayload(
+                cepCampaignId: "rn-guide-json-check", campaignKey: campaign.campaignKey,
+                cepMetadata: [:]))
+
+        let json = try #require(request?.templateConfigJson)
+        let decoded = try #require(
+            try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        #expect(decoded["templateType"] as? String == "tooltip")
+        // Verbatim, not this core's own guide projection: `anchorKey` is a JS-renderer
+        // field that GuideConfigModel does not keep.
+        let steps = try #require(decoded["steps"] as? [[String: Any]])
+        #expect(steps.first?["anchorKey"] as? String == "help-anchor")
+    }
+
+    @Test("reportExternalGuideLifecycle drives markDisplaying, emitClicked and settle on the real controller")
+    func reportExternalGuideLifecycleDrivesRealController() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var presentationId: String?
+        SDKInstance.shared.onGuideRenderRequest = { presentationId = $0.presentationId }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-verbs", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+        let id = try #require(presentationId)
+
+        #expect(!recorder.displayed)
+        SDKInstance.shared.reportExternalGuideLifecycle(presentationId: id, event: .displaying)
+        #expect(recorder.displayed)
+        #expect(!recorder.isSettled)
+
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id, event: .clicked(elementId: "primary-cta"))
+        #expect(recorder.clickedElementIds == ["primary-cta"])
+        #expect(!recorder.isSettled)
+
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id, event: .settled(.dismissed(reason: .ctaAction, completed: true)))
+        #expect(recorder.isSettled)
+        #expect(recorder.isHoldReleased)
+        #expect(recorder.dismissReason == .ctaAction)
+    }
+
+    @Test("reportExternalGuideLifecycle settles dropped for a presentation that never displayed")
+    func reportExternalGuideLifecycleSettlesDropped() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var presentationId: String?
+        SDKInstance.shared.onGuideRenderRequest = { presentationId = $0.presentationId }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-dropped", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+        let id = try #require(presentationId)
+
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id,
+            event: .settled(.dropped(reason: .invalidConfig, detail: "js declined to render")))
+
+        #expect(recorder.isSettled)
+        #expect(recorder.isHoldReleased)
+        #expect(recorder.dropReason == .invalidConfig)
+        #expect(!recorder.displayed)
+    }
+
+    @Test("Digia.reportExternalGuideLifecycle hops off-main-thread calls onto the real controller")
+    func digiaReportExternalGuideLifecycleHopsToMainActor() async throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var presentationId: String?
+        SDKInstance.shared.onGuideRenderRequest = { presentationId = $0.presentationId }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-public-api", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+        let id = try #require(presentationId)
+
+        // The public entry point is `nonisolated` and hops via its own
+        // `Task { @MainActor in ... }` rather than requiring the caller to
+        // already be on the main actor — mirrors an `@objc` RN method arriving
+        // on the JS thread. Give that hop a couple of turns before asserting.
+        Digia.reportExternalGuideLifecycle(presentationId: id, event: .displaying)
+        await Task.yield()
+        await Task.yield()
+
+        #expect(recorder.displayed)
+    }
+
+    @Test("reportExternalGuideLifecycle is a silent no-op for an unknown or already-settled id")
+    func reportExternalGuideLifecycleNoOpForStaleId() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+
+        // Never minted by any delivery — must not crash and must change nothing.
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: "not-a-real-presentation-id", event: .displaying)
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: "not-a-real-presentation-id",
+            event: .settled(.dismissed(reason: .userClose, completed: false)))
+
+        // A real id, but reported against again after it already settled — the
+        // Metro-reload race the RN bridge is built to survive.
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var presentationId: String?
+        SDKInstance.shared.onGuideRenderRequest = { presentationId = $0.presentationId }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-stale", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+        let id = try #require(presentationId)
+
+        SDKInstance.shared.reportExternalGuideLifecycle(presentationId: id, event: .displaying)
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id, event: .settled(.dismissed(reason: .userClose, completed: false)))
+        #expect(recorder.isSettled)
+        #expect(recorder.dismissReason == .userClose)
+
+        // The stale report a Metro reload sends after native already settled on
+        // its own: a different (wrong) reason, which must never overwrite the
+        // real one.
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id, event: .clicked(elementId: "late-tap"))
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id, event: .settled(.dismissed(reason: .ctaAction, completed: true)))
+
+        #expect(recorder.dismissReason == .userClose)
+        #expect(recorder.clickedElementIds.isEmpty)
     }
 
     @Test("anchorless guide completion sends no click to the CEP")
     func anchorlessGuideCompletionStaysOutOfCepClicks() throws {
         SDKInstance.shared.resetForTesting()
         defer { SDKInstance.shared.resetForTesting() }
-        let plugin = TestPlugin(identifier: "plugin")
+        let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         let campaign = try #require(anchorlessGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
-        let payload = CEPTriggerPayload(
-            cepCampaignId: "anchorless-guide", campaignKey: campaign.campaignKey,
-            cepMetadata: [:])
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "anchorless-guide", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
 
-        #expect(SDKInstance.shared.onCampaignTriggered(payload))
+        #expect(!recorder.isSettled)
         SDKInstance.shared.reportGuideShown()
         SDKInstance.shared.advanceGuide()
         SDKInstance.shared.reportGuideStepClicked(
@@ -345,44 +739,48 @@ struct DigiaEngageTests {
         )
         SDKInstance.shared.dismissGuide()
 
-        #expect(plugin.events.map(\.0) == [.impressed, .dismissed])
+        #expect(recorder.signals == [.displayed])
+        // The last step's CTA completes the guide; completed wins (SR71).
+        #expect(recorder.dismissReason == .completed)
     }
 
     @Test("screen changes dismiss an accepted targeted survey")
     func screenChangesDismissTargetedSurvey() throws {
         SDKInstance.shared.resetForTesting()
-        let plugin = TestPlugin(identifier: "plugin")
+        let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         let campaign = try #require(targetedSurveyCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
-        let accepted = SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(
-                cepCampaignId: "survey-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "survey-1", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
 
         SDKInstance.shared.setCurrentScreen("Home")
 
-        #expect(accepted)
         #expect(SDKInstance.shared.surveyOrchestrator.state == nil)
-        #expect(plugin.events.contains { event, payload in
-            event == .dismissed && payload.cepCampaignId == "survey-1"
-        })
+        #expect(recorder.isSettled)
+        #expect(recorder.isHoldReleased)
     }
 
     @Test("reentrant screen change dismisses a survey once")
     func reentrantScreenChangeDismissesSurveyOnce() throws {
         SDKInstance.shared.resetForTesting()
-        let plugin = TestPlugin(identifier: "plugin")
+        let plugin = TestPlugin(id: "plugin")
         Digia.register(plugin)
         let campaign = try #require(targetedSurveyCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
-        _ = SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(
-                cepCampaignId: "survey-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "survey-1", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
         var reentered = false
-        plugin.onNotifyEvent = { event, _ in
-            if event == .dismissed, !reentered {
+        plugin.onForwardScreen = { _ in
+            if !reentered {
                 reentered = true
                 SDKInstance.shared.setCurrentScreen("Home")
             }
@@ -390,16 +788,16 @@ struct DigiaEngageTests {
 
         SDKInstance.shared.setCurrentScreen("Home")
 
-        #expect(plugin.events.filter { event, payload in
-            event == .dismissed && payload.cepCampaignId == "survey-1"
-        }.count == 1)
+        #expect(reentered)
+        #expect(recorder.isSettled)
+        #expect(SDKInstance.shared.surveyOrchestrator.state == nil)
     }
 
     @Test("campaign-key inline story payloads route into the inline controller")
     func routesInlineStoryCampaignsIntoInlineController() throws {
         SDKInstance.shared.resetForTesting()
 
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "story-campaign-id",
             "campaignKey": "story-campaign",
             "campaignType": "inline",
@@ -415,9 +813,9 @@ struct DigiaEngageTests {
                 ],
             ],
         ]))
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
 
-        SDKInstance.shared.onCampaignTriggered(
+        _ = SDKInstance.shared.deliver(
             CEPTriggerPayload(cepCampaignId: "story-campaign", campaignKey: "story-campaign", cepMetadata: [:]))
 
         #expect(SDKInstance.shared.inlineController.getCampaign("story_strip")?.cepCampaignId == "story-campaign")
@@ -425,10 +823,10 @@ struct DigiaEngageTests {
         #expect(SDKInstance.shared.inlineController.getCarouselConfig("story_strip") == nil)
     }
 
-    @Test("onCampaignInvalidated clears matching inline payloads")
+    @Test("the owner cancelling a presentation clears matching inline payloads")
     func invalidationClearsMatchingPayloads() throws {
         SDKInstance.shared.resetForTesting()
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "carousel-id",
             "campaignKey": "carousel-campaign",
             "campaignType": "inline",
@@ -438,39 +836,27 @@ struct DigiaEngageTests {
                 "items": [["imageUrl": "https://example.com/a.png"]],
             ],
         ]))
-        SDKInstance.shared.campaignStore.populate([campaign])
+        SDKInstance.shared.setCampaignsForTesting([campaign])
 
-        SDKInstance.shared.onCampaignTriggered(
-            CEPTriggerPayload(cepCampaignId: "carousel-campaign", campaignKey: "carousel-campaign", cepMetadata: [:]))
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "carousel-campaign", campaignKey: "carousel-campaign",
+                    cepMetadata: [:])))
         #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") != nil)
 
-        SDKInstance.shared.onCampaignInvalidated("carousel-campaign")
+        // v1's `onCampaignInvalidated(campaignID)` — now only the owner of the
+        // handle can do it, which is the point of the two faces.
+        recorder.presentation.cancel()
 
         #expect(SDKInstance.shared.inlineController.getCampaign("hero_banner") == nil)
-    }
-
-    @Test("slot placeholder registration is delegated to the active plugin")
-    func placeholderRegistrationDelegatesToPlugin() {
-        SDKInstance.shared.resetForTesting()
-        let plugin = TestPlugin(identifier: "plugin")
-        plugin.placeholderIDToReturn = 42
-        Digia.register(plugin)
-
-        let id = SDKInstance.shared.registerPlaceholderForSlot(
-            propertyID: "hero_banner"
-        )
-
-        #expect(id == 42)
-        #expect(plugin.placeholderRegistrations.count == 1)
-        #expect(plugin.placeholderRegistrations.first == "hero_banner")
-
-        SDKInstance.shared.deregisterPlaceholderForSlot(42)
-        #expect(plugin.deregisteredPlaceholderIDs == [42])
+        #expect(recorder.dropReason == .cancelled)
+        #expect(recorder.isHoldReleased)
     }
 
     @Test("campaign parser accepts Android templateConfig survey key")
     func campaignParserAcceptsAndroidTemplateTypeSurveyKey() throws {
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "campaign-123",
             "campaignKey": "welcome_survey",
             "campaignType": "survey",
@@ -486,7 +872,7 @@ struct DigiaEngageTests {
     @Test("campaign key payload routes through fetched survey campaign")
     func campaignKeyPayloadRoutesThroughFetchedSurveyCampaign() {
         SDKInstance.shared.resetForTesting()
-        let campaign = try! #require(CampaignModel.fromJson([
+        let campaign = try! #require(try CampaignModel.fromJson([
             "id": "campaign-123",
             "campaignKey": "welcome_survey",
             "campaignType": "survey",
@@ -494,7 +880,7 @@ struct DigiaEngageTests {
         ]))
         SDKInstance.shared.setCampaignsForTesting([campaign])
 
-        SDKInstance.shared.onCampaignTriggered(
+        _ = SDKInstance.shared.deliver(
             CEPTriggerPayload(cepCampaignId: "bridge-event", campaignKey: "welcome_survey", cepMetadata: [:]))
 
         #expect(SDKInstance.shared.surveyOrchestrator.state?.payload.cepCampaignId == "bridge-event")
@@ -505,11 +891,11 @@ struct DigiaEngageTests {
     func classicInlineClicksStaySeparateFromRichAnalytics() {
         SDKInstance.shared.resetForTesting()
         defer { SDKInstance.shared.resetForTesting() }
-        let plugin = TestPlugin(identifier: "plugin")
-        Digia.register(plugin)
-        let payload = CEPTriggerPayload(
-            cepCampaignId: "inline", campaignKey: "inline",
-            cepMetadata: [:])
+        Digia.register(TestPlugin(id: "plugin"))
+        let recorder = PresentationRecorder(
+            payload: CEPTriggerPayload(
+                cepCampaignId: "inline", campaignKey: "inline", cepMetadata: [:]))
+        let payload = recorder.payload
 
         SDKInstance.shared.reportStoryOpened(payload)
         SDKInstance.shared.reportStoryStepClicked(
@@ -517,51 +903,48 @@ struct DigiaEngageTests {
         SDKInstance.shared.reportCarouselStepClicked(payload: payload, itemIndex: 1, action: nil)
         SDKInstance.shared.reportBannerClicked(payload: payload, action: nil)
         SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: "secondary", isPrimary: false)
-        #expect(plugin.events.isEmpty)
+        #expect(recorder.signals.isEmpty)
 
         SDKInstance.shared.reportClassicStoryOpened(payload)
         SDKInstance.shared.reportClassicCarouselContainerClicked(payload)
         SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: "primary", isPrimary: true)
-        #expect(plugin.events.map(\.0) == [
-            .clicked(elementID: "story_thumbnail"),
-            .clicked(elementID: "carousel_container"),
-            .clicked(elementID: "primary"),
+        // A click promotes a presentation that never reported an impression, so
+        // G3's "displayed first" holds for the plugin either way.
+        #expect(recorder.displayed)
+        #expect(recorder.clickedElementIds == [
+            "story_thumbnail", "carousel_container", "primary",
         ])
-        #expect(plugin.events.allSatisfy { $0.1 == payload })
-
-
     }
 
     @Test("survey automatic engagement and completion do not emit its physical Start click")
     func surveyStartClickIsSeparateFromAutomaticEngagement() throws {
         SDKInstance.shared.resetForTesting()
         defer { SDKInstance.shared.resetForTesting() }
-        let plugin = TestPlugin(identifier: "plugin")
-        Digia.register(plugin)
+        Digia.register(TestPlugin(id: "plugin"))
         let campaign = try #require(targetedSurveyCampaign())
         let config = try #require(campaign.surveyConfig)
-        let payload = CEPTriggerPayload(
-            cepCampaignId: "survey", campaignKey: campaign.campaignKey,
-            cepMetadata: [:])
-        #expect(SDKInstance.shared.surveyOrchestrator.start(payload: payload, config: config))
+        let recorder = PresentationRecorder(
+            payload: CEPTriggerPayload(
+                cepCampaignId: "survey", campaignKey: campaign.campaignKey, cepMetadata: [:]),
+            kind: .modal)
+        #expect(SDKInstance.shared.surveyOrchestrator.start(
+            payload: recorder.payload, config: config))
 
         SDKInstance.shared.reportSurveyWelcomeStart()
         SDKInstance.shared.reportSurveyQuestionSkipped(nodeId: "node-1", itemIndex: 1)
         SDKInstance.shared.reportSurveyCompleted(response: [:])
-        #expect(plugin.events.isEmpty)
+        #expect(recorder.clickedElementIds.isEmpty)
 
         SDKInstance.shared.reportSurveyStartClicked()
-        #expect(plugin.events.map(\.0) == [.clicked(elementID: "welcome_start")])
-        #expect(plugin.events.first?.1 == payload)
+        #expect(recorder.clickedElementIds == ["welcome_start"])
     }
 
     @Test("classic nudge CTA clicks use the parsed primary marker, not button style", arguments: ["bottom_sheet", "dialog"])
     func classicNudgeCTAClicks(displayType: String) throws {
         SDKInstance.shared.resetForTesting()
         defer { SDKInstance.shared.resetForTesting() }
-        let plugin = TestPlugin(identifier: "plugin")
-        Digia.register(plugin)
-        let config = try #require(NudgeConfig.fromJson([
+        Digia.register(TestPlugin(id: "plugin"))
+        let config = try #require(try NudgeConfig.fromJson([
             "container": ["displayType": displayType],
             "layout": [
                 "type": "digia/column", "props": [:],
@@ -572,14 +955,16 @@ struct DigiaEngageTests {
                 ],
             ],
         ]))
-        let payload = CEPTriggerPayload(
-            cepCampaignId: "nudge", campaignKey: "nudge",
-            cepMetadata: [:])
+        let recorder = PresentationRecorder(
+            payload: CEPTriggerPayload(
+                cepCampaignId: "nudge", campaignKey: "nudge", cepMetadata: [:]),
+            kind: .modal)
+        let payload = recorder.payload
         SDKInstance.shared.controller.showNudge(
             DigiaNudgePresentation(config: config, payload: payload, variables: nil))
 
         SDKInstance.shared.reportPrimaryCTAClick(elementId: "secondary", isPrimary: false)
-        #expect(plugin.events.isEmpty)
+        #expect(recorder.clickedElementIds.isEmpty)
         let buttons = config.layout.children.compactMap { node -> NudgeButton? in
             if case .button(let button) = node { return button }
             return nil
@@ -588,9 +973,9 @@ struct DigiaEngageTests {
         for button in buttons {
             SDKInstance.shared.reportPrimaryCTAClick(elementId: "cta_primary", isPrimary: button.isPrimary)
         }
-        #expect(plugin.events.map(\.0) == [.clicked(elementID: "cta_primary")])
+        #expect(recorder.clickedElementIds == ["cta_primary"])
 
-        let canvasConfig = try #require(NudgeConfig.fromJson([
+        let canvasConfig = try #require(try NudgeConfig.fromJson([
             "container": ["displayType": displayType],
             "layoutMode": "canvas",
             "canvas": ["version": 2, "canvasWidth": 360, "canvasHeight": 180, "children": []],
@@ -598,9 +983,9 @@ struct DigiaEngageTests {
         SDKInstance.shared.controller.showNudge(
             DigiaNudgePresentation(config: canvasConfig, payload: payload, variables: nil))
         SDKInstance.shared.reportPrimaryCTAClick(elementId: "secondary", isPrimary: false)
-        #expect(plugin.events.count == 1)
+        #expect(recorder.clickedElementIds.count == 1)
         SDKInstance.shared.reportPrimaryCTAClick(elementId: "primary", isPrimary: true)
-        #expect(plugin.events.map(\.0) == [.clicked(elementID: "cta_primary"), .clicked(elementID: "primary")])
+        #expect(recorder.clickedElementIds == ["cta_primary", "primary"])
     }
 }
 
@@ -776,7 +1161,7 @@ struct EngageActionParserTests {
 }
 
 private func targetedInlineCampaign() -> CampaignModel? {
-    CampaignModel.fromJson([
+    try? CampaignModel.fromJson([
         "id": "targeted-id",
         "campaignKey": "help-inline",
         "campaignType": "inline",
@@ -797,7 +1182,7 @@ private func nudgeCampaign(
     key: String,
     targetScreenNames: [String] = []
 ) -> CampaignModel? {
-    CampaignModel.fromJson([
+    try? CampaignModel.fromJson([
         "id": "\(key)-id",
         "campaignKey": key,
         "campaignType": "nudge",
@@ -814,7 +1199,7 @@ private func nudgeCampaign(
 }
 
 private func targetedGuideCampaign() -> CampaignModel? {
-    CampaignModel.fromJson([
+    try? CampaignModel.fromJson([
         "id": "help-guide-id",
         "campaignKey": "help-guide",
         "campaignType": "guide",
@@ -832,7 +1217,7 @@ private func targetedGuideCampaign() -> CampaignModel? {
 }
 
 private func anchorlessGuideCampaign() -> CampaignModel? {
-    CampaignModel.fromJson([
+    try? CampaignModel.fromJson([
         "id": "anchorless-guide-id",
         "campaignKey": "anchorless-guide",
         "campaignType": "guide",
@@ -841,7 +1226,12 @@ private func anchorlessGuideCampaign() -> CampaignModel? {
             "steps": [1, 2].map { step in
                 [
                     "stepId": "step-\(step)",
-                    "target": ["type": "anchorless", "version": 1, "pageKey": "home"],
+                    "target": [
+                        "type": "anchorless", "version": 1, "pageKey": "home",
+                        "imageUrl": "https://example.com/home.png",
+                        "horizontal": ["frame": "window", "rule": ["kind": "stretch", "startInset": 0, "endInset": 0]],
+                        "vertical": ["frame": "window", "rule": ["kind": "stretch", "topInset": 0, "bottomInset": 0]],
+                    ] as [String: Any],
                     "layoutMode": "canvas",
                     "canvas": [
                         "version": 2,
@@ -856,7 +1246,7 @@ private func anchorlessGuideCampaign() -> CampaignModel? {
 }
 
 private func targetedSurveyCampaign() -> CampaignModel? {
-    CampaignModel.fromJson([
+    try? CampaignModel.fromJson([
         "id": "help-survey-id",
         "campaignKey": "help-survey",
         "campaignType": "survey",
@@ -891,49 +1281,31 @@ private func minimalSurveyTemplate() -> [String: Any] {
 }
 
 private final class TestPlugin: DigiaCEPPlugin {
-    let identifier: String
-    var setupCount = 0
-    var teardownCount = 0
-    var placeholderIDToReturn: Int?
-    var placeholderRegistrations: [String] = []
-    var deregisteredPlaceholderIDs: [Int] = []
+    let id: String
+    var attachCount = 0
+    var detachCount = 0
     var forwardedScreens: [String] = []
-    var events: [(DigiaExperienceEvent, CEPTriggerPayload)] = []
+    private(set) var host: DigiaCEPHost?
     var onForwardScreen: ((String) -> Void)?
-    var onNotifyEvent: ((DigiaExperienceEvent, CEPTriggerPayload) -> Void)?
+    var onDetach: (() -> Void)?
 
-    init(identifier: String) {
-        self.identifier = identifier
+    init(id: String) {
+        self.id = id
     }
 
-    func setup(delegate: DigiaCEPDelegate) {
-        setupCount += 1
+    func attach(host: DigiaCEPHost) {
+        attachCount += 1
+        self.host = host
     }
 
-    func forwardScreen(_ name: String) {
-        forwardedScreens.append(name)
-        onForwardScreen?(name)
+    func onScreenChanged(_ screenName: String) {
+        forwardedScreens.append(screenName)
+        onForwardScreen?(screenName)
     }
 
-    func registerPlaceholder(propertyID: String) -> Int? {
-        placeholderRegistrations.append(propertyID)
-        return placeholderIDToReturn
-    }
-
-    func deregisterPlaceholder(_ id: Int) {
-        deregisteredPlaceholderIDs.append(id)
-    }
-
-    func notifyEvent(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
-        events.append((event, payload))
-        onNotifyEvent?(event, payload)
-    }
-
-    func healthCheck() -> DiagnosticReport {
-        DiagnosticReport(isHealthy: true)
-    }
-
-    func teardown() {
-        teardownCount += 1
+    func detach() {
+        detachCount += 1
+        onDetach?()
+        host = nil
     }
 }

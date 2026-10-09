@@ -1,5 +1,8 @@
 import Foundation
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 // Ported from Android `CampaignModel.kt`. Survey campaigns are delivered as the
 // campaign's `surveyConfig` (or a `templateConfig` with `templateType ==
 // "survey"`) and parsed into a `SurveyConfigModel`, mirroring Android.
@@ -25,11 +28,19 @@ struct CampaignModel: Equatable {
     let id: String
     let campaignKey: String
     let campaignType: String
-    let config: CampaignConfigModel
+    var config: CampaignConfigModel
     let targetScreenNames: [String]
     // Opaque capping policy from the dashboard; nil = "No cap" / inline.
     // Used natively for nudge + survey only (guides cap in JS on RN).
     var frequency: FrequencyPolicy? = nil
+    /// The campaign's authored guide JSON, verbatim, retained for guide campaigns only.
+    ///
+    /// The React Native renderer draws tooltips and spotlights in JS from this exact
+    /// object — it has no campaign store of its own — so it must survive parsing
+    /// unmodified rather than being rebuilt from ``guideConfig``, which is this core's
+    /// own lossy projection of it. Nothing native reads it; every other campaign type
+    /// leaves it nil so a bundle costs no extra memory for it.
+    var guideTemplateJson: String? = nil
 
     var guideConfig: GuideConfigModel? {
         if case let .guide(value) = config { return value }
@@ -71,8 +82,8 @@ struct CampaignModel: Equatable {
         designTokens: DesignTokenCatalog = .empty,
         devicePlatform: String? = nil,
         timeAnchor: TrustedTimeAnchor? = nil
-    ) -> CampaignModel? {
-        guard let selectedJson = selectForDevice(json, devicePlatform: devicePlatform) else { return nil }
+    ) throws -> CampaignModel? {
+        guard let selectedJson = try selectForDevice(json, devicePlatform: devicePlatform) else { return nil }
         guard let id = selectedJson.nonBlankString("id") ?? selectedJson.nonBlankString("_id") else { return nil }
         guard let campaignKey = selectedJson.nonBlankString("campaignKey") else { return nil }
         guard let campaignType = selectedJson.nonBlankString("campaignType") else { return nil }
@@ -81,7 +92,7 @@ struct CampaignModel: Equatable {
         let config: CampaignConfigModel
         switch campaignType {
         case "guide":
-            guard let guideConfig = parseGuideConfig(
+            guard let guideConfig = try parseGuideConfig(
                 selectedJson,
                 fallbackId: id,
                 designTokens: designTokens
@@ -89,13 +100,13 @@ struct CampaignModel: Equatable {
             config = .guide(guideConfig)
         case "nudge":
             guard let templateConfig = selectedJson.object("templateConfig"),
-                  let nudgeConfig = NudgeConfig.fromJson(templateConfig, designTokens: designTokens) else { return nil }
+                  let nudgeConfig = try NudgeConfig.fromJson(templateConfig, designTokens: designTokens) else { return nil }
             config = .nudge(nudgeConfig)
         case "inline":
             guard let templateConfig = selectedJson.object("templateConfig") else { return nil }
             if templateConfig["stateful"] != nil {
                 let schemas = NudgeConfig.parseVariableSchemas(templateConfig)
-                guard let stateful = StatefulTimerConfig.fromJson(
+                guard let stateful = try StatefulTimerConfig.fromJson(
                     templateConfig,
                     designTokens: designTokens,
                     timeAnchor: timeAnchor
@@ -103,7 +114,17 @@ struct CampaignModel: Equatable {
                     templateConfig,
                     stateful: stateful
                 ) else {
-                    DigiaLog.warning("campaign_skipped_unsupported: invalid inline timer config: key=\(campaignKey)")
+                    let stateful = templateConfig["stateful"] as? [String: Any]
+                    if timeAnchor != nil {
+                        _ = try CampaignParseScope.acceptsVersion(
+                            stateful.map(StatefulTimerConfig.version) ?? 1, supported: 1)
+                    } else {
+                        throw CampaignParseScope.report(
+                            "Campaign skipped — timer needs server time, and the fetch had none",
+                            reason: TimelineReason.campaignUnsupported,
+                            extras: ["precondition": "server_time_missing"]
+                        )
+                    }
                     return nil
                 }
                 canvasConfig.variableSchemas = schemas
@@ -124,17 +145,18 @@ struct CampaignModel: Equatable {
             // distinct subtypes only to guarantee the widget is present and
             // undeletable.
             case "canvas", "canvasCarousel", "canvasStory":
-                guard let canvasConfig = InlineCanvasConfig.fromJson(
+                guard var canvasConfig = try InlineCanvasConfig.fromJson(
                     templateConfig,
                     designTokens: designTokens
                 ) else { return nil }
+                canvasConfig.variableSchemas = NudgeConfig.parseVariableSchemas(templateConfig)
                 config = .inlineCanvas(canvasConfig)
             default:
                 guard let carouselConfig = InlineCarouselConfig.fromJson(templateConfig) else { return nil }
                 config = .inline(carouselConfig)
             }
         case "survey":
-            guard let surveyConfig = parseSurveyConfig(
+            guard let surveyConfig = try parseSurveyConfig(
                 selectedJson,
                 fallbackId: id,
                 designTokens: designTokens
@@ -146,19 +168,22 @@ struct CampaignModel: Equatable {
             // `floaterStory` a canvas window that opens a story — the same way `inline`
             // carries `carousel` / `story` / `banner`.
             if templateConfig.string("templateType", default: "pip") == "floaterStory" {
-                guard let storyConfig = FloaterStoryConfig.fromJson(
+                guard let storyConfig = try FloaterStoryConfig.fromJson(
                     templateConfig, designTokens: designTokens
                 ) else { return nil }
                 config = .floaterStory(storyConfig)
             } else {
-                guard let floaterConfig = FloaterConfig.fromJson(
+                guard let floaterConfig = try FloaterConfig.fromJson(
                     templateConfig, designTokens: designTokens
                 ) else { return nil }
                 config = .floater(floaterConfig)
             }
         default:
-            // Any unknown type is skipped.
-            return nil
+            throw CampaignParseScope.report(
+                "Campaign skipped — unknown campaign type (type=\(campaignType))",
+                reason: TimelineReason.campaignUnsupported,
+                extras: ["type": campaignType]
+            )
         }
 
         return CampaignModel(
@@ -167,14 +192,35 @@ struct CampaignModel: Equatable {
             campaignType: campaignType,
             config: config,
             targetScreenNames: targetScreenNames,
-            frequency: FrequencyPolicy.fromJson(selectedJson.object("frequency"))
+            frequency: FrequencyPolicy.fromJson(selectedJson.object("frequency")),
+            guideTemplateJson: campaignType == "guide"
+                // Authored under either key depending on the campaign's age; both carry
+                // the same `{ templateType, steps, variables }` shape the JS renderer reads.
+                ? encodeGuideTemplate(
+                    selectedJson.object("templateConfig") ?? selectedJson.object("guideConfig")
+                )
+                : nil
         )
+    }
+
+    /// Re-serialises the authored guide object for the out-of-process renderer.
+    ///
+    /// `JSONSerialization` is the one thing here that can throw on otherwise valid-looking
+    /// input (a non-JSON value smuggled into the dictionary), and a guide that cannot be
+    /// re-encoded must degrade to "this campaign has no renderable content" rather than
+    /// take the parse down with it — every other campaign in the bundle is still good.
+    private static func encodeGuideTemplate(_ template: [String: Any]?) -> String? {
+        guard let template,
+              JSONSerialization.isValidJSONObject(template),
+              let data = try? JSONSerialization.data(withJSONObject: template)
+        else { return nil }
+        return String(data: data, encoding: .utf8)
     }
 
     private static func selectForDevice(
         _ json: [String: Any],
         devicePlatform: String?
-    ) -> [String: Any]? {
+    ) throws -> [String: Any]? {
         if let platforms = json["deliveryPlatforms"] as? [Any], !platforms.isEmpty {
             guard let devicePlatform,
                   platforms.contains(where: { $0 as? String == devicePlatform })
@@ -194,13 +240,20 @@ struct CampaignModel: Equatable {
                   let target = step["target"] as? [String: Any],
                   target["type"] as? String == "anchorless"
             else { continue }
-            guard target.int("version", default: -1) == 1 else { return nil }
+            let version = target.isAbsent("version") ? 1 : target.int("version", default: -1)
+            guard try CampaignParseScope.acceptsVersion(version, supported: 1) else { return nil }
             guard let variants = target["variants"] else { continue }
             guard let devicePlatform,
                   let variantMap = variants as? [String: Any],
                   let variant = variantMap[devicePlatform] as? [String: Any],
                   variant["devicePlatform"] as? String == devicePlatform
-            else { return nil }
+            else {
+                throw CampaignParseScope.report(
+                    "Campaign skipped — no anchorless variant for this platform",
+                    reason: TimelineReason.campaignUnsupported,
+                    extras: ["precondition": "platform_variant_missing"]
+                )
+            }
 
             var selected = variant
             selected["type"] = "anchorless"
@@ -222,7 +275,7 @@ struct CampaignModel: Equatable {
         _ json: [String: Any],
         fallbackId: String,
         designTokens: DesignTokenCatalog
-    ) -> SurveyConfigModel? {
+    ) throws -> SurveyConfigModel? {
         let raw: [String: Any]?
         if let survey = json["surveyConfig"] as? [String: Any] {
             raw = survey
@@ -235,7 +288,7 @@ struct CampaignModel: Equatable {
         guard let raw, let converted = surveyJSONObject(raw) else { return nil }
         let variableSchemas = NudgeConfig.parseVariableSchemas(json.object("templateConfig") ?? raw)
         if raw.string("layoutMode") == "canvas" {
-            return CanvasSurveyConfigParser.from(
+            return try CanvasSurveyConfigParser.from(
                 converted,
                 fallbackId: fallbackId,
                 designTokens: designTokens,
@@ -255,12 +308,12 @@ struct CampaignModel: Equatable {
         _ json: [String: Any],
         fallbackId: String,
         designTokens: DesignTokenCatalog
-    ) -> GuideConfigModel? {
+    ) throws -> GuideConfigModel? {
         if let guideJson = json.object("guideConfig") {
             // Variables may live on guideConfig or on the sibling templateConfig
-            let templateJson = json.object("templateConfig")
-            let schemas = NudgeConfig.parseVariableSchemas(templateJson ?? guideJson)
-            return parseGuideSteps(
+            let templateSchemas = json.object("templateConfig").map(NudgeConfig.parseVariableSchemas) ?? []
+            let schemas = templateSchemas.isEmpty ? NudgeConfig.parseVariableSchemas(guideJson) : templateSchemas
+            return try parseGuideSteps(
                 guideJson,
                 fallbackId: fallbackId,
                 variableSchemas: schemas,
@@ -271,7 +324,7 @@ struct CampaignModel: Equatable {
             let templateType = templateJson.string("templateType")
             if templateType == "tooltip" || templateType == "spotlight" {
                 let schemas = NudgeConfig.parseVariableSchemas(templateJson)
-                return parseFlatGuideTemplate(
+                return try parseFlatGuideTemplate(
                     templateJson,
                     fallbackId: fallbackId,
                     variableSchemas: schemas,
@@ -287,10 +340,10 @@ struct CampaignModel: Equatable {
         fallbackId: String,
         variableSchemas: [VariableSchema],
         designTokens: DesignTokenCatalog
-    ) -> GuideConfigModel? {
+    ) throws -> GuideConfigModel? {
         let guideId = guideJson.nonBlankString("id") ?? guideJson.nonBlankString("_id") ?? fallbackId
         guard let stepsArr = guideJson["steps"] as? [Any] else { return nil }
-        return buildGuideConfig(
+        return try buildGuideConfig(
             guideId: guideId,
             multiStep: guideJson.bool("multiStep", default: false),
             stepsArr: stepsArr,
@@ -307,13 +360,13 @@ struct CampaignModel: Equatable {
         fallbackId: String,
         variableSchemas: [VariableSchema],
         designTokens: DesignTokenCatalog
-    ) -> GuideConfigModel? {
+    ) throws -> GuideConfigModel? {
         guard let stepsArr = templateJson["steps"] as? [Any] else { return nil }
         let rawDesignWidth = CGFloat(templateJson.double(
             "designWidth",
             default: Double(defaultCampaignCanvasDesignWidth)
         ))
-        return buildGuideConfig(
+        return try buildGuideConfig(
             guideId: templateJson.nonBlankString("templateId") ?? fallbackId,
             multiStep: stepsArr.count > 1,
             stepsArr: stepsArr,
@@ -343,7 +396,7 @@ struct CampaignModel: Equatable {
         designTokens: DesignTokenCatalog,
         designWidth: CGFloat,
         widgetJsonForStep: ([String: Any]) -> [String: Any]?
-    ) -> GuideConfigModel? {
+    ) throws -> GuideConfigModel? {
         var steps: [GuideStepModel] = []
         let hasRawAnchorlessStep = stepsArr.contains { element in
             guard let step = element as? [String: Any],
@@ -377,7 +430,7 @@ struct CampaignModel: Equatable {
                     return nil
                 }
             }
-            let widgetConfig = GuideStepWidgetConfig.fromJson(
+            let widgetConfig = try GuideStepWidgetConfig.fromJson(
                 widgetJson,
                 displayStyle: displayStyle,
                 designTokens: designTokens
@@ -407,7 +460,6 @@ struct CampaignModel: Equatable {
             )
         }
 
-        if steps.isEmpty { return nil }
         let anchorlessTargets = steps.compactMap { step -> AnchorlessTarget? in
             if case let .anchorless(target) = step.target { return target }
             return nil

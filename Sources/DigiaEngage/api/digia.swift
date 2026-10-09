@@ -2,6 +2,10 @@ import Foundation
 import SwiftUI
 import UIKit
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
+
 /// Builds the composite SDK descriptor (schema v1):
 ///   `s=schema | b=binding | p=platform | [w=wrapper |] c=core`
 /// The wrapper segment (`w`) is present only when a thin wrapper SDK
@@ -50,7 +54,7 @@ public enum Digia {
     /// No-op outside a debug build.
     public static func presentDebugSettings(from presenter: UIViewController) {
         guard SDKInstance.shared.isDebugBuild else {
-            DigiaLog.warning("[Digia] presentDebugSettings() ignored — not a debug build.")
+            log.e("presentDebugSettings() ignored — not a debug build")
             return
         }
         // The same link can reach here twice — the SDK opens the screen from its
@@ -75,6 +79,17 @@ public enum Digia {
     /// Initializes the Digia SDK. No-ops below iOS 17 — the SDUI rendering layer
     /// requires APIs (`Layout`, newer `SwiftUI` scroll/animation modifiers) that
     /// only exist from iOS 17 onward.
+    ///
+    /// Await it. It returns once the campaign fetch has completed, or 2 seconds
+    /// after the call, whichever comes first; if the cap fires, the fetch keeps
+    /// running in the background. Campaign triggers that arrive before the fetch
+    /// completes are dropped, not held. A fetch failure does not throw: the SDK
+    /// stays unable to show campaigns, and calling `initialize()` again retries
+    /// the fetch.
+    ///
+    /// A retry after a failed fetch reuses the configuration of the first call:
+    /// the `config` passed to the retry is ignored, except its action handlers,
+    /// which replace the first call's, and only the campaign fetch runs again.
     public static func initialize(_ config: DigiaConfig) async throws {
         guard #available(iOS 17, *) else { return }
         try await SDKInstance.shared.initialize(config)
@@ -83,13 +98,7 @@ public enum Digia {
     public static var requestHeaders: [String: String] { SDKInstance.shared.requestHeaders }
 
     public static var sdkVersion: String? {
-        guard let config = SDKInstance.shared.config else { return nil }
-        return buildSdkVersion(
-            binding: config.wrapperBinding ?? "native",
-            platform: "ios",
-            wrapperVersion: config.wrapperVersion,
-            core: DigiaSdkVersion.value
-        )
+        SDKInstance.shared.sdkVersion
     }
 
     /// No-ops below iOS 17 (see `initialize`).
@@ -113,15 +122,42 @@ public enum Digia {
         SDKInstance.shared.setOpenURLHandler(handler)
     }
 
-    /// RN-only: hand native the same campaign-bundle response JS already fetched, so
-    /// native doesn't also fetch it. Call once after `initialize` when the config's
-    /// `wrapperBinding` is `"react_native"`.
-    ///
-    /// No-ops below iOS 17 (see `initialize`) — this bypasses `initialize`'s own
-    /// state guard, so it needs the same OS check independently.
+    /// No longer does anything: native fetches the campaign bundle itself on every
+    /// binding, React Native included. Kept so an older React Native bundle that still
+    /// calls this keeps working against a newer core.
+    @available(
+        *, deprecated,
+        message: "Native owns the campaign fetch on every binding; this is a no-op."
+    )
     public static func populateCampaignBundle(_ bundleJson: String) {
         guard #available(iOS 17, *) else { return }
         SDKInstance.shared.populateCampaignBundle(bundleJson)
+    }
+
+    /// Delivers the campaign published under `campaignKey`, right now, with no CEP involved.
+    ///
+    /// For an app that owns its own triggering: no CleverTap / MoEngage / WebEngage decides
+    /// what fires, the app does. The delivery is otherwise identical to a plugin's — same
+    /// routing, same frequency capping, same screen targeting, same analytics — so a campaign
+    /// that would be dropped for a CEP is dropped here too, for the same reason.
+    ///
+    /// `variables` override the dashboard-authored fallbacks for this one delivery, exactly
+    /// as a CEP's trigger variables do.
+    ///
+    /// Returns the presentation, whose `outcome` names what actually happened. A campaign key
+    /// that is not published, a screen that is not targeted or a frequency cap already spent
+    /// all come back as a `dropped` outcome rather than a trap — this is a delivery path, and
+    /// a delivery path never fails at its caller.
+    ///
+    /// Before the campaign bundle has loaded, the delivery is not held: it comes back
+    /// already dropped (`notInitialized`, `notReady` or `initializationFailed`), the same
+    /// way a plugin's does.
+    @MainActor
+    public static func triggerCampaign(
+        _ campaignKey: String,
+        variables: [String: String]? = nil
+    ) -> CampaignPresentation {
+        SDKInstance.shared.triggerCampaign(campaignKey, variables: variables)
     }
 
     public static func setThemeMode(_ mode: DigiaThemeMode) {
@@ -192,6 +228,11 @@ public enum Digia {
         SDKInstance.shared.clearUserId()
     }
 
+    /// The device ID for this install, or an empty string before `initialize`. Never creates an ID.
+    public static var anonymousId: String {
+        SDKInstance.shared.anonymousId
+    }
+
     /// Clears inline content (carousels/stories) for the given `placementKeys`. Once
     /// loaded, inline content is retained indefinitely — hosts should call this on
     /// logout so a stale user's content doesn't linger across the account switch.
@@ -213,10 +254,47 @@ public enum Digia {
 
     /// Registers the RN render hook. When set, guides are treated as JS-rendered:
     /// on a guide trigger the SDK applies frequency capping and, if allowed, invokes
-    /// this callback (with the trigger payload) to ask JS to render — it does not
-    /// render the guide natively. Used only by the React Native bridge.
-    public static func setOnGuideRenderRequest(_ callback: ((CEPTriggerPayload) -> Void)?) {
+    /// this callback with a ``GuideRenderRequest`` — the trigger payload, the
+    /// presentation id the coordinator minted for this delivery, and the guide's
+    /// authored JSON — to ask JS to render. It does not render the guide natively.
+    /// Used only by the React Native bridge.
+    ///
+    /// The id is what a later ``reportExternalGuideLifecycle(presentationId:event:)``
+    /// call must use — it is the only thing that resolves back to the real
+    /// presentation the CEP's hold is on.
+    public static func setOnGuideRenderRequest(
+        _ callback: ((GuideRenderRequest) -> Void)?
+    ) {
         SDKInstance.shared.onGuideRenderRequest = callback
+    }
+
+    /// Reports a lifecycle transition for an externally-rendered guide's
+    /// presentation — the JS-rendered path ``setOnGuideRenderRequest(_:)``
+    /// started, correlated by the `presentationId` that callback received.
+    ///
+    /// This is the one way a renderer outside this core can drive a
+    /// presentation: it never gets a ``PresentationController`` of its own to
+    /// hold, only an id and a verb, so there is no way to end up settling a
+    /// second, disconnected presentation instead of the real one.
+    ///
+    /// An unknown or already-settled `presentationId` is a silent no-op (with
+    /// a DEBUG-only log) — never a trap. A Metro reload makes JS report
+    /// lifecycle for a presentation native already settled on its own (a
+    /// screen change, the acceptance watchdog); that is a designed race, not a
+    /// caller error.
+    ///
+    /// Safe to call from any thread: React method calls arrive off the main
+    /// thread, and this hops to the main actor itself before touching any SDK
+    /// state, so a caller never needs its own `Task { @MainActor in ... }`
+    /// wrapper just to reach this one entry point.
+    nonisolated public static func reportExternalGuideLifecycle(
+        presentationId: String,
+        event: ExternalGuideLifecycleEvent
+    ) {
+        Task { @MainActor in
+            SDKInstance.shared.reportExternalGuideLifecycle(
+                presentationId: presentationId, event: event)
+        }
     }
 
     /// Records an analytics event for JS-rendered campaigns (guides / tooltips / spotlights).

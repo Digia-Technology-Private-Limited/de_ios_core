@@ -4,7 +4,7 @@ import Testing
 
 struct NudgeCloseButtonConfigTests {
     private func config(container: [String: Any] = [:], spacing: Any = 24) throws -> NudgeConfig {
-        try #require(NudgeConfig.fromJson([
+        try #require(try NudgeConfig.fromJson([
             "container": container,
             "layout": [
                 "type": "digia/column",

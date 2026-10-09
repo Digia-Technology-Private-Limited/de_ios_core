@@ -8,7 +8,12 @@ final class InlineCampaignController: ObservableObject {
     @Published private var bannerConfigs: [String: InlineBannerConfig] = [:]
     @Published private var storyConfigs: [String: InlineStoryConfig] = [:]
     @Published private var canvasConfigs: [String: InlineCanvasConfig] = [:]
-    var onCampaignRemoved: ((CEPTriggerPayload) -> Void)?
+    var onCampaignRemoved: ((CEPTriggerPayload, DismissReason) -> Void)?
+
+    /// Every slot's current campaign, for the surface rule's occupant snapshot.
+    var slotOccupants: [(slot: String, payload: CEPTriggerPayload)] {
+        campaigns.map { (slot: $0.key, payload: $0.value) }
+    }
 
     func getCampaign(_ placementKey: String) -> CEPTriggerPayload? {
         campaigns[placementKey]
@@ -99,13 +104,13 @@ final class InlineCampaignController: ObservableObject {
         notifyRemovedCampaigns(removedPayloads)
     }
 
-    func dismissCampaign(_ placementKey: String) {
+    func dismissCampaign(_ placementKey: String, reason: DismissReason = .userClose) {
         let removed = campaigns.removeValue(forKey: placementKey)
         carouselConfigs.removeValue(forKey: placementKey)
         bannerConfigs.removeValue(forKey: placementKey)
         storyConfigs.removeValue(forKey: placementKey)
         canvasConfigs.removeValue(forKey: placementKey)
-        if let removed { notifyRemovedCampaigns([removed]) }
+        if let removed { notifyRemovedCampaigns([removed], reason: reason) }
     }
 
     func clear() {
@@ -118,10 +123,12 @@ final class InlineCampaignController: ObservableObject {
         notifyRemovedCampaigns(removed)
     }
 
-    private func notifyRemovedCampaigns(_ removed: [CEPTriggerPayload]) {
+    private func notifyRemovedCampaigns(
+        _ removed: [CEPTriggerPayload], reason: DismissReason = .userClose
+    ) {
         var remainingIds = Set(campaigns.values.map(\.cepCampaignId))
         for payload in removed where remainingIds.insert(payload.cepCampaignId).inserted {
-            onCampaignRemoved?(payload)
+            onCampaignRemoved?(payload, reason)
         }
     }
 }

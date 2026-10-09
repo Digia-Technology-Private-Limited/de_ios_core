@@ -1,6 +1,9 @@
 import StoreKit
 import UIKit
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 @MainActor
 struct LocalActionExecutor {
     private let dismiss: (() -> Void)?
@@ -35,7 +38,7 @@ struct LocalActionExecutor {
         if let callback {
             callback()
         } else {
-            DigiaLog.warning("Local action '\(name)' is not supported by this campaign surface")
+            log.e("Local action ignored — not supported by this campaign surface (action=\(name))")
         }
         return true
     }
@@ -56,7 +59,7 @@ final class GlobalActionExecutor {
         },
         requestReview: @escaping () -> Void = {
             guard let scene = ViewControllerUtil.findWindowScene() else {
-                DigiaLog.warning("requestReview: no window scene; skipping")
+                log.e("requestReview() ignored — no window scene")
                 return
             }
             if #available(iOS 16, *) {
@@ -126,10 +129,20 @@ final class HostActionExecutor {
     }
 
     @discardableResult
-    func execute(_ action: EngageAction) throws -> Bool {
+    func execute(_ action: EngageAction, campaignKey: String?) throws -> Bool {
         switch action {
         case .customKV(let payload):
-            try customKVHandler?(payload)
+            if let customKVHandler {
+                try customKVHandler(payload)
+            } else {
+                log.w(
+                    "customKV action has no host handler — skipped",
+                    campaign: campaignKey,
+                    stage: .interaction,
+                    reason: TimelineReason.actionHandlerMissing,
+                    extras: ["action_type": "customKV"]
+                )
+            }
         case .openDeeplink(let url):
             if let deepLinkHandler {
                 try deepLinkHandler(url)
@@ -165,12 +178,14 @@ final class EngageActionExecutor {
     func executeActionFlow(
         _ actions: [EngageAction],
         variables: VariableContext?,
+        campaignKey: String?,
         localActionExecutor: LocalActionExecutor
     ) async {
         for action in actions {
             await executeAction(
                 action,
                 variables: variables,
+                campaignKey: campaignKey,
                 localActionExecutor: localActionExecutor
             )
         }
@@ -179,15 +194,17 @@ final class EngageActionExecutor {
     func executeAction(
         _ action: EngageAction,
         variables: VariableContext?,
+        campaignKey: String?,
         localActionExecutor: LocalActionExecutor
     ) async {
         do {
             let action = action.resolved(with: variables)
+            if action.hasEmptyPayload { return }
             if localActionExecutor.execute(action) { return }
             if globalActionExecutor.execute(action) { return }
-            try hostActionExecutor.execute(action)
+            try hostActionExecutor.execute(action, campaignKey: campaignKey)
         } catch {
-            DigiaLog.error("Action step failed: \(error.localizedDescription)")
+            log.e("Action step failed", error: error.localizedDescription)
         }
     }
 }

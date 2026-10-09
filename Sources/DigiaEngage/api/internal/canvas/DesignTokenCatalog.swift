@@ -1,8 +1,17 @@
 import Foundation
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 enum DesignTokenError: LocalizedError {
     case invalid(String)
-    var errorDescription: String? { if case .invalid(let message) = self { message } else { nil } }
+    case missingTheme(String)
+    var errorDescription: String? {
+        switch self {
+        case .invalid(let message): message
+        case .missingTheme(let theme): "Missing '\(theme)' theme"
+        }
+    }
 }
 
 struct DesignTokenCatalog {
@@ -15,7 +24,15 @@ struct DesignTokenCatalog {
         let themes = json["themes"] as? [String: Any] ?? [:]
         let effective: [String]
         switch supported.count {
-        case 0: effective = []
+        case 0:
+            // Typography needs no theme, so it survives; color tokens fall back.
+            log.e(
+                "Design tokens declare no supported theme — falling back to authored colors",
+                stage: .parse,
+                reason: TimelineReason.designTokensUnreadable,
+                extras: ["theme": "none"]
+            )
+            effective = []
         case 1: effective = [supported[0], supported[0]]
         default:
             guard supported.contains("light"), supported.contains("dark") else {
@@ -49,7 +66,17 @@ struct DesignTokenCatalog {
             guard let token = map["token"] as? String, !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 return nil
             }
-            return colors[token]
+            guard let color = colors[token] else {
+                log.e(
+                    "Unknown color token — falling back to the authored default (token=\(token))",
+                    campaign: CampaignParseScope.current?.campaignKey,
+                    stage: .parse,
+                    reason: TimelineReason.unknownDesignToken,
+                    extras: ["token": token, "kind": "color"]
+                )
+                return nil
+            }
+            return color
         }
         return canonicalCampaignColorHex(value).map(CampaignColor.literal)
     }
@@ -58,7 +85,17 @@ struct DesignTokenCatalog {
         guard let value = unwrapLiteral(property), !(value is NSNull) else { return nil }
         guard let map = value as? [String: Any] else { throw DesignTokenError.invalid("Invalid typography property") }
         if let token = exactToken(map) {
-            guard let result = typography[token] else { throw DesignTokenError.invalid("Unknown typography token '\(token)'") }
+            guard let result = typography[token] else {
+                log.e(
+                    "Unknown typography token — falling back to the base text style "
+                        + "(token=\(token))",
+                    campaign: CampaignParseScope.current?.campaignKey,
+                    stage: .parse,
+                    reason: TimelineReason.unknownDesignToken,
+                    extras: ["token": token, "kind": "typography"]
+                )
+                return nil
+            }
             return result
         }
         if map["token"] != nil { throw DesignTokenError.invalid("Ambiguous typography property") }
@@ -66,7 +103,7 @@ struct DesignTokenCatalog {
     }
 
     private static func themeColors(_ themes: [String: Any], theme: String) throws -> [String: Any] {
-        guard let value = themes[theme] as? [String: Any] else { throw DesignTokenError.invalid("Missing '\(theme)' theme") }
+        guard let value = themes[theme] as? [String: Any] else { throw DesignTokenError.missingTheme(theme) }
         var result: [String: Any] = [:]
         for entry in value["colors"] as? [[String: Any]] ?? [] {
             if let id = entry["id"] as? String, !id.isEmpty { result[id] = entry["value"] }
