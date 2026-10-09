@@ -247,6 +247,28 @@ final class NoopSubscription: CancellableSubscription, @unchecked Sendable {
     func cancel() {}
 }
 
+/// A `ConnectivityMonitor` the test starts and drives.
+final class FakeConnectivityMonitor: ConnectivityMonitor, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recovery: (@Sendable () -> Void)?
+
+    var started: Bool { lock.withLock { recovery != nil } }
+
+    func start(onRecovered: @escaping @Sendable () -> Void) {
+        lock.withLock { recovery = onRecovered }
+    }
+
+    func stop() {
+        lock.withLock { recovery = nil }
+    }
+
+    /// Simulates the network coming back.
+    func recover() {
+        let callback = lock.withLock { recovery }
+        callback?()
+    }
+}
+
 /// A rotation listener that records each call and the session ID it saw at that moment.
 final class RecordingListener: @unchecked Sendable {
     private let lock = NSLock()
@@ -284,6 +306,7 @@ final class SessionIdentityHarness {
     let identity: IdentityManager
     let session: SessionManager
     let reporter: SessionReporter
+    let connectivity = FakeConnectivityMonitor()
     let rotations = RecordingListener()
 
     init(
@@ -306,7 +329,8 @@ final class SessionIdentityHarness {
             userId: { [weak identity] in identity?.userId },
             context: [:],
             networkClient: network,
-            storage: storage.scoped("session")
+            storage: storage.scoped("session"),
+            connectivityMonitor: connectivity
         )
         rotations.attach(to: session)
         if attach {
@@ -334,7 +358,8 @@ func makeReporter(
     storage: InMemoryLocalStorage,
     network: FakeNetworkClient,
     session: SessionIdBox,
-    userId: String? = nil
+    userId: String? = nil,
+    connectivity: ConnectivityMonitor? = nil
 ) -> SessionReporter {
     SessionReporter(
         sessionId: { session.value },
@@ -342,6 +367,7 @@ func makeReporter(
         userId: { userId },
         context: [:],
         networkClient: network,
-        storage: storage.scoped("session")
+        storage: storage.scoped("session"),
+        connectivityMonitor: connectivity
     )
 }

@@ -122,23 +122,54 @@ final class ReportDurabilityScenarioTests: XCTestCase {
         XCTAssertEqual(pendingSessionIds(storage), [])
     }
 
-    // S29 as coded, pending decision: scenarios doc §6 item 7 (no network-recovery trigger).
-    func test_S29_asCoded_pendingReportsAreNotResentWhenTheNetworkReturnsMidSession() async {
+    /// Polls instead of guessing a delay for work the test does not await directly.
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        for _ in 0..<300 where !condition() {
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
+    // S29 (issue #74): the network returning mid-session flushes the pending reports at once,
+    // oldest first.
+    func test_S29_theNetworkReturningMidSessionFlushesPendingReports() async throws {
         let h = SessionIdentityHarness(storage: storage, clock: TestClock(10, 0), network: network)
         network.answerAll(.noResponse)
         h.session.reset()                       // S1 report at 10:00, kept
         await h.settle()
-        XCTAssertEqual(pendingSessionIds(storage).count, 1)
+        h.session.reset()                       // S2, a rotation while still offline
+        await h.settle()
+        let pending = pendingSessionIds(storage)
+        XCTAssertEqual(pending.count, 2)
+        XCTAssertTrue(h.connectivity.started)
 
         network.answerAll(.status(200))         // 10:02, network back
         let before = network.attempts.count
-        for minute in stride(from: Int64(5), through: 120, by: 5) {
-            h.clock.setRaw(TestClock.at(10, 0) + minute * 60_000)
-            h.session.touch()
-        }
+        h.connectivity.recover()
+        try await waitUntil { pendingSessionIds(storage).isEmpty }
 
-        XCTAssertEqual(network.attempts.count, before, "nothing re-sent for two hours")
+        XCTAssertEqual(Array(network.attemptedSessions.dropFirst(before)), pending)
+        XCTAssertFalse(h.connectivity.started)
+    }
+
+    // S29: a recovery flush follows the retry rules, and the watch survives a failed retry.
+    func test_S29b_aRecoveryFlushThatStillFailsKeepsTheReportAndWatchesAgain() async throws {
+        let h = SessionIdentityHarness(storage: storage, clock: TestClock(10, 0), network: network)
+        network.answerAll(.noResponse)
+        h.session.reset()
+        await h.settle()
         XCTAssertEqual(pendingSessionIds(storage).count, 1)
+
+        network.answerAll(.status(500))         // the network is back, but the send fails
+        let before = network.attempts.count
+        h.connectivity.recover()
+        try await waitUntil { network.attempts.count > before }
+        XCTAssertEqual(pendingSessionIds(storage).count, 1)
+        XCTAssertTrue(h.connectivity.started)
+
+        network.answerAll(.status(200))
+        h.connectivity.recover()
+        try await waitUntil { pendingSessionIds(storage).isEmpty }
+        XCTAssertFalse(h.connectivity.started)
     }
 
     // S30 (known bug SI-B3, plan §5.2): asserts the INTENDED behavior, a report is on the pending
