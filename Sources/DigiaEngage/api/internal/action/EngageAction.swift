@@ -1,5 +1,7 @@
 import Foundation
 
+private let log = DigiaLogger()
+
 enum EngageAction: Equatable {
     case openUrl(String)
     case openDeeplink(String)
@@ -30,6 +32,15 @@ enum EngageAction: Equatable {
         case .previous: "previous"
         case .requestReview: "request_review"
         case .showStory: "show_story"
+        }
+    }
+
+    /// Whether a link, copy or share has an empty value.
+    var hasEmptyPayload: Bool {
+        switch self {
+        case .openUrl(let value), .openDeeplink(let value), .copyToClipboard(let value), .share(let value):
+            value.isEmpty
+        default: false
         }
     }
 
@@ -66,9 +77,12 @@ struct EngageActionParser {
         let data = step["data"] as? [String: Any] ?? [:]
         // `Action.*` is the dashboard wire format; unprefixed names keep previously stored
         // guide and nudge action payloads readable while campaigns migrate to canonical steps.
-        switch step["type"] as? String ?? "" {
+        let type = step["type"] as? String ?? ""
+        switch type {
         case "Action.openUrl":
-            guard let url = string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]) else { return nil }
+            guard let url = string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]) else {
+                return unsupported(type)
+            }
             let launchMode = string(in: data, keys: ["launchMode", "launch_mode"])
                 ?? string(in: step, keys: ["launchMode", "launch_mode"])
                 ?? ""
@@ -76,14 +90,14 @@ struct EngageActionParser {
                 ? .openUrl(url) : .openDeeplink(url)
         case "open_url":
             return (string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]))
-                .map(EngageAction.openUrl)
+                .map(EngageAction.openUrl) ?? unsupported(type)
         case "deep_link":
             return (string(in: data, keys: ["url"]) ?? string(in: step, keys: ["url"]))
-                .map(EngageAction.openDeeplink)
+                .map(EngageAction.openDeeplink) ?? unsupported(type)
         case "Action.copyToClipBoard", "copy":
-            return (text(from: data) ?? text(from: step)).map(EngageAction.copyToClipboard)
+            return (text(from: data) ?? text(from: step)).map(EngageAction.copyToClipboard) ?? unsupported(type)
         case "Action.share", "share":
-            return (text(from: data) ?? text(from: step)).map(EngageAction.share)
+            return (text(from: data) ?? text(from: step)).map(EngageAction.share) ?? unsupported(type)
         // `Action.hideInline` is an inline canvas closing itself: there is no
         // overlay to pop, so the host clears the slot for the session. Same
         // authored intent as the overlay spellings, so the same action.
@@ -97,10 +111,24 @@ struct EngageActionParser {
             let index = (raw as? NSNumber)?.intValue ?? Int("\(raw ?? "")") ?? 0
             return .showStory(max(0, index))
         case "Action.customKV":
-            guard let raw = data["payload"] as? [String: Any] else { return nil }
-            return customKV(from: raw)
-        default: return nil
+            guard let action = (data["payload"] as? [String: Any]).flatMap(customKV(from:)) else {
+                return unsupported(type)
+            }
+            return action
+        default: return unsupported(type)
         }
+    }
+
+    /// The CTA becomes a no-op. Reported so a dashboard/SDK mismatch is visible.
+    private func unsupported(_ type: String) -> EngageAction? {
+        log.w(
+            "Unsupported action step skipped (type=\(type))",
+            campaign: CampaignParseScope.current?.campaignKey,
+            stage: .parse,
+            reason: TimelineReason.unsupportedActionType,
+            extras: ["action_type": type]
+        )
+        return nil
     }
 
     private func customKV(from raw: [String: Any]) -> EngageAction? {

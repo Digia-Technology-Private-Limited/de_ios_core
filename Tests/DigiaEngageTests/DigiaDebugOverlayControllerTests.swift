@@ -12,16 +12,16 @@ struct DigiaDebugOverlayControllerTests {
 
     @Test("defaults to hidden")
     func defaultsToHidden() {
-        let controller = DigiaDebugOverlayController(defaults: makeDefaults())
+        let controller = DigiaDebugOverlayController(storage: UserDefaultsLocalStorage(defaults: makeDefaults()).scoped("debug"))
         #expect(!controller.isVisible)
     }
 
     @Test("setVisible persists across a fresh instance reading the same defaults")
     func persistsAcrossInstances() {
         let defaults = makeDefaults()
-        DigiaDebugOverlayController(defaults: defaults).setVisible(true)
+        DigiaDebugOverlayController(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("debug")).setVisible(true)
 
-        let reconfigured = DigiaDebugOverlayController(defaults: defaults)
+        let reconfigured = DigiaDebugOverlayController(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("debug"))
 
         #expect(reconfigured.isVisible)
     }

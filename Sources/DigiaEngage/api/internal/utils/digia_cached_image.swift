@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
-@_implementationOnly import SDWebImageSwiftUI
-@_implementationOnly import SDWebImageSVGCoder
+internal import SDWebImageSwiftUI
+internal import SDWebImageSVGCoder
 
 enum DigiaImagePipeline {
     private static let configureOnce: Void = {
@@ -19,6 +19,7 @@ struct DigiaCachedImageView: View {
     let placeholder: AnyView
     let onSuccess: ((UIImage) -> Void)?
     let onFailure: (() -> Void)?
+    @Environment(\.digiaCampaignKey) private var campaignKey
 
     init(
         url: URL,
@@ -44,7 +45,8 @@ struct DigiaCachedImageView: View {
             .onSuccess { image, _, _ in
                 onSuccess?(image)
             }
-            .onFailure { _ in
+            .onFailure { error in
+                reportMediaLoadFailed(.image, cause: mediaFailureCause(imageError: error), campaignKey: campaignKey)
                 onFailure?()
             }
     }

@@ -213,6 +213,7 @@ struct CanvasSurveyPanel: View {
             await SDKInstance.shared.executeActionFlow(
                 request.actions,
                 variables: variables,
+                campaignKey: SDKInstance.shared.surveyOrchestrator.state?.payload.campaignKey,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: onClose,
                     next: primary,
@@ -457,7 +458,7 @@ private struct CanvasSurveyScaledStage: View {
                     container: CGRect(origin: .zero, size: size),
                     viewport: size, safeAreaInsets: .zero,
                     isBottomSheet: survey.settings.display.type == .bottomSheet,
-                    action: onClose)
+                    action: onClose, accessibilityLabel: "Close survey")
             }
         }
     }

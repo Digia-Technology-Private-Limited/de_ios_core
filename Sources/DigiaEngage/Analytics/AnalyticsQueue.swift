@@ -11,11 +11,11 @@ struct QueueEntry: @unchecked Sendable {
 }
 
 final class AnalyticsQueue {
-    private let defaults: UserDefaults
-    private static let key = "digia_analytics_queue"
+    private let storage: LocalStorage
+    private static let key = "queue"
 
-    init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
+    init(storage: LocalStorage) {
+        self.storage = storage
     }
 
     var size: Int { load().count }
@@ -57,14 +57,15 @@ final class AnalyticsQueue {
     }
 
     func clear() {
-        defaults.removeObject(forKey: Self.key)
+        storage.removeObject(forKey: Self.key)
     }
 
     // MARK: - Persistence
 
     private func load() -> [QueueEntry] {
         guard
-            let data = defaults.data(forKey: Self.key),
+            let str = storage.string(forKey: Self.key),
+            let data = str.data(using: .utf8),
             let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         else { return [] }
 
@@ -87,8 +88,9 @@ final class AnalyticsQueue {
         let arr: [[String: Any]] = entries.map { e in
             ["event_id": e.eventId, "payload": e.payload, "created_at": e.createdAt, "attempts": e.attempts]
         }
-        if let data = try? JSONSerialization.data(withJSONObject: arr) {
-            defaults.set(data, forKey: Self.key)
+        if let data = try? JSONSerialization.data(withJSONObject: arr),
+           let str = String(data: data, encoding: .utf8) {
+            storage.set(str, forKey: Self.key)
         }
     }
 }

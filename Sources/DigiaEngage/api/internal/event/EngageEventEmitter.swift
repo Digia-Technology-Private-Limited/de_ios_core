@@ -1,22 +1,18 @@
 import Foundation
 import os
 
-/// Unified-logging channel for event emissions. Visible to Console.app and
-/// `log stream` (unlike `print`, which only reaches stdout). Filter with:
-/// `log stream --predicate 'subsystem == "tech.digia.engage"'` or
-/// `... 'eventMessage CONTAINS "DigiaEvent"'`.
-private let eventLog = os.Logger(subsystem: "tech.digia.engage", category: "DigiaEvent")
-
 /// The SDK's single entry point for emitting events, and the one place every
 /// emission is logged.
 ///
 /// Facade over the two delivery channels, which carry deliberately different
-/// event models: the CEP plugin gets the coarse ``DigiaExperienceEvent`` protocol
-/// via ``toCep(_:payload:)``; Digia analytics gets the rich, campaign-grouped
+/// event models: the owning presentation gets the coarse ``DigiaExperienceEvent``
+/// protocol via ``toCep(_:payload:)``; Digia analytics gets the rich, campaign-grouped
 /// ``EngageAnalyticsEvent`` via ``toDigia(_:payload:)``. ``toBoth(_:_:payload:)``
 /// fires a dual signal (e.g. a nudge impression). Also owns the first-render
 /// impression dedup, an emission concern rather than widget state. Ported from
 /// Android `internal/event/EngageEventEmitter.kt`.
+private let log = DigiaLogger("analytics")
+
 @MainActor
 final class EngageEventEmitter {
     /// Where an event actually goes — real delivery, or a live test's ACK
@@ -31,24 +27,26 @@ final class EngageEventEmitter {
 
     @MainActor
     private final class RealEventSink: EventSink {
-        let cep: CepPluginSink
+        let cep: PresentationSink
         let digia: DigiaAnalyticsSink
 
-        init(cep: CepPluginSink, digia: DigiaAnalyticsSink) {
+        init(cep: PresentationSink, digia: DigiaAnalyticsSink) {
             self.cep = cep
             self.digia = digia
         }
 
         func toCep(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
-            eventLog.info(
-                "[DigiaEvent] Event fired → CEP: \(String(describing: event), privacy: .public) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public)"
-            )
+            // Deliberately unlogged: this hands the event to the coordinator, which settles
+            // the owning presentation, and the plugin that owns it logs what it then did
+            // with its CEP ("CEP impression marked", "In-app slot released"). One fact,
+            // one line, one owner.
             cep.deliver(event, payload: payload)
         }
 
         func toDigia(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload) {
-            eventLog.info(
-                "[DigiaEvent] Event fired → DIGIA: '\(event.eventName, privacy: .public)' (\(String(describing: type(of: event)), privacy: .public)) | campaignKey=\(payload.campaignKey, privacy: .public) cepCampaignId=\(payload.cepCampaignId, privacy: .public) properties=\(String(describing: event.properties), privacy: .public)"
+            log.i(
+                "Event fired: \"\(event.eventName)\" (\(type(of: event))) (cepCampaignId=\(payload.cepCampaignId), properties=\(event.properties))",
+                campaign: payload.campaignKey
             )
             digia.deliver(event, payload: payload)
         }
@@ -62,13 +60,29 @@ final class EngageEventEmitter {
     @MainActor
     private final class LiveTestEventSink: EventSink {
         let onLiveTestShown: ((String) -> Void)?
+        let onLiveTestDismissed: ((String, DismissReason, Bool) -> Void)?
 
-        init(onLiveTestShown: ((String) -> Void)?) {
+        init(
+            onLiveTestShown: ((String) -> Void)?,
+            onLiveTestDismissed: ((String, DismissReason, Bool) -> Void)?
+        ) {
             self.onLiveTestShown = onLiveTestShown
+            self.onLiveTestDismissed = onLiveTestDismissed
         }
 
         func toCep(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
-            if case .impressed = event { onLiveTestShown?(payload.cepCampaignId) }
+            // A live test has no CEP to mark, so this sink exists to turn the
+            // two events a person watching the dashboard actually cares about
+            // — it appeared, and how it ended — into the invocation's own
+            // uplink.
+            switch event {
+            case .impressed:
+                onLiveTestShown?(payload.cepCampaignId)
+            case .dismissed(let reason, let completed):
+                onLiveTestDismissed?(payload.cepCampaignId, reason, completed)
+            case .clicked:
+                break
+            }
         }
 
         func toDigia(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload) {
@@ -94,12 +108,20 @@ final class EngageEventEmitter {
     private var digiaClicked: Set<String> = []
     private var timerImpressedStateByCampaign: [String: String] = [:]
 
-    init(cep: CepPluginSink, digia: DigiaAnalyticsSink, onLiveTestShown: ((String) -> Void)? = nil) {
+    init(
+        cep: PresentationSink,
+        digia: DigiaAnalyticsSink,
+        onLiveTestShown: ((String) -> Void)? = nil,
+        onLiveTestDismissed: ((String, DismissReason, Bool) -> Void)? = nil
+    ) {
         self.realSink = RealEventSink(cep: cep, digia: digia)
-        self.liveTestSink = LiveTestEventSink(onLiveTestShown: onLiveTestShown)
+        self.liveTestSink = LiveTestEventSink(
+            onLiveTestShown: onLiveTestShown,
+            onLiveTestDismissed: onLiveTestDismissed
+        )
     }
 
-    /// Coarse signal to the CEP plugin only.
+    /// Coarse lifecycle signal to the owning presentation only.
     func toCep(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {
         sink(for: payload).toCep(event, payload: payload)
     }
@@ -135,9 +157,15 @@ final class EngageEventEmitter {
         toDigia(event, payload: payload)
     }
 
-    func inlineRemoved(_ payload: CEPTriggerPayload) {
+    /// Whether this campaign has recorded its first-render impression — the
+    /// surface rule's "displayed" (SR05).
+    func hasImpressed(_ cepCampaignId: String) -> Bool {
+        digiaImpressed.contains(cepCampaignId)
+    }
+
+    func inlineRemoved(_ payload: CEPTriggerPayload, reason: DismissReason = .userClose) {
         resetImpression(payload.cepCampaignId)
-        toCep(.dismissed, payload: payload)
+        toCep(.dismissed(reason: reason), payload: payload)
     }
 
     func clicked(payload: CEPTriggerPayload, elementId: String) {

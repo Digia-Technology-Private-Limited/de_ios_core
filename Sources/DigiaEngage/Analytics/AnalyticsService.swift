@@ -1,35 +1,20 @@
 import Foundation
 import UIKit
 
-// MARK: - AnalyticsSender
-
-protocol AnalyticsSender: Sendable {
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int
-}
-
-struct URLSessionAnalyticsSender: AnalyticsSender {
-    func post(url: String, body: Data, headers: [String: String]) async throws -> Int {
-        guard let endpoint = URL(string: url) else { throw URLError(.badURL) }
-        var request = URLRequest(url: endpoint, timeoutInterval: 30)
-        request.httpMethod = "POST"
-        for (key, value) in headers { request.setValue(value, forHTTPHeaderField: key) }
-        request.httpBody = body
-        let (_, response) = try await URLSession.shared.data(for: request)
-        return (response as? HTTPURLResponse)?.statusCode ?? 0
-    }
-}
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger("analytics")
 
 // MARK: - AnalyticsService
 
 @MainActor
 final class AnalyticsService {
     private let config: AnalyticsConfig
-    private let apiKey: String
-    let identity: AnalyticsIdentityManager
+    var isEnabled: Bool { config.enabled }
+    let identityManager: IdentityManager
+    let sessionManager: SessionManager
     let queue: AnalyticsQueue
     private let staticContext: [String: Any]
-    private let sender: any AnalyticsSender
-    private let requestHeaders: [String: String]
+    private let networkClient: any NetworkClient
 
     private var isCleared = false
     private var flushTimer: Timer?
@@ -45,7 +30,6 @@ final class AnalyticsService {
     /// it survives app restarts correctly.
     private(set) var retryAttempt = 0
     private var backgroundObserver: NSObjectProtocol?
-    private var foregroundObserver: NSObjectProtocol?
 
     /// Override retry delays (ms) for testing. Index is attempt-1.
     var retryScheduleMs: [Int]?
@@ -65,25 +49,18 @@ final class AnalyticsService {
 
     init(
         config: AnalyticsConfig,
-        apiKey: String,
-        identity: AnalyticsIdentityManager,
+        identityManager: IdentityManager,
+        sessionManager: SessionManager,
         queue: AnalyticsQueue,
         staticContext: [String: Any],
-        sender: any AnalyticsSender = URLSessionAnalyticsSender(),
-        requestHeaders: [String: String] = [:]
+        networkClient: any NetworkClient
     ) {
         self.config = config
-        self.apiKey = apiKey
-        self.identity = identity
+        self.identityManager = identityManager
+        self.sessionManager = sessionManager
         self.queue = queue
         self.staticContext = staticContext
-        self.sender = sender
-        self.requestHeaders = requestHeaders
-
-        identity.initialize(sessionTimeoutMs: config.sessionTimeoutMs)
-        identity.onSessionRotated = { [weak self] in
-            self?.reportSession()
-        }
+        self.networkClient = networkClient
 
         backgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
@@ -97,21 +74,9 @@ final class AnalyticsService {
             }
         }
 
-        foregroundObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.willEnterForegroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.identity.maybeExpireSession()
-            }
-        }
-
         if queue.size > 0 {
             scheduleTimer()
         }
-
-        reportSession()
     }
 
     // MARK: - Public
@@ -124,15 +89,16 @@ final class AnalyticsService {
         _ event: EngageAnalyticsEvent,
         payload: CEPTriggerPayload,
         campaignId: String?,
-        campaignType: String?
+        campaignType: String?,
+        impressionId: String? = nil
     ) {
         guard config.enabled else {
-            DigiaLog.log("capture: DISABLED — event '\(event.eventName)' dropped", tag: "DigiaAnalytics")
+            log.d("Event dropped — analytics disabled (event=\(event.eventName))")
             return
         }
-        DigiaLog.log(
-            "capture: event='\(event.eventName)' campaignKey=\(payload.campaignKey) campaignId=\(campaignId ?? "nil")",
-            tag: "DigiaAnalytics"
+        log.d(
+            "Event captured: \"\(event.eventName)\" (cepCampaignId=\(campaignId ?? "nil"))",
+            campaign: payload.campaignKey
         )
 
         enqueue(
@@ -140,19 +106,42 @@ final class AnalyticsService {
             campaignId: campaignId,
             campaignKey: payload.campaignKey,
             campaignType: campaignType,
+            impressionId: impressionId,
             properties: event.properties
         )
     }
 
-    func setUserId(_ userId: String) {
-        identity.setUserId(userId)
+    /// Captures one SDK health event for Digia's own fleet diagnostics.
+    ///
+    /// An ordinary first-party event — same envelope, same queue, same
+    /// batching, retry and identity — distinguished only by its event name.
+    /// That is the whole point: transport code is exactly the code the SDK's
+    /// release chain says not to ship twice.
+    ///
+    /// Narrow on purpose. A general-public `enqueue` would put event naming
+    /// back at the call sites, which is the drift `HealthSink`'s central
+    /// allowlist exists to prevent; this is the one door, and `HealthSink` is
+    /// the one caller. Its properties are already projected to an explicit,
+    /// symbol-only field list — nothing here re-reads a record.
+    func captureHealth(
+        campaignKey: String?,
+        reason: String,
+        stage: String?,
+        detail: [String: String]?,
+        buildMode: String
+    ) {
+        guard config.enabled else { return }
+        var properties: [String: Any] = ["reason": reason, "build_mode": buildMode]
+        if let stage { properties["stage"] = stage }
+        if let detail, !detail.isEmpty { properties["detail"] = detail }
+        enqueue(
+            eventName: HealthSink.eventName,
+            campaignId: nil,
+            campaignKey: campaignKey,
+            campaignType: nil,
+            properties: properties
+        )
     }
-
-    func clearUserId() {
-        identity.clearUserId()
-    }
-
-    var userId: String? { identity.userId }
 
     func flush() {
         cancelTimer()
@@ -162,14 +151,11 @@ final class AnalyticsService {
     /// Cancels timers and removes lifecycle observers. Call before releasing the service.
     func clear() {
         isCleared = true
-        identity.onSessionRotated = nil
         retryTask?.cancel()
         retryTask = nil
         cancelTimer()
         if let obs = backgroundObserver { NotificationCenter.default.removeObserver(obs) }
-        if let obs = foregroundObserver { NotificationCenter.default.removeObserver(obs) }
         backgroundObserver = nil
-        foregroundObserver = nil
         isDispatching = false
         retryAttempt = 0
     }
@@ -181,66 +167,8 @@ final class AnalyticsService {
         retryAttempt = 0
     }
 
-    // MARK: - Factory
-
-    @MainActor
-    static func create(config: DigiaConfig, requestHeaders: [String: String]) -> AnalyticsService? {
-        let ac = config.analyticsConfig
-        guard ac.enabled else {
-            DigiaLog.log(
-                "create: analytics DISABLED in DigiaConfig — no events will be captured",
-                tag: "DigiaAnalytics"
-            )
-            return nil
-        }
-        DigiaLog.log(
-            "create: analytics enabled, batchSize=\(ac.flushBatchSize) interval=\(ac.flushIntervalMs)ms",
-            tag: "DigiaAnalytics"
-        )
-        return AnalyticsService(
-            config: ac,
-            apiKey: config.apiKey,
-            identity: AnalyticsIdentityManager(),
-            queue: AnalyticsQueue(),
-            staticContext: buildStaticContext(
-                wrapperBinding: config.wrapperBinding,
-                wrapperVersion: config.wrapperVersion
-            ),
-            requestHeaders: requestHeaders
-        )
-    }
-
     private var jsonHeaders: [String: String] {
-        requestHeaders.merging([
-            "Content-Type": "application/json",
-            "X-Digia-Project-Id": apiKey,
-            "X-Digia-Device-Id": identity.anonymousId,
-        ]) { _, value in value }
-    }
-
-    // MARK: - Session
-
-    private func reportSession() {
-        let sessionId = identity.sessionId
-        let anonymousId = identity.anonymousId
-        var body: [String: Any] = [
-            "session_id": sessionId,
-            "anonymous_id": anonymousId,
-            "occurred_at": isoNow(),
-            "properties": staticContext,
-        ]
-        if let uid = identity.userId { body["user_id"] = uid }
-        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }
-        let url = DigiaEndpoints.session
-        let headers = jsonHeaders
-        Task { [weak self, sender] in
-            guard self?.isCleared == false else { return }
-            let status = try? await sender.post(url: url, body: data, headers: headers)
-            DigiaLog.log(
-                "session reported: HTTP \(status ?? -1) sessionId=\(sessionId) anonymousId=\(anonymousId)",
-                tag: "DigiaAnalytics"
-            )
-        }
+        ["Content-Type": "application/json"]
     }
 
     // MARK: - Private
@@ -250,10 +178,11 @@ final class AnalyticsService {
         campaignId: String?,
         campaignKey: String?,
         campaignType: String?,
+        impressionId: String? = nil,
         properties: [String: Any] = [:]
     ) {
         let eventId = UUID().uuidString
-        identity.captureEventTime()
+        sessionManager.touch()
 
         var mergedProperties = staticContext
         for (k, v) in properties { mergedProperties[k] = v }
@@ -262,13 +191,21 @@ final class AnalyticsService {
             "event_id": eventId,
             "event_name": eventName,
             "occurred_at": isoNow(),
-            "anonymous_id": identity.anonymousId,
-            "session_id": identity.sessionId,
+            "anonymous_id": identityManager.deviceId,
+            "session_id": sessionManager.sessionId,
         ]
         if let id = campaignId { payloadMap["campaign_id"] = id }
         if let key = campaignKey { payloadMap["campaign_key"] = key }
         if let type = campaignType { payloadMap["campaign_type"] = type }
-        if let uid = identity.userId { payloadMap["user_id"] = uid }
+        // The key that groups every event from one showing. `campaign_key`
+        // cannot do that job: the same campaign can be delivered many times in
+        // a session. Absent, not null, when there is none — a live test, or a
+        // surface outliving its presentation.
+        if let impressionId { payloadMap["impression_id"] = impressionId }
+        if let uid = identityManager.userId { payloadMap["user_id"] = uid }
+        if let elementId = properties["element_id"] as? String {
+            payloadMap["element_id"] = elementId
+        }
 
         payloadMap["properties"] = mergedProperties
 
@@ -278,9 +215,8 @@ final class AnalyticsService {
                 attempts: 0),
             maxEvents: config.queueMaxEvents
         )
-        DigiaLog.log(
-            "enqueued '\(eventName)' eventId=\(eventId) queueSize=\(queue.size) flushBatchSize=\(config.flushBatchSize)",
-            tag: "DigiaAnalytics"
+        log.d(
+            "Event enqueued (event='\(eventName)', eventId=\(eventId), queueSize=\(queue.size), flushBatchSize=\(config.flushBatchSize))"
         )
 
         guard retryTask == nil else {
@@ -288,16 +224,16 @@ final class AnalyticsService {
             // this event (and everything else queued) when it fires. Don't
             // jump the queue and flush early just because new events pushed
             // us past the threshold.
-            DigiaLog.log("retry pending — deferring to scheduled retry", tag: "DigiaAnalytics")
+            log.d("Dispatch deferred — a retry is already scheduled")
             return
         }
 
         if queue.size >= config.flushBatchSize {
-            DigiaLog.log("batch threshold reached — dispatching immediately", tag: "DigiaAnalytics")
+            log.d("Batch threshold reached — dispatching immediately")
             cancelTimer()
             Task { await dispatchPending() }
         } else {
-            DigiaLog.log("scheduling flush timer (interval=\(config.flushIntervalMs)ms)", tag: "DigiaAnalytics")
+            log.d("Flush timer scheduled (interval=\(config.flushIntervalMs)ms)")
             scheduleTimer()
         }
     }
@@ -305,35 +241,41 @@ final class AnalyticsService {
     private func dispatchPending() async {
         guard !isCleared else { return }
         guard !isDispatching else {
-            DigiaLog.log("dispatchPending: already dispatching — skipped", tag: "DigiaAnalytics")
+            log.d("Dispatch skipped — already dispatching")
             return
         }
         cancelTimer()
         isDispatching = true
-        defer { isDispatching = false }
+        defer {
+            isDispatching = false
+            // Events can be left behind two ways: a batch capped at maxBatchSize, and an event
+            // captured while this dispatch was in flight (its own dispatch was skipped as "already
+            // dispatching", and scheduleTimer is a no-op while dispatching). Neither has a timer, so
+            // arm one here at the configured interval, unless a retry is already pending and will
+            // pick them up.
+            if queue.size > 0 && retryTask == nil && flushTimer == nil {
+                scheduleTimer()
+            }
+        }
 
         let batch = queue.peek(maxCount: config.maxBatchSize)
         guard !batch.isEmpty else {
-            DigiaLog.log("dispatchPending: queue empty — nothing to send", tag: "DigiaAnalytics")
+            log.d("Dispatch skipped — the queue is empty")
             retryAttempt = 0
             return
         }
 
-        DigiaLog.log(
-            "dispatchPending: sending batch of \(batch.count) event(s) to \(DigiaEndpoints.track)",
-            tag: "DigiaAnalytics"
-        )
+        log.d("Batch posting (count=\(batch.count), endpoint=\(DigiaEndpoints.track))")
 
         do {
             let body = try JSONSerialization.data(withJSONObject: [
                 "events": batch.map { $0.payload }
             ])
-            let statusCode = try await sender.post(
-                url: DigiaEndpoints.track,
-                body: body,
-                headers: jsonHeaders
-            )
-            DigiaLog.log("dispatchPending: HTTP \(statusCode)", tag: "DigiaAnalytics")
+            guard let url = URL(string: DigiaEndpoints.track) else { return }
+            let request = NetworkRequest(url: url, method: .post, headers: jsonHeaders, body: body)
+            let response = try await networkClient.execute(request: request)
+            let statusCode = response.statusCode
+            log.d("Batch posted (status=\(statusCode))")
 
             switch statusCode {
             case 200, 207:
@@ -342,11 +284,7 @@ final class AnalyticsService {
                 // the whole batch (accepted + rejected) is simply removed here.
                 queue.remove(eventIds: batch.map { $0.eventId })
                 retryAttempt = 0
-                DigiaLog.log(
-                    "dispatch success — removed \(batch.count) event(s), queueSize=\(queue.size)",
-                    tag: "DigiaAnalytics"
-                )
-                if queue.size > 0 { scheduleTimer(minDelayMs: 15_000) }
+                log.d("Batch accepted (count=\(batch.count), queueSize=\(queue.size))")
             default:
                 // Any other outcome is just "the API call failed" — 4xx, 5xx, or
                 // no real status at all — retried uniformly, capped.
@@ -356,7 +294,7 @@ final class AnalyticsService {
             // Verbose only — a single thrown exception is just one attempt in a
             // retry sequence, not yet a final outcome. Only the eventual drop
             // (after exhausting the cap) is warning-level.
-            DigiaLog.log("dispatchPending: exception — \(error.localizedDescription)", tag: "DigiaAnalytics")
+            log.d("Batch post failed (cause=\(error.localizedDescription))")
             handleFailure(batch: batch, statusLabel: "exception: \(error.localizedDescription)")
         }
     }
@@ -372,25 +310,23 @@ final class AnalyticsService {
 
         if !toDrop.isEmpty {
             queue.remove(eventIds: toDrop.map { $0.eventId })
-            DigiaLog.warning(
-                "dispatch failed (\(statusLabel)) — dropped \(toDrop.count) event(s) "
-                    + "after exhausting \(Self.maxAttempts) attempts",
-                tag: "DigiaAnalytics"
+            log.e(
+                "Batch post failed — dropped \(toDrop.count) event(s) after exhausting "
+                    + "\(Self.maxAttempts) attempts (cause=\(statusLabel))"
             )
         }
 
         guard !toRetry.isEmpty else {
             retryAttempt = 0
-            if queue.size > 0 { scheduleTimer(minDelayMs: 15_000) }
             return
         }
 
         let attempt = toRetry.map { $0.attempts }.max() ?? 1
         // Verbose only — an in-progress retry isn't yet a problem; only the
         // eventual drop above (cap exhausted) is warning-level.
-        DigiaLog.log(
-            "dispatch failed (\(statusLabel)) — scheduling retry #\(attempt) for \(toRetry.count) event(s)",
-            tag: "DigiaAnalytics"
+        log.d(
+            "Batch post failed — retry #\(attempt) scheduled for \(toRetry.count) event(s) "
+                + "(cause=\(statusLabel))"
         )
         scheduleRetry(attempt: attempt)
     }
@@ -455,7 +391,7 @@ final class AnalyticsService {
         return fmt.string(from: Date())
     }
 
-    private static func buildStaticContext(
+    static func buildStaticContext(
         wrapperBinding: String?,
         wrapperVersion: String?
     ) -> [String: Any] {

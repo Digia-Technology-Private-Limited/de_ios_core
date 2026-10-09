@@ -94,6 +94,7 @@ struct StoryThumbnailVideoView: View {
     let onFailed: @MainActor @Sendable () -> Void
 
     @StateObject private var playback: StoryVideoPlayback
+    @Environment(\.digiaCampaignKey) private var campaignKey
 
     init(
         index: Int,
@@ -141,6 +142,7 @@ struct StoryThumbnailVideoView: View {
     }
 
     private func updatePlayback(state: ThumbnailPlaybackViewState) {
+        playback.campaignKey = campaignKey
         playback.update(
             state: StoryVideoPlaybackState(
                 demand: loadDemand(for: state),

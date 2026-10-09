@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 import Combine
-@_implementationOnly import SDWebImageSwiftUI
+internal import SDWebImageSwiftUI
 
 /// Frame-settling buffer added before the survey is shown.
 private let RENDER_DELAY_MS: Int = 150
@@ -83,6 +83,7 @@ struct SurveyRenderer: View {
                 SurveySession(state: state, orchestrator: orchestrator)
                     .id(state.token)
                     .environment(\.digiaVariables, state.variableContext)
+                    .environment(\.digiaCampaignKey, state.payload.campaignKey)
             }
         }
         // Default every raw Text/TextField/TextEditor to the SDK-wide family.
@@ -171,6 +172,11 @@ private struct SurveySession: View {
         }
         .transaction { $0.disablesAnimations = true }
         .task(id: state.token) {
+            let model = vm
+            orchestrator.bindProgress(token: state.token) { [weak model] in
+                guard let model else { return (0, 0) }
+                return (model.currentItemIndex, model.answers.values.filter { $0.isAnswered }.count)
+            }
             let delayNs = UInt64(max(0, survey.timeDelayMs + RENDER_DELAY_MS)) * 1_000_000
             try? await Task.sleep(nanoseconds: delayNs)
             visible = true
@@ -328,7 +334,8 @@ private struct SurveySheet<Content: View>: View {
             return { bounds, viewport in
                 AnyView(CanvasNudgeCloseOverlay(
                     config: close, container: bounds, viewport: viewport,
-                    safeAreaInsets: surveyWindowSafeAreaInsets, isBottomSheet: true, action: onDismiss))
+                    safeAreaInsets: surveyWindowSafeAreaInsets, isBottomSheet: true, action: onDismiss,
+                    accessibilityLabel: "Close survey"))
             }
         }
         return nil
@@ -417,7 +424,8 @@ private struct DialogContainer<Content: View>: View {
                 if !keyboardScrollsContent, let anchor, let close = separateClose, close.placement?.mode == .outside {
                     CanvasNudgeCloseOverlay(
                         config: close, container: geo[anchor], viewport: stableViewport,
-                        safeAreaInsets: .zero, isBottomSheet: false, action: onDismiss)
+                        safeAreaInsets: .zero, isBottomSheet: false, action: onDismiss,
+                        accessibilityLabel: "Close survey")
 
                 }
             }
@@ -525,7 +533,8 @@ struct CanvasSurveyDialogKeyboardLayout: AnimatableModifier {
                     viewport: presentation.viewport,
                     safeAreaInsets: .zero,
                     isBottomSheet: false,
-                    action: onClose
+                    action: onClose,
+                    accessibilityLabel: "Close survey"
                 )
             }
         }
@@ -717,6 +726,7 @@ private struct SurveyBody: View {
                             .frame(width: 26, height: 26)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Close survey")
                 }
             }
             if block.showMedia && block.media.position == .top {
@@ -819,6 +829,7 @@ private struct SurveyBody: View {
                         .frame(width: 26, height: 26)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Close survey")
             }
         }
         .frame(maxWidth: .infinity)

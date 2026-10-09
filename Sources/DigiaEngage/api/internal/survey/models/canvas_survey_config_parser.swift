@@ -30,13 +30,19 @@ enum CanvasSurveyConfigParser {
         case result
     }
 
+    /// 1 when absent; a value that is not a number is also read as 1, as before.
+    private static func schemaVersion(_ raw: JSONValue?) -> Int {
+        SurveyParse.int(raw) ?? 1
+    }
+
     static func from(
         _ json: [String: JSONValue],
         fallbackId: String,
         designTokens: DesignTokenCatalog = .empty,
         variableSchemas: [VariableSchema] = []
-    ) -> SurveyConfigModel? {
+    ) throws -> SurveyConfigModel? {
         guard SurveyParse.string(json["templateType"]) == "survey",
+              try CampaignParseScope.acceptsVersion(schemaVersion(json["schemaVersion"]), supported: 1),
               let scenesArr = SurveyParse.array(json["scenes"]),
               let flow = SurveyParse.object(json["flow"]),
               let flowNodesArr = SurveyParse.array(flow["nodes"]) else { return nil }
@@ -66,7 +72,7 @@ enum CanvasSurveyConfigParser {
         )
         let sharedUi = SurveyParse.object(json["sharedUi"])
         let closeJson = SurveyParse.object(sharedUi?["closeButton"])
-        let closeCanvas = CanvasSurveyDocumentParser(designTokens: designTokens)
+        let closeCanvas = try CanvasSurveyDocumentParser(designTokens: designTokens)
             .parse(sharedUi, fallbackDesignWidth: designWidth(json)).canvas
         let close: NudgeCloseButtonConfig? = closeJson.flatMap { value in
             let raw = canvasSurveyJsonObject(value)
@@ -91,8 +97,8 @@ enum CanvasSurveyConfigParser {
             timeDelayMs: max(0, min(10_000, SurveyParse.int(json["timeDelayMs"]) ?? 0)),
             canvasSurvey: CanvasSurveyConfig(
                 designWidth: designWidth(json),
-                welcomeDocument: welcomeDocument(json, designTokens: designTokens),
-                scenesByBlockId: sceneDocuments(
+                welcomeDocument: try welcomeDocument(json, designTokens: designTokens),
+                scenesByBlockId: try sceneDocuments(
                     scenesArr,
                     root: json,
                     designTokens: designTokens,
@@ -458,11 +464,11 @@ enum CanvasSurveyConfigParser {
         fallbackDesignWidth: CGFloat,
         rootSceneId: String?,
         canNavigateBackFromRoot: Bool
-    ) -> [String: CanvasSurveySceneDocument] {
+    ) throws -> [String: CanvasSurveySceneDocument] {
         let documentParser = CanvasSurveyDocumentParser(designTokens: designTokens)
         let overlay = CanvasSurveySharedUiOverlay()
         let inputParser = CanvasSurveyInputParser(designTokens: designTokens)
-        let sharedCanvas = documentParser.parse(
+        let sharedCanvas = try documentParser.parse(
             SurveyParse.object(root["sharedUi"]),
             fallbackDesignWidth: fallbackDesignWidth
         )
@@ -470,13 +476,13 @@ enum CanvasSurveyConfigParser {
         for value in scenes {
             guard let scene = SurveyParse.object(value),
                   let id = SurveyParse.nonBlank(scene["id"]) else { continue }
-            let canvas = documentParser.parse(
+            let canvas = try documentParser.parse(
                 SurveyParse.object(scene["canvas"]),
                 fallbackDesignWidth: fallbackDesignWidth
             )
             let sharedUiOverride = SurveyParse.object(scene["sharedUi"])
-            let parsedSharedUiOverride = sharedUiOverride.map {
-                documentParser.parse($0, fallbackDesignWidth: fallbackDesignWidth)
+            let parsedSharedUiOverride = try sharedUiOverride.map {
+                try documentParser.parse($0, fallbackDesignWidth: fallbackDesignWidth)
             }
             let kind = canvasSceneKind(sceneKind(SurveyParse.string(scene["kind"]) ?? "question"))
             let composed = overlay.apply(
@@ -503,22 +509,22 @@ enum CanvasSurveyConfigParser {
     private static func welcomeDocument(
         _ json: [String: JSONValue],
         designTokens: DesignTokenCatalog
-    ) -> CanvasSurveyDocument? {
+    ) throws -> CanvasSurveyDocument? {
         guard let welcome = SurveyParse.object(json["welcome"]),
               SurveyParse.bool(welcome["enabled"]) ?? false else { return nil }
         let fallbackDesignWidth = designWidth(json)
         let documentParser = CanvasSurveyDocumentParser(designTokens: designTokens)
-        let sharedCanvas = documentParser.parse(
+        let sharedCanvas = try documentParser.parse(
             SurveyParse.object(json["sharedUi"]),
             fallbackDesignWidth: fallbackDesignWidth
         )
-        let canvas = documentParser.parse(
+        let canvas = try documentParser.parse(
             SurveyParse.object(welcome["canvas"]),
             fallbackDesignWidth: fallbackDesignWidth
         )
         let sharedUiOverride = SurveyParse.object(welcome["sharedUi"])
-        let parsedSharedUiOverride = sharedUiOverride.map {
-            documentParser.parse($0, fallbackDesignWidth: fallbackDesignWidth)
+        let parsedSharedUiOverride = try sharedUiOverride.map {
+            try documentParser.parse($0, fallbackDesignWidth: fallbackDesignWidth)
         }
         return CanvasSurveySharedUiOverlay().apply(
             overrideDocument: sharedUiOverride,

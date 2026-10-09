@@ -1,5 +1,8 @@
 import SwiftUI
 
+/// The SDK's one logging style — see ``DigiaLogger``.
+private let log = DigiaLogger()
+
 // Ported from Android `FloaterConfig.kt` / Flutter `pip_config.dart`. The "floater"
 // campaign type: a small draggable window (the dashboard/analytics template name is
 // "pip") that expands to full screen. Wire shape (see `ai_docs/pip-properties.md`,
@@ -38,6 +41,14 @@ enum FloaterMediaKind: Equatable {
         case "gif": return .gif
         case "lottie": return .lottie
         default: return .video
+        }
+    }
+
+    var healthKind: HealthMediaKind {
+        switch self {
+        case .video: .video
+        case .image, .gif: .image
+        case .lottie: .lottie
         }
     }
 
@@ -296,16 +307,17 @@ struct FloaterExpandedConfig: Equatable {
     /// `FloaterExpandedConfig.fromJson` / Flutter's `PipExpanded.fromJson`).
     static func fromJson(
         _ json: [String: Any]?, designTokens: DesignTokenCatalog = .empty
-    ) -> FloaterExpandedConfig? {
+    ) throws -> FloaterExpandedConfig? {
         guard let j = json, let canvasJson = j.object("canvas"), !canvasJson.isEmpty else {
             return nil
         }
         let canvas: CampaignCanvas
         do {
             canvas = try CampaignCanvasParser(designTokens: designTokens).parse(canvasJson)
+        } catch let reported as ReportedParseFailure {
+            throw reported
         } catch {
-            DigiaLog.warning(
-                "[FloaterConfig] rejected Canvas campaign: \(error.localizedDescription)")
+            log.e("Floater rejected — canvas parse failed", error: error.localizedDescription)
             return nil
         }
         let rawDesignWidth = CGFloat(
@@ -437,12 +449,12 @@ struct FloaterConfig: Equatable {
     /// media, or no expanded canvas to open.
     static func fromJson(
         _ templateConfig: [String: Any], designTokens: DesignTokenCatalog = .empty
-    ) -> FloaterConfig? {
+    ) throws -> FloaterConfig? {
         guard let media = FloaterMediaConfig.fromJson(templateConfig.object("media")) else {
             return nil
         }
         guard
-            let expanded = FloaterExpandedConfig.fromJson(
+            let expanded = try FloaterExpandedConfig.fromJson(
                 templateConfig.object("expanded"), designTokens: designTokens
             )
         else { return nil }

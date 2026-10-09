@@ -2,6 +2,11 @@ import Combine
 import SwiftUI
 
 @MainActor
+private func dismissNudgeFromCta() {
+    SDKInstance.shared.markNudgeDismissed(reason: .ctaAction)
+}
+
+@MainActor
 private func performCanvasAction(
     _ request: CampaignCanvasActionRequest,
     variables: VariableContext?,
@@ -25,6 +30,7 @@ private func performCanvasAction(
         await SDKInstance.shared.executeActionFlow(
             request.actions,
             variables: variables,
+            campaignKey: SDKInstance.shared.controller.activeNudge?.payload.campaignKey,
             localActionExecutor: LocalActionExecutor(dismiss: dismiss)
         )
     }
@@ -152,7 +158,9 @@ private struct NudgeFullScreenView: View {
                         runtimeViewportWidth: geometry.size.width,
                         availableSize: contentSize,
                         onAction: { request in
-                            performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
+                            performCanvasAction(
+                                request, variables: presentation.variables,
+                                dismiss: dismissNudgeFromCta)
                         },
                         showBackground: false
                     )
@@ -202,6 +210,7 @@ private struct NudgeFullScreenView: View {
         }
         .ignoresSafeArea()
         .environment(\.digiaVariables, presentation.variables)
+        .environment(\.digiaCampaignKey, presentation.payload.campaignKey)
         .onAppear { SDKInstance.shared.reportNudgeImpression() }
     }
 
@@ -270,7 +279,9 @@ private struct NudgeSheetView: View {
                                 height: max(1, runtimeSize.height)
                             ),
                             onAction: { request in
-                                performCanvasAction(request, variables: presentation.variables, dismiss: dismiss)
+                                performCanvasAction(
+                                    request, variables: presentation.variables,
+                                    dismiss: dismissNudgeFromCta)
                             },
                             showBackground: !hostPaintsCanvasBackground
                         )
@@ -288,6 +299,7 @@ private struct NudgeSheetView: View {
                         Spacer(minLength: 0)
                     }
                     .environment(\.digiaVariables, presentation.variables)
+                    .environment(\.digiaCampaignKey, presentation.payload.campaignKey)
                 } else {
                     renderedContent.padding(surface.padding)
                 }
@@ -335,8 +347,9 @@ private struct NudgeSheetView: View {
     /// `{{ placeholder }}` copy interpolates (mirrors Flutter's
     /// `VariableScopeProvider`).
     private var renderedContent: some View {
-        NudgeColumnContent(column: presentation.config.layout, onDismiss: dismiss)
+        NudgeColumnContent(column: presentation.config.layout, onDismiss: dismissNudgeFromCta)
             .environment(\.digiaVariables, presentation.variables)
+            .environment(\.digiaCampaignKey, presentation.payload.campaignKey)
     }
 }
 
@@ -453,7 +466,7 @@ private struct NudgeDialogContainer: View {
                 availableSize: availableSize,
                 onAction: { request in
                     performCanvasAction(
-                        request, variables: presentation.variables, dismiss: dismiss)
+                        request, variables: presentation.variables, dismiss: dismissNudgeFromCta)
                 }
             )
             if surface.showCloseButton, surface.closeButton.placement?.mode == .inside {
@@ -474,6 +487,7 @@ private struct NudgeDialogContainer: View {
         .clipShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .contentShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .environment(\.digiaVariables, presentation.variables)
+        .environment(\.digiaCampaignKey, presentation.payload.campaignKey)
         .anchorPreference(key: NudgeCloseContainerBoundsKey.self, value: .bounds) {
             surface.closeButton.placement?.mode == .outside ? $0 : nil
         }
@@ -508,8 +522,9 @@ private struct NudgeDialogContainer: View {
     }
 
     private var renderedContent: some View {
-        NudgeColumnContent(column: presentation.config.layout, onDismiss: dismiss)
+        NudgeColumnContent(column: presentation.config.layout, onDismiss: dismissNudgeFromCta)
             .environment(\.digiaVariables, presentation.variables)
+            .environment(\.digiaCampaignKey, presentation.payload.campaignKey)
     }
 }
 
@@ -541,6 +556,7 @@ struct NudgeCloseButton: View {
     let config: NudgeCloseButtonConfig
     let action: () -> Void
     var layout: NudgeCloseButtonPlacement.Layout? = nil
+    var accessibilityLabel: String? = nil
 
     @ObservedObject private var theme = CampaignCanvasTheme.shared
     @Environment(\.colorScheme) private var colorScheme
@@ -602,6 +618,6 @@ struct NudgeCloseButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Close")
+        .accessibilityLabel(accessibilityLabel ?? "Close")
     }
 }

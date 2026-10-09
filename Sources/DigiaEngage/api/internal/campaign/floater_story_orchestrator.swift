@@ -65,6 +65,8 @@ final class FloaterStoryOrchestrator: ObservableObject {
     private var autoDismissTask: Task<Void, Never>?
     private var exitTask: Task<Void, Never>?
     private(set) var lastStartFailureReason: String?
+    /// `true` when the last start failed only because a floater already shows.
+    private(set) var lastStartFailedBusy = false
 
     var now: () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
 
@@ -97,6 +99,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
     @discardableResult
     func start(_ campaign: CampaignModel, payload: CEPTriggerPayload, screenName: String?) -> Bool {
         lastStartFailureReason = nil
+        lastStartFailedBusy = false
         guard campaign.campaignType == "floater", campaign.floaterStoryConfig != nil else {
             lastStartFailureReason = "campaign is not a parsed story floater"
             return false
@@ -107,9 +110,11 @@ final class FloaterStoryOrchestrator: ObservableObject {
         if closing { finishDismiss() }
         guard state == nil else {
             lastStartFailureReason = "another story floater is already on screen"
+            lastStartFailedBusy = true
             return false
         }
 
+        reportMissingVariables(campaign.floaterStoryConfig?.variableSchemas ?? [], payload: payload)
         tokenCounter += 1
         state = ActiveFloaterStoryState(
             campaign: campaign,
@@ -152,8 +157,13 @@ final class FloaterStoryOrchestrator: ObservableObject {
     }
 
     /// The user tapped the window and the story is opening.
+    /// Whether a nudge, survey or guide is on screen. A collapsed window can sit
+    /// under one (surface rule) but must not open over it. Set by `SDKInstance`.
+    var isCoveredByBlockingCampaign: () -> Bool = { false }
+
     func openStory(initialIndex: Int = 0) {
-        guard let active = state, !closing, !storyOpen else { return }
+        guard let active = state, !closing, !storyOpen, !isCoveredByBlockingCampaign()
+        else { return }
         if case .story(_, let pages, _, _, _, _, _, _, _, _) = active.config.story {
             storyInitialIndex = min(max(0, initialIndex), pages.count - 1)
         }
@@ -218,13 +228,14 @@ final class FloaterStoryOrchestrator: ObservableObject {
         }
     }
 
-    /// The host reported a new current screen. A floater belongs to the exact screen it
-    /// opened on — see `FloaterOrchestrator.onScreenChanged` for why this deliberately
-    /// bypasses the shared `targetScreenNames` helper.
+    /// The host reported a new current screen. Ends the showing if the campaign targets
+    /// specific screens and the new screen is not in that list. Global floaters survive navigation.
     func onScreenChanged(_ screenName: String) {
-        guard let active = state, let ownScreen = active.screenName, ownScreen != screenName
-        else { return }
-        dismiss(.screenExit)
+        guard let active = state else { return }
+        let targets = active.campaign.targetScreenNames
+        if !targets.isEmpty && !targets.contains(screenName) {
+            dismiss(.screenExit)
+        }
     }
 
     /// Ends the showing, running the exit animation first when there is one. Idempotent.
