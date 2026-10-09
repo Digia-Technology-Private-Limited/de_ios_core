@@ -2183,15 +2183,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let completed = completedSurveyToken == state.token
         let reason = completed ? DismissReason.completed : reason
         surveyOrchestrator.dismiss()
-        if completed {
-            // Completed wins (R3-D12, SR71): the CEP hears `completed`, the
-            // Digia Completed already sent stands, and no Digia dismiss follows,
-            // however it is closed afterwards (thank-you close, supersede, screen exit).
-            _ = dwellTracker.consumeDwellMs(state.payload.cepCampaignId)
-            events.toCep(.dismissed(reason: .completed, completed: true), payload: state.payload)
-            clearQuestionViewedAt(token: state.token)
-            return
-        }
         events.toBoth(
             .dismissed(reason: reason, completed: completed),
             SurveyEvent.Dismissed(
@@ -2875,20 +2866,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let completed = completed ?? guideCompletionFired
         let reason = resolveGuideDismissReason(explicit: reason, completed: completed)
         pendingGuideDismissReason = nil
-        if !guideCompletionFired, total > 1 {
+        if !completed, total > 1 {
             events.toDigia(
                 GuideEvent.StepDismissed(itemIndex: state.stepIndex + 1),
                 payload: payload
             )
         }
         guideOrchestrator.dismiss()
-        if completed {
-            // Completed wins (R3-D12, SR71): `completed` to the CEP, the Digia
-            // Completed already sent stands, and no Digia dismiss follows.
-            events.toCep(.dismissed(reason: .completed, completed: true), payload: payload)
-            guideCompletionFired = false
-            return
-        }
         events.toBoth(
             .dismissed(
                 reason: completed ? .completed : reason,
@@ -2896,7 +2880,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             ),
             GuideEvent.Dismissed(
                 dismissReason: (completed ? .completed : reason).wire,
-                abandonedAtItem: state.stepIndex + 1,
+                abandonedAtItem: completed ? nil : state.stepIndex + 1,
                 itemTotal: total,
                 dwellMs: elapsed
             ),

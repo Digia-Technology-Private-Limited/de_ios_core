@@ -236,8 +236,8 @@ extension DigiaEngageTests {
 
         #expect(recorder.outcome == .dismissed(reason: .completed, completed: true))
         let names = try digiaEventNames(sdk)
-        #expect(names.last == "Digia Experience Completed")
-        #expect(!names.contains("Digia Experience Dismissed"))
+        #expect(names.contains("Digia Experience Completed"))
+        #expect(names.contains("Digia Experience Dismissed"))
         #expect(!names.contains("Digia Step Dismissed"))
         let entries = try #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
         let props = { (name: String) in
@@ -246,6 +246,8 @@ extension DigiaEngageTests {
         }
         #expect(props("Digia Experience Completed")?["time_to_complete_ms"] != nil)
         #expect(props("Digia Experience Completed")?["item_total"] as? Int == 2)
+        #expect(props("Digia Experience Dismissed")?["dismiss_reason"] as? String == "completed")
+        #expect(props("Digia Experience Dismissed")?["dwell_ms"] != nil)
         let frequency = try #require(sdk.services?.frequencyManager)
         #expect(frequency.blockReason(
             campaignKey: "a40-guide", policy: FrequencyPolicy(stopOn: "experienceCompleted")

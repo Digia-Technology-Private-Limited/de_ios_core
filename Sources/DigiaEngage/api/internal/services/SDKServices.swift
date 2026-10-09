@@ -68,9 +68,19 @@ final class SDKServices {
         )
         let ac = config.analyticsConfig
         if ac.enabled {
-            log.d("Analytics enabled (batchSize=\(ac.flushBatchSize), interval=\(ac.flushIntervalMs)ms)")
+            let analyticsConfig = DigiaEndpoints.isTestMode
+                ? AnalyticsConfig(
+                    enabled: ac.enabled,
+                    flushIntervalMs: 100,
+                    flushBatchSize: 1,
+                    maxBatchSize: ac.maxBatchSize,
+                    queueMaxEvents: ac.queueMaxEvents,
+                    sessionTimeoutMs: ac.sessionTimeoutMs
+                )
+                : ac
+            log.d("Analytics enabled (batchSize=\(analyticsConfig.flushBatchSize), interval=\(analyticsConfig.flushIntervalMs)ms)")
             self.analyticsService = AnalyticsService(
-                config: ac,
+                config: analyticsConfig,
                 identityManager: identityManager,
                 sessionManager: sessionManager,
                 queue: AnalyticsQueue(storage: storage.scoped("analytics")),

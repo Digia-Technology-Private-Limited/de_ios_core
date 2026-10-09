@@ -246,7 +246,17 @@ final class AnalyticsService {
         }
         cancelTimer()
         isDispatching = true
-        defer { isDispatching = false }
+        defer {
+            isDispatching = false
+            // Events can be left behind two ways: a batch capped at maxBatchSize, and an event
+            // captured while this dispatch was in flight (its own dispatch was skipped as "already
+            // dispatching", and scheduleTimer is a no-op while dispatching). Neither has a timer, so
+            // arm one here at the configured interval, unless a retry is already pending and will
+            // pick them up.
+            if queue.size > 0 && retryTask == nil && flushTimer == nil {
+                scheduleTimer()
+            }
+        }
 
         let batch = queue.peek(maxCount: config.maxBatchSize)
         guard !batch.isEmpty else {
@@ -275,7 +285,6 @@ final class AnalyticsService {
                 queue.remove(eventIds: batch.map { $0.eventId })
                 retryAttempt = 0
                 log.d("Batch accepted (count=\(batch.count), queueSize=\(queue.size))")
-                if queue.size > 0 { scheduleTimer(minDelayMs: 15_000) }
             default:
                 // Any other outcome is just "the API call failed" — 4xx, 5xx, or
                 // no real status at all — retried uniformly, capped.
@@ -309,7 +318,6 @@ final class AnalyticsService {
 
         guard !toRetry.isEmpty else {
             retryAttempt = 0
-            if queue.size > 0 { scheduleTimer(minDelayMs: 15_000) }
             return
         }
 
