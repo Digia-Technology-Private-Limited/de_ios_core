@@ -246,7 +246,12 @@ final class AnalyticsService {
         }
         cancelTimer()
         isDispatching = true
-        defer { isDispatching = false }
+        defer {
+            isDispatching = false
+            if queue.size > 0 && retryTask == nil && flushTimer == nil {
+                scheduleTimer(minDelayMs: config.flushBatchSize == 1 ? 0 : 15_000)
+            }
+        }
 
         let batch = queue.peek(maxCount: config.maxBatchSize)
         guard !batch.isEmpty else {
@@ -275,7 +280,6 @@ final class AnalyticsService {
                 queue.remove(eventIds: batch.map { $0.eventId })
                 retryAttempt = 0
                 log.d("Batch accepted (count=\(batch.count), queueSize=\(queue.size))")
-                if queue.size > 0 { scheduleTimer(minDelayMs: 15_000) }
             default:
                 // Any other outcome is just "the API call failed" — 4xx, 5xx, or
                 // no real status at all — retried uniformly, capped.
@@ -323,9 +327,17 @@ final class AnalyticsService {
         scheduleRetry(attempt: attempt)
     }
 
-    private func scheduleTimer(minDelayMs: Int = 0) {
+    private func scheduleTimer(minDelayMs: Int? = nil) {
         guard flushTimer == nil, !isDispatching else { return }
-        let delayMs = max(config.flushIntervalMs, minDelayMs)
+        let effectiveMinDelay = minDelayMs ?? config.flushIntervalMs
+        let delayMs = min(config.flushIntervalMs, effectiveMinDelay)
+        if delayMs <= 0 {
+            Task { @MainActor [weak self] in
+                guard let self, !self.isCleared else { return }
+                await self.dispatchPending()
+            }
+            return
+        }
         flushTimer = Timer.scheduledTimer(
             withTimeInterval: Double(delayMs) / 1_000,
             repeats: false
