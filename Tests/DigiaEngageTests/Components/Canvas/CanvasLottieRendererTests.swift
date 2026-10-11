@@ -20,6 +20,7 @@ import UIKit
 //
 // See also ai_docs/video-widget-testing.md for the equivalent video modes.
 
+extension RenderedUITests {
 @MainActor
 @Suite("Canvas lottie renderer", .serialized, .tags(.canvas, .component, .media))
 struct CanvasLottieRendererTests {
@@ -624,6 +625,7 @@ struct CanvasLottieRendererTests {
         }
         return condition()
     }
+}
 }
 
 @MainActor

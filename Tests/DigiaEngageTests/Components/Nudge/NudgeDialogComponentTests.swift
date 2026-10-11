@@ -6,6 +6,7 @@ import UIKit
 
 @testable import DigiaEngage
 
+extension RenderedUITests {
 /// Component test for the canonical Nudge Dialog scenario (`test_nudge_dialog`).
 ///
 /// Uses the canonical `nudge-dialog.json` fixture for Tier-2 verification of:
@@ -519,4 +520,5 @@ struct NudgeDialogComponentTests {
         hostingController.view.layoutIfNeeded()
         #expect(hostingController.view != nil)
     }
+}
 }

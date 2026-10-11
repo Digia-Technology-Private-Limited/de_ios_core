@@ -31,8 +31,16 @@ extension Tag {
 
     /// Nudge surfaces: dialog, bottom sheet, full screen, close button, nudge video.
     @Tag static var nudge: Self
+    /// Floater surfaces: story floater window, PiP.
+    @Tag static var floater: Self
+    /// Survey surfaces: dialog and bottom-sheet surveys and their scenes.
+    @Tag static var survey: Self
+    /// PiP surfaces: picture-in-picture windows and their behavior.
+    @Tag static var pip: Self
     /// Inline surfaces: banner, carousel, canvas, story.
     @Tag static var inline: Self
+    /// Guides: tooltip and spotlight steps, anchored and anchorless.
+    @Tag static var guide: Self
     /// Campaign canvas: layout, strips, text, survey configuration.
     @Tag static var canvas: Self
     /// Surface rules: routing, supersede, priority, presentation controller/coordinator.

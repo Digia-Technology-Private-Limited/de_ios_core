@@ -4,6 +4,7 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
+extension RenderedUITests {
 @Suite("Full screen", .serialized, .tags(.nudge))
 struct NudgeFullScreenComponentTests {
 
@@ -103,4 +104,5 @@ struct NudgeFullScreenComponentTests {
         window.isHidden = true
         #expect(hosting.view != nil)
     }
+}
 }

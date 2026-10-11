@@ -5,6 +5,7 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
+extension RenderedUITests {
 @MainActor
 @Suite("Canvas button renderer", .serialized, .tags(.canvas, .component))
 struct CanvasButtonRendererTests {
@@ -769,4 +770,5 @@ struct CanvasButtonRendererTests {
     private func unmount(_ window: UIWindow) {
         ComponentTestHost.unmount(window)
     }
+}
 }

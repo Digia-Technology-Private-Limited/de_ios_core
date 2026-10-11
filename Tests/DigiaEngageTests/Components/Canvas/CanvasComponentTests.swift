@@ -5,6 +5,7 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
+extension RenderedUITests {
 /// Component visual and hierarchy snapshot tests for `CampaignCanvasView`.
 ///
 /// Validates:
@@ -43,5 +44,6 @@ struct CanvasComponentTests {
             perceptualPrecision: 0.98
         )
     }
+}
 }
 

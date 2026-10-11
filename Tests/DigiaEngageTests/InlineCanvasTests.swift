@@ -114,6 +114,7 @@ struct InlineSlotConfigExclusivityTests {
     }
 }
 
+extension RenderedUITests {
 @MainActor
 @Suite("Inline canvas perform action routing", .serialized, .tags(.canvas, .inline, .component))
 struct InlineCanvasPerformTests {
@@ -441,5 +442,6 @@ struct InlineCanvasPerformTests {
         }
         return nil
     }
+}
 }
 

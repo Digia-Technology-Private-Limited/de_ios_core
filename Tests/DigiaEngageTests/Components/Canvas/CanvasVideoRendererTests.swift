@@ -17,6 +17,7 @@ import UIKit
 //   Mode C  ADAPTER  The live runtime closures on a real AVPlayer, with NO view or renderer.
 //   No mode          Parsing or model logic only; no player runtime is involved.
 
+extension RenderedUITests {
 @MainActor
 @Suite("Canvas video renderer", .serialized, .tags(.canvas, .component, .media))
 struct CanvasVideoRendererTests {
@@ -783,6 +784,7 @@ struct CanvasVideoRendererTests {
             }
         }
     }
+}
 }
 
 @MainActor

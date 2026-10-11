@@ -5,6 +5,7 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
+extension RenderedUITests {
 @MainActor
 @Suite("Canvas progress bar renderer", .serialized, .tags(.canvas, .component))
 struct CanvasProgressBarRendererTests {
@@ -314,4 +315,5 @@ struct CanvasProgressBarRendererTests {
     private func unmount(_ window: UIWindow) {
         ComponentTestHost.unmount(window)
     }
+}
 }

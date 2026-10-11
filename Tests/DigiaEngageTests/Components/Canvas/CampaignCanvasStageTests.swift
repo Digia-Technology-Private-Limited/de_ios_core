@@ -4,6 +4,7 @@ import UIKit
 import SwiftUI
 @testable import DigiaEngage
 
+extension RenderedUITests {
 @MainActor
 @Suite("Campaign canvas stage dispatch", .serialized, .tags(.canvas, .component))
 struct CampaignCanvasStageTests {
@@ -285,4 +286,5 @@ struct CampaignCanvasStageTests {
         }
         return nil
     }
+}
 }

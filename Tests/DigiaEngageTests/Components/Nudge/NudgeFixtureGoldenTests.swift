@@ -5,6 +5,7 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
+extension RenderedUITests {
 /// Pixel goldens for every Test Kit nudge fixture that has no hand-written golden test.
 ///
 /// The arguments are read from `testkit/campaigns/<campaign>/fixtures/`, so a fixture added to the
@@ -94,4 +95,5 @@ struct NudgeFixtureGoldenTests {
         }
         return image
     }
+}
 }

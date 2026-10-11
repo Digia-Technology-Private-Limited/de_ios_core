@@ -238,6 +238,20 @@ public enum ComponentTestHost {
         }
     }
 
+    /// Renders until two frames 0.1s apart are identical (at most 2s), so entry animations and
+    /// measure-then-place passes have settled before a golden is compared.
+    @MainActor
+    public static func settledImage(of view: UIView) -> UIImage {
+        var image = renderImage(of: view)
+        for _ in 0..<20 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            let next = renderImage(of: view)
+            if next.pngData() == image.pngData() { return next }
+            image = next
+        }
+        return image
+    }
+
     @MainActor
     public static func drainRunLoop(for seconds: TimeInterval) {
         let until = Date().addingTimeInterval(seconds)

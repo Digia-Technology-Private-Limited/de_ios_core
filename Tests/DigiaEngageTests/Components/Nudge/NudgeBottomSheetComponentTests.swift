@@ -5,6 +5,7 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
+extension RenderedUITests {
 /// Component and interaction tests for the canonical Nudge BottomSheet scenario (`test_nudge_bottomsheet_compact`).
 ///
 /// Validates:
@@ -462,4 +463,5 @@ struct NudgeBottomSheetComponentTests {
         let sheetViewPlaced = NudgeSheetView(presentation: presentationPlaced)
         #expect(sheetViewPlaced.cardCloseButton == nil)
     }
+}
 }

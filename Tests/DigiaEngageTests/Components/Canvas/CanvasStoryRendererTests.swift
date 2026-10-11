@@ -5,6 +5,7 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
+extension RenderedUITests {
 @MainActor
 @Suite("Canvas story renderer", .serialized, .tags(.canvas, .component))
 struct CanvasStoryRendererTests {
@@ -1057,4 +1058,5 @@ struct CanvasStoryRendererTests {
     private func pumpRunLoop(_ seconds: TimeInterval = 0.04) {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
+}
 }

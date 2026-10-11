@@ -6,6 +6,7 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
+extension RenderedUITests {
 @MainActor
 @Suite("Canvas image renderer", .serialized, .tags(.canvas, .component, .media))
 struct CanvasImageRendererTests {
@@ -583,6 +584,7 @@ struct CanvasImageRendererTests {
     private func unmount(_ window: UIWindow) {
         ComponentTestHost.unmount(window)
     }
+}
 }
 
 private enum ImageTestError: Error {

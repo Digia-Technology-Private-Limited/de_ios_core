@@ -3,6 +3,7 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
+extension RenderedUITests {
 @Suite("Canvas nudge close overlay", .serialized, .tags(.nudge, .unit))
 struct CanvasNudgeCloseOverlayTests {
 
@@ -209,4 +210,5 @@ struct CanvasNudgeCloseOverlayTests {
         }
         return nil
     }
+}
 }
