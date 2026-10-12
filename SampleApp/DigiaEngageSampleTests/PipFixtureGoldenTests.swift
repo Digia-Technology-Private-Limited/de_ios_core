@@ -9,16 +9,17 @@ import UIKit
 
 @testable import DigiaEngage
 
-extension RenderedUITests {
+extension HostedUITests {
 /// Pixel goldens for every Test Kit PiP fixture, collapsed and expanded.
 ///
 /// The arguments are read from `testkit/campaigns/pip/fixtures/`, so a fixture added to the Test
-/// Kit is covered with no code change (record it with `RECORD_SNAPSHOTS=true ./run-tests.sh
-/// floater`). Each fixture is decoded by `CampaignModel.fromJson`, started on the SDK's floater
-/// orchestrator, and drawn by the production `FloaterOverlayView` — the layer `DigiaHost` mounts —
-/// over a host screen. Nothing on screen may move with wall-clock time: auto-dismiss is held off,
-/// the video never plays and the Lottie is pinned to one frame, so a slow machine captures the
-/// same pixels as a fast one.
+/// Kit is covered with no code change (record it by running this target's tests with
+/// `TEST_RUNNER_RECORD_SNAPSHOTS=true`; see `SampleApp/README.md`). Each fixture is decoded by
+/// `CampaignModel.fromJson`, started on the SDK's floater orchestrator, and drawn by the production
+/// `FloaterOverlayView` — the layer `DigiaHost` mounts — over a host screen. Nothing on screen may
+/// move with wall-clock time: auto-dismiss is held off, the video never plays and the Lottie is
+/// pinned to one frame, so a slow machine captures the same pixels as a fast one. The second state
+/// is reached by a real tap, so this suite runs hosted by the sample app.
 @Suite("Test Kit PiP fixture goldens", .serialized, .tags(.pip))
 struct PipFixtureGoldenTests {
 
@@ -34,9 +35,11 @@ struct PipFixtureGoldenTests {
         let config = try #require(campaign.floaterConfig, "Fixture must decode to a PiP")
         // The window's `WebImage` drops a synchronous memory-cache hit (it publishes inside the
         // view update that asked for it), and nothing re-evaluates it until the window is resized.
-        // Start from an empty memory cache so every fixture takes the asynchronous load, which
-        // does publish, and wait for it below.
+        // Start from empty caches so every fixture takes the asynchronous load, which does
+        // publish, and wait for it below. The disk cache too: in the host app it persists between
+        // runs, and a disk hit can come back synchronously and be dropped the same way.
         SDImageCache.shared.clearMemory()
+        await withCheckedContinuation { done in SDImageCache.shared.clearDisk { done.resume() } }
 
         let orchestrator = SDKInstance.shared.floaterOrchestrator!
         // A player that stays paused at zero on the local file: it reaches `readyToPlay` (which is
@@ -53,8 +56,8 @@ struct PipFixtureGoldenTests {
             "Floater orchestrator refused the fixture: \(orchestrator.lastStartFailureReason ?? "unknown")"
         )
 
-        // The test bundle has no host app, so the floater cannot look up the device's window scene;
-        // pin the screen and its notch / home-indicator insets to the golden's device instead.
+        // Pin the screen and its notch / home-indicator insets to the golden's device, so the
+        // goldens do not depend on which simulator the host app runs on.
         let device = ViewImageConfig.iPhone17ProMax
         let insets = device.safeArea
         activeFloaterWindowGeometryOverride = (
@@ -83,15 +86,22 @@ struct PipFixtureGoldenTests {
         default: break
         }
 
-        // What a tap does, minus the click analytics. A campaign that opens expanded is captured
-        // that way first, then collapsed; every other one the other way round.
+        // A campaign that opens expanded is captured that way first, then collapsed by a tap on
+        // its collapse button; every other one the other way round, expanded by a tap on the
+        // window. Real touches: a tap the shield refuses or a recognizer swallows fails here.
         let startsExpanded = config.behavior.startExpanded
         try await assertState(
             startsExpanded ? "expanded" : "collapsed", fixture: fixture, window: window)
         if startsExpanded {
-            orchestrator.collapse()
+            let collapse = try #require(
+                collapseButtonCenter(in: window, config: config),
+                "No collapse button in the expanded chrome"
+            )
+            try TouchSynthesizer.tap(at: collapse, in: window)
+            #expect(orchestrator.surface == .collapsed, "Tapping the collapse button did not collapse the PiP")
         } else {
-            orchestrator.expand()
+            try FloaterTap.tapWindow(in: window)
+            #expect(orchestrator.surface == .expanded, "Tapping the PiP did not expand it")
         }
         try await awaitTransition(config)
         try await assertState(
@@ -100,6 +110,15 @@ struct PipFixtureGoldenTests {
 
     @MainActor
     private func assertState(_ state: String, fixture: String, window: UIWindow) async throws {
+        // `WebImage` can drop the update that publishes a loaded image (it publishes inside the
+        // view update that asked for it), leaving the media black. Flipping the trait environment
+        // re-evaluates every environment-reading view, which draws the already-loaded image (as
+        // the floater suite and `ComponentTestHost.makeCanvasSlotHost` do). Before every capture,
+        // since a tap re-renders the media at its new size.
+        window.overrideUserInterfaceStyle = .dark
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        window.overrideUserInterfaceStyle = .light
+        ComponentTestHost.drainRunLoop(for: 0.3)
         // The Lottie plays on wall-clock time, and every SwiftUI update re-applies its authored
         // `.playing` mode, so it is pinned after each transition, right before the capture.
         holdLottie(in: window)
@@ -111,6 +130,35 @@ struct PipFixtureGoldenTests {
             named: "\(fixture)-\(state)",
             function: "testPipFixtureGolden"
         )
+    }
+
+    /// Where the expanded chrome's collapse button is on screen, or nil when it is hidden. The
+    /// chrome's glyph buttons carry no accessibility label, so it is found by position: one row,
+    /// close then the trailing pill (collapse first) when `closeOnLeft`, else the pill then close.
+    /// Accessibility only locates it; the tap itself is a real touch.
+    @MainActor
+    private func collapseButtonCenter(in window: UIWindow, config: FloaterConfig) -> CGPoint? {
+        guard config.controls.showCollapse else { return nil }
+        ComponentTestHost.enableAccessibilityAutomation()
+        var frames: [CGRect] = []
+        collectButtonFrames(in: window, into: &frames)
+        let row = frames.filter { !$0.isEmpty }.sorted { $0.minX < $1.minX }
+        let index = config.expanded.closeOnLeft && config.expanded.showCloseButton ? 1 : 0
+        guard row.indices.contains(index) else { return nil }
+        return CGPoint(x: row[index].midX, y: row[index].midY)
+    }
+
+    @MainActor
+    private func collectButtonFrames(in element: NSObject, into frames: inout [CGRect]) {
+        if element.accessibilityTraits.contains(.button) {
+            frames.append(element.accessibilityFrame)
+        }
+        if let view = element as? UIView {
+            view.subviews.forEach { collectButtonFrames(in: $0, into: &frames) }
+        }
+        (element.accessibilityElements as? [NSObject])?.forEach {
+            collectButtonFrames(in: $0, into: &frames)
+        }
     }
 
     /// Polls until the orchestrator reveals the window, up to its own 10s media timeout. Awaiting

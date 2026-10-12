@@ -5,14 +5,16 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
-extension RenderedUITests {
+extension HostedUITests {
 /// Pixel goldens for every Test Kit story-floater fixture.
 ///
 /// The arguments are read from `testkit/campaigns/floater/fixtures/`, so a fixture added to the
-/// Test Kit is covered with no code change (record it with
-/// `RECORD_SNAPSHOTS=true ./run-tests.sh floater`). Each fixture is decoded by
+/// Test Kit is covered with no code change (record it by running this target's tests with
+/// `TEST_RUNNER_RECORD_SNAPSHOTS=true`; see `SampleApp/README.md`). Each fixture is decoded by
 /// `CampaignModel.fromJson`, started on the SDK's story-floater orchestrator, and drawn by the
-/// production `FloaterStoryOverlayView` — the layer `DigiaHost` mounts — over a host screen.
+/// production `FloaterStoryOverlayView` — the layer `DigiaHost` mounts — over a host screen. The
+/// story is opened by a real tap on the window, so the second golden is reached the way a user
+/// reaches it; that is why this suite runs hosted by the sample app.
 @Suite("Test Kit floater fixture goldens", .serialized, .tags(.floater))
 struct FloaterFixtureGoldenTests {
 
@@ -46,8 +48,8 @@ struct FloaterFixtureGoldenTests {
         )
         try #require(started, "Floater orchestrator refused the fixture: \(orchestrator.lastStartFailureReason ?? "unknown")")
 
-        // The test bundle has no host app, so the floater cannot look up the device's window scene;
-        // pin the screen and its notch / home-indicator insets to the golden's device instead.
+        // Pin the screen and its notch / home-indicator insets to the golden's device, so the
+        // goldens do not depend on which simulator the host app runs on.
         let device = ViewImageConfig.iPhone17ProMax
         let insets = device.safeArea
         activeFloaterWindowGeometryOverride = (
@@ -71,10 +73,12 @@ struct FloaterFixtureGoldenTests {
             function: "testFloaterFixtureGolden"
         )
 
-        // What a tap on the window does, minus the click analytics. The hero runs as a SwiftUI
-        // animation and the story chrome is revealed by a main-queue callback after it; awaiting
-        // (not spinning the run loop) lets the viewer's main-actor work run as well.
-        orchestrator.openStory()
+        // A real tap on the window: a tap the shield refuses, a recognizer swallows or an authored
+        // canvas action intercepts fails here. The hero runs as a SwiftUI animation and the story
+        // chrome is revealed by a main-queue callback after it; awaiting (not spinning the run
+        // loop) lets the viewer's main-actor work run as well.
+        try FloaterTap.tapWindow(in: window)
+        #expect(orchestrator.storyOpen, "A tap on the floater window did not open its story")
         try await Task.sleep(nanoseconds: 800_000_000)
         assertVisualGolden(
             matching: ComponentTestHost.settledImage(of: window),

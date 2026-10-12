@@ -12,3 +12,18 @@ Sample iOS app for the `DigiaEngage` Swift package.
 
 Update `DigiaEngageSampleApp.swift` with a valid API key if you need to hit real config.
 The sample app now initializes the SDK from `DigiaSampleRootView`, so startup failures are surfaced in-app instead of being silently dropped.
+
+## Tests
+
+`DigiaEngageSampleTests` is a unit-test target hosted by this app. Tests that need real UIKit
+touch delivery live here: the package's own test bundle (`swift test` / `run-tests.sh`) has no
+`UIApplication`, so a synthesized touch never becomes a gesture there. `FloaterTapTests` taps the
+PiP and story floater through `TouchSynthesizer` and checks the production tap handlers ran.
+
+```bash
+xcodebuild test -project DigiaEngageSample.xcodeproj -scheme DigiaEngageSample \
+  -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
+```
+
+When the app launches as the test host it skips `Digia.initialize`, so live campaigns cannot
+appear underneath the tests.

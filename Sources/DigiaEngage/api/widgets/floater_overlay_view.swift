@@ -1122,6 +1122,10 @@ private struct FloaterChromeIcon: View {
                 }
             }
             .frame(width: size, height: size)
+            // The whole icon square is the target. A `.plain` button hit-tests only what its
+            // label draws, so a stroked glyph took taps on its strokes alone and a tap between
+            // them — the centre of the collapse arrows — fell through to the swipe strip below.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

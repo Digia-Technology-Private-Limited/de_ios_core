@@ -419,7 +419,7 @@ public enum ComponentTestHost {
     }()
 
     @MainActor
-    private static func enableAccessibilityAutomation() {
+    static func enableAccessibilityAutomation() {
         _ = accessibilityAutomationEnabled
     }
 
