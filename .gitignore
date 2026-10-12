@@ -35,3 +35,6 @@ FatBuild/.archives
 FatBuild/DigiaEngageFat.xcodeproj/
 DigiaEngage.xcframework
 dist/
+
+# Test coverage output (run-tests.sh)
+coverage/

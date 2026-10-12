@@ -139,11 +139,12 @@ Tagged Swift Testing suites use tags declared in [`TestingTags.swift`](TestingTa
 ### Using the Convenience Wrapper (`./run-tests.sh`)
 The wrapper pins the iPhone 17 Pro Max simulator, enables code coverage, validates the tag against `TestingTags.swift`, and fails if a filter matched no tests (xcodebuild alone reports success on zero tests):
 ```bash
+./run-tests.sh            # everything under Tests/ (default; same as `all`)
+./run-tests.sh golden     # pixel goldens only
 ./run-tests.sh nudge      # one tag
-./run-tests.sh smoke      # default
 ./run-tests.sh quick      # everything except `slow`
-./run-tests.sh all        # everything
 ```
+Every run, pass or fail, writes line coverage of `Sources/` as LCOV to `coverage/lcov.info` and, when `genhtml` is installed (`brew install lcov`), an HTML report at `coverage/html/index.html` (both gitignored).
 
 ### Native Xcode commands
 ```bash
@@ -215,4 +216,4 @@ The lowest perceptual color precision 0.0 is less than required 0.98
 - **Model contracts**: Text snapshots represent parsed model state; they are not described as rendered view-hierarchy assertions.
 - **Image precision**: Isolated goldens use `precision: 0.99`; full-device Nudge goldens use `precision: 0.999` so small component regressions are not hidden by the large background. Both use `perceptualPrecision: 0.98` for minor anti-aliasing variation.
 - **Result attachments**: A successful visual golden records its committed reference and current rendered image as per-test PNG attachments; when they differ at all, the helper also forwards SnapshotTesting's `diffV2` `difference.png`. A failed golden uses only SnapshotTesting's native per-test `reference.png`, `failure.png`, and `difference.png` set, avoiding duplicate gallery images. Expand the individual test in Xcode's test report to inspect them.
-- **Coverage and insights**: `run-tests.sh` writes code coverage into the `.xcresult`. Xcode generates Insights only when it detects an actionable result, so a clean run can legitimately have an empty Insights section.
+- **Coverage and insights**: `run-tests.sh` writes code coverage into the `.xcresult` and exports it as LCOV to `coverage/lcov.info`. Xcode generates Insights only when it detects an actionable result, so a clean run can legitimately have an empty Insights section.
