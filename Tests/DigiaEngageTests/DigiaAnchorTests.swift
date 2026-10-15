@@ -209,11 +209,11 @@ extension DigiaEngageTests {
 
         #expect(sdk.guideOrchestrator.state == nil)
         #expect(recorder.outcome == .dismissed(reason: .targetLost, completed: false))
-        #expect(try digiaEventNames(sdk) == [
+        #expect(try await digiaEventNames(sdk) == [
             "Digia Experience Viewed", "Digia Step Viewed",
             "Digia Step Dismissed", "Digia Experience Dismissed",
         ])
-        let entries = try #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
+        let entries = try await #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
         let dismissed = entries.first {
             $0.payload["event_name"] as? String == "Digia Experience Dismissed"
         }?.payload["properties"] as? [String: Any]
@@ -235,11 +235,11 @@ extension DigiaEngageTests {
         await nextTurn()
 
         #expect(recorder.outcome == .dismissed(reason: .completed, completed: true))
-        let names = try digiaEventNames(sdk)
+        let names = try await digiaEventNames(sdk)
         #expect(names.contains("Digia Experience Completed"))
         #expect(names.contains("Digia Experience Dismissed"))
         #expect(!names.contains("Digia Step Dismissed"))
-        let entries = try #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
+        let entries = try await #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
         let props = { (name: String) in
             entries.first { $0.payload["event_name"] as? String == name }?
                 .payload["properties"] as? [String: Any]
@@ -264,7 +264,7 @@ extension DigiaEngageTests {
 
         sdk.reportGuideStepClicked(actionType: "dismiss", actionUrl: nil, ctaLabel: "Done")
 
-        let entries = try #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
+        let entries = try await #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
         let completed = entries.first {
             $0.payload["event_name"] as? String == "Digia Experience Completed"
         }?.payload["properties"] as? [String: Any]
@@ -287,7 +287,7 @@ extension DigiaEngageTests {
         #expect(!recorder.displayed)
         #expect(recorder.dropReason == .cancelled)
         #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (cancelled)"))
-        #expect(try digiaEventNames(sdk).isEmpty)
+        #expect(try await digiaEventNames(sdk).isEmpty)
     }
     @Test("rectangle anchor unregistered by key during the delay: cancelled to the CEP only, next turn (A52)")
     func keylessUnregisterDuringDelayTellsCepOnly() async throws {
@@ -303,7 +303,7 @@ extension DigiaEngageTests {
         #expect(sdk.guideOrchestrator.state == nil)
         #expect(!recorder.displayed)
         #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (cancelled)"))
-        #expect(try digiaEventNames(sdk).isEmpty)
+        #expect(try await digiaEventNames(sdk).isEmpty)
     }
 }
 
@@ -359,9 +359,9 @@ private func makeGuideInstance(
 }
 
 @MainActor
-private func digiaEventNames(_ sdk: SDKInstance) throws -> [String] {
+private func digiaEventNames(_ sdk: SDKInstance) async throws -> [String] {
     let analytics = try #require(sdk.services?.analyticsService)
-    return analytics.queue.peek(maxCount: 100).compactMap { $0.payload["event_name"] as? String }
+    return await analytics.queue.peek(maxCount: 100).compactMap { $0.payload["event_name"] as? String }
         .filter { $0.hasPrefix("Digia ") }
 }
 

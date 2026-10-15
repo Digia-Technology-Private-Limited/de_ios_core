@@ -42,7 +42,7 @@ extension DigiaEngageTests {
         private func digiaEvents(_ sdk: SDKInstance) async throws -> [(name: String, props: [String: Any])] {
             try? await Task.sleep(nanoseconds: 100_000_000)
             let analytics = try #require(sdk.services?.analyticsService)
-            return analytics.queue.peek(maxCount: 100).compactMap { entry in
+            return await analytics.queue.peek(maxCount: 100).compactMap { entry in
                 guard let name = entry.payload["event_name"] as? String, name.hasPrefix("Digia ") else {
                     return nil
                 }

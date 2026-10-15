@@ -108,7 +108,8 @@ struct AnalyticsServiceTests {
     private func makeService(
         config: AnalyticsConfig = AnalyticsConfig(flushIntervalMs: 10_000),
         sender: any NetworkClient = FakeAnalyticsSender(),
-        defaults: UserDefaults? = nil
+        defaults: UserDefaults? = nil,
+        queue: (any AnalyticsQueueProtocol)? = nil
     ) -> AnalyticsService {
         let store = defaults ?? UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
         let storage = UserDefaultsLocalStorage(defaults: store)
@@ -118,7 +119,7 @@ struct AnalyticsServiceTests {
             config: config,
             identityManager: identityManager,
             sessionManager: sessionManager,
-            queue: AnalyticsQueue(storage: UserDefaultsLocalStorage(defaults: store).scoped("analytics")),
+            queue: queue ?? MemoryAnalyticsQueue(),
             staticContext: ["sdk_version": "1.0.0", "sdk_platform": "ios"],
             networkClient: sender
         )
@@ -131,7 +132,7 @@ struct AnalyticsServiceTests {
     // ── Tests ─────────────────────────────────────────────────────────────────
 
     @Test("queue drops oldest events when capacity is exceeded")
-    func queueDropsOldestWhenFull() {
+    func queueDropsOldestWhenFull() async {
         let service = makeService(
             config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 100, queueMaxEvents: 3)
         )
@@ -141,7 +142,7 @@ struct AnalyticsServiceTests {
         }
 
         #expect(service.queue.size == 3)
-        let entries = service.queue.peek(maxCount: 10)
+        let entries = await service.queue.peek(maxCount: 10)
         // oldest two dropped; event-2, event-3, event-4 remain
         #expect(entries[0].payload["campaign_key"] as? String == "event-2")
         #expect(entries[1].payload["campaign_key"] as? String == "event-3")
@@ -149,11 +150,11 @@ struct AnalyticsServiceTests {
     }
 
     @Test("event payload has correct structure and identity fields")
-    func eventPayloadStructure() {
+    func eventPayloadStructure() async {
         let service = makeService()
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("payload-1"))
 
-        let entries = service.queue.peek(maxCount: 1)
+        let entries = await service.queue.peek(maxCount: 1)
         #expect(!entries.isEmpty)
         let event = entries[0].payload
 
@@ -174,7 +175,7 @@ struct AnalyticsServiceTests {
     }
 
     @Test("event names map correctly for all experience event types")
-    func eventNameMapping() {
+    func eventNameMapping() async {
         let service = makeService()
         let payload = buildPayload("test")
 
@@ -182,7 +183,7 @@ struct AnalyticsServiceTests {
         service.capture(NudgeEvent.Clicked(elementId: "cta-btn"), payload: payload)
         service.capture(NudgeEvent.Dismissed(), payload: payload)
 
-        let entries = service.queue.peek(maxCount: 10)
+        let entries = await service.queue.peek(maxCount: 10)
         #expect(entries.count == 3)
         #expect(entries[0].payload["event_name"] as? String == "Digia Experience Viewed")
         #expect(entries[1].payload["event_name"] as? String == "Digia Experience Clicked")
@@ -194,7 +195,7 @@ struct AnalyticsServiceTests {
     }
 
     @Test("impression_id groups the events of one showing, and is absent when there is none")
-    func impressionIdIsStamped() {
+    func impressionIdIsStamped() async {
         let service = makeService()
         let payload = buildPayload("test")
 
@@ -212,7 +213,7 @@ struct AnalyticsServiceTests {
             campaignType: "nudge"
         )
 
-        let entries = service.queue.peek(maxCount: 10)
+        let entries = await service.queue.peek(maxCount: 10)
         #expect(entries.count == 2)
         // The key events from one showing are grouped by. `campaign_key` cannot
         // do that job: one campaign can be delivered many times in a session.
@@ -223,7 +224,7 @@ struct AnalyticsServiceTests {
     }
 
     @Test("click analytics preserve action URL")
-    func clickAnalyticsPreserveActionURL() {
+    func clickAnalyticsPreserveActionURL() async {
         let service = makeService()
         let payload = buildPayload("test")
         let urls = [
@@ -253,7 +254,7 @@ struct AnalyticsServiceTests {
                 itemIndex: 1, actionType: "url", actionUrl: urls[4]),
             payload: payload)
 
-        for (index, entry) in service.queue.peek(maxCount: 10).enumerated() {
+        for (index, entry) in await service.queue.peek(maxCount: 10).enumerated() {
             let properties = entry.payload["properties"] as? [String: Any]
             #expect(properties?["action_type"] != nil)
             #expect(properties?["action_url"] as? String == urls[index])
@@ -366,7 +367,7 @@ struct AnalyticsServiceTests {
     func testKitModeSendsAtOnce() async throws {
         func services(_ client: MockNetworkClient) -> SDKServices {
             let storage = UserDefaultsLocalStorage(defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!)
-            return SDKServices(config: DigiaConfig(apiKey: "test_key"), storage: storage, networkClient: client)
+            return SDKServices(config: DigiaConfig(apiKey: "test_key"), storage: storage, networkClient: client, analyticsQueue: MemoryAnalyticsQueue())
         }
         func trackPosts(_ client: MockNetworkClient) -> Int {
             client.recordedRequests.filter { $0.url.absoluteString == DigiaEndpoints.track }.count
@@ -382,6 +383,7 @@ struct AnalyticsServiceTests {
         normal.analyticsService?.clear()
 
         // Test Kit mode: the same default config sends it immediately.
+        DigiaEndpoints.resetForTest()
         try DigiaEndpoints.setTestRoot("http://127.0.0.1:9")
         defer { DigiaEndpoints.resetForTest() }
         let testClient = MockNetworkClient()
@@ -524,29 +526,43 @@ struct AnalyticsServiceTests {
     @Test("persisted queue flushes on next cold init")
     func persistedQueueFlushesOnColdInit() async throws {
         let (defaults, suiteName) = makeDefaults()
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let path = FileManager.default.temporaryDirectory
+            .appendingPathComponent("analytics_\(UUID().uuidString).db").path
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) }
+        }
+        func sqliteQueue() -> SQLiteAnalyticsQueue {
+            SQLiteAnalyticsQueue(opener: AnalyticsDatabaseOpener(resolvePath: { path }))
+        }
 
-        // First session — enqueue, then simulate process death (queue persists)
+        // First process — enqueue into SQLite, then die.
+        let queue1 = sqliteQueue()
         let service1 = makeService(
             config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
-            defaults: defaults
+            defaults: defaults,
+            queue: queue1
         )
         service1.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("persisted"))
         #expect(service1.queue.size == 1)
-        service1.resetForTest()  // cancel timers, keep queue in UserDefaults
+        service1.clear()
+        await queue1.close()
 
-        // Second session — same defaults, short timer
+        // Second process — same file, short timer: the stored event is sent.
         let fakeSender = FakeAnalyticsSender()
+        let queue2 = sqliteQueue()
         let service2 = makeService(
             config: AnalyticsConfig(flushIntervalMs: 50, flushBatchSize: 10),
             sender: fakeSender,
-            defaults: defaults
+            defaults: defaults,
+            queue: queue2
         )
 
         try await waitUntil { fakeSender.callCount == 1 && service2.queue.size == 0 }
 
         #expect(fakeSender.callCount == 1)
-        #expect(AnalyticsQueue(storage: UserDefaultsLocalStorage(defaults: defaults).scoped("analytics")).size == 0)
+        #expect(await queue2.count() == 0)
+        await queue2.close()
     }
 
     @Test("dismissed event queues but does not self-flush")
@@ -573,7 +589,7 @@ struct AnalyticsServiceTests {
     /// contents of `properties` may differ — everything else (identity,
     /// timestamps, `campaign_key`) comes from the same enqueue path for free.
     @Test("sdk_health rides the existing envelope verbatim — no new top-level columns")
-    func healthEventEnvelopeMatchesNormalEvent() {
+    func healthEventEnvelopeMatchesNormalEvent() async {
         let service = makeService()
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("cmp_normal"))
@@ -585,7 +601,7 @@ struct AnalyticsServiceTests {
             buildMode: "debug"
         )
 
-        let entries = service.queue.peek(maxCount: 2)
+        let entries = await service.queue.peek(maxCount: 2)
         #expect(entries.count == 2)
         let normalEvent = entries[0].payload
         let healthEvent = entries[1].payload
@@ -637,7 +653,7 @@ struct AnalyticsServiceTests {
     }
 
     @Test("captureHealth carries stage and detail only when present")
-    func captureHealthOptionalFields() {
+    func captureHealthOptionalFields() async {
         let service = makeService()
 
         service.captureHealth(
@@ -648,7 +664,7 @@ struct AnalyticsServiceTests {
             buildMode: "release"
         )
 
-        let entry = service.queue.peek(maxCount: 1)[0].payload
+        let entry = await service.queue.peek(maxCount: 1)[0].payload
         #expect(entry["campaign_key"] == nil)
         let props = entry["properties"] as? [String: Any]
         #expect(props?["stage"] == nil)

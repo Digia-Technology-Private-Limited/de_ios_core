@@ -28,7 +28,8 @@ final class UpgradeMigrationScenarioTests: XCTestCase {
     @MainActor
     private func deviceHeader() -> String? {
         let services = SDKServices(
-            config: DigiaConfig(apiKey: "key"), storage: InMemoryLocalStorage(target), networkClient: FakeNetworkClient())
+            config: DigiaConfig(apiKey: "key"), storage: InMemoryLocalStorage(target), networkClient: FakeNetworkClient(),
+            analyticsQueue: MemoryAnalyticsQueue())
         let ref = CurrentSessionRef()
         ref.set(services.sessionManager, identity: services.identityManager, requestHeaders: services.requestHeaders)
         let client = URLSessionNetworkClient(sessionIdProvider: { ref.sessionId }, headerProvider: { ref.requestHeaders })

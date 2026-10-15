@@ -9,10 +9,12 @@ private let log = DigiaLogger("analytics")
 @MainActor
 final class AnalyticsService {
     private let config: AnalyticsConfig
+    /// [AnalyticsConfig.maxBatchSize] clamped to 1...``AnalyticsConfig/maxBatchSizeLimit``.
+    private let maxBatchSize: Int
     var isEnabled: Bool { config.enabled }
     let identityManager: IdentityManager
     let sessionManager: SessionManager
-    let queue: AnalyticsQueue
+    let queue: any AnalyticsQueueProtocol
     private let staticContext: [String: Any]
     private let networkClient: any NetworkClient
 
@@ -51,11 +53,12 @@ final class AnalyticsService {
         config: AnalyticsConfig,
         identityManager: IdentityManager,
         sessionManager: SessionManager,
-        queue: AnalyticsQueue,
+        queue: any AnalyticsQueueProtocol,
         staticContext: [String: Any],
         networkClient: any NetworkClient
     ) {
         self.config = config
+        self.maxBatchSize = Self.boundedBatchSize(config.maxBatchSize)
         self.identityManager = identityManager
         self.sessionManager = sessionManager
         self.queue = queue
@@ -74,8 +77,11 @@ final class AnalyticsService {
             }
         }
 
-        if queue.size > 0 {
-            scheduleTimer()
+        // Events left by an earlier process: the stored count is known only
+        // once the queue has opened its database, off the main actor.
+        Task { @MainActor [weak self] in
+            guard let self, await self.queue.count() > 0, !self.isCleared else { return }
+            self.scheduleTimer()
         }
     }
 
@@ -184,8 +190,10 @@ final class AnalyticsService {
         let eventId = UUID().uuidString
         sessionManager.touch()
 
-        var mergedProperties = staticContext
-        for (k, v) in properties { mergedProperties[k] = v }
+        let copiedStatic = Self.deepCopyMap(staticContext)
+        let copiedProperties = Self.deepCopyMap(properties)
+        var mergedProperties = copiedStatic
+        for (k, v) in copiedProperties { mergedProperties[k] = v }
 
         var payloadMap: [String: Any] = [
             "event_id": eventId,
@@ -258,7 +266,7 @@ final class AnalyticsService {
             }
         }
 
-        let batch = queue.peek(maxCount: config.maxBatchSize)
+        let batch = await queue.peek(maxCount: maxBatchSize)
         guard !batch.isEmpty else {
             log.d("Dispatch skipped — the queue is empty")
             retryAttempt = 0
@@ -282,34 +290,34 @@ final class AnalyticsService {
                 // Any per-event rejections named in the response body were never
                 // retried in the first place — see `logRejected`/response parsing;
                 // the whole batch (accepted + rejected) is simply removed here.
-                queue.remove(eventIds: batch.map { $0.eventId })
+                await queue.remove(eventIds: batch.map { $0.eventId })
                 retryAttempt = 0
                 log.d("Batch accepted (count=\(batch.count), queueSize=\(queue.size))")
             default:
                 // Any other outcome is just "the API call failed" — 4xx, 5xx, or
                 // no real status at all — retried uniformly, capped.
-                handleFailure(batch: batch, statusLabel: "HTTP \(statusCode)")
+                await handleFailure(batch: batch, statusLabel: "HTTP \(statusCode)")
             }
         } catch {
             // Verbose only — a single thrown exception is just one attempt in a
             // retry sequence, not yet a final outcome. Only the eventual drop
             // (after exhausting the cap) is warning-level.
             log.d("Batch post failed (cause=\(error.localizedDescription))")
-            handleFailure(batch: batch, statusLabel: "exception: \(error.localizedDescription)")
+            await handleFailure(batch: batch, statusLabel: "exception: \(error.localizedDescription)")
         }
     }
 
     /// Increments the attempt counter for the failed batch, drops whichever
     /// events have now exhausted the retry cap, and schedules a backoff retry
     /// for the rest (if any remain).
-    private func handleFailure(batch: [QueueEntry], statusLabel: String) {
-        let updated = queue.incrementAttempt(eventIds: batch.map { $0.eventId })
+    private func handleFailure(batch: [QueueEntry], statusLabel: String) async {
+        let updated = await queue.incrementAttempt(eventIds: batch.map { $0.eventId })
 
         let toDrop = updated.filter { $0.attempts >= Self.maxAttempts }
         let toRetry = updated.filter { $0.attempts < Self.maxAttempts }
 
         if !toDrop.isEmpty {
-            queue.remove(eventIds: toDrop.map { $0.eventId })
+            await queue.remove(eventIds: toDrop.map { $0.eventId })
             log.e(
                 "Batch post failed — dropped \(toDrop.count) event(s) after exhausting "
                     + "\(Self.maxAttempts) attempts (cause=\(statusLabel))"
@@ -423,4 +431,32 @@ final class AnalyticsService {
         return ctx
     }
 
+    /// Below 1 nothing would ever be sent; above the limit each dispatch
+    /// stalls the main actor encoding and decoding one large batch.
+    static func boundedBatchSize(_ configured: Int) -> Int {
+        let bounded = min(max(configured, 1), AnalyticsConfig.maxBatchSizeLimit)
+        if bounded != configured {
+            log.w("maxBatchSize \(configured) is outside 1...\(AnalyticsConfig.maxBatchSizeLimit) — using \(bounded)")
+        }
+        return bounded
+    }
+
+    static func deepClone(_ value: Any) -> Any {
+        if let dict = value as? [String: Any] {
+            return deepCopyMap(dict)
+        } else if let arr = value as? [Any] {
+            return arr.map { deepClone($0) }
+        } else if let set = value as? Set<AnyHashable> {
+            return Set(set.map { deepClone($0) as! AnyHashable })
+        }
+        return value
+    }
+
+    static func deepCopyMap(_ source: [String: Any]) -> [String: Any] {
+        var copy = [String: Any]()
+        for (k, v) in source {
+            copy[k] = deepClone(v)
+        }
+        return copy
+    }
 }

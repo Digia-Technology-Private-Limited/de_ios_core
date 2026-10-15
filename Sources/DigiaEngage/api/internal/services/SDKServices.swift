@@ -24,7 +24,8 @@ final class SDKServices {
         config: DigiaConfig,
         storage: LocalStorage,
         networkClient: any NetworkClient,
-        clock: @escaping () -> Int64 = SessionManager.systemClock
+        clock: @escaping () -> Int64 = SessionManager.systemClock,
+        analyticsQueue: any AnalyticsQueueProtocol
     ) {
         let identityManager = IdentityManager(
             storage: storage.scoped("identity"),
@@ -83,7 +84,7 @@ final class SDKServices {
                 config: analyticsConfig,
                 identityManager: identityManager,
                 sessionManager: sessionManager,
-                queue: AnalyticsQueue(storage: storage.scoped("analytics")),
+                queue: analyticsQueue,
                 staticContext: staticContext,
                 networkClient: networkClient
             )
