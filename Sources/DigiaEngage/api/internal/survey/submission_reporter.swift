@@ -35,6 +35,7 @@ final class SubmissionReporter: @unchecked Sendable {
 
     func report(
         campaignId: String,
+        campaignKey: String,
         survey: SurveyConfigModel,
         answers: [String: SurveyAnswer],
         startedAt: Date,
@@ -60,12 +61,12 @@ final class SubmissionReporter: @unchecked Sendable {
             sessionId: sessionIdProvider()
         )
         let client = self.networkClient
-        Task.detached { await Self.post(networkClient: client, body: body) }
+        Task.detached { await Self.post(networkClient: client, body: body, campaignKey: campaignKey) }
     }
 
     // MARK: - Networking
 
-    private static func post(networkClient: any NetworkClient, body: [String: Any]) async {
+    private static func post(networkClient: any NetworkClient, body: [String: Any], campaignKey: String) async {
         guard let url = endpoint() else { return }
         do {
             let data = try JSONSerialization.data(withJSONObject: body)
@@ -79,7 +80,13 @@ final class SubmissionReporter: @unchecked Sendable {
             )
             let response = try await networkClient.execute(request: request)
             if !response.isSuccessful {
-                log.e("Survey submission post failed (status=\(response.statusCode))")
+                log.e(
+                    "Survey submission post failed (status=\(response.statusCode))",
+                    campaign: campaignKey,
+                    stage: .interaction,
+                    reason: TimelineReason.surveySubmissionFailed,
+                    extras: ["http_status": String(response.statusCode)]
+                )
             }
         } catch {
             log.e("Survey submission post failed", error: error)

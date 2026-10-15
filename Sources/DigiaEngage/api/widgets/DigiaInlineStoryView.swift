@@ -49,6 +49,7 @@ struct DigiaInlineStoryView: View {
                 payload: payload
             )
         }
+        .environment(\.digiaCampaignKey, payload.campaignKey)
     }
 }
 
@@ -463,7 +464,10 @@ final class DigiaStoryPresenter {
 
         guard let presenter = ViewControllerUtil.topViewController() else { return }
 
-        let host = DigiaStoryHostingController(rootView: InlineStoryOverlayContent(state: state))
+        let host = DigiaStoryHostingController(
+            rootView: InlineStoryOverlayContent(state: state)
+                .environment(\.digiaCampaignKey, state.payload.campaignKey)
+        )
         // Opaque black so the full-bleed media has no seam during the fade.
         host.view.backgroundColor = .black
         host.modalPresentationStyle = .overFullScreen
@@ -854,6 +858,7 @@ private struct InlineStoryOverlayContent: View {
             await SDKInstance.shared.executeActionFlow(
                 actions,
                 variables: variables,
+                campaignKey: state.payload.campaignKey,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: { SDKInstance.shared.controller.dismissStoryOverlay() }
                 )
@@ -938,6 +943,7 @@ struct InlineStoryVideoView: View {
     var onFailed: (@MainActor @Sendable () -> Void)?
 
     @StateObject private var playback: StoryVideoPlayback
+    @Environment(\.digiaCampaignKey) private var campaignKey
 
     init(
         item: StoryItemConfig,
@@ -984,6 +990,7 @@ struct InlineStoryVideoView: View {
     }
 
     private func updatePlayback() {
+        playback.campaignKey = campaignKey
         playback.update(
             state: StoryVideoPlaybackState(
                 demand: .playback(.fullScreen),

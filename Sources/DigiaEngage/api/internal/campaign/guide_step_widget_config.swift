@@ -46,7 +46,7 @@ struct GuideStepWidgetConfig: Equatable {
         _ json: [String: Any],
         displayStyle: String? = nil,
         designTokens: DesignTokenCatalog = .empty
-    ) -> GuideStepWidgetConfig {
+    ) throws -> GuideStepWidgetConfig {
         let isSpotlight = displayStyle == "spotlight"
             || json.object("target")?.string("type") == "anchorless"
             || json["calloutPosition"] != nil
@@ -83,7 +83,9 @@ struct GuideStepWidgetConfig: Equatable {
             cutout: cutout
         )
         let canvas = layoutMode == "canvas"
-            ? json.object("canvas").flatMap { try? CampaignCanvasParser(designTokens: designTokens).parse($0) }
+            ? try json.object("canvas").flatMap { raw in
+                try parseOrNil { try CampaignCanvasParser(designTokens: designTokens).parse(raw) }
+            }
             : nil
         return GuideStepWidgetConfig(
             bubble: bubble,

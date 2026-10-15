@@ -12,7 +12,7 @@ final class UserDefaultsLocalStorage: LocalStorage, @unchecked Sendable {
     }
 
     func string(forKey key: String) -> String? {
-        defaults.string(forKey: key)
+        defaults.object(forKey: key) as? String
     }
 
     func set(_ value: String?, forKey key: String) {

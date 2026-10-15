@@ -114,7 +114,7 @@ struct DigiaEngageTests {
     @Test("deliver routes inline carousel campaigns into the inline controller")
     func routesInlineCarouselCampaignsIntoInlineController() throws {
         SDKInstance.shared.resetForTesting()
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "carousel-id",
             "campaignKey": "carousel-campaign",
             "campaignType": "inline",
@@ -135,7 +135,7 @@ struct DigiaEngageTests {
 
     @Test("campaign target screens are parsed")
     func parsesCampaignTargetScreens() throws {
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "targeted-id",
             "campaignKey": "help-inline",
             "campaignType": "inline",
@@ -153,7 +153,7 @@ struct DigiaEngageTests {
     @Test("campaign screen matching is case sensitive")
     func rejectsCampaignOnNonTargetedScreen() throws {
         SDKInstance.shared.resetForTesting()
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "targeted-id",
             "campaignKey": "help-inline",
             "campaignType": "inline",
@@ -347,7 +347,7 @@ struct DigiaEngageTests {
     func removingAnchorDismissesGuide() async throws {
         SDKInstance.shared.resetForTesting()
         Digia.register(TestPlugin(id: "plugin"))
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "anchor-guide-id",
             "campaignKey": "anchor-guide",
             "campaignType": "guide",
@@ -797,7 +797,7 @@ struct DigiaEngageTests {
     func routesInlineStoryCampaignsIntoInlineController() throws {
         SDKInstance.shared.resetForTesting()
 
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "story-campaign-id",
             "campaignKey": "story-campaign",
             "campaignType": "inline",
@@ -826,7 +826,7 @@ struct DigiaEngageTests {
     @Test("the owner cancelling a presentation clears matching inline payloads")
     func invalidationClearsMatchingPayloads() throws {
         SDKInstance.shared.resetForTesting()
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "carousel-id",
             "campaignKey": "carousel-campaign",
             "campaignType": "inline",
@@ -856,7 +856,7 @@ struct DigiaEngageTests {
 
     @Test("campaign parser accepts Android templateConfig survey key")
     func campaignParserAcceptsAndroidTemplateTypeSurveyKey() throws {
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "campaign-123",
             "campaignKey": "welcome_survey",
             "campaignType": "survey",
@@ -872,7 +872,7 @@ struct DigiaEngageTests {
     @Test("campaign key payload routes through fetched survey campaign")
     func campaignKeyPayloadRoutesThroughFetchedSurveyCampaign() {
         SDKInstance.shared.resetForTesting()
-        let campaign = try! #require(CampaignModel.fromJson([
+        let campaign = try! #require(try CampaignModel.fromJson([
             "id": "campaign-123",
             "campaignKey": "welcome_survey",
             "campaignType": "survey",
@@ -944,7 +944,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.resetForTesting()
         defer { SDKInstance.shared.resetForTesting() }
         Digia.register(TestPlugin(id: "plugin"))
-        let config = try #require(NudgeConfig.fromJson([
+        let config = try #require(try NudgeConfig.fromJson([
             "container": ["displayType": displayType],
             "layout": [
                 "type": "digia/column", "props": [:],
@@ -975,7 +975,7 @@ struct DigiaEngageTests {
         }
         #expect(recorder.clickedElementIds == ["cta_primary"])
 
-        let canvasConfig = try #require(NudgeConfig.fromJson([
+        let canvasConfig = try #require(try NudgeConfig.fromJson([
             "container": ["displayType": displayType],
             "layoutMode": "canvas",
             "canvas": ["version": 2, "canvasWidth": 360, "canvasHeight": 180, "children": []],
@@ -1161,7 +1161,7 @@ struct EngageActionParserTests {
 }
 
 private func targetedInlineCampaign() -> CampaignModel? {
-    CampaignModel.fromJson([
+    try? CampaignModel.fromJson([
         "id": "targeted-id",
         "campaignKey": "help-inline",
         "campaignType": "inline",
@@ -1182,7 +1182,7 @@ private func nudgeCampaign(
     key: String,
     targetScreenNames: [String] = []
 ) -> CampaignModel? {
-    CampaignModel.fromJson([
+    try? CampaignModel.fromJson([
         "id": "\(key)-id",
         "campaignKey": key,
         "campaignType": "nudge",
@@ -1199,7 +1199,7 @@ private func nudgeCampaign(
 }
 
 private func targetedGuideCampaign() -> CampaignModel? {
-    CampaignModel.fromJson([
+    try? CampaignModel.fromJson([
         "id": "help-guide-id",
         "campaignKey": "help-guide",
         "campaignType": "guide",
@@ -1217,7 +1217,7 @@ private func targetedGuideCampaign() -> CampaignModel? {
 }
 
 private func anchorlessGuideCampaign() -> CampaignModel? {
-    CampaignModel.fromJson([
+    try? CampaignModel.fromJson([
         "id": "anchorless-guide-id",
         "campaignKey": "anchorless-guide",
         "campaignType": "guide",
@@ -1246,7 +1246,7 @@ private func anchorlessGuideCampaign() -> CampaignModel? {
 }
 
 private func targetedSurveyCampaign() -> CampaignModel? {
-    CampaignModel.fromJson([
+    try? CampaignModel.fromJson([
         "id": "help-survey-id",
         "campaignKey": "help-survey",
         "campaignType": "survey",

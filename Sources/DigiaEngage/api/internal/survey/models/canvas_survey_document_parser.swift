@@ -13,7 +13,7 @@ struct CanvasSurveyDocumentParser {
     func parse(
         _ document: [String: JSONValue]?,
         fallbackDesignWidth: CGFloat
-    ) -> ParsedCanvasSurveyDocument {
+    ) throws -> ParsedCanvasSurveyDocument {
         guard let canvasJson = Self.documentCanvas(document) else {
             return empty(fallbackDesignWidth: fallbackDesignWidth)
         }
@@ -22,7 +22,7 @@ struct CanvasSurveyDocumentParser {
         normalized["canvasWidth"] = normalized["canvasWidth"] ?? fallbackDesignWidth
         normalized["canvasHeight"] = normalized["canvasHeight"] ?? 420
         normalized["children"] = normalized["children"] ?? []
-        guard let canvas = try? CampaignCanvasParser(designTokens: designTokens).parse(normalized) else {
+        guard let canvas = try parseOrNil({ try CampaignCanvasParser(designTokens: designTokens).parse(normalized) }) else {
             return empty(fallbackDesignWidth: fallbackDesignWidth)
         }
         let hosts = self.hosts(canvasJson, canvasWidth: canvas.width, canvasHeight: canvas.height)

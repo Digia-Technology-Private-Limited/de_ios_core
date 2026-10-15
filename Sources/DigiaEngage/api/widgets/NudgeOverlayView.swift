@@ -30,6 +30,7 @@ func performCanvasAction(
         await SDKInstance.shared.executeActionFlow(
             request.actions,
             variables: variables,
+            campaignKey: SDKInstance.shared.controller.activeNudge?.payload.campaignKey,
             localActionExecutor: LocalActionExecutor(dismiss: dismiss)
         )
     }
@@ -209,6 +210,7 @@ struct NudgeFullScreenView: View {
         }
         .ignoresSafeArea()
         .environment(\.digiaVariables, presentation.variables)
+        .environment(\.digiaCampaignKey, presentation.payload.campaignKey)
         .onAppear { SDKInstance.shared.reportNudgeImpression() }
     }
 
@@ -297,6 +299,7 @@ struct NudgeSheetView: View {
                         Spacer(minLength: 0)
                     }
                     .environment(\.digiaVariables, presentation.variables)
+                    .environment(\.digiaCampaignKey, presentation.payload.campaignKey)
                 } else {
                     renderedContent.padding(surface.padding)
                 }
@@ -346,6 +349,7 @@ struct NudgeSheetView: View {
     private var renderedContent: some View {
         NudgeColumnContent(column: presentation.config.layout, onDismiss: dismissNudgeFromCta)
             .environment(\.digiaVariables, presentation.variables)
+            .environment(\.digiaCampaignKey, presentation.payload.campaignKey)
     }
 }
 
@@ -487,6 +491,7 @@ struct NudgeDialogContainer: View {
         .clipShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .contentShape(RoundedRectangle(cornerRadius: surface.cornerRadius))
         .environment(\.digiaVariables, presentation.variables)
+        .environment(\.digiaCampaignKey, presentation.payload.campaignKey)
         .anchorPreference(key: NudgeCloseContainerBoundsKey.self, value: .bounds) {
             surface.closeButton.placement?.mode == .outside ? $0 : nil
         }
@@ -523,6 +528,7 @@ struct NudgeDialogContainer: View {
     private var renderedContent: some View {
         NudgeColumnContent(column: presentation.config.layout, onDismiss: dismissNudgeFromCta)
             .environment(\.digiaVariables, presentation.variables)
+            .environment(\.digiaCampaignKey, presentation.payload.campaignKey)
     }
 }
 

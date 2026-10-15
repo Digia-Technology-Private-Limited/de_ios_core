@@ -213,6 +213,7 @@ struct CanvasSurveyPanel: View {
             await SDKInstance.shared.executeActionFlow(
                 request.actions,
                 variables: variables,
+                campaignKey: SDKInstance.shared.surveyOrchestrator.state?.payload.campaignKey,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: onClose,
                     next: primary,

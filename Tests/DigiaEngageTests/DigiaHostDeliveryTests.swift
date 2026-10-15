@@ -111,7 +111,7 @@ private func hostNudgeCampaign(
     key: String,
     targetScreenNames: [String] = []
 ) -> CampaignModel? {
-    CampaignModel.fromJson([
+    try? CampaignModel.fromJson([
         "id": "\(key)-id",
         "campaignKey": key,
         "campaignType": "nudge",
@@ -124,7 +124,7 @@ private func hostNudgeCampaign(
 }
 
 private func hostSurveyCampaign(key: String) -> CampaignModel? {
-    CampaignModel.fromJson([
+    try? CampaignModel.fromJson([
         "id": "\(key)-id",
         "campaignKey": key,
         "campaignType": "survey",

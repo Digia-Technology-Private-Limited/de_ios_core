@@ -347,6 +347,7 @@ private struct FloaterStorySessionView: View {
             alignment: .topLeading
         )
         .environment(\.digiaVariables, state.variableContext)
+        .environment(\.digiaCampaignKey, state.payload.campaignKey)
         .environment(\.canvasVideoUsesStoryPlayback, true)
     }
 
@@ -375,6 +376,7 @@ private struct FloaterStorySessionView: View {
                 safeAreaInsets: safeAreaInsets
             )
             .environment(\.digiaVariables, state.variableContext)
+            .environment(\.digiaCampaignKey, state.payload.campaignKey)
             // Two vocabularies, and the split is by subject rather than by campaign type.
             //
             // `FloaterEvent` describes the *window's* life — it appeared, it was tapped, it was

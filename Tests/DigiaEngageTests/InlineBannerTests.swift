@@ -52,7 +52,7 @@ extension DigiaEngageTests {
         @Test("campaign parsing and routing use the banner subtype")
         func parsesAndRoutesBannerCampaign() throws {
             SDKInstance.shared.resetForTesting()
-            let campaign = try #require(CampaignModel.fromJson([
+            let campaign = try #require(try CampaignModel.fromJson([
                 "id": "banner-id",
                 "campaignKey": "banner-campaign",
                 "campaignType": "inline",

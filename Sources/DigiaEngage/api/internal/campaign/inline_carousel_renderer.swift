@@ -4,14 +4,22 @@ internal import SDWebImageSwiftUI
 
 @MainActor
 enum InlineCarouselRenderer {
-    static func makeView(_ config: InlineCarouselConfig, payload: CEPTriggerPayload) -> AnyView {
-        AnyView(InlineCarouselView(config: config, payload: payload))
+    static func makeView(
+        _ config: InlineCarouselConfig,
+        payload: CEPTriggerPayload,
+        stepGate: CarouselStepGate
+    ) -> AnyView {
+        AnyView(
+            InlineCarouselView(config: config, payload: payload, stepGate: stepGate)
+                .environment(\.digiaCampaignKey, payload.campaignKey)
+        )
     }
 }
 
 private struct InlineCarouselView: View {
     let config: InlineCarouselConfig
     let payload: CEPTriggerPayload
+    let stepGate: CarouselStepGate
     /// Index of the currently-settled page. `nil` only before the first layout pass.
     @State private var scrollPosition: Int?
     @State private var autoPlayTimer: Timer? = nil
@@ -122,13 +130,7 @@ private struct InlineCarouselView: View {
 
                     let auto = autoAdvanced
                     autoAdvanced = false
-                    // 1-based item position, matching Android's reportCarouselStepViewed.
-                    SDKInstance.shared.reportCarouselStepViewed(
-                        payload: payload,
-                        itemIndex: realIndex(idx) + 1,
-                        itemTotal: items.count,
-                        auto: auto
-                    )
+                    stepGate.onStep(index: realIndex(idx), total: items.count, auto: auto)
 
                     // Landed on a boundary clone: silently jump to its real counterpart
                     // (no animation, no analytics) one runloop tick later — mutating
@@ -188,6 +190,7 @@ private struct InlineCarouselView: View {
             await SDKInstance.shared.executeActionFlow(
                 actions,
                 variables: variables,
+                campaignKey: payload.campaignKey,
                 localActionExecutor: LocalActionExecutor()
             )
         }
@@ -219,6 +222,7 @@ private struct InlineCarouselItemImage: View {
     let width: CGFloat
     let height: CGFloat
     let cornerRadius: CGFloat
+    @Environment(\.digiaCampaignKey) private var campaignKey
 
     init(item: CarouselItem, width: CGFloat, height: CGFloat, cornerRadius: CGFloat) {
         DigiaImagePipeline.configureIfNeeded()
@@ -257,6 +261,7 @@ private struct InlineCarouselItemImage: View {
                 contentMode: placeholderContentMode
             )
         }
+        .onFailure { reportMediaLoadFailed(.image, cause: mediaFailureCause(imageError: $0), campaignKey: campaignKey) }
     }
 }
 

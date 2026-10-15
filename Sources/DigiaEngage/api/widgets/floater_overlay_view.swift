@@ -841,6 +841,7 @@ private struct FloaterExpandedContentView: View {
             .padding(.bottom, bottomInset)
         }
         .environment(\.digiaVariables, state.variableContext)
+        .environment(\.digiaCampaignKey, state.payload.campaignKey)
     }
 
     /// Mirrors Android's `NudgeSurface(displayType = DIALOG, minHorizontalMargin = 0f)`
@@ -873,6 +874,7 @@ private func performFloaterCanvasAction(
     Task {
         await SDKInstance.shared.executeActionFlow(
             request.actions, variables: state.variableContext,
+            campaignKey: state.payload.campaignKey,
             localActionExecutor: LocalActionExecutor(dismiss: {
                 SDKInstance.shared.dismissFloater(.userClose)
             })

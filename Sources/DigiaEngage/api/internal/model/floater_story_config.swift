@@ -182,10 +182,10 @@ struct FloaterStoryConfig: Equatable {
     /// in it is an invisible tap target, and a window that opens nothing is a decoration.
     static func fromJson(
         _ templateConfig: [String: Any], designTokens: DesignTokenCatalog = .empty
-    ) -> FloaterStoryConfig? {
+    ) throws -> FloaterStoryConfig? {
         guard let canvasJSON = templateConfig.object("canvas") else { return nil }
         let parser = CampaignCanvasParser(designTokens: designTokens)
-        guard let canvas = try? parser.parse(canvasJSON) else { return nil }
+        guard let canvas = try parseOrNil({ try parser.parse(canvasJSON) }) else { return nil }
         guard let story = parser.parseStandaloneStory(templateConfig.object("story")) else {
             return nil
         }

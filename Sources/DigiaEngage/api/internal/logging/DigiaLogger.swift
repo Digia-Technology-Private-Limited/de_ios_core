@@ -130,15 +130,22 @@ public struct DigiaLogger: Sendable {
         ScreenSink.shared,
     ]
 
+    /// Guards ``sinks``: tests and hosts register sinks while other threads emit.
+    private static let sinksLock = NSLock()
+
     /// Adds a sink to the registry. Idempotent, so a repeated init cannot end
     /// up emitting a record twice into the same destination.
     static func registerSink(_ sink: DiagnosticSink) {
+        sinksLock.lock()
+        defer { sinksLock.unlock() }
         guard !sinks.contains(where: { $0 === sink }) else { return }
         sinks.append(sink)
     }
 
     /// Removes a sink. A no-op if it was never registered.
     static func unregisterSink(_ sink: DiagnosticSink) {
+        sinksLock.lock()
+        defer { sinksLock.unlock() }
         sinks.removeAll { $0 === sink }
     }
 
@@ -270,7 +277,10 @@ public struct DigiaLogger: Sendable {
             extras: TimelineRecord.boundExtras(extras),
             cause: error.map { String(describing: $0) }
         )
-        for sink in Self.sinks {
+        Self.sinksLock.lock()
+        let sinks = Self.sinks
+        Self.sinksLock.unlock()
+        for sink in sinks {
             // A sink can never break the app that hosts us. Nothing is logged
             // about the failure: this runs on render paths, and reporting a
             // sink failure through the logger would re-enter the very loop that

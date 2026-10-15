@@ -28,7 +28,7 @@ struct NudgeVideoFitTests {
             "url": "https://cdn.example.com/video.mp4"
         ]
         props["boxFit"] = boxFit
-        let config = try #require(NudgeConfig.fromJson([
+        let config = try #require(try NudgeConfig.fromJson([
             "layout": [
                 "type": "digia/column",
                 "children": [

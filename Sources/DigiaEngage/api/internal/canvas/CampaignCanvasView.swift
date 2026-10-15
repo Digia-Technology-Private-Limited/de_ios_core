@@ -1,11 +1,11 @@
 import AVFoundation
 import AVKit
+internal import Lottie
+internal import SDWebImageSwiftUI
 import SwiftUI
 import UIKit
 
-internal import Lottie
-internal import SDWebImageSwiftUI
-
+private let log = DigiaLogger()
 private let maxFloatingCanvasUpscale: CGFloat = 1.15
 internal let canvasTextSpanElementID = "canvas_text_span"
 
@@ -121,14 +121,16 @@ struct CampaignCanvasView: View {
 
     private var designScale: CGFloat {
         let base = (runtimeViewportWidth ?? availableSize.width) / max(designWidth, 1)
-        return surface.isBottomSheet || surface.isFullScreen ? base : min(base, maxFloatingCanvasUpscale)
+        return surface.isBottomSheet || surface.isFullScreen
+            ? base : min(base, maxFloatingCanvasUpscale)
     }
     var fittedScale: CGFloat {
         if surface.isFullScreen {
             // Fill the content viewport uniformly; its centered, clipped parent
             // crops overflow without changing the authored composition.
-            return max(availableSize.width / max(canvas.width, 1),
-                       availableSize.height / max(canvas.height, 1))
+            return max(
+                availableSize.width / max(canvas.width, 1),
+                availableSize.height / max(canvas.height, 1))
         }
         let naturalWidth = max(canvas.width * designScale, 1)
         let naturalHeight = max(canvas.height * designScale, 1)
@@ -139,7 +141,8 @@ struct CampaignCanvasView: View {
     var body: some View {
         CampaignCanvasStage(
             canvas: canvas,
-            authoredCornerRadius: surface.isFullScreen ? 0 : surface.cornerRadius / max(designScale, 0.001),
+            authoredCornerRadius: surface.isFullScreen
+                ? 0 : surface.cornerRadius / max(designScale, 0.001),
             isDark: theme.isDark(colorScheme),
             showBackground: showBackground,
             onAction: onAction
@@ -315,14 +318,15 @@ struct GuideCanvasUnionSurface: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var scale: CGFloat {
-        resolvedScale ?? guideCanvasScale(
-            canvas: canvas,
-            designWidth: designWidth,
-            viewportWidth: viewportWidth,
-            availableSize: availableSize,
-            pointerDirection: pointerDirection,
-            pointerSize: pointerSize
-        )
+        resolvedScale
+            ?? guideCanvasScale(
+                canvas: canvas,
+                designWidth: designWidth,
+                viewportWidth: viewportWidth,
+                availableSize: availableSize,
+                pointerDirection: pointerDirection,
+                pointerSize: pointerSize
+            )
     }
 
     private var bodySize: CGSize {
@@ -602,7 +606,8 @@ struct CampaignCanvasStage: View {
                             }
                         }
                         .frame(
-                            width: child.rect.width, height: child.rect.height, alignment: .topLeading
+                            width: child.rect.width, height: child.rect.height,
+                            alignment: .topLeading
                         )
                         .modifier(CanvasChildBoundsModifier(clips: child.clipsToAuthoredRect))
                         .allowsHitTesting(child.isHitTestable)
@@ -650,7 +655,9 @@ private struct CanvasChildView: View {
             CampaignCanvasRendererRegistry.render(widget, isDark: isDark, onAction: onAction)
         case .tapRegion(let id, _, let actions, let isPrimary):
             Color.clear.contentShape(Rectangle()).onTapGesture {
-                onAction(canvasTapRegionActionRequest(actions: actions, elementId: id, isPrimary: isPrimary))
+                onAction(
+                    canvasTapRegionActionRequest(
+                        actions: actions, elementId: id, isPrimary: isPrimary))
             }
         }
     }
@@ -808,7 +815,10 @@ enum CampaignCanvasRendererRegistry {
         case .timer: key = "timer"
         }
         guard let renderer = renderers[key] else {
-            preconditionFailure("Missing Campaign Canvas renderer for \(key)")
+            let message = "Campaign Canvas renderer missing (widget=\(key))"
+            log.e(message)
+            assertionFailure(message)
+            return AnyView(EmptyView())
         }
         return renderer(widget, isDark, onAction)
     }
@@ -843,34 +853,41 @@ private struct CanvasTimerRenderer: View {
 
     var body: some View {
         if case .timer(
-            _, let preset, _, let units, let labels, let labelSpans, let textWidgets, let sharedStyle, let overrides, let layout
+            _, let preset, _, let units, let labels, let labelSpans, let textWidgets,
+            let sharedStyle, let overrides, let layout
         ) = widget, let remainingSeconds {
             let values = timerUnitValues(remainingSeconds: remainingSeconds, visibility: units)
             GeometryReader { geometry in
-                let unitCount = max(1, CampaignTimerUnit.allCases.filter { units[$0] != .hide }.count)
-                let boxWidth = max(0, (geometry.size.width - CGFloat(unitCount - 1) * 4) / CGFloat(unitCount))
+                let unitCount = max(
+                    1, CampaignTimerUnit.allCases.filter { units[$0] != .hide }.count)
+                let boxWidth = max(
+                    0, (geometry.size.width - CGFloat(unitCount - 1) * 4) / CGFloat(unitCount))
                 if preset == "text" {
-                    CampaignCanvasTextView(block: countdownText(
-                        values: values, style: sharedStyle, layout: layout
-                    ), isDark: isDark, onAction: { _ in }, singleLine: true)
+                    CampaignCanvasTextView(
+                        block: countdownText(
+                            values: values, style: sharedStyle, layout: layout
+                        ), isDark: isDark, onAction: { _ in }, singleLine: true
+                    )
                     .frame(width: geometry.size.width, height: geometry.size.height)
                 } else if layout.isCustomized {
-                    containerUnits(values: values, layout: layout, fallback: CGSize(width: boxWidth, height: geometry.size.height))
+                    containerUnits(
+                        values: values, layout: layout,
+                        fallback: CGSize(width: boxWidth, height: geometry.size.height))
                 } else {
-                HStack(spacing: 4) {
-                    ForEach(Array(values.enumerated()), id: \.element.0) { _, value in
-                        unitView(
-                            value: value.1,
-                            label: labels[value.0] ?? "",
-                            labelSpans: labelSpans[value.0],
-                            textWidgets: textWidgets[value.0],
-                            style: overrides[value.0] ?? sharedStyle,
-                            boxed: true
-                        )
-                        .frame(width: boxWidth)
+                    HStack(spacing: 4) {
+                        ForEach(Array(values.enumerated()), id: \.element.0) { _, value in
+                            unitView(
+                                value: value.1,
+                                label: labels[value.0] ?? "",
+                                labelSpans: labelSpans[value.0],
+                                textWidgets: textWidgets[value.0],
+                                style: overrides[value.0] ?? sharedStyle,
+                                boxed: true
+                            )
+                            .frame(width: boxWidth)
+                        }
                     }
-                }
-                .frame(width: geometry.size.width, height: geometry.size.height)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -899,20 +916,37 @@ private struct CanvasTimerRenderer: View {
         contentAlignment: CampaignCanvasTimerContentAlignment? = nil,
         usesUnitLayout: Bool = false
     ) -> some View {
-        let rawDigits = textWidgets?["digits"] ?? .text(
-            box: .none,
-            block: timerTextBlock([style.digitTextStyle ?? CampaignCanvasTextSpan(
-                text: "", typography: nil, color: nil, highlightColor: nil, italic: false,
-                decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
-            )], fallback: style.digitTypography, fallbackSize: 16, color: style.digitColor), shadow: nil
-        )
-        let rawLabels = textWidgets?["label"] ?? .text(
-            box: .none,
-            block: timerTextBlock(labelSpans ?? [CampaignCanvasTextSpan(
-                text: label, typography: nil, color: nil, highlightColor: nil, italic: false,
-                decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
-            )], fallback: style.labelTypography, fallbackSize: 10, color: style.labelColor), shadow: nil
-        )
+        let rawDigits =
+            textWidgets?["digits"]
+            ?? .text(
+                box: .none,
+                block: timerTextBlock(
+                    [
+                        style.digitTextStyle
+                            ?? CampaignCanvasTextSpan(
+                                text: "", typography: nil, color: nil, highlightColor: nil,
+                                italic: false,
+                                decoration: .none, decorationColor: nil, decorationThickness: nil,
+                                actions: []
+                            )
+                    ], fallback: style.digitTypography, fallbackSize: 16, color: style.digitColor),
+                shadow: nil
+            )
+        let rawLabels =
+            textWidgets?["label"]
+            ?? .text(
+                box: .none,
+                block: timerTextBlock(
+                    labelSpans ?? [
+                        CampaignCanvasTextSpan(
+                            text: label, typography: nil, color: nil, highlightColor: nil,
+                            italic: false,
+                            decoration: .none, decorationColor: nil, decorationThickness: nil,
+                            actions: []
+                        )
+                    ], fallback: style.labelTypography, fallbackSize: 10, color: style.labelColor),
+                shadow: nil
+            )
         let digits = alignedTimerText(rawDigits, alignment: contentAlignment)
         let labels = alignedTimerText(rawLabels, alignment: contentAlignment)
         let showLabel = !usesUnitLayout || hasLabel(textWidgets, fallback: label)
@@ -926,11 +960,16 @@ private struct CanvasTimerRenderer: View {
                 }
             }
         }
-        .padding(EdgeInsets(top: padding.top, leading: padding.left, bottom: padding.bottom, trailing: padding.right))
+        .padding(
+            EdgeInsets(
+                top: padding.top, leading: padding.left, bottom: padding.bottom,
+                trailing: padding.right))
 
         if case .container(let fill, let radius, let border, let shadow)? = container {
             ZStack {
-                CanvasContainerRenderer(fill: fill, cornerRadius: radius, border: border, shadow: shadow, isDark: isDark)
+                CanvasContainerRenderer(
+                    fill: fill, cornerRadius: radius, border: border, shadow: shadow, isDark: isDark
+                )
                 content.clipShape(CampaignCanvasRoundedShape(radius: radius))
             }
         } else if boxed {
@@ -941,7 +980,9 @@ private struct CanvasTimerRenderer: View {
                 ),
                 isDark: isDark
             ) { content }
-        } else { content }
+        } else {
+            content
+        }
     }
 
     private func hasLabel(_ texts: [String: CampaignCanvasWidget]?, fallback: String) -> Bool {
@@ -949,48 +990,87 @@ private struct CanvasTimerRenderer: View {
         return !fallback.isEmpty
     }
 
-    private func alignedTimerText(_ widget: CampaignCanvasWidget, alignment: CampaignCanvasTimerContentAlignment?) -> CampaignCanvasWidget {
-        guard let alignment, case .text(let box, let block, let shadow) = widget else { return widget }
-        return .text(box: box, block: CampaignCanvasTextBlock(
-            horizontalAlign: alignment.horizontal, textAlign: alignment.horizontal, verticalAlign: alignment.vertical,
-            maxLines: block.maxLines, overflow: block.overflow, sizingMode: block.sizingMode, spans: block.spans
-        ), shadow: shadow)
+    private func alignedTimerText(
+        _ widget: CampaignCanvasWidget, alignment: CampaignCanvasTimerContentAlignment?
+    ) -> CampaignCanvasWidget {
+        guard let alignment, case .text(let box, let block, let shadow) = widget else {
+            return widget
+        }
+        return .text(
+            box: box,
+            block: CampaignCanvasTextBlock(
+                horizontalAlign: alignment.horizontal, textAlign: alignment.horizontal,
+                verticalAlign: alignment.vertical,
+                maxLines: block.maxLines, overflow: block.overflow, sizingMode: block.sizingMode,
+                spans: block.spans
+            ), shadow: shadow)
     }
 
     @ViewBuilder
-    private func containerUnits(values: [(CampaignTimerUnit, Int64)], layout: CampaignCanvasTimerLayout, fallback: CGSize) -> some View {
-        if case .timer(_, let preset, _, _, let labels, let spans, let texts, let shared, let overrides, _) = widget {
+    private func containerUnits(
+        values: [(CampaignTimerUnit, Int64)], layout: CampaignCanvasTimerLayout, fallback: CGSize
+    ) -> some View {
+        if case .timer(
+            _, let preset, _, _, let labels, let spans, let texts, let shared, let overrides, _) =
+            widget
+        {
             let sizes = values.map { layout.sizes[$0.0] ?? fallback }
             let height = sizes.map(\.height).max() ?? 0
             let gaps = values.dropLast().map { layout.gaps[$0.0] ?? 4 }
             let width = sizes.reduce(0) { $0 + $1.width } + gaps.reduce(0, +)
-            let alignment: Alignment = switch layout.alignment { case .left: .leading; case .right: .trailing; case .center: .center }
+            let alignment: Alignment =
+                switch layout.alignment {
+                case .left: .leading
+                case .right: .trailing
+                case .center: .center
+                }
             ZStack(alignment: .topLeading) {
                 ForEach(Array(values.enumerated()), id: \.element.0) { index, value in
                     let unit = value.0
                     let size = sizes[index]
-                    let x = sizes.prefix(index).reduce(0) { $0 + $1.width } + gaps.prefix(index).reduce(0, +)
+                    let x =
+                        sizes.prefix(index).reduce(0) { $0 + $1.width }
+                        + gaps.prefix(index).reduce(0, +)
                     let top = (height - size.height) / 2
                     let style = overrides[unit] ?? shared
-                    unitView(value: value.1, label: labels[unit] ?? "", labelSpans: spans[unit],
+                    unitView(
+                        value: value.1, label: labels[unit] ?? "", labelSpans: spans[unit],
                         textWidgets: texts[unit], style: style, boxed: preset == "unitBoxes",
-                        container: layout.containers[unit], padding: layout.padding[unit], contentAlignment: layout.contentAlignment[unit], usesUnitLayout: true)
-                        .frame(width: size.width, height: size.height).offset(x: x, y: top)
+                        container: layout.containers[unit], padding: layout.padding[unit],
+                        contentAlignment: layout.contentAlignment[unit], usesUnitLayout: true
+                    )
+                    .frame(width: size.width, height: size.height).offset(x: x, y: top)
                     if index < values.count - 1 && (layout.separatorEnabled ?? (preset == "text")) {
-                        let padding = layout.padding[unit] ?? CampaignCanvasEdgeInsets(top: 2, right: 4, bottom: 2, left: 4)
+                        let padding =
+                            layout.padding[unit]
+                            ?? CampaignCanvasEdgeInsets(top: 2, right: 4, bottom: 2, left: 4)
                         let contentHeight = max(0, size.height - padding.top - padding.bottom)
-                        let digitHeight = hasLabel(texts[unit], fallback: labels[unit] ?? "") ? contentHeight * 2 / 3 : contentHeight
+                        let digitHeight =
+                            hasLabel(texts[unit], fallback: labels[unit] ?? "")
+                            ? contentHeight * 2 / 3 : contentHeight
                         let digitSpan: CampaignCanvasTextSpan? = {
-                            guard case .text(_, let block, _)? = texts[unit]?["digits"] else { return nil }
+                            guard case .text(_, let block, _)? = texts[unit]?["digits"] else {
+                                return nil
+                            }
                             return block.spans.first
                         }()
-                        timerText(.text(box: .none, block: timerTextBlock([
-                            CampaignCanvasTextSpan(text: ":", typography: nil, color: nil, highlightColor: nil,
-                                italic: false, decoration: .none, decorationColor: nil, decorationThickness: nil, actions: [])
-                        ], fallback: digitSpan?.typography ?? style.digitTypography, fallbackSize: 16,
-                            color: layout.separatorColor ?? digitSpan?.color ?? style.digitTextStyle?.color ?? style.digitColor), shadow: nil))
-                            .frame(width: gaps[index], height: digitHeight).clipped()
-                            .offset(x: x + size.width, y: top + padding.top)
+                        timerText(
+                            .text(
+                                box: .none,
+                                block: timerTextBlock(
+                                    [
+                                        CampaignCanvasTextSpan(
+                                            text: ":", typography: nil, color: nil,
+                                            highlightColor: nil,
+                                            italic: false, decoration: .none, decorationColor: nil,
+                                            decorationThickness: nil, actions: [])
+                                    ], fallback: digitSpan?.typography ?? style.digitTypography,
+                                    fallbackSize: 16,
+                                    color: layout.separatorColor ?? digitSpan?.color ?? style
+                                        .digitTextStyle?.color ?? style.digitColor), shadow: nil)
+                        )
+                        .frame(width: gaps[index], height: digitHeight).clipped()
+                        .offset(x: x + size.width, y: top + padding.top)
                     }
                 }
             }
@@ -1002,24 +1082,32 @@ private struct CanvasTimerRenderer: View {
     @ViewBuilder
     private func timerText(_ widget: CampaignCanvasWidget, value: String? = nil) -> some View {
         if case .text(let box, let block, let shadow) = widget {
-            CanvasTextRenderer(box: box, block: timerRuntimeBlock(block, value: value), shadow: shadow, isDark: isDark, onAction: { _ in })
+            CanvasTextRenderer(
+                box: box, block: timerRuntimeBlock(block, value: value), shadow: shadow,
+                isDark: isDark, onAction: { _ in })
         }
     }
 
-    private func timerRuntimeBlock(_ original: CampaignCanvasTextBlock, value: String?) -> CampaignCanvasTextBlock {
+    private func timerRuntimeBlock(_ original: CampaignCanvasTextBlock, value: String?)
+        -> CampaignCanvasTextBlock
+    {
         var block = original
         if let value {
-            let span = block.spans.first ?? CampaignCanvasTextSpan(
-                text: "", typography: nil, color: nil, highlightColor: nil, italic: false,
-                decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
-            )
-            block.spans = [CampaignCanvasTextSpan(
-                text: value, typography: span.typography, color: span.color,
-                highlightColor: span.highlightColor, italic: span.italic,
-                decoration: span.decoration, decorationColor: span.decorationColor,
-                decorationThickness: span.decorationThickness, actions: [],
-                decorationOffset: span.decorationOffset
-            )]
+            let span =
+                block.spans.first
+                ?? CampaignCanvasTextSpan(
+                    text: "", typography: nil, color: nil, highlightColor: nil, italic: false,
+                    decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
+                )
+            block.spans = [
+                CampaignCanvasTextSpan(
+                    text: value, typography: span.typography, color: span.color,
+                    highlightColor: span.highlightColor, italic: span.italic,
+                    decoration: span.decoration, decorationColor: span.decorationColor,
+                    decorationThickness: span.decorationThickness, actions: [],
+                    decorationOffset: span.decorationOffset
+                )
+            ]
         }
         return block
     }
@@ -1030,10 +1118,12 @@ internal func canvasTimerCountdownText(
     style: CampaignCanvasTimerUnitStyle,
     layout: CampaignCanvasTimerLayout
 ) -> CampaignCanvasTextBlock {
-    let base = style.digitTextStyle ?? CampaignCanvasTextSpan(
-        text: "", typography: nil, color: nil, highlightColor: nil, italic: false,
-        decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
-    )
+    let base =
+        style.digitTextStyle
+        ?? CampaignCanvasTextSpan(
+            text: "", typography: nil, color: nil, highlightColor: nil, italic: false,
+            decoration: .none, decorationColor: nil, decorationThickness: nil, actions: []
+        )
     func span(_ text: String, color: CampaignColor?) -> CampaignCanvasTextSpan {
         CampaignCanvasTextSpan(
             text: text, typography: base.typography, color: color,
@@ -1049,7 +1139,8 @@ internal func canvasTimerCountdownText(
         }
         spans.append(span(String(format: "%02lld", value.1), color: base.color))
     }
-    let block = timerTextBlock(spans, fallback: style.digitTypography, fallbackSize: 16, color: style.digitColor)
+    let block = timerTextBlock(
+        spans, fallback: style.digitTypography, fallbackSize: 16, color: style.digitColor)
     return CampaignCanvasTextBlock(
         horizontalAlign: layout.alignment, textAlign: layout.alignment, verticalAlign: .center,
         maxLines: 1, overflow: "clip", sizingMode: "hug", spans: block.spans
@@ -1057,7 +1148,8 @@ internal func canvasTimerCountdownText(
 }
 
 private func timerTextBlock(
-    _ spans: [CampaignCanvasTextSpan], fallback: CampaignTypography?, fallbackSize: CGFloat, color: CampaignColor?
+    _ spans: [CampaignCanvasTextSpan], fallback: CampaignTypography?, fallbackSize: CGFloat,
+    color: CampaignColor?
 ) -> CampaignCanvasTextBlock {
     CampaignCanvasTextBlock(
         horizontalAlign: .center, textAlign: .center, verticalAlign: .center,
@@ -1071,12 +1163,14 @@ private func timerTextBlock(
                     fontFamily: span.typography?.fontFamily ?? fallback?.fontFamily,
                     fontSize: span.typography?.fontSize ?? fallback?.fontSize ?? fallbackSize,
                     fontWeight: span.typography?.fontWeight ?? fallback?.fontWeight,
-                    lineHeight: span.typography?.lineHeight ?? timerLineHeight(inherited, fallbackSize: fallbackSize),
+                    lineHeight: span.typography?.lineHeight
+                        ?? timerLineHeight(inherited, fallbackSize: fallbackSize),
                     letterSpacing: span.typography?.letterSpacing ?? fallback?.letterSpacing
                 ),
                 color: span.color ?? color, highlightColor: span.highlightColor,
                 italic: span.italic, decoration: span.decoration,
-                decorationColor: span.decorationColor, decorationThickness: span.decorationThickness,
+                decorationColor: span.decorationColor,
+                decorationThickness: span.decorationThickness,
                 actions: [], decorationOffset: span.decorationOffset
             )
         }
@@ -1094,7 +1188,7 @@ func timerUnitValues(
     visibility: [CampaignTimerUnit: CampaignTimerUnitVisibility]
 ) -> [(CampaignTimerUnit, Int64)] {
     let factors: [(CampaignTimerUnit, Int64)] = [
-        (.days, 86_400), (.hours, 3_600), (.minutes, 60), (.seconds, 1)
+        (.days, 86_400), (.hours, 3_600), (.minutes, 60), (.seconds, 1),
     ]
     let configured = factors.filter { visibility[$0.0] != .hide }
     guard let smallest = configured.last?.1 else { return [] }
@@ -1347,7 +1441,11 @@ internal struct CanvasRichText: UIViewRepresentable {
     ) -> CGSize? {
         let width = proposal.width ?? UIView.layoutFittingExpandedSize.width
         let fit = uiView.logicalSizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        return CGSize(width: fillWidth ? width : ceil(fit.width), height: centerVertically ? min(ceil(fit.height), proposal.height ?? .greatestFiniteMagnitude) : ceil(fit.height))
+        return CGSize(
+            width: fillWidth ? width : ceil(fit.width),
+            height: centerVertically
+                ? min(ceil(fit.height), proposal.height ?? .greatestFiniteMagnitude)
+                : ceil(fit.height))
     }
 }
 
@@ -1378,8 +1476,12 @@ internal final class CanvasRichTextContainerView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        let verticalOverflow = centerVertically
-            ? max(0, logicalSizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude)).height - bounds.height) / 2
+        let verticalOverflow =
+            centerVertically
+            ? max(
+                0,
+                logicalSizeThatFits(CGSize(width: bounds.width, height: .greatestFiniteMagnitude))
+                    .height - bounds.height) / 2
             : 0
         // Expand only the UIKit drawing surface. The matching text-container
         // insets keep glyph layout unchanged while making room for shadow bleed.
@@ -1387,7 +1489,8 @@ internal final class CanvasRichTextContainerView: UIView {
             x: -drawingOutsets.left,
             y: -drawingOutsets.top - verticalOverflow,
             width: bounds.width + drawingOutsets.left + drawingOutsets.right,
-            height: bounds.height + drawingOutsets.top + drawingOutsets.bottom + verticalOverflow * 2
+            height: bounds.height + drawingOutsets.top + drawingOutsets.bottom + verticalOverflow
+                * 2
         )
     }
 
@@ -1595,7 +1698,12 @@ private struct CanvasButtonRenderer: View {
             )
         }.contentShape(CampaignCanvasRoundedShape(radius: cornerRadius))
     }
-    private var buttonColors: (fill: CampaignCanvasPaint, isFilled: Bool, destructiveColor: UIColor?, foregroundColor: UIColor) {
+    private var buttonColors:
+        (
+            fill: CampaignCanvasPaint, isFilled: Bool, destructiveColor: UIColor?,
+            foregroundColor: UIColor
+        )
+    {
         canvasButtonEffectiveColors(
             style: style,
             isDestructive: isDestructive,
@@ -1733,7 +1841,7 @@ private struct CanvasRemoteLottie: View {
     let autoplay: Bool
     let loop: Bool
     let fit: String
-    @Environment(\.canvasLottieRuntime) private var runtime
+    @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var failed = false
     var body: some View {
         Group {
@@ -1755,27 +1863,12 @@ private struct CanvasRemoteLottie: View {
     }
     private var lottie: LottieView<CanvasLottiePlaceholder> {
         LottieView {
-            do {
-                if let customLoader = runtime.loadSource {
-                    if let source = try await customLoader(url) {
-                        return source
-                    }
-                    failed = true
-                    return nil
-                }
-                if url.pathExtension.lowercased() == "lottie" {
-                    return try await DotLottieFile.loadedFrom(url: url).animationSource
-                }
-                guard let source = await LottieAnimation.loadedFrom(url: url)?.animationSource
-                else {
-                    failed = true
-                    return nil
-                }
-                return source
-            } catch {
+            let loaded = await loadLottieSource(url)
+            if loaded.source == nil {
                 failed = true
-                return nil
+                reportMediaLoadFailed(.lottie, cause: loaded.failureCause, campaignKey: campaignKey)
             }
+            return loaded.source
         } placeholder: {
             CanvasLottiePlaceholder(failed: failed, placeholder: placeholder, fit: fit)
         }
@@ -1808,9 +1901,10 @@ private struct CanvasVideoRenderer: View {
     let isDark: Bool
     @Environment(\.digiaVariables) private var variables
     @Environment(\.canvasVideoUsesStoryPlayback) private var usesStoryPlayback
-    @Environment(\.canvasVideoRuntime) private var runtime
+    @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var player: AVPlayer?
     @State private var observer: NSObjectProtocol?
+    @State private var statusObservation: NSKeyValueObservation?
     private var url: String {
         interpolate(CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark), context: variables)
     }
@@ -1854,6 +1948,14 @@ private struct CanvasVideoRenderer: View {
         let value = runtime.makePlayer(item)
         value.isMuted = muted
         player = value
+        let campaignKey = campaignKey
+        statusObservation = item.observe(\.status) { item, _ in
+            guard item.status == .failed else { return }
+            Task { @MainActor in
+                reportMediaLoadFailed(
+                    .video, cause: mediaFailureCause(playerItem: item), campaignKey: campaignKey)
+            }
+        }
         if loop {
             observer = NotificationCenter.default.addObserver(
                 forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
@@ -1868,6 +1970,7 @@ private struct CanvasVideoRenderer: View {
     private func teardown() {
         if let player { runtime.pause(player) }
         player = nil
+        statusObservation = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
     }
@@ -1904,7 +2007,8 @@ struct CanvasPlayerController: UIViewControllerRepresentable {
         value.videoGravity = gravity
     }
 
-    static func dismantleUIViewController(_ value: AVPlayerViewController, coordinator: Coordinator) {
+    static func dismantleUIViewController(_ value: AVPlayerViewController, coordinator: Coordinator)
+    {
         coordinator.readyObservation?.invalidate()
         coordinator.readyObservation = nil
         value.player = nil
@@ -2134,6 +2238,7 @@ private struct FocalCanvasImage: View {
     var tint: CampaignColor? = nil
     var failureLabel: String? = nil
     @Environment(\.digiaVariables) private var variables
+    @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var failedURL: String?
 
     init(
@@ -2173,7 +2278,12 @@ private struct FocalCanvasImage: View {
                         placeholder: source.placeholder,
                         contentMode: fit == "contain" ? .fit : .fill)
                 }
-                .onFailure { _ in failedURL = resolved }
+                .onFailure { error in
+                    failedURL = resolved
+                    reportMediaLoadFailed(
+                        .image, cause: mediaFailureCause(imageError: error),
+                        campaignKey: campaignKey)
+                }
                 .modifier(CanvasImageFit(fit: fit))
                 .foregroundStyle(
                     tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) } ?? .clear
@@ -2404,7 +2514,9 @@ internal func canvasButtonEffectiveColors(
     applyDestructiveStyling: Bool,
     isDark: Bool,
     outline: CampaignCanvasBorder?
-) -> (fill: CampaignCanvasPaint, isFilled: Bool, destructiveColor: UIColor?, foregroundColor: UIColor) {
+) -> (
+    fill: CampaignCanvasPaint, isFilled: Bool, destructiveColor: UIColor?, foregroundColor: UIColor
+) {
     let isFilled: Bool
     if case .fill = style { isFilled = true } else { isFilled = false }
     let danger = CampaignColor.literal("#FFD92D20")
@@ -2455,6 +2567,3 @@ internal func canvasTapRegionActionRequest(
         isPrimary: isPrimary
     )
 }
-
-
-

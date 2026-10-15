@@ -12,7 +12,7 @@ struct EngageActionExecutorTests {
         let executor = HostActionExecutor(openURL: { fallbacks.append($0) })
         executor.configure(DigiaActionHandlers(deepLink: { handled.append($0) }))
 
-        try executor.execute(.openDeeplink("medihubrn://cart"))
+        try executor.execute(.openDeeplink("medihubrn://cart"), campaignKey: nil)
 
         #expect(handled == ["medihubrn://cart"])
         #expect(fallbacks.isEmpty)
@@ -28,7 +28,7 @@ struct EngageActionExecutorTests {
             return true
         }
 
-        try executor.execute(.openUrl("https://digia.tech"))
+        try executor.execute(.openUrl("https://digia.tech"), campaignKey: nil)
 
         #expect(legacy == ["open_url:https://digia.tech"])
         #expect(fallbacks.isEmpty)
@@ -45,7 +45,7 @@ struct EngageActionExecutorTests {
         }
         executor.configure(DigiaActionHandlers(deepLink: { handled.append($0) }))
 
-        try executor.execute(.openDeeplink("medihubrn://cart"))
+        try executor.execute(.openDeeplink("medihubrn://cart"), campaignKey: nil)
 
         #expect(handled == ["medihubrn://cart"])
         #expect(legacyCalls == 0)
@@ -57,10 +57,10 @@ struct EngageActionExecutorTests {
         var fallbacks: [String] = []
         let executor = HostActionExecutor(openURL: { fallbacks.append($0) })
         executor.configure(DigiaActionHandlers(openURL: { handled.append($0) }))
-        try executor.execute(.openUrl("https://digia.tech/first"))
+        try executor.execute(.openUrl("https://digia.tech/first"), campaignKey: nil)
 
         executor.setOpenURLHandler(nil)
-        try executor.execute(.openUrl("https://digia.tech/second"))
+        try executor.execute(.openUrl("https://digia.tech/second"), campaignKey: nil)
 
         #expect(handled == ["https://digia.tech/first"])
         #expect(fallbacks == ["https://digia.tech/second"])
@@ -71,7 +71,7 @@ struct EngageActionExecutorTests {
         var fallbacks: [String] = []
         let executor = HostActionExecutor(openURL: { fallbacks.append($0) })
 
-        try executor.execute(.customKV(["screen": "cart"]))
+        try executor.execute(.customKV(["screen": "cart"]), campaignKey: nil)
 
         #expect(fallbacks.isEmpty)
     }
@@ -88,9 +88,9 @@ struct EngageActionExecutorTests {
         ))
 
         executor.clearHandlers()
-        try executor.execute(.customKV(["screen": "cart"]))
-        try executor.execute(.openDeeplink("medihubrn://cart"))
-        try executor.execute(.openUrl("https://digia.tech"))
+        try executor.execute(.customKV(["screen": "cart"]), campaignKey: nil)
+        try executor.execute(.openDeeplink("medihubrn://cart"), campaignKey: nil)
+        try executor.execute(.openUrl("https://digia.tech"), campaignKey: nil)
 
         #expect(handled.isEmpty)
         #expect(fallbacks == ["medihubrn://cart", "https://digia.tech"])
@@ -196,6 +196,7 @@ struct EngageActionExecutorTests {
         await executor.executeActionFlow(
             [.dismiss, .copyToClipboard("text"), .openUrl("https://digia.tech")],
             variables: nil,
+            campaignKey: nil,
             localActionExecutor: LocalActionExecutor(dismiss: { executed.append("local") })
         )
 
@@ -218,6 +219,7 @@ struct EngageActionExecutorTests {
         await executor.executeAction(
             .next,
             variables: nil,
+            campaignKey: nil,
             localActionExecutor: LocalActionExecutor()
         )
 
@@ -246,6 +248,7 @@ struct EngageActionExecutorTests {
                 values: ["path": "cart", "product": "Shoes"],
                 types: ["path": "string", "product": "string"]
             ),
+            campaignKey: nil,
             localActionExecutor: LocalActionExecutor()
         )
 
@@ -274,6 +277,7 @@ struct EngageActionExecutorTests {
         await executor.executeActionFlow(
             [.openDeeplink("medihubrn://cart"), .copyToClipboard("Shoes")],
             variables: nil,
+            campaignKey: nil,
             localActionExecutor: LocalActionExecutor()
         )
 

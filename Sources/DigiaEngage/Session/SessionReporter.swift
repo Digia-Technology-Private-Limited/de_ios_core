@@ -135,9 +135,9 @@ final class SessionReporter: @unchecked Sendable {
 
     private func loadPending() -> [String] {
         guard let raw = storage.string(forKey: Self.keyPendingReport),
-              let list = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String]
+              let list = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [Any]
         else { return [] }
-        return list
+        return list.compactMap { $0 as? String }
     }
 
     private func savePending(_ list: [String]) {

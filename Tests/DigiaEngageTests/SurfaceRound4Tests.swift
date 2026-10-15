@@ -24,7 +24,7 @@ extension DigiaEngageTests {
                 sdk.markInitializedForTesting(
                     with: DigiaConfig(apiKey: "test_key", wrapperBinding: wrapperBinding))
             }
-            sdk.setCampaignsForTesting(try campaigns.map { try #require(CampaignModel.fromJson($0)) })
+            sdk.setCampaignsForTesting(try campaigns.map { try #require(try CampaignModel.fromJson($0)) })
             return sdk
         }
 
@@ -152,8 +152,11 @@ extension DigiaEngageTests {
             #expect(guide.outcome == .dismissed(reason: .completed, completed: true))
             let names = try await digiaEvents(sdk).map(\.name)
             #expect(names.contains("Digia Experience Completed"))
-            #expect(!names.contains("Digia Experience Dismissed"))
+            #expect(names.contains("Digia Experience Dismissed"))
             #expect(!names.contains("Digia Step Dismissed"))
+            let dismissed = try await digiaEvents(sdk).first { $0.name == "Digia Experience Dismissed" }
+            #expect(dismissed?.props["dismiss_reason"] as? String == "completed")
+            #expect(dismissed?.props["dwell_ms"] != nil)
         }
 
         // MARK: - SR97 R3-07

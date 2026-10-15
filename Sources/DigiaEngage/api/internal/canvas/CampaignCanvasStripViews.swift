@@ -88,6 +88,7 @@ struct CanvasStoryCachedMedia: View {
     var posterFrameMs: Int64 = 0
 
     @StateObject private var playback: StoryVideoPlayback
+    @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var controllerReady = false
 
     init(
@@ -158,6 +159,7 @@ struct CanvasStoryCachedMedia: View {
         }
         .onAppear {
             guard isVideo else { return }
+            playback.campaignKey = campaignKey
             playback.update(
                 state: StoryVideoPlaybackState(
                     demand: .playback(.scheduled),

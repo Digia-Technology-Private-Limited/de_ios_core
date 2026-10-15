@@ -40,7 +40,7 @@ final class SessionManager: @unchecked Sendable {
         self.clock = clock
 
         let now = clock()
-        let savedSessionId = storage.string(forKey: Self.keySessionId)
+        let savedSessionId = storage.string(forKey: Self.keySessionId)?.trimmingCharacters(in: .whitespacesAndNewlines)
         let savedLastActivityStr = storage.string(forKey: Self.keyLastActivityMs)
         let savedLastActivity = savedLastActivityStr.flatMap { Int64($0) }
 

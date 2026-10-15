@@ -7,6 +7,8 @@ struct VariableSchema: Equatable {
     let name: String
     let type: String        // "string" | "number"
     let fallbackValue: String
+    /// `false` when no fallback was authored. An authored empty string is a fallback.
+    var hasFallback = true
 }
 
 /// Normalises a raw variable definition into a `VariableSchema` (D29).
@@ -14,6 +16,7 @@ func normalizeVariable(name: String, type rawType: String?, fallbackValue: Strin
     VariableSchema(
         name: name,
         type: rawType == "number" ? "number" : "string",
-        fallbackValue: fallbackValue ?? sampleValue ?? ""
+        fallbackValue: fallbackValue ?? sampleValue ?? "",
+        hasFallback: (fallbackValue ?? sampleValue) != nil
     )
 }

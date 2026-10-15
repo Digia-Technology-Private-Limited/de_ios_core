@@ -6,7 +6,7 @@ import Testing
 struct CanvasSurveyConfigTests {
     @Test("keeps answer host presentation metadata")
     func answerHostPresentation() throws {
-        let survey = try #require(CanvasSurveyConfigParser.from(
+        let survey = try #require(try CanvasSurveyConfigParser.from(
             parseCanvasSurveyTemplate(),
             fallbackId: "fallback"
         ))
@@ -29,7 +29,7 @@ struct CanvasSurveyConfigTests {
 
     @Test("keeps shared answer text style when dashboard template text is empty")
     func sharedAnswerStyleWithoutTemplateText() throws {
-        let survey = try #require(CanvasSurveyConfigParser.from(
+        let survey = try #require(try CanvasSurveyConfigParser.from(
             parseCanvasSurveyTemplate(
                 scenes: [
                     questionScene(
@@ -65,7 +65,7 @@ struct CanvasSurveyConfigTests {
 
     @Test("parses heavy answer input font weight")
     func heavyAnswerHostWeight() throws {
-        let survey = try #require(CanvasSurveyConfigParser.from(
+        let survey = try #require(try CanvasSurveyConfigParser.from(
             parseCanvasSurveyTemplate(fontWeight: "heavy"),
             fallbackId: "fallback"
         ))
@@ -80,7 +80,7 @@ struct CanvasSurveyConfigTests {
 
     @Test("maps shared ui controls into active canvas height")
     func sharedUiOverlayGeometry() throws {
-        let survey = try #require(CanvasSurveyConfigParser.from(
+        let survey = try #require(try CanvasSurveyConfigParser.from(
             parseCanvasSurveyTemplate(welcomeEnabled: false, bodyHeight: 320, includeBack: true),
             fallbackId: "fallback"
         ))
@@ -214,7 +214,7 @@ struct CanvasSurveyConfigTests {
             ],
             rootNodeId: "node_intro_content"
         )
-        let survey = try #require(CanvasSurveyConfigParser.from(template, fallbackId: "fallback"))
+        let survey = try #require(try CanvasSurveyConfigParser.from(template, fallbackId: "fallback"))
         let vm = SurveyViewModel(survey: survey)
 
         #expect(vm.progressTotal(countQuestionsOnly: true) == 2)
@@ -239,7 +239,7 @@ struct CanvasSurveyConfigTests {
             ["name": "first_name", "fallbackValue": "there"],
             ["name": "score", "type": "number", "fallbackValue": "7"]
         ]
-        let campaign = try #require(CampaignModel.fromJson([
+        let campaign = try #require(try CampaignModel.fromJson([
             "id": "campaign1",
             "campaignKey": "canvas_survey",
             "campaignType": "survey",

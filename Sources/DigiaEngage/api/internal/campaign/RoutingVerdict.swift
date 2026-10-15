@@ -19,7 +19,8 @@ enum RoutingVerdict {
     /// The campaign will never display, and the CEP's hold can go back now.
     ///
     /// `detail` is debug-only free text. Log it, never branch on it.
-    case dropped(reason: DropReason, detail: String?)
+    /// `cause` is the fixed `invalid_config` token that health sends.
+    case dropped(reason: DropReason, detail: String?, cause: String? = nil)
 
     var isAccepted: Bool {
         if case .accepted = self { return true }

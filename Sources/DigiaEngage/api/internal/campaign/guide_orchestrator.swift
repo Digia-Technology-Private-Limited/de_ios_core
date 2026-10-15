@@ -43,6 +43,7 @@ final class GuideOrchestrator: ObservableObject {
               !guideConfig.steps.isEmpty,
               state == nil
         else { return false }
+        reportMissingVariables(guideConfig.variableSchemas, payload: payload)
         tokenCounter &+= 1
         state = ActiveGuideState(token: tokenCounter, campaign: campaign, stepIndex: 0, payload: payload)
         return true

@@ -74,6 +74,10 @@ public enum DropReason: String, CaseIterable, Sendable {
     /// The owning plugin was unregistered.
     case pluginDetached = "plugin_detached"
 
+    /// The plugin held the trigger while core was not ready, for more than 5
+    /// minutes.
+    case pendingExpired = "pending_expired"
+
     /// An unexpected error — specifics in the dropped arm's `detail`.
     case error = "error"
 

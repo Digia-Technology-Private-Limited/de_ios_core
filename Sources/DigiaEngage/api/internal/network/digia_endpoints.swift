@@ -9,6 +9,7 @@ enum DigiaEndpoints {
     nonisolated(unsafe) private static var _initialized: Bool = false
 
     static var isInitialized: Bool { _initialized }
+    static var isTestMode: Bool { _testRoot != nil }
 
     static func configure(_ config: DigiaConfig) {
         _environmentRoot = config.environment == .sandbox ? sandbox : production

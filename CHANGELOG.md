@@ -2,6 +2,96 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [4.0.0] - 2026-10-09
+
+### New Features
+- **Native guide anchors** — SwiftUI `DigiaAnchor` and UIKit `DigiaAnchorView`
+  mark the views a guide step points at. Guides scroll an off-screen anchor into
+  view once the step's delay has elapsed, and end when the anchored view leaves
+  the screen.
+- **Public anonymous ID** — `Digia.anonymousId` returns the device's anonymous
+  identifier.
+- **Campaign timeline in debug settings** — the debug settings screen has a
+  "Campaign timeline" that lists what Digia did with each campaign (delivered,
+  displayed, clicked, dismissed or dropped, with a plain-language reason),
+  newest first.
+
+### Improvements
+- **Structured SDK logging** — console output now follows one format with a
+  campaign slot, level badge and tag, and uses `os.Logger`. `DigiaLogLevel` gains
+  `warn`, `info`, `debug` and `auto`; the default is now `auto` (debug output in
+  debug builds, errors only in release). Startup logs one line with the SDK
+  version, environment and a masked API key.
+- **Non-blocking startup** — `Digia.initialize()` returns once the SDK is set up
+  and loads campaigns in the background, waiting at most 2 seconds for them. A
+  trigger that arrives before campaigns are ready is dropped as `not_ready`
+  (`not_initialized` if `initialize()` was never called, `initialization_failed`
+  after a failed load) instead of being lost without a reason. `initialize()` can
+  be retried after a failed load, user IDs set before `initialize()` are applied
+  when it runs, and a plugin registered early is attached after setup.
+- **One blocking campaign at a time** — nudges, surveys, guides and expanded
+  floaters now go through a single arbitration rule. A campaign that arrives
+  while another is on screen is dropped with `surface_busy`, naming the campaign
+  in the way; a second inline campaign for the same slot replaces one that was
+  never shown. A guide now draws above a collapsed floater, and a floater cannot
+  expand underneath a nudge, survey or guide. Live tests still displace whatever
+  is on screen.
+- **Richer analytics events** — events from one showing share an
+  `impression_id`, clicks carry the clicked element, and nudge and survey
+  dismissals carry a `dismiss_reason` (user close, CTA, auto timeout, superseded,
+  screen exit, target lost and so on). A survey dismissed by a screen change or a
+  newer campaign reports how far the user got.
+- **More reliable live testing** — a live-test invocation always receives exactly
+  one result within a bounded wait, results are retried on network or server
+  errors, a rejected API key stops reconnecting, and survey submissions and
+  dismissals are relayed to the dashboard during a test.
+- **Floater behavior** — a floater is dismissed on a screen change only when it
+  targets specific screens and the new screen is not one of them, and a PiP floater
+  records its impression when it is drawn rather than when its media finishes
+  loading.
+
+### Bug Fixes
+- **Analytics events no longer stall in the queue** — events left behind by a
+  batch capped at the maximum size, or captured while a send was in flight, are
+  now flushed at the configured interval.
+- **Inline impressions only when visible** — an inline campaign's impression and
+  a carousel's "Step Viewed" are sent only while the slot is on screen (at least
+  half visible for carousels) and the app is active.
+- **Guide spotlight callout position** — with a circular spotlight cutout, the
+  callout card is placed outside the circle instead of overlapping it.
+- **Variables in inline canvas and guides** — campaign variables now resolve in
+  inline canvas and guide campaigns.
+- **Nudge auto-dismiss** — an authored auto-dismiss time now closes nudges on
+  every surface, not only full-screen canvas nudges.
+- **Unknown canvas widget no longer crashes** — a canvas widget with no renderer
+  now renders nothing (and asserts in debug builds) instead of trapping.
+
+## [3.14.1] - 2026-09-24
+
+### Improvements
+- **Weighted canvas survey progress bar** — segmented progress bars in canvas
+  surveys keep the progress already shown when an answer branches to more or
+  fewer scenes; only the unfilled remainder is redistributed across the
+  remaining segments, so the bar no longer jumps backwards mid-survey.
+- **Outside close button margins** — close buttons placed outside a canvas nudge
+  or canvas survey (dialog or bottom sheet) now honour authored per-side margins
+  (`margin` as a single number or `top`/`right`/`bottom`/`left`), and canvas
+  dialogs scroll when the close button and card do not fit together on screen.
+- **Proportional canvas survey answer inputs** — choice tiles, text and date
+  fields, NPS scales, star ratings, and reaction scales now scale their size,
+  spacing, corner radii, and borders to fill the answer area authored in the
+  dashboard. Validation messages render as a compact single-line label inside
+  the bottom of that answer area instead of below it.
+
+### Bug Fixes
+- **Rounded corners on canvas elements** — corners now draw as true circular
+  arcs, and radii larger than the element are scaled down proportionally (as in
+  CSS), so pill and circle shapes render correctly instead of with flattened
+  corners.
+- **Survey text fields in dark mode** — typed text and placeholder text in
+  survey text inputs now use the survey's text colours, so they stay readable
+  when the device is in dark mode.
+
 ## [3.14.0] - 2026-09-10
 
 ### New Features
