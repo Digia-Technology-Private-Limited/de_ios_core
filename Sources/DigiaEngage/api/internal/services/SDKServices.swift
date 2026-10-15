@@ -25,7 +25,8 @@ final class SDKServices {
         storage: LocalStorage,
         networkClient: any NetworkClient,
         clock: @escaping () -> Int64 = SessionManager.systemClock,
-        analyticsQueue: any AnalyticsQueueProtocol
+        analyticsQueue: any AnalyticsQueueProtocol,
+        networkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor()
     ) {
         let identityManager = IdentityManager(
             storage: storage.scoped("identity"),
@@ -86,7 +87,8 @@ final class SDKServices {
                 sessionManager: sessionManager,
                 queue: analyticsQueue,
                 staticContext: staticContext,
-                networkClient: networkClient
+                networkClient: networkClient,
+                networkMonitor: networkMonitor
             )
         } else {
             log.i("Analytics disabled in DigiaConfig — no events will be captured")

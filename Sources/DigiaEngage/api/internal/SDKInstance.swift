@@ -22,7 +22,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     opener: AnalyticsDatabaseOpener(),
                     legacyImport: LegacyQueueImport(source: legacyStorage)
                 )
-            }
+            },
+            makeNetworkMonitor: { PathNetworkMonitor() }
         )
         // Only the production instance: a test's own instance must not take
         // over the process-wide registry's hook.
@@ -131,6 +132,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// here rather than in ``SDKServices`` so a retried `initialize()` reuses
     /// it: a second queue on the same file would interleave with the first.
     private let analyticsQueue: any AnalyticsQueueProtocol
+    /// One per services graph: its analytics service stops it on teardown.
+    private let makeNetworkMonitor: () -> any NetworkMonitor
     /// The capture toggles `SDKInstance` itself persists.
     private let captureStorage: LocalStorage
     let networkClient: any NetworkClient
@@ -216,8 +219,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         clock: @escaping () -> Int64 = SessionManager.systemClock,
         makeAnalyticsQueue: (_ legacyStorage: LocalStorage) -> any AnalyticsQueueProtocol = { _ in
             MemoryAnalyticsQueue()
-        }
+        },
+        makeNetworkMonitor: @escaping () -> any NetworkMonitor = { AlwaysOnlineNetworkMonitor() }
     ) {
+        self.makeNetworkMonitor = makeNetworkMonitor
         self.defaults = defaults
         self.legacyDefaults = legacyDefaults
         self.clock = clock
@@ -356,7 +361,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             storage: storage,
             networkClient: networkClient,
             clock: clock,
-            analyticsQueue: analyticsQueue
+            analyticsQueue: analyticsQueue,
+            networkMonitor: makeNetworkMonitor()
         )
         self.services = services
         currentSession.set(services.sessionManager, identity: services.identityManager, requestHeaders: services.requestHeaders)

@@ -56,16 +56,23 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
 /// Fake sender that always throws, to exercise the "ambiguous" (no status code
 /// at all — no connectivity, timeout, DNS failure) retry path. Only counts the
 /// track-dispatch endpoint, for the same reason as `FakeAnalyticsSender` above.
+/// Throws for its first `failures` track sends — no HTTP response at all — then succeeds.
 final class ThrowingAnalyticsSender: NetworkClient, @unchecked Sendable {
     private var _callCount = 0
     var callCount: Int { _callCount }
+    private let failures: Int
+
+    init(failures: Int = .max) {
+        self.failures = failures
+    }
 
     func execute(request: NetworkRequest) async throws -> NetworkResponse {
         guard request.url.absoluteString == DigiaEndpoints.track else {
             return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
         }
         _callCount += 1
-        throw URLError(.notConnectedToInternet)
+        if _callCount <= failures { throw URLError(.notConnectedToInternet) }
+        return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
     }
 
     func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
@@ -78,17 +85,54 @@ final class ThrowingAnalyticsSender: NetworkClient, @unchecked Sendable {
     }
 }
 
+/// Background time the test controls: records begins and ends, expires on demand.
+@MainActor
+final class FakeBackgroundTime: BackgroundTimeProvider {
+    private(set) var begun = 0
+    private(set) var ended: [Int] = []
+    private var expiration: (@MainActor () -> Void)?
+
+    func begin(name: String, expiration: @escaping @MainActor () -> Void) -> Int? {
+        begun += 1
+        self.expiration = expiration
+        return begun
+    }
+
+    func end(_ id: Int) { ended.append(id) }
+
+    func expire() { expiration?() }
+}
+
+/// A network whose state the test sets; changes reach the service like the OS's.
+final class FakeNetworkMonitor: NetworkMonitor, @unchecked Sendable {
+    private(set) var isOnline: Bool
+    private var onChange: (@Sendable (Bool) -> Void)?
+
+    init(online: Bool) {
+        isOnline = online
+    }
+
+    func start(_ onChange: @escaping @Sendable (Bool) -> Void) { self.onChange = onChange }
+    func stop() { onChange = nil }
+
+    func set(_ online: Bool) {
+        guard online != isOnline else { return }
+        isOnline = online
+        onChange?(online)
+    }
+}
+
 // MARK: - Suite
 
 private func sleepMillis(_ ms: UInt64) async throws {
     try await Task.sleep(nanoseconds: ms * 1_000_000)
 }
 
-/// Polls `condition` (up to 5 s) instead of guessing how long the work takes:
+/// Polls `condition` (up to 8 s) instead of guessing how long the work takes:
 /// the main actor is shared with other suites and can be busy for a while.
 @MainActor
 private func waitUntil(_ condition: () -> Bool) async throws {
-    for _ in 0..<500 where !condition() {
+    for _ in 0..<800 where !condition() {
         try await Task.sleep(nanoseconds: 10_000_000)
     }
 }
@@ -109,7 +153,9 @@ struct AnalyticsServiceTests {
         config: AnalyticsConfig = AnalyticsConfig(flushIntervalMs: 10_000),
         sender: any NetworkClient = FakeAnalyticsSender(),
         defaults: UserDefaults? = nil,
-        queue: (any AnalyticsQueueProtocol)? = nil
+        queue: (any AnalyticsQueueProtocol)? = nil,
+        networkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor(),
+        backgroundTime: BackgroundTimeProvider = FakeBackgroundTime()
     ) -> AnalyticsService {
         let store = defaults ?? UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
         let storage = UserDefaultsLocalStorage(defaults: store)
@@ -121,7 +167,9 @@ struct AnalyticsServiceTests {
             sessionManager: sessionManager,
             queue: queue ?? MemoryAnalyticsQueue(),
             staticContext: ["sdk_version": "1.0.0", "sdk_platform": "ios"],
-            networkClient: sender
+            networkClient: sender,
+            networkMonitor: networkMonitor,
+            backgroundTime: backgroundTime
         )
     }
 
@@ -431,7 +479,7 @@ struct AnalyticsServiceTests {
         #expect(service.queue.size == 1)
 
         // The retry fires and succeeds.
-        try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 }
+        try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 && service.retryAttempt == 0 }
         #expect(service.queue.size == 0)
         #expect(service.retryAttempt == 0)
         #expect(fakeSender.callCount == 2)
@@ -484,22 +532,69 @@ struct AnalyticsServiceTests {
         #expect(fakeSender.callCount == 10)
     }
 
-    @Test("transport failures (no status code) retry up to the cap (10) then drop the event")
-    func transportFailureRetriesThenDrops() async throws {
-        let throwingSender = ThrowingAnalyticsSender()
+    @Test("transport failures are retried without counting attempts and never drop the event")
+    func transportFailuresAreNotCounted() async throws {
+        // More failures than the cap of 10: a server failure would have dropped it.
+        let sender = ThrowingAnalyticsSender(failures: 15)
         let service = makeService(
             config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
-            sender: throwingSender
+            sender: sender
         )
-        service.retryScheduleMs = [2]  // fast, fixed retries for the test
+        service.retryScheduleMs = [2]
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
         service.flush()
 
-        try await waitUntil { throwingSender.callCount == 10 && service.queue.size == 0 }
+        try await waitUntil { sender.callCount >= 12 }
+        #expect(service.queue.size == 1)
+        #expect(await service.queue.peek(maxCount: 1).first?.attempts == 0)
 
+        try await waitUntil { sender.callCount == 16 && service.queue.size == 0 }
         #expect(service.queue.size == 0)
-        #expect(throwingSender.callCount == 10)
+    }
+
+    @Test("offline pauses sending and the network's return sends at once")
+    func offlinePausesAndReconnectSends() async throws {
+        let network = FakeNetworkMonitor(online: false)
+        let sender = FakeAnalyticsSender()
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 1),
+            sender: sender,
+            networkMonitor: network
+        )
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
+        service.flush()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(sender.callCount == 0, "nothing is attempted offline")
+        #expect(service.queue.size == 1)
+
+        network.set(true)
+        try await waitUntil { sender.callCount == 1 && service.queue.size == 0 }
+        #expect(service.queue.size == 0)
+    }
+
+    @Test("a network change does not cut short a server failure's backoff")
+    func networkChangeKeepsServerBackoff() async throws {
+        let network = FakeNetworkMonitor(online: true)
+        let sender = FakeAnalyticsSender { _ in 500 }
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
+            sender: sender,
+            networkMonitor: network
+        )
+        service.retryScheduleMs = [60_000]
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
+        service.flush()
+        try await waitUntil { sender.callCount == 1 && service.retryAttempt == 1 }
+
+        network.set(false)
+        network.set(true)
+        try await Task.sleep(nanoseconds: 100_000_000)
+        #expect(sender.callCount == 1, "the retry keeps its backoff")
+        #expect(await service.queue.peek(maxCount: 1).first?.attempts == 1)
+        service.clear()
     }
 
     @Test("background notification flushes pending events")
@@ -521,6 +616,49 @@ struct AnalyticsServiceTests {
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
+    }
+
+    @Test("the background flush runs inside one background task, ended when it finishes")
+    func backgroundFlushHoldsBackgroundTime() async throws {
+        let sender = FakeAnalyticsSender()
+        sender.responseDelayMs = 50
+        let time = FakeBackgroundTime()
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
+            sender: sender,
+            backgroundTime: time
+        )
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
+
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await waitUntil { sender.callCount == 1 }
+        #expect(time.begun == 1)
+        #expect(time.ended.isEmpty, "held while the send is in flight")
+
+        try await waitUntil { service.queue.size == 0 && time.ended.count == 1 }
+        #expect(time.ended == [1])
+    }
+
+    @Test("an expiring background task is ended at once, and only once")
+    func expiringBackgroundTimeEndsOnce() async throws {
+        let sender = FakeAnalyticsSender()
+        sender.responseDelayMs = 200
+        let time = FakeBackgroundTime()
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
+            sender: sender,
+            backgroundTime: time
+        )
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
+
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await waitUntil { sender.callCount == 1 }
+        time.expire()
+        #expect(time.ended == [1], "ended when iOS says time is up")
+
+        try await waitUntil { service.queue.size == 0 }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(time.ended == [1], "not ended again when the send finishes")
     }
 
     @Test("persisted queue flushes on next cold init")

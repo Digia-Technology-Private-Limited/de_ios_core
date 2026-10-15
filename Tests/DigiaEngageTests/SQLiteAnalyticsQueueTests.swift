@@ -312,6 +312,41 @@ struct SQLiteAnalyticsQueueTests {
         }
     }
 
+    @Test("receipts are cleared once a later launch finds the old key gone")
+    func receiptsClearedAfterKeyGone() throws {
+        let db = TempDatabase()
+        let raw = try db.raw()
+        defer { raw.close() }
+        let store = try SQLiteQueueStore.attach(raw)
+        let source = legacyStorage([legacyEntry("old")])
+
+        try LegacyQueueImport(source: source).run(on: store, maxEvents: 100)
+        #expect(source.string(forKey: "queue") == nil)
+        #expect(try receipts(raw) == 1, "kept until the deletion is proven")
+
+        try LegacyQueueImport(source: source).run(on: store, maxEvents: 100)  // next launch
+        #expect(try receipts(raw) == 0)
+        #expect(try store.peek(10).map(\.eventId) == ["old"])
+    }
+
+    @Test("the schema version is recorded as user_version 1")
+    func schemaVersionRecorded() throws {
+        let db = TempDatabase()
+        let raw = try db.raw()
+        defer { raw.close() }
+        _ = try SQLiteQueueStore.attach(raw)
+        var version = 0
+        try raw.query("PRAGMA user_version") { version = Int($0.int64(0)) }
+        #expect(version == SQLiteQueueStore.schemaVersion)
+        #expect(version == 1)
+    }
+
+    private func receipts(_ connection: SQLiteConnection) throws -> Int {
+        var count = 0
+        try connection.query("SELECT COUNT(*) FROM analytics_queue_imports") { count = Int($0.int64(0)) }
+        return count
+    }
+
     // MARK: - Memory queue
 
     @Test("memory queue drops the oldest events at its own limit")

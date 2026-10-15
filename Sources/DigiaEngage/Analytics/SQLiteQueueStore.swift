@@ -13,6 +13,11 @@ final class SQLiteQueueStore {
     /// ``LegacyQueueImport``.
     static let importsTable = "analytics_queue_imports"
 
+    /// The schema version, stored as SQLite's `user_version`. Raise it with
+    /// every schema change and add the step to ``attach(_:)``, keyed on the
+    /// stored version; Android and Flutter use the same number.
+    static let schemaVersion = 1
+
     /// Below SQLite's default host-parameter limit.
     private static let chunkSize = 500
 
@@ -34,6 +39,13 @@ final class SQLiteQueueStore {
             );
             CREATE TABLE IF NOT EXISTS \(importsTable) (event_id TEXT PRIMARY KEY);
             """)
+        var stored = 0
+        try connection.query("PRAGMA user_version") { stored = Int($0.int64(0)) }
+        // Version 1 is the first schema, created above. A later version's step
+        // goes here: `if stored < 2 { … }`.
+        if stored < schemaVersion {
+            try connection.execute("PRAGMA user_version = \(schemaVersion)")
+        }
         return SQLiteQueueStore(connection: connection)
     }
 

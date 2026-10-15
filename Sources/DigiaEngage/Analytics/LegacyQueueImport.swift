@@ -25,7 +25,10 @@ struct LegacyQueueImport {
     /// unreadable (then kept intact, never deleted). Throws when SQLite
     /// fails; the source is untouched and the import can run again later.
     func run(on store: SQLiteQueueStore, maxEvents: Int) throws {
-        guard let raw = source.string(forKey: key) else { return }
+        guard let raw = source.string(forKey: key) else {
+            try clearReceipts(in: store)
+            return
+        }
         let rows: [Row]
         switch Self.parse(raw) {
         case .unreadable(let reason):
@@ -84,6 +87,17 @@ struct LegacyQueueImport {
         }
         // Reached only after a successful COMMIT.
         source.removeObject(forKey: key)
+    }
+
+    /// Receipts guard one window: imported, but the source key not yet
+    /// deleted. Once a later launch finds the key gone, that window has closed
+    /// for good — nothing writes the key any more, and UserDefaults gives no
+    /// other proof the deletion reached disk — so they are dropped. Reads only,
+    /// unless there is something to delete.
+    private func clearReceipts(in store: SQLiteQueueStore) throws {
+        var any = false
+        try store.connection.query("SELECT 1 FROM \(SQLiteQueueStore.importsTable) LIMIT 1") { _ in any = true }
+        if any { try store.connection.run("DELETE FROM \(SQLiteQueueStore.importsTable)") }
     }
 
     private enum Parsed {
