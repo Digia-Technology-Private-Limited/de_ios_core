@@ -61,13 +61,23 @@ final class AnalyticsDatabaseOpener {
     /// `SQLITE_CANTOPEN`/`SQLITE_IOERR`. Applied to the companions too: they
     /// exist only once the connection has written.
     private static func protect(_ path: String) {
-        for file in [path, path + "-wal", path + "-shm"]
+        for (suffix, file) in [("db", path), ("wal", path + "-wal"), ("shm", path + "-shm")]
         where FileManager.default.fileExists(atPath: file) {
-            try? FileManager.default.setAttributes(
-                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
-                ofItemAtPath: file
-            )
+            do {
+                try FileManager.default.setAttributes(
+                    [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                    ofItemAtPath: file
+                )
+            } catch {
+                log.w("Analytics file protection not applied (\(suffix)): \(describe(error))")
+            }
         }
+    }
+
+    /// Domain and code only: a file error's description names the full path.
+    private static func describe(_ error: Error) -> String {
+        let error = error as NSError
+        return "\(error.domain) \(error.code)"
     }
 
     private static func deleteFiles(at path: String) {
@@ -91,13 +101,21 @@ final class AnalyticsDatabaseOpener {
             attributes: [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
         )
         // Also for a directory created by an earlier version without them.
-        try? fileManager.setAttributes(
-            [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
-            ofItemAtPath: directory.path
-        )
+        do {
+            try fileManager.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: directory.path
+            )
+        } catch {
+            log.w("Analytics directory protection not applied: \(describe(error))")
+        }
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
-        try? directory.setResourceValues(values)
+        do {
+            try directory.setResourceValues(values)
+        } catch {
+            log.w("Analytics directory not excluded from backup: \(describe(error))")
+        }
         return directory.appendingPathComponent(fileName).path
     }
 }

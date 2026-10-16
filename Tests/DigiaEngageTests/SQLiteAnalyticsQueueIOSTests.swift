@@ -26,4 +26,19 @@ struct SQLiteAnalyticsQueueIOSTests {
         #expect(await queue.count() == 20)
         await queue.close()
     }
+
+    /// Backup exclusion is applied best-effort at runtime, so this is where a
+    /// regression would show. Opens the real default file without wiping it:
+    /// other suites may be using it. The protection class is not checked here:
+    /// the simulator does not report data protection, so it needs a device.
+    @Test("the default database directory is excluded from backup")
+    func defaultLocationIsExcludedFromBackup() throws {
+        let path = try AnalyticsDatabaseOpener.defaultPath()
+        let connection = try AnalyticsDatabaseOpener().open()
+        defer { connection.close() }
+
+        let directory = URL(fileURLWithPath: path).deletingLastPathComponent()
+        let values = try directory.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        #expect(values.isExcludedFromBackup == true)
+    }
 }
