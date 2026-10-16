@@ -9,10 +9,12 @@ private let log = DigiaLogger("analytics")
 @MainActor
 final class AnalyticsService {
     private let config: AnalyticsConfig
+    /// [AnalyticsConfig.maxBatchSize] clamped to 1...``AnalyticsConfig/maxBatchSizeLimit``.
+    private let maxBatchSize: Int
     var isEnabled: Bool { config.enabled }
     let identityManager: IdentityManager
     let sessionManager: SessionManager
-    let queue: AnalyticsQueue
+    let queue: any AnalyticsQueueProtocol
     private let staticContext: [String: Any]
     private let networkClient: any NetworkClient
 
@@ -23,6 +25,16 @@ final class AnalyticsService {
     /// `enqueue` can tell "a retry will happen" and defer to it instead of
     /// jumping ahead with an early flush.
     private var retryTask: Task<Void, Never>?
+    /// True when `retryTask` retries a send that never reached the server.
+    private var retryIsForTransport = false
+    /// Sends in a row that got no HTTP response (no network, DNS, timeout).
+    /// Sets the backoff for those retries only: they never count toward an
+    /// event's attempts.
+    private var transportFailures = 0
+    private let networkMonitor: any NetworkMonitor
+    /// Keeps the app running long enough to finish the send started on
+    /// entering the background.
+    private let backgroundTime: BackgroundTimeProvider
     private var isDispatching = false
     /// Attempt number of the most recently scheduled retry, reset to 0 on
     /// success. Diagnostic mirror only — the real retry-cap enforcement reads
@@ -34,10 +46,11 @@ final class AnalyticsService {
     /// Override retry delays (ms) for testing. Index is attempt-1.
     var retryScheduleMs: [Int]?
 
-    /// Any failed API call (4xx, 5xx, or a thrown error — no connectivity,
-    /// timeout, DNS failure) is retried up to this many times. An event the
-    /// server explicitly rejected (named in a 200/207 response's error list)
-    /// is dropped immediately instead — that's not an API-call failure.
+    /// A send the server answered with 4xx/5xx is retried up to this many
+    /// times. A send that got no response at all (no connectivity, timeout,
+    /// DNS failure) is never counted — see `handleTransportFailure`. An event
+    /// the server explicitly rejected (named in a 200/207 response's error
+    /// list) is dropped immediately instead — that's not an API-call failure.
     private static let maxAttempts = 10
     /// 10 attempts at a low, fixed cap would mostly sit at the floor after a
     /// few seconds, which isn't a meaningful amount of patience for a real
@@ -51,11 +64,16 @@ final class AnalyticsService {
         config: AnalyticsConfig,
         identityManager: IdentityManager,
         sessionManager: SessionManager,
-        queue: AnalyticsQueue,
+        queue: any AnalyticsQueueProtocol,
         staticContext: [String: Any],
-        networkClient: any NetworkClient
+        networkClient: any NetworkClient,
+        networkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor(),
+        backgroundTime: BackgroundTimeProvider = UIKitBackgroundTime()
     ) {
         self.config = config
+        self.networkMonitor = networkMonitor
+        self.backgroundTime = backgroundTime
+        self.maxBatchSize = Self.boundedBatchSize(config.maxBatchSize)
         self.identityManager = identityManager
         self.sessionManager = sessionManager
         self.queue = queue
@@ -70,12 +88,21 @@ final class AnalyticsService {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.cancelTimer()
-                await self.dispatchPending()
+                await withBackgroundTime(self.backgroundTime, name: "DigiaEngage analytics flush") {
+                    await self.dispatchPending()
+                }
             }
         }
 
-        if queue.size > 0 {
-            scheduleTimer()
+        networkMonitor.start { [weak self] online in
+            Task { @MainActor [weak self] in await self?.networkChanged(online: online) }
+        }
+
+        // Events left by an earlier process: the stored count is known only
+        // once the queue has opened its database, off the main actor.
+        Task { @MainActor [weak self] in
+            guard let self, await self.queue.count() > 0, !self.isCleared else { return }
+            self.scheduleTimer()
         }
     }
 
@@ -151,6 +178,7 @@ final class AnalyticsService {
     /// Cancels timers and removes lifecycle observers. Call before releasing the service.
     func clear() {
         isCleared = true
+        networkMonitor.stop()
         retryTask?.cancel()
         retryTask = nil
         cancelTimer()
@@ -184,8 +212,10 @@ final class AnalyticsService {
         let eventId = UUID().uuidString
         sessionManager.touch()
 
-        var mergedProperties = staticContext
-        for (k, v) in properties { mergedProperties[k] = v }
+        let copiedStatic = Self.deepCopyMap(staticContext)
+        let copiedProperties = Self.deepCopyMap(properties)
+        var mergedProperties = copiedStatic
+        for (k, v) in copiedProperties { mergedProperties[k] = v }
 
         var payloadMap: [String: Any] = [
             "event_id": eventId,
@@ -238,10 +268,32 @@ final class AnalyticsService {
         }
     }
 
+    /// Offline: nothing is sent and nothing is scheduled — the network's
+    /// return sends. Online: sends at once, unless a retry for a server
+    /// failure is pending, whose backoff a network change must not cut short.
+    private func networkChanged(online: Bool) async {
+        guard !isCleared else { return }
+        guard online else {
+            log.d("Offline — sending paused until the network returns")
+            return
+        }
+        transportFailures = 0
+        guard queue.size > 0, retryTask == nil || retryIsForTransport else { return }
+        log.d("Network available — sending queued events")
+        retryTask?.cancel()
+        retryTask = nil
+        cancelTimer()
+        await dispatchPending()
+    }
+
     private func dispatchPending() async {
         guard !isCleared else { return }
         guard !isDispatching else {
             log.d("Dispatch skipped — already dispatching")
+            return
+        }
+        guard networkMonitor.isOnline else {
+            log.d("Dispatch deferred — offline; the network's return will send")
             return
         }
         cancelTimer()
@@ -253,12 +305,12 @@ final class AnalyticsService {
             // dispatching", and scheduleTimer is a no-op while dispatching). Neither has a timer, so
             // arm one here at the configured interval, unless a retry is already pending and will
             // pick them up.
-            if queue.size > 0 && retryTask == nil && flushTimer == nil {
+            if queue.size > 0 && retryTask == nil && flushTimer == nil && networkMonitor.isOnline {
                 scheduleTimer()
             }
         }
 
-        let batch = queue.peek(maxCount: config.maxBatchSize)
+        let batch = await queue.peek(maxCount: maxBatchSize)
         guard !batch.isEmpty else {
             log.d("Dispatch skipped — the queue is empty")
             retryAttempt = 0
@@ -268,48 +320,74 @@ final class AnalyticsService {
         log.d("Batch posting (count=\(batch.count), endpoint=\(DigiaEndpoints.track))")
 
         do {
-            let body = try JSONSerialization.data(withJSONObject: [
-                "events": batch.map { $0.payload }
-            ])
+            // Built off the main actor. Every stored payload was validated as
+            // JSON when it was queued.
+            let body = try await Task.detached(priority: .utility) {
+                try JSONSerialization.data(withJSONObject: ["events": batch.map { $0.payload }])
+            }.value
             guard let url = URL(string: DigiaEndpoints.track) else { return }
             let request = NetworkRequest(url: url, method: .post, headers: jsonHeaders, body: body)
-            let response = try await networkClient.execute(request: request)
+            let response: NetworkResponse
+            do {
+                response = try await networkClient.execute(request: request)
+            } catch {
+                // No HTTP response: the request never reached the server.
+                handleTransportFailure(cause: error.localizedDescription)
+                return
+            }
+            transportFailures = 0
             let statusCode = response.statusCode
             log.d("Batch posted (status=\(statusCode))")
 
             switch statusCode {
             case 200, 207:
-                // Any per-event rejections named in the response body were never
-                // retried in the first place — see `logRejected`/response parsing;
-                // the whole batch (accepted + rejected) is simply removed here.
-                queue.remove(eventIds: batch.map { $0.eventId })
+                // Events the server rejected (named in the body's errors) are not
+                // retried: the whole batch, accepted and rejected, is removed.
                 retryAttempt = 0
+                await queue.remove(eventIds: batch.map { $0.eventId })
                 log.d("Batch accepted (count=\(batch.count), queueSize=\(queue.size))")
             default:
-                // Any other outcome is just "the API call failed" — 4xx, 5xx, or
-                // no real status at all — retried uniformly, capped.
-                handleFailure(batch: batch, statusLabel: "HTTP \(statusCode)")
+                // The server answered and refused: 4xx or 5xx, retried
+                // uniformly, capped.
+                await handleFailure(batch: batch, statusLabel: "HTTP \(statusCode)")
             }
         } catch {
-            // Verbose only — a single thrown exception is just one attempt in a
-            // retry sequence, not yet a final outcome. Only the eventual drop
-            // (after exhausting the cap) is warning-level.
+            // Not a network failure (e.g. the body could not be built): counted,
+            // so a batch that can never be sent is eventually dropped.
             log.d("Batch post failed (cause=\(error.localizedDescription))")
-            handleFailure(batch: batch, statusLabel: "exception: \(error.localizedDescription)")
+            await handleFailure(batch: batch, statusLabel: "exception: \(error.localizedDescription)")
         }
+    }
+
+    /// The send got no HTTP response: no network, DNS failure, timeout. The
+    /// events stay and their attempts are not counted — losing the network is
+    /// not the events' fault. Offline, nothing is scheduled: the network's
+    /// return sends. Online (a captive portal, an unreachable host), retried
+    /// on the same capped backoff, indefinitely.
+    /// Logs each event the server named as rejected in a 200/207 body. They are
+    /// removed with the rest of the batch: sending them again would be rejected
+    /// again. An empty or unreadable body names none.
+    private func handleTransportFailure(cause: String) {
+        transportFailures += 1
+        guard networkMonitor.isOnline else {
+            log.d("Batch not sent — offline; waiting for the network (cause=\(cause))")
+            return
+        }
+        log.d("Batch not sent — no response; retry #\(transportFailures) scheduled, attempts not counted (cause=\(cause))")
+        scheduleRetry(attempt: transportFailures, forTransport: true)
     }
 
     /// Increments the attempt counter for the failed batch, drops whichever
     /// events have now exhausted the retry cap, and schedules a backoff retry
     /// for the rest (if any remain).
-    private func handleFailure(batch: [QueueEntry], statusLabel: String) {
-        let updated = queue.incrementAttempt(eventIds: batch.map { $0.eventId })
+    private func handleFailure(batch: [QueueEntry], statusLabel: String) async {
+        let updated = await queue.incrementAttempt(eventIds: batch.map { $0.eventId })
 
         let toDrop = updated.filter { $0.attempts >= Self.maxAttempts }
         let toRetry = updated.filter { $0.attempts < Self.maxAttempts }
 
         if !toDrop.isEmpty {
-            queue.remove(eventIds: toDrop.map { $0.eventId })
+            await queue.remove(eventIds: toDrop.map { $0.eventId })
             log.e(
                 "Batch post failed — dropped \(toDrop.count) event(s) after exhausting "
                     + "\(Self.maxAttempts) attempts (cause=\(statusLabel))"
@@ -332,7 +410,7 @@ final class AnalyticsService {
     }
 
     private func scheduleTimer(minDelayMs: Int = 0) {
-        guard flushTimer == nil, !isDispatching else { return }
+        guard flushTimer == nil, !isDispatching, networkMonitor.isOnline else { return }
         let delayMs = max(config.flushIntervalMs, minDelayMs)
         flushTimer = Timer.scheduledTimer(
             withTimeInterval: Double(delayMs) / 1_000,
@@ -351,7 +429,9 @@ final class AnalyticsService {
         flushTimer = nil
     }
 
-    private func scheduleRetry(attempt: Int) {
+    private func scheduleRetry(attempt: Int, forTransport: Bool = false) {
+        retryTask?.cancel()
+        retryIsForTransport = forTransport
         retryAttempt = attempt
         let delayMs = retryDelayMs(attempt)
         let delayNs = UInt64(delayMs) * 1_000_000
@@ -372,7 +452,9 @@ final class AnalyticsService {
         }
         // Exponential backoff, capped. The cap (10) keeps `attempt` small enough
         // that `1 << (attempt - 1)` can't overflow Int.
-        let exponent = max(attempt - 1, 0)
+        // Clamped: transport retries are uncapped in number, so `attempt` can
+        // grow past 10, and an unclamped shift would overflow.
+        let exponent = min(max(attempt - 1, 0), 20)
         let base = min(1_000 * (1 << exponent), Self.backoffCeilingMs)
         return applyJitter(base)
     }
@@ -423,4 +505,32 @@ final class AnalyticsService {
         return ctx
     }
 
+    /// Below 1 nothing would ever be sent; above the limit each dispatch
+    /// stalls the main actor encoding and decoding one large batch.
+    static func boundedBatchSize(_ configured: Int) -> Int {
+        let bounded = min(max(configured, 1), AnalyticsConfig.maxBatchSizeLimit)
+        if bounded != configured {
+            log.w("maxBatchSize \(configured) is outside 1...\(AnalyticsConfig.maxBatchSizeLimit) — using \(bounded)")
+        }
+        return bounded
+    }
+
+    static func deepClone(_ value: Any) -> Any {
+        if let dict = value as? [String: Any] {
+            return deepCopyMap(dict)
+        } else if let arr = value as? [Any] {
+            return arr.map { deepClone($0) }
+        } else if let set = value as? Set<AnyHashable> {
+            return Set(set.map { deepClone($0) as! AnyHashable })
+        }
+        return value
+    }
+
+    static func deepCopyMap(_ source: [String: Any]) -> [String: Any] {
+        var copy = [String: Any]()
+        for (k, v) in source {
+            copy[k] = deepClone(v)
+        }
+        return copy
+    }
 }

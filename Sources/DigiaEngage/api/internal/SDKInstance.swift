@@ -16,7 +16,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     sessionIdProvider: { currentSession.sessionId },
                     headerProvider: { currentSession.requestHeaders }
                 )
-            }
+            },
+            makeAnalyticsQueue: { legacyStorage in
+                SQLiteAnalyticsQueue(
+                    opener: AnalyticsDatabaseOpener(),
+                    legacyImport: LegacyQueueImport(source: legacyStorage)
+                )
+            },
+            makeNetworkMonitor: { PathNetworkMonitor() }
         )
         // Only the production instance: a test's own instance must not take
         // over the process-wide registry's hook.
@@ -121,6 +128,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     // storage or builds a collaborator. The services themselves take storage
     // as given and have no fallbacks (D6).
     private let storage: LocalStorage
+    /// Owns the analytics database file for the life of the process. Lives
+    /// here rather than in ``SDKServices`` so a retried `initialize()` reuses
+    /// it: a second queue on the same file would interleave with the first.
+    private let analyticsQueue: any AnalyticsQueueProtocol
+    /// One per services graph: its analytics service stops it on teardown.
+    private let makeNetworkMonitor: () -> any NetworkMonitor
     /// The capture toggles `SDKInstance` itself persists.
     private let captureStorage: LocalStorage
     let networkClient: any NetworkClient
@@ -203,13 +216,20 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         defaults: UserDefaults,
         legacyDefaults: UserDefaults,
         makeNetworkClient: (CurrentSessionRef) -> any NetworkClient,
-        clock: @escaping () -> Int64 = SessionManager.systemClock
+        clock: @escaping () -> Int64 = SessionManager.systemClock,
+        makeAnalyticsQueue: (_ legacyStorage: LocalStorage) -> any AnalyticsQueueProtocol = { _ in
+            MemoryAnalyticsQueue()
+        },
+        makeNetworkMonitor: @escaping () -> any NetworkMonitor = { AlwaysOnlineNetworkMonitor() }
     ) {
+        self.makeNetworkMonitor = makeNetworkMonitor
         self.defaults = defaults
         self.legacyDefaults = legacyDefaults
         self.clock = clock
         LocalStorageMigrator.migrateIfNeeded(targetDefaults: defaults, standardDefaults: legacyDefaults)
         let defaultStorage = UserDefaultsLocalStorage(defaults: defaults)
+        // After the migrator, which moves the legacy queue into this suite.
+        self.analyticsQueue = makeAnalyticsQueue(defaultStorage.scoped("analytics"))
         let defaultNetworkClient = makeNetworkClient(currentSession)
         let defaultDebugOverlay = DigiaDebugOverlayController(storage: defaultStorage.scoped("debug"))
         self.debugOverlayController = defaultDebugOverlay
@@ -338,7 +358,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         HealthSink.shared.beginPending()
         DigiaLogger.configure(config.logLevel)
         DigiaEndpoints.configure(config)
-        let services = SDKServices(config: config, storage: storage, networkClient: networkClient, clock: clock)
+        let services = SDKServices(
+            config: config,
+            storage: storage,
+            networkClient: networkClient,
+            clock: clock,
+            analyticsQueue: analyticsQueue,
+            networkMonitor: makeNetworkMonitor()
+        )
         self.services = services
         currentSession.set(services.sessionManager, identity: services.identityManager, requestHeaders: services.requestHeaders)
         // The startup session is reported before the buffered user change
