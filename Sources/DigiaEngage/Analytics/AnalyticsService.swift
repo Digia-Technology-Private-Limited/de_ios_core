@@ -341,10 +341,8 @@ final class AnalyticsService {
 
             switch statusCode {
             case 200, 207:
-                // Any per-event rejections named in the response body were never
-                // retried in the first place — see `logRejected`/response parsing;
-                // the whole batch (accepted + rejected) is simply removed here.
-                logRejected(response.body)
+                // Events the server rejected (named in the body's errors) are not
+                // retried: the whole batch, accepted and rejected, is removed.
                 retryAttempt = 0
                 await queue.remove(eventIds: batch.map { $0.eventId })
                 log.d("Batch accepted (count=\(batch.count), queueSize=\(queue.size))")
@@ -369,18 +367,6 @@ final class AnalyticsService {
     /// Logs each event the server named as rejected in a 200/207 body. They are
     /// removed with the rest of the batch: sending them again would be rejected
     /// again. An empty or unreadable body names none.
-    private func logRejected(_ body: Data?) {
-        guard let body,
-              let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-              let errors = json["errors"] as? [Any]
-        else { return }
-        for case let error as [String: Any] in errors {
-            let eventId = error["event_id"] as? String ?? ""
-            let reason = error["reason"] as? String ?? ""
-            log.e("Event rejected (eventId=\(eventId), reason=\(reason))")
-        }
-    }
-
     private func handleTransportFailure(cause: String) {
         transportFailures += 1
         guard networkMonitor.isOnline else {
