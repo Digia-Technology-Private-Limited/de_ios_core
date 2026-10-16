@@ -20,10 +20,11 @@ struct SQLiteAnalyticsQueueTests {
 
         func queue(
             maxEvents: Int = 5_000,
-            legacyImport: LegacyQueueImport? = nil
+            legacyImport: LegacyQueueImport? = nil,
+            opener: AnalyticsDatabaseOpener? = nil
         ) -> SQLiteAnalyticsQueue {
             SQLiteAnalyticsQueue(
-                opener: AnalyticsDatabaseOpener(resolvePath: { [path] in path }),
+                opener: opener ?? AnalyticsDatabaseOpener(resolvePath: { [path] in path }),
                 maxEvents: maxEvents,
                 legacyImport: legacyImport
             )
@@ -31,6 +32,26 @@ struct SQLiteAnalyticsQueueTests {
 
         /// A second connection to the same file, for setting up conditions.
         func raw() throws -> SQLiteConnection { try SQLiteConnection.open(path: path) }
+
+        /// Makes every insert into the queue fail, as a full disk would.
+        func rejectWrites() throws {
+            let connection = try raw()
+            defer { connection.close() }
+            try connection.execute(
+                "CREATE TRIGGER reject BEFORE INSERT ON analytics_queue BEGIN SELECT RAISE(ABORT, 'disk full'); END"
+            )
+        }
+
+        func acceptWrites() throws {
+            let connection = try raw()
+            defer { connection.close() }
+            try connection.execute("DROP TRIGGER reject")
+        }
+    }
+
+    /// An opener whose open fails the way a locked or unreadable file does.
+    private func failingOpener() -> AnalyticsDatabaseOpener {
+        AnalyticsDatabaseOpener(resolvePath: { throw SQLiteError(code: 14, message: "unable to open database file") })
     }
 
     private func entry(_ id: String, at createdAt: TimeInterval = 1_000, _ payload: [String: Any] = [:]) -> QueueEntry {
@@ -56,6 +77,15 @@ struct SQLiteAnalyticsQueueTests {
 
     // MARK: - Queue operations
 
+    @Test("starts with length 0 and empty peek")
+    func startsEmpty() async {
+        let db = TempDatabase()
+        let queue = db.queue()
+        #expect(await queue.count() == 0)
+        #expect(await queue.peek(maxCount: 10).isEmpty)
+        await queue.close()
+    }
+
     @Test("persists in FIFO order and survives a restart")
     func persistsAcrossRestart() async {
         let db = TempDatabase()
@@ -69,16 +99,6 @@ struct SQLiteAnalyticsQueueTests {
         #expect(await second.count() == 2)
         #expect(await ids(second) == ["e1", "e2"])
         await second.close()
-    }
-
-    @Test("size is exact the moment append returns")
-    func sizeCountsPendingAppends() async {
-        let db = TempDatabase()
-        let queue = db.queue()
-        for i in 0..<20 { queue.append(entry("e\(i)"), maxEvents: 100) }
-        #expect(queue.size == 20)
-        #expect(await queue.count() == 20)
-        await queue.close()
     }
 
     @Test("drops the oldest events beyond the cap")
@@ -109,7 +129,54 @@ struct SQLiteAnalyticsQueueTests {
         await queue.close()
     }
 
-    @Test("a non-JSON payload is dropped alone")
+    @Test("clear empties the queue")
+    func clearEmpties() async {
+        let db = TempDatabase()
+        let queue = db.queue()
+        queue.append(entry("e1"), maxEvents: 100)
+        queue.append(entry("e2"), maxEvents: 100)
+        await queue.clear()
+        #expect(await queue.count() == 0)
+        #expect(await queue.peek(maxCount: 10).isEmpty)
+        await queue.close()
+    }
+
+    @Test("a duplicate event id keeps the existing row and its retry count")
+    func duplicateKeepsRow() async {
+        let db = TempDatabase()
+        let queue = db.queue()
+        queue.append(entry("dup"), maxEvents: 100)
+        queue.append(entry("other"), maxEvents: 100)
+        await queue.incrementAttempt(eventIds: ["dup"])
+        queue.append(entry("dup"), maxEvents: 100)
+        #expect(await ids(queue) == ["dup", "other"])
+        #expect(await queue.peek(maxCount: 1).first?.attempts == 1)
+        #expect(await queue.count() == 2)
+        await queue.close()
+    }
+
+    @Test("concurrent operations apply in call order")
+    func concurrentOperationsInOrder() async {
+        let db = TempDatabase()
+        let queue = db.queue()
+        queue.append(entry("sent-1"), maxEvents: 100)
+        queue.append(entry("sent-2"), maxEvents: 100)
+
+        // Issued without waiting in between, as a dispatch removing what it
+        // sent races new captures.
+        for i in 0..<10 { queue.append(entry("c\(i)"), maxEvents: 100) }
+        async let removing: Void = queue.remove(eventIds: ["sent-1", "sent-2"])
+        for i in 10..<20 { queue.append(entry("c\(i)"), maxEvents: 100) }
+        async let retrying = queue.incrementAttempt(eventIds: ["c0", "c5"])
+        _ = await (removing, retrying)
+
+        let all = await queue.peek(maxCount: 50)
+        #expect(all.map(\.eventId) == (0..<20).map { "c\($0)" })
+        #expect(all.filter { $0.attempts == 1 }.map(\.eventId) == ["c0", "c5"])
+        await queue.close()
+    }
+
+    @Test("a payload JSON cannot represent is dropped alone")
     func nonJSONPayloadDropped() async {
         let db = TempDatabase()
         let queue = db.queue()
@@ -133,86 +200,6 @@ struct SQLiteAnalyticsQueueTests {
         #expect(await ids(queue) == ["valid"])
         #expect(await queue.count() == 1)
         await queue.close()
-    }
-
-    // MARK: - Degradation
-
-    @Test("degrades to memory when the database path cannot resolve")
-    func unresolvablePath() async {
-        struct NoPath: Error {}
-        let queue = SQLiteAnalyticsQueue(opener: AnalyticsDatabaseOpener(resolvePath: { throw NoPath() }))
-        queue.append(entry("mem"), maxEvents: 100)
-        #expect(await queue.isDegraded)
-        #expect(await ids(queue) == ["mem"])
-        #expect(queue.size == 1)
-    }
-
-    @Test("reopens after the cooldown and moves buffered events into SQLite")
-    func reconnectsAfterCooldown() async {
-        struct Locked: Error {}
-        let db = TempDatabase()
-        nonisolated(unsafe) var available = false
-        nonisolated(unsafe) var now = Date(timeIntervalSince1970: 0)
-        let queue = SQLiteAnalyticsQueue(
-            opener: AnalyticsDatabaseOpener(resolvePath: { [path = db.path] in
-                guard available else { throw Locked() }
-                return path
-            }),
-            reconnectCooldown: 30,
-            now: { now }
-        )
-        queue.append(entry("buffered-1"), maxEvents: 100)
-        #expect(await queue.isDegraded)
-
-        available = true
-        queue.append(entry("buffered-2"), maxEvents: 100)
-        #expect(await queue.isDegraded, "still inside the cooldown")
-
-        now = now.addingTimeInterval(30)
-        queue.append(entry("stored-3"), maxEvents: 100)
-        #expect(await queue.isDegraded == false)
-        #expect(await ids(queue) == ["buffered-1", "buffered-2", "stored-3"])
-        await queue.close()
-
-        let reopened = db.queue()
-        #expect(await reopened.count() == 3, "all three were written to disk")
-        await reopened.close()
-    }
-
-    @Test("buffers in memory while SQLite rejects writes")
-    func buffersWhileWritesFail() async throws {
-        let db = TempDatabase()
-        let queue = db.queue()
-        queue.append(entry("stored"), maxEvents: 100)
-        _ = await queue.count()
-        try db.raw().execute(
-            "CREATE TRIGGER reject BEFORE INSERT ON analytics_queue BEGIN SELECT RAISE(ABORT, 'disk full'); END"
-        )
-        queue.append(entry("mem"), maxEvents: 100)
-        #expect(await ids(queue) == ["stored", "mem"])
-        #expect(queue.size == 2)
-        await queue.close()
-    }
-
-    @Test("recreates a corrupt database file")
-    func recreatesCorruptFile() async throws {
-        let db = TempDatabase()
-        try Data([0x00, 0x11, 0x22, 0x33, 0xAA, 0xFF] + Array(repeating: 0x42, count: 4096))
-            .write(to: URL(fileURLWithPath: db.path))
-        let queue = db.queue()
-        queue.append(entry("healed"), maxEvents: 100)
-        #expect(await queue.isDegraded == false)
-        #expect(await ids(queue) == ["healed"])
-        await queue.close()
-    }
-
-    @Test("corruption is recognised by SQLite's result code")
-    func corruptionCodes() {
-        #expect(SQLiteError(code: 11, message: "").isCorruption)
-        #expect(SQLiteError(code: 26, message: "").isCorruption)
-        #expect(SQLiteError(code: 11 | (1 << 8), message: "").isCorruption, "extended codes")
-        #expect(SQLiteError(code: 13, message: "database or disk is full").isCorruption == false)
-        #expect(SQLiteError(code: 5, message: "the payload said corrupt").isCorruption == false)
     }
 
     // MARK: - Legacy import
@@ -251,7 +238,7 @@ struct SQLiteAnalyticsQueueTests {
         await reopened.close()
     }
 
-    @Test("an existing duplicate keeps its retry state, and receipts stop replays")
+    @Test("an existing duplicate keeps its retry state and receipts stop replays")
     func importIsIdempotent() async throws {
         let db = TempDatabase()
         let raw = try db.raw()
@@ -273,6 +260,29 @@ struct SQLiteAnalyticsQueueTests {
         try store.remove(eventIds: ["gone"])
         try legacyImport.run(on: store, maxEvents: 100)
         #expect(try store.peek(10).map(\.eventId) == ["dup"], "a delivered import never reappears")
+    }
+
+    @Test("the cap keeps newer rows and evicted imports do not replay")
+    func evictedImportsDoNotReplay() throws {
+        let db = TempDatabase()
+        let raw = try db.raw()
+        defer { raw.close() }
+        let store = try SQLiteQueueStore.attach(raw)
+        try store.append(eventId: "new", payloadJSON: #"{"event_id":"new"}"#, createdAt: 5_000, maxEvents: 1)
+
+        // A source whose cleanup never lands, as if interrupted each time.
+        let sticky = InMemoryLocalStorage()
+        let data = try JSONSerialization.data(withJSONObject: [legacyEntry("old", createdAt: 1_000)])
+        sticky.set(String(data: data, encoding: .utf8), forKey: "queue")
+        sticky.dropWrites = true
+        let legacyImport = LegacyQueueImport(source: sticky)
+
+        try legacyImport.run(on: store, maxEvents: 1)
+        #expect(try store.peek(10).map(\.eventId) == ["new"])
+
+        try store.remove(eventIds: ["new"])
+        try legacyImport.run(on: store, maxEvents: 1)
+        #expect(try store.peek(10).isEmpty, "an evicted import never reappears")
     }
 
     @Test("a failed import rolls back and keeps the source")
@@ -329,6 +339,140 @@ struct SQLiteAnalyticsQueueTests {
         #expect(try store.peek(10).map(\.eventId) == ["old"])
     }
 
+    // MARK: - Degradation
+
+    @Test("degrades to memory while the database cannot open")
+    func degradesWhileUnopenable() async {
+        let queue = SQLiteAnalyticsQueue(opener: failingOpener())
+        queue.append(entry("mem"), maxEvents: 100)
+        #expect(await queue.isDegraded)
+        #expect(await ids(queue) == ["mem"])
+        #expect(queue.size == 1)
+    }
+
+    @Test("a failing open leaves the file untouched")
+    func failingOpenKeepsFile() async {
+        let db = TempDatabase()
+        let first = db.queue()
+        first.append(entry("kept"), maxEvents: 100)
+        await first.close()
+
+        let failing = db.queue(opener: failingOpener())
+        failing.append(entry("mem"), maxEvents: 100)
+        #expect(await failing.isDegraded)
+        await failing.close()
+
+        let reopened = db.queue()
+        #expect(await ids(reopened) == ["kept"], "the stored event survived the failed open")
+        await reopened.close()
+    }
+
+    @Test("recreates a corrupt database file")
+    func recreatesCorruptFile() async throws {
+        let db = TempDatabase()
+        try Data([0x00, 0x11, 0x22, 0x33, 0xAA, 0xFF] + Array(repeating: 0x42, count: 4096))
+            .write(to: URL(fileURLWithPath: db.path))
+        let queue = db.queue()
+        queue.append(entry("healed"), maxEvents: 100)
+        #expect(await queue.isDegraded == false)
+        #expect(await ids(queue) == ["healed"])
+        await queue.close()
+    }
+
+    @Test("buffers in memory while SQLite rejects writes")
+    func buffersWhileWritesFail() async throws {
+        let db = TempDatabase()
+        let queue = db.queue()
+        queue.append(entry("stored"), maxEvents: 100)
+        _ = await queue.count()
+        try db.rejectWrites()
+        queue.append(entry("mem"), maxEvents: 100)
+        #expect(await ids(queue) == ["stored", "mem"])
+        #expect(queue.size == 2)
+        await queue.close()
+    }
+
+    @Test("moves buffered events into SQLite once it accepts writes again")
+    func movesBufferedEvents() async throws {
+        let db = TempDatabase()
+        let queue = db.queue()
+        queue.append(entry("stored"), maxEvents: 100)
+        _ = await queue.count()
+        try db.rejectWrites()
+        queue.append(entry("mem-1"), maxEvents: 100)
+        queue.append(entry("mem-2"), maxEvents: 100)
+        _ = await queue.count()
+
+        try db.acceptWrites()
+        #expect(await ids(queue) == ["stored", "mem-1", "mem-2"])
+        await queue.close()
+        let reopened = db.queue()
+        #expect(await reopened.count() == 3, "all three were written to disk")
+        await reopened.close()
+    }
+
+    @Test("moving buffered events obeys the cap")
+    func movingBufferedObeysCap() async throws {
+        let db = TempDatabase()
+        let queue = db.queue()
+        queue.append(entry("seed"), maxEvents: 3)
+        _ = await queue.count()
+        try db.rejectWrites()
+        for i in 0..<5 { queue.append(entry("cap-\(i)"), maxEvents: 3) }
+        _ = await queue.count()
+
+        try db.acceptWrites()
+        #expect(await ids(queue) == ["cap-2", "cap-3", "cap-4"])
+        await queue.close()
+    }
+
+    @Test("reopens after the cooldown and moves buffered events into SQLite")
+    func reconnectsAfterCooldown() async {
+        struct Locked: Error {}
+        let db = TempDatabase()
+        nonisolated(unsafe) var available = false
+        nonisolated(unsafe) var now = Date(timeIntervalSince1970: 0)
+        let queue = SQLiteAnalyticsQueue(
+            opener: AnalyticsDatabaseOpener(resolvePath: { [path = db.path] in
+                guard available else { throw Locked() }
+                return path
+            }),
+            reconnectCooldown: 30,
+            now: { now }
+        )
+        queue.append(entry("buffered-1"), maxEvents: 100)
+        #expect(await queue.isDegraded)
+
+        available = true
+        queue.append(entry("buffered-2"), maxEvents: 100)
+        #expect(await queue.isDegraded, "still inside the cooldown")
+
+        now = now.addingTimeInterval(30)
+        queue.append(entry("stored-3"), maxEvents: 100)
+        #expect(await queue.isDegraded == false)
+        #expect(await ids(queue) == ["buffered-1", "buffered-2", "stored-3"])
+        await queue.close()
+
+        let reopened = db.queue()
+        #expect(await reopened.count() == 3, "all three were written to disk")
+        await reopened.close()
+    }
+
+    // MARK: - Database setup
+
+    @Test("the opened database uses WAL with synchronous FULL")
+    func walWithFullSync() throws {
+        let db = TempDatabase()
+        let connection = try AnalyticsDatabaseOpener(resolvePath: { [path = db.path] in path }).open()
+        defer { connection.close() }
+        var sync = -1
+        var journal = ""
+        try connection.query("PRAGMA synchronous") { sync = Int($0.int64(0)) }
+        try connection.query("PRAGMA journal_mode") { journal = $0.text(0) ?? "" }
+        #expect(sync == 2, "2 = FULL")
+        #expect(journal.lowercased() == "wal")
+    }
+
     @Test("the schema version is recorded as user_version 1")
     func schemaVersionRecorded() throws {
         let db = TempDatabase()
@@ -347,6 +491,15 @@ struct SQLiteAnalyticsQueueTests {
         return count
     }
 
+    @Test("corruption is recognised from SQLite's own result code")
+    func corruptionCodes() {
+        #expect(SQLiteError(code: 11, message: "").isCorruption)
+        #expect(SQLiteError(code: 26, message: "").isCorruption)
+        #expect(SQLiteError(code: 11 | (1 << 8), message: "").isCorruption, "extended codes")
+        #expect(SQLiteError(code: 13, message: "database or disk is full").isCorruption == false)
+        #expect(SQLiteError(code: 5, message: "the payload said corrupt").isCorruption == false)
+    }
+
     // MARK: - Memory queue
 
     @Test("memory queue drops the oldest events at its own limit")
@@ -357,5 +510,31 @@ struct SQLiteAnalyticsQueueTests {
         #expect(await queue.incrementAttempt(eventIds: ["m4"]).map(\.attempts) == [1])
         await queue.remove(eventIds: ["m3"])
         #expect(queue.size == 2)
+    }
+
+    @Test("memory queue loses and resurrects nothing under concurrent appends and a remove")
+    func memoryQueueConcurrency() async {
+        let queue = MemoryAnalyticsQueue()
+        let seeded = (0..<20).map { "seed-\($0)" }
+        for id in seeded { queue.append(entry(id), maxEvents: 10_000) }
+
+        let threads = 8
+        let perThread = 50
+        await withTaskGroup(of: Void.self) { group in
+            for t in 0..<threads {
+                group.addTask {
+                    for i in 0..<perThread { queue.append(self.entry("t\(t)-\(i)"), maxEvents: 10_000) }
+                }
+            }
+            group.addTask {
+                await queue.remove(eventIds: seeded)
+                for i in 0..<perThread { await queue.incrementAttempt(eventIds: ["t0-\(i)"]) }
+            }
+        }
+
+        let ids = await queue.peek(maxCount: .max).map(\.eventId)
+        #expect(ids.count == threads * perThread)
+        #expect(Set(ids).count == ids.count)
+        #expect(ids.filter { $0.hasPrefix("seed-") }.isEmpty)
     }
 }

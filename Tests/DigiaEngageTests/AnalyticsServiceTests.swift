@@ -7,7 +7,7 @@ import Testing
 // into capture() by the caller; this helper supplies fixed test values so the
 // existing call sites stay terse.
 @MainActor
-private extension AnalyticsService {
+extension AnalyticsService {
     func capture(_ event: EngageAnalyticsEvent, payload: CEPTriggerPayload) {
         capture(event, payload: payload, campaignId: "example-campaign", campaignType: "guide")
     }
@@ -28,6 +28,9 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
     var responseFactory: (Int) -> Int
     /// How long a track call takes to answer — lets a test capture while a send is in flight.
     var responseDelayMs: UInt64 = 0
+    /// The events of each track body, in send order.
+    private(set) var batches: [[[String: Any]]] = []
+    var batchSizes: [Int] { batches.map(\.count) }
 
     init(responseFactory: @escaping (Int) -> Int = { _ in 200 }) {
         self.responseFactory = responseFactory
@@ -38,6 +41,11 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
             return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
         }
         _callCount += 1
+        if let body = request.body,
+           let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+           let events = json["events"] as? [[String: Any]] {
+            batches.append(events)
+        }
         let status = responseFactory(_callCount)
         if responseDelayMs > 0 { try await Task.sleep(nanoseconds: responseDelayMs * 1_000_000) }
         return NetworkResponse(statusCode: status, headers: [:], body: nil, isSuccessful: (200..<300).contains(status))
@@ -122,19 +130,64 @@ final class FakeNetworkMonitor: NetworkMonitor, @unchecked Sendable {
     }
 }
 
+// MARK: - Shared helpers
+
+/// A service over a memory queue and fresh storage. Shared with
+/// `AnalyticsServiceIOSTests` and `AnalyticsServiceSQLiteTests`.
+@MainActor
+func makeTestAnalyticsService(
+    config: AnalyticsConfig = AnalyticsConfig(flushIntervalMs: 10_000),
+    sender: any NetworkClient = FakeAnalyticsSender(),
+    defaults: UserDefaults? = nil,
+    queue: (any AnalyticsQueueProtocol)? = nil,
+    networkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor(),
+    backgroundTime: BackgroundTimeProvider = FakeBackgroundTime()
+) -> AnalyticsService {
+    let store = defaults ?? UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
+    let storage = UserDefaultsLocalStorage(defaults: store)
+    let identityManager = IdentityManager(storage: storage.scoped("identity"))
+    let sessionManager = SessionManager(storage: storage.scoped("session"), timeoutMs: Int64(config.sessionTimeoutMs), observeLifecycle: false)
+    return AnalyticsService(
+        config: config,
+        identityManager: identityManager,
+        sessionManager: sessionManager,
+        queue: queue ?? MemoryAnalyticsQueue(),
+        staticContext: ["sdk_version": "1.0.0", "sdk_platform": "ios"],
+        networkClient: sender,
+        networkMonitor: networkMonitor,
+        backgroundTime: backgroundTime
+    )
+}
+
+func testPayload(_ campaignKey: String) -> CEPTriggerPayload {
+    CEPTriggerPayload(cepCampaignId: campaignKey, campaignKey: campaignKey, cepMetadata: [:])
+}
+
+/// Polls `condition` (up to 8 s) instead of guessing how long the work takes:
+/// the main actor is shared with other suites and can be busy for a while.
+@MainActor
+func waitForAnalytics(_ condition: () -> Bool) async throws {
+    for _ in 0..<800 where !condition() {
+        try await Task.sleep(nanoseconds: 10_000_000)
+    }
+}
+
+/// An event whose properties hold Foundation's mutable containers, which a
+/// caller can change after `capture` returns.
+struct MutablePropertiesEvent: EngageAnalyticsEvent {
+    let eventName = "Digia Experience Viewed"
+    let properties: [String: Any]
+}
+
 // MARK: - Suite
 
 private func sleepMillis(_ ms: UInt64) async throws {
     try await Task.sleep(nanoseconds: ms * 1_000_000)
 }
 
-/// Polls `condition` (up to 8 s) instead of guessing how long the work takes:
-/// the main actor is shared with other suites and can be busy for a while.
 @MainActor
 private func waitUntil(_ condition: () -> Bool) async throws {
-    for _ in 0..<800 where !condition() {
-        try await Task.sleep(nanoseconds: 10_000_000)
-    }
+    try await waitForAnalytics(condition)
 }
 
 @MainActor
@@ -154,27 +207,13 @@ struct AnalyticsServiceTests {
         sender: any NetworkClient = FakeAnalyticsSender(),
         defaults: UserDefaults? = nil,
         queue: (any AnalyticsQueueProtocol)? = nil,
-        networkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor(),
-        backgroundTime: BackgroundTimeProvider = FakeBackgroundTime()
+        networkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor()
     ) -> AnalyticsService {
-        let store = defaults ?? UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
-        let storage = UserDefaultsLocalStorage(defaults: store)
-        let identityManager = IdentityManager(storage: storage.scoped("identity"))
-        let sessionManager = SessionManager(storage: storage.scoped("session"), timeoutMs: Int64(config.sessionTimeoutMs), observeLifecycle: false)
-        return AnalyticsService(
-            config: config,
-            identityManager: identityManager,
-            sessionManager: sessionManager,
-            queue: queue ?? MemoryAnalyticsQueue(),
-            staticContext: ["sdk_version": "1.0.0", "sdk_platform": "ios"],
-            networkClient: sender,
-            networkMonitor: networkMonitor,
-            backgroundTime: backgroundTime
-        )
+        makeTestAnalyticsService(config: config, sender: sender, defaults: defaults, queue: queue, networkMonitor: networkMonitor)
     }
 
     private func buildPayload(_ campaignKey: String) -> CEPTriggerPayload {
-        CEPTriggerPayload(cepCampaignId: campaignKey, campaignKey: campaignKey, cepMetadata: [:])
+        testPayload(campaignKey)
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
@@ -271,7 +310,7 @@ struct AnalyticsServiceTests {
         #expect(entries[1].payload["impression_id"] == nil)
     }
 
-    @Test("click analytics preserve action URL")
+    @Test("click analytics preserve action url")
     func clickAnalyticsPreserveActionURL() async {
         let service = makeService()
         let payload = buildPayload("test")
@@ -307,6 +346,24 @@ struct AnalyticsServiceTests {
             #expect(properties?["action_type"] != nil)
             #expect(properties?["action_url"] as? String == urls[index])
         }
+    }
+
+    @Test("capture makes a deep copy of properties")
+    func captureDeepCopiesProperties() async {
+        let service = makeService()
+        let nested = NSMutableDictionary(dictionary: ["key": "original"])
+        let properties = NSMutableDictionary(dictionary: ["prop": "initial", "deep": nested])
+
+        service.capture(
+            MutablePropertiesEvent(properties: properties as! [String: Any]),
+            payload: buildPayload("copy")
+        )
+        properties["prop"] = "mutated"
+        nested["key"] = "mutated"
+
+        let queued = await service.queue.peek(maxCount: 1).first?.payload["properties"] as? [String: Any]
+        #expect(queued?["prop"] as? String == "initial")
+        #expect((queued?["deep"] as? [String: Any])?["key"] as? String == "original")
     }
 
     @Test("batch threshold triggers immediate flush")
@@ -387,6 +444,28 @@ struct AnalyticsServiceTests {
         #expect(fakeSender.callCount == 2)
     }
 
+    @Test("an event captured during a send waits for the interval instead of being stranded")
+    func eventCapturedDuringSendWaitsForInterval() async throws {
+        let sender = FakeAnalyticsSender()
+        sender.responseDelayMs = 150
+        let service = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 500, flushBatchSize: 10),
+            sender: sender
+        )
+
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("first"))
+        service.flush()
+        try await waitUntil { sender.callCount == 1 }  // send #1 is in flight
+        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("second"))
+
+        try await waitUntil { service.queue.size == 1 && sender.callCount == 1 }  // #1 finished
+        try await sleepMillis(200)
+        #expect(sender.callCount == 1, "not before the interval")
+
+        try await waitUntil { sender.callCount == 2 && service.queue.size == 0 }
+        #expect(service.queue.size == 0)
+    }
+
     @Test("after a failed send only the retry fires, not also a flush timer")
     func afterFailureOnlyTheRetryFires() async throws {
         let fakeSender = FakeAnalyticsSender { callNum in callNum == 1 ? 500 : 200 }
@@ -442,7 +521,7 @@ struct AnalyticsServiceTests {
         testMode.analyticsService?.clear()
     }
 
-    @Test("explicit flush() dispatches pending events")
+    @Test("explicit flush dispatches pending events")
     func explicitFlushDispatchesPending() async throws {
         let fakeSender = FakeAnalyticsSender()
         let service = makeService(
@@ -458,6 +537,32 @@ struct AnalyticsServiceTests {
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
+    }
+
+    @Test("maxBatchSize is clamped to 1 to 100")
+    func maxBatchSizeIsClamped() async throws {
+        let sender = FakeAnalyticsSender()
+        let wide = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 100_000, maxBatchSize: 500),
+            sender: sender
+        )
+        for i in 0...AnalyticsConfig.maxBatchSizeLimit {
+            wide.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p\(i)"))
+        }
+        wide.flush()
+        try await waitUntil { sender.callCount == 1 && wide.queue.size == 1 }
+        #expect(sender.batchSizes == [AnalyticsConfig.maxBatchSizeLimit], "one capped batch per send")
+        wide.clear()
+
+        let zeroSender = FakeAnalyticsSender()
+        let zero = makeService(
+            config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 100_000, maxBatchSize: 0),
+            sender: zeroSender
+        )
+        zero.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("z"))
+        zero.flush()
+        try await waitUntil { zeroSender.callCount == 1 && zero.queue.size == 0 }
+        #expect(zeroSender.batchSizes == [1], "a zero batch size still sends")
     }
 
     @Test("5xx response retries and event survives until success")
@@ -514,7 +619,7 @@ struct AnalyticsServiceTests {
         #expect(fakeSender.callCount == 2)
     }
 
-    @Test("4xx/5xx responses retry up to the cap (10) then drop the event")
+    @Test("4xx-5xx responses retry up to the cap then drop the event")
     func httpErrorRetriesThenDrops() async throws {
         let fakeSender = FakeAnalyticsSender { _ in 400 }
         let service = makeService(
@@ -597,7 +702,7 @@ struct AnalyticsServiceTests {
         service.clear()
     }
 
-    @Test("background notification flushes pending events")
+    @Test("going to the background flushes pending events")
     func backgroundNotificationFlushes() async throws {
         let fakeSender = FakeAnalyticsSender()
         let service = makeService(
@@ -616,49 +721,6 @@ struct AnalyticsServiceTests {
 
         #expect(service.queue.size == 0)
         #expect(fakeSender.callCount == 1)
-    }
-
-    @Test("the background flush runs inside one background task, ended when it finishes")
-    func backgroundFlushHoldsBackgroundTime() async throws {
-        let sender = FakeAnalyticsSender()
-        sender.responseDelayMs = 50
-        let time = FakeBackgroundTime()
-        let service = makeService(
-            config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
-            sender: sender,
-            backgroundTime: time
-        )
-        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
-
-        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
-        try await waitUntil { sender.callCount == 1 }
-        #expect(time.begun == 1)
-        #expect(time.ended.isEmpty, "held while the send is in flight")
-
-        try await waitUntil { service.queue.size == 0 && time.ended.count == 1 }
-        #expect(time.ended == [1])
-    }
-
-    @Test("an expiring background task is ended at once, and only once")
-    func expiringBackgroundTimeEndsOnce() async throws {
-        let sender = FakeAnalyticsSender()
-        sender.responseDelayMs = 200
-        let time = FakeBackgroundTime()
-        let service = makeService(
-            config: AnalyticsConfig(flushIntervalMs: 10_000, flushBatchSize: 10),
-            sender: sender,
-            backgroundTime: time
-        )
-        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
-
-        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
-        try await waitUntil { sender.callCount == 1 }
-        time.expire()
-        #expect(time.ended == [1], "ended when iOS says time is up")
-
-        try await waitUntil { service.queue.size == 0 }
-        try await Task.sleep(nanoseconds: 50_000_000)
-        #expect(time.ended == [1], "not ended again when the send finishes")
     }
 
     @Test("persisted queue flushes on next cold init")
@@ -726,7 +788,7 @@ struct AnalyticsServiceTests {
     /// keys a normal first-party event's is. Only `event_name` and the
     /// contents of `properties` may differ — everything else (identity,
     /// timestamps, `campaign_key`) comes from the same enqueue path for free.
-    @Test("sdk_health rides the existing envelope verbatim — no new top-level columns")
+    @Test("a health event is the first-party envelope, with health only inside properties")
     func healthEventEnvelopeMatchesNormalEvent() async {
         let service = makeService()
 
@@ -790,26 +852,7 @@ struct AnalyticsServiceTests {
         #expect(healthProps?["sdk_version"] as? String == "1.0.0")
     }
 
-    @Test("captureHealth carries stage and detail only when present")
-    func captureHealthOptionalFields() async {
-        let service = makeService()
-
-        service.captureHealth(
-            campaignKey: nil,
-            reason: "fetch_failed_auth",
-            stage: nil,
-            detail: ["http_status": "401"],
-            buildMode: "release"
-        )
-
-        let entry = await service.queue.peek(maxCount: 1)[0].payload
-        #expect(entry["campaign_key"] == nil)
-        let props = entry["properties"] as? [String: Any]
-        #expect(props?["stage"] == nil)
-        #expect((props?["detail"] as? [String: String]) == ["http_status": "401"])
-    }
-
-    @Test("captureHealth is a no-op when analytics is disabled")
+    @Test("disabled analytics drops a health event rather than throwing")
     func captureHealthNoOpWhenDisabled() {
         let service = makeService(config: AnalyticsConfig(enabled: false))
         service.captureHealth(
@@ -817,7 +860,7 @@ struct AnalyticsServiceTests {
         #expect(service.queue.size == 0)
     }
 
-    @Test("partial failure (207) removes all batched events without retry")
+    @Test("partial failure removes all batched events without retry")
     func partialFailureRemovesAllEvents() async throws {
         let fakeSender = FakeAnalyticsSender { _ in 207 }
         let service = makeService(
