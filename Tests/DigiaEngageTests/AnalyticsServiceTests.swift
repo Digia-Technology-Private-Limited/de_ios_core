@@ -539,7 +539,7 @@ struct AnalyticsServiceTests {
         #expect(fakeSender.callCount == 1)
     }
 
-    @Test("maxBatchSize is clamped to 1 to 100")
+    @Test("maxBatchSize is clamped to 1 to 200")
     func maxBatchSizeIsClamped() async throws {
         let sender = FakeAnalyticsSender()
         let wide = makeService(
