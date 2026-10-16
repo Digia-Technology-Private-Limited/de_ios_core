@@ -289,6 +289,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 self?.floaterOrchestrator.setAppForegrounded(false)
                 self?.floaterStoryOrchestrator.setAppForegrounded(false)
                 self?.coordinator.noteAppLeftForeground()
+                self?.dwellTracker.pause()
             }
         }
         appForegroundObserver = NotificationCenter.default.addObserver(
@@ -300,6 +301,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 self?.floaterOrchestrator.setAppForegrounded(true)
                 self?.floaterStoryOrchestrator.setAppForegrounded(true)
                 self?.coordinator.noteAppEnteredForeground()
+                self?.dwellTracker.resume()
             }
         }
     }
