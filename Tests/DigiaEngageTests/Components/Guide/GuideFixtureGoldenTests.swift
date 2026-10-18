@@ -18,8 +18,8 @@ extension RenderedUITests {
 /// `testkit/campaigns/anchorless/` is not covered: `GuideOverlayView` resolves an anchorless
 /// target against `ViewControllerUtil.keyWindow()`, which needs a connected `UIWindowScene`, and
 /// the test bundle has no host app and so no scene; every anchorless step fails with
-/// `invalidGeometry` before it draws. Covering it needs a window override like the floaters'
-/// `activeFloaterWindowGeometryOverride`.
+/// `invalidGeometry` before it draws. It is covered by `AnchorlessFixtureGoldenTests` in the
+/// sample-app-hosted target, which has a scene.
 @Suite("Test Kit guide fixture goldens", .serialized, .tags(.guide))
 struct GuideFixtureGoldenTests {
 
@@ -55,7 +55,7 @@ struct GuideFixtureGoldenTests {
         let parts = path.split(separator: "/").map(String.init)
         let json = try #require(FixtureLoader.loadFixture(campaignType: parts[0], fileName: parts[1]))
         // A fixture the parser rejects never reaches the screen.
-        guard let campaign = CampaignModel.fromJson(json, devicePlatform: "ios") else { return }
+        guard let campaign = try CampaignModel.fromJson(json, devicePlatform: "ios") else { return }
 
         let showing = try showGuide(campaign)
         defer { showing.end() }
@@ -75,7 +75,7 @@ struct GuideFixtureGoldenTests {
             "Failed to load fixture \(campaignType)/\(fixture).json"
         )
         let campaign = try #require(
-            CampaignModel.fromJson(json, devicePlatform: "ios"),
+            try CampaignModel.fromJson(json, devicePlatform: "ios"),
             "Fixture must decode to a guide"
         )
         try #require(campaign.guideConfig != nil, "Fixture must decode to a guide")

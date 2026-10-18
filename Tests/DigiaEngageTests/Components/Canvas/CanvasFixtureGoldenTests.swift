@@ -58,7 +58,7 @@ struct CanvasFixtureGoldenTests {
             "Fixture must load"
         )
         let standIn = withMissingImagesReplaced(json) as! [String: Any]
-        let campaign = try #require(CampaignModel.fromJson(standIn), "Fixture must decode to a campaign")
+        let campaign = try #require(try CampaignModel.fromJson(standIn), "Fixture must decode to a campaign")
         guard case .inlineCanvas(let config) = campaign.config else {
             Issue.record("Fixture must decode to an inline canvas")
             return
@@ -221,7 +221,7 @@ private struct SlotHostScreen: View {
         ScrollView {
             VStack(spacing: 0) {
                 Color(red: 0x26 / 255, green: 0xA6 / 255, blue: 0x9A / 255).frame(height: 120)
-                DigiaInlineCanvasView(config: config, payload: payload)
+                DigiaInlineCanvasView(config: config, payload: payload, stepGate: CarouselStepGate(payload: payload))
                 Color(red: 0xFF / 255, green: 0xCA / 255, blue: 0x28 / 255).frame(height: 120)
             }
         }

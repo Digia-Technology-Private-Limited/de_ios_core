@@ -41,7 +41,7 @@ struct NudgeDialogComponentTests {
             return
         }
 
-        let nudgeConfig = try #require(NudgeConfig.fromJson(templateConfig))
+        let nudgeConfig = try #require(try NudgeConfig.fromJson(templateConfig))
 
         #expect(nudgeConfig.surface.displayType == .dialog)
         #expect(nudgeConfig.surface.cornerRadius == 18)
@@ -59,7 +59,7 @@ struct NudgeDialogComponentTests {
             return
         }
 
-        let nudgeConfig = try #require(NudgeConfig.fromJson(templateConfig))
+        let nudgeConfig = try #require(try NudgeConfig.fromJson(templateConfig))
         let canvas = try #require(nudgeConfig.canvas)
 
         #expect(canvas.width == 320)
@@ -78,7 +78,7 @@ struct NudgeDialogComponentTests {
             return
         }
 
-        let nudgeConfig = try #require(NudgeConfig.fromJson(templateConfig))
+        let nudgeConfig = try #require(try NudgeConfig.fromJson(templateConfig))
         let canvas = try #require(nudgeConfig.canvas)
 
         guard case .widget(let id, _, let widget) = canvas.children[2],
@@ -99,7 +99,7 @@ struct NudgeDialogComponentTests {
     func testNudgeDialogVisualImageGolden() throws {
         let fixture = try loadNudgeDialogFixture()
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-            let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+            let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse canvas nudge config")
@@ -148,7 +148,7 @@ struct NudgeDialogComponentTests {
     func testNudgeDialogLayoutVariants(testCase: DialogLayoutVariantCase) throws {
         let fixture = try loadNudgeDialogFixture(named: testCase.fixtureName)
         let template = try #require(fixture["templateConfig"] as? [String: Any])
-        let config = try #require(NudgeConfig.fromJson(template))
+        let config = try #require(try NudgeConfig.fromJson(template))
         let canvas = try #require(config.canvas)
 
         #expect(config.surface.cornerRadius == testCase.expectedCornerRadius)
@@ -169,7 +169,7 @@ struct NudgeDialogComponentTests {
     func testNudgeDialogDarkThemeVariantContract() throws {
         let darkFixture = try loadNudgeDialogFixture(named: "nudge-dialog-bg-dark.json")
         let darkTemplate = try #require(darkFixture["templateConfig"] as? [String: Any])
-        let darkConfig = try #require(NudgeConfig.fromJson(darkTemplate))
+        let darkConfig = try #require(try NudgeConfig.fromJson(darkTemplate))
         let darkCanvas = try #require(darkConfig.canvas)
 
         let surfaceBg = try #require(darkConfig.surface.backgroundColor)
@@ -200,7 +200,7 @@ struct NudgeDialogComponentTests {
     func testNudgeDialogRadius0VisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-radius-0.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-            let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+            let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse sharp radius nudge config")
@@ -227,7 +227,7 @@ struct NudgeDialogComponentTests {
     func testNudgeDialogRadius28VisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-radius-28.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-            let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+            let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse rounded radius nudge config")
@@ -254,7 +254,7 @@ struct NudgeDialogComponentTests {
     func testNudgeDialogMarginZeroVisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-margin-zero.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-            let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+            let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse zero margin nudge config")
@@ -281,7 +281,7 @@ struct NudgeDialogComponentTests {
     func testNudgeDialogMarginLargeVisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-margin-large.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-            let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+            let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse large margin nudge config")
@@ -308,7 +308,7 @@ struct NudgeDialogComponentTests {
     func testNudgeDialogWidthNarrowVisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-width-narrow.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-            let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+            let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse narrow width nudge config")
@@ -335,7 +335,7 @@ struct NudgeDialogComponentTests {
     func testNudgeDialogWidthWideVisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-width-wide.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-            let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+            let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse wide width nudge config")
@@ -362,7 +362,7 @@ struct NudgeDialogComponentTests {
     func testNudgeDialogDarkThemeVisualGolden() throws {
         let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-bg-dark.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-            let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+            let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
         else {
             Issue.record("Failed to parse dark background nudge config")
@@ -391,7 +391,7 @@ struct NudgeDialogComponentTests {
     func testNudgeDialogBackdropTapDismissal() throws {
         let fixture = try loadNudgeDialogFixture()
         let templateConfig = try #require(fixture["templateConfig"] as? [String: Any])
-        let config = try #require(NudgeConfig.fromJson(templateConfig))
+        let config = try #require(try NudgeConfig.fromJson(templateConfig))
         #expect(config.surface.backdropDismissible == true)
 
         let presentation = DigiaNudgePresentation(
@@ -417,7 +417,7 @@ struct NudgeDialogComponentTests {
         var surfaceDict = nonDismissibleTemplate["container"] as? [String: Any] ?? [:]
         surfaceDict["backdropDismissible"] = false
         nonDismissibleTemplate["container"] = surfaceDict
-        let nonDismissibleConfig = try #require(NudgeConfig.fromJson(nonDismissibleTemplate))
+        let nonDismissibleConfig = try #require(try NudgeConfig.fromJson(nonDismissibleTemplate))
         #expect(!nonDismissibleConfig.surface.backdropDismissible)
 
         let nonDismissiblePresentation = DigiaNudgePresentation(
@@ -444,7 +444,7 @@ struct NudgeDialogComponentTests {
     func testNudgeDialogCTADismissAction() throws {
         let fixture = try loadNudgeDialogFixture()
         let templateConfig = try #require(fixture["templateConfig"] as? [String: Any])
-        let config = try #require(NudgeConfig.fromJson(templateConfig))
+        let config = try #require(try NudgeConfig.fromJson(templateConfig))
 
         let presentation = DigiaNudgePresentation(
             config: config,
@@ -467,13 +467,13 @@ struct NudgeDialogComponentTests {
         // Default: shown
         containerDict["showCloseButton"] = true
         templateConfig["container"] = containerDict
-        let shownConfig = try #require(NudgeConfig.fromJson(templateConfig))
+        let shownConfig = try #require(try NudgeConfig.fromJson(templateConfig))
         #expect(shownConfig.surface.showCloseButton)
 
         // Toggled off: hidden
         containerDict["showCloseButton"] = false
         templateConfig["container"] = containerDict
-        let hiddenConfig = try #require(NudgeConfig.fromJson(templateConfig))
+        let hiddenConfig = try #require(try NudgeConfig.fromJson(templateConfig))
         #expect(!hiddenConfig.surface.showCloseButton)
     }
 
@@ -499,7 +499,7 @@ struct NudgeDialogComponentTests {
                 ]
             ]
         ]
-        let config = try #require(NudgeConfig.fromJson(json))
+        let config = try #require(try NudgeConfig.fromJson(json))
         #expect(config.canvas == nil)
 
         let presentation = DigiaNudgePresentation(

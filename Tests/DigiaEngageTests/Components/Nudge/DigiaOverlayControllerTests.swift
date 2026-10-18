@@ -16,7 +16,7 @@ struct DigiaOverlayControllerTests {
         var container = templateConfig["container"] as? [String: Any] ?? [:]
         container["autoDismissAfterMs"] = autoDismissAfterMs
         templateConfig["container"] = container
-        guard let config = NudgeConfig.fromJson(templateConfig) else {
+        guard let config = try? NudgeConfig.fromJson(templateConfig) else {
             fatalError("Failed to parse nudge config")
         }
         return DigiaNudgePresentation(

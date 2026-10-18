@@ -1,0 +1,140 @@
+{
+  "id": "mock-action-hide-floater-story",
+  "projectId": "local-mock",
+  "name": "Action: Hide (Story Floater)",
+  "campaignType": "floater",
+  "campaignKey": "test_action_hide_floater_story",
+  "status": "active",
+  "templateConfig": {
+    "templateType": "floaterStory",
+    "designWidth": 360,
+    "collapsed": {
+      "aspectRatio": 1,
+      "widthFraction": 0.35,
+      "border": {
+        "widthDp": 2,
+        "color": {
+          "value": "#6366F1"
+        }
+      },
+      "cornerRadius": 12
+    },
+    "canvas": {
+      "version": 2,
+      "canvasWidth": 360,
+      "canvasHeight": 360,
+      "background": {
+        "type": "solid",
+        "color": {
+          "value": "#EEF2FF"
+        }
+      },
+      "children": []
+    },
+    "story": {
+      "pages": [
+        {
+          "canvas": {
+            "version": 2,
+            "canvasWidth": 360,
+            "canvasHeight": 640,
+            "children": [
+              {
+                "kind": "widget",
+                "id": "story_title",
+                "rect": {
+                  "x": 0.08,
+                  "y": 0.4,
+                  "width": 0.84,
+                  "height": 0.08
+                },
+                "widget": {
+                  "id": "story_title_text",
+                  "type": "digia/text",
+                  "props": {
+                    "spans": [
+                      {
+                        "text": "Weekend Health Drop",
+                        "fontSize": 20,
+                        "fontWeight": "bold",
+                        "color": "#0F172A"
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "kind": "widget",
+                "id": "story_hide_button",
+                "rect": {
+                  "x": 0.08,
+                  "y": 0.75,
+                  "width": 0.84,
+                  "height": 0.08
+                },
+                "widget": {
+                  "id": "story_hide_btn",
+                  "type": "digia/button",
+                  "props": {
+                    "label": {
+                      "horizontalAlign": "center",
+                      "verticalAlign": "center",
+                      "maxLines": 1,
+                      "overflow": "ellipsis",
+                      "spans": [
+                        {
+                          "text": "No Thanks",
+                          "typography": {
+                            "fontSize": 16,
+                            "fontWeight": 600
+                          },
+                          "color": {
+                            "value": "#FFFFFF"
+                          }
+                        }
+                      ]
+                    },
+                    "style": {
+                      "variant": "fill",
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "value": "#6366F1"
+                        }
+                      }
+                    },
+                    "cornerRadius": 10,
+                    "onClick": {
+                      "steps": [
+                        {
+                          "type": "Action.dismiss"
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "chromeCanvas": {
+        "version": 2,
+        "canvasWidth": 360,
+        "canvasHeight": 640,
+        "children": []
+      }
+    },
+    "controls": {
+      "showClose": true
+    },
+    "behavior": {
+      "initialPosition": "bottomRight"
+    },
+    "variables": []
+  },
+  "frequency": null,
+  "createdBy": "local-mock",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

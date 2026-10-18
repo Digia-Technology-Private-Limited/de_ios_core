@@ -7,6 +7,17 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     private let sessionIdProvider: @Sendable () -> String?
     private let headerProvider: @Sendable () -> [String: String]
 
+    /// Test seam: while set, every request goes to this client instead of the network.
+    /// `SDKInstance.shared` builds its client before a hosted test can run, so this is the
+    /// one place such a test can serve the real `initialize` fetch. The SDK never sets it;
+    /// `SDKInstance.resetForTesting` clears it.
+    var overrideForTesting: (any NetworkClient)? {
+        get { overrideLock.lock(); defer { overrideLock.unlock() }; return _overrideForTesting }
+        set { overrideLock.lock(); defer { overrideLock.unlock() }; _overrideForTesting = newValue }
+    }
+    private var _overrideForTesting: (any NetworkClient)?
+    private let overrideLock = NSLock()
+
     init(
         session: URLSession? = nil,
         sessionIdProvider: @escaping @Sendable () -> String?,
@@ -50,6 +61,7 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     // MARK: - NetworkClient
 
     func execute(request: NetworkRequest) async throws -> NetworkResponse {
+        if let override = overrideForTesting { return try await override.execute(request: request) }
         var urlRequest = URLRequest(url: request.url)
         urlRequest.httpMethod = request.method.rawValue
         if let timeout = request.timeoutInterval {
@@ -89,6 +101,7 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     }
 
     func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
+        if let override = overrideForTesting { return try await override.executeMultipart(request: request) }
         let boundary = "DigiaMultipart-\(UUID().uuidString)"
         var urlRequest = URLRequest(url: request.url)
         urlRequest.httpMethod = "POST"
@@ -141,6 +154,7 @@ final class URLSessionNetworkClient: NetworkClient, @unchecked Sendable {
     }
 
     func openSseStream(request: NetworkRequest, handler: any SseStreamHandler) -> any CancellableSubscription {
+        if let override = overrideForTesting { return override.openSseStream(request: request, handler: handler) }
         var urlRequest = URLRequest(url: request.url)
         urlRequest.httpMethod = request.method.rawValue
         urlRequest.timeoutInterval = 45

@@ -141,7 +141,7 @@ struct InlineCanvasPerformTests {
         SDKInstance.shared.inlineController.setCampaign("home_hero", payload: payload)
 
         let (window, _) = ComponentTestHost.mount(
-            rootView: DigiaInlineCanvasView(config: config, payload: payload),
+            rootView: DigiaInlineCanvasView(config: config, payload: payload, stepGate: CarouselStepGate(payload: payload)),
             size: CGSize(width: 360, height: 120)
         )
         defer { ComponentTestHost.unmount(window) }
@@ -177,7 +177,7 @@ struct InlineCanvasPerformTests {
         #expect(SDKInstance.shared.inlineController.getCampaign("home_hero") == payload)
 
         let (window, _) = ComponentTestHost.mount(
-            rootView: DigiaInlineCanvasView(config: config, payload: payload),
+            rootView: DigiaInlineCanvasView(config: config, payload: payload, stepGate: CarouselStepGate(payload: payload)),
             size: CGSize(width: 360, height: 120)
         )
         defer { ComponentTestHost.unmount(window) }
@@ -222,7 +222,7 @@ struct InlineCanvasPerformTests {
         SDKInstance.shared.inlineController.setCampaign("home_hero", payload: currentPayload)
 
         let (window, _) = ComponentTestHost.mount(
-            rootView: DigiaInlineCanvasView(config: config, payload: renderedPayload),
+            rootView: DigiaInlineCanvasView(config: config, payload: renderedPayload, stepGate: CarouselStepGate(payload: renderedPayload)),
             size: CGSize(width: 360, height: 120)
         )
         defer { ComponentTestHost.unmount(window) }
@@ -267,7 +267,7 @@ struct InlineCanvasPerformTests {
         SDKInstance.shared.inlineController.setCampaign("home_hero", payload: payload)
 
         let (window, _) = ComponentTestHost.mount(
-            rootView: DigiaInlineCanvasView(config: config, payload: payload),
+            rootView: DigiaInlineCanvasView(config: config, payload: payload, stepGate: CarouselStepGate(payload: payload)),
             size: CGSize(width: 360, height: 120)
         )
         defer { ComponentTestHost.unmount(window) }
@@ -310,7 +310,7 @@ struct InlineCanvasPerformTests {
         SDKInstance.shared.inlineController.setCampaign("home_hero", payload: payload)
 
         let (window, _) = ComponentTestHost.mount(
-            rootView: DigiaInlineCanvasView(config: config, payload: payload),
+            rootView: DigiaInlineCanvasView(config: config, payload: payload, stepGate: CarouselStepGate(payload: payload)),
             size: CGSize(width: 360, height: 120)
         )
         defer { ComponentTestHost.unmount(window) }

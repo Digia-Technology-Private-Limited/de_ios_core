@@ -23,7 +23,7 @@ struct CanvasComponentTests {
             Issue.record("Missing templateConfig in \(name)")
             throw CancellationError()
         }
-        guard let config = InlineCanvasConfig.fromJson(templateConfig) else {
+        guard let config = try InlineCanvasConfig.fromJson(templateConfig) else {
             Issue.record("Failed to parse InlineCanvasConfig from \(name)")
             throw CancellationError()
         }

@@ -3,7 +3,7 @@ import Testing
 @testable import DigiaEngage
 
 extension HostedUITests {
-/// `next`: only a multi-step surface can move forward, so this drives the Test Kit's
+/// `next`: only a multi-step surface can move forward, so this drives the
 /// `guide-spotlight-journey`, unchanged. Its first step's "Next" button (`btn_next`) is authored
 /// `Action.next`.
 @Suite("Next action", .serialized, .tags(.actions, .integration))
@@ -12,7 +12,8 @@ struct NextActionTests {
 
     @Test("tapping a button authored with next shows the following step")
     func nextShowsTheFollowingStep() async throws {
-        let sdk = try await ActionHarness.start(ActionCampaigns.load("guide_spotlight", "guide-spotlight-journey"))
+        let sdk = try await SdkHarness.start(
+            loadCampaign("Campaigns/guide_spotlight/fixtures/guide-spotlight-journey.json"))
         defer { sdk.tearDown() }
         try sdk.mount { GuideHostScreen() }
         try sdk.deliver("test_guide_spotlight_journey")

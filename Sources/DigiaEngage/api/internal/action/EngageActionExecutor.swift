@@ -4,6 +4,40 @@ import UIKit
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger()
 
+/// The OS calls the SDK's actions end in. `live` is the only value the SDK uses; a test
+/// swaps `current` to record the calls instead of leaving the app, and
+/// `SDKInstance.resetForTesting` puts `live` back.
+@MainActor
+struct ActionPlatform {
+    var open: (URL) -> Void
+    var copy: (String) -> Void
+    var share: (String) -> Void
+    var requestReview: () -> Void
+
+    static let live = ActionPlatform(
+        open: { UIApplication.shared.open($0) },
+        copy: { UIPasteboard.general.string = $0 },
+        share: {
+            ViewControllerUtil.present(
+                UIActivityViewController(activityItems: [$0], applicationActivities: nil)
+            )
+        },
+        requestReview: {
+            guard let scene = ViewControllerUtil.findWindowScene() else {
+                log.e("requestReview() ignored — no window scene")
+                return
+            }
+            if #available(iOS 16, *) {
+                AppStore.requestReview(in: scene)
+            } else {
+                SKStoreReviewController.requestReview(in: scene)
+            }
+        }
+    )
+
+    static var current = live
+}
+
 @MainActor
 struct LocalActionExecutor {
     private let dismiss: (() -> Void)?
@@ -51,23 +85,9 @@ final class GlobalActionExecutor {
     private let requestReview: () -> Void
 
     init(
-        copy: @escaping (String) -> Void = { UIPasteboard.general.string = $0 },
-        share: @escaping (String) -> Void = {
-            ViewControllerUtil.present(
-                UIActivityViewController(activityItems: [$0], applicationActivities: nil)
-            )
-        },
-        requestReview: @escaping () -> Void = {
-            guard let scene = ViewControllerUtil.findWindowScene() else {
-                log.e("requestReview() ignored — no window scene")
-                return
-            }
-            if #available(iOS 16, *) {
-                AppStore.requestReview(in: scene)
-            } else {
-                SKStoreReviewController.requestReview(in: scene)
-            }
-        }
+        copy: @escaping (String) -> Void = { ActionPlatform.current.copy($0) },
+        share: @escaping (String) -> Void = { ActionPlatform.current.share($0) },
+        requestReview: @escaping () -> Void = { ActionPlatform.current.requestReview() }
     ) {
         self.copy = copy
         self.share = share
@@ -95,7 +115,7 @@ final class HostActionExecutor {
 
     init(openURL: @escaping (String) -> Void = {
         guard let url = URL(string: $0) else { return }
-        UIApplication.shared.open(url)
+        ActionPlatform.current.open(url)
     }) {
         self.openURL = openURL
     }

@@ -3,35 +3,35 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
-/// Shared plumbing for the action tests in this folder.
+/// Drives the real SDK over a scripted backend; the one harness for every suite here that needs a
+/// running SDK. Mirrors `flutter/core/test/support/sdk_harness.dart`.
 ///
 /// Every test drives an action from the highest level a test reaches: the campaign comes from the
 /// (mocked) server through the real `Digia.initialize`, a CEP plugin delivers it, the app's own
 /// `DigiaHost` renders it, and a real touch (`TouchSynthesizer`) runs the action. Only the
 /// boundaries outside the SDK are faked — the network (`MockNetworkClient` behind
-/// `URLSessionNetworkClient.overrideForTesting`) and the OS (`ActionPlatform.current`) — so what a
-/// test asserts is what the user would see or what the SDK asked iOS to do.
+/// `URLSessionNetworkClient.overrideForTesting`) and the OS (`ActionPlatform.current`, recorded by
+/// `RecordingPlatform` in `PlatformFakes.swift`) — so what a test asserts is what the user would see
+/// or what the SDK asked iOS to do.
 @MainActor
-final class ActionHarness {
+final class SdkHarness {
 
-    /// The Test Kit has no fixture for most actions, so those tests reuse the `canvas-button-fill`
-    /// inline card and swap the steps its button runs. The surface, layout and wire shape stay the
-    /// shared fixture's.
-    static let buttonCampaignKey = "test_canvas_button_fill"
+    /// The `actions/fixtures/action_*` inline cards (all but the story and surface-specific ones)
+    /// share this slot and button; only the steps the button runs differ.
     static let buttonSlotKey = "home_banner"
     static let buttonId = "canvas_btn_primary"
 
     let platform = RecordingPlatform()
     private let network = MockNetworkClient()
-    private let plugin = ActionTestPlugin()
-    private var window: UIWindow?
+    private let plugin = FakeCep()
+    private(set) var window: UIWindow?
 
     /// Boots the real SDK with [campaign] as the only campaign the server returns.
     static func start(
         _ campaign: [String: Any],
         actionHandlers: DigiaActionHandlers = DigiaActionHandlers()
-    ) async throws -> ActionHarness {
-        let harness = ActionHarness()
+    ) async throws -> SdkHarness {
+        let harness = SdkHarness()
         let sdk = SDKInstance.shared
         sdk.resetForTesting()
         ComponentTestHost.enableAccessibilityAutomation()
@@ -86,11 +86,21 @@ final class ActionHarness {
     /// waiting 400 ms passed 10 in 10. There is no public signal for "accepts touches", and
     /// Core Animation sees no running animation then either.
     func tap(id: String) async throws {
+        try await tap("element \(id)") { Self.identifier(of: $0) == id }
+    }
+
+    /// As ``tap(id:)``, for the element that shows [text] (an option label has no id of its own).
+    func tap(text: String) async throws {
+        try await tap("text \(text)") { Self.shownText(of: $0)?.contains(text) == true }
+    }
+
+    private func tap(_ what: String, where match: @escaping (NSObject) -> Bool) async throws {
         let window = try #require(window)
         var last: CGRect?
         var steadyReads = 0
-        try await waitUntil("element \(id) settled on screen") {
-            guard let frame = self.element(id: id)?.accessibilityFrame, !frame.isEmpty else { return false }
+        try await waitUntil("\(what) settled on screen") {
+            guard let frame = Self.find(in: window, where: match)?.accessibilityFrame, !frame.isEmpty
+            else { return false }
             steadyReads = frame == last ? steadyReads + 1 : 0
             last = frame
             return steadyReads >= 8 // 8 reads, 50 ms apart
@@ -103,12 +113,12 @@ final class ActionHarness {
     /// or read out by an accessibility element.
     func isShowing(_ text: String) -> Bool {
         guard let window else { return false }
-        return Self.find(in: window) { object in
-            let shown: String? =
-                (object as? UITextView)?.text ?? (object as? UILabel)?.text
-                ?? object.accessibilityLabel ?? object.accessibilityValue
-            return shown?.contains(text) == true
-        } != nil
+        return Self.find(in: window) { Self.shownText(of: $0)?.contains(text) == true } != nil
+    }
+
+    private static func shownText(of object: NSObject) -> String? {
+        (object as? UITextView)?.text ?? (object as? UILabel)?.text
+            ?? object.accessibilityLabel ?? object.accessibilityValue
     }
 
     /// The view controller presented over the app (a full-screen viewer, a sheet), if any.
@@ -138,11 +148,6 @@ final class ActionHarness {
     }
 
     // MARK: - Accessibility tree
-
-    private func element(id: String) -> NSObject? {
-        guard let window else { return nil }
-        return Self.find(in: window) { Self.identifier(of: $0) == id }
-    }
 
     private static func identifier(of object: NSObject) -> String? {
         let selector = NSSelectorFromString("accessibilityIdentifier")
@@ -181,26 +186,8 @@ final class ActionHarness {
     }
 }
 
-/// Stands in for iOS: records every call the SDK's actions make instead of leaving the app.
-@MainActor
-final class RecordingPlatform {
-    private(set) var opened: [String] = []
-    private(set) var copied: [String] = []
-    private(set) var shared: [String] = []
-    private(set) var reviewRequests = 0
-
-    var actionPlatform: ActionPlatform {
-        ActionPlatform(
-            open: { [weak self] in self?.opened.append($0.absoluteString) },
-            copy: { [weak self] in self?.copied.append($0) },
-            share: { [weak self] in self?.shared.append($0) },
-            requestReview: { [weak self] in self?.reviewRequests += 1 }
-        )
-    }
-}
-
-/// Stands in for a CEP plugin (CleverTap, WebEngage, …): keeps the host the SDK attaches.
-private final class ActionTestPlugin: DigiaCEPPlugin {
+/// A CEP integration reduced to what it does in production: hold the host and hand it triggers.
+private final class FakeCep: DigiaCEPPlugin {
     let id = "action-test"
     private(set) var host: DigiaCEPHost?
 
@@ -208,46 +195,36 @@ private final class ActionTestPlugin: DigiaCEPPlugin {
     func detach() { host = nil }
 }
 
-/// Test Kit campaigns, as JSON, for editing before the server "returns" them.
-enum ActionCampaigns {
-
-    static func load(_ campaignType: String, _ fileName: String) throws -> [String: Any] {
-        try #require(
-            FixtureLoader.loadFixture(campaignType: campaignType, fileName: fileName),
-            "Test Kit fixture \(campaignType)/\(fileName) not found; run `bash clone.sh` in de_workspace")
-    }
-
-    /// `canvas-button-fill` with its button's `onClick` replaced by [steps].
-    static func button(steps: [[String: Any]]) throws -> [String: Any] {
-        var campaign = try load("canvas", "canvas-button-fill")
-        try editCanvasChild(in: &campaign, id: ActionHarness.buttonId) { child in
-            var widget = child["widget"] as? [String: Any] ?? [:]
-            var props = widget["props"] as? [String: Any] ?? [:]
-            props["onClick"] = ["steps": steps]
-            widget["props"] = props
-            child["widget"] = widget
-        }
-        return campaign
-    }
-
-    static func editCanvasChild(
-        in campaign: inout [String: Any], id: String, _ edit: (inout [String: Any]) -> Void
-    ) throws {
-        try editChildren(in: &campaign) { children in
-            let index = try #require(children.firstIndex { $0["id"] as? String == id }, "No canvas child \(id)")
-            edit(&children[index])
-        }
-    }
-
-    static func editChildren(
-        in campaign: inout [String: Any], _ edit: (inout [[String: Any]]) throws -> Void
-    ) throws {
-        var template = try #require(campaign["templateConfig"] as? [String: Any])
-        var canvas = try #require(template["canvas"] as? [String: Any])
-        var children = try #require(canvas["children"] as? [[String: Any]])
-        try edit(&children)
-        canvas["children"] = children
-        template["canvas"] = canvas
-        campaign["templateConfig"] = template
-    }
+/// The campaign fixture at [path], relative to this test target's folder, e.g.
+/// `Actions/Fixtures/action_share.json` or `Campaigns/nudge_dialog/fixtures/nudge-dialog.json`,
+/// with its media pointed at the Test Kit's mock server (see ``testkitSkipReason``).
+///
+/// Read from the source tree rather than the bundle: the simulator shares the Mac's filesystem,
+/// and a synchronized folder would flatten the fixture directories.
+func loadCampaign(_ path: String, file: StaticString = #filePath) throws -> [String: Any] {
+    let root = URL(fileURLWithPath: "\(file)").deletingLastPathComponent().deletingLastPathComponent()
+    let data = try Data(contentsOf: root.appendingPathComponent(path))
+    let raw = try #require(String(data: data, encoding: .utf8))
+    let resolved = FixtureLoader.resolveAssetOrigin(in: raw, workspaceUrl: testkitWorkspace(file: file))
+    return try #require(
+        try JSONSerialization.jsonObject(with: Data(resolved.utf8)) as? [String: Any],
+        "Fixture \(path) is not a JSON object")
 }
+
+/// The workspace Test Kit still owns the media the fixtures point at; this package is cloned at
+/// `<workspace>/ios/core`.
+private func testkitWorkspace(file: StaticString) -> URL? {
+    var url = URL(fileURLWithPath: "\(file)").deletingLastPathComponent()
+    for _ in 0..<12 {
+        if FileManager.default.fileExists(atPath: url.appendingPathComponent("testkit/mock-server").path) {
+            return url
+        }
+        url = url.deletingLastPathComponent()
+    }
+    return nil
+}
+
+/// Whether a test that needs campaign media (the PiP shows only once its image has loaded) can run:
+/// the Test Kit is cloned beside this repo. Use as `.enabled(if: testkitAvailable, ...)`.
+let testkitAvailable = testkitWorkspace(file: #filePath) != nil
+let testkitSkipReason: Comment = "Test Kit not found beside this repo; run `bash clone.sh` in de_workspace"

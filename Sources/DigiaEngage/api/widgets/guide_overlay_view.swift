@@ -3,6 +3,20 @@ import Combine
 import UIKit
 internal import SDWebImageSVGCoder
 
+/// SVG data as a bitmap image, or nil when it is not a drawable SVG.
+///
+/// Without a pixel size the SVG coder returns a vector-backed image, which `Image(uiImage:)`
+/// draws as an empty box. Asking for a pixel size makes the coder rasterize it, like PNG and WebP.
+private func svgBitmap(from data: Data) -> UIImage? {
+    let coder = SDImageSVGCoder.shared
+    guard let vector = coder.decodedImage(with: data, options: nil),
+          vector.size.width > 0, vector.size.height > 0
+    else { return nil }
+    let scale = UIScreen.main.scale
+    let pixelSize = CGSize(width: vector.size.width * scale, height: vector.size.height * scale)
+    return coder.decodedImage(with: data, options: [.decodeThumbnailPixelSize: pixelSize]) ?? vector
+}
+
 @MainActor
 private enum AnchorlessImageLoader {
     private static let cache = NSCache<NSURL, UIImage>()
@@ -19,7 +33,7 @@ private enum AnchorlessImageLoader {
         else { return (nil, nil) }
         let status = (response as? HTTPURLResponse)?.statusCode
         guard let status, (200..<300).contains(status),
-              let image = UIImage(data: data) ?? SDImageSVGCoder.shared.decodedImage(with: data, options: nil)
+              let image = UIImage(data: data) ?? svgBitmap(from: data)
         else { return (nil, mediaFailureCause(httpStatus: status)) }
         cache.setObject(image, forKey: url as NSURL)
         return (image, nil)

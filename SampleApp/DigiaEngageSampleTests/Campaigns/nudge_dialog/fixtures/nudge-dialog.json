@@ -1,0 +1,146 @@
+{
+  "id": "mock-nudge-dialog-001",
+  "projectId": "local-mock",
+  "name": "Dialog Test Nudge",
+  "campaignType": "nudge",
+  "campaignKey": "test_nudge_dialog",
+  "status": "active",
+  "templateConfig": {
+    "templateType": "nudge",
+    "layoutMode": "canvas",
+    "templateId": "",
+    "nudgeName": "",
+    "container": {
+      "displayType": "dialog",
+      "backgroundColor": "",
+      "barrierColor": "",
+      "cornerRadius": 18,
+      "padding": 20,
+      "backdropDismissible": true,
+      "showCloseButton": true,
+      "closeButton": {
+        "outsidePlacement": {
+          "horizontal": "right",
+          "vertical": "top"
+        },
+        "placement": null
+      },
+      "itemSpacing": 12,
+      "itemAlign": "left",
+      "itemArrange": "top",
+      "showHandle": false,
+      "draggable": false
+    },
+    "canvas": {
+      "version": 2,
+      "canvasWidth": 320,
+      "canvasHeight": 260,
+      "background": {
+        "type": "solid",
+        "color": "#FFFFFFFF"
+      },
+      "children": [
+        {
+          "kind": "widget",
+          "id": "dialogTitle",
+          "rect": {
+            "x": 0.05,
+            "y": 0.1,
+            "width": 0.9,
+            "height": 0.18
+          },
+          "widget": {
+            "type": "digia/text",
+            "props": {
+              "spans": [
+                {
+                  "text": "Dialog Test Nudge",
+                  "typography": {
+                    "fontSize": 22,
+                    "fontWeight": 700
+                  },
+                  "color": "#111111"
+                }
+              ],
+              "textAlign": "left"
+            }
+          }
+        },
+        {
+          "kind": "widget",
+          "id": "dialogBody",
+          "rect": {
+            "x": 0.05,
+            "y": 0.35,
+            "width": 0.9,
+            "height": 0.25
+          },
+          "widget": {
+            "type": "digia/text",
+            "props": {
+              "spans": [
+                {
+                  "text": "A centered dialog nudge with a close button.",
+                  "typography": {
+                    "fontSize": 14,
+                    "fontWeight": 400
+                  },
+                  "color": "#333333"
+                }
+              ],
+              "textAlign": "left"
+            }
+          }
+        },
+        {
+          "kind": "widget",
+          "id": "dialogButton",
+          "rect": {
+            "x": 0.05,
+            "y": 0.68,
+            "width": 0.9,
+            "height": 0.22
+          },
+          "widget": {
+            "type": "digia/button",
+            "props": {
+              "label": {
+                "spans": [
+                  {
+                    "text": "Got It",
+                    "typography": {
+                      "fontSize": 16,
+                      "fontWeight": 600
+                    },
+                    "color": "#FFFFFF"
+                  }
+                ]
+              },
+              "style": {
+                "variant": "fill",
+                "fill": {
+                  "type": "solid",
+                  "color": "#4945FF"
+                }
+              },
+              "cornerRadius": 10,
+              "isPrimary": true,
+              "onClick": {
+                "steps": [
+                  {
+                    "type": "Action.dismissDialog"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "variables": []
+  },
+  "frequency": null,
+  "createdBy": "local-mock",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

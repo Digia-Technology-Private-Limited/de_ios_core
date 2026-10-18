@@ -62,7 +62,7 @@ struct NudgeFixtureGoldenTests {
             "Failed to load fixture \(campaignType)/\(fixture).json"
         )
         let templateConfig = try #require(json["templateConfig"] as? [String: Any], "Missing templateConfig")
-        let nudgeConfig = try #require(NudgeConfig.fromJson(templateConfig), "Fixture must decode to a nudge")
+        let nudgeConfig = try #require(try NudgeConfig.fromJson(templateConfig), "Fixture must decode to a nudge")
 
         let hostView = ComponentTestHost.makeRealOverlayWindow(
             nudgeConfig: nudgeConfig,

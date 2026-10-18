@@ -60,7 +60,7 @@ struct NudgeBottomSheetComponentTests {
             return
         }
 
-        let nudgeConfig = try #require(NudgeConfig.fromJson(templateConfig))
+        let nudgeConfig = try #require(try NudgeConfig.fromJson(templateConfig))
 
         // Surface / container assertions
         #expect(nudgeConfig.surface.displayType == .bottomSheet)
@@ -137,7 +137,7 @@ struct NudgeBottomSheetComponentTests {
     func testNudgeBottomSheetVisualImageGolden() throws {
         let fixture = try loadCompactBottomSheetFixture()
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+              let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
               nudgeConfig.canvas != nil else {
             Issue.record("Failed to parse canvas nudge config")
             return
@@ -164,7 +164,7 @@ struct NudgeBottomSheetComponentTests {
     func testNudgeBottomSheetDeviceGolden() throws {
         let fixture = try loadCompactBottomSheetFixture()
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+              let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
               let _ = nudgeConfig.canvas else {
             Issue.record("Failed to parse canvas nudge config")
             return
@@ -191,7 +191,7 @@ struct NudgeBottomSheetComponentTests {
     func testNudgeBottomSheetSafeAreaInsetContentVariant() throws {
         let fixture = try loadSafeAreaFixture(named: "nudge-bottomsheet-safe-area.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+              let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
               let _ = nudgeConfig.canvas else {
             Issue.record("Failed to parse safe-area bottomsheet config")
             return
@@ -217,7 +217,7 @@ struct NudgeBottomSheetComponentTests {
     func testNudgeBottomSheetSafeAreaInsetSurfaceVariant() throws {
         let fixture = try loadSafeAreaFixture(named: "nudge-bottomsheet-safe-area-surface.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+              let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
               let _ = nudgeConfig.canvas else {
             Issue.record("Failed to parse safe-area-surface bottomsheet config")
             return
@@ -243,7 +243,7 @@ struct NudgeBottomSheetComponentTests {
     func testNudgeBottomSheetSafeAreaNoneVariant() throws {
         let fixture = try loadSafeAreaFixture(named: "nudge-bottomsheet-safe-area-none.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = NudgeConfig.fromJson(templateConfig),
+              let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
               let _ = nudgeConfig.canvas else {
             Issue.record("Failed to parse safe-area-none bottomsheet config")
             return

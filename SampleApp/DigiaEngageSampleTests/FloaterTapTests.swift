@@ -48,7 +48,7 @@ struct FloaterTapTests {
     @Test("a tap on a story floater opens its story")
     func tapOnStoryFloaterOpensStory() async throws {
         let json = try #require(FixtureLoader.loadFixture(campaignType: "floater", fileName: "floater-story-window"))
-        let campaign = try #require(CampaignModel.fromJson(json))
+        let campaign = try #require(try CampaignModel.fromJson(json))
         let orchestrator = SDKInstance.shared.floaterStoryOrchestrator!
         try #require(orchestrator.start(campaign, payload: payload(campaign), screenName: nil),
                      "\(orchestrator.lastStartFailureReason ?? "start refused")")
@@ -66,7 +66,7 @@ struct FloaterTapTests {
 
     private func startPip(_ name: String) async throws -> (FloaterOrchestrator, UIWindow) {
         let json = try #require(FixtureLoader.loadFixture(campaignType: "pip", fileName: name))
-        let campaign = try #require(CampaignModel.fromJson(json))
+        let campaign = try #require(try CampaignModel.fromJson(json))
         let orchestrator = SDKInstance.shared.floaterOrchestrator!
         try #require(orchestrator.start(campaign, payload: payload(campaign), screenName: nil),
                      "\(orchestrator.lastStartFailureReason ?? "start refused")")

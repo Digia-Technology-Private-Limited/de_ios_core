@@ -81,9 +81,11 @@ struct SessionReporterTests {
             storage: storage.scoped("session")
         )
 
-        reporter.report()
-        try await waitUntil { pendingCount(storage) == 1 }
+        // Await the report itself: it is saved as pending before it is sent, so waiting for the
+        // pending count alone can return before the request is made.
+        await reporter.report()?.value
 
+        #expect(pendingCount(storage) == 1)
         #expect(mock.recordedRequests.count == 1)
         let savedReport = storage.scoped("session").string(forKey: "pending_session_report")
         #expect(savedReport != nil)
@@ -92,10 +94,10 @@ struct SessionReporterTests {
         mock.enqueueResponse(statusCode: 200, body: Data("{}".utf8))
         mock.enqueueResponse(statusCode: 200, body: Data("{}".utf8))
 
-        reporter.report()
-        try await waitUntil { mock.requestCount >= 3 && pendingCount(storage) == 0 }
+        await reporter.report()?.value
 
         #expect(mock.recordedRequests.count == 3)
+        #expect(pendingCount(storage) == 0)
         #expect(storage.scoped("session").string(forKey: "pending_session_report") == nil)
     }
 

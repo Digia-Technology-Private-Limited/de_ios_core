@@ -234,7 +234,7 @@ struct PipFixtureGoldenTests {
             template["behavior"] = behavior
             json["templateConfig"] = template
         }
-        return CampaignModel.fromJson(json)
+        return try? CampaignModel.fromJson(json)
     }
 
     /// A key window with the floater layer over a plain host, as `DigiaHost` stacks them.

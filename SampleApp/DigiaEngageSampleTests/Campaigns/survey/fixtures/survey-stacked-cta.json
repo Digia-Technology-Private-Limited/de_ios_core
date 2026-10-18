@@ -1,0 +1,609 @@
+{
+  "id": "mock-survey-stacked-001",
+  "projectId": "local-mock",
+  "name": "Survey Stacked CTA",
+  "campaignType": "survey",
+  "campaignKey": "test_survey_stacked_cta",
+  "status": "active",
+  "templateConfig": {
+    "templateType": "survey",
+    "layoutMode": "canvas",
+    "schemaVersion": 1,
+    "designWidth": 360,
+    "display": {
+      "type": "dialog",
+      "cornerRadius": 20,
+      "backdropColor": {
+        "value": "#40252521"
+      },
+      "backdropDismissible": true,
+      "showHandle": false,
+      "dragDismissible": false,
+      "bottomSafeAreaMode": "none"
+    },
+    "behavior": {
+      "autoAdvance": false
+    },
+    "theme": {
+      "primaryColor": {
+        "value": "#283F37"
+      }
+    },
+    "sharedUi": {
+      "roles": {
+        "progress": "survey_progress",
+        "primaryNavigation": "survey_primary",
+        "backNavigation": "survey_back"
+      },
+      "closeButton": {
+        "backgroundColor": {
+          "value": "#00000000"
+        },
+        "iconColor": {
+          "value": "#74766D"
+        },
+        "iconSize": 16,
+        "placement": {
+          "x": 0.844,
+          "y": 0.083,
+          "width": 0.088,
+          "height": 0.053
+        },
+        "visible": true
+      },
+      "canvas": {
+        "version": 2,
+        "canvasWidth": 360,
+        "canvasHeight": 600,
+        "background": {
+          "type": "solid",
+          "color": {
+            "value": "#F7F5F0"
+          }
+        },
+        "children": [
+          {
+            "kind": "hostElement",
+            "id": "survey_progress",
+            "rect": {
+              "x": 0.077,
+              "y": 0.08,
+              "width": 0.733,
+              "height": 0.005
+            },
+            "element": {
+              "type": "canvasSurvey.managed",
+              "props": {
+                "role": "progress",
+                "shared": true,
+                "visible": true,
+                "color": {
+                  "value": "#283F37"
+                },
+                "fill": {
+                  "value": "#F4F4F5"
+                },
+                "trackColor": {
+                  "value": "#DDE0D5"
+                },
+                "borderColor": {
+                  "value": "#00000000"
+                },
+                "borderWidth": 0,
+                "cornerRadius": 999,
+                "fontSize": 14,
+                "gap": 5,
+                "progressStyle": "continuous",
+                "countQuestionsOnly": true,
+                "padding": 6
+              }
+            }
+          },
+          {
+            "kind": "hostElement",
+            "id": "survey_primary",
+            "rect": {
+              "x": 0.411,
+              "y": 0.866,
+              "width": 0.522,
+              "height": 0.08
+            },
+            "element": {
+              "type": "canvasSurvey.managed",
+              "props": {
+                "role": "primaryNavigation",
+                "shared": true,
+                "button": {
+                  "id": "btn_primary",
+                  "type": "button",
+                  "props": {
+                    "label": {
+                      "textAlign": "center",
+                      "overflow": "ellipsis",
+                      "maxLines": 1,
+                      "spans": [
+                        {
+                          "text": "Continue to Results",
+                          "typography": {
+                            "value": {
+                              "fontSize": 15,
+                              "fontWeight": "semibold",
+                              "lineHeight": 20,
+                              "letterSpacing": 0,
+                              "fontFamily": ""
+                            }
+                          },
+                          "color": {
+                            "value": "#FFFFFF"
+                          }
+                        }
+                      ]
+                    },
+                    "cornerRadius": {
+                      "value": 10
+                    },
+                    "contentPadding": {
+                      "value": {
+                        "top": 0,
+                        "right": 16,
+                        "bottom": 0,
+                        "left": 16
+                      }
+                    },
+                    "style": {
+                      "variant": "fill",
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "value": "#283F37"
+                        }
+                      }
+                    },
+                    "isPrimary": true,
+                    "onClick": [
+                      {
+                        "type": "next",
+                        "value": ""
+                      }
+                    ],
+                    "confirm": null
+                  },
+                  "common": {
+                    "padding": {
+                      "value": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0,
+                        "left": 0
+                      }
+                    }
+                  }
+                },
+                "visible": true,
+                "color": {
+                  "value": "#FFFFFF"
+                },
+                "fill": {
+                  "value": "#283F37"
+                },
+                "trackColor": {
+                  "value": "#E5E7EB"
+                },
+                "borderColor": {
+                  "value": "#00000000"
+                },
+                "borderWidth": 0,
+                "cornerRadius": 10,
+                "fontSize": 14,
+                "gap": 4,
+                "padding": 12
+              }
+            }
+          },
+          {
+            "kind": "hostElement",
+            "id": "survey_back",
+            "rect": {
+              "x": 0.066,
+              "y": 0.866,
+              "width": 0.311,
+              "height": 0.08
+            },
+            "element": {
+              "type": "canvasSurvey.managed",
+              "props": {
+                "role": "backNavigation",
+                "shared": true,
+                "button": {
+                  "id": "btn_back",
+                  "type": "button",
+                  "props": {
+                    "label": {
+                      "textAlign": "center",
+                      "overflow": "ellipsis",
+                      "maxLines": 1,
+                      "spans": [
+                        {
+                          "text": "Back",
+                          "typography": {
+                            "value": {
+                              "fontSize": 15,
+                              "fontWeight": "semibold",
+                              "lineHeight": 20,
+                              "letterSpacing": 0,
+                              "fontFamily": ""
+                            }
+                          },
+                          "color": {
+                            "value": "#252521"
+                          }
+                        }
+                      ]
+                    },
+                    "cornerRadius": {
+                      "value": 10
+                    },
+                    "contentPadding": {
+                      "value": {
+                        "top": 0,
+                        "right": 16,
+                        "bottom": 0,
+                        "left": 16
+                      }
+                    },
+                    "style": {
+                      "variant": "outline",
+                      "outline": {
+                        "color": {
+                          "value": "#DDE0D5"
+                        },
+                        "width": 1
+                      },
+                      "fill": {
+                        "type": "solid",
+                        "color": {
+                          "value": "#FEFDFB"
+                        }
+                      }
+                    },
+                    "isPrimary": false,
+                    "onClick": [
+                      {
+                        "type": "previous",
+                        "value": ""
+                      }
+                    ],
+                    "confirm": null
+                  },
+                  "common": {
+                    "padding": {
+                      "value": {
+                        "top": 0,
+                        "right": 0,
+                        "bottom": 0,
+                        "left": 0
+                      }
+                    }
+                  }
+                },
+                "visible": true,
+                "color": {
+                  "value": "#252521"
+                },
+                "fill": {
+                  "value": "#FEFDFB"
+                },
+                "trackColor": {
+                  "value": "#E5E7EB"
+                },
+                "borderColor": {
+                  "value": "#DDE0D5"
+                },
+                "borderWidth": 1,
+                "cornerRadius": 10,
+                "fontSize": 14,
+                "gap": 4,
+                "padding": 6
+              }
+            }
+          }
+        ]
+      }
+    },
+    "scenes": [
+      {
+        "id": "scene_stacked_q",
+        "kind": "question",
+        "enabled": true,
+        "title": "Stacked CTA Layout Survey",
+        "roles": {
+          "prompt": "prompt_scene_stacked_q",
+          "answerInput": "answer_scene_stacked_q"
+        },
+        "input": {
+          "profile": "choice",
+          "type": "single_select",
+          "required": true,
+          "options": [
+            {
+              "id": "o_alpha",
+              "label": "Option Alpha"
+            },
+            {
+              "id": "o_beta",
+              "label": "Option Beta"
+            }
+          ]
+        },
+        "canvas": {
+          "version": 2,
+          "canvasWidth": 360,
+          "canvasHeight": 600,
+          "background": {
+            "type": "solid",
+            "color": {
+              "value": "#00000000"
+            }
+          },
+          "children": [
+            {
+              "kind": "widget",
+              "id": "prompt_scene_stacked_q",
+              "rect": {
+                "x": 0.088,
+                "y": 0.173,
+                "width": 0.822,
+                "height": 0.12
+              },
+              "widget": {
+                "id": "w_prompt_scene_stacked_q",
+                "type": "digia/text",
+                "props": {
+                  "horizontalAlign": "left",
+                  "textAlign": "left",
+                  "verticalAlign": "top",
+                  "sizingMode": "fixed",
+                  "overflow": "visible",
+                  "maxLines": 0,
+                  "spans": [
+                    {
+                      "text": "Stacked CTA Layout Survey",
+                      "typography": {
+                        "fontFamily": null,
+                        "fontSize": 24,
+                        "fontWeight": 600,
+                        "lineHeight": 29,
+                        "letterSpacing": 0
+                      },
+                      "color": {
+                        "value": "#252521"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "kind": "hostElement",
+              "id": "answer_scene_stacked_q",
+              "rect": {
+                "x": 0.088,
+                "y": 0.32,
+                "width": 0.822,
+                "height": 0.5
+              },
+              "element": {
+                "type": "canvasSurvey.answerInput",
+                "props": {
+                  "options": [
+                    {
+                      "id": "o_alpha",
+                      "text": {
+                        "spans": [
+                          {
+                            "text": "Option Alpha"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "id": "o_beta",
+                      "text": {
+                        "spans": [
+                          {
+                            "text": "Option Beta"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "sharedUi": {
+          "version": 2,
+          "canvasWidth": 360,
+          "canvasHeight": 600,
+          "children": [
+            {
+              "id": "survey_progress",
+              "rect": {
+                "x": 0.077,
+                "y": 0.08,
+                "width": 0.733,
+                "height": 0.005
+              }
+            },
+            {
+              "id": "survey_primary",
+              "rect": {
+                "x": 0.411,
+                "y": 0.866,
+                "width": 0.522,
+                "height": 0.08
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "scene_stacked_done",
+        "kind": "result",
+        "enabled": true,
+        "title": "All Done!",
+        "canvas": {
+          "version": 2,
+          "canvasWidth": 360,
+          "canvasHeight": 600,
+          "background": {
+            "type": "solid",
+            "color": {
+              "value": "#00000000"
+            }
+          },
+          "children": [
+            {
+              "kind": "widget",
+              "id": "title_scene_stacked_done",
+              "rect": {
+                "x": 0.088,
+                "y": 0.35,
+                "width": 0.822,
+                "height": 0.12
+              },
+              "widget": {
+                "id": "w_title_scene_stacked_done",
+                "type": "digia/text",
+                "props": {
+                  "horizontalAlign": "left",
+                  "textAlign": "left",
+                  "verticalAlign": "top",
+                  "sizingMode": "fixed",
+                  "overflow": "visible",
+                  "maxLines": 0,
+                  "spans": [
+                    {
+                      "text": "All Done!",
+                      "typography": {
+                        "fontFamily": null,
+                        "fontSize": 26,
+                        "fontWeight": 600,
+                        "lineHeight": 31,
+                        "letterSpacing": 0
+                      },
+                      "color": {
+                        "value": "#252521"
+                      }
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "kind": "widget",
+              "id": "btn_scene_stacked_done",
+              "rect": {
+                "x": 0.066,
+                "y": 0.866,
+                "width": 0.866,
+                "height": 0.08
+              },
+              "widget": {
+                "type": "digia/button",
+                "props": {
+                  "label": {
+                    "textAlign": "center",
+                    "spans": [
+                      {
+                        "text": "Close Survey",
+                        "typography": {
+                          "value": {
+                            "fontSize": 15,
+                            "fontWeight": "semibold",
+                            "lineHeight": 20
+                          }
+                        },
+                        "color": {
+                          "value": "#FFFFFF"
+                        }
+                      }
+                    ]
+                  },
+                  "cornerRadius": {
+                    "value": 10
+                  },
+                  "style": {
+                    "variant": "fill",
+                    "fill": {
+                      "type": "solid",
+                      "color": {
+                        "value": "#283F37"
+                      }
+                    }
+                  },
+                  "isPrimary": true,
+                  "onClick": {
+                    "steps": [
+                      {
+                        "type": "Action.hideBottomSheet"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "sharedUi": {
+          "version": 2,
+          "canvasWidth": 360,
+          "canvasHeight": 600,
+          "children": []
+        }
+      }
+    ],
+    "flow": {
+      "rootNodeId": "node_scene_stacked_q",
+      "nodes": [
+        {
+          "id": "node_scene_stacked_q",
+          "sceneId": "scene_stacked_q",
+          "rules": [],
+          "fallback": {
+            "kind": "node",
+            "nodeId": "node_scene_stacked_done"
+          }
+        },
+        {
+          "id": "node_scene_stacked_done",
+          "sceneId": "scene_stacked_done",
+          "rules": [],
+          "fallback": {
+            "kind": "end"
+          }
+        }
+      ]
+    },
+    "welcome": {
+      "enabled": false,
+      "canvas": {
+        "version": 2,
+        "canvasWidth": 360,
+        "canvasHeight": 600,
+        "children": []
+      },
+      "sharedUi": {
+        "version": 2,
+        "canvasWidth": 360,
+        "canvasHeight": 600,
+        "children": []
+      }
+    }
+  },
+  "frequency": null,
+  "createdBy": "local-mock",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}

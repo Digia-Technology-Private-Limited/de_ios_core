@@ -3300,6 +3300,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     func resetForTesting() {
         DigiaEndpoints.resetForTest()
+        ActionPlatform.current = .live
+        (networkClient as? URLSessionNetworkClient)?.overrideForTesting = nil
         if let plugin = activePlugin {
             coordinator.detach(owner: plugin.id)
             plugin.detach()

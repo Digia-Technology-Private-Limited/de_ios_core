@@ -30,7 +30,7 @@ struct NudgeFullScreenComponentTests {
             container.removeValue(forKey: "closeButton")
         }
         templateConfig["container"] = container
-        guard let config = NudgeConfig.fromJson(templateConfig) else {
+        guard let config = try? NudgeConfig.fromJson(templateConfig) else {
             fatalError("Failed to parse full screen config")
         }
         return config

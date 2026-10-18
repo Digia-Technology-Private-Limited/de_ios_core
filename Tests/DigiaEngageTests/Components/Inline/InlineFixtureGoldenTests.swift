@@ -63,7 +63,7 @@ struct InlineFixtureGoldenTests {
         )
         let (standIn, imageURLs) = withLocalImages(json, fixture: fixture)
         let campaign = try #require(
-            CampaignModel.fromJson(withAutoPlayHeld(standIn) as! [String: Any], timeAnchor: Self.timerNow),
+            try CampaignModel.fromJson(withAutoPlayHeld(standIn) as! [String: Any], timeAnchor: Self.timerNow),
             "Fixture must decode to a campaign"
         )
         let payload = CEPTriggerPayload(cepCampaignId: "test_inline", campaignKey: campaign.campaignKey, cepMetadata: [:])
@@ -71,10 +71,10 @@ struct InlineFixtureGoldenTests {
         // The same dispatch as `DigiaSlot.slotContent`.
         let content: AnyView
         switch campaign.config {
-        case .inline(let config): content = AnyView(InlineCarouselRenderer.makeView(config, payload: payload))
+        case .inline(let config): content = AnyView(InlineCarouselRenderer.makeView(config, payload: payload, stepGate: CarouselStepGate(payload: payload)))
         case .banner(let config): content = AnyView(DigiaInlineBannerView(config: config, payload: payload))
         case .story(let config): content = AnyView(DigiaInlineStoryView(config: config, payload: payload))
-        case .inlineCanvas(let config): content = AnyView(DigiaInlineCanvasView(config: config, payload: payload))
+        case .inlineCanvas(let config): content = AnyView(DigiaInlineCanvasView(config: config, payload: payload, stepGate: CarouselStepGate(payload: payload)))
         default:
             Issue.record("Fixture must decode to an inline campaign")
             return

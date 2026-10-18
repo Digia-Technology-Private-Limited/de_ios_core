@@ -18,17 +18,9 @@ extension HostedUITests {
 @Suite("Test Kit floater fixture goldens", .serialized, .tags(.floater))
 struct FloaterFixtureGoldenTests {
 
-    /// Fixtures whose `story.pages` is empty. The SDK drops a story floater with no story to open,
-    /// so there is nothing to draw; each is asserted to stay dropped, and fails once its fixture is
-    /// fixed so it can get a golden instead.
-    private static let dropped: Set<String> = [
-        "floater-action-url",
-        "floater-badge-counter",
-    ]
-
     private static let fixtures = FixtureLoader.fixtureNames(campaignType: "floater")
 
-    @Test("matches the floater fixture golden", .tags(.golden), arguments: fixtures.filter { !dropped.contains($0) })
+    @Test("matches the floater fixture golden", .tags(.golden), arguments: fixtures)
     @MainActor
     func testFloaterFixtureGolden(fixture: String) async throws {
         let campaign = try #require(
@@ -89,14 +81,6 @@ struct FloaterFixtureGoldenTests {
         )
     }
 
-    @Test("drops a story floater with no story to open", .tags(.contract), arguments: fixtures.filter { dropped.contains($0) })
-    func testFloaterFixtureDropped(fixture: String) {
-        #expect(
-            loadCampaign(fixture) == nil,
-            "\(fixture) now decodes; remove it from `dropped` so it gets a golden"
-        )
-    }
-
     /// With `holdingStoryPages`, every story page lasts a day: the viewer's progress bar is driven by
     /// a wall-clock timer, so at the authored length it would be at a different spot in every run.
     private func loadCampaign(_ fixture: String, holdingStoryPages: Bool = false) -> CampaignModel? {
@@ -110,7 +94,7 @@ struct FloaterFixtureGoldenTests {
             template["story"] = story
             json["templateConfig"] = template
         }
-        return CampaignModel.fromJson(json)
+        return try? CampaignModel.fromJson(json)
     }
 
     /// A key window with the floater layer over a plain host, as `DigiaHost` stacks them.

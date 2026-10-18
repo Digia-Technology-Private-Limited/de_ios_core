@@ -24,7 +24,7 @@ struct SurveyFixtureGoldenTests {
             FixtureLoader.loadFixture(campaignType: "survey", fileName: fixture),
             "Failed to load fixture survey/\(fixture).json"
         )
-        let campaign = try #require(CampaignModel.fromJson(json), "Fixture must decode to a campaign")
+        let campaign = try #require(try CampaignModel.fromJson(json), "Fixture must decode to a campaign")
         let config = try #require(campaign.surveyConfig, "Fixture must decode to a survey")
 
         let orchestrator = SDKInstance.shared.surveyOrchestrator

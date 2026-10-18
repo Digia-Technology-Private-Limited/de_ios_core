@@ -25,9 +25,13 @@ private extension AnalyticsService {
 final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
     private var _callCount = 0
     var callCount: Int { _callCount }
+    /// When each track call arrived, so a test can assert the gap between sends instead of racing
+    /// a wall-clock window on a main actor that other suites keep busy.
+    private(set) var callTimes: [ContinuousClock.Instant] = []
     var responseFactory: (Int) -> Int
-    /// How long a track call takes to answer — lets a test capture while a send is in flight.
-    var responseDelayMs: UInt64 = 0
+    /// While true a track call does not answer — lets a test capture while a send is in flight
+    /// without guessing how long that window stays open on a busy main actor.
+    var holdsResponses = false
 
     init(responseFactory: @escaping (Int) -> Int = { _ in 200 }) {
         self.responseFactory = responseFactory
@@ -37,9 +41,10 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
         guard request.url.absoluteString == DigiaEndpoints.track else {
             return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
         }
+        callTimes.append(.now)
         _callCount += 1
         let status = responseFactory(_callCount)
-        if responseDelayMs > 0 { try await Task.sleep(nanoseconds: responseDelayMs * 1_000_000) }
+        while holdsResponses { try await Task.sleep(nanoseconds: 5_000_000) }
         return NetworkResponse(statusCode: status, headers: [:], body: nil, isSuccessful: (200..<300).contains(status))
     }
 
@@ -309,33 +314,38 @@ struct AnalyticsServiceTests {
         try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 1 }
         #expect(fakeSender.callCount == 1)
 
-        try await sleepMillis(150)
-        #expect(fakeSender.callCount == 1, "not before the configured interval")
-
         try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 }
         #expect(fakeSender.callCount == 2)
+        // A stalled main actor only delays the timer, so the gap can only grow under load.
+        let times = fakeSender.callTimes
+        try #require(times.count == 2)
+        #expect(times[1] - times[0] >= .milliseconds(380), "not before the configured interval (400 ms)")
     }
 
     @Test("the follow-up flush waits the flush interval whatever the batch size")
     func followUpWaitsTheIntervalWhateverTheBatchSize() async throws {
         let fakeSender = FakeAnalyticsSender()
-        fakeSender.responseDelayMs = 150
+        fakeSender.holdsResponses = true
         let service = makeService(
             config: AnalyticsConfig(flushIntervalMs: 500, flushBatchSize: 1),
             sender: fakeSender
         )
 
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("first"))
-        try await waitUntil { fakeSender.callCount == 1 }  // send #1 is in flight
+        try await waitUntil { fakeSender.callCount == 1 }  // send #1 is in flight, and held there
         // This capture's own dispatch is skipped ("already dispatching") and arms no timer.
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("second"))
 
-        try await waitUntil { service.queue.size == 1 && fakeSender.callCount == 1 }  // #1 finished
-        try await sleepMillis(200)
-        #expect(fakeSender.callCount == 1, "batch size 1 does not shorten the interval")
+        let releasedAt = ContinuousClock.now
+        fakeSender.holdsResponses = false  // #1 finishes; the follow-up timer starts from here
 
         try await waitUntil { fakeSender.callCount == 2 }
         #expect(fakeSender.callCount == 2)
+        // A stalled main actor only delays the timer, so the gap can only grow under load; a
+        // follow-up fired without waiting would show a gap of a few milliseconds.
+        let times = fakeSender.callTimes
+        try #require(times.count == 2)
+        #expect(times[1] - releasedAt >= .milliseconds(480), "batch size 1 does not shorten the interval (500 ms)")
     }
 
     @Test("after a failed send only the retry fires, not also a flush timer")
@@ -352,12 +362,13 @@ struct AnalyticsServiceTests {
         try await waitUntil { service.retryAttempt == 1 }
         #expect(fakeSender.callCount == 1)
 
-        // A second timer at the 100 ms flush interval would have resent long before this.
-        try await sleepMillis(500)
-        #expect(fakeSender.callCount == 1, "only the retry may resend")
-
         try await waitUntil { fakeSender.callCount == 2 && service.queue.size == 0 }
         #expect(fakeSender.callCount == 2)
+        // A second timer at the 100 ms flush interval would have resent long before the 1 s retry.
+        // A stalled main actor only delays the resend, so the gap can only grow under load.
+        let times = fakeSender.callTimes
+        try #require(times.count == 2)
+        #expect(times[1] - times[0] >= .milliseconds(980), "only the retry may resend (1000 ms)")
     }
 
     // ── Test Kit mode ─────────────────────────────────────────────────────────
@@ -382,6 +393,9 @@ struct AnalyticsServiceTests {
         normal.analyticsService?.clear()
 
         // Test Kit mode: the same default config sends it immediately.
+        // Reset again right before: another suite initializing the SDK during the sleep above sets
+        // the shared `_initialized`, and `setTestRoot` refuses to run once it is.
+        DigiaEndpoints.resetForTest()
         try DigiaEndpoints.setTestRoot("http://127.0.0.1:9")
         defer { DigiaEndpoints.resetForTest() }
         let testClient = MockNetworkClient()

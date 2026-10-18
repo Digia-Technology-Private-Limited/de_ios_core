@@ -1841,6 +1841,7 @@ private struct CanvasRemoteLottie: View {
     let autoplay: Bool
     let loop: Bool
     let fit: String
+    @Environment(\.canvasLottieRuntime) private var runtime
     @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var failed = false
     var body: some View {
@@ -1863,6 +1864,11 @@ private struct CanvasRemoteLottie: View {
     }
     private var lottie: LottieView<CanvasLottiePlaceholder> {
         LottieView {
+            if let customLoader = runtime.loadSource {
+                if let source = try? await customLoader(url) { return source }
+                failed = true
+                return nil
+            }
             let loaded = await loadLottieSource(url)
             if loaded.source == nil {
                 failed = true
@@ -1901,6 +1907,7 @@ private struct CanvasVideoRenderer: View {
     let isDark: Bool
     @Environment(\.digiaVariables) private var variables
     @Environment(\.canvasVideoUsesStoryPlayback) private var usesStoryPlayback
+    @Environment(\.canvasVideoRuntime) private var runtime
     @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var player: AVPlayer?
     @State private var observer: NSObjectProtocol?

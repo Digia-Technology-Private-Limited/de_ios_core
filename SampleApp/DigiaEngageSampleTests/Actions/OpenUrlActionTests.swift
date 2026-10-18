@@ -3,7 +3,7 @@ import Testing
 @testable import DigiaEngage
 
 extension HostedUITests {
-/// `openUrl`: the Test Kit's `canvas-button-fill` card, unchanged, whose button is authored
+/// `openUrl`: the `actions/fixtures/action_open_url` card, whose button is authored
 /// `Action.openUrl` with `launchMode: externalApplication`.
 ///
 /// iOS has no launch-mode distinction: an external URL and a deep link both end in
@@ -15,15 +15,16 @@ struct OpenUrlActionTests {
 
     @Test("tapping a button authored with openUrl hands that URL to iOS")
     func openUrlOpensTheAuthoredUrl() async throws {
-        let sdk = try await ActionHarness.start(ActionCampaigns.load("canvas", "canvas-button-fill"))
+        let sdk = try await SdkHarness.start(
+            loadCampaign("Actions/Fixtures/action_open_url.json"))
         defer { sdk.tearDown() }
-        try sdk.mount { DigiaSlot(ActionHarness.buttonSlotKey) { EmptyView() } }
-        try sdk.deliver(ActionHarness.buttonCampaignKey)
+        try sdk.mount { DigiaSlot(SdkHarness.buttonSlotKey) { EmptyView() } }
+        try sdk.deliver("test_action_open_url")
 
-        try await sdk.tap(id: ActionHarness.buttonId)
+        try await sdk.tap(id: SdkHarness.buttonId)
 
         try await sdk.waitUntil("the URL is opened") { !sdk.platform.opened.isEmpty }
-        #expect(sdk.platform.opened == ["https://digia.com/claim"])
+        #expect(sdk.platform.opened == ["https://www.digia.tech"])
     }
 }
 }
