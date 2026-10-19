@@ -13,6 +13,12 @@ private enum ExprToken {
     case op(Character)
 }
 
+private func isNameStart(_ ch: Character) -> Bool {
+    ("a"..."z").contains(ch) || ("A"..."Z").contains(ch) || ch == "_"
+}
+
+private func isNameChar(_ ch: Character) -> Bool { isNameStart(ch) || ("0"..."9").contains(ch) }
+
 private func tokenize(_ expr: String, _ context: VariableContext) -> [ExprToken]? {
     var tokens: [ExprToken] = []
     var i = expr.startIndex
@@ -33,11 +39,21 @@ private func tokenize(_ expr: String, _ context: VariableContext) -> [ExprToken]
             }
             guard let v = Double(num) else { return nil } // also rejects a bare "."
             tokens.append(.num(v))
-        } else if ("a"..."z").contains(ch) {
+        } else if isNameStart(ch) {
+            // A context variable carries one dot (`user.age`); custom names have none.
             var id = ""
-            while i < expr.endIndex, ("a"..."z").contains(expr[i]) || ("0"..."9").contains(expr[i]) || expr[i] == "_" {
+            while i < expr.endIndex, isNameChar(expr[i]) {
                 id.append(expr[i])
                 i = expr.index(after: i)
+            }
+            if i < expr.endIndex, expr[i] == ".",
+               case let next = expr.index(after: i), next < expr.endIndex, isNameStart(expr[next]) {
+                id.append(".")
+                i = next
+                while i < expr.endIndex, isNameChar(expr[i]) {
+                    id.append(expr[i])
+                    i = expr.index(after: i)
+                }
             }
             guard context.types[id] == "number",
                   let raw = context.values[id], let v = Double(raw)
@@ -90,12 +106,5 @@ func evalArithmetic(_ expr: String, context: VariableContext) -> String? {
 
     guard let result = expression(), pos == tokens.count, result.isFinite else { return nil }
 
-    // Format: half-up, max 4 dp, strip trailing zeros/dot.
-    let rounded = (result * 10000).rounded() / 10000
-    var formatted = String(format: "%.4f", rounded)
-    if formatted.contains(".") {
-        while formatted.hasSuffix("0") { formatted.removeLast() }
-        if formatted.hasSuffix(".") { formatted.removeLast() }
-    }
-    return formatted
+    return formatCopyNumber(result)
 }

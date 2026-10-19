@@ -18,8 +18,7 @@ func buildVariableContext(schemas: [VariableSchema], cepVars: [String: String]?)
     var values: [String: String] = [:]
     var types: [String: String] = [:]
     for schema in schemas {
-        let cep = cepVars?[schema.name] ?? ""
-        values[schema.name] = (cep != "") ? cep : schema.fallbackValue
+        values[schema.name] = schema.resolve(cepVars?[schema.name])
         types[schema.name] = schema.type
     }
     return VariableContext(values: values, types: types)
@@ -36,4 +35,29 @@ func reportMissingVariables(_ schemas: [VariableSchema], payload: CEPTriggerPayl
             extras: ["variable": schema.name]
         )
     }
+}
+
+/// Looks up the runtime value of each context variable in `schemas` — `user.<key>` from
+/// `userAttributes`, `event.<key>` from `eventProperties` — keyed by its token. Custom
+/// variables are skipped: the CEP payload carries those. `buildVariableContext` applies
+/// types and fallbacks, so a CEP-decided campaign, which declares no context variables,
+/// gets an empty map.
+func bindContextVariables(
+    _ schemas: [VariableSchema],
+    userAttributes: [String: Any],
+    eventProperties: [String: Any] = [:]
+) -> [String: String] {
+    var bound: [String: String] = [:]
+    for schema in schemas {
+        guard let dot = schema.name.firstIndex(of: ".") else { continue }
+        let key = String(schema.name[schema.name.index(after: dot)...])
+        let raw: Any?
+        switch schema.name[..<dot] {
+        case userNamespace[...]: raw = userAttributes[key]
+        case eventNamespace[...]: raw = eventProperties[key]
+        default: raw = nil
+        }
+        bound[schema.name] = schema.resolve(raw)
+    }
+    return bound
 }

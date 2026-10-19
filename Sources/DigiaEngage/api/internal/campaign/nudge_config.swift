@@ -293,6 +293,10 @@ struct NudgeConfig: Equatable {
                 }
             }
         }
+        // A Digia-managed campaign's `user.` / `event.` tokens; a CEP-decided one sends none.
+        if let contextList = templateConfig["contextVariables"] as? [Any] {
+            result.append(contentsOf: contextList.compactMap { ($0 as? [String: Any]).flatMap(normalizeContextVariable) })
+        }
         return result
     }
 

@@ -5,13 +5,27 @@ import Foundation
 @MainActor
 final class CampaignStore {
     private var campaigns: [String: CampaignModel] = [:]
+    private var index = TriggerIndex([])
 
     func populate(_ list: [CampaignModel]) {
         campaigns.removeAll()
+        var ordered: [String] = []
         for campaign in list {
-            campaigns[campaign.campaignKey] = campaign
+            if campaigns.updateValue(campaign, forKey: campaign.campaignKey) == nil {
+                ordered.append(campaign.campaignKey)
+            }
         }
+        // Catalog order, one entry per key: a duplicate key keeps its first position.
+        index = TriggerIndex(ordered.compactMap { campaigns[$0] })
     }
+
+    /// The Digia-owned campaigns whose rule listens for `signal`, in catalog order.
+    func listeningTo(_ signal: RuleSignal) -> [CampaignModel] {
+        index.listeningTo(signal)
+    }
+
+    /// Every cached campaign, in no particular order.
+    var all: [CampaignModel] { Array(campaigns.values) }
 
     func find(_ campaignKey: String) -> CampaignModel? {
         campaigns[campaignKey]
@@ -34,5 +48,6 @@ final class CampaignStore {
 
     func clear() {
         campaigns.removeAll()
+        index = TriggerIndex([])
     }
 }
