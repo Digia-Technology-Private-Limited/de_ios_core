@@ -72,6 +72,11 @@ struct StatefulTimerConfig: Equatable {
     let urgentBelowSeconds: Int64?
     let rules: [StatefulTimerRule]
 
+    /// Resolves against the trigger's variables with each schema's fallback filling an empty one.
+    func resolve(schemas: [VariableSchema], cepVars: [String: String]?) -> ResolvedTimerCanvas? {
+        resolve(buildVariableContext(schemas: schemas, cepVars: cepVars).values)
+    }
+
     func resolve(_ variables: [String: String]?) -> ResolvedTimerCanvas? {
         guard let deadlineMs = deadline.resolve(variables) else { return nil }
         let startsAtMs = startsAt?.resolve(variables)

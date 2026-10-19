@@ -2451,7 +2451,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         if case .inlineCanvas(let cfg) = campaign.config, inlineController.getCampaign(cfg.slotKey) != payload { return }
         var timerState: ResolvedTimerCanvas?
         if case .inlineCanvas(let cfg) = campaign.config, let runtime = cfg.statefulTimer {
-            guard let resolved = runtime.resolve(payload.variables), resolved.canvas != nil else { return }
+            guard let resolved = runtime.resolve(schemas: campaign.variableSchemas, cepVars: payload.variables), resolved.canvas != nil else { return }
             timerState = resolved
         }
         let viewed: EngageAnalyticsEvent

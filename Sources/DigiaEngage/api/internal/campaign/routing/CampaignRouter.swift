@@ -65,7 +65,8 @@ struct CampaignRouter {
         reportMissing(request)
         switch request.campaign.config {
         case .inlineCanvas(let cfg):
-            if let timer = cfg.statefulTimer, timer.resolve(request.payload.variables) == nil {
+            if let timer = cfg.statefulTimer,
+               timer.resolve(schemas: request.campaign.variableSchemas, cepVars: request.payload.variables) == nil {
                 return request.invalidConfig(
                     "timer time variable could not be resolved", cause: "timer_precondition")
             }
