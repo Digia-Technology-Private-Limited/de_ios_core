@@ -25,6 +25,10 @@ struct CampaignAPIResponse {
         self.headers = headers
     }
 }
+/// The highest campaign schema version this SDK supports. The backend sends only
+/// campaigns at or below it; 2 is the base version.
+let supportedCampaignSchemaVersion = 2
+
 struct CampaignFetcher {
     private let networkClient: any NetworkClient
 
@@ -41,6 +45,7 @@ struct CampaignFetcher {
         let request = NetworkRequest(
             url: url,
             method: .post,
+            headers: ["x-digia-campaign-schema-version": String(supportedCampaignSchemaVersion)],
             body: Data("{}".utf8),
             connectTimeout: 10,
             readTimeout: 10
