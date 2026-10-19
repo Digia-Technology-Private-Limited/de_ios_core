@@ -22,6 +22,12 @@ func buildSdkVersion(
     return parts.joined(separator: "|")
 }
 
+/// Carries a value the SDK only reads across a thread hop.
+private struct UncheckedSendable<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
+}
+
 @MainActor
 public enum Digia {
     /// Path suffix used to recognize the SDK's debug-settings deeplink. Digia
@@ -219,13 +225,25 @@ public enum Digia {
     }
 
     /// Sets the authenticated user ID for analytics identity stitching.
-    public static func setUserId(_ userId: String) {
-        SDKInstance.shared.setUserId(userId)
+    ///
+    /// Safe to call from any thread: it hops to the main actor itself.
+    nonisolated public static func setUserId(_ userId: String) {
+        onMain { SDKInstance.shared.setUserId(userId) }
     }
 
     /// Supplies attributes about the current user, for campaigns to interpolate
     /// as `{{user.<key>}}`. Calls merge. Requires `setUserId`; attributes
     /// describe an identified user.
+    ///
+    /// Fire and forget, and safe to call from any thread: it hops to the main
+    /// actor itself. Ignored before `initialize`.
+    nonisolated public static func setUserAttributes(_ attributes: [String: Any]) {
+        let box = UncheckedSendable(attributes)
+        onMain { Task { await SDKInstance.shared.setUserAttributes(box.value) } }
+    }
+
+    /// The awaitable form of the fire-and-forget `setUserAttributes(_:)`: returns once the
+    /// attributes are applied.
     @MainActor
     public static func setUserAttributes(_ attributes: [String: Any]) async {
         await SDKInstance.shared.setUserAttributes(attributes)
@@ -237,14 +255,18 @@ public enum Digia {
     /// The name and `properties` are also evaluated against Digia-owned rules.
     /// A name that is empty or longer than 120 characters is dropped, and so is
     /// any property value that is not a string, number, boolean or list of those.
-    @MainActor
-    public static func trackEvent(name: String, properties: [String: Any] = [:]) {
-        SDKInstance.shared.trackEvent(name, properties: properties)
+    /// Ignored before `initialize`. Safe to call from any thread: it hops to the
+    /// main actor itself.
+    nonisolated public static func trackEvent(name: String, properties: [String: Any] = [:]) {
+        let box = UncheckedSendable(properties)
+        onMain { SDKInstance.shared.trackEvent(name, properties: box.value) }
     }
 
     /// Clears the authenticated user ID (e.g. on logout).
-    public static func clearUserId() {
-        SDKInstance.shared.clearUserId()
+    ///
+    /// Safe to call from any thread: it hops to the main actor itself.
+    nonisolated public static func clearUserId() {
+        onMain { SDKInstance.shared.clearUserId() }
     }
 
     /// The device ID for this install, or an empty string before `initialize`. Never creates an ID.
@@ -333,7 +355,19 @@ public enum Digia {
     /// Call this manually from `viewDidAppear` (see the `UIViewController.digiaScreen(_:)`
     /// extension for a drop-in helper), or add `DigiaNavigatorObserver` to your
     /// `UINavigationController`'s delegate chain for automatic tracking.
-    public static func setCurrentScreen(name: String) {
-        SDKInstance.shared.setCurrentScreen(name)
+    ///
+    /// Safe to call from any thread: it hops to the main actor itself.
+    nonisolated public static func setCurrentScreen(name: String) {
+        onMain { SDKInstance.shared.setCurrentScreen(name) }
+    }
+
+    /// Runs `work` on the main actor: at once when already on the main thread,
+    /// otherwise queued behind earlier calls, in call order.
+    nonisolated static func onMain(_ work: @escaping @MainActor @Sendable () -> Void) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { work() }
+        } else {
+            DispatchQueue.main.async { MainActor.assumeIsolated { work() } }
+        }
     }
 }

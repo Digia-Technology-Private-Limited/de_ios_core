@@ -139,4 +139,47 @@ struct DMCTrackEventTests {
         #expect(found.first?.stage == .session)
         #expect(found.first?.extras["event_name"] == "add_to_cart")
     }
+
+    @Test("trackEvent and setUserAttributes before initialize are ignored, not held for later")
+    func beforeInitializeIsIgnored() async throws {
+        // initialize() marks the process-wide endpoints as initialized.
+        defer { DigiaEndpoints.resetForTest() }
+        let campaign: [String: Any] = [
+            "id": "id-ev", "campaignKey": "ev", "campaignType": "nudge", "status": "active",
+            "rule": [
+                "priority": 600,
+                "trigger": ["any": [["type": "event", "name": "cart_landed"]]],
+                "conditions": ["all": [Any]()],
+            ] as [String: Any],
+            "templateConfig": [
+                "templateType": "nudge", "layoutMode": "canvas",
+                "container": ["displayType": "dialog"],
+                "canvas": ["version": 2, "canvasWidth": 320, "canvasHeight": 200, "children": [Any]()],
+                "variables": [Any](),
+            ] as [String: Any],
+        ]
+        let network = HeldBundleNetworkClient()
+        network.release(.success(NetworkResponse(
+            statusCode: 200, headers: [:],
+            body: try JSONSerialization.data(withJSONObject: ["campaigns": [campaign]]),
+            isSuccessful: true)))
+        let sdk = SDKInstance(
+            defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
+            legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
+            makeNetworkClient: { _ in network })
+
+        sdk.trackEvent("cart_landed")
+        await sdk.setUserAttributes(["plan": "pro"])
+        try await sdk.initialize(DigiaConfig(apiKey: "test-api-key"))
+        for _ in 0..<300 where sdk.sdkState != .ready { try await Task.sleep(nanoseconds: 10_000_000) }
+        #expect(sdk.sdkState == .ready)
+
+        // Neither the early event nor the early attributes survived to be applied.
+        #expect(sdk.selfTriggerCount == 0)
+        #expect(sdk.services?.userContextManager.attributes.isEmpty == true)
+
+        // The same event once ready does fire the campaign, so the zero above is meaningful.
+        sdk.trackEvent("cart_landed")
+        #expect(sdk.selfTriggerCount == 1)
+    }
 }
