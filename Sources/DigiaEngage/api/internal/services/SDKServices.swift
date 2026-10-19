@@ -23,6 +23,8 @@ final class SDKServices {
     let frequencyManager: FrequencyManager
     let submissionReporter: SubmissionReporter
     let requestHeaders: [String: String]
+    /// What every analytics event carries: platform, OS, app and SDK versions.
+    let staticContext: [String: Any]
 
     init(
         config: DigiaConfig,
@@ -48,6 +50,7 @@ final class SDKServices {
             wrapperBinding: config.wrapperBinding,
             wrapperVersion: config.wrapperVersion
         )
+        self.staticContext = staticContext
         let sessionReporter = SessionReporter(
             sessionId: { [weak sessionManager] in sessionManager?.sessionId ?? "" },
             anonymousId: { [weak identityManager] in identityManager?.deviceId ?? "" },

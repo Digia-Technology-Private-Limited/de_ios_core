@@ -24,18 +24,29 @@ private let log = DigiaLogger()
 ///                                └─ dropped ────────►     (trigger|gating|render)
 /// ```
 @MainActor
-func observeDelivery(_ controller: PresentationController) {
+func observeDelivery(_ controller: PresentationController, firedBy: String? = nil) {
     let campaignKey = controller.trigger.campaignKey
     let id = controller.id
 
-    log.d(
-        "Delivered (presentationId=\(id))",
-        campaign: campaignKey,
-        stage: .trigger,
-        reason: TimelineReason.cepTriggerReceived,
-        presentationId: id,
-        extras: ["cepCampaignId": controller.trigger.cepCampaignId]
-    )
+    if let firedBy {
+        log.i(
+            "Fired — \(firedBy) (presentationId=\(id))",
+            campaign: campaignKey,
+            stage: .trigger,
+            reason: TimelineReason.ruleFired,
+            presentationId: id,
+            extras: ["trigger": firedBy]
+        )
+    } else {
+        log.d(
+            "Delivered (presentationId=\(id))",
+            campaign: campaignKey,
+            stage: .trigger,
+            reason: TimelineReason.cepTriggerReceived,
+            presentationId: id,
+            extras: ["cepCampaignId": controller.trigger.cepCampaignId]
+        )
+    }
 
     // The unsubscribe closure is discarded on purpose: settlement clears every
     // listener, and this observer lives exactly as long as the presentation.

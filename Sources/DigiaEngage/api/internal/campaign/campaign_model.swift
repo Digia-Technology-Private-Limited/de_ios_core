@@ -132,6 +132,18 @@ struct CampaignModel: Equatable {
     /// `eligibleCampaigns`, which the backend worked out for this user — so an
     /// unidentified user, or one whose context never arrived, sees no targeted
     /// campaign at all.
+    /// The variables the campaign declares; empty for kinds that carry none.
+    var variableSchemas: [VariableSchema] {
+        switch config {
+        case .inline(let cfg): return cfg.variableSchemas
+        case .banner(let cfg): return cfg.variableSchemas
+        case .inlineCanvas(let cfg): return cfg.variableSchemas
+        case .story(let cfg): return cfg.variableSchemas
+        case .nudge(let cfg): return cfg.variableSchemas
+        default: return []
+        }
+    }
+
     func allowsUser(_ eligibleCampaigns: [String]) -> Bool {
         !audienceGated || eligibleCampaigns.contains(campaignKey)
     }

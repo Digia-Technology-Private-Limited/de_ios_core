@@ -136,6 +136,22 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case clear
     }
     private var pendingUserChange: PendingUserChange?
+
+    // DMC: the Digia-decided campaign engine and the state its wiring keeps
+    // (see SDKInstance+DMC.swift). Stored here because extensions cannot.
+    /// Decides which Digia-owned campaign each rule signal shows.
+    lazy var engine = makeDecisionEngine()
+    /// The app is not on screen.
+    var inBackground = false
+    /// The process started in the background, so `app_opened` waits for the
+    /// first return to the foreground.
+    var appOpenedDue = false
+    /// Cold starts on this phone, the `device.app_opens` rule fact.
+    var appOpens = AppOpensCounter()
+    /// Anchor and slot keys that already sent their signal this session.
+    var visibleSent: Set<String> = []
+    /// Firings of Digia-decided campaigns, so each gets its own `cepCampaignId`.
+    var selfTriggerCount = 0
     private let defaults: UserDefaults
     private let legacyDefaults: UserDefaults
     /// The session clock handed to `SDKServices`. Only tests replace it.
@@ -193,7 +209,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     // Event system (mirrors Android): a fan-out emitter over two sinks — the
     // coarse CEP channel (`toCep`) and Digia's rich analytics (`toDigia`).
     // Campaign id/type are resolved from the store inside the Digia sink.
-    private let dwellTracker = DwellTracker()
+    let dwellTracker = DwellTracker()
     private var events: EngageEventEmitter!
 
     /// `shared` is the only production instance. Tests build their own with
@@ -289,6 +305,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 self?.floaterStoryOrchestrator.setAppForegrounded(false)
                 self?.coordinator.noteAppLeftForeground()
                 self?.dwellTracker.pause()
+                self?.appDidEnterBackground()
             }
         }
         appForegroundObserver = NotificationCenter.default.addObserver(
@@ -301,6 +318,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 self?.floaterStoryOrchestrator.setAppForegrounded(true)
                 self?.coordinator.noteAppEnteredForeground()
                 self?.dwellTracker.resume()
+                self?.appWillEnterForeground()
             }
         }
     }
@@ -323,6 +341,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             // health sink were built by the first call and are kept: only the
             // fetch runs again, with the first call's config.
             log.i("Retrying the campaign fetch after a failed initialization", stage: .fetch)
+            noteAppOpened()
             startCampaignFetch()
             await awaitCampaignFetch(calledAt: calledAt)
             return
@@ -344,12 +363,18 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // below can rotate it.
         services.sessionIdentityWiring.reportStartup()
 
-        // Apply the user change buffered before services existed.
+        // Before the bundle can be ready, so a held `app_opened` sees its open.
+        appOpens.attach(storage)
+        services.sessionManager.addRotationListener { [weak self] in self?.sessionDidRotate() }
+
+        // Apply the user change buffered before services existed. The user
+        // context is configured from the resulting identity once the bundle
+        // lands, so this change needs no refresh of its own.
         switch pendingUserChange {
         case let .set(userId):
-            services.identityManager.setUserId(userId)
+            applyUserId(services, userId, refreshContext: false)
         case .clear:
-            services.identityManager.clearUserId()
+            applyUserId(services, nil, refreshContext: false)
         case nil:
             break
         }
@@ -364,6 +389,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // registry needs only services, and anchors that mounted before this
         // point wait on it.
         configureComponentRegistry(config: config, services: services)
+
+        // The moment the app is on screen, whatever the bundle's progress.
+        beginAppOpen()
 
         // `completeInitialization` marks the SDK ready once the bundle lands. A
         // trigger that arrives before then is dropped, never held (SP5).
@@ -415,11 +443,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             guard let self, self.initGeneration == generation else { return }
             self.fetchTask = nil
             self.applyFetchResult(fetched)
+            if case .success(let bundle) = fetched {
+                await self.openDecisionEngine(policy: bundle.appEventUploadPolicy, generation: generation)
+            }
         }
     }
 
     /// Increments on reset so a fetch started before it cannot land after it.
-    private var initGeneration = 0
+    var initGeneration = 0
     private var fetchTask: Task<Void, Never>?
 
     private func applyFetchResult(_ fetched: Result<CampaignBundle, Error>) {
@@ -449,6 +480,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             // Not ready with an empty store (SP7): every trigger drops
             // `initialization_failed` until the host calls `initialize()` again.
             sdkState = .failed
+            engine.close()
             activateHealthSink()
             return
         }
@@ -694,6 +726,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // arrived and we turned it away" are the two answers a campaign creator
         // most needs to tell apart.
         observeDelivery(controller)
+        // A CEP must not show a campaign that Digia decides itself.
+        if sdkState == .ready, campaignStore.find(trigger.campaignKey)?.rule != nil {
+            controller.settle(.dropped(reason: .digiaManaged, detail: "Digia decides this campaign"))
+            return controller.presentation
+        }
         routeOrDrop(controller, driver: driver)
         return controller.presentation
     }
@@ -730,7 +767,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// The state gate `deliver` and `triggerCampaign` share, as Flutter and Android: route when
     /// ready, otherwise settle at once as dropped so the CEP gets its slot back. Core never
     /// holds a trigger (SP5); the reason says which of the not-ready states it met.
-    private func routeOrDrop(_ controller: PresentationController, driver: CampaignDriver) {
+    func routeOrDrop(_ controller: PresentationController, driver: CampaignDriver) {
         let drop: (DropReason, String)
         switch sdkState {
         case .ready:
@@ -874,6 +911,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         if screenUpdateRevision == revision {
             activePlugin?.onScreenChanged(screenName)
         }
+        // Digia-owned rules need no plugin.
+        engine.send(.screenViewed(screenName))
         // Checked at a screen change, not at fetch: hosts may register after `initialize()`.
         if needsPlugin, sdkState == .ready {
             needsPlugin = false
@@ -1159,11 +1198,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Called the first time an anchor key registers (`AnchorRegistry.register`).
     func recordAnchorSeen(_ anchorKey: String) {
         componentRegistry.recordAnchor(anchorKey, screenName: _currentScreen)
+        sendVisibleOnce("anchor:\(anchorKey)", .anchorVisible(anchorKey))
     }
 
     /// Called the first time a placement key appears (`DigiaSlot`).
     func recordSlotSeen(_ placementKey: String) {
         componentRegistry.recordSlot(placementKey, screenName: _currentScreen)
+        sendVisibleOnce("slot:\(placementKey)", .slotVisible(placementKey))
     }
 
     /// Exposes the recording toggle + control surface to `DigiaDebugSettingsView`.
@@ -1366,14 +1407,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     private func reportMissingCampaignVariables(_ campaign: CampaignModel, payload: CEPTriggerPayload) {
-        switch campaign.config {
-        case .inline(let cfg): reportMissingVariables(cfg.variableSchemas, payload: payload)
-        case .banner(let cfg): reportMissingVariables(cfg.variableSchemas, payload: payload)
-        case .inlineCanvas(let cfg): reportMissingVariables(cfg.variableSchemas, payload: payload)
-        case .story(let cfg): reportMissingVariables(cfg.variableSchemas, payload: payload)
-        case .nudge(let cfg): reportMissingVariables(cfg.variableSchemas, payload: payload)
-        default: break
-        }
+        reportMissingVariables(campaign.variableSchemas, payload: payload)
     }
 
     /// A native guide keeps only the steps that carry a canvas, so a guide with
@@ -2007,7 +2041,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             pendingUserChange = .set(userId)
             return
         }
-        services.identityManager.setUserId(userId)
+        applyUserId(services, userId)
     }
 
     func clearUserId() {
@@ -2015,7 +2049,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             pendingUserChange = .clear
             return
         }
-        services.identityManager.clearUserId()
+        applyUserId(services, nil)
     }
 
     /// Removes inline content (carousel/story/payload) for each key in `placementKeys`.
@@ -3082,6 +3116,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     func resetForTesting() {
         DigiaEndpoints.resetForTest()
+        resetDecisionStateForTesting()
         if let plugin = activePlugin {
             coordinator.detach(owner: plugin.id)
             plugin.detach()

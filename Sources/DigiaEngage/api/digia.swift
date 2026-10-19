@@ -223,6 +223,25 @@ public enum Digia {
         SDKInstance.shared.setUserId(userId)
     }
 
+    /// Supplies attributes about the current user, for campaigns to interpolate
+    /// as `{{user.<key>}}`. Calls merge. Requires `setUserId`; attributes
+    /// describe an identified user.
+    @MainActor
+    public static func setUserAttributes(_ attributes: [String: Any]) async {
+        await SDKInstance.shared.setUserAttributes(attributes)
+    }
+
+    /// Records an event the app performed, such as a purchase.
+    ///
+    /// Queued and sent in batches alongside campaign analytics; never blocks.
+    /// The name and `properties` are also evaluated against Digia-owned rules.
+    /// A name that is empty or longer than 120 characters is dropped, and so is
+    /// any property value that is not a string, number, boolean or list of those.
+    @MainActor
+    public static func trackEvent(name: String, properties: [String: Any] = [:]) {
+        SDKInstance.shared.trackEvent(name, properties: properties)
+    }
+
     /// Clears the authenticated user ID (e.g. on logout).
     public static func clearUserId() {
         SDKInstance.shared.clearUserId()
