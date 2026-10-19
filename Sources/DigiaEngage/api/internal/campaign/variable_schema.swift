@@ -50,7 +50,8 @@ func dartText(_ value: Any) -> String {
         return string
     case let number as NSNumber:
         if CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue ? "true" : "false" }
-        return number.stringValue
+        // Dart prints a double with its point: `1.0`, never `1`.
+        return CFNumberIsFloatType(number) ? String(number.doubleValue) : number.stringValue
     case let list as [Any]:
         return "[" + list.map(dartText).joined(separator: ", ") + "]"
     default:

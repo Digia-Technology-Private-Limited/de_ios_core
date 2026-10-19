@@ -202,6 +202,9 @@ private func parseEnvelope(_ json: Any?) throws -> CampaignRule {
         ))
 }
 
+/// The longest delay kept, about 31,700 years.
+private let maxDelayMs = 1e15
+
 private func parseWait(_ json: Any?) throws -> RuleWait {
     guard let json = json as? [String: Any] else { try malformed("wait is not an object") }
     guard json["type"] as? String == "delay" else { try unknownType(json["type"], "wait") }
@@ -220,7 +223,9 @@ private func parseWait(_ json: Any?) throws -> RuleWait {
     default:
         try malformed("delay cancel has no any list")
     }
-    return RuleWait(ms: Int(ms), cancels: try any.map(parseCancel))
+    // A delay past any real session keeps its meaning (the wait never ends) and
+    // cannot trap `Int(_:)` or overflow the end-time sum in `Waits`.
+    return RuleWait(ms: Int(min(ms, maxDelayMs)), cancels: try any.map(parseCancel))
 }
 
 private func parseCancel(_ json: Any?) throws -> CancelCondition {
@@ -383,7 +388,10 @@ func ruleJSONEquals(_ a: Any?, _ b: Any?) -> Bool {
     if let aNumber = ruleJSONNumber(a), let bNumber = ruleJSONNumber(b) {
         return aNumber == bNumber
     }
-    if let aBool = a as? Bool, let bBool = b as? Bool { return aBool == bBool }
+    if ruleIsBool(a) || ruleIsBool(b) {
+        guard ruleIsBool(a), ruleIsBool(b) else { return false }
+        return (a as? Bool) == (b as? Bool)
+    }
     if let aString = a as? String, let bString = b as? String { return aString == bString }
     if let aList = a as? [Any], let bList = b as? [Any] {
         guard aList.count == bList.count else { return false }

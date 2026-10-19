@@ -1,9 +1,9 @@
 import Darwin
 import Foundation
 
-/// Milliseconds that keep counting while the phone sleeps: Darwin's
-/// `CLOCK_MONOTONIC` continues to increment while the system is asleep, unlike
-/// `CLOCK_MONOTONIC_RAW`, and is unaffected by wall-clock changes.
+/// Milliseconds that keep counting while the phone sleeps: on Darwin both
+/// `CLOCK_MONOTONIC` and `CLOCK_MONOTONIC_RAW` include sleep time (only
+/// `CLOCK_UPTIME_RAW` does not), and neither follows wall-clock changes.
 enum MonotonicClock {
     static func nowMs() -> Int {
         Int(clock_gettime_nsec_np(CLOCK_MONOTONIC) / 1_000_000)
@@ -68,13 +68,14 @@ final class Waits {
         elapsedMs: Int = 0
     ) {
         for entry in waits where !isWaiting(entry.campaignKey) {
+            let end = nowMs().addingReportingOverflow(entry.wait.ms)
             pending[entry.campaignKey] = PendingWait(
                 campaignKey: entry.campaignKey,
                 priority: entry.priority,
                 wait: entry.wait,
                 trigger: trigger,
                 screen: screen,
-                endsAtMs: nowMs() + entry.wait.ms - elapsedMs
+                endsAtMs: (end.overflow ? Int.max : end.partialValue) - elapsedMs
             )
         }
         schedule()

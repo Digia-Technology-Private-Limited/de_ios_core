@@ -23,7 +23,7 @@ protocol DecisionFacts: AnyObject {
 }
 
 /// Shows a campaign the SDK fired itself; `firedBy` names the cause in logs.
-typealias RouteCampaign = (CampaignModel, String, RuleSignal) -> Void
+typealias RouteCampaign = (CampaignModel, String, RuleSignal) throws -> Void
 
 /// Decides which Digia-owned campaign a signal shows: holds signals until
 /// `ready`, evaluates them one at a time, runs waits, and hands each winner to
@@ -37,7 +37,7 @@ final class DecisionEngine {
         onElapsed: { [weak self] due in self?.onWaitsElapsed(due) }, nowMs: nowMs)
     private lazy var gate: SignalGate = {
         let bus = SignalBus { [weak self] signal, ageMs in
-            self?.evaluate(signal, ageMs: ageMs)
+            try self?.evaluate(signal, ageMs: ageMs)
         }
         return SignalGate(
             send: { signal, ageMs in bus.send(signal, ageMs: ageMs) }, nowMs: nowMs)
@@ -87,7 +87,7 @@ final class DecisionEngine {
 
     /// Evaluates the Digia-owned rules that listen for `signal` and routes the
     /// eligible campaign with the highest priority.
-    private func evaluate(_ signal: RuleSignal, ageMs: Int) {
+    private func evaluate(_ signal: RuleSignal, ageMs: Int) throws {
         guard facts.ready, gate.isOpen else { return }
         // Cancels first, so the signal that starts a wait cannot also end it.
         cancelWaits(signal)
@@ -108,14 +108,14 @@ final class DecisionEngine {
                 reportIneligible(campaign, reason: reason, detail: detail)
             }
         }
-        routeInlineWinners(decision.inlineWinners, signal: signal)
-        routeWinner(decision, signal: signal)
+        try routeInlineWinners(decision.inlineWinners, signal: signal)
+        try routeWinner(decision, signal: signal)
         // After the winner: a wait that already ended, as for a held signal,
         // fires at once and must not take the surface ahead of it.
         startRuleWaits(decision.waiting, signal: signal, ageMs: ageMs)
     }
 
-    private func routeWinner(_ decision: RuleDecision, signal: RuleSignal) {
+    private func routeWinner(_ decision: RuleDecision, signal: RuleSignal) throws {
         guard let winner = decision.winner, let winnerRule = decision.winnerRule else { return }
         for campaign in [winner] + decision.heldBack {
             reportDefaultedPriority(campaign)
@@ -140,13 +140,13 @@ final class DecisionEngine {
                 ]
             )
         }
-        route(winner, signal.name, signal)
+        try route(winner, signal.name, signal)
     }
 
     /// Routes each slot's winner as its own presentation, at once: an inline
     /// campaign's wait is ignored. A winner already in its slot is skipped, so a
     /// frequent trigger neither drops it `surface_busy` nor replaces it.
-    private func routeInlineWinners(_ winners: [SlotWinner], signal: RuleSignal) {
+    private func routeInlineWinners(_ winners: [SlotWinner], signal: RuleSignal) throws {
         for slotWinner in winners {
             let campaign = slotWinner.campaign
             if facts.slotCampaignKey(slotWinner.slot) == campaign.campaignKey {
@@ -176,7 +176,7 @@ final class DecisionEngine {
                     "Wait ignored — an inline campaign shows at once",
                     campaign: campaign.campaignKey)
             }
-            route(campaign, signal.name, signal)
+            try route(campaign, signal.name, signal)
         }
     }
 
@@ -291,8 +291,20 @@ final class DecisionEngine {
             return false
         }
         // On a timer, routing must cost at most this campaign, never the app.
-        route(campaign, "\(pending.trigger.name) after wait", pending.trigger)
-        return true
+        do {
+            try route(campaign, "\(pending.trigger.name) after wait", pending.trigger)
+            return true
+        } catch {
+            log.e(
+                "Dropped — routing threw after the wait",
+                campaign: key,
+                error: error,
+                stage: .gating,
+                reason: TimelineReason.internalError,
+                extras: ["exception_class": String(describing: type(of: error))]
+            )
+            return false
+        }
     }
 
     private func logWaitEnded(_ campaignKey: String, outcome: String, waitMs: Int) {
@@ -364,6 +376,7 @@ final class DecisionEngine {
 
     private func formatPriority(_ value: Double?) -> String {
         guard let value else { return "?" }
-        return value == value.rounded() ? String(Int(value)) : String(value)
+        // `Int(_:)` traps outside the Int range, and priority is any finite server number.
+        return value == value.rounded() && abs(value) < 1e15 ? String(Int(value)) : String(value)
     }
 }

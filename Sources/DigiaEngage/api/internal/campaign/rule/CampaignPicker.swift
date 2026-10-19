@@ -108,8 +108,8 @@ func compareByPriority(
     _ bPriority: Double, _ bKey: String
 ) -> Int {
     if aPriority != bPriority { return aPriority > bPriority ? -1 : 1 }
-    if aKey == bKey { return 0 }
-    return aKey < bKey ? -1 : 1
+    if aKey.utf16.elementsEqual(bKey.utf16) { return 0 }
+    return aKey.utf16.lexicographicallyPrecedes(bKey.utf16) ? -1 : 1
 }
 
 /// Why an evaluated campaign may not show, or nil when it may.

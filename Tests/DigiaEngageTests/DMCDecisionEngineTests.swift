@@ -485,6 +485,41 @@ struct DMCDecisionEngineTests {
         "type": "attribute", "key": "plan", "op": "eq", "value": "gold",
     ]
 
+    // MARK: server data that must not crash
+
+    @Test("a priority beyond the Int range is logged, not a trap")
+    func hugePriorityIsLogged() {
+        defer { finish() }
+        facts.add(Self.campaign("big", priority: 1e300, screen: "home"))
+        facts.add(Self.campaign("small", priority: 1e299, screen: "home"))
+        engine.ready()
+
+        engine.send(.screenViewed("home"))
+
+        #expect(routedKeys == ["big"])
+        #expect(gating("small", TimelineReason.lowerPriority).count == 1)
+    }
+
+    @Test("a router that throws costs that show, not the app")
+    func throwingRouterAfterWaitIsContained() {
+        defer { finish() }
+        struct Boom: Error {}
+        let clock = clock
+        let thrower = DecisionEngine(
+            facts: facts, route: { _, _, _ in throw Boom() }, nowMs: { clock.now })
+        facts.add(Self.campaign("tip", screen: "home", waitMs: 1000))
+        thrower.ready()
+
+        thrower.send(.screenViewed("home"))
+        clock.now += 1000
+        thrower.waits.schedule()
+
+        let dropped = gating("tip", TimelineReason.internalError)
+        #expect(dropped.count == 1)
+        #expect(dropped.first?.extras["exception_class"] == "Boom")
+        #expect(!thrower.waits.isWaiting("tip"))
+    }
+
     private static func campaign(
         _ key: String,
         priority: Any? = 600,

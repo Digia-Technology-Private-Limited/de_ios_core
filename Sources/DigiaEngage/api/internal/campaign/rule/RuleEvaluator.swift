@@ -228,7 +228,7 @@ enum RuleEvaluator {
 
     private static func versionParts(_ version: String) -> [Int] {
         version.split(separator: ".", omittingEmptySubsequences: false).map { part in
-            let digits = part.prefix { $0.isNumber }
+            let digits = part.prefix { $0.isASCII && $0.isNumber }
             return Int(digits) ?? 0
         }
     }

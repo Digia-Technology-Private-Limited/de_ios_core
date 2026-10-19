@@ -148,6 +148,10 @@ enum TimelineReason: String, CaseIterable, DiagnosticReason {
     /// A wait already runs for this campaign. The first timer stays.
     case waitInProgress = "wait_in_progress"
 
+    /// The SDK failed internally while handling this campaign; it was dropped
+    /// and the app is unaffected. The exception class is in `extras`.
+    case internalError = "internal_error"
+
     /// A pending wait ended without a show. The cause is in `extras`.
     case waitCancelled = "wait_cancelled"
 

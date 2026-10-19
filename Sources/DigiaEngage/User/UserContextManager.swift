@@ -270,7 +270,7 @@ final class UserContextManager {
                 // and looks like nothing is wrong.
                 log.w("User attributes rejected by the server: \(dropped.joined(separator: ", "))")
             }
-            if userHash != nil, payload["verified"] as? Bool == false, !unverifiedReported {
+            if userHash != nil, ruleIsBool(payload["verified"]), payload["verified"] as? Bool == false, !unverifiedReported {
                 unverifiedReported = true
                 log.d(
                     "userHash not verified — imported attributes are withheld",
@@ -278,11 +278,11 @@ final class UserContextManager {
                     reason: TimelineReason.userHashUnverified
                 )
             }
-            let ttl = (payload["expiresInSeconds"] as? NSNumber)?.intValue ?? defaultExpirySeconds
+            let ttl = Self.expirySeconds(payload["expiresInSeconds"])
             let fresh = UserContext(
                 campaigns: (payload["campaigns"] as? [Any] ?? []).compactMap { $0 as? String },
                 attributes: typedAttributes(payload["attributes"]),
-                expiresAtMs: nowMs() + Int64(ttl) * 1000
+                expiresAtMs: nowMs() + ttl * 1000
             )
             context = fresh
             log.d("User context ready (campaigns=\(fresh.campaigns.count), attributes=\(fresh.attributes.count))")
@@ -301,6 +301,17 @@ final class UserContextManager {
                 extras: ["cause": String(describing: type(of: error))]
             )
         }
+    }
+
+    /// The context's lifetime. A JSON number only (a boolean is not one), whole
+    /// seconds; a value no real clock reaches falls back to the default, so the
+    /// millisecond arithmetic cannot overflow.
+    static func expirySeconds(_ raw: Any?) -> Int64 {
+        let limit = 3_153_600_000.0  // 100 years
+        guard let seconds = ruleJSONNumber(raw), seconds.isFinite, abs(seconds) <= limit else {
+            return Int64(defaultExpirySeconds)
+        }
+        return Int64(seconds)
     }
 
     /// Unwraps the `{isSuccess, data: {response}}` envelope every Engage SDK

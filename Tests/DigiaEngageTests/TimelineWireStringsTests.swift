@@ -64,10 +64,11 @@ struct TimelineWireStringsTests {
         #expect(TimelineReason.lowerPriority.wire == "lower_priority")
         #expect(TimelineReason.waitStarted.wire == "wait_started")
         #expect(TimelineReason.waitInProgress.wire == "wait_in_progress")
+        #expect(TimelineReason.internalError.wire == "internal_error")
         #expect(TimelineReason.waitCancelled.wire == "wait_cancelled")
         #expect(TimelineReason.waitEnded.wire == "wait_ended")
         #expect(CEPPluginReason.bridgeUnavailable.wire == "cep_bridge_unavailable")
-        #expect(TimelineReason.allCases.count == 41)
+        #expect(TimelineReason.allCases.count == 42)
     }
 
     /// The delivery enums *are* the timeline's reasons for a delivery — no
