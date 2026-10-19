@@ -70,16 +70,16 @@ struct DMCRuleRoutingTests {
         let (sdk, sink) = try await Self.ready()
         defer { DigiaLogger.unregisterSink(sink) }
         let services = try #require(sdk.services)
-        let capped = try #require(sdk.campaignStore.find("capped"))
-        services.frequencyManager.recordShow("capped", capped.frequency)
+        let capped = try #require(sdk.campaignStore.find("routing_capped"))
+        services.frequencyManager.recordShow("routing_capped", capped.frequency)
 
         sdk.trackEvent("cart_landed")
 
-        #expect(gating(sink, "gated")?.reason?.wire == TimelineReason.notInAudience.wire)
-        #expect(gating(sink, "capped")?.reason?.wire == TimelineReason.capped.wire)
+        #expect(gating(sink, "routing_gated")?.reason?.wire == TimelineReason.notInAudience.wire)
+        #expect(gating(sink, "routing_capped")?.reason?.wire == TimelineReason.capped.wire)
         #expect(gating(sink, "vip_only")?.reason?.wire == TimelineReason.conditionFailed.wire)
         #expect(gating(sink, "broken")?.reason?.wire == TimelineReason.malformedRule.wire)
-        #expect(gating(sink, "gated")?.extras == ["verdict": "ineligible", "context": "missing"])
+        #expect(gating(sink, "routing_gated")?.extras == ["verdict": "ineligible", "context": "missing"])
         #expect(gating(sink, "vip_only")?.extras == ["verdict": "ineligible", "condition": "attribute.plan"])
         #expect(gating(sink, "broken")?.extras == ["verdict": "ineligible", "exception_class": "parse"])
     }
@@ -163,8 +163,8 @@ struct DMCRuleRoutingTests {
         let campaigns: [[String: Any]] = [
             nudge("low", 400, event("cart_landed")),
             nudge("high", 800, event("cart_landed")),
-            nudge("gated", 1, event("cart_landed"), extra: ["audienceGated": true]),
-            nudge("capped", 1, event("cart_landed"), extra: ["frequency": ["maxTotal": 1]]),
+            nudge("routing_gated", 1, event("cart_landed"), extra: ["audienceGated": true]),
+            nudge("routing_capped", 1, event("cart_landed"), extra: ["frequency": ["maxTotal": 1]]),
             nudge(
                 "vip_only", 1, event("cart_landed"),
                 conditions: ["type": "attribute", "key": "plan", "op": "eq", "value": "vip"]),
