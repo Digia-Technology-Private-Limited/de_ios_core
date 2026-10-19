@@ -74,6 +74,25 @@ struct DMCHostTriggerTests {
         #expect(recorder.dropReason == .frequencyCapped)
         #expect(sdk.controller.activeNudge == nil)
     }
+
+    @Test("a host trigger before initialize drops at once, not silently")
+    func dropsBeforeInitialize() {
+        let sdk = SDKInstance(
+            defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
+            legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
+            makeNetworkClient: { _ in HeldBundleNetworkClient() })
+        #expect(sdk.sdkState == .notInitialized)
+
+        let presentation = sdk.triggerCampaign("home_banner", variables: nil)
+        let recorder = PresentationRecorder(presentation)
+
+        guard case .dropped(let reason, let detail) = recorder.outcome else {
+            Issue.record("expected a drop, got \(String(describing: recorder.outcome))")
+            return
+        }
+        #expect(reason == .notInitialized)
+        #expect(detail == "Digia.initialize() has not been called")
+    }
 }
 
 /// Flutter: `test/sdk_instance_track_event_test.dart` — `trackEvent`'s two
