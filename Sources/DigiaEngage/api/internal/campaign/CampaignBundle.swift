@@ -19,6 +19,10 @@ struct CampaignBundle {
     /// wire), or `nil` to use ``HealthSink/defaultSessionCap``.
     let healthSessionCap: Int?
 
+    /// The bundle's app-event upload settings. Absent keys mean upload on and
+    /// unlimited, matching ``healthEnabled``.
+    let appEventUploadPolicy: AppEventUploadPolicy
+
     // platform note: unlike Flutter's `CampaignBundle`, which defers
     // per-campaign parsing to a lazy `.parse()` called after the health
     // config above is applied, this initializer parses every campaign (and
@@ -37,7 +41,8 @@ struct CampaignBundle {
         devicePlatform: String? = nil,
         serverTimeMs: Int64? = nil,
         healthEnabled: Bool = true,
-        healthSessionCap: Int? = nil
+        healthSessionCap: Int? = nil,
+        appEventUploadPolicy: AppEventUploadPolicy = .unlimited
     ) -> CampaignBundle {
         let catalog: DesignTokenCatalog
         do { catalog = try designTokensJSON.map(DesignTokenCatalog.fromJson) ?? .empty }
@@ -95,7 +100,8 @@ struct CampaignBundle {
             timeAnchor: timeAnchor,
             campaigns: campaigns,
             healthEnabled: healthEnabled,
-            healthSessionCap: healthSessionCap
+            healthSessionCap: healthSessionCap,
+            appEventUploadPolicy: appEventUploadPolicy
         )
     }
 }

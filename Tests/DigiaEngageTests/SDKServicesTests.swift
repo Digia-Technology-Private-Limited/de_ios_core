@@ -42,4 +42,39 @@ struct SDKServicesTests {
         services.identityManager.clearUserId()
         #expect(rotations() == 2)
     }
+
+    // Flutter: `test/sdk_services_test.dart` › flushAnalytics flushes both queues.
+    @Test("flushAnalytics flushes both queues")
+    func flushAnalyticsFlushesBothQueues() async throws {
+        let client = MockNetworkClient()
+        client.setResponseFactory { _ in
+            NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
+        }
+        let storage = UserDefaultsLocalStorage(defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!)
+        let services = SDKServices(config: DigiaConfig(apiKey: "test_key"), storage: storage, networkClient: client)
+        let experience = try #require(services.analyticsService)
+        let appEvents = try #require(services.appEventsService)
+
+        experience.capture(
+            NudgeEvent.Viewed(displayStyle: "dialog"),
+            payload: CEPTriggerPayload(cepCampaignId: "c", campaignKey: "c", cepMetadata: [:]),
+            campaignId: "c", campaignType: "guide"
+        )
+        appEvents.track("add_to_cart")
+
+        services.flushAnalytics()
+
+        func bodies() -> [String] {
+            client.recordedRequests
+                .filter { $0.url.absoluteString == DigiaEndpoints.track }
+                .map { $0.body.flatMap { String(data: $0, encoding: .utf8) } ?? "" }
+        }
+        for _ in 0..<500 where bodies().count < 2 { try await Task.sleep(nanoseconds: 10_000_000) }
+
+        // One request per queue — the owner reaches both, and neither queue knows the other exists.
+        #expect(bodies().count == 2)
+        #expect(bodies().contains { $0.contains("Digia Experience Viewed") })
+        #expect(bodies().contains { $0.contains("add_to_cart") })
+        services.tearDown()
+    }
 }

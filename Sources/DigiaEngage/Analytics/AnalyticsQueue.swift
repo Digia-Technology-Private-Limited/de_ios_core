@@ -12,21 +12,27 @@ struct QueueEntry: @unchecked Sendable {
 
 final class AnalyticsQueue {
     private let storage: LocalStorage
-    private static let key = "queue"
+    private let key: String
 
-    init(storage: LocalStorage) {
+    /// Each queue owns one storage key, so the app-event queue and the
+    /// experience queue can share a scoped storage without sharing entries.
+    init(storage: LocalStorage, key: String = "queue") {
         self.storage = storage
+        self.key = key
     }
 
     var size: Int { load().count }
 
-    func append(_ entry: QueueEntry, maxEvents: Int) {
+    /// Appends `entry`, dropping the oldest beyond `maxEvents`, and returns how
+    /// many older entries the cap evicted.
+    @discardableResult
+    func append(_ entry: QueueEntry, maxEvents: Int) -> Int {
         var entries = load()
         entries.append(entry)
-        if entries.count > maxEvents {
-            entries = Array(entries.dropFirst(entries.count - maxEvents))
-        }
+        let evicted = max(0, entries.count - maxEvents)
+        if evicted > 0 { entries = Array(entries.dropFirst(evicted)) }
         save(entries)
+        return evicted
     }
 
     func peek(maxCount: Int) -> [QueueEntry] {
@@ -57,14 +63,14 @@ final class AnalyticsQueue {
     }
 
     func clear() {
-        storage.removeObject(forKey: Self.key)
+        storage.removeObject(forKey: key)
     }
 
     // MARK: - Persistence
 
     private func load() -> [QueueEntry] {
         guard
-            let str = storage.string(forKey: Self.key),
+            let str = storage.string(forKey: key),
             let data = str.data(using: .utf8),
             let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         else { return [] }
@@ -90,7 +96,7 @@ final class AnalyticsQueue {
         }
         if let data = try? JSONSerialization.data(withJSONObject: arr),
            let str = String(data: data, encoding: .utf8) {
-            storage.set(str, forKey: Self.key)
+            storage.set(str, forKey: key)
         }
     }
 }

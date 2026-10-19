@@ -16,6 +16,8 @@ final class SDKServices {
     /// The session-and-identity rules; already attached by `init`.
     let sessionIdentityWiring: SessionIdentityWiring
     let analyticsService: AnalyticsService?
+    /// Host-app events, on their own queue, cap and upload policy.
+    let appEventsService: AppEventsService?
     let frequencyManager: FrequencyManager
     let submissionReporter: SubmissionReporter
     let requestHeaders: [String: String]
@@ -87,9 +89,21 @@ final class SDKServices {
                 staticContext: staticContext,
                 networkClient: networkClient
             )
+            self.appEventsService = AppEventsService(
+                AnalyticsService(
+                    config: analyticsConfig,
+                    identityManager: identityManager,
+                    sessionManager: sessionManager,
+                    queue: AnalyticsQueue(storage: storage.scoped("analytics"), key: "app_event_queue"),
+                    staticContext: staticContext,
+                    networkClient: networkClient,
+                    maxQueueEvents: appEventQueueMaxEvents
+                )
+            )
         } else {
             log.i("Analytics disabled in DigiaConfig — no events will be captured")
             self.analyticsService = nil
+            self.appEventsService = nil
         }
         self.submissionReporter = SubmissionReporter(
             sessionIdProvider: { [weak sessionManager] in sessionManager?.sessionId },
@@ -97,8 +111,15 @@ final class SDKServices {
         )
     }
 
+    /// Sends whatever both analytics queues hold now, one request per queue.
+    func flushAnalytics() {
+        analyticsService?.flush()
+        appEventsService?.flush()
+    }
+
     /// Stops everything this container started. Called before it is dropped.
     func tearDown() {
         analyticsService?.clear()
+        appEventsService?.clear()
     }
 }
