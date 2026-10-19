@@ -49,8 +49,25 @@ struct TimelineWireStringsTests {
         #expect(TimelineReason.mediaLoadFailed.wire == "media_load_failed")
         #expect(TimelineReason.actionHandlerMissing.wire == "action_handler_missing")
         #expect(TimelineReason.surveySubmissionFailed.wire == "survey_submission_failed")
+        #expect(TimelineReason.appEventInvalid.wire == "app_event_invalid")
+        #expect(TimelineReason.appEventRateLimited.wire == "app_event_rate_limited")
+        #expect(TimelineReason.appEventBlocked.wire == "app_event_blocked")
+        #expect(TimelineReason.appEventQueueFull.wire == "app_event_queue_full")
+        #expect(TimelineReason.userHashUnverified.wire == "user_hash_unverified")
+        #expect(TimelineReason.userContextFailed.wire == "user_context_failed")
+        #expect(TimelineReason.ruleFired.wire == "rule_fired")
+        #expect(TimelineReason.unsupportedFeature.wire == "unsupported_feature")
+        #expect(TimelineReason.malformedRule.wire == "malformed_rule")
+        #expect(TimelineReason.conditionFailed.wire == "condition_failed")
+        #expect(TimelineReason.notInAudience.wire == "not_in_audience")
+        #expect(TimelineReason.capped.wire == "capped")
+        #expect(TimelineReason.lowerPriority.wire == "lower_priority")
+        #expect(TimelineReason.waitStarted.wire == "wait_started")
+        #expect(TimelineReason.waitInProgress.wire == "wait_in_progress")
+        #expect(TimelineReason.waitCancelled.wire == "wait_cancelled")
+        #expect(TimelineReason.waitEnded.wire == "wait_ended")
         #expect(CEPPluginReason.bridgeUnavailable.wire == "cep_bridge_unavailable")
-        #expect(TimelineReason.allCases.count == 24)
+        #expect(TimelineReason.allCases.count == 41)
     }
 
     /// The delivery enums *are* the timeline's reasons for a delivery — no
@@ -97,6 +114,15 @@ struct TimelineWireStringsTests {
                 "survey_submission_failed",
                 "media_load_failed",
                 "cep_bridge_unavailable",
+                "internal_error",
+                "user_hash_unverified",
+                "unsupported_feature",
+                "malformed_rule",
+                "app_event_invalid",
+                "app_event_rate_limited",
+                "app_event_blocked",
+                "app_event_queue_full",
+                "digia_managed",
             ])
     }
 
@@ -125,6 +151,15 @@ struct TimelineWireStringsTests {
         #expect(HealthReasons.detailKeys["survey_submission_failed"] == ["http_status"])
         #expect(HealthReasons.detailKeys["media_load_failed"] == ["media_kind", "cause"])
         #expect(HealthReasons.detailKeys["cep_bridge_unavailable"] == ["selector"])
+        #expect(HealthReasons.detailKeys["internal_error"] == ["exception_class"])
+        #expect(HealthReasons.detailKeys["user_hash_unverified"] == [])
+        #expect(HealthReasons.detailKeys["unsupported_feature"] == ["feature"])
+        #expect(HealthReasons.detailKeys["malformed_rule"] == ["exception_class"])
+        #expect(HealthReasons.detailKeys["app_event_invalid"] == ["event_name"])
+        #expect(HealthReasons.detailKeys["app_event_rate_limited"] == [])
+        #expect(HealthReasons.detailKeys["app_event_blocked"] == [])
+        #expect(HealthReasons.detailKeys["app_event_queue_full"] == [])
+        #expect(HealthReasons.detailKeys["digia_managed"] == [])
         // Every allowlisted reason has an explicit projection, even if empty —
         // an absent entry and an empty list must never be conflated.
         for reason in HealthReasons.reasons {
@@ -136,7 +171,8 @@ struct TimelineWireStringsTests {
     func healthReasonsDedupShape() {
         #expect(HealthReasons.campaignlessReasons == [
             "design_tokens_unreadable", "fetch_failed_auth", "fetch_failed_response",
-            "plugin_not_registered",
+            "plugin_not_registered", "user_hash_unverified", "app_event_invalid",
+            "app_event_rate_limited", "app_event_blocked", "app_event_queue_full",
         ])
         #expect(HealthReasons.dedupExtraKeys == [
             "unknown_design_token": ["token"],
@@ -148,6 +184,7 @@ struct TimelineWireStringsTests {
             "action_handler_missing": ["action_type"],
             "cep_bridge_unavailable": ["selector"],
             "media_load_failed": ["media_kind", "cause"],
+            "internal_error": ["exception_class"],
         ])
         #expect(HealthReasons.liveTestBlockerKey == "blocking_live_test")
     }

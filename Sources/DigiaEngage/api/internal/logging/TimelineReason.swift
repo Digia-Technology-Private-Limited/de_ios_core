@@ -34,6 +34,29 @@ enum TimelineReason: String, CaseIterable, DiagnosticReason {
     /// The live-test stream went down.
     case liveSessionDisconnected = "live_session_disconnected"
 
+    // MARK: app events (Digia.trackEvent)
+
+    /// A `Digia.trackEvent` call broke one of the app-event limits and was
+    /// dropped before queueing. `extras` carries a sample `event_name`.
+    case appEventInvalid = "app_event_invalid"
+
+    /// App events were dropped by the bundle's rate or burst limit.
+    case appEventRateLimited = "app_event_rate_limited"
+
+    /// App events were dropped because their name is on the bundle's blocklist.
+    case appEventBlocked = "app_event_blocked"
+
+    /// App events were evicted because the app-event queue reached its cap.
+    case appEventQueueFull = "app_event_queue_full"
+
+    // MARK: user context
+
+    /// The server did not verify the `userHash` sent with the user ID.
+    case userHashUnverified = "user_hash_unverified"
+
+    /// The user-context request failed. Rules use the cached copy, if any.
+    case userContextFailed = "user_context_failed"
+
     // MARK: fetch
 
     /// Campaigns came down from Digia. The count is in `extras`.
@@ -94,6 +117,42 @@ enum TimelineReason: String, CaseIterable, DiagnosticReason {
     /// CleverTap, WebEngage or MoEngage, outside this process, and the SDK
     /// reports only what it observed.
     case cepTriggerReceived = "cep_trigger_received"
+
+    // MARK: rules
+
+    /// A Digia-owned rule fired its campaign. No CEP delivered it.
+    case ruleFired = "rule_fired"
+
+    /// A Digia-owned rule needs a feature this SDK does not know.
+    case unsupportedFeature = "unsupported_feature"
+
+    /// A Digia-owned rule is not well-formed.
+    case malformedRule = "malformed_rule"
+
+    /// The signal matched a rule, but its conditions are false for this user.
+    case conditionFailed = "condition_failed"
+
+    /// The rule passed, but the user is not in the campaign's audience.
+    case notInAudience = "not_in_audience"
+
+    /// The rule passed, but the campaign's frequency cap is reached.
+    case capped = "capped"
+
+    /// Eligible, but a campaign with a higher priority won the same signal.
+    /// The winner's key is in the `lost_to` extra.
+    case lowerPriority = "lower_priority"
+
+    /// A rule matched and its campaign now waits for its `delay`.
+    case waitStarted = "wait_started"
+
+    /// A wait already runs for this campaign. The first timer stays.
+    case waitInProgress = "wait_in_progress"
+
+    /// A pending wait ended without a show. The cause is in `extras`.
+    case waitCancelled = "wait_cancelled"
+
+    /// A wait ran its full time. The campaign is checked again, then routed.
+    case waitEnded = "wait_ended"
 
     // MARK: render
 

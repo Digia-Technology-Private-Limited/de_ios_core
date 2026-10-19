@@ -22,6 +22,15 @@ enum CampaignConfigModel: Equatable {
     /// The floater family's second member: a small floating **canvas** window that opens
     /// a full-screen story on tap. Shares the PiP's window vocabulary and none of its media.
     case floaterStory(FloaterStoryConfig)
+    /// A campaign whose type this SDK recognises but cannot render. Kept in
+    /// the store for diagnostics rather than dropped, so the store mirrors the
+    /// full set of campaigns the backend returned.
+    case unsupported(UnsupportedCampaignConfig)
+}
+
+/// Why a campaign type cannot be rendered here.
+struct UnsupportedCampaignConfig: Equatable {
+    let reason: String
 }
 
 struct CampaignModel: Equatable {
@@ -33,6 +42,18 @@ struct CampaignModel: Equatable {
     // Opaque capping policy from the dashboard; nil = "No cap" / inline.
     // Used natively for nudge + survey only (guides cap in JS on RN).
     var frequency: FrequencyPolicy? = nil
+    /// Whether this campaign may only be shown to certain people.
+    ///
+    /// The bundle says *that* a campaign is targeted, never at whom — audience
+    /// names never reach the device. Which of them apply to the current user
+    /// comes from ``UserContextManager``.
+    var audienceGated: Bool = false
+    /// The compiled DMC rule, when Digia owns the decision to show it.
+    ///
+    /// Nil means another engagement platform owns it: it fires only when that
+    /// platform calls in. Non-nil means the SDK evaluates the rule on each
+    /// signal and fires the campaign itself.
+    var rule: CampaignRule? = nil
     /// The campaign's authored guide JSON, verbatim, retained for guide campaigns only.
     ///
     /// The React Native renderer draws tooltips and spotlights in JS from this exact
@@ -75,6 +96,44 @@ struct CampaignModel: Equatable {
     var floaterConfig: FloaterConfig? {
         if case let .floater(value) = config { return value }
         return nil
+    }
+
+    /// The inline slot this campaign fills; nil for any other campaign.
+    var inlineSlotKey: String? {
+        switch config {
+        case .inline(let value): return value.slotKey
+        case .story(let value): return value.slotKey
+        case .banner(let value): return value.slotKey
+        case .inlineCanvas(let value): return value.slotKey
+        default: return nil
+        }
+    }
+
+    /// The rule priority when Digia decides this campaign; nil otherwise.
+    var rulePriority: Double? {
+        if case .valid(let rule) = rule { return rule.priority }
+        return nil
+    }
+
+    /// Whether this campaign may render while the host is on `currentScreen`.
+    ///
+    /// An untargeted campaign (empty ``targetScreenNames``) always passes. A
+    /// targeted one requires an exact match, so a nil current screen — the host
+    /// never called `setCurrentScreen`, or cleared it — drops it.
+    func allowsScreen(_ currentScreen: String?) -> Bool {
+        if targetScreenNames.isEmpty { return true }
+        guard let currentScreen else { return false }
+        return targetScreenNames.contains(currentScreen)
+    }
+
+    /// Whether this campaign may be shown to the current user.
+    ///
+    /// An untargeted campaign always passes. A targeted one must appear in
+    /// `eligibleCampaigns`, which the backend worked out for this user — so an
+    /// unidentified user, or one whose context never arrived, sees no targeted
+    /// campaign at all.
+    func allowsUser(_ eligibleCampaigns: [String]) -> Bool {
+        !audienceGated || eligibleCampaigns.contains(campaignKey)
     }
 
     static func fromJson(
@@ -179,11 +238,9 @@ struct CampaignModel: Equatable {
                 config = .floater(floaterConfig)
             }
         default:
-            throw CampaignParseScope.report(
-                "Campaign skipped — unknown campaign type (type=\(campaignType))",
-                reason: TimelineReason.campaignUnsupported,
-                extras: ["type": campaignType]
-            )
+            config = .unsupported(
+                UnsupportedCampaignConfig(
+                    reason: "\(campaignType) rendering is not supported in this SDK"))
         }
 
         return CampaignModel(
@@ -193,6 +250,8 @@ struct CampaignModel: Equatable {
             config: config,
             targetScreenNames: targetScreenNames,
             frequency: FrequencyPolicy.fromJson(selectedJson.object("frequency")),
+            audienceGated: selectedJson["audienceGated"] as? Bool == true,
+            rule: selectedJson["rule"].flatMap { $0 is NSNull ? nil : parseRule($0) },
             guideTemplateJson: campaignType == "guide"
                 // Authored under either key depending on the campaign's age; both carry
                 // the same `{ templateType, steps, variables }` shape the JS renderer reads.

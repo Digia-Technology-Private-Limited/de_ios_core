@@ -819,6 +819,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .floater, .floaterStory:
             return campaign.floaterStoryConfig != nil ? "story_floater" : "pip"
         case .inline, .banner, .inlineCanvas, .story: return nil
+        case .unsupported: return nil
         }
     }
 
@@ -1736,6 +1737,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     cause: "start_failed")
             }
             return .accepted(payload: payload, kind: .floating)
+        case .unsupported(let config):
+            log.e("Dropped — unsupported config (reason=\(config.reason))", campaign: key)
+            context.onDropped(DropReason.invalidConfig, message: config.reason)
+            return .dropped(reason: .invalidConfig, detail: config.reason)
         }
     }
 
@@ -1811,6 +1816,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .guide, .floater, .floaterStory: supportsLiveTest = true
         case .nudge, .survey, .inline, .inlineCanvas: supportsLiveTest = true
         case .banner, .story: supportsLiveTest = false
+        case .unsupported: supportsLiveTest = false
         }
         guard supportsLiveTest else {
             reporter.postFailed(

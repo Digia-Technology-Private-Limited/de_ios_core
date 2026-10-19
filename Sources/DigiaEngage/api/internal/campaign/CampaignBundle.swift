@@ -69,7 +69,18 @@ struct CampaignBundle {
             } catch {
                 parsed = nil
             }
-            if let parsed { return parsed }
+            if let parsed {
+                if case .unsupported = parsed.config {
+                    log.i(
+                        "Campaign type is not supported by this SDK (type=\(parsed.campaignType))",
+                        campaign: parsed.campaignKey,
+                        stage: .parse,
+                        reason: TimelineReason.campaignUnsupported,
+                        extras: ["type": parsed.campaignType]
+                    )
+                }
+                return parsed
+            }
             log.e(
                 "Campaign skipped — could not be read (index=\(index))",
                 campaign: scope.campaignKey,

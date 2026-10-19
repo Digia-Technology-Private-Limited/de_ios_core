@@ -103,7 +103,8 @@ func observeDelivery(_ controller: PresentationController) {
 /// rather than back at the trigger.
 func stageOf(_ reason: DropReason) -> TimelineStage {
     switch reason {
-    case .notInitialized, .notReady, .initializationFailed, .pendingExpired, .unknownCampaignKey:
+    case .notInitialized, .notReady, .initializationFailed, .pendingExpired, .unknownCampaignKey,
+        .digiaManaged:
         return .trigger
     case .frequencyCapped, .screenNotTargeted, .surfaceBusy, .superseded:
         return .gating

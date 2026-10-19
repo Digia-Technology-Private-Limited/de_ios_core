@@ -78,6 +78,9 @@ public enum DropReason: String, CaseIterable, Sendable {
     /// minutes.
     case pendingExpired = "pending_expired"
 
+    /// A CEP triggered a campaign that Digia decides. Only Digia shows it.
+    case digiaManaged = "digia_managed"
+
     /// An unexpected error — specifics in the dropped arm's `detail`.
     case error = "error"
 
