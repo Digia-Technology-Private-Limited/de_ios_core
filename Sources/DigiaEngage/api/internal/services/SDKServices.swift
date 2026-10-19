@@ -18,6 +18,8 @@ final class SDKServices {
     let analyticsService: AnalyticsService?
     /// Host-app events, on their own queue, cap and upload policy.
     let appEventsService: AppEventsService?
+    /// The current user's attributes and server-side context (audience, imports).
+    let userContextManager: UserContextManager
     let frequencyManager: FrequencyManager
     let submissionReporter: SubmissionReporter
     let requestHeaders: [String: String]
@@ -68,6 +70,7 @@ final class SDKServices {
             storage: storage.scoped("frequency"),
             sessionIdProvider: { [weak sessionManager] in sessionManager?.sessionId }
         )
+        self.userContextManager = UserContextManager(storage: storage.scoped("user"), networkClient: networkClient)
         let ac = config.analyticsConfig
         if ac.enabled {
             let analyticsConfig = DigiaEndpoints.isTestMode
