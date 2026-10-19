@@ -92,11 +92,10 @@ func pickCampaign(
         winnerRule: now.first?.1,
         heldBack: now.dropFirst().map { $0.0 },
         waiting: waiting,
-        inlineWinners: slotOrder.map { slot in
+        inlineWinners: slotOrder.compactMap { slot in
             let campaigns = bySlot[slot] ?? []
-            return SlotWinner(
-                slot: slot, campaign: campaigns[0],
-                heldBack: Array(campaigns.dropFirst()))
+            guard let winner = campaigns.first else { return nil }
+            return SlotWinner(slot: slot, campaign: winner, heldBack: Array(campaigns.dropFirst()))
         }
     )
 }
