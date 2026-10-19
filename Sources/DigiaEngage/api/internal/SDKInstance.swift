@@ -148,6 +148,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     var launchedInBackground: @MainActor () -> Bool = {
         UIApplication.shared.applicationState == .background
     }
+
+    /// The clock waits are stored on. A seam so a test can move time by hand.
+    var waitClock: () -> Int = MonotonicClock.nowMs
     /// The process started in the background, so `app_opened` waits for the
     /// first return to the foreground.
     var appOpenedDue = false

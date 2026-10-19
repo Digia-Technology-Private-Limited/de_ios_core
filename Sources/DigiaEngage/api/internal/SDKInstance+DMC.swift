@@ -67,7 +67,7 @@ extension SDKInstance {
             route: { [weak self] campaign, firedBy, signal in
                 self?.routeSelfTriggered(campaign, firedBy: firedBy, signal: signal)
             },
-            nowMs: MonotonicClock.nowMs
+            nowMs: { [weak self] in self?.waitClock() ?? MonotonicClock.nowMs() }
         )
     }
 
