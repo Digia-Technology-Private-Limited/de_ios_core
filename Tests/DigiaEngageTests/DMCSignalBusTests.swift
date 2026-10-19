@@ -8,7 +8,6 @@ import Testing
 struct DMCSignalBusTests {
     enum TestError: Error { case boom }
 
-
     @Test("a throwing handler neither escapes nor strands queued signals")
     func throwingHandler() {
         var handled: [String] = []

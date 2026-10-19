@@ -26,7 +26,6 @@ private final class RoutingPlugin: DigiaCEPPlugin {
 @Suite("DMC rule routing through SDKInstance", .serialized)
 struct DMCRuleRoutingTests {
 
-
     /// An SDK that has fetched the bundle below and is ready.
     private static func ready() async throws -> (SDKInstance, RoutingSink) {
         let network = HeldBundleNetworkClient()
