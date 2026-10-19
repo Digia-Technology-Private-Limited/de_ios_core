@@ -167,17 +167,24 @@ final class UserContextManager {
     ///
     /// Values are `String`, number, `Bool` or `[String]`. Others are dropped.
     func setUserAttributes(_ new: [String: Any]) async {
+        guard mergeAttributes(new) else { return }
+        await refresh()
+    }
+
+    /// The synchronous half of ``setUserAttributes(_:)``: rules read the merged
+    /// attributes as soon as this returns. False when nothing was storable.
+    func mergeAttributes(_ new: [String: Any]) -> Bool {
         let typed = typedAttributes(new)
         for key in new.keys.sorted() where typed[key] == nil {
             log.w("User attribute \"\(key)\" dropped — \(type(of: new[key] as Any)) is not String, number, Bool or [String]")
         }
-        guard !typed.isEmpty else { return }
+        guard !typed.isEmpty else { return false }
         log.i("User attributes set (\(typed.keys.sorted().joined(separator: ", ")))")
         attributes.merge(typed) { _, new in new }
         if let data = try? JSONSerialization.data(withJSONObject: attributes) {
             storage.set(data, forKey: attributesKey)
         }
-        await refresh()
+        return true
     }
 
     /// Drops the cached data of the previous user from memory at once. Call it

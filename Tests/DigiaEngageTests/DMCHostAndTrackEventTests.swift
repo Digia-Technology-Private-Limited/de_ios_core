@@ -182,4 +182,14 @@ struct DMCTrackEventTests {
         sdk.trackEvent("cart_landed")
         #expect(sdk.selfTriggerCount == 1)
     }
+
+    @Test("fire-and-forget attributes are merged before the call returns, so the next event sees them")
+    func attributesAreMergedAtOnce() async throws {
+        let sdk = try await readySDK(campaigns: [])
+
+        sdk.setUserAttributesNow(["plan": "pro", "bad": ["nested": 1]])
+
+        #expect(sdk.services?.userContextManager.attributes["plan"] as? String == "pro")
+        #expect(sdk.services?.userContextManager.attributes["bad"] == nil)
+    }
 }

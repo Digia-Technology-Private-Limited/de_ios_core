@@ -239,7 +239,7 @@ public enum Digia {
     /// actor itself. Ignored before `initialize`.
     nonisolated public static func setUserAttributes(_ attributes: [String: Any]) {
         let box = UncheckedSendable(attributes)
-        onMain { Task { await SDKInstance.shared.setUserAttributes(box.value) } }
+        onMain { SDKInstance.shared.setUserAttributesNow(box.value) }
     }
 
     /// The awaitable form of the fire-and-forget `setUserAttributes(_:)`: returns once the

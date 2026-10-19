@@ -259,6 +259,18 @@ extension SDKInstance {
         await services.userContextManager.setUserAttributes(attributes)
     }
 
+    /// ``setUserAttributes(_:)`` without waiting for the sync: the attributes
+    /// are merged before this returns, so an event sent right after sees them.
+    func setUserAttributesNow(_ attributes: [String: Any]) {
+        guard let manager = services?.userContextManager else {
+            log.e("setUserAttributes() ignored — called before initialize()")
+            return
+        }
+        if manager.mergeAttributes(attributes) {
+            Task { await manager.refresh() }
+        }
+    }
+
     /// Records an event the app performed, such as a purchase.
     ///
     /// Queued and sent in batches alongside campaign analytics; never blocks.
