@@ -33,7 +33,7 @@ final class DecisionEngine {
     private let facts: DecisionFacts
     private let route: RouteCampaign
     private let nowMs: () -> Int
-    private lazy var waits = Waits(
+    lazy var waits = Waits(
         onElapsed: { [weak self] due in self?.onWaitsElapsed(due) }, nowMs: nowMs)
     private lazy var gate: SignalGate = {
         let bus = SignalBus { [weak self] signal, ageMs in
