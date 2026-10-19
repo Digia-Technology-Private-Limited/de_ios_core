@@ -105,4 +105,33 @@ struct SurfaceRuleTests {
         let displayed = Self.occupant(.inline(slot: Self.slot), displayed: true)
         #expect(SurfaceRule.liveTestDisplaced(.inline(slot: Self.slot), occupants: [displayed]) == [displayed])
     }
+
+    // surface_rule_test.dart › by priority (D5)
+    private static func held(_ priority: Double?, displayed: Bool = false) -> SurfaceOccupant {
+        SurfaceOccupant(
+            kind: .inline(slot: slot), campaignKey: "held", cepCampaignId: "c-held",
+            isLiveTest: false, hasDisplayed: displayed, priority: priority)
+    }
+
+    @Test("by priority: a higher priority replaces a never-displayed occupant")
+    func higherPriorityReplaces() {
+        let occ = Self.held(600)
+        #expect(SurfaceRule.decide(.inline(slot: Self.slot), occupants: [occ], priority: 601) == .replace(occ))
+    }
+
+    @Test("by priority: an equal or lower priority is busy", arguments: [600.0, 599.0])
+    func equalOrLowerPriorityIsBusy(priority: Double) {
+        let occ = Self.held(600)
+        #expect(
+            SurfaceRule.decide(.inline(slot: Self.slot), occupants: [occ], priority: priority)
+                == .busy(blocker: occ))
+    }
+
+    @Test("by priority: a displayed occupant is kept whatever the priority")
+    func displayedKeptWhateverPriority() {
+        let shown = Self.held(100, displayed: true)
+        #expect(
+            SurfaceRule.decide(.inline(slot: Self.slot), occupants: [shown], priority: 1000)
+                == .busy(blocker: shown))
+    }
 }

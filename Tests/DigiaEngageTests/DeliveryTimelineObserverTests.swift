@@ -18,6 +18,7 @@ struct DeliveryTimelineObserverTests {
         #expect(stageOf(.initializationFailed) == .trigger)
         #expect(stageOf(.pendingExpired) == .trigger)
         #expect(stageOf(.unknownCampaignKey) == .trigger)
+        #expect(stageOf(.digiaManaged) == .trigger)
 
         #expect(stageOf(.frequencyCapped) == .gating)
         #expect(stageOf(.screenNotTargeted) == .gating)
@@ -36,6 +37,6 @@ struct DeliveryTimelineObserverTests {
 
         // Total by construction — if a reason is ever added, this count fails
         // before the mapping can silently acquire a default branch.
-        #expect(DropReason.allCases.count == 16)
+        #expect(DropReason.allCases.count == 17)
     }
 }
