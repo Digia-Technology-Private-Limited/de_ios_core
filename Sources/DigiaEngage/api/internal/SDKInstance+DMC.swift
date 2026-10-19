@@ -130,7 +130,7 @@ extension SDKInstance {
 
     /// Reads whether the process launched in the background, then notes the open.
     func beginAppOpen() {
-        if UIApplication.shared.applicationState == .background {
+        if launchedInBackground() {
             inBackground = true
             engine.pause()
             dwellTracker.pause()

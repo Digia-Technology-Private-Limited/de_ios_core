@@ -143,6 +143,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     lazy var engine = makeDecisionEngine()
     /// The app is not on screen.
     var inBackground = false
+    /// Whether the process started while the app was not on screen. A seam so
+    /// a test can launch in the background.
+    var launchedInBackground: @MainActor () -> Bool = {
+        UIApplication.shared.applicationState == .background
+    }
     /// The process started in the background, so `app_opened` waits for the
     /// first return to the foreground.
     var appOpenedDue = false
