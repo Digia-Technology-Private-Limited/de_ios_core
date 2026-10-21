@@ -176,6 +176,10 @@ final class PresentationCoordinator {
             if let surfaceKind, stayedForeground {
                 controller.dropExtras = ["surface_kind": surfaceKind]
             }
+            // Delivery detail names the surface even after a background stretch.
+            if let surfaceKind { controller.noteDropDetail("surface_kind", surfaceKind) }
+            controller.noteDropDetail("timeout_ms", Int(window * 1000))
+            controller.noteDropDetail("app_backgrounded", !stayedForeground)
             // Settle first, then take it off the surface (R3-D1), as the anchor
             // watchdog does: the settle is the decision and can't be undone by
             // whatever the teardown emits.
@@ -194,8 +198,9 @@ final class PresentationCoordinator {
     /// disarms it, and so does an impression.
     ///
     /// `dueDelay`: the first step's authored delay, added so the window counts
-    /// from when the step is due to appear (R3-D9).
-    func awaitAnchor(_ payload: CEPTriggerPayload, dueDelay: TimeInterval = 0) {
+    /// from when the step is due to appear (R3-D9). `anchorKey`: the awaited
+    /// anchor, for the drop's delivery detail.
+    func awaitAnchor(_ payload: CEPTriggerPayload, dueDelay: TimeInterval = 0, anchorKey: String? = nil) {
         guard let id = payload.presentationId, let entry = live[id] else { return }
         let controller = entry.controller
         guard !controller.isSettled else { return }
@@ -221,6 +226,10 @@ final class PresentationCoordinator {
             // platform note: the Kotlin twin runs these two in the opposite
             // order, and its settle is a backstop rather than the decision. The
             // Dart core has no anchor watchdog at all yet.
+            if !displaying {
+                if let anchorKey { controller.noteDropDetail("anchor_key", anchorKey) }
+                controller.noteDropDetail("step_index", 0)
+            }
             controller.settle(
                 displaying
                     ? .dismissed(reason: .autoTimeout, completed: false)
@@ -290,6 +299,9 @@ final class PresentationCoordinator {
             controller.markDisplaying()
             controller.emitClicked(elementId: elementID)
         case .dismissed(let reason, let completed):
+            if controller.state != .displaying, reason != .superseded {
+                controller.noteDropDetail("cancel_cause", reason.value)
+            }
             controller.settle(
                 controller.state == .displaying
                     ? .dismissed(reason: reason, completed: completed)
@@ -312,10 +324,12 @@ final class PresentationCoordinator {
     /// collapses to `cancelled`; the real reason is worth more to whoever reads
     /// the drop, and this is the one path that still has it in scope.
     func drop(
-        _ payload: CEPTriggerPayload, reason: DropReason, detail: String?, extras: [String: String]? = nil
+        _ payload: CEPTriggerPayload, reason: DropReason, detail: String?, extras: [String: String]? = nil,
+        deliveryDetail: [String: Any]? = nil
     ) {
         guard let id = payload.presentationId, let entry = live[id] else { return }
         if let extras { entry.controller.dropExtras = extras }
+        for (key, value) in deliveryDetail ?? [:] { entry.controller.noteDropDetail(key, value) }
         entry.controller.settle(.dropped(reason: reason, detail: detail))
     }
 

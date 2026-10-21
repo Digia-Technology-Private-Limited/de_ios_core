@@ -750,7 +750,11 @@ enum DeliveryEvent {
         /// The ``DropReason`` wire value.
         let dropReason: String
         let triggerSource: String
+        /// The screen at the drop, not at the trigger.
         var screenName: String?
+        /// The closed per-reason properties ("Drop detail" in the spec). Keys
+        /// never collide with the three above.
+        var detail: [String: Any] = [:]
 
         var eventName: String { "Digia Experience Dropped" }
         var properties: [String: Any] {
@@ -758,7 +762,7 @@ enum DeliveryEvent {
                 ("drop_reason", dropReason),
                 ("trigger_source", triggerSource),
                 ("screen_name", screenName),
-            ])
+            ]).merging(detail) { base, _ in base }
         }
     }
 }

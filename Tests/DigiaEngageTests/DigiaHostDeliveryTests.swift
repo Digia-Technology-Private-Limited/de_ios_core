@@ -145,6 +145,60 @@ extension DigiaEngageTests {
             #expect((triggered["properties"] as? [String: Any])?["screen_name"] as? String == "Home")
         }
 
+        // One instance for both reasons: every `initialize()` flips a process-wide
+        // endpoint flag another (parallel) suite resets, so these share one.
+        @Test("Dropped names the campaign that blocked it, and the frequency rule that capped it")
+        func droppedCarriesPerReasonDetail() async throws {
+            let sdk = try await initializedInstance()
+            var once = nudgeJson("once")
+            once["frequency"] = ["maxTotal": 1]
+            sdk.setCampaignsForTesting([
+                try #require(try CampaignModel.fromJson(once)),
+                try #require(hostSurveyCampaign(key: "survey-a")),
+                try #require(hostSurveyCampaign(key: "survey-b")),
+            ])
+            let deliver = { (key: String) in
+                _ = sdk.deliver(CEPTriggerPayload(cepCampaignId: "cep-\(key)", campaignKey: key, cepMetadata: [:]))
+            }
+            deliver("once")
+            sdk.reportNudgeImpression()
+            sdk.markNudgeDismissed()
+            deliver("once")
+            deliver("survey-a")
+            deliver("survey-b")
+            try? await Task.sleep(nanoseconds: 100_000_000)
+
+            let dropped = try droppedProperties(sdk)
+            #expect(dropped.count == 2)
+            let capped = try #require(dropped.first)
+            #expect(capped["drop_reason"] as? String == "frequency_capped")
+            #expect(capped["cap_rule"] as? String == "max_total")
+            #expect(capped["cap_limit"] as? Int == 1)
+            #expect(capped["cap_window"] == nil)
+            let busy = try #require(dropped.last)
+            #expect(busy["drop_reason"] as? String == "surface_busy")
+            #expect(busy["blocking_campaign_key"] as? String == "survey-a")
+            #expect(busy["blocking_campaign_id"] as? String == "survey-a-id")
+            #expect(busy["blocking_kind"] as? String == "survey")
+            #expect(busy["blocking_displayed"] as? Bool == false)
+        }
+
+        private func initializedInstance() async throws -> SDKInstance {
+            let suite = { UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")! }
+            let sdk = SDKInstance(
+                defaults: suite(), legacyDefaults: suite(), makeNetworkClient: { _ in MockNetworkClient() }
+            )
+            try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
+            return sdk
+        }
+
+        private func droppedProperties(_ sdk: SDKInstance) throws -> [[String: Any]] {
+            try #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
+                .map(\.payload)
+                .filter { $0["event_name"] as? String == "Digia Experience Dropped" }
+                .compactMap { $0["properties"] as? [String: Any] }
+        }
+
     }
 }
 
