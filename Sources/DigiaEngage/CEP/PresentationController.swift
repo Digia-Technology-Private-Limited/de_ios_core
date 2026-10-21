@@ -89,9 +89,11 @@ public final class PresentationController {
     var dropDeliveryDetail: [String: Any]?
 
     /// Adds `value` under `key` to ``dropDeliveryDetail`` unless the key is
-    /// already set — the first writer names the cause.
+    /// already set — the first writer names the cause. Ignored once settled:
+    /// a teardown that runs after the settle (a timed-out floater's own
+    /// dismissal) must not add keys from another reason.
     func noteDropDetail(_ key: String, _ value: Any) {
-        guard dropDeliveryDetail?[key] == nil else { return }
+        guard !isSettled, dropDeliveryDetail?[key] == nil else { return }
         dropDeliveryDetail = (dropDeliveryDetail ?? [:]).merging([key: value]) { old, _ in old }
     }
 
