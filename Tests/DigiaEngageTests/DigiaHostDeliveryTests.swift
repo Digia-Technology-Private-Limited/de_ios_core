@@ -104,6 +104,47 @@ extension DigiaEngageTests {
             #expect(recorder.payload.presentationId == "fixed-1")
         }
 
+        @Test("a resolved trigger sends Triggered, and Dropped with the same impression only if it drops")
+        func deliveryEventsPairByImpression() async throws {
+            let suite = { UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")! }
+            let sdk = SDKInstance(
+                defaults: suite(), legacyDefaults: suite(), makeNetworkClient: { _ in MockNetworkClient() }
+            )
+            try await sdk.initialize(DigiaConfig(apiKey: "test_key"))
+            sdk.setCampaignsForTesting([
+                try #require(try CampaignModel.fromJson(nudgeJson("help-only", targetScreenNames: ["Help"]))),
+                try #require(try CampaignModel.fromJson(nudgeJson("shown"))),
+            ])
+            sdk.setCurrentScreen("Home")
+            let deliver = { (key: String) in
+                PresentationRecorder(
+                    sdk.deliver(CEPTriggerPayload(cepCampaignId: "cep-\(key)", campaignKey: key, cepMetadata: [:])))
+            }
+
+            let dropped = deliver("help-only")
+            _ = deliver("not-in-bundle")
+            let shown = deliver("shown")
+            sdk.reportNudgeImpression()
+            sdk.markNudgeDismissed()
+            try? await Task.sleep(nanoseconds: 100_000_000)
+
+            let events = try #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
+                .map(\.payload)
+                .filter { ["Digia Experience Triggered", "Digia Experience Dropped"].contains($0["event_name"] as? String) }
+            let rows = events.map {
+                [$0["event_name"] as? String, $0["campaign_key"] as? String, $0["impression_id"] as? String,
+                 ($0["properties"] as? [String: Any])?["drop_reason"] as? String]
+            }
+            #expect(rows == [
+                ["Digia Experience Triggered", "help-only", dropped.presentation.id, nil],
+                ["Digia Experience Triggered", "shown", shown.presentation.id, nil],
+                ["Digia Experience Dropped", "help-only", dropped.presentation.id, "screen_not_targeted"],
+            ])
+            let triggered = try #require(events.first)
+            #expect(triggered["campaign_id"] as? String == "help-only-id")
+            #expect((triggered["properties"] as? [String: Any])?["screen_name"] as? String == "Home")
+        }
+
     }
 }
 

@@ -688,13 +688,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// ready is dropped at once, never held (`routeOrDrop`). Never make this
     /// `async` — spec §10.3.
     func deliver(_ trigger: CEPTriggerPayload) -> CampaignPresentation {
-        let controller = coordinator.open(trigger, owner: activePlugin?.id ?? "")
+        let owner = activePlugin?.id ?? ""
+        let controller = coordinator.open(trigger, owner: owner)
         // Before routing, so a trigger that is turned away still shows up on
         // the timeline as having arrived. "Nothing happened at all" and "it
         // arrived and we turned it away" are the two answers a campaign creator
         // most needs to tell apart.
         observeDelivery(controller)
-        routeOrDrop(controller)
+        routeOrDrop(controller, source: owner)
         return controller.presentation
     }
 
@@ -722,18 +723,18 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         hostTriggersCampaigns = true
         let controller = coordinator.open(trigger, owner: Self.hostOwner)
         observeDelivery(controller)
-        routeOrDrop(controller)
+        routeOrDrop(controller, source: Self.hostTriggerSource)
         return controller.presentation
     }
 
     /// The state gate `deliver` and `triggerCampaign` share, as Flutter and Android: route when
     /// ready, otherwise settle at once as dropped so the CEP gets its slot back. Core never
     /// holds a trigger (SP5); the reason says which of the not-ready states it met.
-    private func routeOrDrop(_ controller: PresentationController) {
+    private func routeOrDrop(_ controller: PresentationController, source: String) {
         let drop: (DropReason, String)
         switch sdkState {
         case .ready:
-            routeNow(controller)
+            routeNow(controller, source: source)
             return
         case .notInitialized:
             drop = (.notInitialized, "Digia.initialize() has not been called")
@@ -749,8 +750,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Owner recorded for a delivery the host app asked for itself, with no CEP involved.
     private static let hostOwner = "<host>"
 
+    /// The `trigger_source` of a delivery the host app asked for itself.
+    private static let hostTriggerSource = "host"
+
     /// Routes a delivery against the store as it stands right now.
-    private func routeNow(_ controller: PresentationController) {
+    private func routeNow(_ controller: PresentationController, source: String) {
+        recordDelivery(controller, source: source)
         // Routing must see the stamped payload: it is the instance every render
         // surface stores and hands back, and the only thing that leads an event
         // back to this presentation.
@@ -776,6 +781,35 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
             if let cause { controller.dropExtras = ["cause": cause] }
             controller.settle(.dropped(reason: reason, detail: detail))
+        }
+    }
+
+    /// Records `Digia Experience Triggered` for a trigger whose campaign is in
+    /// the bundle, and `Digia Experience Dropped` if it later settles dropped.
+    ///
+    /// Keyed on the settled outcome rather than on each drop site, so every
+    /// later drop is counted. A trigger whose campaign is unknown sends neither —
+    /// there is no campaign id to attribute it to
+    /// (ai_docs/campaign-delivery-events.md). The id is passed explicitly: the
+    /// coordinator forgets the presentation at settle.
+    private func recordDelivery(_ controller: PresentationController, source: String) {
+        guard let analytics = services?.analyticsService,
+            let campaign = campaignStore.find(Self.routingKey(controller.trigger))
+        else { return }
+        let trigger = controller.trigger
+        let screenName = _currentScreen
+        analytics.capture(
+            DeliveryEvent.Triggered(triggerSource: source, screenName: screenName),
+            payload: trigger, campaignId: campaign.id, campaignType: campaign.campaignType,
+            impressionId: controller.id)
+        Task { @MainActor in
+            guard case .dropped(let reason, _) = await controller.presentation.outcome.value
+            else { return }
+            analytics.capture(
+                DeliveryEvent.Dropped(
+                    dropReason: reason.value, triggerSource: source, screenName: screenName),
+                payload: trigger, campaignId: campaign.id, campaignType: campaign.campaignType,
+                impressionId: controller.id)
         }
     }
 
@@ -1224,13 +1258,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         logVerbose(
             "deliver cepCampaignId='\(payload.cepCampaignId)' "
                 + "campaignKey='\(payload.campaignKey)'")
-        // Route purely by the campaignKey resolved from the store (mirrors
-        // Android) — fall back to cepCampaignId when no campaignKey was supplied.
-        let key = payload.campaignKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedKey =
-            key.isEmpty
-            ? payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
-            : key
+        let resolvedKey = Self.routingKey(payload)
         guard !resolvedKey.isEmpty, let campaign = campaignStore.find(resolvedKey) else {
             lastCampaignDropReason = "no native campaign for key '\(resolvedKey)'"
             logError(
@@ -1245,6 +1273,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         return route(
             campaign, payload: payload,
             context: OrganicRoutingContext(frequencyManager: services?.frequencyManager))
+    }
+
+    /// The store key a trigger routes by. Route purely by the campaignKey
+    /// resolved from the store (mirrors Android) — fall back to cepCampaignId
+    /// when no campaignKey was supplied.
+    private static func routingKey(_ payload: CEPTriggerPayload) -> String {
+        let key = payload.campaignKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty
+            ? payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
+            : key
     }
 
     /// Abstracts the two points where `route` otherwise diverges between an

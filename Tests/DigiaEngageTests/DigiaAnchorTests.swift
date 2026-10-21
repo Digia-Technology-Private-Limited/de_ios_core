@@ -361,8 +361,11 @@ private func makeGuideInstance(
 @MainActor
 private func digiaEventNames(_ sdk: SDKInstance) throws -> [String] {
     let analytics = try #require(sdk.services?.analyticsService)
+    // The experience's own lifecycle; delivery accounting (Triggered/Dropped) is
+    // covered in DigiaHostDeliveryTests.
     return analytics.queue.peek(maxCount: 100).compactMap { $0.payload["event_name"] as? String }
         .filter { $0.hasPrefix("Digia ") }
+        .filter { $0 != "Digia Experience Triggered" && $0 != "Digia Experience Dropped" }
 }
 
 private struct AnchoredScrollContent: View {
