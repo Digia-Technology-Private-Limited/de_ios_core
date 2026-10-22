@@ -5,7 +5,8 @@ import SwiftUI
 struct DigiaEngageSampleApp: App {
     /// True when the app is launched as the host of `DigiaEngageSampleTests`. The tests drive the
     /// SDK themselves, so the app must not start it against live campaigns underneath them.
-    private let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+    private let isTestHost =
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     init() {
         guard !isTestHost else { return }

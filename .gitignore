@@ -42,3 +42,9 @@ coverage/
 # Allure raw results and generated HTML report (run-tests.sh)
 /allure-results/
 /reports/
+
+# xcode-build-server config for SourceKit-LSP (machine-specific paths)
+buildServer.json
+
+# Local xcodebuild output
+/build/
