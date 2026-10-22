@@ -1,0 +1,144 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html lang="en">
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <title>LCOV - lcov.info - api/internal/campaign/json_like_parse.swift</title>
+  <link rel="stylesheet" type="text/css" href="../../../gcov.css">
+</head>
+
+<body>
+
+          <table width="100%" border=0 cellspacing=0 cellpadding=0>
+            <tr><td class="title">LCOV - code coverage report</td></tr>
+            <tr><td class="ruler"><img src="../../../glass.png" width=3 height=3 alt=""></td></tr>
+
+            <tr>
+              <td width="100%">
+                <table cellpadding=1 border=0 width="100%">
+          <tr>
+            <td width="10%" class="headerItem">Current view:</td>
+            <td width="10%" class="headerValue"><a href="../../../index.html" title="Click to go to top-level">top level</a> - <a href="index.html" title="Click to go to directory api/internal/campaign">api/internal/campaign</a> - json_like_parse.swift<span style="font-size: 80%;"> (source / <a href="json_like_parse.swift.func-c.html" title="Click to go to function table">functions</a>)</span></td>
+            <td width="5%"></td>
+            <td width="5%"></td>
+            <td width="5%" class="headerCovTableHead">Coverage</td>
+            <td width="5%" class="headerCovTableHead" title="Covered + Uncovered code">Total</td>
+            <td width="5%" class="headerCovTableHead" title="Exercised code only">Hit</td>
+          </tr>
+          <tr>
+            <td class="headerItem">Test:</td>
+            <td class="headerValue">lcov.info</td>
+            <td></td>
+            <td class="headerItem">Lines:</td>
+            <td class="headerCovTableEntryLo">53.2&nbsp;%</td>
+            <td class="headerCovTableEntry">47</td>
+            <td class="headerCovTableEntry">25</td>
+          </tr>
+          <tr>
+            <td class="headerItem">Test Date:</td>
+            <td class="headerValue">2026-10-21 16:21:04</td>
+            <td></td>
+            <td class="headerItem">Functions:</td>
+            <td class="headerCovTableEntryLo">52.6&nbsp;%</td>
+            <td class="headerCovTableEntry">19</td>
+            <td class="headerCovTableEntry">10</td>
+          </tr>
+                  <tr><td><img src="../../../glass.png" width=3 height=3 alt=""></td></tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr><td class="ruler"><img src="../../../glass.png" width=3 height=3 alt=""></td></tr>
+          </table>
+
+          <table cellpadding=0 cellspacing=0 border=0>
+            <tr>
+              <td><br></td>
+            </tr>
+            <tr>
+              <td>
+<pre class="sourceHeading">            Line data    Source code</pre>
+<pre class="source">
+<span id="L1"><span class="lineNum">       1</span>              : import Foundation</span>
+<span id="L2"><span class="lineNum">       2</span>              : </span>
+<span id="L3"><span class="lineNum">       3</span>              : /// Lightweight `[String: Any]` readers mirroring Android `org.json` `opt*` semantics.</span>
+<span id="L4"><span class="lineNum">       4</span>              : /// Used by the campaign model parsers ported from the Android SDK.</span>
+<span id="L5"><span class="lineNum">       5</span>              : extension Dictionary where Key == String, Value == Any {</span>
+<span id="L6"><span class="lineNum">       6</span> <span class="tlaGNC">          51 :     func string(_ key: String, default fallback: String = &quot;&quot;) -&gt; String {</span></span>
+<span id="L7"><span class="lineNum">       7</span> <span class="tlaGNC">          51 :         self[key] as? String ?? fallback</span></span>
+<span id="L8"><span class="lineNum">       8</span> <span class="tlaGNC">          51 :     }</span></span>
+<span id="L9"><span class="lineNum">       9</span>              : </span>
+<span id="L10"><span class="lineNum">      10</span>              :     /// Non-blank string or `nil`.</span>
+<span id="L11"><span class="lineNum">      11</span> <span class="tlaGNC">         141 :     func nonBlankString(_ key: String) -&gt; String? {</span></span>
+<span id="L12"><span class="lineNum">      12</span> <span class="tlaGNC">         141 :         guard let value = self[key] as? String, !value.isEmpty else { return nil }</span></span>
+<span id="L13"><span class="lineNum">      13</span> <span class="tlaGNC">         141 :         return value</span></span>
+<span id="L14"><span class="lineNum">      14</span> <span class="tlaGNC">         141 :     }</span></span>
+<span id="L15"><span class="lineNum">      15</span>              : </span>
+<span id="L16"><span class="lineNum">      16</span> <span class="tlaGNC">          16 :     func bool(_ key: String, default fallback: Bool) -&gt; Bool {</span></span>
+<span id="L17"><span class="lineNum">      17</span> <span class="tlaGNC">          16 :         self[key] as? Bool ?? fallback</span></span>
+<span id="L18"><span class="lineNum">      18</span> <span class="tlaGNC">          16 :     }</span></span>
+<span id="L19"><span class="lineNum">      19</span>              : </span>
+<span id="L20"><span class="lineNum">      20</span>              :     /// Whether `key` is absent or JSON `null`.</span>
+<span id="L21"><span class="lineNum">      21</span> <span class="tlaGNC">         185 :     func isAbsent(_ key: String) -&gt; Bool {</span></span>
+<span id="L22"><span class="lineNum">      22</span> <span class="tlaGNC">         185 :         self[key] == nil || self[key] is NSNull</span></span>
+<span id="L23"><span class="lineNum">      23</span> <span class="tlaGNC">         185 :     }</span></span>
+<span id="L24"><span class="lineNum">      24</span>              : </span>
+<span id="L25"><span class="lineNum">      25</span> <span class="tlaUNC">           0 :     func int(_ key: String, default fallback: Int) -&gt; Int {</span></span>
+<span id="L26"><span class="lineNum">      26</span> <span class="tlaUNC">           0 :         if let value = self[key] as? Int { return value }</span></span>
+<span id="L27"><span class="lineNum">      27</span> <span class="tlaUNC">           0 :         if let value = self[key] as? NSNumber { return value.intValue }</span></span>
+<span id="L28"><span class="lineNum">      28</span> <span class="tlaUNC">           0 :         if let value = self[key] as? String, let parsed = Int(value) { return parsed }</span></span>
+<span id="L29"><span class="lineNum">      29</span> <span class="tlaUNC">           0 :         return fallback</span></span>
+<span id="L30"><span class="lineNum">      30</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L31"><span class="lineNum">      31</span>              : </span>
+<span id="L32"><span class="lineNum">      32</span> <span class="tlaGNC">         236 :     func double(_ key: String, default fallback: Double) -&gt; Double {</span></span>
+<span id="L33"><span class="lineNum">      33</span> <span class="tlaGNC">         236 :         if let value = self[key] as? Double { return value }</span></span>
+<span id="L34"><span class="lineNum">      34</span> <span class="tlaGNC">          44 :         if let value = self[key] as? NSNumber { return value.doubleValue }</span></span>
+<span id="L35"><span class="lineNum">      35</span> <span class="tlaGNC">          33 :         if let value = self[key] as? String, let parsed = Double(value) { return parsed }</span></span>
+<span id="L36"><span class="lineNum">      36</span> <span class="tlaGNC">          33 :         return fallback</span></span>
+<span id="L37"><span class="lineNum">      37</span> <span class="tlaGNC">         236 :     }</span></span>
+<span id="L38"><span class="lineNum">      38</span>              : </span>
+<span id="L39"><span class="lineNum">      39</span> <span class="tlaUNC">           0 :     func long(_ key: String, default fallback: Int64) -&gt; Int64 {</span></span>
+<span id="L40"><span class="lineNum">      40</span> <span class="tlaUNC">           0 :         if let value = self[key] as? NSNumber { return value.int64Value }</span></span>
+<span id="L41"><span class="lineNum">      41</span> <span class="tlaUNC">           0 :         if let value = self[key] as? String, let parsed = Int64(value) { return parsed }</span></span>
+<span id="L42"><span class="lineNum">      42</span> <span class="tlaUNC">           0 :         return fallback</span></span>
+<span id="L43"><span class="lineNum">      43</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L44"><span class="lineNum">      44</span>              : </span>
+<span id="L45"><span class="lineNum">      45</span>              :     /// Positive int (`&gt; 0`) or `nil`.</span>
+<span id="L46"><span class="lineNum">      46</span> <span class="tlaGNC">           4 :     func positiveInt(_ key: String) -&gt; Int? {</span></span>
+<span id="L47"><span class="lineNum">      47</span> <span class="tlaGNC">           4 :         guard let raw = self[key], !(raw is NSNull) else { return nil }</span></span>
+<span id="L48"><span class="lineNum">      48</span> <span class="tlaUNC">           0 :         let value = (raw as? NSNumber)?.intValue</span></span>
+<span id="L49"><span class="lineNum">      49</span> <span class="tlaUNC">           0 :         return value.flatMap { $0 &gt; 0 ? $0 : nil }</span></span>
+<span id="L50"><span class="lineNum">      50</span> <span class="tlaGNC">           4 :     }</span></span>
+<span id="L51"><span class="lineNum">      51</span>              : </span>
+<span id="L52"><span class="lineNum">      52</span> <span class="tlaGNC">         208 :     func object(_ key: String) -&gt; [String: Any]? {</span></span>
+<span id="L53"><span class="lineNum">      53</span> <span class="tlaGNC">         208 :         self[key] as? [String: Any]</span></span>
+<span id="L54"><span class="lineNum">      54</span> <span class="tlaGNC">         208 :     }</span></span>
+<span id="L55"><span class="lineNum">      55</span>              : </span>
+<span id="L56"><span class="lineNum">      56</span>              :     /// Array of objects, skipping any non-object elements.</span>
+<span id="L57"><span class="lineNum">      57</span> <span class="tlaUNC">           0 :     func objectArray(_ key: String) -&gt; [[String: Any]] {</span></span>
+<span id="L58"><span class="lineNum">      58</span> <span class="tlaUNC">           0 :         (self[key] as? [Any])?.compactMap { $0 as? [String: Any] } ?? []</span></span>
+<span id="L59"><span class="lineNum">      59</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L60"><span class="lineNum">      60</span>              : </span>
+<span id="L61"><span class="lineNum">      61</span>              :     /// Array of non-blank strings.</span>
+<span id="L62"><span class="lineNum">      62</span> <span class="tlaUNC">           0 :     func stringArray(_ key: String) -&gt; [String] {</span></span>
+<span id="L63"><span class="lineNum">      63</span> <span class="tlaUNC">           0 :         (self[key] as? [Any])?.compactMap { element -&gt; String? in</span></span>
+<span id="L64"><span class="lineNum">      64</span> <span class="tlaUNC">           0 :             guard let string = element as? String, !string.isEmpty else { return nil }</span></span>
+<span id="L65"><span class="lineNum">      65</span> <span class="tlaUNC">           0 :             return string</span></span>
+<span id="L66"><span class="lineNum">      66</span> <span class="tlaUNC">           0 :         } ?? []</span></span>
+<span id="L67"><span class="lineNum">      67</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L68"><span class="lineNum">      68</span>              : }</span>
+        </pre>
+              </td>
+            </tr>
+          </table>
+          <br>
+
+          <table width="100%" border=0 cellspacing=0 cellpadding=0>
+            <tr><td class="ruler"><img src="../../../glass.png" width=3 height=3 alt=""></td></tr>
+            <tr><td class="versionInfo">Generated by: <a href="https://github.com/linux-test-project/lcov" target="_parent">LCOV version 2.6-0</a></td></tr>
+          </table>
+          <br>
+
+</body>
+</html>

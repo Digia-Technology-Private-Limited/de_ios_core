@@ -1,0 +1,240 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html lang="en">
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <title>LCOV - lcov.info - api/internal/logging/HealthReasons.swift</title>
+  <link rel="stylesheet" type="text/css" href="../../../gcov.css">
+</head>
+
+<body>
+
+          <table width="100%" border=0 cellspacing=0 cellpadding=0>
+            <tr><td class="title">LCOV - code coverage report</td></tr>
+            <tr><td class="ruler"><img src="../../../glass.png" width=3 height=3 alt=""></td></tr>
+
+            <tr>
+              <td width="100%">
+                <table cellpadding=1 border=0 width="100%">
+          <tr>
+            <td width="10%" class="headerItem">Current view:</td>
+            <td width="10%" class="headerValue"><a href="../../../index.html" title="Click to go to top-level">top level</a> - <a href="index.html" title="Click to go to directory api/internal/logging">api/internal/logging</a> - HealthReasons.swift<span style="font-size: 80%;"> (source / <a href="HealthReasons.swift.func-c.html" title="Click to go to function table">functions</a>)</span></td>
+            <td width="5%"></td>
+            <td width="5%"></td>
+            <td width="5%" class="headerCovTableHead">Coverage</td>
+            <td width="5%" class="headerCovTableHead" title="Covered + Uncovered code">Total</td>
+            <td width="5%" class="headerCovTableHead" title="Exercised code only">Hit</td>
+          </tr>
+          <tr>
+            <td class="headerItem">Test:</td>
+            <td class="headerValue">lcov.info</td>
+            <td></td>
+            <td class="headerItem">Lines:</td>
+            <td class="headerCovTableEntryLo">0.0&nbsp;%</td>
+            <td class="headerCovTableEntry">8</td>
+            <td class="headerCovTableEntry">0</td>
+          </tr>
+          <tr>
+            <td class="headerItem">Test Date:</td>
+            <td class="headerValue">2026-10-21 16:21:04</td>
+            <td></td>
+            <td class="headerItem">Functions:</td>
+            <td class="headerCovTableEntryLo">0.0&nbsp;%</td>
+            <td class="headerCovTableEntry">1</td>
+            <td class="headerCovTableEntry">0</td>
+          </tr>
+                  <tr><td><img src="../../../glass.png" width=3 height=3 alt=""></td></tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr><td class="ruler"><img src="../../../glass.png" width=3 height=3 alt=""></td></tr>
+          </table>
+
+          <table cellpadding=0 cellspacing=0 border=0>
+            <tr>
+              <td><br></td>
+            </tr>
+            <tr>
+              <td>
+<pre class="sourceHeading">            Line data    Source code</pre>
+<pre class="source">
+<span id="L1"><span class="lineNum">       1</span>              : import Foundation</span>
+<span id="L2"><span class="lineNum">       2</span>              : </span>
+<span id="L3"><span class="lineNum">       3</span>              : /// The Digia-owned allowlist of reasons that may leave the device.</span>
+<span id="L4"><span class="lineNum">       4</span>              : ///</span>
+<span id="L5"><span class="lineNum">       5</span>              : /// Named `HEALTH_REASONS` in</span>
+<span id="L6"><span class="lineNum">       6</span>              : /// [the spec](../../../../../../ai_docs/sdk-health-telemetry.md) §2; this type is</span>
+<span id="L7"><span class="lineNum">       7</span>              : /// the Swift spelling. It is **part of the wire contract** — changes are</span>
+<span id="L8"><span class="lineNum">       8</span>              : /// reviewed like one, and the spec's table is the source of truth.</span>
+<span id="L9"><span class="lineNum">       9</span>              : ///</span>
+<span id="L10"><span class="lineNum">      10</span>              : /// Three rules this type exists to enforce, all of them structural rather than</span>
+<span id="L11"><span class="lineNum">      11</span>              : /// remembered:</span>
+<span id="L12"><span class="lineNum">      12</span>              : ///</span>
+<span id="L13"><span class="lineNum">      13</span>              : /// - **Routing is central, never per call site.** A call site fills in a</span>
+<span id="L14"><span class="lineNum">      14</span>              : ///   ``DiagnosticReason``; nothing it can write opts itself into the uplink.</span>
+<span id="L15"><span class="lineNum">      15</span>              : ///   Adding a symbol here is the only way in, which is why this list sits</span>
+<span id="L16"><span class="lineNum">      16</span>              : ///   apart from ``HealthSink`` rather than inside it.</span>
+<span id="L17"><span class="lineNum">      17</span>              : /// - **Only named keys reach the wire.** ``detailKeys`` is the whole of what a</span>
+<span id="L18"><span class="lineNum">      18</span>              : ///   reason may carry as `detail`; every other extra is dropped. A free-text</span>
+<span id="L19"><span class="lineNum">      19</span>              : ///   value therefore cannot reach the backend by any path, because no path</span>
+<span id="L20"><span class="lineNum">      20</span>              : ///   carries it.</span>
+<span id="L21"><span class="lineNum">      21</span>              : /// - **A symbol with no emit site is fine.** Several entries here are dormant:</span>
+<span id="L22"><span class="lineNum">      22</span>              : ///   this core never emits them yet. The list is additive and central, so</span>
+<span id="L23"><span class="lineNum">      23</span>              : ///   each goes live the day its emit site lands, with no change to this type.</span>
+<span id="L24"><span class="lineNum">      24</span>              : enum HealthReasons {</span>
+<span id="L25"><span class="lineNum">      25</span>              :     /// Reasons the backend may hear about, by wire symbol.</span>
+<span id="L26"><span class="lineNum">      26</span>              :     ///</span>
+<span id="L27"><span class="lineNum">      27</span>              :     /// Wire strings rather than a closed Swift enum on purpose: three of the</span>
+<span id="L28"><span class="lineNum">      28</span>              :     /// twelve have no emit site on this core yet, and the rest are spread across</span>
+<span id="L29"><span class="lineNum">      29</span>              :     /// ``DropReason`` and `TimelineReason` — two enums that deliberately do not</span>
+<span id="L30"><span class="lineNum">      30</span>              :     /// merge. Matching on ``DiagnosticReason/wire`` is the one thing all of</span>
+<span id="L31"><span class="lineNum">      31</span>              :     /// them share.</span>
+<span id="L32"><span class="lineNum">      32</span>              :     static let reasons: Set&lt;String&gt; = [</span>
+<span id="L33"><span class="lineNum">      33</span>              :         &quot;unknown_campaign_key&quot;,</span>
+<span id="L34"><span class="lineNum">      34</span>              :         &quot;malformed_campaign_skipped&quot;,</span>
+<span id="L35"><span class="lineNum">      35</span>              :         &quot;unknown_design_token&quot;,</span>
+<span id="L36"><span class="lineNum">      36</span>              :         &quot;design_tokens_unreadable&quot;,</span>
+<span id="L37"><span class="lineNum">      37</span>              :         &quot;schema_version_too_new&quot;,</span>
+<span id="L38"><span class="lineNum">      38</span>              :         &quot;unsupported_widget_type&quot;,</span>
+<span id="L39"><span class="lineNum">      39</span>              :         &quot;campaign_unsupported&quot;,</span>
+<span id="L40"><span class="lineNum">      40</span>              :         &quot;fetch_failed_auth&quot;,</span>
+<span id="L41"><span class="lineNum">      41</span>              :         &quot;invalid_config&quot;,</span>
+<span id="L42"><span class="lineNum">      42</span>              :         &quot;missing_variable&quot;,</span>
+<span id="L43"><span class="lineNum">      43</span>              :         // Startup drops (SP5/SP6): a trigger that reached core before the SDK</span>
+<span id="L44"><span class="lineNum">      44</span>              :         // was ready. `not_initialized` stays off the list — the sink does not</span>
+<span id="L45"><span class="lineNum">      45</span>              :         // exist before `initialize()`.</span>
+<span id="L46"><span class="lineNum">      46</span>              :         &quot;not_ready&quot;,</span>
+<span id="L47"><span class="lineNum">      47</span>              :         &quot;initialization_failed&quot;,</span>
+<span id="L48"><span class="lineNum">      48</span>              :         // A setup mistake the customer fixes, not breakage (surface rule §2.5):</span>
+<span id="L49"><span class="lineNum">      49</span>              :         // one campaign turned away by another that holds the surface.</span>
+<span id="L50"><span class="lineNum">      50</span>              :         &quot;surface_busy&quot;,</span>
+<span id="L51"><span class="lineNum">      51</span>              :         // Breakage (R3-D10): an accepted campaign nothing drew within the</span>
+<span id="L52"><span class="lineNum">      52</span>              :         // acceptance window. Only the organic acceptance watchdog emits it as a</span>
+<span id="L53"><span class="lineNum">      53</span>              :         // drop record; a live test's timeout is an ACK, never a record.</span>
+<span id="L54"><span class="lineNum">      54</span>              :         &quot;timeout&quot;,</span>
+<span id="L55"><span class="lineNum">      55</span>              :         // A CEP plugin's pending buffer (#71): held too long, or pushed out when full.</span>
+<span id="L56"><span class="lineNum">      56</span>              :         &quot;pending_expired&quot;,</span>
+<span id="L57"><span class="lineNum">      57</span>              :         &quot;superseded&quot;,</span>
+<span id="L58"><span class="lineNum">      58</span>              :         &quot;unsupported_action_type&quot;,</span>
+<span id="L59"><span class="lineNum">      59</span>              :         &quot;action_handler_missing&quot;,</span>
+<span id="L60"><span class="lineNum">      60</span>              :         &quot;fetch_failed_response&quot;,</span>
+<span id="L61"><span class="lineNum">      61</span>              :         &quot;plugin_not_registered&quot;,</span>
+<span id="L62"><span class="lineNum">      62</span>              :         &quot;survey_submission_failed&quot;,</span>
+<span id="L63"><span class="lineNum">      63</span>              :         &quot;media_load_failed&quot;,</span>
+<span id="L64"><span class="lineNum">      64</span>              :         &quot;cep_bridge_unavailable&quot;,</span>
+<span id="L65"><span class="lineNum">      65</span>              :     ]</span>
+<span id="L66"><span class="lineNum">      66</span>              : </span>
+<span id="L67"><span class="lineNum">      67</span>              :     /// Which `extras` keys each reason may send as `detail` — and nothing else.</span>
+<span id="L68"><span class="lineNum">      68</span>              :     ///</span>
+<span id="L69"><span class="lineNum">      69</span>              :     /// The spec's `detail` column, widened in two places where the live emit</span>
+<span id="L70"><span class="lineNum">      70</span>              :     /// site already carries something the spec's author had not seen (decided</span>
+<span id="L71"><span class="lineNum">      71</span>              :     /// 2026-09-19 during the Flutter build, recorded back into spec §2):</span>
+<span id="L72"><span class="lineNum">      72</span>              :     ///</span>
+<span id="L73"><span class="lineNum">      73</span>              :     /// - `unknown_design_token` also sends `kind` (`color` / `typography`),</span>
+<span id="L74"><span class="lineNum">      74</span>              :     ///   which separates a broken palette from a broken type scale without a</span>
+<span id="L75"><span class="lineNum">      75</span>              :     ///   second query.</span>
+<span id="L76"><span class="lineNum">      76</span>              :     /// - `campaign_unsupported` also sends `type`. The spec describes this</span>
+<span id="L77"><span class="lineNum">      77</span>              :     ///   symbol as an unhonourable *runtime precondition* and names</span>
+<span id="L78"><span class="lineNum">      78</span>              :     ///   `precondition`; this core's one live emit site</span>
+<span id="L79"><span class="lineNum">      79</span>              :     ///   (`CampaignModel.fromJson`, an unparseable stateful-timer config) sends</span>
+<span id="L80"><span class="lineNum">      80</span>              :     ///   `type`. Both keys are listed rather than one guessed at — see the</span>
+<span id="L81"><span class="lineNum">      81</span>              :     ///   note in spec §2 about the two readings.</span>
+<span id="L82"><span class="lineNum">      82</span>              :     ///</span>
+<span id="L83"><span class="lineNum">      83</span>              :     /// A reason absent from this map sends no `detail` at all. A reason</span>
+<span id="L84"><span class="lineNum">      84</span>              :     /// present with an empty list is the same thing said explicitly, so that</span>
+<span id="L85"><span class="lineNum">      85</span>              :     /// adding a key later is a visible edit here rather than a new entry</span>
+<span id="L86"><span class="lineNum">      86</span>              :     /// nobody reviews.</span>
+<span id="L87"><span class="lineNum">      87</span>              :     static let detailKeys: [String: [String]] = [</span>
+<span id="L88"><span class="lineNum">      88</span>              :         &quot;unknown_campaign_key&quot;: [],</span>
+<span id="L89"><span class="lineNum">      89</span>              :         &quot;malformed_campaign_skipped&quot;: [],</span>
+<span id="L90"><span class="lineNum">      90</span>              :         &quot;unknown_design_token&quot;: [&quot;token&quot;, &quot;kind&quot;],</span>
+<span id="L91"><span class="lineNum">      91</span>              :         &quot;design_tokens_unreadable&quot;: [&quot;theme&quot;],</span>
+<span id="L92"><span class="lineNum">      92</span>              :         &quot;schema_version_too_new&quot;: [&quot;required&quot;, &quot;supported&quot;],</span>
+<span id="L93"><span class="lineNum">      93</span>              :         &quot;unsupported_widget_type&quot;: [&quot;widget_type&quot;],</span>
+<span id="L94"><span class="lineNum">      94</span>              :         &quot;campaign_unsupported&quot;: [&quot;precondition&quot;, &quot;type&quot;],</span>
+<span id="L95"><span class="lineNum">      95</span>              :         &quot;fetch_failed_auth&quot;: [&quot;http_status&quot;],</span>
+<span id="L96"><span class="lineNum">      96</span>              :         &quot;invalid_config&quot;: [&quot;cause&quot;],</span>
+<span id="L97"><span class="lineNum">      97</span>              :         &quot;missing_variable&quot;: [&quot;variable&quot;],</span>
+<span id="L98"><span class="lineNum">      98</span>              :         &quot;not_ready&quot;: [],</span>
+<span id="L99"><span class="lineNum">      99</span>              :         &quot;initialization_failed&quot;: [],</span>
+<span id="L100"><span class="lineNum">     100</span>              :         &quot;surface_busy&quot;: [&quot;blocking_campaign_key&quot;, &quot;blocking_kind&quot;],</span>
+<span id="L101"><span class="lineNum">     101</span>              :         &quot;timeout&quot;: [&quot;surface_kind&quot;],</span>
+<span id="L102"><span class="lineNum">     102</span>              :         &quot;pending_expired&quot;: [&quot;cep&quot;],</span>
+<span id="L103"><span class="lineNum">     103</span>              :         &quot;superseded&quot;: [&quot;cep&quot;],</span>
+<span id="L104"><span class="lineNum">     104</span>              :         &quot;unsupported_action_type&quot;: [&quot;action_type&quot;],</span>
+<span id="L105"><span class="lineNum">     105</span>              :         &quot;action_handler_missing&quot;: [&quot;action_type&quot;],</span>
+<span id="L106"><span class="lineNum">     106</span>              :         &quot;fetch_failed_response&quot;: [&quot;http_status&quot;],</span>
+<span id="L107"><span class="lineNum">     107</span>              :         &quot;plugin_not_registered&quot;: [],</span>
+<span id="L108"><span class="lineNum">     108</span>              :         &quot;survey_submission_failed&quot;: [&quot;http_status&quot;],</span>
+<span id="L109"><span class="lineNum">     109</span>              :         &quot;media_load_failed&quot;: [&quot;media_kind&quot;, &quot;cause&quot;],</span>
+<span id="L110"><span class="lineNum">     110</span>              :         &quot;cep_bridge_unavailable&quot;: [&quot;selector&quot;],</span>
+<span id="L111"><span class="lineNum">     111</span>              :     ]</span>
+<span id="L112"><span class="lineNum">     112</span>              : </span>
+<span id="L113"><span class="lineNum">     113</span>              :     /// Reasons that identify *no* campaign, and so dedup on the symbol alone.</span>
+<span id="L114"><span class="lineNum">     114</span>              :     ///</span>
+<span id="L115"><span class="lineNum">     115</span>              :     /// Each is an app-wide fact: a failed fetch, an unreadable token catalog,</span>
+<span id="L116"><span class="lineNum">     116</span>              :     /// or a host setup gap. Keying them on a campaign would report one per</span>
+<span id="L117"><span class="lineNum">     117</span>              :     /// campaign for a failure that happened once.</span>
+<span id="L118"><span class="lineNum">     118</span>              :     static let campaignlessReasons: Set&lt;String&gt; = [</span>
+<span id="L119"><span class="lineNum">     119</span>              :         &quot;design_tokens_unreadable&quot;,</span>
+<span id="L120"><span class="lineNum">     120</span>              :         &quot;fetch_failed_auth&quot;,</span>
+<span id="L121"><span class="lineNum">     121</span>              :         &quot;fetch_failed_response&quot;,</span>
+<span id="L122"><span class="lineNum">     122</span>              :         &quot;plugin_not_registered&quot;,</span>
+<span id="L123"><span class="lineNum">     123</span>              :     ]</span>
+<span id="L124"><span class="lineNum">     124</span>              : </span>
+<span id="L125"><span class="lineNum">     125</span>              :     /// The extra that makes one campaign's several instances of a reason</span>
+<span id="L126"><span class="lineNum">     126</span>              :     /// distinct.</span>
+<span id="L127"><span class="lineNum">     127</span>              :     ///</span>
+<span id="L128"><span class="lineNum">     128</span>              :     /// Spec §2's dedup key is `(reason, campaign)` for ten of the twelve. The</span>
+<span id="L129"><span class="lineNum">     129</span>              :     /// two here can happen repeatedly within one campaign for genuinely</span>
+<span id="L130"><span class="lineNum">     130</span>              :     /// different causes — two broken tokens, two unsupplied variables — and</span>
+<span id="L131"><span class="lineNum">     131</span>              :     /// collapsing them would report the first and hide the rest, which is the</span>
+<span id="L132"><span class="lineNum">     132</span>              :     /// opposite of what the backend is being asked.</span>
+<span id="L133"><span class="lineNum">     133</span>              :     static let dedupExtraKeys: [String: [String]] = [</span>
+<span id="L134"><span class="lineNum">     134</span>              :         &quot;unknown_design_token&quot;: [&quot;token&quot;],</span>
+<span id="L135"><span class="lineNum">     135</span>              :         &quot;missing_variable&quot;: [&quot;variable&quot;],</span>
+<span id="L136"><span class="lineNum">     136</span>              :         &quot;unsupported_widget_type&quot;: [&quot;widget_type&quot;],</span>
+<span id="L137"><span class="lineNum">     137</span>              :         // A fixed token per failed precondition, so two causes stay two reports.</span>
+<span id="L138"><span class="lineNum">     138</span>              :         &quot;invalid_config&quot;: [&quot;cause&quot;],</span>
+<span id="L139"><span class="lineNum">     139</span>              :         // One report per (dropped campaign, blocker) per launch — &quot;blocked by X</span>
+<span id="L140"><span class="lineNum">     140</span>              :         // on N% of app opens&quot;.</span>
+<span id="L141"><span class="lineNum">     141</span>              :         &quot;surface_busy&quot;: [&quot;blocking_campaign_key&quot;],</span>
+<span id="L142"><span class="lineNum">     142</span>              :         &quot;unsupported_action_type&quot;: [&quot;action_type&quot;],</span>
+<span id="L143"><span class="lineNum">     143</span>              :         &quot;action_handler_missing&quot;: [&quot;action_type&quot;],</span>
+<span id="L144"><span class="lineNum">     144</span>              :         &quot;cep_bridge_unavailable&quot;: [&quot;selector&quot;],</span>
+<span id="L145"><span class="lineNum">     145</span>              :         &quot;media_load_failed&quot;: [&quot;media_kind&quot;, &quot;cause&quot;],</span>
+<span id="L146"><span class="lineNum">     146</span>              :     ]</span>
+<span id="L147"><span class="lineNum">     147</span>              : </span>
+<span id="L148"><span class="lineNum">     148</span>              :     /// Extra marking a record whose blocker is a live test. Such a record stays</span>
+<span id="L149"><span class="lineNum">     149</span>              :     /// on the console and timeline but never reaches HealthSink: a PM's testing</span>
+<span id="L150"><span class="lineNum">     150</span>              :     /// must not show up in the customer's report (§2.5, LT-Q2).</span>
+<span id="L151"><span class="lineNum">     151</span>              :     static let liveTestBlockerKey = &quot;blocking_live_test&quot;</span>
+<span id="L152"><span class="lineNum">     152</span>              : </span>
+<span id="L153"><span class="lineNum">     153</span>              :     /// The timeline extras for a `surface_busy` drop.</span>
+<span id="L154"><span class="lineNum">     154</span>              :     static func surfaceBusyExtras(</span>
+<span id="L155"><span class="lineNum">     155</span>              :         blockingCampaignKey: String, blockingKind: String, blockerIsLiveTest: Bool</span>
+<span id="L156"><span class="lineNum">     156</span> <span class="tlaUNC">           0 :     ) -&gt; [String: String] {</span></span>
+<span id="L157"><span class="lineNum">     157</span> <span class="tlaUNC">           0 :         var extras = [</span></span>
+<span id="L158"><span class="lineNum">     158</span> <span class="tlaUNC">           0 :             &quot;blocking_campaign_key&quot;: blockingCampaignKey,</span></span>
+<span id="L159"><span class="lineNum">     159</span> <span class="tlaUNC">           0 :             &quot;blocking_kind&quot;: blockingKind,</span></span>
+<span id="L160"><span class="lineNum">     160</span> <span class="tlaUNC">           0 :         ]</span></span>
+<span id="L161"><span class="lineNum">     161</span> <span class="tlaUNC">           0 :         if blockerIsLiveTest { extras[liveTestBlockerKey] = &quot;true&quot; }</span></span>
+<span id="L162"><span class="lineNum">     162</span> <span class="tlaUNC">           0 :         return extras</span></span>
+<span id="L163"><span class="lineNum">     163</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L164"><span class="lineNum">     164</span>              : }</span>
+        </pre>
+              </td>
+            </tr>
+          </table>
+          <br>
+
+          <table width="100%" border=0 cellspacing=0 cellpadding=0>
+            <tr><td class="ruler"><img src="../../../glass.png" width=3 height=3 alt=""></td></tr>
+            <tr><td class="versionInfo">Generated by: <a href="https://github.com/linux-test-project/lcov" target="_parent">LCOV version 2.6-0</a></td></tr>
+          </table>
+          <br>
+
+</body>
+</html>

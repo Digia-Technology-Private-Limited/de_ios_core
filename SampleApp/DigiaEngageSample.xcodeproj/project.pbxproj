@@ -7,14 +7,35 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		C10100000000000000000001 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = C10200000000000000000001 /* SnapshotTesting */; };
 		B10100000000000000000001 /* DigiaEngage in Frameworks */ = {isa = PBXBuildFile; productRef = B10200000000000000000001 /* DigiaEngage */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		C10000000000000000000003 /* DigiaEngageSampleTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DigiaEngageSampleTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A10000000000000000000003 /* DigiaEngageSample.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = DigiaEngageSample.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		C10000000000000000000020 /* Exceptions for "DigiaEngageSampleTests" folder in "DigiaEngageSampleTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				VisualRegression/__Snapshots__,
+			);
+			target = C10000000000000000000008 /* DigiaEngageSampleTests */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		C10000000000000000000004 /* DigiaEngageSampleTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C10000000000000000000020 /* Exceptions for "DigiaEngageSampleTests" folder in "DigiaEngageSampleTests" target */,
+			);
+			path = DigiaEngageSampleTests;
+			sourceTree = "<group>";
+		};
 		A10000000000000000000004 /* DigiaEngageSample */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = DigiaEngageSample;
@@ -23,6 +44,14 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		C10000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C10100000000000000000001 /* SnapshotTesting in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A10000000000000000000005 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -38,6 +67,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000004 /* DigiaEngageSample */,
+				C10000000000000000000004 /* DigiaEngageSampleTests */,
 				A10000000000000000000007 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -46,6 +76,7 @@
 			isa = PBXGroup;
 			children = (
 				A10000000000000000000003 /* DigiaEngageSample.app */,
+				C10000000000000000000003 /* DigiaEngageSampleTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -53,6 +84,30 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		C10000000000000000000008 /* DigiaEngageSampleTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C10000000000000000000009 /* Build configuration list for PBXNativeTarget "DigiaEngageSampleTests" */;
+			buildPhases = (
+				C10000000000000000000010 /* Sources */,
+				C10000000000000000000005 /* Frameworks */,
+				C10000000000000000000011 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				C10000000000000000000014 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C10000000000000000000004 /* DigiaEngageSampleTests */,
+			);
+			name = DigiaEngageSampleTests;
+			packageProductDependencies = (
+				C10200000000000000000001 /* SnapshotTesting */,
+			);
+			productName = DigiaEngageSampleTests;
+			productReference = C10000000000000000000003 /* DigiaEngageSampleTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		A10000000000000000000008 /* DigiaEngageSample */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A10000000000000000000009 /* Build configuration list for PBXNativeTarget "DigiaEngageSample" */;
@@ -89,6 +144,10 @@
 					A10000000000000000000008 = {
 						CreatedOnToolsVersion = 26.2;
 					};
+					C10000000000000000000008 = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = A10000000000000000000008;
+					};
 				};
 			};
 			buildConfigurationList = A10000000000000000000013 /* Build configuration list for PBXProject "DigiaEngageSample" */;
@@ -102,6 +161,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				B10300000000000000000001 /* XCLocalSwiftPackageReference ".." */,
+				C10300000000000000000001 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A10000000000000000000007 /* Products */;
@@ -109,11 +169,19 @@
 			projectRoot = "";
 			targets = (
 				A10000000000000000000008 /* DigiaEngageSample */,
+				C10000000000000000000008 /* DigiaEngageSampleTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		C10000000000000000000011 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A10000000000000000000011 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -123,7 +191,33 @@
 		};
 /* End PBXResourcesBuildPhase section */
 
+
+/* Begin PBXContainerItemProxy section */
+		C10000000000000000000013 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000012 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000008;
+			remoteInfo = DigiaEngageSample;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		C10000000000000000000014 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000008 /* DigiaEngageSample */;
+			targetProxy = C10000000000000000000013 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin PBXSourcesBuildPhase section */
+		C10000000000000000000010 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		A10000000000000000000010 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -134,6 +228,50 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
+		C10000000000000000000017 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.digia.engage.sample.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DigiaEngageSample.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/DigiaEngageSample";
+			};
+			name = Debug;
+		};
+		C10000000000000000000018 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.digia.engage.sample.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/DigiaEngageSample.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/DigiaEngageSample";
+			};
+			name = Release;
+		};
 		A10000000000000000000015 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -322,6 +460,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		C10000000000000000000009 /* Build configuration list for PBXNativeTarget "DigiaEngageSampleTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C10000000000000000000017 /* Debug */,
+				C10000000000000000000018 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		A10000000000000000000009 /* Build configuration list for PBXNativeTarget "DigiaEngageSample" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -342,6 +489,18 @@
 		};
 /* End XCConfigurationList section */
 
+
+/* Begin XCRemoteSwiftPackageReference section */
+		C10300000000000000000001 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/pointfreeco/swift-snapshot-testing";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.18.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCLocalSwiftPackageReference section */
 		B10300000000000000000001 /* XCLocalSwiftPackageReference ".." */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -350,6 +509,11 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		C10200000000000000000001 /* SnapshotTesting */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = C10300000000000000000001 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */;
+			productName = SnapshotTesting;
+		};
 		B10200000000000000000001 /* DigiaEngage */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = B10300000000000000000001 /* XCLocalSwiftPackageReference ".." */;

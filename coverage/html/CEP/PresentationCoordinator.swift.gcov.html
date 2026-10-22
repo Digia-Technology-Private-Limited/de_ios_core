@@ -1,0 +1,464 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
+
+<html lang="en">
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+  <title>LCOV - lcov.info - CEP/PresentationCoordinator.swift</title>
+  <link rel="stylesheet" type="text/css" href="../gcov.css">
+</head>
+
+<body>
+
+          <table width="100%" border=0 cellspacing=0 cellpadding=0>
+            <tr><td class="title">LCOV - code coverage report</td></tr>
+            <tr><td class="ruler"><img src="../glass.png" width=3 height=3 alt=""></td></tr>
+
+            <tr>
+              <td width="100%">
+                <table cellpadding=1 border=0 width="100%">
+          <tr>
+            <td width="10%" class="headerItem">Current view:</td>
+            <td width="10%" class="headerValue"><a href="../index.html" title="Click to go to top-level">top level</a> - <a href="index.html" title="Click to go to directory CEP">CEP</a> - PresentationCoordinator.swift<span style="font-size: 80%;"> (source / <a href="PresentationCoordinator.swift.func-c.html" title="Click to go to function table">functions</a>)</span></td>
+            <td width="5%"></td>
+            <td width="5%"></td>
+            <td width="5%" class="headerCovTableHead">Coverage</td>
+            <td width="5%" class="headerCovTableHead" title="Covered + Uncovered code">Total</td>
+            <td width="5%" class="headerCovTableHead" title="Exercised code only">Hit</td>
+          </tr>
+          <tr>
+            <td class="headerItem">Test:</td>
+            <td class="headerValue">lcov.info</td>
+            <td></td>
+            <td class="headerItem">Lines:</td>
+            <td class="headerCovTableEntryLo">8.3&nbsp;%</td>
+            <td class="headerCovTableEntry">204</td>
+            <td class="headerCovTableEntry">17</td>
+          </tr>
+          <tr>
+            <td class="headerItem">Test Date:</td>
+            <td class="headerValue">2026-10-21 16:21:04</td>
+            <td></td>
+            <td class="headerItem">Functions:</td>
+            <td class="headerCovTableEntryLo">18.8&nbsp;%</td>
+            <td class="headerCovTableEntry">32</td>
+            <td class="headerCovTableEntry">6</td>
+          </tr>
+                  <tr><td><img src="../glass.png" width=3 height=3 alt=""></td></tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr><td class="ruler"><img src="../glass.png" width=3 height=3 alt=""></td></tr>
+          </table>
+
+          <table cellpadding=0 cellspacing=0 border=0>
+            <tr>
+              <td><br></td>
+            </tr>
+            <tr>
+              <td>
+<pre class="sourceHeading">            Line data    Source code</pre>
+<pre class="source">
+<span id="L1"><span class="lineNum">       1</span>              : import Foundation</span>
+<span id="L2"><span class="lineNum">       2</span>              : </span>
+<span id="L3"><span class="lineNum">       3</span>              : /// The SDK's one logging style — see ``DigiaLogger``.</span>
+<span id="L4"><span class="lineNum">       4</span>              : private let log = DigiaLogger()</span>
+<span id="L5"><span class="lineNum">       5</span>              : </span>
+<span id="L6"><span class="lineNum">       6</span>              : /// The single writer of presentation state.</span>
+<span id="L7"><span class="lineNum">       7</span>              : ///</span>
+<span id="L8"><span class="lineNum">       8</span>              : /// Every live ``PresentationController`` in the SDK is opened here, indexed</span>
+<span id="L9"><span class="lineNum">       9</span>              : /// here, and forgotten here when it settles. Nothing else keeps a map of them,</span>
+<span id="L10"><span class="lineNum">      10</span>              : /// so &quot;did this presentation settle?&quot; has exactly one answer and exactly one</span>
+<span id="L11"><span class="lineNum">      11</span>              : /// place that can change it — which is what makes G1 a fact rather than a habit.</span>
+<span id="L12"><span class="lineNum">      12</span>              : ///</span>
+<span id="L13"><span class="lineNum">      13</span>              : /// It is deliberately ignorant of campaigns. It never looks in the store, never</span>
+<span id="L14"><span class="lineNum">      14</span>              : /// decides what renders, and never touches a surface: routing hands it a</span>
+<span id="L15"><span class="lineNum">      15</span>              : /// verdict and the render surfaces hand it lifecycle events, and it turns those</span>
+<span id="L16"><span class="lineNum">      16</span>              : /// into state transitions. Anything it needed to *know* about a campaign would</span>
+<span id="L17"><span class="lineNum">      17</span>              : /// be a second place the routing rules live.</span>
+<span id="L18"><span class="lineNum">      18</span>              : ///</span>
+<span id="L19"><span class="lineNum">      19</span>              : /// ```</span>
+<span id="L20"><span class="lineNum">      20</span>              : ///   plugin ── host.deliver ──►  open()  ──► PresentationController (pending)</span>
+<span id="L21"><span class="lineNum">      21</span>              : ///                                  │</span>
+<span id="L22"><span class="lineNum">      22</span>              : ///        routing verdict ──────────┤</span>
+<span id="L23"><span class="lineNum">      23</span>              : ///          dropped ────────────────┼──► settle(dropped) ── hold released</span>
+<span id="L24"><span class="lineNum">      24</span>              : ///          accepted ───────────────┴──► accept() ── (+ acceptance watchdog</span>
+<span id="L25"><span class="lineNum">      25</span>              : ///                                                    unless inline, + hold</span>
+<span id="L26"><span class="lineNum">      26</span>              : ///                                                    released at once when</span>
+<span id="L27"><span class="lineNum">      27</span>              : ///                                                    inline, + anchor</span>
+<span id="L28"><span class="lineNum">      28</span>              : ///                                                    watchdog when one is owed)</span>
+<span id="L29"><span class="lineNum">      29</span>              : ///   render surface ── toCep(event) ──► handle() ─────┘</span>
+<span id="L30"><span class="lineNum">      30</span>              : ///          impressed ─► markDisplaying    clicked ─► emitClicked</span>
+<span id="L31"><span class="lineNum">      31</span>              : ///          dismissed ─► settle(dismissed) ── hold released</span>
+<span id="L32"><span class="lineNum">      32</span>              : /// ```</span>
+<span id="L33"><span class="lineNum">      33</span>              : ///</span>
+<span id="L34"><span class="lineNum">      34</span>              : /// platform note: the Dart twin keys its registry by payload *identity*, which</span>
+<span id="L35"><span class="lineNum">      35</span>              : /// Swift cannot do — `CEPTriggerPayload` is a struct. ``open(_:owner:)`` stamps</span>
+<span id="L36"><span class="lineNum">      36</span>              : /// the minted id onto the payload instead and hands that stamped instance to</span>
+<span id="L37"><span class="lineNum">      37</span>              : /// routing, so every surface stores it and hands it back on every event. Same</span>
+<span id="L38"><span class="lineNum">      38</span>              : /// property (two deliveries of one campaign never share a handle), spelled</span>
+<span id="L39"><span class="lineNum">      39</span>              : /// explicitly rather than through object identity.</span>
+<span id="L40"><span class="lineNum">      40</span>              : @MainActor</span>
+<span id="L41"><span class="lineNum">      41</span>              : final class PresentationCoordinator {</span>
+<span id="L42"><span class="lineNum">      42</span>              :     /// Creates the coordinator.</span>
+<span id="L43"><span class="lineNum">      43</span>              :     ///</span>
+<span id="L44"><span class="lineNum">      44</span>              :     /// `idGenerator` mints presentation ids; it is injected because the id is</span>
+<span id="L45"><span class="lineNum">      45</span>              :     /// also the analytics dedup key, so a test needs it deterministic and</span>
+<span id="L46"><span class="lineNum">      46</span>              :     /// production needs it UUID-grade.</span>
+<span id="L47"><span class="lineNum">      47</span>              :     ///</span>
+<span id="L48"><span class="lineNum">      48</span>              :     /// `onCancelSurface` runs the SDK's ordered teardown for a campaign the</span>
+<span id="L49"><span class="lineNum">      49</span>              :     /// plugin cancelled or a watchdog gave up on — it must take that delivery</span>
+<span id="L50"><span class="lineNum">      50</span>              :     /// (the stamped payload) off the screen. The controller settles first</span>
+<span id="L51"><span class="lineNum">      51</span>              :     /// whatever it does, so a teardown can never be the thing that wedges a CEP</span>
+<span id="L52"><span class="lineNum">      52</span>              :     /// slot.</span>
+<span id="L53"><span class="lineNum">      53</span>              :     init(</span>
+<span id="L54"><span class="lineNum">      54</span>              :         idGenerator: @escaping () -&gt; String,</span>
+<span id="L55"><span class="lineNum">      55</span>              :         onCancelSurface: @escaping (CEPTriggerPayload) -&gt; Void,</span>
+<span id="L56"><span class="lineNum">      56</span>              :         acceptanceTimeout: TimeInterval = PresentationCoordinator.defaultAcceptanceTimeout,</span>
+<span id="L57"><span class="lineNum">      57</span>              :         anchorLayoutTimeout: TimeInterval = PresentationCoordinator.defaultAnchorLayoutTimeout</span>
+<span id="L58"><span class="lineNum">      58</span> <span class="tlaGNC">           1 :     ) {</span></span>
+<span id="L59"><span class="lineNum">      59</span> <span class="tlaGNC">           1 :         newId = idGenerator</span></span>
+<span id="L60"><span class="lineNum">      60</span> <span class="tlaGNC">           1 :         self.onCancelSurface = onCancelSurface</span></span>
+<span id="L61"><span class="lineNum">      61</span> <span class="tlaGNC">           1 :         self.acceptanceTimeout = acceptanceTimeout</span></span>
+<span id="L62"><span class="lineNum">      62</span> <span class="tlaGNC">           1 :         self.anchorLayoutTimeout = anchorLayoutTimeout</span></span>
+<span id="L63"><span class="lineNum">      63</span> <span class="tlaGNC">           1 :     }</span></span>
+<span id="L64"><span class="lineNum">      64</span>              : </span>
+<span id="L65"><span class="lineNum">      65</span>              :     /// Spec §3.5 `acceptanceMs`.</span>
+<span id="L66"><span class="lineNum">      66</span>              :     static let defaultAcceptanceTimeout: TimeInterval = 15</span>
+<span id="L67"><span class="lineNum">      67</span>              : </span>
+<span id="L68"><span class="lineNum">      68</span>              :     /// Spec §3.5 `anchorLayoutMs`.</span>
+<span id="L69"><span class="lineNum">      69</span>              :     static let defaultAnchorLayoutTimeout: TimeInterval = 5</span>
+<span id="L70"><span class="lineNum">      70</span>              : </span>
+<span id="L71"><span class="lineNum">      71</span>              :     /// How long a non-inline presentation may sit `pending` before the watchdog</span>
+<span id="L72"><span class="lineNum">      72</span>              :     /// settles it `dropped('timeout')`.</span>
+<span id="L73"><span class="lineNum">      73</span>              :     ///</span>
+<span id="L74"><span class="lineNum">      74</span>              :     /// The airbag, not the brakes: the explicit terminal transitions are the</span>
+<span id="L75"><span class="lineNum">      75</span>              :     /// fix. This exists so the next missed one degrades a single campaign for a</span>
+<span id="L76"><span class="lineNum">      76</span>              :     /// few seconds instead of killing in-apps for the rest of the session.</span>
+<span id="L77"><span class="lineNum">      77</span>              :     let acceptanceTimeout: TimeInterval</span>
+<span id="L78"><span class="lineNum">      78</span>              : </span>
+<span id="L79"><span class="lineNum">      79</span>              :     /// How long an anchored experience may go without its anchor yielding a</span>
+<span id="L80"><span class="lineNum">      80</span>              :     /// layout. Tighter than ``acceptanceTimeout`` because the failure is</span>
+<span id="L81"><span class="lineNum">      81</span>              :     /// specific: the screen is up, the campaign is routed, and the one thing it</span>
+<span id="L82"><span class="lineNum">      82</span>              :     /// is waiting for is an anchor that is not coming.</span>
+<span id="L83"><span class="lineNum">      83</span>              :     let anchorLayoutTimeout: TimeInterval</span>
+<span id="L84"><span class="lineNum">      84</span>              : </span>
+<span id="L85"><span class="lineNum">      85</span>              :     private let newId: () -&gt; String</span>
+<span id="L86"><span class="lineNum">      86</span>              :     private let onCancelSurface: (CEPTriggerPayload) -&gt; Void</span>
+<span id="L87"><span class="lineNum">      87</span>              : </span>
+<span id="L88"><span class="lineNum">      88</span> <span class="tlaGNC">           1 :     private var live: [String: LiveEntry] = [:]</span></span>
+<span id="L89"><span class="lineNum">      89</span>              : </span>
+<span id="L90"><span class="lineNum">      90</span>              :     /// Bumped each time the app leaves the foreground. An acceptance window</span>
+<span id="L91"><span class="lineNum">      91</span>              :     /// that saw it change (or started in the background) was not a fair test of</span>
+<span id="L92"><span class="lineNum">      92</span>              :     /// the surface, so its `timeout` stays off HealthSink (R4-D3).</span>
+<span id="L93"><span class="lineNum">      93</span> <span class="tlaGNC">           1 :     private var backgroundEpoch = 0</span></span>
+<span id="L94"><span class="lineNum">      94</span> <span class="tlaGNC">           1 :     private var isAppInForeground = true</span></span>
+<span id="L95"><span class="lineNum">      95</span>              : </span>
+<span id="L96"><span class="lineNum">      96</span>              :     /// The app left the foreground (`didEnterBackground`).</span>
+<span id="L97"><span class="lineNum">      97</span> <span class="tlaUNC">           0 :     func noteAppLeftForeground() {</span></span>
+<span id="L98"><span class="lineNum">      98</span> <span class="tlaUNC">           0 :         isAppInForeground = false</span></span>
+<span id="L99"><span class="lineNum">      99</span> <span class="tlaUNC">           0 :         backgroundEpoch += 1</span></span>
+<span id="L100"><span class="lineNum">     100</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L101"><span class="lineNum">     101</span>              : </span>
+<span id="L102"><span class="lineNum">     102</span>              :     /// The app is back in the foreground (`willEnterForeground`).</span>
+<span id="L103"><span class="lineNum">     103</span> <span class="tlaUNC">           0 :     func noteAppEnteredForeground() {</span></span>
+<span id="L104"><span class="lineNum">     104</span> <span class="tlaUNC">           0 :         isAppInForeground = true</span></span>
+<span id="L105"><span class="lineNum">     105</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L106"><span class="lineNum">     106</span>              : </span>
+<span id="L107"><span class="lineNum">     107</span>              :     /// Presentations that have not settled yet. Diagnostics and tests.</span>
+<span id="L108"><span class="lineNum">     108</span> <span class="tlaUNC">           0 :     var liveCount: Int { live.count }</span></span>
+<span id="L109"><span class="lineNum">     109</span>              : </span>
+<span id="L110"><span class="lineNum">     110</span>              :     /// Opens a presentation for a trigger `owner` just delivered.</span>
+<span id="L111"><span class="lineNum">     111</span>              :     ///</span>
+<span id="L112"><span class="lineNum">     112</span>              :     /// The returned controller is `pending` and not yet accepted — routing has</span>
+<span id="L113"><span class="lineNum">     113</span>              :     /// not run. Its ``PresentationController/trigger`` is the *stamped* payload</span>
+<span id="L114"><span class="lineNum">     114</span>              :     /// and is what must be handed on to routing. Call ``accept(_:kind:awaitsAnchorLayout:)``</span>
+<span id="L115"><span class="lineNum">     115</span>              :     /// or settle it.</span>
+<span id="L116"><span class="lineNum">     116</span> <span class="tlaUNC">           0 :     func open(_ trigger: CEPTriggerPayload, owner: String) -&gt; PresentationController {</span></span>
+<span id="L117"><span class="lineNum">     117</span> <span class="tlaUNC">           0 :         let id = newId()</span></span>
+<span id="L118"><span class="lineNum">     118</span> <span class="tlaUNC">           0 :         let controller = PresentationController(</span></span>
+<span id="L119"><span class="lineNum">     119</span> <span class="tlaUNC">           0 :             id: id,</span></span>
+<span id="L120"><span class="lineNum">     120</span> <span class="tlaUNC">           0 :             trigger: trigger.stamped(presentationId: id),</span></span>
+<span id="L121"><span class="lineNum">     121</span> <span class="tlaUNC">           0 :             onCancel: { [weak self] c in self?.onCancelSurface(c.trigger) }</span></span>
+<span id="L122"><span class="lineNum">     122</span> <span class="tlaUNC">           0 :         )</span></span>
+<span id="L123"><span class="lineNum">     123</span> <span class="tlaUNC">           0 :         live[id] = LiveEntry(owner: owner, controller: controller)</span></span>
+<span id="L124"><span class="lineNum">     124</span> <span class="tlaUNC">           0 :         // Cleanup binds to the outcome rather than to each settling path, so a</span></span>
+<span id="L125"><span class="lineNum">     125</span> <span class="tlaUNC">           0 :         // settle the coordinator never saw — the plugin's own `cancel()`, the</span></span>
+<span id="L126"><span class="lineNum">     126</span> <span class="tlaUNC">           0 :         // controller's cancelled backstop — still releases the index and the</span></span>
+<span id="L127"><span class="lineNum">     127</span> <span class="tlaUNC">           0 :         // watchdogs.</span></span>
+<span id="L128"><span class="lineNum">     128</span> <span class="tlaUNC">           0 :         Task { @MainActor [weak self] in</span></span>
+<span id="L129"><span class="lineNum">     129</span> <span class="tlaUNC">           0 :             _ = await controller.presentation.outcome.value</span></span>
+<span id="L130"><span class="lineNum">     130</span> <span class="tlaUNC">           0 :             self?.forget(id)</span></span>
+<span id="L131"><span class="lineNum">     131</span> <span class="tlaUNC">           0 :         }</span></span>
+<span id="L132"><span class="lineNum">     132</span> <span class="tlaUNC">           0 :         return controller</span></span>
+<span id="L133"><span class="lineNum">     133</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L134"><span class="lineNum">     134</span>              : </span>
+<span id="L135"><span class="lineNum">     135</span>              :     /// Records what kind of surface took an accepted presentation, and arms the</span>
+<span id="L136"><span class="lineNum">     136</span>              :     /// acceptance watchdog if its `kind` owes an appearance.</span>
+<span id="L137"><span class="lineNum">     137</span>              :     ///</span>
+<span id="L138"><span class="lineNum">     138</span>              :     /// `dueDelay` is the authored wait before the campaign is due to appear</span>
+<span id="L139"><span class="lineNum">     139</span>              :     /// (R3-D9); the window counts from then. `surfaceKind` is the `timeout`</span>
+<span id="L140"><span class="lineNum">     140</span>              :     /// drop's `surface_kind` for HealthSink (R3-D10).</span>
+<span id="L141"><span class="lineNum">     141</span>              :     ///</span>
+<span id="L142"><span class="lineNum">     142</span>              :     /// platform note: the Kotlin twin also takes the routed payload here,</span>
+<span id="L143"><span class="lineNum">     143</span>              :     /// because it indexes by that instance's identity. Swift has the id on the</span>
+<span id="L144"><span class="lineNum">     144</span>              :     /// payload already, so there is nothing to index.</span>
+<span id="L145"><span class="lineNum">     145</span>              :     func accept(</span>
+<span id="L146"><span class="lineNum">     146</span>              :         _ controller: PresentationController,</span>
+<span id="L147"><span class="lineNum">     147</span>              :         kind: PresentationKind,</span>
+<span id="L148"><span class="lineNum">     148</span>              :         dueDelay: TimeInterval = 0,</span>
+<span id="L149"><span class="lineNum">     149</span>              :         surfaceKind: String? = nil</span>
+<span id="L150"><span class="lineNum">     150</span> <span class="tlaUNC">           0 :     ) {</span></span>
+<span id="L151"><span class="lineNum">     151</span> <span class="tlaUNC">           0 :         guard !controller.isSettled, let entry = live[controller.id] else { return }</span></span>
+<span id="L152"><span class="lineNum">     152</span> <span class="tlaUNC">           0 :         entry.kind = kind</span></span>
+<span id="L153"><span class="lineNum">     153</span> <span class="tlaUNC">           0 :         // An inline campaign may never reach its slot, so its hold goes back at</span></span>
+<span id="L154"><span class="lineNum">     154</span> <span class="tlaUNC">           0 :         // acceptance, not at the impression — otherwise WebEngage's</span></span>
+<span id="L155"><span class="lineNum">     155</span> <span class="tlaUNC">           0 :         // render lock stays held until the slot is seen, possibly forever.</span></span>
+<span id="L156"><span class="lineNum">     156</span> <span class="tlaUNC">           0 :         if kind == .inline { controller.releaseHoldAtAcceptance() }</span></span>
+<span id="L157"><span class="lineNum">     157</span> <span class="tlaUNC">           0 :         guard kind.armsAcceptanceWatchdog else { return }</span></span>
+<span id="L158"><span class="lineNum">     158</span> <span class="tlaUNC">           0 :         let window = acceptanceTimeout + max(0, dueDelay)</span></span>
+<span id="L159"><span class="lineNum">     159</span> <span class="tlaUNC">           0 :         let armedEpoch = backgroundEpoch</span></span>
+<span id="L160"><span class="lineNum">     160</span> <span class="tlaUNC">           0 :         let armedInForeground = isAppInForeground</span></span>
+<span id="L161"><span class="lineNum">     161</span> <span class="tlaUNC">           0 :         entry.acceptance = Task { @MainActor [weak self] in</span></span>
+<span id="L162"><span class="lineNum">     162</span> <span class="tlaUNC">           0 :             guard let self else { return }</span></span>
+<span id="L163"><span class="lineNum">     163</span> <span class="tlaUNC">           0 :             try? await Task.sleep(nanoseconds: nanoseconds(window))</span></span>
+<span id="L164"><span class="lineNum">     164</span> <span class="tlaUNC">           0 :             guard !Task.isCancelled, !controller.isSettled else { return }</span></span>
+<span id="L165"><span class="lineNum">     165</span> <span class="tlaUNC">           0 :             log.e(</span></span>
+<span id="L166"><span class="lineNum">     166</span> <span class="tlaUNC">           0 :                 &quot;Dropped — acceptance watchdog fired, still pending; releasing the CEP hold &quot;</span></span>
+<span id="L167"><span class="lineNum">     167</span> <span class="tlaUNC">           0 :                     + &quot;and clearing the surface (presentationId=\(controller.id), &quot;</span></span>
+<span id="L168"><span class="lineNum">     168</span> <span class="tlaUNC">           0 :                     + &quot;timeout=\(Int(window * 1000))ms)&quot;,</span></span>
+<span id="L169"><span class="lineNum">     169</span> <span class="tlaUNC">           0 :                 campaign: controller.trigger.campaignKey</span></span>
+<span id="L170"><span class="lineNum">     170</span> <span class="tlaUNC">           0 :             )</span></span>
+<span id="L171"><span class="lineNum">     171</span> <span class="tlaUNC">           0 :             // HealthSink requires `surface_kind`; leaving it off keeps a window</span></span>
+<span id="L172"><span class="lineNum">     172</span> <span class="tlaUNC">           0 :             // the app spent partly in the background out of the breakage</span></span>
+<span id="L173"><span class="lineNum">     173</span> <span class="tlaUNC">           0 :             // report (R4-D3). The console and timeline still show the drop.</span></span>
+<span id="L174"><span class="lineNum">     174</span> <span class="tlaUNC">           0 :             let stayedForeground = armedInForeground &amp;&amp; self.isAppInForeground</span></span>
+<span id="L175"><span class="lineNum">     175</span> <span class="tlaUNC">           0 :                 &amp;&amp; self.backgroundEpoch == armedEpoch</span></span>
+<span id="L176"><span class="lineNum">     176</span> <span class="tlaUNC">           0 :             if let surfaceKind, stayedForeground {</span></span>
+<span id="L177"><span class="lineNum">     177</span> <span class="tlaUNC">           0 :                 controller.dropExtras = [&quot;surface_kind&quot;: surfaceKind]</span></span>
+<span id="L178"><span class="lineNum">     178</span> <span class="tlaUNC">           0 :             }</span></span>
+<span id="L179"><span class="lineNum">     179</span> <span class="tlaUNC">           0 :             // Settle first, then take it off the surface (R3-D1), as the anchor</span></span>
+<span id="L180"><span class="lineNum">     180</span> <span class="tlaUNC">           0 :             // watchdog does: the settle is the decision and can't be undone by</span></span>
+<span id="L181"><span class="lineNum">     181</span> <span class="tlaUNC">           0 :             // whatever the teardown emits.</span></span>
+<span id="L182"><span class="lineNum">     182</span> <span class="tlaUNC">           0 :             controller.settle(</span></span>
+<span id="L183"><span class="lineNum">     183</span> <span class="tlaUNC">           0 :                 .dropped(</span></span>
+<span id="L184"><span class="lineNum">     184</span> <span class="tlaUNC">           0 :                     reason: .timeout,</span></span>
+<span id="L185"><span class="lineNum">     185</span> <span class="tlaUNC">           0 :                     detail: &quot;never displayed within the acceptance window&quot;</span></span>
+<span id="L186"><span class="lineNum">     186</span> <span class="tlaUNC">           0 :                 )</span></span>
+<span id="L187"><span class="lineNum">     187</span> <span class="tlaUNC">           0 :             )</span></span>
+<span id="L188"><span class="lineNum">     188</span> <span class="tlaUNC">           0 :             self.onCancelSurface(controller.trigger)</span></span>
+<span id="L189"><span class="lineNum">     189</span> <span class="tlaUNC">           0 :         }</span></span>
+<span id="L190"><span class="lineNum">     190</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L191"><span class="lineNum">     191</span>              : </span>
+<span id="L192"><span class="lineNum">     192</span>              :     /// Arms the anchor watchdog for an experience that cannot appear until a</span>
+<span id="L193"><span class="lineNum">     193</span>              :     /// named anchor resolves — a non-anchorless guide. ``anchorResolved(_:)``</span>
+<span id="L194"><span class="lineNum">     194</span>              :     /// disarms it, and so does an impression.</span>
+<span id="L195"><span class="lineNum">     195</span>              :     ///</span>
+<span id="L196"><span class="lineNum">     196</span>              :     /// `dueDelay`: the first step's authored delay, added so the window counts</span>
+<span id="L197"><span class="lineNum">     197</span>              :     /// from when the step is due to appear (R3-D9).</span>
+<span id="L198"><span class="lineNum">     198</span> <span class="tlaUNC">           0 :     func awaitAnchor(_ payload: CEPTriggerPayload, dueDelay: TimeInterval = 0) {</span></span>
+<span id="L199"><span class="lineNum">     199</span> <span class="tlaUNC">           0 :         guard let id = payload.presentationId, let entry = live[id] else { return }</span></span>
+<span id="L200"><span class="lineNum">     200</span> <span class="tlaUNC">           0 :         let controller = entry.controller</span></span>
+<span id="L201"><span class="lineNum">     201</span> <span class="tlaUNC">           0 :         guard !controller.isSettled else { return }</span></span>
+<span id="L202"><span class="lineNum">     202</span> <span class="tlaUNC">           0 :         entry.disarmAnchor()</span></span>
+<span id="L203"><span class="lineNum">     203</span> <span class="tlaUNC">           0 :         let window = anchorLayoutTimeout + max(0, dueDelay)</span></span>
+<span id="L204"><span class="lineNum">     204</span> <span class="tlaUNC">           0 :         entry.anchor = Task { @MainActor [weak self] in</span></span>
+<span id="L205"><span class="lineNum">     205</span> <span class="tlaUNC">           0 :             guard let self else { return }</span></span>
+<span id="L206"><span class="lineNum">     206</span> <span class="tlaUNC">           0 :             try? await Task.sleep(nanoseconds: nanoseconds(window))</span></span>
+<span id="L207"><span class="lineNum">     207</span> <span class="tlaUNC">           0 :             guard !Task.isCancelled, !controller.isSettled else { return }</span></span>
+<span id="L208"><span class="lineNum">     208</span> <span class="tlaUNC">           0 :             let displaying = controller.state == .displaying</span></span>
+<span id="L209"><span class="lineNum">     209</span> <span class="tlaUNC">           0 :             log.e(</span></span>
+<span id="L210"><span class="lineNum">     210</span> <span class="tlaUNC">           0 :                 &quot;Ended — anchor watchdog fired, no layout in &quot;</span></span>
+<span id="L211"><span class="lineNum">     211</span> <span class="tlaUNC">           0 :                     + &quot;\(Int(self.anchorLayoutTimeout * 1000))ms &quot;</span></span>
+<span id="L212"><span class="lineNum">     212</span> <span class="tlaUNC">           0 :                     + &quot;(presentationId=\(controller.id), displaying=\(displaying))&quot;,</span></span>
+<span id="L213"><span class="lineNum">     213</span> <span class="tlaUNC">           0 :                 campaign: payload.campaignKey</span></span>
+<span id="L214"><span class="lineNum">     214</span> <span class="tlaUNC">           0 :             )</span></span>
+<span id="L215"><span class="lineNum">     215</span> <span class="tlaUNC">           0 :             // Settle first, tear the surface down second. The teardown emits its</span></span>
+<span id="L216"><span class="lineNum">     216</span> <span class="tlaUNC">           0 :             // own `dismissed`, and settling after it would record whatever the</span></span>
+<span id="L217"><span class="lineNum">     217</span> <span class="tlaUNC">           0 :             // surface said — `user_close` for a close the user never performed —</span></span>
+<span id="L218"><span class="lineNum">     218</span> <span class="tlaUNC">           0 :             // instead of the watchdog's reason. G7 names that reason, so it has</span></span>
+<span id="L219"><span class="lineNum">     219</span> <span class="tlaUNC">           0 :             // to be the one that wins.</span></span>
+<span id="L220"><span class="lineNum">     220</span> <span class="tlaUNC">           0 :             //</span></span>
+<span id="L221"><span class="lineNum">     221</span> <span class="tlaUNC">           0 :             // platform note: the Kotlin twin runs these two in the opposite</span></span>
+<span id="L222"><span class="lineNum">     222</span> <span class="tlaUNC">           0 :             // order, and its settle is a backstop rather than the decision. The</span></span>
+<span id="L223"><span class="lineNum">     223</span> <span class="tlaUNC">           0 :             // Dart core has no anchor watchdog at all yet.</span></span>
+<span id="L224"><span class="lineNum">     224</span> <span class="tlaUNC">           0 :             controller.settle(</span></span>
+<span id="L225"><span class="lineNum">     225</span> <span class="tlaUNC">           0 :                 displaying</span></span>
+<span id="L226"><span class="lineNum">     226</span> <span class="tlaUNC">           0 :                     ? .dismissed(reason: .autoTimeout, completed: false)</span></span>
+<span id="L227"><span class="lineNum">     227</span> <span class="tlaUNC">           0 :                     // It never displayed, so it cannot settle `dismissed` — and</span></span>
+<span id="L228"><span class="lineNum">     228</span> <span class="tlaUNC">           0 :                     // the honest reason is the one the enum already has for</span></span>
+<span id="L229"><span class="lineNum">     229</span> <span class="tlaUNC">           0 :                     // exactly this: the anchor it was pinned to never showed up.</span></span>
+<span id="L230"><span class="lineNum">     230</span> <span class="tlaUNC">           0 :                     : .dropped(</span></span>
+<span id="L231"><span class="lineNum">     231</span> <span class="tlaUNC">           0 :                         reason: .anchorNotRegistered,</span></span>
+<span id="L232"><span class="lineNum">     232</span> <span class="tlaUNC">           0 :                         detail: &quot;the anchor did not yield a layout within &quot;</span></span>
+<span id="L233"><span class="lineNum">     233</span> <span class="tlaUNC">           0 :                             + &quot;\(Int(self.anchorLayoutTimeout * 1000))ms&quot;</span></span>
+<span id="L234"><span class="lineNum">     234</span> <span class="tlaUNC">           0 :                     )</span></span>
+<span id="L235"><span class="lineNum">     235</span> <span class="tlaUNC">           0 :             )</span></span>
+<span id="L236"><span class="lineNum">     236</span> <span class="tlaUNC">           0 :             self.onCancelSurface(payload)</span></span>
+<span id="L237"><span class="lineNum">     237</span> <span class="tlaUNC">           0 :         }</span></span>
+<span id="L238"><span class="lineNum">     238</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L239"><span class="lineNum">     239</span>              : </span>
+<span id="L240"><span class="lineNum">     240</span>              :     /// The anchor produced a layout — disarms the watchdog ``awaitAnchor(_:)`` armed.</span>
+<span id="L241"><span class="lineNum">     241</span> <span class="tlaUNC">           0 :     func anchorResolved(_ payload: CEPTriggerPayload) {</span></span>
+<span id="L242"><span class="lineNum">     242</span> <span class="tlaUNC">           0 :         guard let id = payload.presentationId else { return }</span></span>
+<span id="L243"><span class="lineNum">     243</span> <span class="tlaUNC">           0 :         live[id]?.disarmAnchor()</span></span>
+<span id="L244"><span class="lineNum">     244</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L245"><span class="lineNum">     245</span>              : </span>
+<span id="L246"><span class="lineNum">     246</span>              :     /// The presentation that owns `payload`, or nil once it has settled.</span>
+<span id="L247"><span class="lineNum">     247</span> <span class="tlaUNC">           0 :     func ownerOf(_ payload: CEPTriggerPayload) -&gt; PresentationController? {</span></span>
+<span id="L248"><span class="lineNum">     248</span> <span class="tlaUNC">           0 :         guard let id = payload.presentationId else { return nil }</span></span>
+<span id="L249"><span class="lineNum">     249</span> <span class="tlaUNC">           0 :         return live[id]?.controller</span></span>
+<span id="L250"><span class="lineNum">     250</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L251"><span class="lineNum">     251</span>              : </span>
+<span id="L252"><span class="lineNum">     252</span>              :     /// The live presentation for a bare `id`, or nil when unknown or already</span>
+<span id="L253"><span class="lineNum">     253</span>              :     /// settled.</span>
+<span id="L254"><span class="lineNum">     254</span>              :     ///</span>
+<span id="L255"><span class="lineNum">     255</span>              :     /// Every other lookup here takes the stamped ``CEPTriggerPayload`` a render</span>
+<span id="L256"><span class="lineNum">     256</span>              :     /// surface still holds. A lifecycle report crossing the RN bridge for an</span>
+<span id="L257"><span class="lineNum">     257</span>              :     /// externally-rendered guide never gets that payload back — only the id it</span>
+<span id="L258"><span class="lineNum">     258</span>              :     /// was handed alongside it — so this is the one caller that has nothing but</span>
+<span id="L259"><span class="lineNum">     259</span>              :     /// the string. `forget(_:)` already removes a settled id from `live`, which</span>
+<span id="L260"><span class="lineNum">     260</span>              :     /// is what makes a stale or unrecognised id resolve to `nil` here for free.</span>
+<span id="L261"><span class="lineNum">     261</span> <span class="tlaUNC">           0 :     func controller(forPresentationId id: String) -&gt; PresentationController? {</span></span>
+<span id="L262"><span class="lineNum">     262</span> <span class="tlaUNC">           0 :         live[id]?.controller</span></span>
+<span id="L263"><span class="lineNum">     263</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L264"><span class="lineNum">     264</span>              : </span>
+<span id="L265"><span class="lineNum">     265</span>              :     /// Turns one coarse lifecycle event into a state transition on its owner.</span>
+<span id="L266"><span class="lineNum">     266</span>              :     ///</span>
+<span id="L267"><span class="lineNum">     267</span>              :     /// Total, and deliberately silent about payloads it does not know: a live</span>
+<span id="L268"><span class="lineNum">     268</span>              :     /// test's events, a surface still emitting after its presentation settled,</span>
+<span id="L269"><span class="lineNum">     269</span>              :     /// and anything rendered before a plugin ever attached all arrive here and</span>
+<span id="L270"><span class="lineNum">     270</span>              :     /// all mean &quot;nothing to transition&quot;.</span>
+<span id="L271"><span class="lineNum">     271</span> <span class="tlaGNC">           6 :     func handle(_ event: DigiaExperienceEvent, payload: CEPTriggerPayload) {</span></span>
+<span id="L272"><span class="lineNum">     272</span> <span class="tlaGNC">           6 :         guard let id = payload.presentationId, let entry = live[id] else { return }</span></span>
+<span id="L273"><span class="lineNum">     273</span> <span class="tlaUNC">           0 :         let controller = entry.controller</span></span>
+<span id="L274"><span class="lineNum">     274</span> <span class="tlaUNC">           0 :         switch event {</span></span>
+<span id="L275"><span class="lineNum">     275</span> <span class="tlaUNC">           0 :         case .impressed:</span></span>
+<span id="L276"><span class="lineNum">     276</span> <span class="tlaUNC">           0 :             entry.disarm()</span></span>
+<span id="L277"><span class="lineNum">     277</span> <span class="tlaUNC">           0 :             controller.markDisplaying()</span></span>
+<span id="L278"><span class="lineNum">     278</span> <span class="tlaUNC">           0 :             // A floating experience hands the CEP's slot back the moment it</span></span>
+<span id="L279"><span class="lineNum">     279</span> <span class="tlaUNC">           0 :             // appears, not when it finally ends. Doing it here rather than at</span></span>
+<span id="L280"><span class="lineNum">     280</span> <span class="tlaUNC">           0 :             // each surface is what keeps the rule in one place.</span></span>
+<span id="L281"><span class="lineNum">     281</span> <span class="tlaUNC">           0 :             if entry.kind.releasesHoldOnDisplay { controller.releaseHold() }</span></span>
+<span id="L282"><span class="lineNum">     282</span> <span class="tlaUNC">           0 :         case .clicked(let elementID):</span></span>
+<span id="L283"><span class="lineNum">     283</span> <span class="tlaUNC">           0 :             // A tap is proof the experience is on screen, so a click that beats</span></span>
+<span id="L284"><span class="lineNum">     284</span> <span class="tlaUNC">           0 :             // its own impression here promotes the presentation rather than</span></span>
+<span id="L285"><span class="lineNum">     285</span> <span class="tlaUNC">           0 :             // breaking G3's ordering. The surfaces are not all equally careful</span></span>
+<span id="L286"><span class="lineNum">     286</span> <span class="tlaUNC">           0 :             // about reporting visibility, and normalising is this class's job.</span></span>
+<span id="L287"><span class="lineNum">     287</span> <span class="tlaUNC">           0 :             // Asserting instead would raise from a gesture handler, on the host</span></span>
+<span id="L288"><span class="lineNum">     288</span> <span class="tlaUNC">           0 :             // app's frame.</span></span>
+<span id="L289"><span class="lineNum">     289</span> <span class="tlaUNC">           0 :             entry.disarm()</span></span>
+<span id="L290"><span class="lineNum">     290</span> <span class="tlaUNC">           0 :             controller.markDisplaying()</span></span>
+<span id="L291"><span class="lineNum">     291</span> <span class="tlaUNC">           0 :             controller.emitClicked(elementId: elementID)</span></span>
+<span id="L292"><span class="lineNum">     292</span> <span class="tlaUNC">           0 :         case .dismissed(let reason, let completed):</span></span>
+<span id="L293"><span class="lineNum">     293</span> <span class="tlaUNC">           0 :             controller.settle(</span></span>
+<span id="L294"><span class="lineNum">     294</span> <span class="tlaUNC">           0 :                 controller.state == .displaying</span></span>
+<span id="L295"><span class="lineNum">     295</span> <span class="tlaUNC">           0 :                     ? .dismissed(reason: reason, completed: completed)</span></span>
+<span id="L296"><span class="lineNum">     296</span> <span class="tlaUNC">           0 :                     // It ended without ever being seen, which is a drop however</span></span>
+<span id="L297"><span class="lineNum">     297</span> <span class="tlaUNC">           0 :                     // the surface phrased it. `dismissed` would tell the CEP an</span></span>
+<span id="L298"><span class="lineNum">     298</span> <span class="tlaUNC">           0 :                     // impression happened that never did.</span></span>
+<span id="L299"><span class="lineNum">     299</span> <span class="tlaUNC">           0 :                     : .dropped(</span></span>
+<span id="L300"><span class="lineNum">     300</span> <span class="tlaUNC">           0 :                         reason: reason == .superseded ? .superseded : .cancelled,</span></span>
+<span id="L301"><span class="lineNum">     301</span> <span class="tlaUNC">           0 :                         detail: &quot;ended before it displayed (\(reason.value))&quot;</span></span>
+<span id="L302"><span class="lineNum">     302</span> <span class="tlaUNC">           0 :                     )</span></span>
+<span id="L303"><span class="lineNum">     303</span> <span class="tlaUNC">           0 :             )</span></span>
+<span id="L304"><span class="lineNum">     304</span> <span class="tlaUNC">           0 :         }</span></span>
+<span id="L305"><span class="lineNum">     305</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L306"><span class="lineNum">     306</span>              : </span>
+<span id="L307"><span class="lineNum">     307</span>              :     /// Settles the presentation that owns `payload` as a drop.</span>
+<span id="L308"><span class="lineNum">     308</span>              :     ///</span>
+<span id="L309"><span class="lineNum">     309</span>              :     /// For a failure a lifecycle event has no vocabulary for — a guide whose</span>
+<span id="L310"><span class="lineNum">     310</span>              :     /// anchor or artwork never produced a frame. ``DigiaExperienceEvent`` can</span>
+<span id="L311"><span class="lineNum">     311</span>              :     /// only say &quot;dismissed&quot;, which on a presentation that never displayed</span>
+<span id="L312"><span class="lineNum">     312</span>              :     /// collapses to `cancelled`; the real reason is worth more to whoever reads</span>
+<span id="L313"><span class="lineNum">     313</span>              :     /// the drop, and this is the one path that still has it in scope.</span>
+<span id="L314"><span class="lineNum">     314</span>              :     func drop(</span>
+<span id="L315"><span class="lineNum">     315</span>              :         _ payload: CEPTriggerPayload, reason: DropReason, detail: String?, extras: [String: String]? = nil</span>
+<span id="L316"><span class="lineNum">     316</span> <span class="tlaUNC">           0 :     ) {</span></span>
+<span id="L317"><span class="lineNum">     317</span> <span class="tlaUNC">           0 :         guard let id = payload.presentationId, let entry = live[id] else { return }</span></span>
+<span id="L318"><span class="lineNum">     318</span> <span class="tlaUNC">           0 :         if let extras { entry.controller.dropExtras = extras }</span></span>
+<span id="L319"><span class="lineNum">     319</span> <span class="tlaUNC">           0 :         entry.controller.settle(.dropped(reason: reason, detail: detail))</span></span>
+<span id="L320"><span class="lineNum">     320</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L321"><span class="lineNum">     321</span>              : </span>
+<span id="L322"><span class="lineNum">     322</span>              :     /// G6 — settles every presentation `owner` holds. Runs *before* the plugin's</span>
+<span id="L323"><span class="lineNum">     323</span>              :     /// `detach()`, so the plugin's outcome handlers still fire and release its</span>
+<span id="L324"><span class="lineNum">     324</span>              :     /// slot while its bridge is alive.</span>
+<span id="L325"><span class="lineNum">     325</span> <span class="tlaUNC">           0 :     func detach(owner: String) {</span></span>
+<span id="L326"><span class="lineNum">     326</span> <span class="tlaUNC">           0 :         for controller in live.values.filter({ $0.owner == owner }).map(\.controller) {</span></span>
+<span id="L327"><span class="lineNum">     327</span> <span class="tlaUNC">           0 :             controller.settle(</span></span>
+<span id="L328"><span class="lineNum">     328</span> <span class="tlaUNC">           0 :                 controller.state == .displaying</span></span>
+<span id="L329"><span class="lineNum">     329</span> <span class="tlaUNC">           0 :                     ? .dismissed(reason: .pluginDetached, completed: false)</span></span>
+<span id="L330"><span class="lineNum">     330</span> <span class="tlaUNC">           0 :                     : .dropped(reason: .pluginDetached, detail: nil)</span></span>
+<span id="L331"><span class="lineNum">     331</span> <span class="tlaUNC">           0 :             )</span></span>
+<span id="L332"><span class="lineNum">     332</span> <span class="tlaUNC">           0 :         }</span></span>
+<span id="L333"><span class="lineNum">     333</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L334"><span class="lineNum">     334</span>              : </span>
+<span id="L335"><span class="lineNum">     335</span>              :     /// Settles every live presentation and clears the registry. Test teardown</span>
+<span id="L336"><span class="lineNum">     336</span>              :     /// only — in production a presentation ends through its surface.</span>
+<span id="L337"><span class="lineNum">     337</span> <span class="tlaGNC">           5 :     func resetForTesting() {</span></span>
+<span id="L338"><span class="lineNum">     338</span> <span class="tlaGNC">           5 :         for controller in live.values.map(\.controller) {</span></span>
+<span id="L339"><span class="lineNum">     339</span> <span class="tlaUNC">           0 :             controller.settle(.dropped(reason: .cancelled, detail: &quot;SDK reset&quot;))</span></span>
+<span id="L340"><span class="lineNum">     340</span> <span class="tlaGNC">           5 :         }</span></span>
+<span id="L341"><span class="lineNum">     341</span> <span class="tlaGNC">           5 :         for entry in live.values { entry.disarm() }</span></span>
+<span id="L342"><span class="lineNum">     342</span> <span class="tlaGNC">           5 :         live.removeAll()</span></span>
+<span id="L343"><span class="lineNum">     343</span> <span class="tlaGNC">           5 :     }</span></span>
+<span id="L344"><span class="lineNum">     344</span>              : </span>
+<span id="L345"><span class="lineNum">     345</span> <span class="tlaUNC">           0 :     private func forget(_ id: String) {</span></span>
+<span id="L346"><span class="lineNum">     346</span> <span class="tlaUNC">           0 :         live.removeValue(forKey: id)?.disarm()</span></span>
+<span id="L347"><span class="lineNum">     347</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L348"><span class="lineNum">     348</span>              : </span>
+<span id="L349"><span class="lineNum">     349</span> <span class="tlaUNC">           0 :     private func nanoseconds(_ seconds: TimeInterval) -&gt; UInt64 {</span></span>
+<span id="L350"><span class="lineNum">     350</span> <span class="tlaUNC">           0 :         UInt64(max(0, seconds) * 1_000_000_000)</span></span>
+<span id="L351"><span class="lineNum">     351</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L352"><span class="lineNum">     352</span>              : }</span>
+<span id="L353"><span class="lineNum">     353</span>              : </span>
+<span id="L354"><span class="lineNum">     354</span>              : /// Coordinator-side bookkeeping for one live presentation.</span>
+<span id="L355"><span class="lineNum">     355</span>              : @MainActor</span>
+<span id="L356"><span class="lineNum">     356</span>              : private final class LiveEntry {</span>
+<span id="L357"><span class="lineNum">     357</span> <span class="tlaUNC">           0 :     init(owner: String, controller: PresentationController) {</span></span>
+<span id="L358"><span class="lineNum">     358</span> <span class="tlaUNC">           0 :         self.owner = owner</span></span>
+<span id="L359"><span class="lineNum">     359</span> <span class="tlaUNC">           0 :         self.controller = controller</span></span>
+<span id="L360"><span class="lineNum">     360</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L361"><span class="lineNum">     361</span>              : </span>
+<span id="L362"><span class="lineNum">     362</span>              :     /// `DigiaCEPPlugin.id` of the plugin that delivered it.</span>
+<span id="L363"><span class="lineNum">     363</span>              :     let owner: String</span>
+<span id="L364"><span class="lineNum">     364</span>              : </span>
+<span id="L365"><span class="lineNum">     365</span>              :     /// Strong: this registry *is* core's ownership of the write face. The read</span>
+<span id="L366"><span class="lineNum">     366</span>              :     /// face the plugin holds keeps only a weak link back, so nothing else would</span>
+<span id="L367"><span class="lineNum">     367</span>              :     /// keep the controller alive. ``PresentationCoordinator/forget(_:)`` — bound</span>
+<span id="L368"><span class="lineNum">     368</span>              :     /// to the outcome — is what releases it.</span>
+<span id="L369"><span class="lineNum">     369</span>              :     let controller: PresentationController</span>
+<span id="L370"><span class="lineNum">     370</span>              : </span>
+<span id="L371"><span class="lineNum">     371</span>              :     /// What kind of surface took it. `modal` until routing says otherwise, which</span>
+<span id="L372"><span class="lineNum">     372</span>              :     /// is the conservative default: hold the CEP until the outcome.</span>
+<span id="L373"><span class="lineNum">     373</span> <span class="tlaUNC">           0 :     var kind: PresentationKind = .modal</span></span>
+<span id="L374"><span class="lineNum">     374</span>              : </span>
+<span id="L375"><span class="lineNum">     375</span>              :     var acceptance: Task&lt;Void, Never&gt;?</span>
+<span id="L376"><span class="lineNum">     376</span>              :     var anchor: Task&lt;Void, Never&gt;?</span>
+<span id="L377"><span class="lineNum">     377</span>              : </span>
+<span id="L378"><span class="lineNum">     378</span> <span class="tlaUNC">           0 :     func disarm() {</span></span>
+<span id="L379"><span class="lineNum">     379</span> <span class="tlaUNC">           0 :         acceptance?.cancel()</span></span>
+<span id="L380"><span class="lineNum">     380</span> <span class="tlaUNC">           0 :         acceptance = nil</span></span>
+<span id="L381"><span class="lineNum">     381</span> <span class="tlaUNC">           0 :         disarmAnchor()</span></span>
+<span id="L382"><span class="lineNum">     382</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L383"><span class="lineNum">     383</span>              : </span>
+<span id="L384"><span class="lineNum">     384</span> <span class="tlaUNC">           0 :     func disarmAnchor() {</span></span>
+<span id="L385"><span class="lineNum">     385</span> <span class="tlaUNC">           0 :         anchor?.cancel()</span></span>
+<span id="L386"><span class="lineNum">     386</span> <span class="tlaUNC">           0 :         anchor = nil</span></span>
+<span id="L387"><span class="lineNum">     387</span> <span class="tlaUNC">           0 :     }</span></span>
+<span id="L388"><span class="lineNum">     388</span>              : }</span>
+        </pre>
+              </td>
+            </tr>
+          </table>
+          <br>
+
+          <table width="100%" border=0 cellspacing=0 cellpadding=0>
+            <tr><td class="ruler"><img src="../glass.png" width=3 height=3 alt=""></td></tr>
+            <tr><td class="versionInfo">Generated by: <a href="https://github.com/linux-test-project/lcov" target="_parent">LCOV version 2.6-0</a></td></tr>
+          </table>
+          <br>
+
+</body>
+</html>
