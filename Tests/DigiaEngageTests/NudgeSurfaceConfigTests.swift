@@ -3,6 +3,7 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
+@Suite("Nudge surface configuration", .tags(.nudge, .contract))
 struct NudgeSurfaceConfigTests {
     @Test("parses nudge barrier color alpha as alpha-first hex")
     func parsesBarrierColorAlphaFirstHex() throws {

@@ -69,7 +69,10 @@ struct SDKInstanceEarlyInitTests {
         start = Date()
         try await fast.initialize(DigiaConfig(apiKey: "test_key"))
         elapsed = Date().timeIntervalSince(start)
-        #expect(elapsed < 1.0)
+        // Below the cap path's 1.9 s floor in (a), so it proves the fetch ended the
+        // wait. Not tighter: in a parallel run other suites hold the main actor
+        // and stretch the ~100 ms answer past a second.
+        #expect(elapsed < 1.9)
         #expect(fast.sdkState == .ready)
 
         // (c) A fetch that fails at ~100 ms: returns then, failed, no throw.
@@ -79,7 +82,7 @@ struct SDKInstanceEarlyInitTests {
         start = Date()
         try await failing.initialize(DigiaConfig(apiKey: "test_key"))
         elapsed = Date().timeIntervalSince(start)
-        #expect(elapsed < 1.0)
+        #expect(elapsed < 1.9)
         #expect(failing.sdkState == .failed)
     }
 

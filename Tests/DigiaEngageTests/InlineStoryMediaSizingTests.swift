@@ -3,7 +3,7 @@ import SwiftUI
 @testable import DigiaEngage
 import Testing
 
-@Suite("Inline story media sizing")
+@Suite("Inline story media sizing", .tags(.media, .contract))
 struct InlineStoryMediaSizingTests {
     @Test("accepts finite positive portrait square and landscape card ratios")
     func acceptsValidRatios() {

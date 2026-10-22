@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import DigiaEngage
 
-@Suite("Campaign Canvas v2 contract")
+@Suite("Campaign Canvas v2 contract", .serialized, .tags(.canvas, .contract))
 struct CampaignCanvasContractTests {
     @Test("design tokens canonicalize themes and nested typography wrappers")
     func designTokens() throws {
@@ -55,8 +55,25 @@ struct CampaignCanvasContractTests {
         #expect(try catalog.resolveColor(["token": "accent"]) == CampaignColor(lightHex: "#FF112233", darkHex: "#FF112233"))
     }
 
-    @Test("v2 parser expands normalized rects and preserves typed widget properties")
-    func canvasParser() throws {
+    @Test("v2 parser expands normalized rects to pixel dimensions")
+    func parserExpandsNormalizedRects() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 200,
+            "canvasHeight": 100,
+            "children": [
+                [
+                    "kind": "widget", "id": "text",
+                    "rect": ["x": 0.1, "y": 0.2, "width": 0.5, "height": 0.4],
+                    "widget": ["type": "digia/text", "props": ["spans": []]],
+                ],
+            ],
+        ])
+        #expect(canvas.children[0].rect == CampaignCanvasRect(x: 20, y: 20, width: 100, height: 40))
+    }
+
+    @Test("v2 parser sorts canvas background gradient stops by offset")
+    func parserSortsGradientStops() throws {
         let canvas = try CampaignCanvasParser().parse([
             "version": 2,
             "canvasWidth": 200,
@@ -68,12 +85,22 @@ struct CampaignCanvasContractTests {
                     ["color": "#000", "offset": 0],
                 ],
             ],
+            "children": [],
+        ])
+        guard case .gradient(_, _, _, _, _, _, _, let stops) = canvas.background else {
+            Issue.record("Expected gradient background")
+            return
+        }
+        #expect(stops.map(\.offset) == [0, 1])
+    }
+
+    @Test("v2 parser preserves typed button and container widget properties")
+    func parserPreservesTypedWidgetProperties() throws {
+        let canvas = try CampaignCanvasParser().parse([
+            "version": 2,
+            "canvasWidth": 200,
+            "canvasHeight": 100,
             "children": [
-                [
-                    "kind": "widget", "id": "text",
-                    "rect": ["x": 0.1, "y": 0.2, "width": 0.5, "height": 0.4],
-                    "widget": ["type": "digia/text", "props": ["spans": []]],
-                ],
                 [
                     "kind": "widget", "id": "button",
                     "rect": ["x": 0, "y": 0, "width": 1, "height": 0.2],
@@ -100,13 +127,7 @@ struct CampaignCanvasContractTests {
             ],
         ])
 
-        #expect(canvas.children[0].rect == CampaignCanvasRect(x: 20, y: 20, width: 100, height: 40))
-        guard case .gradient(_, _, _, _, _, _, _, let stops) = canvas.background else {
-            Issue.record("Expected gradient background")
-            return
-        }
-        #expect(stops.map(\.offset) == [0, 1])
-        guard case .widget(_, _, .button(_, let label, _, let style, _, _, _, _, _, _)) = canvas.children[1] else {
+        guard case .widget(_, _, .button(_, let label, _, let style, _, _, _, _, _, _)) = canvas.children[0] else {
             Issue.record("Expected button")
             return
         }
@@ -116,7 +137,7 @@ struct CampaignCanvasContractTests {
             return
         }
         #expect(buttonFill == .none)
-        guard case .widget(_, _, .container(_, let radius, _, _)) = canvas.children[2] else {
+        guard case .widget(_, _, .container(_, let radius, _, _)) = canvas.children[1] else {
             Issue.record("Expected container")
             return
         }
@@ -232,6 +253,15 @@ struct CampaignCanvasContractTests {
             return
         }
         #expect(shadow?.color == .literal("#FF000000"))
+    }
+
+    @Test(
+        "all 14 supported widgets have registered renderers in CampaignCanvasRendererRegistry",
+        arguments: allSampleWidgets
+    )
+    @MainActor
+    func allFourteenSupportedWidgetsHaveRegisteredRenderers(widget: CampaignCanvasWidget) {
+        #expect(CampaignCanvasRendererRegistry.hasRenderer(for: widget))
     }
 
     @Test("all supported widgets keep authored v2 values and have one renderer")
@@ -361,12 +391,10 @@ struct CampaignCanvasContractTests {
         #expect(span.decorationThickness == 8)
     }
 
-    @Test("runtime theme selection drives colors and every media variant")
+    @Test("runtime theme updates drive light and dark mode state")
     @MainActor
-    func runtimeThemeSelection() {
+    func runtimeThemeModeUpdates() {
         let theme = CampaignCanvasTheme.shared
-        let darkMedia = CampaignCanvasMediaSource(url: "light.png", darkUrl: "dark.png", placeholder: nil)
-        let sharedMedia = CampaignCanvasMediaSource(url: "shared.png", darkUrl: nil, placeholder: nil)
         defer { theme.update(.auto) }
 
         theme.update(.auto)
@@ -374,9 +402,18 @@ struct CampaignCanvasContractTests {
         #expect(theme.isDark(.dark))
         theme.update(.light)
         #expect(!theme.isDark(.dark))
-        #expect(theme.mediaURL(darkMedia, isDark: false) == "light.png")
         theme.update(.dark)
         #expect(theme.isDark(.light))
+    }
+
+    @Test("runtime theme selects correct light, dark, and shared media variants")
+    @MainActor
+    func runtimeThemeMediaURLSelection() {
+        let theme = CampaignCanvasTheme.shared
+        let darkMedia = CampaignCanvasMediaSource(url: "light.png", darkUrl: "dark.png", placeholder: nil)
+        let sharedMedia = CampaignCanvasMediaSource(url: "shared.png", darkUrl: nil, placeholder: nil)
+
+        #expect(theme.mediaURL(darkMedia, isDark: false) == "light.png")
         #expect(theme.mediaURL(darkMedia, isDark: true) == "dark.png")
         #expect(theme.mediaURL(sharedMedia, isDark: true) == "shared.png")
     }
@@ -426,4 +463,158 @@ struct CampaignCanvasContractTests {
             ],
         ]
     }
+
+    private static func sampleTextBlock() -> CampaignCanvasTextBlock {
+        CampaignCanvasTextBlock(
+            horizontalAlign: .left,
+            textAlign: .left,
+            verticalAlign: .top,
+            maxLines: 0,
+            overflow: "none",
+            sizingMode: "auto",
+            spans: []
+        )
+    }
+
+    private static func sampleMediaSource(_ url: String = "https://example.com/media") -> CampaignCanvasMediaSource {
+        CampaignCanvasMediaSource(url: url, darkUrl: nil, placeholder: nil)
+    }
+
+    private static let allSampleWidgets: [CampaignCanvasWidget] = [
+        .text(box: .none, block: sampleTextBlock(), shadow: nil),
+        .image(
+            box: .none,
+            source: sampleMediaSource("https://example.com/img.png"),
+            fit: "cover",
+            positionX: 0.5,
+            positionY: 0.5,
+            scale: 1,
+            tintColor: nil
+        ),
+        .button(
+            box: .none,
+            label: sampleTextBlock(),
+            cornerRadius: .zero,
+            style: .fill(fill: .none),
+            shadow: nil,
+            isPrimary: true,
+            isDestructive: false,
+            applyDestructiveStyling: false,
+            actions: [],
+            confirm: CampaignCanvasConfirmDialog()
+        ),
+        .progress(
+            box: .none,
+            valueMode: .percent,
+            percent: "50",
+            rangeStart: "0",
+            rangeCurrent: "50",
+            rangeEnd: "100",
+            indicator: .none,
+            track: .none,
+            cornerRadius: .zero,
+            animateOnAppear: CampaignCanvasAppearAnimation(enabled: false, durationMs: 0)
+        ),
+        .lottie(
+            box: .none,
+            source: sampleMediaSource("https://example.com/anim.json"),
+            autoplay: true,
+            loop: true,
+            fit: "contain"
+        ),
+        .video(
+            box: .none,
+            source: sampleMediaSource("https://example.com/video.mp4"),
+            autoplay: true,
+            loop: true,
+            muted: true,
+            showControls: false,
+            fit: "cover"
+        ),
+        .container(
+            fill: .none,
+            cornerRadius: .zero,
+            border: nil,
+            shadow: nil
+        ),
+        .divider(
+            box: .none,
+            axis: .horizontal,
+            pattern: .solid,
+            strokeCap: .butt,
+            inset: 0,
+            dashPattern: [],
+            color: CampaignColor.literal("#000000")
+        ),
+        .carousel(
+            box: .none,
+            slides: [],
+            viewportFraction: 0.8,
+            itemSpacing: 8,
+            autoPlay: false,
+            autoPlayInterval: 3,
+            animationDuration: 0.3,
+            infiniteScroll: false,
+            cornerRadius: 0,
+            showIndicator: true,
+            dotWidth: 8,
+            dotHeight: 8,
+            dotSpacing: 4,
+            dotColor: nil,
+            activeDotColor: nil,
+            indicatorEffect: "scale"
+        ),
+        .story(
+            box: .none,
+            pages: [],
+            cardAspectRatio: 9 / 16,
+            cardCornerRadius: 8,
+            cardSpacing: 8,
+            showRail: true,
+            thumbnailVideoPlayback: .sequential,
+            restartOnCompleted: false,
+            startMuted: true,
+            chrome: CampaignCanvas(version: 2, width: 100, height: 100, background: .none, children: [])
+        ),
+        .storyProgress(
+            box: .none,
+            activeColor: nil,
+            trackColor: nil,
+            barHeight: 2,
+            cornerRadius: 1,
+            gap: 4
+        ),
+        .storyClose(
+            box: .none,
+            visible: true,
+            iconColor: nil,
+            backgroundColor: nil
+        ),
+        .storyMute(
+            box: .none,
+            visible: true,
+            iconColor: nil,
+            backgroundColor: nil
+        ),
+        .timer(
+            box: .none,
+            preset: "default",
+            separator: ":",
+            units: [:],
+            labels: [:],
+            labelSpans: [:],
+            textWidgets: [:],
+            style: CampaignCanvasTimerUnitStyle(
+                digitTextStyle: nil,
+                digitTypography: nil,
+                digitColor: nil,
+                labelTypography: nil,
+                labelColor: nil,
+                boxFill: .none,
+                cornerRadius: .zero
+            ),
+            unitOverrides: [:],
+            layout: CampaignCanvasTimerLayout()
+        )
+    ]
 }

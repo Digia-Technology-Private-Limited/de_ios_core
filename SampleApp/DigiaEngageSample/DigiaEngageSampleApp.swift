@@ -3,7 +3,13 @@ import SwiftUI
 
 @main
 struct DigiaEngageSampleApp: App {
+    /// True when the app is launched as the host of `DigiaEngageSampleTests`. The tests drive the
+    /// SDK themselves, so the app must not start it against live campaigns underneath them.
+    private let isTestHost =
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     init() {
+        guard !isTestHost else { return }
         Task {
             try await Digia.initialize(
                 DigiaConfig(
@@ -16,7 +22,11 @@ struct DigiaEngageSampleApp: App {
 
     var body: some Scene {
         WindowGroup {
-            DigiaSampleRootView()
+            if isTestHost {
+                Text("Running DigiaEngageSampleTests")
+            } else {
+                DigiaSampleRootView()
+            }
         }
     }
 }
@@ -26,7 +36,8 @@ private struct DigiaSampleRootView: View {
 
     var body: some View {
         DigiaHost {
-            DUIFactory.shared.createInitialPage()
+            // `DUIFactory` was removed with the DUI framework (4bc23bd); a plain host screen.
+            Text("Digia Engage Sample")
         }
         .overlay(alignment: .top) {
             if case .failed(let message) = initializationState {

@@ -35,3 +35,16 @@ FatBuild/.archives
 FatBuild/DigiaEngageFat.xcodeproj/
 DigiaEngage.xcframework
 dist/
+
+# Test coverage output (run-tests.sh)
+coverage/
+
+# Allure raw results and generated HTML report (run-tests.sh)
+/allure-results/
+/reports/
+
+# xcode-build-server config for SourceKit-LSP (machine-specific paths)
+buildServer.json
+
+# Local xcodebuild output
+/build/

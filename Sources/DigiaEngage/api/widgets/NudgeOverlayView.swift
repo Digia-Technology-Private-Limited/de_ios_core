@@ -2,12 +2,12 @@ import Combine
 import SwiftUI
 
 @MainActor
-private func dismissNudgeFromCta() {
+func dismissNudgeFromCta() {
     SDKInstance.shared.markNudgeDismissed(reason: .ctaAction)
 }
 
 @MainActor
-private func performCanvasAction(
+func performCanvasAction(
     _ request: CampaignCanvasActionRequest,
     variables: VariableContext?,
     dismiss: @escaping () -> Void
@@ -83,7 +83,7 @@ struct NudgeOverlayView: View {
     }
 }
 
-private func nudgeScrimColor(_ surface: NudgeSurface) -> Color {
+func nudgeScrimColor(_ surface: NudgeSurface) -> Color {
     surface.barrierColor ?? Color.black.opacity(0.4)
 }
 
@@ -123,7 +123,7 @@ private struct NudgeCoverPresenter: View {
 // MARK: - Full Screen (canvas only)
 
 @MainActor
-private struct NudgeFullScreenView: View {
+struct NudgeFullScreenView: View {
     let presentation: DigiaNudgePresentation
     @Environment(\.layoutDirection) private var layoutDirection
 
@@ -214,7 +214,7 @@ private struct NudgeFullScreenView: View {
         .onAppear { SDKInstance.shared.reportNudgeImpression() }
     }
 
-    private func safeCloseButton(bounds: CGSize) -> NudgeCloseButtonConfig {
+    func safeCloseButton(bounds: CGSize) -> NudgeCloseButtonConfig {
         let close = surface.closeButton
         let touchSize = max(close.diameter, 44)
         return NudgeCloseButtonConfig(
@@ -232,7 +232,7 @@ private struct NudgeFullScreenView: View {
 // MARK: - Bottom sheet (native, via shared DigiaBottomSheet)
 
 @MainActor
-private struct NudgeSheetView: View {
+struct NudgeSheetView: View {
     let presentation: DigiaNudgePresentation
 
     private var authoredSurface: NudgeSurface { presentation.config.surface }
@@ -322,7 +322,7 @@ private struct NudgeSheetView: View {
         .onAppear { SDKInstance.shared.reportNudgeImpression() }
     }
 
-    private var cardCloseButton: AnyView? {
+    var cardCloseButton: AnyView? {
         guard surface.showCloseButton else { return nil }
         guard surface.closeButton.placement?.mode != .outside,
               surface.closeButton.placement?.rect == nil else { return nil }
@@ -356,7 +356,7 @@ private struct NudgeSheetView: View {
 // MARK: - Center dialog (custom overlay)
 
 @MainActor
-private struct NudgeDialogContainer: View {
+struct NudgeDialogContainer: View {
     let presentation: DigiaNudgePresentation
     let viewportSize: CGSize
     let safeAreaInsets: UIEdgeInsets
@@ -368,6 +368,10 @@ private struct NudgeDialogContainer: View {
     private var scrimColor: Color { nudgeScrimColor(surface) }
     private var backgroundColor: Color { surface.backgroundColor ?? .white }
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
+
+    func handleBackdropTap() {
+        if surface.backdropDismissible { dismiss() }
+    }
 
     var body: some View {
         let insets = surface.useSafeArea ? safeAreaInsets : .zero
@@ -382,7 +386,7 @@ private struct NudgeDialogContainer: View {
         ZStack {
             scrimColor
                 .contentShape(Rectangle())
-                .onTapGesture { if surface.backdropDismissible { dismiss() } }
+                .onTapGesture { handleBackdropTap() }
 
             Group {
                 if let canvas = presentation.config.canvas {
@@ -496,7 +500,7 @@ private struct NudgeDialogContainer: View {
     /// Mirrors Flutter's `_DialogFrame`: centred, width-constrained, fully
     /// rounded surface that sizes to its content up to the available area, with
     /// an optional close button.
-    private func dialogPanel(width: CGFloat, maxHeight: CGFloat) -> some View {
+    func dialogPanel(width: CGFloat, maxHeight: CGFloat) -> some View {
         ZStack(alignment: .topTrailing) {
             ScrollView {
                 VStack(spacing: 0) { renderedContent }

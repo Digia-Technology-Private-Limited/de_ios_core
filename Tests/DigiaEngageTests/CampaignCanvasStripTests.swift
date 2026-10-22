@@ -4,7 +4,7 @@ import Testing
 
 /// The two canvas strips — carousel and story — parse as *widgets* inside an
 /// ordinary inline canvas, which is why neither has a campaign type of its own.
-@Suite("Campaign Canvas strips")
+@Suite("Campaign Canvas strips", .tags(.canvas, .contract))
 struct CampaignCanvasStripTests {
     private func nestedCanvas(version: Int = 2, height: Int = 180) -> [String: Any] {
         [

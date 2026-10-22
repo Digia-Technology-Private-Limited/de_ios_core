@@ -52,6 +52,11 @@ struct FloaterOverlayView: View {
     activeFloaterWindowGeometry.safeArea
 }
 
+/// Test seam for `activeFloaterWindowGeometry`. The package's test bundle runs without a host app,
+/// so there is no window scene to read the device from; snapshot tests pin the device here. Never
+/// set in production, where `nil` leaves the lookup below unchanged.
+@MainActor var activeFloaterWindowGeometryOverride: (bounds: CGRect, safeArea: EdgeInsets)?
+
 /// The device's screen box and its safe-area insets, taken from the same `UIWindow`.
 ///
 /// Both together, deliberately. Reading the size from SwiftUI and the insets from UIKit is how the
@@ -64,6 +69,7 @@ struct FloaterOverlayView: View {
 /// Taking both from the window makes the pair consistent by construction, whatever the host app did
 /// with `DigiaHost`.
 @MainActor var activeFloaterWindowGeometry: (bounds: CGRect, safeArea: EdgeInsets) {
+    if let override = activeFloaterWindowGeometryOverride { return override }
     let window = UIApplication.shared.connectedScenes
         .compactMap { $0 as? UIWindowScene }
         .filter { $0.activationState == .foregroundActive }
@@ -1118,6 +1124,10 @@ private struct FloaterChromeIcon: View {
                 }
             }
             .frame(width: size, height: size)
+            // The whole icon square is the target. A `.plain` button hit-tests only what its
+            // label draws, so a stroked glyph took taps on its strokes alone and a tap between
+            // them — the centre of the collapse arrows — fell through to the swipe strip below.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }

@@ -1,0 +1,88 @@
+{
+  "id": "mock-guide-tooltip-single-001",
+  "projectId": "local-mock",
+  "name": "Tooltip Single Step Callout",
+  "campaignType": "guide",
+  "campaignKey": "test_guide_tooltip_single",
+  "status": "active",
+  "templateConfig": {
+    "templateType": "tooltip",
+    "templateId": "tpl_tooltip_single",
+    "designWidth": 360,
+    "outsideTapBehavior": "next",
+    "steps": [
+      {
+        "id": "step_tooltip_single_search",
+        "sequenceOrder": 0,
+        "anchorKey": "home_header_search",
+        "layoutMode": "canvas",
+        "placement": "bottom",
+        "gap": 10,
+        "showArrow": true,
+        "canvas": {
+          "version": 2,
+          "canvasWidth": 260,
+          "canvasHeight": 90,
+          "background": {
+            "type": "solid",
+            "color": "#FFFFFF"
+          },
+          "children": [
+            {
+              "kind": "widget",
+              "id": "title",
+              "rect": { "x": 0.08, "y": 0.15, "width": 0.84, "height": 0.4 },
+              "widget": {
+                "id": "title_text",
+                "type": "digia/text",
+                "props": {
+                  "spans": [
+                    { "text": "Quick Search Callout", "fontSize": 15, "fontWeight": "bold", "color": "#0F172A" }
+                  ]
+                }
+              }
+            },
+            {
+              "kind": "widget",
+              "id": "dismiss_btn",
+              "rect": { "x": 0.08, "y": 0.55, "width": 0.35, "height": 0.35 },
+              "widget": {
+                "id": "dismiss_button",
+                "type": "digia/button",
+                "props": {
+                  "label": {
+                    "horizontalAlign": "center",
+                    "verticalAlign": "center",
+                    "maxLines": 1,
+                    "overflow": "ellipsis",
+                    "spans": [
+                      {
+                        "text": "Close",
+                        "typography": { "fontSize": 16, "fontWeight": 600 },
+                        "color": { "value": "#FFFFFF" }
+                      }
+                    ]
+                  },
+                  "style": {
+                    "variant": "fill",
+                    "fill": { "type": "solid", "color": { "value": "#6366F1" } }
+                  },
+                  "cornerRadius": 6,
+                  "onClick": {
+                    "steps": [
+                      { "type": "Action.dismiss" }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "frequency": null,
+  "createdBy": "local-mock",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "updatedAt": "2026-01-01T00:00:00.000Z"
+}
