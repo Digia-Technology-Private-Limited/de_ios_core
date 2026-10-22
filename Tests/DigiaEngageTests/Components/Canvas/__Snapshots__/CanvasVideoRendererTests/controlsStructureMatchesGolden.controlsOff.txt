@@ -1,8 +1,4 @@
 AVPlayerView
   AVPlayerViewControllerContentView
-    AVStackArrangementView
-      AVArrangementContainerView
-        AVPlaybackContentContainerView
-          __AVPlayerLayerView
-    AVStackArrangementView
-      AVArrangementContainerView
+    AVPlaybackContentContainerView
+      __AVPlayerLayerView

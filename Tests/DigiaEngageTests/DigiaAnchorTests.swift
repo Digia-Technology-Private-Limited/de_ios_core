@@ -287,7 +287,7 @@ extension DigiaEngageTests {
         #expect(!recorder.displayed)
         #expect(recorder.dropReason == .cancelled)
         #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (target_lost)"))
-        #expect(try digiaEventNames(sdk).isEmpty)
+        #expect(try await digiaEventNames(sdk).isEmpty)
     }
     @Test("rectangle anchor unregistered by key during the delay: target_lost to the CEP only, next turn (A52)")
     func keylessUnregisterDuringDelayTellsCepOnly() async throws {
@@ -303,7 +303,7 @@ extension DigiaEngageTests {
         #expect(sdk.guideOrchestrator.state == nil)
         #expect(!recorder.displayed)
         #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (target_lost)"))
-        #expect(try digiaEventNames(sdk).isEmpty)
+        #expect(try await digiaEventNames(sdk).isEmpty)
     }
 }
 

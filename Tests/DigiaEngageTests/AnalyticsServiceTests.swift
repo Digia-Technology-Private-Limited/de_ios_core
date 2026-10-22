@@ -28,10 +28,13 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
     var callCount: Int { _callCount }
     /// When each track call arrived, so a test can assert the gap between sends instead of racing
     /// a wall-clock window on a main actor that other suites keep busy.
-    private(set) var callTimes: [ContinuousClock.Instant] = []
+    private(set) var callTimes: [TimeInterval] = []
     var responseFactory: (Int) -> Int
     /// How long a track call takes to answer — lets a test capture while a send is in flight.
     var responseDelayMs: UInt64 = 0
+    /// While true a track call does not answer — lets a test capture while a send is in flight
+    /// without guessing how long that window stays open on a busy main actor.
+    var holdsResponses = false
     /// The events of each track body, in send order.
     private(set) var batches: [[[String: Any]]] = []
     var batchSizes: [Int] { batches.map(\.count) }
@@ -44,7 +47,7 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
         guard request.url.absoluteString == DigiaEndpoints.track else {
             return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
         }
-        callTimes.append(.now)
+        callTimes.append(ProcessInfo.processInfo.systemUptime)
         _callCount += 1
         if let body = request.body,
             let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
@@ -53,6 +56,7 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
             batches.append(events)
         }
         let status = responseFactory(_callCount)
+        if responseDelayMs > 0 { try await Task.sleep(nanoseconds: responseDelayMs * 1_000_000) }
         while holdsResponses { try await Task.sleep(nanoseconds: 5_000_000) }
         return NetworkResponse(
             statusCode: status, headers: [:], body: nil, isSuccessful: (200..<300).contains(status))
@@ -440,7 +444,7 @@ struct AnalyticsServiceTests {
         let times = fakeSender.callTimes
         try #require(times.count == 2)
         #expect(
-            times[1] - times[0] >= .milliseconds(380), "not before the configured interval (400 ms)"
+            times[1] - times[0] >= 0.380, "not before the configured interval (400 ms)"
         )
     }
 
@@ -458,7 +462,7 @@ struct AnalyticsServiceTests {
         // This capture's own dispatch is skipped ("already dispatching") and arms no timer.
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("second"))
 
-        let releasedAt = ContinuousClock.now
+        let releasedAt = ProcessInfo.processInfo.systemUptime
         fakeSender.holdsResponses = false  // #1 finishes; the follow-up timer starts from here
 
         try await waitUntil { fakeSender.callCount == 2 }
@@ -468,30 +472,8 @@ struct AnalyticsServiceTests {
         let times = fakeSender.callTimes
         try #require(times.count == 2)
         #expect(
-            times[1] - releasedAt >= .milliseconds(480),
+            times[1] - releasedAt >= 0.480,
             "batch size 1 does not shorten the interval (500 ms)")
-    }
-
-    @Test("an event captured during a send waits for the interval instead of being stranded")
-    func eventCapturedDuringSendWaitsForInterval() async throws {
-        let sender = FakeAnalyticsSender()
-        sender.responseDelayMs = 150
-        let service = makeService(
-            config: AnalyticsConfig(flushIntervalMs: 500, flushBatchSize: 10),
-            sender: sender
-        )
-
-        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("first"))
-        service.flush()
-        try await waitUntil { sender.callCount == 1 }  // send #1 is in flight
-        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("second"))
-
-        try await waitUntil { service.queue.size == 1 && sender.callCount == 1 }  // #1 finished
-        try await sleepMillis(200)
-        #expect(sender.callCount == 1, "not before the interval")
-
-        try await waitUntil { sender.callCount == 2 && service.queue.size == 0 }
-        #expect(service.queue.size == 0)
     }
 
     @Test("an event captured during a send waits for the interval instead of being stranded")
@@ -536,7 +518,7 @@ struct AnalyticsServiceTests {
         // A stalled main actor only delays the resend, so the gap can only grow under load.
         let times = fakeSender.callTimes
         try #require(times.count == 2)
-        #expect(times[1] - times[0] >= .milliseconds(980), "only the retry may resend (1000 ms)")
+        #expect(times[1] - times[0] >= 0.980, "only the retry may resend (1000 ms)")
     }
 
     // ── Test Kit mode ─────────────────────────────────────────────────────────
