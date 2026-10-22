@@ -272,7 +272,7 @@ extension DigiaEngageTests {
         #expect(completed?["item_total"] as? Int == 2)
     }
 
-    @Test("anchor leaves before the step shows: cancelled to the CEP only, nothing to Digia (A40)")
+    @Test("anchor leaves before the step shows: target_lost to the CEP only, nothing to Digia (A40)")
     func removedAnchorBeforeStepShowsTellsCepOnly() async throws {
         let (sdk, window) = try await makeGuideInstance(stepCount: 1, delayInMs: 5_000)
         let recorder = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
@@ -282,14 +282,14 @@ extension DigiaEngageTests {
         await nextTurn()
 
         #expect(sdk.guideOrchestrator.state == nil)
-        // The CEP is told dismissed(cancelled); the coordinator settles a
-        // presentation that never displayed as a cancelled drop.
+        // The CEP is told dismissed(target_lost), as Android; the coordinator
+        // settles a presentation that never displayed as a cancelled drop.
         #expect(!recorder.displayed)
         #expect(recorder.dropReason == .cancelled)
-        #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (cancelled)"))
+        #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (target_lost)"))
         #expect(try digiaEventNames(sdk).isEmpty)
     }
-    @Test("rectangle anchor unregistered by key during the delay: cancelled to the CEP only, next turn (A52)")
+    @Test("rectangle anchor unregistered by key during the delay: target_lost to the CEP only, next turn (A52)")
     func keylessUnregisterDuringDelayTellsCepOnly() async throws {
         let (sdk, window) = try await makeGuideInstance(stepCount: 1, delayInMs: 5_000)
         try #require(window.subviews.first as? DigiaAnchorView)?.removeFromSuperview()
@@ -302,7 +302,7 @@ extension DigiaEngageTests {
 
         #expect(sdk.guideOrchestrator.state == nil)
         #expect(!recorder.displayed)
-        #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (cancelled)"))
+        #expect(recorder.outcome == .dropped(reason: .cancelled, detail: "ended before it displayed (target_lost)"))
         #expect(try digiaEventNames(sdk).isEmpty)
     }
 }
@@ -361,8 +361,11 @@ private func makeGuideInstance(
 @MainActor
 private func digiaEventNames(_ sdk: SDKInstance) throws -> [String] {
     let analytics = try #require(sdk.services?.analyticsService)
+    // The experience's own lifecycle; delivery accounting (Triggered/Dropped) is
+    // covered in DigiaHostDeliveryTests.
     return analytics.queue.peek(maxCount: 100).compactMap { $0.payload["event_name"] as? String }
         .filter { $0.hasPrefix("Digia ") }
+        .filter { $0 != "Digia Experience Triggered" && $0 != "Digia Experience Dropped" }
 }
 
 private struct AnchoredScrollContent: View {

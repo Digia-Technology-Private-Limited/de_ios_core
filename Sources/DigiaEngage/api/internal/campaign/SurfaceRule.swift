@@ -42,6 +42,9 @@ struct SurfaceOccupant: Equatable {
     let isLiveTest: Bool
     /// Whether it recorded an impression. Only read for an inline slot (SR05).
     let hasDisplayed: Bool
+    /// The occupant's presentation, so a displacement can describe itself on
+    /// that presentation's drop. Nil for a live test.
+    var presentationId: String? = nil
 }
 
 /// The rule's answer for one arriving campaign.

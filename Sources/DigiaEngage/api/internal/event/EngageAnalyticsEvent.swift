@@ -728,6 +728,45 @@ enum FloaterEvent {
     }
 }
 
+// ── Delivery (every campaign type; ai_docs/campaign-delivery-events.md) ──────
+
+enum DeliveryEvent {
+    /// An organic trigger resolved to a campaign in the bundle. Paired with
+    /// ``Dropped`` by `impression_id`.
+    struct Triggered: EngageAnalyticsEvent {
+        /// The CEP plugin id that delivered the trigger, or `host` for
+        /// `Digia.triggerCampaign`.
+        let triggerSource: String
+        var screenName: String?
+
+        var eventName: String { "Digia Experience Triggered" }
+        var properties: [String: Any] {
+            nonNull([("trigger_source", triggerSource), ("screen_name", screenName)])
+        }
+    }
+
+    /// A triggered campaign settled `dropped` without displaying.
+    struct Dropped: EngageAnalyticsEvent {
+        /// The ``DropReason`` wire value.
+        let dropReason: String
+        let triggerSource: String
+        /// The screen at the drop, not at the trigger.
+        var screenName: String?
+        /// The closed per-reason properties ("Drop detail" in the spec). Keys
+        /// never collide with the three above.
+        var detail: [String: Any] = [:]
+
+        var eventName: String { "Digia Experience Dropped" }
+        var properties: [String: Any] {
+            nonNull([
+                ("drop_reason", dropReason),
+                ("trigger_source", triggerSource),
+                ("screen_name", screenName),
+            ]).merging(detail) { base, _ in base }
+        }
+    }
+}
+
 // MARK: - Helpers
 
 /// Builds a wire map from named fields, dropping any whose value is nil.

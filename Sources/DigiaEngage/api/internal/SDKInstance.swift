@@ -248,6 +248,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
         )
         inlineController.onCampaignRemoved = { [weak self] payload, reason in
+            // Removed before its impression: the CEP still hears `user_close`;
+            // delivery detail says what actually happened.
+            if reason == .userClose, let presentation = self?.coordinator.ownerOf(payload),
+               presentation.state == .pending
+            {
+                presentation.noteDropDetail("cancel_cause", "slot_removed")
+            }
             self?.events.inlineRemoved(payload, reason: reason)
         }
         floaterOrchestrator = FloaterOrchestrator(
@@ -688,13 +695,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// ready is dropped at once, never held (`routeOrDrop`). Never make this
     /// `async` — spec §10.3.
     func deliver(_ trigger: CEPTriggerPayload) -> CampaignPresentation {
-        let controller = coordinator.open(trigger, owner: activePlugin?.id ?? "")
+        let owner = activePlugin?.id ?? ""
+        let controller = coordinator.open(trigger, owner: owner)
         // Before routing, so a trigger that is turned away still shows up on
         // the timeline as having arrived. "Nothing happened at all" and "it
         // arrived and we turned it away" are the two answers a campaign creator
         // most needs to tell apart.
         observeDelivery(controller)
-        routeOrDrop(controller)
+        routeOrDrop(controller, source: owner)
         return controller.presentation
     }
 
@@ -722,18 +730,18 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         hostTriggersCampaigns = true
         let controller = coordinator.open(trigger, owner: Self.hostOwner)
         observeDelivery(controller)
-        routeOrDrop(controller)
+        routeOrDrop(controller, source: Self.hostTriggerSource)
         return controller.presentation
     }
 
     /// The state gate `deliver` and `triggerCampaign` share, as Flutter and Android: route when
     /// ready, otherwise settle at once as dropped so the CEP gets its slot back. Core never
     /// holds a trigger (SP5); the reason says which of the not-ready states it met.
-    private func routeOrDrop(_ controller: PresentationController) {
+    private func routeOrDrop(_ controller: PresentationController, source: String) {
         let drop: (DropReason, String)
         switch sdkState {
         case .ready:
-            routeNow(controller)
+            routeNow(controller, source: source)
             return
         case .notInitialized:
             drop = (.notInitialized, "Digia.initialize() has not been called")
@@ -749,8 +757,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Owner recorded for a delivery the host app asked for itself, with no CEP involved.
     private static let hostOwner = "<host>"
 
+    /// The `trigger_source` of a delivery the host app asked for itself.
+    private static let hostTriggerSource = "host"
+
     /// Routes a delivery against the store as it stands right now.
-    private func routeNow(_ controller: PresentationController) {
+    private func routeNow(_ controller: PresentationController, source: String) {
+        recordDelivery(controller, source: source)
         // Routing must see the stamped payload: it is the instance every render
         // surface stores and hands back, and the only thing that leads an event
         // back to this presentation.
@@ -761,7 +773,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             coordinator.accept(
                 controller, kind: kind, dueDelay: dueDelay,
                 surfaceKind: campaign.flatMap(Self.healthSurfaceKind))
-            if awaitsAnchorLayout(payload) { coordinator.awaitAnchor(payload, dueDelay: dueDelay) }
+            if awaitsAnchorLayout(payload) {
+                coordinator.awaitAnchor(
+                    payload, dueDelay: dueDelay,
+                    anchorKey: campaign?.guideConfig?.steps.first?.target.anchorKey)
+            }
         case .dropped(let reason, let detail, let cause):
             // A4 (SR64): a blocker that was never displayed is not named, so
             // HealthSink (which requires a blocker key) sends nothing for it.
@@ -775,7 +791,41 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 )
             }
             if let cause { controller.dropExtras = ["cause": cause] }
+            controller.dropDeliveryDetail = lastDropDeliveryDetail
+            if let cause { controller.noteDropDetail("cause", cause) }
             controller.settle(.dropped(reason: reason, detail: detail))
+        }
+    }
+
+    /// Records `Digia Experience Triggered` for a trigger whose campaign is in
+    /// the bundle, and `Digia Experience Dropped` if it later settles dropped.
+    ///
+    /// Keyed on the settled outcome rather than on each drop site, so every
+    /// later drop is counted. A trigger whose campaign is unknown sends neither —
+    /// there is no campaign id to attribute it to
+    /// (ai_docs/campaign-delivery-events.md). The id is passed explicitly: the
+    /// coordinator forgets the presentation at settle.
+    private func recordDelivery(_ controller: PresentationController, source: String) {
+        guard let analytics = services?.analyticsService,
+            let campaign = campaignStore.find(Self.routingKey(controller.trigger))
+        else { return }
+        let trigger = controller.trigger
+        analytics.capture(
+            DeliveryEvent.Triggered(triggerSource: source, screenName: _currentScreen),
+            payload: trigger, campaignId: campaign.id, campaignType: campaign.campaignType,
+            impressionId: controller.id)
+        Task { @MainActor [weak self] in
+            guard case .dropped(let reason, _) = await controller.presentation.outcome.value
+            else { return }
+            // The screen at the drop, not at the trigger (they differ for a
+            // `cancelled` / `screen_exit`).
+            analytics.capture(
+                DeliveryEvent.Dropped(
+                    dropReason: reason.value, triggerSource: source,
+                    screenName: self?._currentScreen,
+                    detail: controller.dropDeliveryDetail ?? [:]),
+                payload: trigger, campaignId: campaign.id, campaignType: campaign.campaignType,
+                impressionId: controller.id)
         }
     }
 
@@ -1221,16 +1271,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     func routeOrganicTrigger(_ payload: CEPTriggerPayload) -> RoutingVerdict {
         lastCampaignDropReason = nil
         lastSurfaceBlocker = nil
+        lastDropDeliveryDetail = nil
         logVerbose(
             "deliver cepCampaignId='\(payload.cepCampaignId)' "
                 + "campaignKey='\(payload.campaignKey)'")
-        // Route purely by the campaignKey resolved from the store (mirrors
-        // Android) — fall back to cepCampaignId when no campaignKey was supplied.
-        let key = payload.campaignKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedKey =
-            key.isEmpty
-            ? payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
-            : key
+        let resolvedKey = Self.routingKey(payload)
         guard !resolvedKey.isEmpty, let campaign = campaignStore.find(resolvedKey) else {
             lastCampaignDropReason = "no native campaign for key '\(resolvedKey)'"
             logError(
@@ -1247,6 +1292,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             context: OrganicRoutingContext(frequencyManager: services?.frequencyManager))
     }
 
+    /// The store key a trigger routes by. Route purely by the campaignKey
+    /// resolved from the store (mirrors Android) — fall back to cepCampaignId
+    /// when no campaignKey was supplied.
+    private static func routingKey(_ payload: CEPTriggerPayload) -> String {
+        let key = payload.campaignKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty
+            ? payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
+            : key
+    }
+
     /// Abstracts the two points where `route` otherwise diverges between an
     /// organic trigger and a live test — frequency capping, and how a
     /// routed/dropped campaign reports back — so the routing switch itself never
@@ -1255,7 +1310,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private protocol RoutingContext {
         /// A live test takes the §2.2 path through the surface rule.
         var isLiveTest: Bool { get }
-        func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool
+        /// Why the campaign is capped right now, or nil when it may show.
+        func frequencyCapReason(campaignKey: String, policy: FrequencyPolicy?) -> FrequencySkipReason?
         func onInlineRouted(payload: CEPTriggerPayload)
         func onDropped(_ code: DiagnosticReason, message: String)
     }
@@ -1265,18 +1321,18 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let frequencyManager: FrequencyManager?
         var isLiveTest: Bool { false }
 
-        func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool {
+        func frequencyCapReason(campaignKey: String, policy: FrequencyPolicy?) -> FrequencySkipReason? {
             guard
                 let reason = frequencyManager?.blockReason(campaignKey: campaignKey, policy: policy)
             else {
-                return false
+                return nil
             }
             log.d(
                 "Dropped — frequency capped (rule=\(reason), "
                     + "policy=\(String(describing: policy)))",
                 campaign: campaignKey
             )
-            return true
+            return reason
         }
 
         func onInlineRouted(payload: CEPTriggerPayload) {
@@ -1298,7 +1354,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
         var isLiveTest: Bool { true }
 
-        func isFrequencyCapped(campaignKey: String, policy: FrequencyPolicy?) -> Bool { false }
+        func frequencyCapReason(campaignKey: String, policy: FrequencyPolicy?) -> FrequencySkipReason? { nil }
 
         func onInlineRouted(payload: CEPTriggerPayload) {
             // No synchronous way to know a matching DigiaSlot exists anywhere
@@ -1321,14 +1377,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private func surfaceOccupants() -> [SurfaceOccupant] {
         var result: [SurfaceOccupant] = []
         func add(_ kind: SurfaceKind, _ payload: CEPTriggerPayload) {
-            result.append(
-                SurfaceOccupant(
-                    kind: kind,
-                    campaignKey: payload.campaignKey,
-                    cepCampaignId: payload.cepCampaignId,
-                    isLiveTest: isLiveTestCepId(payload.cepCampaignId),
-                    hasDisplayed: events.hasImpressed(payload.cepCampaignId)
-                ))
+            result.append(occupant(kind, payload))
         }
         if let nudge = controller.activeNudge { add(.nudge, nudge.payload) }
         if let survey = surveyOrchestrator.state { add(.survey, survey.payload) }
@@ -1345,6 +1394,59 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             add(.inline(slot: occupant.slot), occupant.payload)
         }
         return result
+    }
+
+    /// The per-reason delivery detail of the last organic drop, moved onto the
+    /// presentation by `routeNow` (ai_docs/campaign-delivery-events.md "Drop
+    /// detail"). Same "last" pattern as `lastSurfaceBlocker`; never read by
+    /// HealthSink.
+    private var lastDropDeliveryDetail: [String: Any]?
+
+    /// A `frequency_capped` verdict, recording which rule of `policy` capped it.
+    private func frequencyCapped(_ cap: FrequencySkipReason, policy: FrequencyPolicy?) -> RoutingVerdict {
+        var detail: [String: Any] = [:]
+        switch cap {
+        case .maxTotal:
+            detail["cap_rule"] = "max_total"
+            if let limit = policy?.maxTotal { detail["cap_limit"] = limit }
+        case .window:
+            detail["cap_rule"] = "window"
+            if let window = policy?.maxPerWindow {
+                detail["cap_window"] = window.window
+                detail["cap_limit"] = window.count
+            }
+        case .stopped:
+            detail["cap_rule"] = "stopped"
+        }
+        lastDropDeliveryDetail = detail
+        return .dropped(reason: .frequencyCapped, detail: nil)
+    }
+
+    /// A `surface_busy` drop's delivery detail naming `blocker`. A live-test
+    /// blocker is a draft and is never named.
+    private func surfaceBusyDetail(_ blocker: SurfaceOccupant) -> [String: Any] {
+        if blocker.isLiveTest {
+            return ["blocking_kind": blocker.kind.wire, "blocking_live_test": true]
+        }
+        var detail: [String: Any] = [
+            "blocking_campaign_key": blocker.campaignKey,
+            "blocking_kind": blocker.kind.wire,
+            "blocking_displayed": blocker.hasDisplayed
+                || dwellTracker.elapsedMs(blocker.cepCampaignId) != nil,
+        ]
+        if let id = campaignStore.find(blocker.campaignKey)?.id { detail["blocking_campaign_id"] = id }
+        return detail
+    }
+
+    private func occupant(_ kind: SurfaceKind, _ payload: CEPTriggerPayload) -> SurfaceOccupant {
+        SurfaceOccupant(
+            kind: kind,
+            campaignKey: payload.campaignKey,
+            cepCampaignId: payload.cepCampaignId,
+            isLiveTest: isLiveTestCepId(payload.cepCampaignId),
+            hasDisplayed: events.hasImpressed(payload.cepCampaignId),
+            presentationId: payload.presentationId
+        )
     }
 
     /// The occupant that turned the last organic trigger away `surface_busy`,
@@ -1369,7 +1471,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 log.d(
                     "Live test displaces \(occupant.kind.wire) '\(occupant.campaignKey)'",
                     campaign: campaignKey)
-                settleSuperseded(occupant)
+                settleSuperseded(occupant, by: incoming, campaignKey: campaignKey, isLiveTest: true)
             }
             return nil
         }
@@ -1377,7 +1479,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .show:
             return nil
         case .replace(let occupant):
-            settleSuperseded(occupant)
+            settleSuperseded(occupant, by: incoming, campaignKey: campaignKey, isLiveTest: false)
             return nil
         case .busy(let blocker):
             if case .inline = incoming, blocker.campaignKey == campaignKey {
@@ -1387,6 +1489,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 let detail = "same campaign already in slot"
                 lastCampaignDropReason = detail
                 lastSurfaceBlocker = nil
+                // Delivery detail still names it: the blocker is the campaign itself.
+                lastDropDeliveryDetail = surfaceBusyDetail(blocker)
                 log.d("Dropped — \(detail)", campaign: campaignKey)
                 context.onDropped(DropReason.surfaceBusy, message: detail)
                 return .dropped(reason: .surfaceBusy, detail: detail)
@@ -1394,6 +1498,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             let detail = "\(blocker.kind.wire) on screen (\(blocker.campaignKey))"
             lastCampaignDropReason = detail
             lastSurfaceBlocker = blocker
+            lastDropDeliveryDetail = surfaceBusyDetail(blocker)
             log.d("Dropped — surface busy: \(detail)", campaign: campaignKey)
             context.onDropped(DropReason.surfaceBusy, message: detail)
             return .dropped(reason: .surfaceBusy, detail: detail)
@@ -1404,8 +1509,24 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// releases a real campaign's CEP slot, and reports an earlier live test
     /// that never showed as superseded on its dashboard row. The one helper
     /// every displacement goes through (SR06).
-    private func settleSuperseded(_ occupant: SurfaceOccupant) {
+    ///
+    /// `incoming`, `campaignKey`, `isLiveTest`: the arrival that displaced it,
+    /// for the occupant's delivery detail.
+    private func settleSuperseded(
+        _ occupant: SurfaceOccupant, by incoming: SurfaceKind, campaignKey: String, isLiveTest: Bool
+    ) {
         let id = occupant.cepCampaignId
+        if let presentation = occupant.presentationId.flatMap(coordinator.controller(forPresentationId:)) {
+            if isLiveTest {
+                presentation.noteDropDetail("superseded_by_live_test", true)
+            } else {
+                presentation.noteDropDetail("superseded_by_campaign_key", campaignKey)
+                if let newer = campaignStore.find(campaignKey)?.id {
+                    presentation.noteDropDetail("superseded_by_campaign_id", newer)
+                }
+            }
+            presentation.noteDropDetail("superseded_by_kind", incoming.wire)
+        }
         // First (SR46): a test's dashboard row gets `failed: superseded`, never
         // a relayed `dismissed` from the teardown below. As Flutter and Android.
         supersedeLiveTest(id)
@@ -1497,6 +1618,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 campaign: key
             )
             context.onDropped(DropReason.screenNotTargeted, message: "screen not targeted")
+            lastDropDeliveryDetail = ["target_screens": Array(campaign.targetScreenNames.prefix(20))]
             return .dropped(
                 reason: .screenNotTargeted,
                 detail:
@@ -1565,9 +1687,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     logNativeGuideStage("route", "result=dropped reason=js_renderer_missing campaign_key=\(key)")
                     return .dropped(reason: .hostNotMounted, detail: message)
                 }
-                if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
+                if let cap = context.frequencyCapReason(campaignKey: key, policy: campaign.frequency) {
                     lastCampaignDropReason = "frequency capped"
-                    return .dropped(reason: .frequencyCapped, detail: nil)
+                    return frequencyCapped(cap, policy: campaign.frequency)
                 }
                 // G1 (plan §2.4): an arriving classic guide goes through the
                 // rule like any guide.
@@ -1590,10 +1712,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 )
                 return .accepted(payload: payload, kind: .modal)
             }
-            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
+            if let cap = context.frequencyCapReason(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
                 logNativeGuideStage("route", "result=dropped reason=frequency_capped campaign_key=\(key)")
-                return .dropped(reason: .frequencyCapped, detail: nil)
+                return frequencyCapped(cap, policy: campaign.frequency)
             }
             // As Flutter: skip steps with no canvas, and show the rest.
             var canvasGuide = guideConfig
@@ -1624,9 +1746,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             logNativeGuideStage("route", "result=accepted campaign_key=\(key)")
             return .accepted(payload: payload, kind: .modal)
         case .nudge(let nudgeConfig):
-            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
+            if let cap = context.frequencyCapReason(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
-                return .dropped(reason: .frequencyCapped, detail: nil)
+                return frequencyCapped(cap, policy: campaign.frequency)
             }
             // Resolve variable context: dashboard schemas define type + fallback;
             // CEP trigger variables win over fallbacks (D3′).
@@ -1647,9 +1769,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 ))
             return .accepted(payload: payload, kind: .modal)
         case .survey(let cfg):
-            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
+            if let cap = context.frequencyCapReason(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
-                return .dropped(reason: .frequencyCapped, detail: nil)
+                return frequencyCapped(cap, policy: campaign.frequency)
             }
             // Checked before the surface rule so a test with no content leaves
             // the screen as it was (§2.2).
@@ -1672,9 +1794,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // Both floater subtypes route through the same gate — a collapsed window of
         // either kind is the same third, non-blocking lane.
         case .floater, .floaterStory:
-            if context.isFrequencyCapped(campaignKey: key, policy: campaign.frequency) {
+            if let cap = context.frequencyCapReason(campaignKey: key, policy: campaign.frequency) {
                 lastCampaignDropReason = "frequency capped"
-                return .dropped(reason: .frequencyCapped, detail: nil)
+                return frequencyCapped(cap, policy: campaign.frequency)
             }
             // Both lanes are one floater: the rule's floater row turns this away
             // over a blocking campaign or over any other floater.
@@ -1699,6 +1821,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     // Another floater on screen is a busy surface, not a broken campaign.
                     if floaterStoryOrchestrator.lastStartFailedBusy {
                         let message = lastCampaignDropReason ?? "story floater start failed"
+                        if let story = floaterStoryOrchestrator.state {
+                            lastDropDeliveryDetail = surfaceBusyDetail(occupant(
+                                floaterStoryOrchestrator.storyOverlayActive ? .floaterExpanded : .floaterCollapsed,
+                                story.payload))
+                        }
                         context.onDropped(DropReason.surfaceBusy, message: message)
                         return .dropped(reason: .surfaceBusy, detail: message)
                     }
@@ -1726,6 +1853,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 )
                 if floaterOrchestrator.lastStartFailedBusy {
                     let message = lastCampaignDropReason ?? "floater start failed"
+                    if let floater = floaterOrchestrator.state {
+                        lastDropDeliveryDetail = surfaceBusyDetail(occupant(
+                            floaterOrchestrator.surface == .expanded ? .floaterExpanded : .floaterCollapsed,
+                            floater.payload))
+                    }
                     context.onDropped(DropReason.surfaceBusy, message: message)
                     return .dropped(reason: .surfaceBusy, detail: message)
                 }
@@ -2826,15 +2958,20 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// The anchor hosting the current step left the screen. Same events as
     /// Flutter (`guide_showcase_manager.dart` `dismiss()` / `_finish`):
     /// - not shown yet (still in the first step's delay): the CEP alone is told
-    ///   `dismissed` with the caller's reason, or `cancelled` when the SDK ended
-    ///   an unseen guide; Digia records nothing for an unseen guide.
+    ///   `dismissed` with the caller's reason, or `target_lost` (as Android) when
+    ///   the anchor went away; Digia records nothing for an unseen guide.
     /// - shown: a lost target in place, a screen exit after a host screen change.
     ///   On the last step of a multi-step guide that is a completion: Digia
     ///   Completed, CEP `completed`, no Digia dismiss (R4-D2, ADR-004).
     private func dismissGuideForRemovedAnchor(_ state: ActiveGuideState, reason: DismissReason? = nil) {
         guard dwellTracker.elapsedMs(state.payload.cepCampaignId) != nil else {
             guideOrchestrator.dismiss()
-            events.toCep(.dismissed(reason: reason ?? .cancelled), payload: state.payload)
+            if let anchorKey = state.currentStep?.target.anchorKey {
+                coordinator.ownerOf(state.payload)?.noteDropDetail("anchor_key", anchorKey)
+            }
+            // As Android: the anchor it was pinned to went away (the
+            // coordinator turns this into `cancelled`, cancel_cause `target_lost`).
+            events.toCep(.dismissed(reason: reason ?? .targetLost), payload: state.payload)
             guideCompletionFired = false
             pendingGuideDismissReason = nil
             return
@@ -3029,7 +3166,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 payload,
                 reason: Self.dropReason(for: failure),
                 detail: failure?.rawValue ?? "Anchorless Spotlight image could not be loaded",
-                extras: Self.healthExtras(for: failure)
+                extras: Self.healthExtras(for: failure),
+                deliveryDetail: Self.renderFailureDetail(failure, state)
             )
             guideCompletionFired = false
         } else {
@@ -3099,6 +3237,25 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .unsupportedLayout: return .invalidConfig
         case nil: return .timeout
         }
+    }
+
+    /// Delivery detail for a guide render failure (ai_docs/campaign-delivery-events.md).
+    private static func renderFailureDetail(
+        _ failure: AnchorlessFailure?, _ state: ActiveGuideState
+    ) -> [String: Any] {
+        let target = state.currentStep?.target
+        var detail: [String: Any] = ["step_index": state.stepIndex]
+        switch failure {
+        case .pageKeyMismatch:
+            if let pageKey = target?.anchorlessTarget?.pageKey { detail["page_key"] = pageKey }
+        case .invalidTarget, .invalidGeometry:
+            if let anchorKey = target?.anchorKey { detail["anchor_key"] = anchorKey }
+        case .unsupportedLayout:
+            return ["cause": "anchorless_layout"]
+        case nil:
+            detail["cause"] = "image_load"
+        }
+        return detail
     }
 
     /// Health extras for an anchorless drop: `invalid_config` needs its cause.
