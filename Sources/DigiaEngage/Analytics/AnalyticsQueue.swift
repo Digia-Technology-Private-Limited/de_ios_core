@@ -1,5 +1,7 @@
 import Foundation
 
+private let log = DigiaLogger("analytics")
+
 struct QueueEntry: @unchecked Sendable {
     let eventId: String
     let payload: [String: Any]
@@ -10,87 +12,82 @@ struct QueueEntry: @unchecked Sendable {
     var attempts: Int
 }
 
-final class AnalyticsQueue {
-    private let storage: LocalStorage
-    private static let key = "queue"
+/// FIFO entries in memory, holding at most [limit] (or the caller's smaller
+/// cap) by dropping the oldest. Not thread-safe; its owner serializes access.
+struct BoundedEntryBuffer {
+    let limit: Int
+    private(set) var entries: [QueueEntry] = []
 
-    init(storage: LocalStorage) {
-        self.storage = storage
+    init(limit: Int) {
+        self.limit = limit
     }
 
-    var size: Int { load().count }
+    var count: Int { entries.count }
 
-    func append(_ entry: QueueEntry, maxEvents: Int) {
-        var entries = load()
+    mutating func append(_ entry: QueueEntry, maxEvents: Int) {
+        entries.removeAll { $0.eventId == entry.eventId }
         entries.append(entry)
-        if entries.count > maxEvents {
-            entries = Array(entries.dropFirst(entries.count - maxEvents))
+        let overflow = entries.count - min(limit, maxEvents)
+        if overflow > 0 {
+            entries.removeFirst(overflow)
+            log.w("Memory queue exceeded its cap — dropping \(overflow) oldest event(s)")
         }
-        save(entries)
     }
 
-    func peek(maxCount: Int) -> [QueueEntry] {
-        Array(load().prefix(maxCount))
+    func prefix(_ count: Int) -> [QueueEntry] {
+        Array(entries.prefix(max(0, count)))
     }
 
-    func remove(eventIds: [String]) {
-        let ids = Set(eventIds)
-        save(load().filter { !ids.contains($0.eventId) })
+    mutating func remove(eventIds: Set<String>) {
+        entries.removeAll { eventIds.contains($0.eventId) }
     }
 
-    /// Increments the attempt counter on the matching entries and returns their
-    /// post-increment state, so the caller can decide whether any of them have
-    /// now exceeded the retry cap.
-    @discardableResult
-    func incrementAttempt(eventIds: [String]) -> [QueueEntry] {
-        let ids = Set(eventIds)
+    mutating func incrementAttempt(eventIds: Set<String>) -> [QueueEntry] {
         var updated: [QueueEntry] = []
-        let entries = load().map { entry -> QueueEntry in
-            guard ids.contains(entry.eventId) else { return entry }
-            var e = entry
-            e.attempts += 1
-            updated.append(e)
-            return e
+        for index in entries.indices where eventIds.contains(entries[index].eventId) {
+            entries[index].attempts += 1
+            updated.append(entries[index])
         }
-        save(entries)
         return updated
     }
 
-    func clear() {
-        storage.removeObject(forKey: Self.key)
+    mutating func removeAll() {
+        entries.removeAll()
+    }
+}
+
+/// An in-memory ``AnalyticsQueueProtocol``: events last for this process only.
+/// For tests, and for a container built without persistent storage.
+final class MemoryAnalyticsQueue: AnalyticsQueueProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer: BoundedEntryBuffer
+
+    init(limit: Int = .max) {
+        buffer = BoundedEntryBuffer(limit: limit)
     }
 
-    // MARK: - Persistence
+    var size: Int { lock.withLock { buffer.count } }
 
-    private func load() -> [QueueEntry] {
-        guard
-            let str = storage.string(forKey: Self.key),
-            let data = str.data(using: .utf8),
-            let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]]
-        else { return [] }
-
-        return arr.compactMap { dict in
-            guard
-                let eventId = dict["event_id"] as? String,
-                let payload = dict["payload"] as? [String: Any],
-                let createdAt = dict["created_at"] as? TimeInterval
-            else { return nil }
-            return QueueEntry(
-                eventId: eventId,
-                payload: payload,
-                createdAt: createdAt,
-                attempts: dict["attempts"] as? Int ?? 0
-            )
-        }
+    func append(_ entry: QueueEntry, maxEvents: Int) {
+        lock.withLock { buffer.append(entry, maxEvents: maxEvents) }
     }
 
-    private func save(_ entries: [QueueEntry]) {
-        let arr: [[String: Any]] = entries.map { e in
-            ["event_id": e.eventId, "payload": e.payload, "created_at": e.createdAt, "attempts": e.attempts]
-        }
-        if let data = try? JSONSerialization.data(withJSONObject: arr),
-           let str = String(data: data, encoding: .utf8) {
-            storage.set(str, forKey: Self.key)
-        }
+    func count() async -> Int { size }
+
+    func peek(maxCount: Int) async -> [QueueEntry] {
+        lock.withLock { buffer.prefix(maxCount) }
+    }
+
+    func remove(eventIds: [String]) async {
+        lock.withLock { buffer.remove(eventIds: Set(eventIds)) }
+    }
+
+    @discardableResult
+    func incrementAttempt(eventIds: [String]) async -> [QueueEntry] {
+        lock.withLock { buffer.incrementAttempt(eventIds: Set(eventIds)) }
+    }
+
+    func clear() async {
+        lock.withLock { buffer.removeAll() }
     }
 }

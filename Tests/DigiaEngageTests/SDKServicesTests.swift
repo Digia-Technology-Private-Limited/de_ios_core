@@ -9,7 +9,7 @@ struct SDKServicesTests {
 
     private func makeServices() -> SDKServices {
         let storage = UserDefaultsLocalStorage(defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!)
-        return SDKServices(config: DigiaConfig(apiKey: "test_key"), storage: storage, networkClient: MockNetworkClient())
+        return SDKServices(config: DigiaConfig(apiKey: "test_key"), storage: storage, networkClient: MockNetworkClient(), analyticsQueue: MemoryAnalyticsQueue())
     }
 
     private func countRotations(_ services: SDKServices) -> () -> Int {

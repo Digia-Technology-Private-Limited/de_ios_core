@@ -32,9 +32,9 @@ struct SDKInstanceInitTests {
         return posts()
     }
 
-    private func queuedEvents(_ sdk: SDKInstance) throws -> [[String: Any]] {
+    private func queuedEvents(_ sdk: SDKInstance) async throws -> [[String: Any]] {
         let analytics = try #require(sdk.services?.analyticsService)
-        return analytics.queue.peek(maxCount: 100).map(\.payload)
+        return await analytics.queue.peek(maxCount: 100).map(\.payload)
     }
 
     @Test("setUserId right after an un-awaited initialize() reaches the first tracked event")
@@ -47,7 +47,7 @@ struct SDKInstanceInitTests {
         sdk.services?.analyticsService?.captureHealth(
             campaignKey: nil, reason: "probe", stage: nil, detail: nil, buildMode: "debug")
 
-        let events = try queuedEvents(sdk)
+        let events = try await queuedEvents(sdk)
         #expect(!events.isEmpty)
         #expect(events.allSatisfy { $0["user_id"] as? String == "u" })
     }
