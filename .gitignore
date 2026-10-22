@@ -40,3 +40,5 @@ dist/
 # Test reports
 reports/
 allure-results/
+build/
+coverage/

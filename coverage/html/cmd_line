@@ -1,1 +1,0 @@
-genhtml /Users/amarrawat/digia/de_workspace/ios/core/coverage/lcov.info -o /Users/amarrawat/digia/de_workspace/ios/core/coverage/html --quiet --ignore-errors inconsistent,unsupported,format,corrupt,mismatch,category
