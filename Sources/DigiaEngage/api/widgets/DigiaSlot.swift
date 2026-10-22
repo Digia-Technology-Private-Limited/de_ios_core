@@ -7,7 +7,6 @@ public struct DigiaSlot<Placeholder: View>: View {
     public let placementKey: String
     private let placeholder: Placeholder
     @ObservedObject private var inlineController = SDKInstance.shared.inlineController
-    @State private var impressedPayloadID: String?
     @State private var visible = false
 
     public init(
@@ -26,11 +25,15 @@ public struct DigiaSlot<Placeholder: View>: View {
     public var body: some View {
         Group {
             if let payload = inlineController.getCampaign(placementKey) {
+                let deliveryID = payload.presentationId ?? payload.cepCampaignId
                 slotContent(for: payload)
-                    .id(payload.cepCampaignId)
+                    .id(deliveryID)
                     .background(SlotVisibilityReader(visible: $visible))
-                    .task(id: "\(payload.cepCampaignId)-\(visible)") {
-                        if visible { reportFirstRenderIfNeeded(payload) }
+                    .task(id: "\(deliveryID)-\(visible)") {
+                        // No once-guard here: EngageEventEmitter dedupes the impression
+                        // per campaign and resets it when the slot is cleared, so a
+                        // redelivery of the same CEP campaign ID impresses again.
+                        if visible { SDKInstance.shared.reportSlotFirstRender(payload) }
                     }
             } else {
                 placeholder
@@ -58,16 +61,6 @@ public struct DigiaSlot<Placeholder: View>: View {
             Color.clear.frame(height: 0)
                 .onAppear { inlineController.dismissCampaign(placementKey) }
         }
-    }
-
-    private func reportFirstRenderIfNeeded(_ payload: CEPTriggerPayload) {
-        // Digia's impression fires once, the first time this slot actually renders
-        // a given payload. CEP was already impressed instantly at route time
-        // (syncTemplate). The payload-keyed task also fires when a mounted slot is
-        // reused for another live-test invocation.
-        guard impressedPayloadID != payload.cepCampaignId else { return }
-        impressedPayloadID = payload.cepCampaignId
-        SDKInstance.shared.reportSlotFirstRender(payload)
     }
 }
 

@@ -12,6 +12,7 @@ final class InitializeHarness {
     let network = FakeNetworkClient()
     private(set) var sdk: SDKInstance!
     private var session: CurrentSessionRef!
+    private let analyticsQueue = MemoryAnalyticsQueue()
 
     init(clock: TestClock = TestClock(10, 0)) {
         self.clock = clock
@@ -33,7 +34,8 @@ final class InitializeHarness {
                 session = ref
                 return network
             },
-            clock: clock.closure
+            clock: clock.closure,
+            makeAnalyticsQueue: { [analyticsQueue] _ in analyticsQueue }
         )
         self.session = session
     }

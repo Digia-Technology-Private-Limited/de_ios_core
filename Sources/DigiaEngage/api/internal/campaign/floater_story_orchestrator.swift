@@ -116,16 +116,21 @@ final class FloaterStoryOrchestrator: ObservableObject {
 
         reportMissingVariables(campaign.floaterStoryConfig?.variableSchemas ?? [], payload: payload)
         tokenCounter += 1
-        state = ActiveFloaterStoryState(
+        let active = ActiveFloaterStoryState(
             campaign: campaign,
             payload: payload,
             token: tokenCounter,
             startedAtMs: now(),
             screenName: screenName
         )
+        state = active
         dragFraction = nil
-        storyOpen = false
-        storyOverlayActive = false
+        // A start-expanded showing opens the story out of the window on its first frame. The
+        // user did not tap, so `openCount` stays 0; the open is credited in `markVisible`, once
+        // the window is actually on screen — as a PiP's `startExpanded` is.
+        let startsExpanded = active.config.behavior.startExpanded
+        storyOpen = startsExpanded
+        storyOverlayActive = startsExpanded
         closing = false
         obscured = false
         visible = false
@@ -145,6 +150,12 @@ final class FloaterStoryOrchestrator: ObservableObject {
     func markVisible(token: Int64) {
         guard let active = state, active.token == token, !visible else { return }
         visible = true
+        if storyOpen {
+            // Opened at start: the story is what the user saw, so the showing completes and
+            // its engaged time runs from here.
+            everOpened = true
+            storyStartedAtMs = now()
+        }
         restartAutoDismiss()
         onVisible(active)
     }
