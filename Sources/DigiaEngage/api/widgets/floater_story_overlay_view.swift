@@ -253,6 +253,9 @@ private struct FloaterStorySessionView: View {
             runEntryAnimation()
             // The impression is the first painted frame, not the routing decision.
             orchestrator.markVisible(token: state.token)
+            // A start-expanded showing is already open, so `onChange(of: storyOpen)` below never
+            // fires for it; grow the story out of the window from here instead.
+            if orchestrator.storyOpen { runStoryTransition(opening: true) }
         }
         .onChange(of: orchestrator.closing) { closing in
             if closing { runExitAnimation() }
