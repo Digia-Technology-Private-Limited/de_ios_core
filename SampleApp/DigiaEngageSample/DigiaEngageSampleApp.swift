@@ -4,6 +4,8 @@ import SwiftUI
 @main
 struct DigiaEngageSampleApp: App {
     init() {
+        // Hosting the test bundle: the tests initialize the SDK themselves, against a fake backend.
+        guard !isHostingTests else { return }
         Task {
             try await Digia.initialize(
                 DigiaConfig(
@@ -16,7 +18,9 @@ struct DigiaEngageSampleApp: App {
 
     var body: some Scene {
         WindowGroup {
-            DigiaSampleRootView()
+            // Hosting the test bundle: the tests mount their own DigiaHost, and nothing here may touch
+            // the SDK before they install their fake backend.
+            if isHostingTests { Color.clear } else { DigiaSampleRootView() }
         }
     }
 }
@@ -26,7 +30,7 @@ private struct DigiaSampleRootView: View {
 
     var body: some View {
         DigiaHost {
-            DUIFactory.shared.createInitialPage()
+            Color.white
         }
         .overlay(alignment: .top) {
             if case .failed(let message) = initializationState {
@@ -41,7 +45,7 @@ private struct DigiaSampleRootView: View {
             }
         }
         .task {
-            guard initializationState == .idle else { return }
+            guard !isHostingTests, initializationState == .idle else { return }
             initializationState = .initializing
 
             do {
@@ -54,6 +58,10 @@ private struct DigiaSampleRootView: View {
             }
         }
     }
+}
+
+private var isHostingTests: Bool {
+    ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 }
 
 private enum InitializationState: Equatable {

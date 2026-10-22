@@ -35,3 +35,10 @@ FatBuild/.archives
 FatBuild/DigiaEngageFat.xcodeproj/
 DigiaEngage.xcframework
 dist/
+
+
+# Test reports
+reports/
+allure-results/
+build/
+coverage/
