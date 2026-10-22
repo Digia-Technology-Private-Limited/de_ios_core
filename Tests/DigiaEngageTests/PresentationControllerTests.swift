@@ -49,6 +49,22 @@ struct PresentationControllerTests {
         #expect(await waiter.value == .dismissed(reason: .userClose, completed: false))
     }
 
+    // MARK: - Drop detail
+
+    @Test("drop detail written after settle is ignored; the first writer keeps a key")
+    func dropDetailIgnoresLateWrites() {
+        let controller = makeController()
+
+        controller.noteDropDetail("cancel_cause", "cep_cancel")
+        controller.noteDropDetail("cancel_cause", "user_close")
+        controller.settle(.dropped(reason: .timeout, detail: nil))
+        // A timed-out floater's own teardown dismissal arrives after the settle.
+        controller.noteDropDetail("surface_kind", "pip")
+
+        #expect(controller.dropDeliveryDetail?["cancel_cause"] as? String == "cep_cancel")
+        #expect(controller.dropDeliveryDetail?["surface_kind"] == nil)
+    }
+
     // MARK: - G3
 
     @Test("G3 — displayed fires at most once and never after settle")

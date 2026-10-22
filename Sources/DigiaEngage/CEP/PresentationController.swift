@@ -82,6 +82,21 @@ public final class PresentationController {
     /// drop; read by `observeDelivery`. Internal.
     var dropExtras: [String: String]?
 
+    /// The per-reason properties `Digia Experience Dropped` carries
+    /// (ai_docs/campaign-delivery-events.md "Drop detail"). Its own channel:
+    /// ``dropExtras`` feeds HealthSink, whose gates rely on what it leaves out.
+    /// Set by core before it settles the drop. Internal.
+    var dropDeliveryDetail: [String: Any]?
+
+    /// Adds `value` under `key` to ``dropDeliveryDetail`` unless the key is
+    /// already set — the first writer names the cause. Ignored once settled:
+    /// a teardown that runs after the settle (a timed-out floater's own
+    /// dismissal) must not add keys from another reason.
+    func noteDropDetail(_ key: String, _ value: Any) {
+        guard !isSettled, dropDeliveryDetail?[key] == nil else { return }
+        dropDeliveryDetail = (dropDeliveryDetail ?? [:]).merging([key: value]) { old, _ in old }
+    }
+
     /// Whether the CEP has already been told it may release its hold.
     public var isHoldReleased: Bool { backing.holdReleased.isSettled }
 
@@ -174,6 +189,7 @@ private final class PresentationBacking: CampaignPresentation {
 
     func cancel() {
         guard state != .settled else { return }
+        if state == .pending { controller?.noteDropDetail("cancel_cause", "cep_cancel") }
         guard let controller, let onCancel else {
             settleCancelled()
             return

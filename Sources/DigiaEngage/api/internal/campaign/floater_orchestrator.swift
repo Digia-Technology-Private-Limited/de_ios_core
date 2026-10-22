@@ -299,12 +299,18 @@ final class FloaterOrchestrator: ObservableObject {
               drawnToken != token
         else { return }
         drawnToken = token
-        if surface == .expanded {
+        let drawnExpanded = surface == .expanded
+        if drawnExpanded {
             everExpanded = true
             expandedStartedAtMs = expandedStartedAtMs ?? now()
         }
         restartAutoDismiss()
         onVisible(active)
+        // A `startExpanded` showing never goes through `expand()`, yet its full screen is on
+        // view from this frame. Report the step here, after the impression, so a later
+        // collapse's step-dismissed has a step-viewed to pair with. `expandCount` stays 0: the
+        // user did not expand it.
+        if drawnExpanded { onStepViewed(active) }
     }
 
     /// The media could not be loaded, so the campaign never runs. There is nothing to
