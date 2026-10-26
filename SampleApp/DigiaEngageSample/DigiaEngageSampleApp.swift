@@ -1,19 +1,10 @@
 import DigiaEngage
 import SwiftUI
+import UIKit
 
+// TEMPORARY — PokerBoss tg_suppport_popup live-test harness (core 3.14.1).
 @main
 struct DigiaEngageSampleApp: App {
-    init() {
-        Task {
-            try await Digia.initialize(
-                DigiaConfig(
-                    apiKey: "69abfbcb79d23afa245a60ee",
-                    logLevel: .verbose
-                )
-            )
-        }
-    }
-
     var body: some Scene {
         WindowGroup {
             DigiaSampleRootView()
@@ -22,43 +13,39 @@ struct DigiaEngageSampleApp: App {
 }
 
 private struct DigiaSampleRootView: View {
-    @State private var initializationState: InitializationState = .idle
+    @State private var status = "initializing…"
 
     var body: some View {
         DigiaHost {
-            DUIFactory.shared.createInitialPage()
-        }
-        .overlay(alignment: .top) {
-            if case .failed(let message) = initializationState {
-                Text(message)
-                    .font(.caption)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.red)
-                    .clipShape(Capsule())
-                    .padding(.top, 12)
+            ZStack {
+                Color(white: 0.1).ignoresSafeArea()
+                VStack(spacing: 16) {
+                    Text("PokerBoss repro · core 3.14.1 · sandbox").foregroundStyle(.white)
+                    Text(status).font(.caption).foregroundStyle(.gray)
+                    Button("Open Digia Debug Settings (Live Test)") {
+                        guard let root = UIApplication.shared.connectedScenes
+                            .compactMap({ ($0 as? UIWindowScene)?.keyWindow?.rootViewController })
+                            .first else { return }
+                        var top = root
+                        while let presented = top.presentedViewController { top = presented }
+                        Digia.presentDebugSettings(from: top)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button("Set screen App_home") { Digia.setCurrentScreen(name: "App_home") }
+                        .buttonStyle(.bordered)
+                }
             }
         }
         .task {
-            guard initializationState == .idle else { return }
-            initializationState = .initializing
-
             do {
                 try await Digia.initialize(
-                    DigiaConfig(apiKey: "69d3dc5e4d3eed4271b8c259")
+                    DigiaConfig(apiKey: "digia_875438e814f34ff0b33df83071be5c3d", logLevel: .verbose, environment: .sandbox)
                 )
-                initializationState = .ready
+                Digia.setCurrentScreen(name: "App_home")
+                status = "ready · screen=App_home"
             } catch {
-                initializationState = .failed(error.localizedDescription)
+                status = "init failed: \(error.localizedDescription)"
             }
         }
     }
-}
-
-private enum InitializationState: Equatable {
-    case idle
-    case initializing
-    case ready
-    case failed(String)
 }
