@@ -356,7 +356,7 @@ private struct NudgeSheetView: View {
 // MARK: - Center dialog (custom overlay)
 
 @MainActor
-private struct NudgeDialogContainer: View {
+struct NudgeDialogContainer: View {  // TEMP: was private, for ZZPokerbossReproTests
     let presentation: DigiaNudgePresentation
     let viewportSize: CGSize
     let safeAreaInsets: UIEdgeInsets
@@ -469,18 +469,24 @@ private struct NudgeDialogContainer: View {
                         request, variables: presentation.variables, dismiss: dismissNudgeFromCta)
                 }
             )
-            if surface.showCloseButton, surface.closeButton.placement?.mode == .inside {
-                GeometryReader { geometry in
-                    CanvasNudgeCloseOverlay(
-                        config: surface.closeButton,
-                        container: CGRect(origin: .zero, size: geometry.size),
-                        viewport: geometry.size,
-                        safeAreaInsets: .zero,
-                        isBottomSheet: false,
-                        action: dismiss
-                    )
+            // An overlay, not a ZStack sibling: the greedy GeometryReader must
+            // take the canvas's size, never set it, or the panel fills the
+            // viewport and pins to `.topTrailing`.
+            .overlay(alignment: .topLeading) {
+                if surface.showCloseButton, surface.closeButton.placement?.mode == .inside {
+                    GeometryReader { geometry in
+                        CanvasNudgeCloseOverlay(
+                            config: surface.closeButton,
+                            container: CGRect(origin: .zero, size: geometry.size),
+                            viewport: geometry.size,
+                            safeAreaInsets: .zero,
+                            isBottomSheet: false,
+                            action: dismiss
+                        )
+                    }
                 }
-            } else if surface.showCloseButton && surface.closeButton.placement == nil {
+            }
+            if surface.showCloseButton && surface.closeButton.placement == nil {
                 NudgeCloseButton(config: surface.closeButton, action: dismiss)
             }
         }
