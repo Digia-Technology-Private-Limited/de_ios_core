@@ -322,7 +322,7 @@ private struct NudgeSheetView: View {
 // MARK: - Center dialog (custom overlay)
 
 @MainActor
-private struct NudgeDialogContainer: View {
+struct NudgeDialogContainer: View {
     let presentation: DigiaNudgePresentation
     let viewportSize: CGSize
     let safeAreaInsets: UIEdgeInsets
