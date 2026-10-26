@@ -1890,8 +1890,7 @@ private struct CanvasLottiePlaceholder: View {
         if failed {
             CanvasPlaceholder(label: "Lottie")
         } else {
-            BlurHashPlaceholderView(
-                placeholder: placeholder, contentMode: fit == "contain" ? .fit : .fill)
+            BlurHashPlaceholderView(placeholder: placeholder, fit: fit)
         }
     }
 }
@@ -2281,9 +2280,7 @@ private struct FocalCanvasImage: View {
                 WebImage(url: URL(string: resolved)) { image in
                     image.resizable().renderingMode(tint == nil ? .original : .template)
                 } placeholder: {
-                    BlurHashPlaceholderView(
-                        placeholder: source.placeholder,
-                        contentMode: fit == "contain" ? .fit : .fill)
+                    BlurHashPlaceholderView(placeholder: source.placeholder, fit: fit)
                 }
                 .onFailure { error in
                     failedURL = resolved

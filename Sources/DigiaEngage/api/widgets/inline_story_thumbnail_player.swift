@@ -37,14 +37,15 @@ struct StoryThumbnailPlaceholderView: View {
                 Color(hex: value) ?? Color(red: 0.10, green: 0.10, blue: 0.10)
             case let .image(source, fit, placeholder):
                 if let url = URL(string: source) {
+                    let effectiveFit = fitOverride ?? fit
                     fitted(
                         DigiaCachedImageView(
                             url: url,
                             placeholder: AnyView(
-                                BlurHashPlaceholderView(placeholder: placeholder)
+                                BlurHashPlaceholderView(placeholder: placeholder, fit: effectiveFit.rawValue)
                             )
                         ),
-                        fit: fitOverride ?? fit
+                        fit: effectiveFit
                     )
                 }
             case nil:

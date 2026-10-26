@@ -163,7 +163,7 @@ private struct NudgeImageView: View {
     // dashboard) while the image downloads; empty when the payload has none.
     private var image: some View {
         WebImage(url: URL(string: url)) { $0.resizable() } placeholder: {
-            BlurHashPlaceholderView(placeholder: node.placeholder)
+            BlurHashPlaceholderView(placeholder: node.placeholder, fit: node.fit.rawValue)
         }
     }
 
