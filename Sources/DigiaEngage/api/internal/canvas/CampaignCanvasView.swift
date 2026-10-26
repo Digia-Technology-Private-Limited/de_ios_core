@@ -139,6 +139,7 @@ struct InlineCampaignCanvasView: View {
         GeometryReader { proxy in
             let inner = proxy.size.width - CGFloat(margin.horizontal)
             let scale = (inner > 0 && designFrame > 0) ? inner / designFrame : 0
+            let _ = NSLog("[SwishDbg] core inlineCanvas proxy=%.1fx%.1f scale=%.3f drawnH=%.1f", proxy.size.width, proxy.size.height, scale, canvas.height * scale)
             CampaignCanvasStage(
                 canvas: canvas,
                 authoredCornerRadius: cornerRadius,
@@ -182,6 +183,7 @@ private struct InlineCanvasCardLayout: Layout {
         cache: inout ()
     ) -> CGSize {
         let width = resolvedWidth(proposal)
+        NSLog("[SwishDbg] core cardLayout proposal=%@x%@ -> %.1fx%.1f", proposal.width.map { String(format: "%.1f", $0) } ?? "nil", proposal.height.map { String(format: "%.1f", $0) } ?? "nil", width, height(forWidth: width))
         return CGSize(width: width, height: height(forWidth: width))
     }
 
@@ -1752,6 +1754,7 @@ private struct FocalCanvasImage: View {
         let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
         let resolved = interpolate(raw, context: variables)
         if resolved.isEmpty || failedURL == resolved {
+            let _ = NSLog("[SwishDbg] core image body branch=failed-or-empty failed=%d url=%@", failedURL == resolved ? 1 : 0, resolved)
             if let failureLabel { CanvasPlaceholder(label: failureLabel) }
         } else if URL(string: resolved) == nil {
             if let failureLabel { CanvasPlaceholder(label: failureLabel) }
@@ -1763,8 +1766,10 @@ private struct FocalCanvasImage: View {
                     BlurHashPlaceholderView(
                         placeholder: source.placeholder,
                         contentMode: fit == "contain" ? .fit : .fill)
+                        .onAppear { NSLog("[SwishDbg] core image placeholder shown hasBlurhash=%d geo=%.1fx%.1f url=%@", source.placeholder != nil ? 1 : 0, geometry.size.width, geometry.size.height, resolved) }
                 }
-                .onFailure { _ in failedURL = resolved }
+                .onSuccess { _, _, cacheType in NSLog("[SwishDbg] core image success cache=%d url=%@", cacheType.rawValue, resolved) }
+                .onFailure { error in NSLog("[SwishDbg] core image FAILURE err=%@ url=%@", String(describing: error), resolved); failedURL = resolved }
                 .modifier(CanvasImageFit(fit: fit))
                 .foregroundStyle(
                     tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) } ?? .clear

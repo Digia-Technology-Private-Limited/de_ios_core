@@ -27,6 +27,7 @@ public struct DigiaSlot<Placeholder: View>: View {
     public var body: some View {
         Group {
             if let payload = inlineController.getCampaign(placementKey) {
+                let _ = NSLog("[SwishDbg] core DigiaSlot body key=%@ branch=payload id=%@ canvas=%d", placementKey, payload.cepCampaignId, inlineController.getCanvasConfig(placementKey) != nil ? 1 : 0)
                 slotContent(for: payload)
                     .id(payload.cepCampaignId)
                     .onAppear {
@@ -37,6 +38,7 @@ public struct DigiaSlot<Placeholder: View>: View {
                         reportFirstRenderIfNeeded(payload)
                     }
             } else {
+                let _ = NSLog("[SwishDbg] core DigiaSlot body key=%@ branch=placeholder", placementKey)
                 placeholder
                     .onAppear { registerPlaceholderIfNeeded() }
             }
