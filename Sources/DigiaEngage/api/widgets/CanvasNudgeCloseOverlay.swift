@@ -18,11 +18,20 @@ struct CanvasNudgeCloseOverlay: View {
     var accessibilityLabel: String? = nil
 
     var body: some View {
-        if let placement = config.placement, placement.mode == .outside {
+        if let placement = config.placement, placement.mode == .outside, fitsOutside(placement) {
             outsideClose(placement)
         } else {
+            // A container with no room beside it, such as a full-screen nudge, keeps its close
+            // inside, as Android and Flutter do; `layout` resolves that fallback.
             resolvedClose
         }
+    }
+
+    private func fitsOutside(_ placement: NudgeCloseButtonPlacement) -> Bool {
+        let extent = placement.margin.top + config.diameter + placement.margin.bottom
+        return isBottomSheet || placement.vertical == .top
+            ? container.minY - extent >= safeAreaInsets.top
+            : container.maxY + extent <= viewport.height - safeAreaInsets.bottom
     }
 
     private var resolvedClose: some View {
