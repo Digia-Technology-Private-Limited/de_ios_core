@@ -262,6 +262,7 @@ struct ScaledCanvasStage: View {
     let cornerRadius: CGFloat
     let isDark: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
+    var showBackground = true
 
     private var scale: CGFloat { canvas.width > 0 ? width / canvas.width : 1 }
 
@@ -270,7 +271,7 @@ struct ScaledCanvasStage: View {
             canvas: canvas,
             authoredCornerRadius: 0,
             isDark: isDark,
-            showBackground: true,
+            showBackground: showBackground,
             onAction: onAction
         )
         .scaleEffect(scale, anchor: .topLeading)
@@ -728,7 +729,9 @@ struct CanvasStoryViewer: View {
                     height: chrome.height * scale,
                     cornerRadius: 0,
                     isDark: isDark,
-                    onAction: pageAction
+                    onAction: pageAction,
+                    // Transparent by design — the page shows through, as on Flutter.
+                    showBackground: false
                 )
                 .environment(
                     \.canvasStoryViewer,

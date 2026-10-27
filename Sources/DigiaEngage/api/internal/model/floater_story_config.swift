@@ -190,7 +190,16 @@ struct FloaterStoryConfig: Equatable {
     ) throws -> FloaterStoryConfig? {
         guard let canvasJSON = templateConfig.object("canvas") else { return nil }
         let parser = CampaignCanvasParser(designTokens: designTokens)
-        guard let canvas = try parseOrNil({ try parser.parse(canvasJSON) }) else { return nil }
+        guard var canvas = try parseOrNil({ try parser.parse(canvasJSON) }) else { return nil }
+        if canvasJSON["background"] == nil {
+            // The canvas parser defaults a missing background to white, which suits a card but
+            // not a floating window: the space between its widgets should show the host screen,
+            // as it does on Android and Flutter.
+            canvas = CampaignCanvas(
+                version: canvas.version, width: canvas.width, height: canvas.height,
+                background: .none, children: canvas.children
+            )
+        }
         guard let story = parser.parseStandaloneStory(templateConfig.object("story")) else {
             return nil
         }
