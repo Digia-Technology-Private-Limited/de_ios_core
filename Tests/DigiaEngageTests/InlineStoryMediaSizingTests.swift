@@ -71,6 +71,33 @@ struct InlineStoryMediaSizingTests {
         #expect(StoryMediaFit.fill.videoGravity == .resize)
     }
 
+    @Test("parses thumbnail fit and blurhash placeholder")
+    func parsesThumbnailFitAndPlaceholder() throws {
+        var json: [String: Any] = [
+            "type": "image",
+            "url": "https://cdn.example.com/story.jpg",
+            "boxFit": "contain",
+        ]
+        json["thumbnail"] = [
+            "type": "image",
+            "src": ["imageSrc": "https://cdn.example.com/thumb.jpg"],
+            "fit": "contain",
+            "placeholder": [
+                "type": "blurhash",
+                "blurHash": "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
+            ],
+        ]
+        let item = try #require(StoryItemConfig.fromJson(json))
+        #expect(item.boxFit == .contain)
+        guard case .image(let source, let fit, let placeholder) = item.thumbnail else {
+            Issue.record("Expected an image thumbnail")
+            return
+        }
+        #expect(source == "https://cdn.example.com/thumb.jpg")
+        #expect(fit == .contain)
+        #expect(placeholder?.blurHash == "LEHV6nWB2yk8pyo0adR*.7kCMdnj")
+    }
+
     private func item(
         type: String,
         fit: String?,

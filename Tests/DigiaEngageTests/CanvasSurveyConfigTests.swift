@@ -265,6 +265,20 @@ struct CanvasSurveyConfigTests {
         #expect(interpolate("Hi {{first_name}}, score {{score + 1}}", context: variables) == "Hi Asha, score 8")
     }
 
+    @Test("block media preserves box fit and blurhash placeholder")
+    func blockMediaPreservesFitAndPlaceholder() {
+        let media = BlockMedia.from([
+            "url": .string("https://cdn.example.com/block.png"),
+            "boxFit": .string("contain"),
+            "placeholder": .object([
+                "type": .string("blurhash"),
+                "blurHash": .string("LEHV6nWB2yk8pyo0adR*.7kCMdnj"),
+            ]),
+        ])
+        #expect(media.boxFit == "contain")
+        #expect(media.placeholder?.blurHash == "LEHV6nWB2yk8pyo0adR*.7kCMdnj")
+    }
+
     private func parseCanvasSurveyTemplate(
         welcomeEnabled: Bool = true,
         bodyHeight: Int = 640,
