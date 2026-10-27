@@ -78,14 +78,14 @@ extension DigiaEngageTests {
             await sdk.settle()
             #expect(!firstSignals.displayed, "the slot is not built yet")
             try await scroll(sdk, to: CGFloat(rows) * rowHeight - rowHeight)
-            #expect(firstSignals.displayed, "the first is drawn once scrolled to")
+            #expect(firstSignals.displayed, "the first is displayed once scrolled to")
 
             try await scroll(sdk, to: 0)
             let second = try sdk.deliver("feed-b")
             await sdk.settle()
 
             #expect(dropReason(sdk.outcome(of: second)) == .surfaceBusy)
-            #expect(sdk.outcome(of: first) == nil, "the first still holds the slot")
+            #expect(sdk.outcome(of: first) == nil, "the first is not settled")
             #expect(occupant() == "feed-a")
         }
 
@@ -99,16 +99,18 @@ extension DigiaEngageTests {
             try showFeed(sdk)
 
             let first = try sdk.deliver("feed-a")
+            let firstSignals = PresentationRecorder(first)
             await sdk.settle()
+            #expect(!firstSignals.displayed, "the slot is not built")
             let second = try sdk.deliver("feed-b")
             let secondSignals = PresentationRecorder(second)
             await sdk.settle()
 
             #expect(dropReason(sdk.outcome(of: first)) == .superseded)
-            #expect(sdk.outcome(of: second) == nil, "the second holds the slot")
+            #expect(sdk.outcome(of: second) == nil, "the second is not settled")
             #expect(occupant() == "feed-b")
             try await scroll(sdk, to: CGFloat(rows) * rowHeight - rowHeight)
-            #expect(secondSignals.displayed, "the second is drawn once scrolled to")
+            #expect(secondSignals.displayed, "the second is displayed once scrolled to")
         }
     }
 }
