@@ -1268,9 +1268,22 @@ private struct CampaignCanvasTextView: View {
                 )
             },
             spans: block.spans,
-            drawingOutsets: glyphShadowOutsets
+            drawingOutsets: drawingOutsets
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: block.alignment)
+    }
+
+    /// UITextView renders only inside its bounds, so an underline moved by `decorationOffset`
+    /// past the line box needs the same drawing room as a glyph shadow, or it is cut off.
+    private var drawingOutsets: UIEdgeInsets {
+        var outsets = glyphShadowOutsets
+        for span in block.spans where span.decoration == .underline {
+            guard let offset = span.decorationOffset else { continue }
+            let reach = abs(offset) + (span.decorationThickness ?? 1)
+            if offset > 0 { outsets.bottom = max(outsets.bottom, reach) }
+            if offset < 0 { outsets.top = max(outsets.top, reach) }
+        }
+        return outsets
     }
 
     private var glyphShadow: NSShadow? {
