@@ -2,6 +2,26 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [4.1.0] - 2026-10-22
+
+### New Features
+- Added `Digia Experience Triggered` and `Digia Experience Dropped` analytics events carrying `impression_id` and `trigger_source`; Dropped also carries `drop_reason` and per-reason detail.
+- Floater stories now honor `behavior.initialState`; `expanded` opens the story on its first frame.
+
+### Improvements
+- Queued analytics events are now stored in a SQLite database instead of UserDefaults and survive restarts; an existing queue is imported once.
+- Analytics sending now pauses while offline, resumes when the network returns, and a flush started as the app enters the background is given time to finish.
+- `AnalyticsConfig` defaults are now a 10 s flush interval, a flush batch size of 30 and a maximum batch size of 200 (previously 30 s, 50 and 100), and `maxBatchSize` is clamped to 1...200.
+
+### Bug Fixes
+- Analytics events are no longer dropped after failed sends that never reached the server; only 4xx and 5xx responses count toward the retry limit.
+- Floater control icons now respond to taps across their whole square, not only on their drawn strokes.
+- SVG images in anchorless guides now render instead of an empty box.
+- Dwell time no longer counts time spent with the app in the background.
+- A CEP campaign redelivered with the same campaign ID to a mounted `DigiaSlot` now records its impression and closes as dismissed instead of dropped.
+- A floater PiP that starts expanded now reports step viewed after its impression.
+- A guide whose anchor is removed before it displays is now reported to the CEP as `target_lost` instead of `cancelled`.
+
 ## [4.0.0] - 2026-10-09
 
 ### New Features

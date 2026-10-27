@@ -28,7 +28,7 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
     var callCount: Int { _callCount }
     /// When each track call arrived, so a test can assert the gap between sends instead of racing
     /// a wall-clock window on a main actor that other suites keep busy.
-    private(set) var callTimes: [ContinuousClock.Instant] = []
+    private(set) var callTimes: [TimeInterval] = []
     var responseFactory: (Int) -> Int
     /// How long a track call takes to answer — lets a test capture while a send is in flight.
     var responseDelayMs: UInt64 = 0
@@ -46,7 +46,7 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
         guard request.url.absoluteString == DigiaEndpoints.track else {
             return NetworkResponse(statusCode: 200, headers: [:], body: nil, isSuccessful: true)
         }
-        callTimes.append(.now)
+        callTimes.append(ProcessInfo.processInfo.systemUptime)
         _callCount += 1
         if let body = request.body,
             let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
@@ -443,7 +443,7 @@ struct AnalyticsServiceTests {
         let times = fakeSender.callTimes
         try #require(times.count == 2)
         #expect(
-            times[1] - times[0] >= .milliseconds(380), "not before the configured interval (400 ms)"
+            times[1] - times[0] >= 0.380, "not before the configured interval (400 ms)"
         )
     }
 
@@ -461,7 +461,7 @@ struct AnalyticsServiceTests {
         // This capture's own dispatch is skipped ("already dispatching") and arms no timer.
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("second"))
 
-        let releasedAt = ContinuousClock.now
+        let releasedAt = ProcessInfo.processInfo.systemUptime
         fakeSender.holdsResponses = false  // #1 finishes; the follow-up timer starts from here
 
         try await waitUntil { fakeSender.callCount == 2 }
@@ -471,7 +471,7 @@ struct AnalyticsServiceTests {
         let times = fakeSender.callTimes
         try #require(times.count == 2)
         #expect(
-            times[1] - releasedAt >= .milliseconds(480),
+            times[1] - releasedAt >= 0.480,
             "batch size 1 does not shorten the interval (500 ms)")
     }
 
@@ -517,7 +517,7 @@ struct AnalyticsServiceTests {
         // A stalled main actor only delays the resend, so the gap can only grow under load.
         let times = fakeSender.callTimes
         try #require(times.count == 2)
-        #expect(times[1] - times[0] >= .milliseconds(980), "only the retry may resend (1000 ms)")
+        #expect(times[1] - times[0] >= 0.980, "only the retry may resend (1000 ms)")
     }
 
     // ── Test Kit mode ─────────────────────────────────────────────────────────

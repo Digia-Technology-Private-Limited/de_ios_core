@@ -7,7 +7,7 @@ struct InlineBannerMargin: Equatable {
     var left: Double = 0
 }
 
-enum InlineBannerBoxFit: Equatable {
+enum InlineBannerBoxFit: String, Equatable {
     case cover
     case contain
     case fill

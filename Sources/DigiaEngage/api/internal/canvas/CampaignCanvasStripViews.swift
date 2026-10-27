@@ -302,12 +302,12 @@ struct CanvasCarouselRenderer: View {
     @State private var lastReportedDisplayIndex: Int?
     @Environment(\.canvasInteractions) private var reportInteraction
 
-    package static func realIndex(_ displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int {
+    static func realIndex(_ displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int {
         guard loopEnabled else { return displayIndex }
         return (((displayIndex - 1) % slideCount) + slideCount) % slideCount
     }
 
-    package static func recenteringTarget(displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int? {
+    static func recenteringTarget(displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int? {
         guard loopEnabled, slideCount > 1 else { return nil }
         let displayCount = slideCount + 2
         if displayIndex == 0 {
@@ -482,11 +482,11 @@ struct CanvasCarouselRenderer: View {
         )
     }
 
-    package static func shouldStartAutoPlay(autoPlay: Bool, slideCount: Int) -> Bool {
+    static func shouldStartAutoPlay(autoPlay: Bool, slideCount: Int) -> Bool {
         autoPlay && slideCount > 1
     }
 
-    package static func nextAutoPlayIndex(
+    static func nextAutoPlayIndex(
         currentIndex: Int?,
         displayCount: Int,
         loopEnabled: Bool
@@ -543,7 +543,7 @@ struct CanvasStoryRailRenderer: View {
     @State private var openIndex: Int?
     @Environment(\.canvasInteractions) private var reportInteraction
 
-    package static func cardWidth(railHeight: CGFloat, cardAspectRatio: CGFloat) -> CGFloat {
+    static func cardWidth(railHeight: CGFloat, cardAspectRatio: CGFloat) -> CGFloat {
         railHeight * cardAspectRatio
     }
 
@@ -831,13 +831,13 @@ struct CanvasStoryViewer: View {
         reportInteraction(.storyPageViewed(index: pageIndex, total: pages.count))
     }
 
-    package enum NavigationOutcome: Equatable {
+    enum NavigationOutcome: Equatable {
         case restartCurrent
         case advance(to: Int)
         case complete(loopToStart: Bool)
     }
 
-    package static func navigationOutcome(
+    static func navigationOutcome(
         currentIndex: Int,
         delta: Int,
         pageCount: Int,
@@ -880,7 +880,7 @@ struct CanvasStoryViewer: View {
         }
     }
 
-    package static func dismissalInteraction(
+    static func dismissalInteraction(
         currentIndex: Int,
         pageCount: Int,
         completedReported: Bool
@@ -889,7 +889,7 @@ struct CanvasStoryViewer: View {
         return .storyPageDismissed(index: currentIndex, total: pageCount)
     }
 
-    package static func completionInteraction(
+    static func completionInteraction(
         pageCount: Int,
         timeToCompleteMs: Int,
         completedReported: Bool
@@ -946,7 +946,7 @@ struct CanvasStoryViewer: View {
         startAuthoredTimer()
     }
 
-    package static func progressIncrement(
+    static func progressIncrement(
         interval: TimeInterval,
         duration: Double,
         isPaused: Bool
@@ -986,7 +986,7 @@ struct CanvasStoryProgressRenderer: View {
 
     @Environment(\.canvasStoryViewer) private var viewer
 
-    package static func fraction(for segment: Int, active: Int, elapsed: CGFloat) -> CGFloat {
+    static func fraction(for segment: Int, active: Int, elapsed: CGFloat) -> CGFloat {
         segment < active ? 1 : (segment == active ? min(max(elapsed, 0), 1) : 0)
     }
 
@@ -1034,14 +1034,14 @@ struct CanvasStoryChromeButton: View {
     @Environment(\.canvasStoryClose) private var close
     @Environment(\.canvasStoryToggleMute) private var toggleMute
 
-    package static func symbol(for kind: Kind, viewer: CanvasStoryViewerState?) -> String {
+    static func symbol(for kind: Kind, viewer: CanvasStoryViewerState?) -> String {
         switch kind {
         case .close: "xmark"
         case .mute: (viewer?.muted ?? true) ? "speaker.slash.fill" : "speaker.wave.2.fill"
         }
     }
 
-    package static func performAction(
+    static func performAction(
         kind: Kind,
         close: CanvasStoryCallback?,
         toggleMute: CanvasStoryCallback?

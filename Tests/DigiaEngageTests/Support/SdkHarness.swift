@@ -36,7 +36,14 @@ final class SdkHarness {
     let platform = RecordingPlatform()
     let network = MockNetworkClient()
     let plugin = FakeCep()
+    /// The CEP plugin, under the name the held-boot suites use.
+    var cep: FakeCep { plugin }
     private(set) var window: UIWindow?
+
+    /// Holds the bundle fetch for ``startHeld(_:actionHandlers:)``; nil for every other boot.
+    private var heldNetwork: HeldBundleNetwork?
+    /// `initialize`, left running by ``startHeld(_:actionHandlers:)`` until ``releaseBundle()``.
+    private var initialization: Task<Void, Never>?
 
     /// What the scripted backend answers with. The network client calls it off the main actor.
     private let backend: ScriptedBackend
@@ -131,6 +138,36 @@ final class SdkHarness {
         return harness
     }
 
+    /// As ``start(campaigns:actionHandlers:stored:)``, but registers the plugin before `initialize`
+    /// and holds the bundle fetch. Returns while the SDK is still initializing;
+    /// ``releaseBundle()`` lets it finish.
+    static func startHeld(
+        _ campaigns: [String: Any]...,
+        actionHandlers: DigiaActionHandlers = DigiaActionHandlers()
+    ) async throws -> SdkHarness {
+        let harness = try create(campaigns: campaigns)
+        let held = HeldBundleNetwork(harness.network)
+        held.hold()
+        harness.heldNetwork = held
+        let client = try #require(harness.sdk.networkClient as? URLSessionNetworkClient)
+        client.overrideForTesting = held
+        Digia.register(harness.plugin)
+        harness.initialization = Task { try? await harness.initialize(actionHandlers: actionHandlers) }
+        try await harness.waitUntil("the SDK is initializing with the plugin attached") {
+            harness.sdk.sdkState == .initializing && harness.plugin.host != nil
+        }
+        return harness
+    }
+
+    /// Answers the held bundle fetch, then waits for READY and for the plugin to flush its buffer.
+    func releaseBundle() async throws {
+        heldNetwork?.release()
+        try await waitUntil("the SDK is READY") { sdk.sdkState == .ready }
+        try await waitUntil("the plugin flushed its buffer") { plugin.buffered == 0 }
+        await initialization?.value
+        initialization = nil
+    }
+
     /// Runs `Digia.initialize`, which returns once the bundle fetch has settled the SDK state.
     func initialize(actionHandlers: DigiaActionHandlers = DigiaActionHandlers()) async throws {
         try await Digia.initialize(DigiaConfig(apiKey: "test-api-key", actionHandlers: actionHandlers))
@@ -173,6 +210,11 @@ final class SdkHarness {
         return host.deliver(CEPTriggerPayload(
             cepCampaignId: "cep-\(campaignKey)", campaignKey: campaignKey, cepMetadata: [:],
             variables: variables))
+    }
+
+    /// How the showing ended, or nil while it is still running. Never blocks.
+    func outcome(of presentation: CampaignPresentation) -> PresentationOutcome? {
+        presentation.outcome.settledValue
     }
 
     /// The host app reporting a screen, as `Digia.setCurrentScreen(name:)` does.
@@ -330,6 +372,9 @@ final class SdkHarness {
     struct TimedOut: Error {}
 
     func tearDown() {
+        heldNetwork?.release()
+        initialization?.cancel()
+        initialization = nil
         DigiaLogger.unregisterSink(recorder)
         if let window { ComponentTestHost.cleanupOverlayWindow(window) }
         window = nil
@@ -396,13 +441,93 @@ extension CampaignPresentation {
     }
 }
 
-/// A CEP integration reduced to what it does in production: hold the host and hand it triggers.
+/// A CEP integration reduced to what it does in production: hold the host, hand it triggers, and
+/// buffer what arrives before the host is ready.
+@MainActor
 final class FakeCep: DigiaCEPPlugin {
     let id = "action-test"
     private(set) var host: DigiaCEPHost?
+    /// Every presentation ``receive(_:)`` delivered, in delivery order, with the campaign key.
+    private(set) var presentations: [(campaignKey: String, presentation: CampaignPresentation)] = []
+    private let buffer = PendingPayloadBuffer(onDrop: { _, _ in })
+
+    /// How many payloads are waiting in the buffer.
+    var buffered: Int { buffer.length }
 
     func attach(host: DigiaCEPHost) { self.host = host }
-    func detach() { host = nil }
+
+    func detach() {
+        buffer.dropAll(.pluginDetached)
+        host = nil
+    }
+
+    func onHostReady() {
+        for trigger in buffer.takeAll() { deliver(trigger) }
+    }
+
+    /// What a real plugin does when its CEP calls back: delivers if the host is ready, otherwise
+    /// buffers the payload. Returns the presentation when it delivered, nil when it buffered.
+    @discardableResult
+    func receive(_ campaignKey: String) -> CampaignPresentation? {
+        let trigger = CEPTriggerPayload(
+            cepCampaignId: "cep-\(campaignKey)", campaignKey: campaignKey, cepMetadata: [:])
+        guard let host, host.isReady else {
+            buffer.add(trigger)
+            return nil
+        }
+        return deliver(trigger)
+    }
+
+    @discardableResult
+    private func deliver(_ trigger: CEPTriggerPayload) -> CampaignPresentation? {
+        guard let host else { return nil }
+        let presentation = host.deliver(trigger)
+        presentations.append((trigger.campaignKey, presentation))
+        return presentation
+    }
+}
+
+/// The harness's network for ``SdkHarness/startHeld(_:actionHandlers:)``: forwards every request to
+/// the `MockNetworkClient`, except that a bundle fetch waits while held, until `release()`.
+private final class HeldBundleNetwork: NetworkClient, @unchecked Sendable {
+    private let mock: MockNetworkClient
+    private let lock = NSLock()
+    private var held = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(_ mock: MockNetworkClient) { self.mock = mock }
+
+    func hold() { lock.withLock { held = true } }
+
+    func release() {
+        let pending = lock.withLock {
+            held = false
+            defer { waiters.removeAll() }
+            return waiters
+        }
+        for waiter in pending { waiter.resume() }
+    }
+
+    func execute(request: NetworkRequest) async throws -> NetworkResponse {
+        if request.url.path.hasSuffix("/getCampaignBundle") {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                let wait = lock.withLock {
+                    if held { waiters.append(continuation) }
+                    return held
+                }
+                if !wait { continuation.resume() }
+            }
+        }
+        return try await mock.execute(request: request)
+    }
+
+    func executeMultipart(request: MultipartUploadRequest) async throws -> NetworkResponse {
+        try await mock.executeMultipart(request: request)
+    }
+
+    func openSseStream(request: NetworkRequest, handler: any SseStreamHandler) -> any CancellableSubscription {
+        mock.openSseStream(request: request, handler: handler)
+    }
 }
 
 /// Stands in for iOS: records every call the SDK's actions make instead of leaving the app.

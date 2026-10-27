@@ -50,7 +50,7 @@ struct DigiaInlineBannerView: View {
             if let url = URL(string: interpolate(config.image.url, context: variables)) {
                 fitted(DigiaCachedImageView(
                     url: url,
-                    placeholder: AnyView(BlurHashPlaceholderView(placeholder: config.image.placeholder))
+                    placeholder: AnyView(BlurHashPlaceholderView(placeholder: config.image.placeholder, fit: config.image.boxFit.rawValue))
                 ))
             }
         }

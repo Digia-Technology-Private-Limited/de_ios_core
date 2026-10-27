@@ -16,6 +16,17 @@ struct BlurHashPlaceholderView: View {
         self.contentMode = contentMode
     }
 
+    /// Follows the image's fit (cover → fill, contain → fit, fill → stretch);
+    /// unknown values fall back to cover.
+    init(placeholder: ImagePlaceholder?, fit: String) {
+        let mode: ContentMode? = switch fit {
+        case "contain": .fit
+        case "fill": nil
+        default: .fill
+        }
+        self.init(placeholder: placeholder, contentMode: mode)
+    }
+
     /// Size the hash is decoded at; the upscale to the image box is the blur.
     private static let decodeSize = 32
 

@@ -113,6 +113,8 @@
 				D10000000000000000000012 /* FixtureLoader.swift */,
 				D10000000000000000000013 /* SnapshotTestingExtensions.swift */,
 				D10000000000000000000014 /* TestingTags.swift */,
+				F10000000000000000000001 /* SdkHarness.swift */,
+				F10000000000000000000013 /* PlatformFakes.swift */,
 			);
 			name = PackageTestSupport;
 			path = ../Tests/DigiaEngageTests;
