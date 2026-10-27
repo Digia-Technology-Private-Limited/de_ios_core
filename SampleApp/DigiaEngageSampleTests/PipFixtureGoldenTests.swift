@@ -44,7 +44,7 @@ struct PipFixtureGoldenTests {
         let orchestrator = SDKInstance.shared.floaterOrchestrator!
         // A player that stays paused at zero on the local file: it reaches `readyToPlay` (which is
         // what reveals the window) without the network, and autoplay cannot move it.
-        orchestrator.playerFactory = { url in PausedPlayer(url: URL(string: url)!) }
+        orchestrator.playerFactory = { url in NeverPlayingPlayer(url: URL(string: url)!) }
         let started = orchestrator.start(
             campaign,
             payload: CEPTriggerPayload(
@@ -271,6 +271,6 @@ struct PipFixtureGoldenTests {
 
 /// An `AVPlayer` that never starts: autoplay calls `play()` on `readyToPlay`, and a playing video
 /// would put its progress and its play/pause glyph at a different point in every run.
-private final class PausedPlayer: AVPlayer {
+private final class NeverPlayingPlayer: AVPlayer {
     override func play() {}
 }

@@ -3,6 +3,23 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
+/// The SDK is a process singleton and the tests share one app, one window scene and one pasteboard, but Swift
+/// Testing runs separate suites in parallel. This lets one test at a time hold them, whatever suite it is in.
+actor SdkGate {
+    static let shared = SdkGate()
+    private var held = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func enter() async {
+        if !held { held = true; return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func leave() {
+        if waiters.isEmpty { held = false } else { waiters.removeFirst().resume() }
+    }
+}
+
 /// Drives the real SDK over a scripted backend; the one harness for every suite here that needs a
 /// running SDK. Mirrors `flutter/core/test/support/sdk_harness.dart`.
 ///
@@ -23,15 +40,30 @@ final class SdkHarness {
 
     let platform = RecordingPlatform()
     private let network = MockNetworkClient()
-    private let plugin = FakeCep()
-    private(set) var window: UIWindow?
+    let cep = FakeCep()
+    private(set) var window: UIWindow!
+    /// Whether the campaigns come from the workspace fixtures through `StubBackend` (see
+    /// ``start(_:actionHandlers:backend:content:)``), rather than the in-process `MockNetworkClient`.
+    private var usesStubBackend = false
 
     /// Boots the real SDK with [campaign] as the only campaign the server returns.
     static func start(
         _ campaign: [String: Any],
         actionHandlers: DigiaActionHandlers = DigiaActionHandlers()
     ) async throws -> SdkHarness {
+        await SdkGate.shared.enter()
         let harness = SdkHarness()
+        do {
+            try await harness.boot(campaign, actionHandlers: actionHandlers)
+        } catch {
+            harness.tearDown()
+            throw error
+        }
+        return harness
+    }
+
+    private func boot(_ campaign: [String: Any], actionHandlers: DigiaActionHandlers) async throws {
+        let harness = self
         let sdk = SDKInstance.shared
         sdk.resetForTesting()
         ComponentTestHost.enableAccessibilityAutomation()
@@ -48,9 +80,56 @@ final class SdkHarness {
         try await Digia.initialize(DigiaConfig(apiKey: "test-api-key", actionHandlers: actionHandlers))
         try #require(sdk.sdkState == .ready, "initialize did not reach ready: \(sdk.sdkState)")
 
-        Digia.register(harness.plugin)
-        try await harness.waitUntil("the plugin is attached") { harness.plugin.host != nil }
+        Digia.register(harness.cep)
+        try await harness.waitUntil("the plugin is attached") { harness.cep.host != nil }
+    }
+
+    /// Boots the SDK serving `campaigns` (the shared workspace fixtures) through `StubBackend`, with a
+    /// CEP plugin attached and `content` under the `DigiaHost`. Use `cep.deliver` to fire a campaign.
+    static func start<Content: View>(
+        _ campaigns: [WorkspaceFixtures.Campaign],
+        actionHandlers: DigiaActionHandlers = DigiaActionHandlers(),
+        backend: StubBackend.Options = StubBackend.Options(),
+        @ViewBuilder content: () -> Content
+    ) async throws -> SdkHarness {
+        await SdkGate.shared.enter()
+        let harness = SdkHarness()
+        harness.usesStubBackend = true
+        // First, so the SDK's network client is built on a configuration that carries the stub.
+        StubBackend.install(campaigns: campaigns.map(\.json), options: backend)
+        UserDefaults(suiteName: "tech.digia.engage")?.removePersistentDomain(forName: "tech.digia.engage")
+        SDKInstance.shared.resetForTesting()
+        do {
+            try await Digia.initialize(DigiaConfig(apiKey: "test-api-key", actionHandlers: actionHandlers))
+            SDKInstance.shared.register(harness.cep)
+        } catch {
+            harness.tearDown()
+            throw error
+        }
+        harness.mountFullScreen(content())
         return harness
+    }
+
+    private func mountFullScreen<Content: View>(_ content: Content) {
+        let scene = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first!
+        let window = UIWindow(windowScene: scene)
+        // Full screen, like the app's own window: the floater and PiP take the screen box and safe area from
+        // the app's window, so a smaller test window would be laid out for a screen it is not.
+        window.frame = scene.coordinateSpace.bounds
+        window.rootViewController = UIHostingController(rootView: DigiaHost { content })
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        self.window = window
+    }
+
+    /// Lets the run loop turn for `seconds`, so layout, animations and image loads finish.
+    func settle(_ seconds: TimeInterval = 1) async {
+        try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+    }
+
+    /// Serves every PiP video from the Test Kit's file through a player that never plays; see `PausedPlayer`.
+    func useStillVideo() {
+        SDKInstance.shared.floaterOrchestrator.playerFactory = { PausedPlayer(forRemote: $0) }
     }
 
     /// Mounts the app the way the integration guide tells customers to: `DigiaHost` around the
@@ -71,7 +150,7 @@ final class SdkHarness {
     /// What the CEP does when its campaign fires. The handle reports how the showing ended.
     @discardableResult
     func deliver(_ campaignKey: String) throws -> CampaignPresentation {
-        let host = try #require(plugin.host)
+        let host = try #require(cep.host)
         return host.deliver(CEPTriggerPayload(
             cepCampaignId: "cep-\(campaignKey)", campaignKey: campaignKey, cepMetadata: [:]))
     }
@@ -90,8 +169,18 @@ final class SdkHarness {
     }
 
     /// As ``tap(id:)``, for the element that shows [text] (an option label has no id of its own).
-    func tap(text: String) async throws {
-        try await tap("text \(text)") { Self.shownText(of: $0)?.contains(text) == true }
+    ///
+    /// A harness started from workspace fixtures finds the text with `UIProbe` instead, and settles after.
+    func tap(text: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        guard usesStubBackend else {
+            try await tap("text \(text)") { Self.shownText(of: $0)?.contains(text) == true }
+            return
+        }
+        let point = try #require(
+            UIProbe.center(ofText: text, in: window), "nothing on screen shows \"\(text)\"",
+            sourceLocation: sourceLocation)
+        try TouchSynthesizer.tap(at: point, in: window)
+        await settle(0.5)
     }
 
     private func tap(_ what: String, where match: @escaping (NSObject) -> Bool) async throws {
@@ -142,9 +231,14 @@ final class SdkHarness {
     struct TimedOut: Error {}
 
     func tearDown() {
-        if let window { ComponentTestHost.cleanupOverlayWindow(window) }
+        SDKInstance.shared.floaterOrchestrator.playerFactory = nil
+        if let window {
+            if usesStubBackend { window.isHidden = true } else { ComponentTestHost.cleanupOverlayWindow(window) }
+        }
         window = nil
         SDKInstance.shared.resetForTesting()
+        if usesStubBackend { StubBackend.uninstall() }
+        Task { await SdkGate.shared.leave() }
     }
 
     // MARK: - Accessibility tree
@@ -184,15 +278,6 @@ final class SdkHarness {
         }
         return nil
     }
-}
-
-/// A CEP integration reduced to what it does in production: hold the host and hand it triggers.
-private final class FakeCep: DigiaCEPPlugin {
-    let id = "action-test"
-    private(set) var host: DigiaCEPHost?
-
-    func attach(host: DigiaCEPHost) { self.host = host }
-    func detach() { host = nil }
 }
 
 /// The campaign fixture at [path], relative to this test target's folder, e.g.
