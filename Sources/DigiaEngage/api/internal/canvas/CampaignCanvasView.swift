@@ -2217,10 +2217,16 @@ private struct CampaignCanvasGradientView: View {
                         center: UnitPoint(x: centerX, y: centerY), startRadius: 0,
                         endRadius: min(geometry.size.width, geometry.size.height) * radius)
                 case .sweep:
+                    // The dashboard draws `conic-gradient(from start, …)`: the stops span
+                    // start→end clockwise, the rest of the turn keeps the last colour and the
+                    // seam sits at the start angle. AngularGradient splits an uncovered arc
+                    // halfway between the end colours instead, so a sweep shorter than a turn
+                    // is laid out over the full turn with its stops scaled to the arc.
+                    let arc = end - start
                     AngularGradient(
-                        gradient: Gradient(stops: gradientStops),
+                        gradient: Gradient(stops: arc >= 360 ? gradientStops : sweepStops(arc: arc)),
                         center: UnitPoint(x: centerX, y: centerY), startAngle: .degrees(start - 90),
-                        endAngle: .degrees(end - 90))
+                        endAngle: .degrees(start - 90 + max(arc, 360)))
                 }
             }
         }
@@ -2231,6 +2237,13 @@ private struct CampaignCanvasGradientView: View {
                 color: CampaignCanvasTheme.shared.color($0.color, isDark: isDark),
                 location: $0.offset)
         }
+    }
+    /// [gradientStops] over a full turn for an arc of `arc` degrees, the last colour holding to
+    /// the seam. An empty or reversed arc is the last colour all round, as in CSS.
+    private func sweepStops(arc: CGFloat) -> [Gradient.Stop] {
+        let scale = max(arc, 0) / 360
+        let scaled = gradientStops.map { Gradient.Stop(color: $0.color, location: $0.location * scale) }
+        return scaled + [Gradient.Stop(color: scaled[scaled.count - 1].color, location: 1)]
     }
 }
 
