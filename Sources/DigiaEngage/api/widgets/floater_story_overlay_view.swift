@@ -172,9 +172,16 @@ private struct FloaterStorySessionView: View {
                 }
 
                 if windowAlpha > 0 {
+                    // Circular corners capped at half the short side, as Android and Flutter draw
+                    // them: SwiftUI's default continuous corners turn a pill radius (999) into a
+                    // squircle, and its stroke does not follow the clip, leaving bars at each edge.
+                    let windowShape = RoundedRectangle(
+                        cornerRadius: min(config.window.cornerRadiusDp, min(resting.width, resting.height) / 2),
+                        style: .circular
+                    )
                     windowBox(width: resting.width)
                         .frame(width: resting.width, height: resting.height, alignment: .topLeading)
-                        .clipShape(RoundedRectangle(cornerRadius: config.window.cornerRadiusDp))
+                        .clipShape(windowShape)
                         .shadow(
                             color: config.window.shadow ? Color.black.opacity(0.45) : .clear,
                             radius: config.window.shadow ? 12 : 0,
@@ -182,7 +189,7 @@ private struct FloaterStorySessionView: View {
                             y: config.window.shadow ? 8 : 0
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: config.window.cornerRadiusDp)
+                            windowShape
                                 .stroke(
                                     config.window.borderColor.map {
                                         canvasTheme.color($0, isDark: isDark)
