@@ -224,8 +224,8 @@ struct CanvasTextRendererTests {
         #expect(canvasGlyphShadowBlurRadius(blur: 0, spread: 5) == 5)
         #expect(canvasGlyphShadowBlurRadius(blur: 0, spread: -3) == 0)
 
-        // Positive blur: 2 * (blur * 0.57735 + 0.5) + spread
-        let expectedForBlur4 = 2.0 * (4.0 * 0.57735 + 0.5)
+        // Positive blur: blur * 0.57735 + 0.5 + spread
+        let expectedForBlur4 = 4.0 * 0.57735 + 0.5
         #expect(abs(canvasGlyphShadowBlurRadius(blur: 4, spread: 0) - expectedForBlur4) < 0.0001)
 
         let expectedForBlur4WithSpread = expectedForBlur4 + 3.0

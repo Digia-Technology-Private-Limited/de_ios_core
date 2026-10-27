@@ -2455,8 +2455,8 @@ internal func focalAnchorPoint(x: CGFloat, y: CGFloat) -> UnitPoint {
 }
 
 internal func canvasGlyphShadowBlurRadius(blur: CGFloat, spread: CGFloat) -> CGFloat {
-    let blurDiameter = blur > 0 ? 2 * (blur * 0.57735 + 0.5) : 0
-    return max(0, blurDiameter + spread)
+    let sigma = blur > 0 ? blur * 0.57735 + 0.5 : 0
+    return max(0, sigma + spread)
 }
 
 internal func canvasGlyphShadowOutsets(shadow: CampaignCanvasShadow?) -> UIEdgeInsets {
