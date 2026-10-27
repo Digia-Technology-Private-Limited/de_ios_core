@@ -31,7 +31,10 @@ final class StubBackend: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) private static var options = Options()
 
     static func install(campaigns: [[String: any Sendable]], options: Options = Options()) {
-        let payload: [String: Any] = ["data": ["response": ["campaigns": campaigns]]]
+        var response: [String: Any] = ["campaigns": campaigns]
+        // The SDK reads design tokens from the bundle response, not from a campaign, so the fixture's are lifted there.
+        if let tokens = campaigns.lazy.compactMap({ $0["designTokens"] }).first { response["designTokens"] = tokens }
+        let payload: [String: Any] = ["data": ["response": response]]
         lock.withLock {
             campaignsBody = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data()
             recorded = []
