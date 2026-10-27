@@ -399,7 +399,7 @@ struct CampaignCanvasParser {
             maxLines: max(0, (json["maxLines"] as? NSNumber)?.intValue ?? (buttonDefaults ? 1 : 0)),
             overflow: json["overflow"] as? String ?? (buttonDefaults ? "ellipsis" : "visible"),
             sizingMode: ["wrap", "hug", "fixed"].contains(json["sizingMode"] as? String ?? "wrap") ? (json["sizingMode"] as? String ?? "wrap") : "wrap",
-            spans: try parseSpans(json["spans"] as? [[String: Any]])
+            spans: try parseSpans((json["spans"] as? [Any])?.compactMap { $0 as? [String: Any] })
         )
     }
 
@@ -455,17 +455,28 @@ struct CampaignCanvasParser {
         let label = try parseTextBlock(propertyObject(props["label"]) ?? [:], buttonDefaults: true)
         let styleJSON = propertyObject(props["style"]) ?? [:]
         let style: CampaignCanvasButtonStyle
-        switch styleJSON["variant"] as? String ?? "fill" {
+        let declaredVariant = (styleJSON["variant"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let outlineJSON = propertyObject(styleJSON["outline"])
+        switch declaredVariant.isEmpty && outlineJSON != nil ? "outline" : (declaredVariant.isEmpty ? "fill" : declaredVariant) {
         case "outline":
+            let outlineFill = try parsePaint(propertyObject(styleJSON["fill"]), allowImage: false)
+            // Missing outline colour -> the button's solid fill colour, else #FF4945FF (matches Flutter/Android).
+            var missingColor = CampaignColor.literal("#FF4945FF")
+            if case .solid(let color) = outlineFill { missingColor = color }
+            let outline = try parseBorder(outlineJSON, missingColor: missingColor)
+                ?? CampaignCanvasBorder(color: missingColor, width: 1.5)
             style = .outline(
-                fill: try parsePaint(propertyObject(styleJSON["fill"]), allowImage: false),
-                outline: try parseBorder(propertyObject(styleJSON["outline"])) ?? CampaignCanvasBorder(color: .literal("#FF4945FF"), width: 1.5)
+                fill: outlineFill,
+                outline: CampaignCanvasBorder(color: outline.color, width: outline.width > 0 ? outline.width : 1.5)
             )
         case "text": style = .text
         default:
-            style = .fill(
-                fill: try parsePaint(propertyObject(styleJSON["fill"]), allowImage: false)
-            )
+            let paint = try parsePaint(propertyObject(styleJSON["fill"]), allowImage: false)
+            if case .none = paint {
+                style = .fill(fill: .solid(.literal("#FF4945FF")))
+            } else {
+                style = .fill(fill: paint)
+            }
         }
         let confirm = propertyObject(props["confirm"]) ?? [:]
         return .button(
@@ -586,8 +597,11 @@ struct CampaignCanvasParser {
         return CampaignCanvasCornerRadius(topLeft: CGFloat(propertyNumber(json["topLeft"]) ?? 0), topRight: CGFloat(propertyNumber(json["topRight"]) ?? 0), bottomRight: CGFloat(propertyNumber(json["bottomRight"]) ?? 0), bottomLeft: CGFloat(propertyNumber(json["bottomLeft"]) ?? 0))
     }
 
-    private func parseBorder(_ json: [String: Any]?) throws -> CampaignCanvasBorder? {
-        guard let json, let color = try designTokens.resolveColor(json["color"]) else { return nil }
+    private func parseBorder(
+        _ json: [String: Any]?, missingColor: CampaignColor = .literal("#FFE5E7EB")
+    ) throws -> CampaignCanvasBorder? {
+        guard let json else { return nil }
+        let color = try designTokens.resolveColor(json["color"]) ?? missingColor
         return CampaignCanvasBorder(color: color, width: max(0, CGFloat(propertyNumber(json["width"]) ?? 1)))
     }
 
@@ -619,7 +633,7 @@ struct CampaignCanvasParser {
         return value
     }
     private func propertyObject(_ raw: Any?) -> [String: Any]? { unwrapLiteral(raw) as? [String: Any] }
-    private func propertyArray(_ raw: Any?) -> [[String: Any]]? { unwrapLiteral(raw) as? [[String: Any]] }
+    private func propertyArray(_ raw: Any?) -> [[String: Any]]? { (unwrapLiteral(raw) as? [Any])?.compactMap { $0 as? [String: Any] } }
     private func positive(_ value: Double, fallback: CGFloat) -> CGFloat { value.isFinite && value > 0 ? CGFloat(value) : fallback }
     private func clamp(_ value: Double, _ lower: Double, _ upper: Double) -> CGFloat { CGFloat(min(max(value, lower), upper)) }
     private func rawString(_ raw: Any?, fallback: String) -> String {
