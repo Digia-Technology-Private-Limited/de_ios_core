@@ -217,22 +217,14 @@ struct CanvasTextRendererTests {
 
     // MARK: - 3. Mathematical & Layout Oracles
 
-    @Test("canvasGlyphShadowBlurRadius calculates exact Gaussian sigma with spread and zero clamping")
+    @Test("canvasGlyphShadowBlurRadius converts the combined blur + spread, floored at 0.1")
     func glyphShadowBlurRadiusOracle() {
-        // Zero blur
-        #expect(canvasGlyphShadowBlurRadius(blur: 0, spread: 0) == 0)
-        #expect(canvasGlyphShadowBlurRadius(blur: 0, spread: 5) == 5)
-        #expect(canvasGlyphShadowBlurRadius(blur: 0, spread: -3) == 0)
-
-        // Positive blur: blur * 0.57735 + 0.5 + spread
-        let expectedForBlur4 = 4.0 * 0.57735 + 0.5
-        #expect(abs(canvasGlyphShadowBlurRadius(blur: 4, spread: 0) - expectedForBlur4) < 0.0001)
-
-        let expectedForBlur4WithSpread = expectedForBlur4 + 3.0
-        #expect(abs(canvasGlyphShadowBlurRadius(blur: 4, spread: 3) - expectedForBlur4WithSpread) < 0.0001)
-
-        // Large negative spread clamps to zero
-        #expect(canvasGlyphShadowBlurRadius(blur: 4, spread: -100) == 0)
+        func sigma(_ combined: CGFloat) -> CGFloat { combined * 0.57735 + 0.5 }
+        #expect(abs(canvasGlyphShadowBlurRadius(blur: 4, spread: 0) - sigma(4)) < 0.0001)
+        #expect(abs(canvasGlyphShadowBlurRadius(blur: 4, spread: 3) - sigma(7)) < 0.0001)
+        #expect(abs(canvasGlyphShadowBlurRadius(blur: 0, spread: 5) - sigma(5)) < 0.0001)
+        #expect(abs(canvasGlyphShadowBlurRadius(blur: 0, spread: 0) - sigma(0.1)) < 0.0001)
+        #expect(abs(canvasGlyphShadowBlurRadius(blur: 4, spread: -100) - sigma(0.1)) < 0.0001)
     }
 
     @Test("canvasGlyphShadowOutsets returns zero for nil or zero shadow")
