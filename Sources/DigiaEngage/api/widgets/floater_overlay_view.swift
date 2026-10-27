@@ -837,7 +837,9 @@ private struct FloaterExpandedContentView: View {
                 surface: floaterCanvasSurface,
                 designWidth: config.designWidth,
                 availableSize: geo.size,
-                onAction: { request in performFloaterCanvasAction(request, state: state) }
+                onAction: { request in performFloaterCanvasAction(request, state: state) },
+                // Composited over the media; `expanded.backgroundColor` is drawn behind it, as on Flutter.
+                showBackground: false
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.top, topInset)
