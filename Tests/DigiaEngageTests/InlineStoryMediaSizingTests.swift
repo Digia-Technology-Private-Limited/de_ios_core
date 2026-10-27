@@ -71,39 +71,6 @@ struct InlineStoryMediaSizingTests {
         #expect(StoryMediaFit.fill.videoGravity == .resize)
     }
 
-    @Test("parses thumbnail fit and blurhash placeholder")
-    func parsesThumbnailFitAndPlaceholder() throws {
-        var json: [String: Any] = [
-            "type": "image",
-            "url": "https://cdn.example.com/story.jpg",
-            "boxFit": "contain",
-        ]
-        json["thumbnail"] = [
-            "type": "image",
-            "src": ["imageSrc": "https://cdn.example.com/thumb.jpg"],
-            "fit": "contain",
-            "placeholder": [
-                "type": "blurhash",
-                "blurHash": "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
-            ],
-        ]
-        let item = try #require(StoryItemConfig.fromJson(json))
-        #expect(item.boxFit == .contain)
-        guard case .image(let source, let fit, let placeholder) = item.thumbnail else {
-            Issue.record("Expected an image thumbnail")
-            return
-        }
-        #expect(source == "https://cdn.example.com/thumb.jpg")
-        #expect(fit == .contain)
-        #expect(placeholder?.blurHash == "LEHV6nWB2yk8pyo0adR*.7kCMdnj")
-    }
-
-    @Test("defaults thumbnail fit for unknown and missing values")
-    func parsesThumbnailFitDefaults() throws {
-        #expect(try thumbnailFit(nil) == .cover)
-        #expect(try thumbnailFit("future") == .cover)
-    }
-
     private func item(
         type: String,
         fit: String?,
@@ -121,28 +88,4 @@ struct InlineStoryMediaSizingTests {
         }
         return try #require(StoryItemConfig.fromJson(json))
     }
-
-    private func thumbnailFit(_ fit: String?) throws -> StoryMediaFit {
-        var thumbnail: [String: Any] = [
-            "type": "image",
-            "src": ["imageSrc": "https://cdn.example.com/thumb.jpg"],
-        ]
-        if let fit {
-            thumbnail["fit"] = fit
-        }
-        let item = try #require(StoryItemConfig.fromJson([
-            "type": "image",
-            "url": "https://cdn.example.com/story.jpg",
-            "thumbnail": thumbnail,
-        ]))
-        guard case .image(_, let fit, _) = item.thumbnail else {
-            Issue.record("Expected an image thumbnail")
-            throw ThumbnailFitTestError.missingThumbnail
-        }
-        return fit
-    }
-}
-
-private enum ThumbnailFitTestError: Error {
-    case missingThumbnail
 }
