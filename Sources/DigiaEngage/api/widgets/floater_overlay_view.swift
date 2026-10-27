@@ -33,7 +33,10 @@ struct FloaterOverlayView: View {
         if let state = orchestrator.state, !orchestrator.awaitingMedia {
             FloaterSessionView(state: state, orchestrator: orchestrator)
                 .id(state.token)
-                .ignoresSafeArea(.all, edges: orchestrator.surface == .expanded ? .all : [])
+                // Full-bleed in both states, and placed inside the real window insets below, as
+                // the story floater is. Respecting the container's safe area as well inset the
+                // collapsed window twice: once by the container, again by the insets it reported.
+                .ignoresSafeArea()
         }
     }
 }
@@ -188,10 +191,10 @@ private struct FloaterSessionView: View {
     var body: some View {
         GeometryReader { geo in
             let screenSize = geo.size
-            // Expanded media is deliberately full-bleed, which makes this
-            // GeometryReader report zero safe-area insets. Keep the video edge-to-edge,
-            // but source the real window insets for chrome and canvas overlays.
-            let safe = expanded ? activeFloaterWindowSafeAreaInsets : geo.safeAreaInsets
+            // The overlay is full-bleed, which makes this GeometryReader report zero
+            // safe-area insets. Keep media edge-to-edge, but source the real window insets
+            // for the collapsed window, chrome and canvas overlays.
+            let safe = activeFloaterWindowSafeAreaInsets
             let resting = collapsedRect(
                 config: config, screenSize: screenSize, safeInsets: safe,
                 dragFraction: orchestrator.dragFraction
@@ -834,7 +837,9 @@ private struct FloaterExpandedContentView: View {
                 surface: floaterCanvasSurface,
                 designWidth: config.designWidth,
                 availableSize: geo.size,
-                onAction: { request in performFloaterCanvasAction(request, state: state) }
+                onAction: { request in performFloaterCanvasAction(request, state: state) },
+                // Composited over the media; `expanded.backgroundColor` is drawn behind it, as on Flutter.
+                showBackground: false
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.top, topInset)
