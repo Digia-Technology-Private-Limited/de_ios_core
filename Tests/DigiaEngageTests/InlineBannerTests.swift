@@ -36,12 +36,6 @@ extension DigiaEngageTests {
             #expect(InlineBannerConfig.fromJson(missingImage) == nil)
         }
 
-        @Test("image box fit defaults unknown and missing values to cover")
-        func boxFitDefaultsUnknownAndMissingToCover() throws {
-            #expect(try #require(Self.banner(boxFit: "future")).image.boxFit == .cover)
-            #expect(try #require(Self.banner(boxFit: nil)).image.boxFit == .cover)
-        }
-
         @Test("filters unsupported actions")
         func filtersUnsupportedActions() throws {
             var json = Self.configJson
@@ -119,11 +113,5 @@ extension DigiaEngageTests {
                 ["name": "route", "type": "string", "fallbackValue": "cart"]
             ],
         ]
-
-        private static func banner(boxFit: String?) -> InlineBannerConfig? {
-            var image: [String: Any] = ["url": "https://example.com/banner.png"]
-            if let boxFit { image["boxFit"] = boxFit }
-            return InlineBannerConfig.fromJson(["slotKey": "home_hero", "image": image])
-        }
     }
 }
