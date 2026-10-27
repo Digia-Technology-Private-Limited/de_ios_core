@@ -296,6 +296,11 @@ enum CampaignCanvasChild: Equatable, Identifiable, Sendable {
             preset != "text", layout.isCustomized { return false }
         if widget.box.shadow != nil { return false }
         if case .text(_, _, let shadow) = widget, shadow != nil { return false }
+        // An offset underline is drawn below the line box, as on Android and Flutter.
+        if case .text(_, let block, _) = widget,
+            block.spans.contains(where: { $0.decoration == .underline && ($0.decorationOffset ?? 0) != 0 }) {
+            return false
+        }
         if case .button(_, _, _, _, let shadow, _, _, _, _, _) = widget { return shadow == nil }
         return true
     }

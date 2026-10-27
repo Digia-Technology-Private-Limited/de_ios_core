@@ -1268,9 +1268,22 @@ private struct CampaignCanvasTextView: View {
                 )
             },
             spans: block.spans,
-            drawingOutsets: glyphShadowOutsets
+            drawingOutsets: drawingOutsets
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: block.alignment)
+    }
+
+    /// UITextView renders only inside its bounds, so an underline moved by `decorationOffset`
+    /// past the line box needs the same drawing room as a glyph shadow, or it is cut off.
+    private var drawingOutsets: UIEdgeInsets {
+        var outsets = glyphShadowOutsets
+        for span in block.spans where span.decoration == .underline {
+            guard let offset = span.decorationOffset else { continue }
+            let reach = abs(offset) + (span.decorationThickness ?? 1)
+            if offset > 0 { outsets.bottom = max(outsets.bottom, reach) }
+            if offset < 0 { outsets.top = max(outsets.top, reach) }
+        }
+        return outsets
     }
 
     private var glyphShadow: NSShadow? {
@@ -2217,10 +2230,20 @@ private struct CampaignCanvasGradientView: View {
                         center: UnitPoint(x: centerX, y: centerY), startRadius: 0,
                         endRadius: min(geometry.size.width, geometry.size.height) * radius)
                 case .sweep:
-                    AngularGradient(
-                        gradient: Gradient(stops: gradientStops),
-                        center: UnitPoint(x: centerX, y: centerY), startAngle: .degrees(start - 90),
-                        endAngle: .degrees(end - 90))
+                    // The dashboard draws `conic-gradient(from start, …)`: the stops span
+                    // start→end clockwise, the rest of the turn keeps the last colour and the
+                    // seam sits at the start angle. A conic gradient is that full turn from the
+                    // start angle, with the stops scaled to the arc. Drawn in `Canvas`, like the
+                    // linear case, because AngularGradient blends stops in a different colour
+                    // space and comes out lighter than Android and Flutter.
+                    Canvas { context, size in
+                        context.fill(
+                            Path(CGRect(origin: .zero, size: size)),
+                            with: .conicGradient(
+                                Gradient(stops: sweepStops(arc: end - start)),
+                                center: CGPoint(x: centerX * size.width, y: centerY * size.height),
+                                angle: .degrees(start - 90)))
+                    }
                 }
             }
         }
@@ -2231,6 +2254,16 @@ private struct CampaignCanvasGradientView: View {
                 color: CampaignCanvasTheme.shared.color($0.color, isDark: isDark),
                 location: $0.offset)
         }
+    }
+    /// [gradientStops] over a full turn for an arc of `arc` degrees, the last colour holding to
+    /// the seam. An empty or reversed arc is the last colour all round, as in CSS; an arc past a
+    /// turn keeps only its first turn's stops.
+    private func sweepStops(arc: CGFloat) -> [Gradient.Stop] {
+        let scale = max(arc, 0) / 360
+        let scaled = gradientStops.map {
+            Gradient.Stop(color: $0.color, location: min($0.location * scale, 1))
+        }
+        return scaled + [Gradient.Stop(color: scaled[scaled.count - 1].color, location: 1)]
     }
 }
 
