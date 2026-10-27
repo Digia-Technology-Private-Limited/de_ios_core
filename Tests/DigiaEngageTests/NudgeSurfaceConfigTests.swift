@@ -21,4 +21,30 @@ struct NudgeSurfaceConfigTests {
         let surface = NudgeSurface.fromJson(["autoDismissAfterMs": 5000])
         #expect(surface.autoDismissAfterMs == 5000)
     }
+
+    @Test("preserves nudge image fit and blurhash placeholder")
+    func parsesImageFitAndPlaceholder() throws {
+        let config = try #require(try NudgeConfig.fromJson([
+            "layout": [
+                "type": "digia/column",
+                "children": [[
+                    "type": "digia/image",
+                    "props": [
+                        "src": ["imageSrc": "https://cdn.example.com/hero.png"],
+                        "fit": "contain",
+                        "placeholder": [
+                            "type": "blurhash",
+                            "blurHash": "LEHV6nWB2yk8pyo0adR*.7kCMdnj",
+                        ],
+                    ],
+                ]],
+            ],
+        ]))
+        guard case .image(let image) = config.layout.children.first else {
+            Issue.record("Expected an image node")
+            return
+        }
+        #expect(image.fit == .contain)
+        #expect(image.placeholder?.blurHash == "LEHV6nWB2yk8pyo0adR*.7kCMdnj")
+    }
 }
