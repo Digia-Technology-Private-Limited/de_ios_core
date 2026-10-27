@@ -32,6 +32,7 @@
 		F20000000000000000000011 /* PreviousActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000011 /* PreviousActionTests.swift */; };
 		F20000000000000000000012 /* ShowStoryActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000012 /* ShowStoryActionTests.swift */; };
 		F20000000000000000000013 /* PlatformFakes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000013 /* PlatformFakes.swift */; };
+		F20000000000000000000014 /* SdkHarness+Touch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000014 /* SdkHarness+Touch.swift */; };
 		E10000000000000000000016 /* AnchorlessFixtureGoldenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000006 /* AnchorlessFixtureGoldenTests.swift */; };
 		E10000000000000000000017 /* AnchorlessFormatsGoldenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000007 /* AnchorlessFormatsGoldenTests.swift */; };
 		E10000000000000000000018 /* AnchorlessGuideHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000008 /* AnchorlessGuideHost.swift */; };
@@ -60,7 +61,7 @@
 		E10000000000000000000004 /* PipFixtureGoldenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipFixtureGoldenTests.swift; sourceTree = "<group>"; };
 		E10000000000000000000005 /* TouchSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TouchSynthesizer.swift; sourceTree = "<group>"; };
 		F10000000000000000000100 /* MockNetworkClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Network/MockNetworkClient.swift; sourceTree = "<group>"; };
-		F10000000000000000000001 /* SdkHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHarness.swift; sourceTree = "<group>"; };
+		F10000000000000000000001 /* SdkHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/SdkHarness.swift; sourceTree = "<group>"; };
 		F10000000000000000000002 /* OpenUrlActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenUrlActionTests.swift; sourceTree = "<group>"; };
 		F10000000000000000000003 /* OpenDeeplinkActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenDeeplinkActionTests.swift; sourceTree = "<group>"; };
 		F10000000000000000000004 /* CustomKVActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomKVActionTests.swift; sourceTree = "<group>"; };
@@ -72,7 +73,8 @@
 		F10000000000000000000010 /* NextActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextActionTests.swift; sourceTree = "<group>"; };
 		F10000000000000000000011 /* PreviousActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviousActionTests.swift; sourceTree = "<group>"; };
 		F10000000000000000000012 /* ShowStoryActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShowStoryActionTests.swift; sourceTree = "<group>"; };
-		F10000000000000000000013 /* PlatformFakes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformFakes.swift; sourceTree = "<group>"; };
+		F10000000000000000000013 /* PlatformFakes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/PlatformFakes.swift; sourceTree = "<group>"; };
+		F10000000000000000000014 /* SdkHarness+Touch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SdkHarness+Touch.swift"; sourceTree = "<group>"; };
 		E10000000000000000000006 /* AnchorlessFixtureGoldenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchorlessFixtureGoldenTests.swift; sourceTree = "<group>"; };
 		E10000000000000000000007 /* AnchorlessFormatsGoldenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchorlessFormatsGoldenTests.swift; sourceTree = "<group>"; };
 		E10000000000000000000008 /* AnchorlessGuideHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchorlessGuideHost.swift; sourceTree = "<group>"; };
@@ -133,6 +135,8 @@
 				D10000000000000000000012 /* FixtureLoader.swift */,
 				D10000000000000000000013 /* SnapshotTestingExtensions.swift */,
 				D10000000000000000000014 /* TestingTags.swift */,
+				F10000000000000000000001 /* SdkHarness.swift */,
+				F10000000000000000000013 /* PlatformFakes.swift */,
 			);
 			name = PackageTestSupport;
 			path = ../Tests/DigiaEngageTests;
@@ -174,9 +178,8 @@
 		F30000000000000000000002 /* Support */ = {
 			isa = PBXGroup;
 			children = (
-				F10000000000000000000001 /* SdkHarness.swift */,
+				F10000000000000000000014 /* SdkHarness+Touch.swift */,
 				E10000000000000000000008 /* AnchorlessGuideHost.swift */,
-				F10000000000000000000013 /* PlatformFakes.swift */,
 				F10000000000000000000009 /* GuideHostScreen.swift */,
 			);
 			path = Support;
@@ -314,6 +317,7 @@
 				F20000000000000000000002 /* OpenUrlActionTests.swift in Sources */,
 				F20000000000000000000001 /* SdkHarness.swift in Sources */,
 				F20000000000000000000013 /* PlatformFakes.swift in Sources */,
+				F20000000000000000000014 /* SdkHarness+Touch.swift in Sources */,
 				F20000000000000000000100 /* MockNetworkClient.swift in Sources */,
 				D10000000000000000000021 /* ComponentTestHost.swift in Sources */,
 				D10000000000000000000022 /* FixtureLoader.swift in Sources */,
