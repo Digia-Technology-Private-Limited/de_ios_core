@@ -2067,10 +2067,27 @@ private struct CanvasDividerRenderer: View {
                         ? CGPoint(x: size.width - inset, y: size.height / 2)
                         : CGPoint(x: size.width / 2, y: size.height - inset))
                 let thickness = horizontal ? size.height : size.width
+                let resolvedColor = CampaignCanvasTheme.shared.color(color, isDark: isDark)
+                if pattern == .dotted {
+                    // Filled circles whatever the cap or dashPattern, matching Flutter and Android.
+                    let length = (horizontal ? size.width : size.height) - inset * 2
+                    let radius = thickness / 2
+                    for distance in canvasDividerDotOffsets(length: length, thickness: thickness) {
+                        let center = horizontal
+                            ? CGPoint(x: inset + distance, y: size.height / 2)
+                            : CGPoint(x: size.width / 2, y: inset + distance)
+                        context.fill(
+                            Path(ellipseIn: CGRect(
+                                x: center.x - radius, y: center.y - radius,
+                                width: thickness, height: thickness)),
+                            with: .color(resolvedColor))
+                    }
+                    return
+                }
                 let dash = canvasDividerDashPattern(
                     pattern: pattern, thickness: thickness, dashPattern: dashPattern)
                 context.stroke(
-                    path, with: .color(CampaignCanvasTheme.shared.color(color, isDark: isDark)),
+                    path, with: .color(resolvedColor),
                     style: StrokeStyle(lineWidth: thickness, lineCap: strokeCap.lineCap, dash: dash)
                 )
             }
@@ -2496,6 +2513,16 @@ internal func canvasProgressTarget(
     return CGFloat(min(max(raw, 0), 100) / 100)
 }
 
+/// Centres of a dotted divider's circles along its length: radius thickness/2, period max(2·thickness, 2),
+/// first dot at the radius and the last at length − radius.
+internal func canvasDividerDotOffsets(length: CGFloat, thickness: CGFloat) -> [CGFloat] {
+    guard length > 0, thickness > 0 else { return [] }
+    let radius = thickness / 2
+    let period = max(thickness * 2, 2)
+    let last = max(radius, length - radius)
+    return Array(stride(from: radius, through: last, by: period))
+}
+
 internal func canvasDividerDashPattern(
     pattern: CampaignCanvasDividerPattern,
     thickness: CGFloat,
@@ -2505,7 +2532,7 @@ internal func canvasDividerDashPattern(
     case .solid:
         return []
     case .dotted:
-        return [0, max(thickness, dashPattern.dropFirst().first ?? 4)]
+        return []
     case .dashed:
         return dashPattern
     }

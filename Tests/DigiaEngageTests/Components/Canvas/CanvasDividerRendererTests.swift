@@ -80,14 +80,12 @@ struct CanvasDividerRendererTests {
         #expect(canvasDividerDashPattern(pattern: .solid, thickness: 10, dashPattern: []).isEmpty)
     }
 
-    @Test("canvasDividerDashPattern for dotted pattern produces zero-length dash with maximum of thickness and gap")
-    func dividerDashPatternDotted() {
-        // Case A: empty authored dash pattern falls back to gap 4
-        #expect(canvasDividerDashPattern(pattern: .dotted, thickness: 2, dashPattern: []) == [0, 4])
-        // Case B: thickness larger than gap
-        #expect(canvasDividerDashPattern(pattern: .dotted, thickness: 8, dashPattern: [0, 4]) == [0, 8])
-        // Case C: authored gap larger than thickness
-        #expect(canvasDividerDashPattern(pattern: .dotted, thickness: 2, dashPattern: [0, 10]) == [0, 10])
+    @Test("dotted divider dots start at the radius, step by max(2·thickness, 2) and stop within length − radius")
+    func dividerDotOffsets() {
+        #expect(canvasDividerDotOffsets(length: 20, thickness: 4) == [2, 10, 18])
+        #expect(canvasDividerDotOffsets(length: 10, thickness: 0.5) == [0.25, 2.25, 4.25, 6.25, 8.25])
+        #expect(canvasDividerDotOffsets(length: 1, thickness: 4) == [2])
+        #expect(canvasDividerDotOffsets(length: 0, thickness: 4).isEmpty)
     }
 
     @Test("canvasDividerDashPattern for dashed pattern returns authored pattern directly")
