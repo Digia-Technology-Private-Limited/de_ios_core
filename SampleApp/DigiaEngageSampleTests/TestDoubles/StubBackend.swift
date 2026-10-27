@@ -38,7 +38,7 @@ final class StubBackend: URLProtocol, @unchecked Sendable {
             Self.options = options
         }
         URLProtocol.registerClass(StubBackend.self)
-        swizzleDefaultConfiguration()
+        swizzleConfigurations()
     }
 
     static func uninstall() {
@@ -46,17 +46,22 @@ final class StubBackend: URLProtocol, @unchecked Sendable {
     }
 
     /// `registerClass` reaches only `URLSession.shared`. The SDK and the image pipeline build their own
-    /// sessions from `URLSessionConfiguration.default`, so that configuration carries the stub from here on.
+    /// sessions from `URLSessionConfiguration.default`, and the story video cache from `.ephemeral`, so
+    /// those configurations carry the stub from here on.
     /// Test-only; every session built before `install` keeps its real wire.
     nonisolated(unsafe) private static var swizzled = false
-    private static func swizzleDefaultConfiguration() {
+    private static func swizzleConfigurations() {
         guard !swizzled else { return }
         swizzled = true
-        let selector = NSSelectorFromString("defaultSessionConfiguration")
-        guard let original = class_getClassMethod(URLSessionConfiguration.self, selector),
-              let replacement = class_getClassMethod(URLSessionConfiguration.self, #selector(URLSessionConfiguration.stubbedDefault))
-        else { return }
-        method_exchangeImplementations(original, replacement)
+        for (name, replacement) in [
+            ("defaultSessionConfiguration", #selector(URLSessionConfiguration.stubbedDefault)),
+            ("ephemeralSessionConfiguration", #selector(URLSessionConfiguration.stubbedEphemeral)),
+        ] {
+            guard let original = class_getClassMethod(URLSessionConfiguration.self, NSSelectorFromString(name)),
+                  let stub = class_getClassMethod(URLSessionConfiguration.self, replacement)
+            else { continue }
+            method_exchangeImplementations(original, stub)
+        }
     }
 
     /// Every request seen since `install`, in order.
@@ -147,6 +152,13 @@ extension URLSessionConfiguration {
     /// After the exchange in `StubBackend`, `default` lands here, and this call reaches the original.
     @objc class func stubbedDefault() -> URLSessionConfiguration {
         let config = stubbedDefault()
+        config.protocolClasses = [StubBackend.self] + (config.protocolClasses ?? [])
+        return config
+    }
+
+    /// As `stubbedDefault`, for `ephemeral`.
+    @objc class func stubbedEphemeral() -> URLSessionConfiguration {
+        let config = stubbedEphemeral()
         config.protocolClasses = [StubBackend.self] + (config.protocolClasses ?? [])
         return config
     }

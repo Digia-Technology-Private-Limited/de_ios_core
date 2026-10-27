@@ -157,6 +157,7 @@ enum GoldenHarness {
         case .guide: sdk = try await SdkHarness.start([fixture], backend: backend) { GuideHost() }
         }
         defer { sdk.tearDown() }
+        await warmVideoCache(for: fixture)
         // A screen-targeted campaign only shows while the host is on one of its screens; an anchorless guide
         // resolves its geometry only on the page it was captured on.
         if let screen = fixture.targetScreens.first { Digia.setCurrentScreen(name: screen) }
@@ -170,6 +171,18 @@ enum GoldenHarness {
             #expect(fixture.name.hasSuffix("shows_nothing"), "the campaign was turned away: \(outcome)", sourceLocation: sourceLocation)
         }
         expect(sdk.window, surface: surface, name: fixture.name, sourceLocation: sourceLocation)
+    }
+
+    /// Downloads the fixture's videos into the SDK's cache first. The cache is a persistent directory and its
+    /// download is slower than the settle time, so without this the first run after a clean install draws
+    /// empty video thumbnails while every later run draws the frames.
+    private static func warmVideoCache(for fixture: WorkspaceFixtures.Campaign) async {
+        guard let data = try? JSONSerialization.data(withJSONObject: fixture.json, options: .withoutEscapingSlashes),
+              let text = String(data: data, encoding: .utf8) else { return }
+        let urls = Set(text.matches(of: /https?:[^"\\]+\.mp4/).compactMap { URL(string: String($0.output)) })
+        for url in urls {
+            _ = try? await DigiaVideoFileCache.shared.localURL(for: url, priority: .scheduled)
+        }
     }
 
     /// Delivers a guide the SDK must not draw and asserts it stays off screen, as every Engage SDK does when the
