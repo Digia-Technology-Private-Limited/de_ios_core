@@ -18,11 +18,21 @@ struct CanvasNudgeCloseOverlay: View {
     var accessibilityLabel: String? = nil
 
     var body: some View {
-        if let placement = config.placement, placement.mode == .outside {
+        if let placement = config.placement, placement.mode == .outside, hasRoomOutside(placement) {
             outsideClose(placement)
         } else {
             resolvedClose
         }
+    }
+
+    /// Outside placement is only used when the safe area leaves room for the whole button on that edge;
+    /// otherwise the inside placement keeps it on screen.
+    private func hasRoomOutside(_ placement: NudgeCloseButtonPlacement) -> Bool {
+        let top = isBottomSheet || placement.vertical == .top
+        let available = top
+            ? container.minY - safeAreaInsets.top
+            : viewport.height - safeAreaInsets.bottom - container.maxY
+        return available >= config.diameter
     }
 
     private var resolvedClose: some View {
