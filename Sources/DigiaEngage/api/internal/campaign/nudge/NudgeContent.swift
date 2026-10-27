@@ -32,7 +32,7 @@ enum NudgeButtonVariant      { case fill, outline, text, elevated }
 
 enum ProgressValueMode { case percent, range }
 
-enum NudgeContentFit { case cover, contain, fill }
+enum NudgeContentFit: String { case cover, contain, fill }
 enum NudgeCrossAxisAlignment { case start, center, end }
 enum NudgeMainAxisAlignment  { case start, center, end, spaceBetween, spaceAround, spaceEvenly }
 

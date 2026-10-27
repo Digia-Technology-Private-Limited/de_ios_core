@@ -107,7 +107,7 @@ enum StoryThumbnailConfig: Equatable {
     }
 }
 
-enum StoryMediaFit: Hashable {
+enum StoryMediaFit: String, Hashable {
     case cover
     case contain
     case fill

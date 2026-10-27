@@ -1114,7 +1114,7 @@ private struct BlockMediaImage: View {
             } placeholder: {
                 ZStack {
                     SurveyTokens.surfaceSunken
-                    BlurHashPlaceholderView(placeholder: media.placeholder)
+                    BlurHashPlaceholderView(placeholder: media.placeholder, fit: media.boxFit)
                 }
             }
             .frame(height: 176)
