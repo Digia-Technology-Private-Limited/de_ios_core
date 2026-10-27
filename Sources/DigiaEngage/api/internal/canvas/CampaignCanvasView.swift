@@ -2043,7 +2043,8 @@ private struct CanvasContainerRenderer: View {
     var body: some View {
         ZStack {
             if let shadow {
-                CampaignCanvasShadowView(shadow: shadow, cornerRadius: cornerRadius, isDark: isDark)
+                CampaignCanvasShadowView(
+                    shadow: shadow, cornerRadius: cornerRadius, isDark: isDark, outsideOnly: true)
             }
             CampaignCanvasPaintView(paint: fill, isDark: isDark)
                 .clipShape(CampaignCanvasRoundedShape(radius: cornerRadius))
@@ -2100,7 +2101,8 @@ private struct CampaignCanvasBoxView<Content: View>: View {
         ZStack {
             if let shadow = box.shadow {
                 CampaignCanvasShadowView(
-                    shadow: shadow, cornerRadius: box.cornerRadius, isDark: isDark)
+                    shadow: shadow, cornerRadius: box.cornerRadius, isDark: isDark,
+                    outsideOnly: true)
             }
             Group {
                 if clipsContent {
