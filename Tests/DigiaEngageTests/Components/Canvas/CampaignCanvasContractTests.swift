@@ -136,7 +136,7 @@ struct CampaignCanvasContractTests {
             Issue.record("Expected fill style")
             return
         }
-        #expect(buttonFill == .none)
+        #expect(buttonFill == .solid(.literal("#FF4945FF")))
         guard case .widget(_, _, .container(_, let radius, _, _)) = canvas.children[1] else {
             Issue.record("Expected container")
             return

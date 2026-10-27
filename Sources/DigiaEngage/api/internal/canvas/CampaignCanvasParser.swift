@@ -425,7 +425,7 @@ struct CampaignCanvasParser {
             typography: typography.isEmpty ? nil : typography,
             color: try designTokens.resolveColor(firstPresent(span["color"], span["textColor"], style["color"], style["textColor"])),
             highlightColor: try designTokens.resolveColor(firstPresent(span["highlightColor"], style["highlightColor"])),
-            italic: (span["italic"] as? Bool ?? false) || ((style["fontStyle"] as? String) == "italic"),
+            italic: isJSONTrue(span["italic"]) || ((style["fontStyle"] as? String) == "italic"),
             decoration: {
                 switch rawString(firstPresent(style["decoration"], span["decoration"]), fallback: "none") {
                 case "underline": .underline
@@ -455,12 +455,12 @@ struct CampaignCanvasParser {
         let label = try parseTextBlock(propertyObject(props["label"]) ?? [:], buttonDefaults: true)
         let styleJSON = propertyObject(props["style"]) ?? [:]
         let style: CampaignCanvasButtonStyle
-        let declaredVariant = (styleJSON["variant"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let outlineJSON = propertyObject(styleJSON["outline"])
-        switch declaredVariant.isEmpty && outlineJSON != nil ? "outline" : (declaredVariant.isEmpty ? "fill" : declaredVariant) {
+        let declaredVariant = rawString(firstPresent(styleJSON["variant"], props["variant"]), fallback: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch declaredVariant.isEmpty && outlineJSON != nil ? "outline" : declaredVariant {
         case "outline":
             let outlineFill = try parsePaint(propertyObject(styleJSON["fill"]), allowImage: false)
-            // Missing outline colour -> the button's solid fill colour, else #FF4945FF (matches Flutter/Android).
             var missingColor = CampaignColor.literal("#FF4945FF")
             if case .solid(let color) = outlineFill { missingColor = color }
             let outline = try parseBorder(outlineJSON, missingColor: missingColor)
@@ -471,8 +471,9 @@ struct CampaignCanvasParser {
             )
         case "text": style = .text
         default:
-            let paint = try parsePaint(propertyObject(styleJSON["fill"]), allowImage: false)
-            if case .none = paint {
+            let fillJSON = propertyObject(styleJSON["fill"])
+            let paint = try parsePaint(fillJSON, allowImage: false)
+            if case .none = paint, fillJSON?["type"] as? String != "none" {
                 style = .fill(fill: .solid(.literal("#FF4945FF")))
             } else {
                 style = .fill(fill: paint)
@@ -631,6 +632,10 @@ struct CampaignCanvasParser {
     private func propertyNumber(_ raw: Any?) -> Double? {
         guard let value = designNumber(unwrapLiteral(raw)), value.isFinite else { return nil }
         return value
+    }
+    private func isJSONTrue(_ raw: Any?) -> Bool {
+        guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return false }
+        return number.boolValue
     }
     private func propertyObject(_ raw: Any?) -> [String: Any]? { unwrapLiteral(raw) as? [String: Any] }
     private func propertyArray(_ raw: Any?) -> [[String: Any]]? { (unwrapLiteral(raw) as? [Any])?.compactMap { $0 as? [String: Any] } }

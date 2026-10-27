@@ -1766,7 +1766,6 @@ private struct CanvasProgressRenderer: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     CampaignCanvasPaintView(paint: track, isDark: isDark)
-                    // The indicator is rounded at both ends with the same radius as the track.
                     CampaignCanvasPaintView(paint: indicator, isDark: isDark)
                         .clipShape(CampaignCanvasRoundedShape(radius: cornerRadius))
                         .frame(width: geometry.size.width * displayed)
