@@ -34,7 +34,7 @@ struct CanvasComponentTests {
 
     @Test("matches the solid background canvas visual golden", .tags(.golden, .smoke)) @MainActor
     func testCanvasSolidBackgroundVisualGolden() throws {
-        let config = try loadCanvasConfig(named: "canvas-bg-solid.json")
+        let config = try loadCanvasConfig(named: "canvas_bg_solid.json")
         let hostView = ComponentTestHost.makeCanvasSlotHost(config: config)
         defer { ComponentTestHost.cleanupCanvasSlotHost(hostView, slotKey: config.slotKey) }
 

@@ -22,7 +22,9 @@ struct CaptureUploadTests {
         #expect(result == .accepted(assetId: "asset-1"))
         #expect(network.multipartRequestCount == 1)
         let request = try #require(network.lastMultipartRequest)
-        #expect(request.url.absoluteString == DigiaEndpoints.recordPageCapture)
+        // The path, not the whole URL: suites running alongside this one may point the endpoint
+        // root at a test server.
+        #expect(request.url.path == URL(string: DigiaEndpoints.recordPageCapture)?.path)
         #expect(request.formFields.isEmpty)
         #expect(request.files.map(\.fieldName) == ["capture", "file"])
 

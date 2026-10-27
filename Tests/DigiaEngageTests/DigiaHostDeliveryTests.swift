@@ -128,7 +128,7 @@ extension DigiaEngageTests {
             sdk.markNudgeDismissed()
             try? await Task.sleep(nanoseconds: 100_000_000)
 
-            let events = try #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
+            let events = await (try #require(sdk.services?.analyticsService)).queue.peek(maxCount: 100)
                 .map(\.payload)
                 .filter { ["Digia Experience Triggered", "Digia Experience Dropped"].contains($0["event_name"] as? String) }
             let rows = events.map {
@@ -168,7 +168,7 @@ extension DigiaEngageTests {
             deliver("survey-b")
             try? await Task.sleep(nanoseconds: 100_000_000)
 
-            let dropped = try droppedProperties(sdk)
+            let dropped = try await droppedProperties(sdk)
             #expect(dropped.count == 2)
             let capped = try #require(dropped.first)
             #expect(capped["drop_reason"] as? String == "frequency_capped")
@@ -192,8 +192,8 @@ extension DigiaEngageTests {
             return sdk
         }
 
-        private func droppedProperties(_ sdk: SDKInstance) throws -> [[String: Any]] {
-            try #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
+        private func droppedProperties(_ sdk: SDKInstance) async throws -> [[String: Any]] {
+            await (try #require(sdk.services?.analyticsService)).queue.peek(maxCount: 100)
                 .map(\.payload)
                 .filter { $0["event_name"] as? String == "Digia Experience Dropped" }
                 .compactMap { $0["properties"] as? [String: Any] }

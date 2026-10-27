@@ -17,7 +17,16 @@ public enum ComponentTestHost {
 
         /// Realistic host application UI with white navigation bar and sample cards on a grouped light background.
         case mockApp(title: String = "Host App", showBottomBar: Bool = false)
+
+        /// The overlay host screen of the Flutter and Android goldens (`_HostScreen`, `StripedHost`):
+        /// eight teal and amber bands, so a scrim, a transparent surface or a safe-area gap shows.
+        case striped
     }
+
+    /// The host screen colours the Flutter and Android goldens share.
+    static let hostTeal = UIColor(red: 0x26 / 255, green: 0xA6 / 255, blue: 0x9A / 255, alpha: 1)
+    static let hostAmber = UIColor(red: 0xFF / 255, green: 0xCA / 255, blue: 0x28 / 255, alpha: 1)
+    static let hostPage = UIColor(red: 0xEC / 255, green: 0xEF / 255, blue: 0xF1 / 255, alpha: 1)
 
     /// Creates an isolated component host controller at exact dimensions with a background color.
     ///
@@ -41,13 +50,13 @@ public enum ComponentTestHost {
 
     /// Creates a full-screen device host controller with optional background style and backdrop scrim.
     /// - Parameters:
-    ///   - device: Target device configuration preset (defaults to `.iPhone17ProMax`).
+    ///   - device: Target device configuration preset (defaults to `.engageGolden`).
     ///   - style: Background presentation style (defaults to solid white).
     ///   - scrimColor: Optional dimming overlay color (defaults to 40% black scrim).
     ///   - showHomeIndicator: Whether to render the system home indicator overlay.
     /// - Returns: A configured `UIViewController` ready to host overlays.
     public static func makeDeviceHost(
-        device: ViewImageConfig = .iPhone17ProMax,
+        device: ViewImageConfig = .engageGolden,
         style: BackgroundStyle = .solid(.white),
         scrimColor: UIColor? = UIColor.black.withAlphaComponent(0.4),
         showHomeIndicator: Bool = false
@@ -75,6 +84,9 @@ public enum ComponentTestHost {
                 showBottomBar: showBottomBar
             )
             hostVC.view.addSubview(mockAppView)
+
+        case .striped:
+            addStripes(to: hostVC.view)
         }
 
         // Optional backdrop scrim (dimming)
@@ -157,8 +169,8 @@ public enum ComponentTestHost {
     @MainActor
     public static func makeRealOverlayWindow(
         nudgeConfig: NudgeConfig,
-        device: ViewImageConfig = .iPhone17ProMax,
-        style: BackgroundStyle = .solid(.white)
+        device: ViewImageConfig = .engageGolden,
+        style: BackgroundStyle = .striped
     ) -> UIWindow {
         guard let size = device.size else {
             fatalError("Device configuration must have a concrete size")
@@ -230,6 +242,8 @@ public enum ComponentTestHost {
     public static func renderImage(of view: UIView) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.preferredRange = .standard
+        // 1x, as the Flutter and Android goldens: a pixel in the PNG is a point.
+        format.scale = 1
         return UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { context in
             // Render the presentation tree: it is what the user sees. Animations that are paused or
             // time-offset (Lottie's Core Animation engine freezes a frame this way) exist only there;
@@ -295,8 +309,8 @@ public enum ComponentTestHost {
     @MainActor
     public static func makeRealBottomSheetHost(
         nudgeConfig: NudgeConfig,
-        device: ViewImageConfig = .iPhone17ProMax,
-        style: BackgroundStyle = .solid(.white)
+        device: ViewImageConfig = .engageGolden,
+        style: BackgroundStyle = .striped
     ) -> UIView {
         makeRealOverlayWindow(nudgeConfig: nudgeConfig, device: device, style: style)
     }
@@ -304,8 +318,8 @@ public enum ComponentTestHost {
     @MainActor
     public static func makeRealDialogHost(
         nudgeConfig: NudgeConfig,
-        device: ViewImageConfig = .iPhone17ProMax,
-        style: BackgroundStyle = .solid(.white)
+        device: ViewImageConfig = .engageGolden,
+        style: BackgroundStyle = .striped
     ) -> UIView {
         makeRealOverlayWindow(nudgeConfig: nudgeConfig, device: device, style: style)
     }
@@ -527,6 +541,49 @@ public enum ComponentTestHost {
             drainDuration: drainDuration
         )
         return (window, controller)
+    }
+
+    // MARK: - Host screens
+
+    /// Fills [view] with the eight teal and amber bands of ``BackgroundStyle/striped``.
+    static func addStripes(to view: UIView) {
+        let band = view.bounds.height / 8
+        for i in 0..<8 {
+            let stripe = UIView(frame: CGRect(x: 0, y: CGFloat(i) * band, width: view.bounds.width, height: band))
+            stripe.backgroundColor = i.isMultiple(of: 2) ? hostTeal : hostAmber
+            view.addSubview(stripe)
+        }
+    }
+
+    /// The guide host screen of the Flutter and Android goldens (`_GuideHostScreen`,
+    /// `GuideHostScreen`): the Test Kit's anchors on a grey page, below the notch, laid out as
+    /// their column with 16pt padding. Each is a `DigiaAnchorView`, registered when the window shows.
+    static func addGuideAnchors(to view: UIView, safeTop: CGFloat) {
+        view.backgroundColor = hostPage
+        let width = view.bounds.width - 32
+        let top = safeTop + 16
+        let anchors: [(key: String, label: String, frame: CGRect)] = [
+            ("home_header_search", "Search", CGRect(x: 16, y: top, width: width - 12 - 44, height: 44)),
+            ("wishlist_icon_btn", "W", CGRect(x: 16 + width - 44, y: top, width: 44, height: 44)),
+            ("category_chips", "Categories", CGRect(x: 16, y: top + 60, width: width, height: 40)),
+            ("home_carousel", "Carousel", CGRect(x: 16, y: top + 240, width: width, height: 180)),
+            ("pdp_seller_info", "Seller info", CGRect(x: 16, y: top + 540, width: width, height: 64)),
+        ]
+        for anchor in anchors {
+            let label = UILabel(frame: CGRect(origin: .zero, size: anchor.frame.size))
+            label.text = anchor.label
+            label.textAlignment = .center
+            label.font = .systemFont(ofSize: 14)
+            label.textColor = .white
+            label.backgroundColor = hostTeal
+            label.layer.cornerRadius = 8
+            label.clipsToBounds = true
+
+            let anchorView = DigiaAnchorView(frame: anchor.frame)
+            anchorView.addSubview(label)
+            anchorView.anchorKey = anchor.key
+            view.addSubview(anchorView)
+        }
     }
 
     // MARK: - Private Mock UI Builders

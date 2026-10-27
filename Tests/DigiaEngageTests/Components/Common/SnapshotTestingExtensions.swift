@@ -5,10 +5,13 @@ import UIKit
 @testable import DigiaEngage
 
 extension ViewImageConfig {
-    /// Pinned visual-golden viewport used by `run-tests.sh`.
-    public static let iPhone17ProMax = ViewImageConfig(
-        safeArea: UIEdgeInsets(top: 59, left: 0, bottom: 34, right: 0),
-        size: CGSize(width: 440, height: 956),
+    /// The visual-golden viewport: the screen of the Flutter and Android goldens (`_screen`,
+    /// `_safeTop` / `_safeBottom` in `flutter/core/test/support/sdk_harness.dart`, Android's
+    /// `w390dp-h844dp`). `run-tests.sh` pins a simulator of this size (iPhone 17e), so a view that
+    /// falls back to `UIScreen.main` agrees with the golden's window.
+    public static let engageGolden = ViewImageConfig(
+        safeArea: UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0),
+        size: CGSize(width: 390, height: 844),
         traits: UITraitCollection(userInterfaceIdiom: .phone)
     )
 }
@@ -17,6 +20,17 @@ extension ViewImageConfig {
 public var isSnapshotRecordingEnabled: Bool {
     ProcessInfo.processInfo.environment["RECORD_SNAPSHOTS"] == "true"
         || ProcessInfo.processInfo.environment["TEST_RUNNER_RECORD_SNAPSHOTS"] == "true"
+}
+
+/// Where the goldens of the test file at [filePath] live: `de_workspace/goldens/ios/<file>/`, beside
+/// the Flutter and Android copies the goldens reviewer reads, not in this repository. The file's
+/// name keeps SnapshotTesting's own `__Snapshots__/<file>/` grouping.
+public func goldenDirectory(filePath: String) -> String {
+    let file = URL(fileURLWithPath: filePath).deletingPathExtension().lastPathComponent
+    guard let workspace = FixtureLoader.workspaceURL() else {
+        preconditionFailure("No de_workspace above \(filePath): the goldens live in its goldens/ios/")
+    }
+    return workspace.appendingPathComponent("goldens/ios/\(file)", isDirectory: true).path
 }
 
 // MARK: - Swift Testing Visual Golden Assertions
@@ -58,6 +72,7 @@ public func assertVisualGolden(
         as: capturingSnapshotting,
         named: name,
         record: recordMode,
+        snapshotDirectory: goldenDirectory(filePath: "\(filePath)"),
         fileID: fileID,
         file: filePath,
         testName: cleanTestName,
@@ -100,6 +115,7 @@ public func assertVisualGolden(
         as: .image(precision: precision, perceptualPrecision: perceptualPrecision),
         named: name,
         record: recordMode,
+        snapshotDirectory: goldenDirectory(filePath: "\(filePath)"),
         fileID: fileID,
         file: filePath,
         testName: cleanTestName,
@@ -131,11 +147,7 @@ private func recordGoldenAttachments(
     let attachmentStem = identifier.map { "\(testName)-\($0)" } ?? testName
     Attachment.record(actual, named: "\(attachmentStem)-actual", as: .png)
 
-    let sourceURL = URL(fileURLWithPath: sourceFilePath)
-    let snapshotDirectory = sourceURL
-        .deletingLastPathComponent()
-        .appendingPathComponent("__Snapshots__", isDirectory: true)
-        .appendingPathComponent(sourceURL.deletingPathExtension().lastPathComponent, isDirectory: true)
+    let snapshotDirectory = URL(fileURLWithPath: goldenDirectory(filePath: sourceFilePath), isDirectory: true)
 
     guard let snapshotURLs = try? FileManager.default.contentsOfDirectory(
         at: snapshotDirectory,
@@ -285,6 +297,7 @@ public func assertHierarchy(
         as: .hierarchy,
         named: name,
         record: recordMode,
+        snapshotDirectory: goldenDirectory(filePath: "\(filePath)"),
         fileID: fileID,
         file: filePath,
         testName: cleanTestName,
@@ -316,6 +329,7 @@ public func assertHierarchy(
         as: .hierarchy,
         named: name,
         record: recordMode,
+        snapshotDirectory: goldenDirectory(filePath: "\(filePath)"),
         fileID: fileID,
         file: filePath,
         testName: cleanTestName,

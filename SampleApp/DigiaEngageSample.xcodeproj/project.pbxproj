@@ -13,28 +13,8 @@
 		D10000000000000000000023 /* SnapshotTestingExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000013 /* SnapshotTestingExtensions.swift */; };
 		D10000000000000000000024 /* TestingTags.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000014 /* TestingTags.swift */; };
 		D10000000000000000000003 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000002 /* SnapshotTesting */; };
-		E10000000000000000000011 /* FloaterFixtureGoldenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000001 /* FloaterFixtureGoldenTests.swift */; };
-		E10000000000000000000012 /* FloaterTapTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000002 /* FloaterTapTests.swift */; };
-		E10000000000000000000013 /* HostedUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000003 /* HostedUITests.swift */; };
-		E10000000000000000000014 /* PipFixtureGoldenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* PipFixtureGoldenTests.swift */; };
-		E10000000000000000000015 /* TouchSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000005 /* TouchSynthesizer.swift */; };
 		F20000000000000000000100 /* MockNetworkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000100 /* MockNetworkClient.swift */; };
-		F20000000000000000000001 /* SdkHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* SdkHarness.swift */; };
-		F20000000000000000000002 /* OpenUrlActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* OpenUrlActionTests.swift */; };
-		F20000000000000000000003 /* OpenDeeplinkActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000003 /* OpenDeeplinkActionTests.swift */; };
-		F20000000000000000000004 /* CustomKVActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000004 /* CustomKVActionTests.swift */; };
-		F20000000000000000000005 /* ShareActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000005 /* ShareActionTests.swift */; };
-		F20000000000000000000006 /* CopyToClipboardActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000006 /* CopyToClipboardActionTests.swift */; };
-		F20000000000000000000007 /* RequestReviewActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000007 /* RequestReviewActionTests.swift */; };
-		F20000000000000000000008 /* HideActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000008 /* HideActionTests.swift */; };
-		F20000000000000000000009 /* GuideHostScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000009 /* GuideHostScreen.swift */; };
-		F20000000000000000000010 /* NextActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000010 /* NextActionTests.swift */; };
-		F20000000000000000000011 /* PreviousActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000011 /* PreviousActionTests.swift */; };
-		F20000000000000000000012 /* ShowStoryActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000012 /* ShowStoryActionTests.swift */; };
-		F20000000000000000000013 /* PlatformFakes.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000013 /* PlatformFakes.swift */; };
-		E10000000000000000000016 /* AnchorlessFixtureGoldenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000006 /* AnchorlessFixtureGoldenTests.swift */; };
-		E10000000000000000000017 /* AnchorlessFormatsGoldenTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000007 /* AnchorlessFormatsGoldenTests.swift */; };
-		E10000000000000000000018 /* AnchorlessGuideHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000008 /* AnchorlessGuideHost.swift */; };
+		F20000000000000000000101 /* SdkHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000101 /* SdkHarness.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -54,34 +34,33 @@
 		D10000000000000000000012 /* FixtureLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components/Common/FixtureLoader.swift; sourceTree = "<group>"; };
 		D10000000000000000000013 /* SnapshotTestingExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components/Common/SnapshotTestingExtensions.swift; sourceTree = "<group>"; };
 		D10000000000000000000014 /* TestingTags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestingTags.swift; sourceTree = "<group>"; };
-		E10000000000000000000001 /* FloaterFixtureGoldenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloaterFixtureGoldenTests.swift; sourceTree = "<group>"; };
-		E10000000000000000000002 /* FloaterTapTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloaterTapTests.swift; sourceTree = "<group>"; };
-		E10000000000000000000003 /* HostedUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostedUITests.swift; sourceTree = "<group>"; };
-		E10000000000000000000004 /* PipFixtureGoldenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PipFixtureGoldenTests.swift; sourceTree = "<group>"; };
-		E10000000000000000000005 /* TouchSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TouchSynthesizer.swift; sourceTree = "<group>"; };
 		F10000000000000000000100 /* MockNetworkClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Network/MockNetworkClient.swift; sourceTree = "<group>"; };
-		F10000000000000000000001 /* SdkHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHarness.swift; sourceTree = "<group>"; };
-		F10000000000000000000002 /* OpenUrlActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenUrlActionTests.swift; sourceTree = "<group>"; };
-		F10000000000000000000003 /* OpenDeeplinkActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenDeeplinkActionTests.swift; sourceTree = "<group>"; };
-		F10000000000000000000004 /* CustomKVActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomKVActionTests.swift; sourceTree = "<group>"; };
-		F10000000000000000000005 /* ShareActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareActionTests.swift; sourceTree = "<group>"; };
-		F10000000000000000000006 /* CopyToClipboardActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CopyToClipboardActionTests.swift; sourceTree = "<group>"; };
-		F10000000000000000000007 /* RequestReviewActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestReviewActionTests.swift; sourceTree = "<group>"; };
-		F10000000000000000000008 /* HideActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HideActionTests.swift; sourceTree = "<group>"; };
-		F10000000000000000000009 /* GuideHostScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GuideHostScreen.swift; sourceTree = "<group>"; };
-		F10000000000000000000010 /* NextActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NextActionTests.swift; sourceTree = "<group>"; };
-		F10000000000000000000011 /* PreviousActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviousActionTests.swift; sourceTree = "<group>"; };
-		F10000000000000000000012 /* ShowStoryActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShowStoryActionTests.swift; sourceTree = "<group>"; };
-		F10000000000000000000013 /* PlatformFakes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformFakes.swift; sourceTree = "<group>"; };
-		E10000000000000000000006 /* AnchorlessFixtureGoldenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchorlessFixtureGoldenTests.swift; sourceTree = "<group>"; };
-		E10000000000000000000007 /* AnchorlessFormatsGoldenTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchorlessFormatsGoldenTests.swift; sourceTree = "<group>"; };
-		E10000000000000000000008 /* AnchorlessGuideHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnchorlessGuideHost.swift; sourceTree = "<group>"; };
+		F10000000000000000000101 /* SdkHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/SdkHarness.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		C10000000000000000000020 /* Exceptions for "DigiaEngageSampleTests" folder in "DigiaEngageSampleTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				__Snapshots__,
+				Support/CropAssets,
+			);
+			target = C10000000000000000000006 /* DigiaEngageSampleTests */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A10000000000000000000004 /* DigiaEngageSample */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = DigiaEngageSample;
+			sourceTree = "<group>";
+		};
+		C10000000000000000000002 /* DigiaEngageSampleTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				C10000000000000000000020 /* Exceptions for "DigiaEngageSampleTests" folder in "DigiaEngageSampleTests" target */,
+			);
+			path = DigiaEngageSampleTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -129,6 +108,7 @@
 			isa = PBXGroup;
 			children = (
 				F10000000000000000000100 /* MockNetworkClient.swift */,
+				F10000000000000000000101 /* SdkHarness.swift */,
 				D10000000000000000000011 /* ComponentTestHost.swift */,
 				D10000000000000000000012 /* FixtureLoader.swift */,
 				D10000000000000000000013 /* SnapshotTestingExtensions.swift */,
@@ -136,50 +116,6 @@
 			);
 			name = PackageTestSupport;
 			path = ../Tests/DigiaEngageTests;
-			sourceTree = "<group>";
-		};
-		C10000000000000000000002 /* DigiaEngageSampleTests */ = {
-			isa = PBXGroup;
-			children = (
-				F30000000000000000000001 /* Actions */,
-				F30000000000000000000002 /* Support */,
-				E10000000000000000000006 /* AnchorlessFixtureGoldenTests.swift */,
-				E10000000000000000000007 /* AnchorlessFormatsGoldenTests.swift */,
-				E10000000000000000000001 /* FloaterFixtureGoldenTests.swift */,
-				E10000000000000000000002 /* FloaterTapTests.swift */,
-				E10000000000000000000003 /* HostedUITests.swift */,
-				E10000000000000000000004 /* PipFixtureGoldenTests.swift */,
-				E10000000000000000000005 /* TouchSynthesizer.swift */,
-			);
-			path = DigiaEngageSampleTests;
-			sourceTree = "<group>";
-		};
-		F30000000000000000000001 /* Actions */ = {
-			isa = PBXGroup;
-			children = (
-				F10000000000000000000012 /* ShowStoryActionTests.swift */,
-				F10000000000000000000011 /* PreviousActionTests.swift */,
-				F10000000000000000000010 /* NextActionTests.swift */,
-				F10000000000000000000008 /* HideActionTests.swift */,
-				F10000000000000000000007 /* RequestReviewActionTests.swift */,
-				F10000000000000000000006 /* CopyToClipboardActionTests.swift */,
-				F10000000000000000000005 /* ShareActionTests.swift */,
-				F10000000000000000000004 /* CustomKVActionTests.swift */,
-				F10000000000000000000003 /* OpenDeeplinkActionTests.swift */,
-				F10000000000000000000002 /* OpenUrlActionTests.swift */,
-			);
-			path = Actions;
-			sourceTree = "<group>";
-		};
-		F30000000000000000000002 /* Support */ = {
-			isa = PBXGroup;
-			children = (
-				F10000000000000000000001 /* SdkHarness.swift */,
-				E10000000000000000000008 /* AnchorlessGuideHost.swift */,
-				F10000000000000000000013 /* PlatformFakes.swift */,
-				F10000000000000000000009 /* GuideHostScreen.swift */,
-			);
-			path = Support;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -220,6 +156,9 @@
 			);
 			dependencies = (
 				C10000000000000000000007 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				C10000000000000000000002 /* DigiaEngageSampleTests */,
 			);
 			name = DigiaEngageSampleTests;
 			packageProductDependencies = (
@@ -301,32 +240,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F20000000000000000000012 /* ShowStoryActionTests.swift in Sources */,
-				F20000000000000000000011 /* PreviousActionTests.swift in Sources */,
-				F20000000000000000000010 /* NextActionTests.swift in Sources */,
-				F20000000000000000000009 /* GuideHostScreen.swift in Sources */,
-				F20000000000000000000008 /* HideActionTests.swift in Sources */,
-				F20000000000000000000007 /* RequestReviewActionTests.swift in Sources */,
-				F20000000000000000000006 /* CopyToClipboardActionTests.swift in Sources */,
-				F20000000000000000000005 /* ShareActionTests.swift in Sources */,
-				F20000000000000000000004 /* CustomKVActionTests.swift in Sources */,
-				F20000000000000000000003 /* OpenDeeplinkActionTests.swift in Sources */,
-				F20000000000000000000002 /* OpenUrlActionTests.swift in Sources */,
-				F20000000000000000000001 /* SdkHarness.swift in Sources */,
-				F20000000000000000000013 /* PlatformFakes.swift in Sources */,
 				F20000000000000000000100 /* MockNetworkClient.swift in Sources */,
+				F20000000000000000000101 /* SdkHarness.swift in Sources */,
 				D10000000000000000000021 /* ComponentTestHost.swift in Sources */,
 				D10000000000000000000022 /* FixtureLoader.swift in Sources */,
 				D10000000000000000000023 /* SnapshotTestingExtensions.swift in Sources */,
 				D10000000000000000000024 /* TestingTags.swift in Sources */,
-				E10000000000000000000016 /* AnchorlessFixtureGoldenTests.swift in Sources */,
-				E10000000000000000000017 /* AnchorlessFormatsGoldenTests.swift in Sources */,
-				E10000000000000000000018 /* AnchorlessGuideHost.swift in Sources */,
-				E10000000000000000000011 /* FloaterFixtureGoldenTests.swift in Sources */,
-				E10000000000000000000012 /* FloaterTapTests.swift in Sources */,
-				E10000000000000000000013 /* HostedUITests.swift in Sources */,
-				E10000000000000000000014 /* PipFixtureGoldenTests.swift in Sources */,
-				E10000000000000000000015 /* TouchSynthesizer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

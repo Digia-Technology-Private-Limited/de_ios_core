@@ -32,6 +32,8 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
     var responseFactory: (Int) -> Int
     /// How long a track call takes to answer — lets a test capture while a send is in flight.
     var responseDelayMs: UInt64 = 0
+    /// While true, a track call does not answer — holds a send in flight.
+    var holdsResponses = false
     /// The events of each track body, in send order.
     private(set) var batches: [[[String: Any]]] = []
     var batchSizes: [Int] { batches.map(\.count) }
@@ -53,6 +55,7 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
             batches.append(events)
         }
         let status = responseFactory(_callCount)
+        if responseDelayMs > 0 { try await Task.sleep(nanoseconds: responseDelayMs * 1_000_000) }
         while holdsResponses { try await Task.sleep(nanoseconds: 5_000_000) }
         return NetworkResponse(
             statusCode: status, headers: [:], body: nil, isSuccessful: (200..<300).contains(status))
@@ -470,28 +473,6 @@ struct AnalyticsServiceTests {
         #expect(
             times[1] - releasedAt >= .milliseconds(480),
             "batch size 1 does not shorten the interval (500 ms)")
-    }
-
-    @Test("an event captured during a send waits for the interval instead of being stranded")
-    func eventCapturedDuringSendWaitsForInterval() async throws {
-        let sender = FakeAnalyticsSender()
-        sender.responseDelayMs = 150
-        let service = makeService(
-            config: AnalyticsConfig(flushIntervalMs: 500, flushBatchSize: 10),
-            sender: sender
-        )
-
-        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("first"))
-        service.flush()
-        try await waitUntil { sender.callCount == 1 }  // send #1 is in flight
-        service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("second"))
-
-        try await waitUntil { service.queue.size == 1 && sender.callCount == 1 }  // #1 finished
-        try await sleepMillis(200)
-        #expect(sender.callCount == 1, "not before the interval")
-
-        try await waitUntil { sender.callCount == 2 && service.queue.size == 0 }
-        #expect(service.queue.size == 0)
     }
 
     @Test("an event captured during a send waits for the interval instead of being stranded")
