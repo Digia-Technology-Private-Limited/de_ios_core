@@ -2219,14 +2219,18 @@ private struct CampaignCanvasGradientView: View {
                 case .sweep:
                     // The dashboard draws `conic-gradient(from start, …)`: the stops span
                     // start→end clockwise, the rest of the turn keeps the last colour and the
-                    // seam sits at the start angle. AngularGradient splits an uncovered arc
-                    // halfway between the end colours instead, so a sweep shorter than a turn
-                    // is laid out over the full turn with its stops scaled to the arc.
-                    let arc = end - start
-                    AngularGradient(
-                        gradient: Gradient(stops: arc >= 360 ? gradientStops : sweepStops(arc: arc)),
-                        center: UnitPoint(x: centerX, y: centerY), startAngle: .degrees(start - 90),
-                        endAngle: .degrees(start - 90 + max(arc, 360)))
+                    // seam sits at the start angle. A conic gradient is that full turn from the
+                    // start angle, with the stops scaled to the arc. Drawn in `Canvas`, like the
+                    // linear case, because AngularGradient blends stops in a different colour
+                    // space and comes out lighter than Android and Flutter.
+                    Canvas { context, size in
+                        context.fill(
+                            Path(CGRect(origin: .zero, size: size)),
+                            with: .conicGradient(
+                                Gradient(stops: sweepStops(arc: end - start)),
+                                center: CGPoint(x: centerX * size.width, y: centerY * size.height),
+                                angle: .degrees(start - 90)))
+                    }
                 }
             }
         }
@@ -2239,10 +2243,13 @@ private struct CampaignCanvasGradientView: View {
         }
     }
     /// [gradientStops] over a full turn for an arc of `arc` degrees, the last colour holding to
-    /// the seam. An empty or reversed arc is the last colour all round, as in CSS.
+    /// the seam. An empty or reversed arc is the last colour all round, as in CSS; an arc past a
+    /// turn keeps only its first turn's stops.
     private func sweepStops(arc: CGFloat) -> [Gradient.Stop] {
         let scale = max(arc, 0) / 360
-        let scaled = gradientStops.map { Gradient.Stop(color: $0.color, location: $0.location * scale) }
+        let scaled = gradientStops.map {
+            Gradient.Stop(color: $0.color, location: min($0.location * scale, 1))
+        }
         return scaled + [Gradient.Stop(color: scaled[scaled.count - 1].color, location: 1)]
     }
 }
