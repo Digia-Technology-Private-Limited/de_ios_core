@@ -143,14 +143,17 @@ struct InlineFixtureGoldenTests {
     /// asked for it), so every image must take the asynchronous load, which does publish — without
     /// clearing the shared cache under the other suites. Returns the stand-in URLs to wait for.
     private func withLocalImages(_ json: [String: Any], fixture: String) -> (Any, [String]) {
-        let remote = Set(remoteImageURLs(in: json)).sorted()
-        guard !remote.isEmpty, let workspace = FixtureLoader.workspaceURL() else { return (json, []) }
+        guard !remoteImageURLs(in: json).isEmpty, let workspace = FixtureLoader.workspaceURL() else { return (json, []) }
         let file = workspace.appendingPathComponent("testkit/mock-server/assets/strawberry.jpg")
-        var standIns: [String: String] = [:]
-        for (index, url) in remote.enumerated() {
-            standIns[url] = "\(file.absoluteString)?standIn=\(fixture)-\(index)"
+        // One stand-in per occurrence, not per distinct URL: two views of the same URL would share a
+        // cache key, and the second takes the synchronous hit `WebImage` drops.
+        var standIns: [String] = []
+        let replaced = replacingRemoteImages(json) { _ in
+            let url = "\(file.absoluteString)?standIn=\(fixture)-\(standIns.count)"
+            standIns.append(url)
+            return url
         }
-        return (replacingRemoteImages(json, with: standIns), Array(standIns.values))
+        return (replaced, standIns)
     }
 
     /// Remote URLs outside action objects: an action's URL is a link, not an image.
@@ -168,23 +171,26 @@ struct InlineFixtureGoldenTests {
         }
     }
 
-    private func replacingRemoteImages(_ value: Any, with standIns: [String: String]) -> Any {
+    private func replacingRemoteImages(_ value: Any, with standIn: (String) -> String) -> Any {
         switch value {
         case let string as String:
-            return standIns[string] ?? string
+            return isRemote(string) ? standIn(string) : string
         case let dictionary as [String: Any]:
             if isAction(dictionary) { return dictionary }
-            return dictionary.mapValues { replacingRemoteImages($0, with: standIns) }
+            // Sorted keys keep the occurrence numbering stable between runs.
+            return Dictionary(uniqueKeysWithValues: dictionary.keys.sorted().map { ($0, replacingRemoteImages(dictionary[$0]!, with: standIn)) })
         case let array as [Any]:
-            return array.map { replacingRemoteImages($0, with: standIns) }
+            return array.map { replacingRemoteImages($0, with: standIn) }
         default:
             return value
         }
     }
 
     private func isRemote(_ string: String) -> Bool {
-        guard let scheme = URL(string: string)?.scheme?.lowercased() else { return false }
-        return scheme == "http" || scheme == "https"
+        guard let url = URL(string: string), let scheme = url.scheme?.lowercased() else { return false }
+        if scheme == "http" || scheme == "https" { return true }
+        // `FixtureLoader` has already pointed `{{TESTKIT_ASSET_ORIGIN}}` at a local file.
+        return scheme == "file" && ["jpg", "jpeg", "png", "webp"].contains(url.pathExtension.lowercased())
     }
 
     private func isAction(_ dictionary: [String: Any]) -> Bool {
