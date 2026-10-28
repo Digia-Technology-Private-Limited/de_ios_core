@@ -48,3 +48,6 @@ buildServer.json
 
 # Local xcodebuild output
 /build/
+
+# Goldens live in de_workspace/goldens/ios, never in this repository.
+__Snapshots__/

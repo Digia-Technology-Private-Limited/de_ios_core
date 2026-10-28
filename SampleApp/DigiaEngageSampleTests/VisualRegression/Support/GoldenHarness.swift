@@ -6,7 +6,8 @@ import UIKit
 @testable import DigiaEngage
 
 /// Draws a campaign fixture through the real SDK and compares the settled frame with
-/// `__Snapshots__/<surface>/<name>.png`.
+/// `de_workspace/goldens/ios/<surface>/<name>.png`, beside the Flutter and Android copies, never in
+/// this repository.
 ///
 /// The comparison is `swift-snapshot-testing`'s image diffing. The file layout is ours, so a baseline is
 /// `<fixture>.png` as on Flutter, and recording is a plain write that does not fail the run.
@@ -60,9 +61,12 @@ enum GoldenHarness {
 
     static var isRecording: Bool { ProcessInfo.processInfo.environment["RECORD_SNAPSHOTS"] == "true" }
 
-    private static let snapshots = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("__Snapshots__")
+    private static let snapshots: URL = {
+        guard let workspace = FixtureLoader.workspaceURL() else {
+            preconditionFailure("No de_workspace above \(#filePath): the goldens live in its goldens/ios/")
+        }
+        return workspace.appendingPathComponent("goldens/ios", isDirectory: true)
+    }()
 
     /// What the campaign is shown over.
     enum Host {

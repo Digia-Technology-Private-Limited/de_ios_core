@@ -1,7 +1,6 @@
 import AVFoundation
 import Foundation
 import Lottie
-import SDWebImage
 import SnapshotTesting
 import SwiftUI
 import Testing
@@ -33,14 +32,6 @@ struct PipFixtureGoldenTests {
     func testPipFixtureGolden(fixture: String) async throws {
         let campaign = try #require(loadCampaign(fixture), "Fixture must decode to a campaign")
         let config = try #require(campaign.floaterConfig, "Fixture must decode to a PiP")
-        // The window's `WebImage` drops a synchronous memory-cache hit (it publishes inside the
-        // view update that asked for it), and nothing re-evaluates it until the window is resized.
-        // Start from empty caches so every fixture takes the asynchronous load, which does
-        // publish, and wait for it below. The disk cache too: in the host app it persists between
-        // runs, and a disk hit can come back synchronously and be dropped the same way.
-        SDImageCache.shared.clearMemory()
-        await withCheckedContinuation { done in SDImageCache.shared.clearDisk { done.resume() } }
-
         let orchestrator = SDKInstance.shared.floaterOrchestrator!
         // A player that stays paused at zero on the local file: it reaches `readyToPlay` (which is
         // what reveals the window) without the network, and autoplay cannot move it.
@@ -81,7 +72,8 @@ struct PipFixtureGoldenTests {
             ComponentTestHost.cleanupOverlayWindow(window)
         }
         switch config.media.kind {
-        case .image: try await awaitImageLoaded(orchestrator.state!.resolvedMediaUrl)
+        // The window draws the image the orchestrator decoded before revealing it.
+        case .image: try #require(orchestrator.preloadedImage != nil, "Media image was not preloaded")
         case .lottie: try await awaitLottieLoaded(in: window)
         default: break
         }
@@ -91,8 +83,7 @@ struct PipFixtureGoldenTests {
         // window. Real touches: a tap the shield refuses or a recognizer swallows fails here.
         let startsExpanded = config.behavior.startExpanded
         try await assertState(
-            startsExpanded ? "expanded" : "collapsed", fixture: fixture, window: window,
-            drawsImage: config.media.kind == .image)
+            startsExpanded ? "expanded" : "collapsed", fixture: fixture, window: window)
         if startsExpanded {
             let collapse = try #require(
                 collapseButtonCenter(in: window, config: config),
@@ -113,27 +104,13 @@ struct PipFixtureGoldenTests {
         }
         try await awaitTransition(config)
         try await assertState(
-            startsExpanded ? "collapsed" : "expanded", fixture: fixture, window: window,
-            drawsImage: config.media.kind == .image)
+            startsExpanded ? "collapsed" : "expanded", fixture: fixture, window: window)
     }
 
     @MainActor
     private func assertState(
-        _ state: String, fixture: String, window: UIWindow, drawsImage: Bool
+        _ state: String, fixture: String, window: UIWindow
     ) async throws {
-        // `WebImage` can drop the update that publishes a loaded image (it publishes inside the
-        // view update that asked for it), leaving the media black. Flipping the trait environment
-        // re-evaluates every environment-reading view, which draws the already-loaded image (as
-        // the floater suite and `ComponentTestHost.makeCanvasSlotHost` do). Before every capture,
-        // since a tap re-renders the media at its new size. One flip is not always enough, so an
-        // image PiP flips again while the window still shows the empty black media frame.
-        for _ in 0..<5 {
-            window.overrideUserInterfaceStyle = .dark
-            ComponentTestHost.drainRunLoop(for: 0.3)
-            window.overrideUserInterfaceStyle = .light
-            ComponentTestHost.drainRunLoop(for: 0.3)
-            guard drawsImage, showsEmptyMediaFrame(window) else { break }
-        }
         // The Lottie plays on wall-clock time, and every SwiftUI update re-applies its authored
         // `.playing` mode, so it is pinned after each transition, right before the capture.
         holdLottie(in: window)
@@ -145,28 +122,6 @@ struct PipFixtureGoldenTests {
             named: "\(fixture)-\(state)",
             function: "testPipFixtureGolden"
         )
-    }
-
-    /// Whether the window shows an empty media frame: a block of pure black. Nothing else in these
-    /// goldens is pure black (the host is teal and amber, the media a photo), so a few hundred black pixels
-    /// at a quarter of the point size means the image was dropped.
-    @MainActor
-    private func showsEmptyMediaFrame(_ window: UIWindow) -> Bool {
-        guard let cg = ComponentTestHost.renderImage(of: window).cgImage else { return false }
-        let width = Int(window.bounds.width / 4), height = Int(window.bounds.height / 4)
-        var pixels = [UInt8](repeating: 0, count: width * height * 4)
-        guard let context = CGContext(
-            data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-        else { return false }
-        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
-        var black = 0
-        for index in stride(from: 0, to: pixels.count, by: 4)
-        where pixels[index] < 6 && pixels[index + 1] < 6 && pixels[index + 2] < 6 {
-            black += 1
-        }
-        return black > 300
     }
 
     /// Where the expanded chrome's collapse button is on screen, or nil when it is hidden. The
@@ -210,18 +165,6 @@ struct PipFixtureGoldenTests {
             "Media was abandoned: \(orchestrator.lastStartFailureReason ?? "unknown")")
         try #require(
             !orchestrator.awaitingMedia, "Media did not load within the orchestrator's timeout")
-    }
-
-    /// Polls until `WebImage` has stored the decoded image (it does so just before publishing it),
-    /// up to 5s; the capture then waits for the frame to settle.
-    @MainActor
-    private func awaitImageLoaded(_ url: String) async throws {
-        for _ in 0..<250 where SDImageCache.shared.imageFromMemoryCache(forKey: url) == nil {
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
-        try #require(
-            SDImageCache.shared.imageFromMemoryCache(forKey: url) != nil, "Media image did not load"
-        )
     }
 
     /// The window's `LottieView` decodes the file again on its own, after the orchestrator's

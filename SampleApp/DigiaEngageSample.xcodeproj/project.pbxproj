@@ -12,6 +12,7 @@
 		D10000000000000000000022 /* FixtureLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000012 /* FixtureLoader.swift */; };
 		D10000000000000000000023 /* SnapshotTestingExtensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000013 /* SnapshotTestingExtensions.swift */; };
 		D10000000000000000000024 /* TestingTags.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000014 /* TestingTags.swift */; };
+		D10000000000000000000025 /* GoldenFonts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000015 /* GoldenFonts.swift */; };
 		D10000000000000000000003 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000002 /* SnapshotTesting */; };
 		F20000000000000000000100 /* MockNetworkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000100 /* MockNetworkClient.swift */; };
 		F20000000000000000000101 /* SdkHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000101 /* SdkHarness.swift */; };
@@ -34,6 +35,7 @@
 		D10000000000000000000012 /* FixtureLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components/Common/FixtureLoader.swift; sourceTree = "<group>"; };
 		D10000000000000000000013 /* SnapshotTestingExtensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components/Common/SnapshotTestingExtensions.swift; sourceTree = "<group>"; };
 		D10000000000000000000014 /* TestingTags.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestingTags.swift; sourceTree = "<group>"; };
+		D10000000000000000000015 /* GoldenFonts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components/Common/GoldenFonts.swift; sourceTree = "<group>"; };
 		F10000000000000000000100 /* MockNetworkClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Network/MockNetworkClient.swift; sourceTree = "<group>"; };
 		F10000000000000000000101 /* SdkHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/SdkHarness.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -112,6 +114,7 @@
 				D10000000000000000000011 /* ComponentTestHost.swift */,
 				D10000000000000000000012 /* FixtureLoader.swift */,
 				D10000000000000000000013 /* SnapshotTestingExtensions.swift */,
+				D10000000000000000000015 /* GoldenFonts.swift */,
 				D10000000000000000000014 /* TestingTags.swift */,
 				F10000000000000000000001 /* SdkHarness.swift */,
 				F10000000000000000000013 /* PlatformFakes.swift */,
@@ -247,6 +250,7 @@
 				D10000000000000000000021 /* ComponentTestHost.swift in Sources */,
 				D10000000000000000000022 /* FixtureLoader.swift in Sources */,
 				D10000000000000000000023 /* SnapshotTestingExtensions.swift in Sources */,
+				D10000000000000000000025 /* GoldenFonts.swift in Sources */,
 				D10000000000000000000024 /* TestingTags.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
