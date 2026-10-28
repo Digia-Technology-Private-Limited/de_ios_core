@@ -205,6 +205,8 @@ private struct ChoiceTile: View {
         let scaledGap = min(max(8.0 * scaleFactor, 4.0), 24.0)
         let scaledPadding = min(max(effective.padding * scaleFactor, 4.0), 36.0)
         let scaledRadius = min(max(effective.cornerRadius * scaleFactor, 0.0), 32.0)
+        // Circular corners capped at half the box, as Android and Flutter draw a radio: SwiftUI's default
+        // continuous corners turn a pill radius into a squircle whose stroke leaves bars at each edge.
         let indicatorRadius = inputType == .singleSelect ? scaledIndicatorSize / 2 : min(max(4.0 * scaleFactor, 2.0), 12.0, scaledIndicatorSize / 2)
         let scaledBorderWidth = min(max(effective.borderWidth * scaleFactor, 0.5), 4.0)
         let baseFontSize = text?.typography.fontSize ?? effective.fontSize
@@ -214,10 +216,10 @@ private struct ChoiceTile: View {
         Button(action: onTap) {
             HStack(spacing: scaledGap) {
                 ZStack {
-                    RoundedRectangle(cornerRadius: indicatorRadius)
+                    RoundedRectangle(cornerRadius: indicatorRadius, style: .circular)
                         .fill(selected ? CampaignCanvasTheme.shared.color(effective.selectedBorderColor, isDark: isDark) : .clear)
                         .overlay(
-                            RoundedRectangle(cornerRadius: indicatorRadius)
+                            RoundedRectangle(cornerRadius: indicatorRadius, style: .circular)
                                 .stroke(CampaignCanvasTheme.shared.color(selected ? effective.selectedBorderColor : effective.borderColor, isDark: isDark), lineWidth: scaledBorderWidth)
                         )
                     if selected {
@@ -734,11 +736,11 @@ private struct NumericNpsScale: View {
                             .lineLimit(1)
                             .frame(width: tileSize, height: tileSize)
                             .background(
-                                RoundedRectangle(cornerRadius: scaledRadius)
+                                RoundedRectangle(cornerRadius: scaledRadius, style: .circular)
                                     .fill(CampaignCanvasTheme.shared.color(isSelected ? style.selectedFill : style.unselectedFill, isDark: isDark))
                             )
                             .overlay(
-                                RoundedRectangle(cornerRadius: scaledRadius)
+                                RoundedRectangle(cornerRadius: scaledRadius, style: .circular)
                                     .stroke(CampaignCanvasTheme.shared.color(isSelected ? style.selectedFill : style.borderColor, isDark: isDark), lineWidth: scaledBorderWidth)
                             )
                     }
