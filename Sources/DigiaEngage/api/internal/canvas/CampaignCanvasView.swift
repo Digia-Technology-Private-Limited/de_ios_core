@@ -2158,17 +2158,27 @@ private struct CampaignCanvasShadowView: View {
     var body: some View {
         if shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0 {
             if outsideOnly {
-                ZStack {
-                    shadowShape
-                    CampaignCanvasRoundedShape(radius: cornerRadius)
-                        .fill(Color.black)
-                        .blendMode(.destinationOut)
-                }
-                .compositingGroup()
+                // Clip the blurred shadow to the region outside the border box. Punching the
+                // interior with destinationOut does not survive CALayer.render(in:) (the golden
+                // snapshot path): the punch fill stays opaque and the interior snapshots black.
+                shadowShape
+                    .padding(outsideBleed)
+                    .clipShape(
+                        CanvasOutsideShadowRing(
+                            radius: cornerRadius, inset: shadow.spread + outsideBleed),
+                        style: FillStyle(eoFill: true)
+                    )
+                    .padding(-outsideBleed)
             } else {
                 shadowShape
             }
         }
+    }
+    /// Past the spread-expanded border box, how far the shadow artwork can reach: the offset
+    /// plus a cutoff for the blur falloff. The ring's outer edge clears it, so the falloff is
+    /// never cut; the transient padding is removed right after and lays out nothing.
+    private var outsideBleed: CGFloat {
+        ceil(shadow.blur * 3 + max(abs(shadow.offsetX), abs(shadow.offsetY)) + 2)
     }
     private var shadowShape: some View {
         CampaignCanvasRoundedShape(radius: cornerRadius)
@@ -2367,6 +2377,22 @@ private struct CanvasImageFit: ViewModifier {
         case "fill": content
         default: content.scaledToFill()
         }
+    }
+}
+
+/// The region outside a widget's rounded border box: an even-odd ring whose outer edge
+/// clears the shadow's blur falloff and offset, so clipping the blurred shadow artwork to it
+/// leaves a ring outside the border and a transparent interior.
+private struct CanvasOutsideShadowRing: Shape {
+    let radius: CampaignCanvasCornerRadius
+    let inset: CGFloat
+    func path(in rect: CGRect) -> Path {
+        var path = Path(rect)
+        let inner = rect.insetBy(dx: inset, dy: inset)
+        if inner.width > 0 && inner.height > 0 {
+            path.addPath(CampaignCanvasRoundedShape(radius: radius).path(in: inner))
+        }
+        return path
     }
 }
 
