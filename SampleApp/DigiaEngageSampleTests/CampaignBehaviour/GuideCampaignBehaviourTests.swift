@@ -301,6 +301,82 @@ struct GuideCampaignBehaviourTests {
         expectDropped(await sdk.sent(key), d, .surfaceBusy)
     }
 
+    // As coded: a classic guide (steps with no canvas) is parsed into the store, but this renderer shows canvas
+    // steps only, so routing turns it away `invalid_config`, with nothing on screen.
+    @Test("D4 a guide with no canvas steps: invalid_config (as coded)")
+    func noCanvasSteps() async throws {
+        let key = "test_guide_tooltip_classic_stack_push"
+        let campaign = guide("guide_tooltip_classic_stack_push")
+        let sdk = try await SdkHarness.startChain([campaign]) { GuideHostScreen() }
+        defer { sdk.tearDown() }
+        Digia.setCurrentScreen(name: "home")  // the fixture targets home
+        let d = try sdk.deliverChain(key)
+        try await sdk.settle(1)
+
+        expectDroppedWire(
+            await sdk.sent(key), d, .invalidConfig, campaign, screen: "home",
+            extras: ["cause": "empty_content"], detail: "campaign has no valid Canvas guide content")
+    }
+
+    @Test("D11 over its cap: frequency_capped, and the first chain intact")
+    func overItsCap() async throws {
+        let key = "test_guide_tooltip_single"
+        let campaign = guide("guide_tooltip_single_step").cappedAtOne()
+        let sdk = try await SdkHarness.startChain([campaign]) { GuideHostScreen() }
+        defer { sdk.tearDown() }
+        let first = try sdk.deliverChain(key)
+        try await show(sdk, "Quick Search Callout")
+        try await sdk.tap(id: "dismiss_btn")  // "Close"
+        try await sdk.waitUntil("the guide is gone") { !sdk.isShowing("Quick Search Callout") }
+
+        let second = try sdk.deliverChain(key)
+        try await sdk.settle(1)
+        #expect(!sdk.isShowing("Quick Search Callout"))
+
+        let events = await sdk.sent(key)
+        expectChain(
+            eventsOf(first, in: events), first,
+            names: [
+                Chain.triggered, Chain.viewed, Chain.stepViewed, Chain.stepClicked, Chain.completed, Chain.dismissed,
+            ],
+            reason: .completed, cepClicks: 0)
+        expectDroppedWire(
+            eventsOf(second, in: events), second, .frequencyCapped, campaign, screen: nil,
+            extras: ["cap_rule": "max_total", "cap_limit": 1])
+    }
+
+    @Test("D12 CEP cancel before it shows: cancelled")
+    func cepCancelBeforeShowing() async throws {
+        let key = "test_guide_tooltip_single"
+        let campaign = guide("guide_tooltip_single_step")
+        let sdk = try await SdkHarness.startChain([campaign]) { GuideHostScreen() }
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        d.presentation.cancel()
+        try await sdk.settle(1)
+        #expect(!sdk.isShowing("Quick Search Callout"))
+
+        expectDroppedWire(
+            await sdk.sent(key), d, .cancelled, campaign, screen: nil,
+            extras: ["cancel_cause": "cep_cancel"])
+    }
+
+    @Test("D13 off its target screen: screen_not_targeted")
+    func offItsTargetScreen() async throws {
+        let key = "test_guide_tooltip_screen_change_allowed"
+        let campaign = guide("guide_tooltip_screen_change_allowed")
+        let sdk = try await SdkHarness.startChain([campaign]) { GuideHostScreen() }
+        defer { sdk.tearDown() }
+        Digia.setCurrentScreen(name: "cart")
+        let d = try sdk.deliverChain(key)
+        try await sdk.settle(1)
+
+        expectDroppedWire(
+            await sdk.sent(key), d, .screenNotTargeted, campaign, screen: "cart",
+            extras: ["target_screens": ["home", "search"]],
+            detail: "currentScreen=cart targetScreenNames=[\"home\", \"search\"]")
+    }
+
     // MARK: - A double tap
 
     // Fails today: the second tap is a second Step Clicked(1) and ends the guide (Completed, Dismissed) before step 2 shows (expected one Step Clicked, step 2 on screen).

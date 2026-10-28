@@ -357,6 +357,90 @@ struct NudgeCampaignBehaviourTests {
         expectDropped(await sdk.sent("test_no_such_campaign"), d, .unknownCampaignKey, sendsEvents: false)
     }
 
+    // MARK: - Dropped before the SDK is ready
+
+    // The SDK knows no campaign yet, so a delivery in these states sends nothing to Digia: only the CEP hears.
+
+    @Test("D1 delivered before Digia.initialize: not_initialized, nothing sent")
+    func beforeInitialize() async throws {
+        let sdk = try await SdkHarness.startUninitialized()
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain("test_nudge_dialog")
+        try await sdk.settle()
+
+        #expect(!sdk.isShowing("Dialog Test Nudge"))
+        expectDropped(try await sdk.sentToScriptedNetwork("test_nudge_dialog"), d, .notInitialized, sendsEvents: false)
+        #expect(d.dropDetail == "Digia.initialize() has not been called")
+    }
+
+    @Test("D2 delivered while the campaign fetch is held open: not_ready, nothing sent, and not shown once it lands")
+    func whileFetchHeld() async throws {
+        let sdk = try await SdkHarness.startFetchHeld(fixture("nudge_dialog"))
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain("test_nudge_dialog")
+        try await sdk.settle()
+
+        expectDropped(try await sdk.sentToScriptedNetwork("test_nudge_dialog"), d, .notReady, sendsEvents: false)
+        #expect(d.dropDetail == "Campaigns are still loading; trigger dropped")
+
+        // Core never holds a trigger: the campaign does not appear when the fetch finishes.
+        try await sdk.releaseBundle()
+        try await sdk.settle(0.5)
+        #expect(!sdk.isShowing("Dialog Test Nudge"))
+        #expect(try await sdk.sentToScriptedNetwork("test_nudge_dialog").isEmpty)
+    }
+
+    @Test("D3 delivered after the campaign fetch failed: initialization_failed, nothing sent")
+    func afterFetchFailed() async throws {
+        let sdk = try await SdkHarness.startFetchFailed(fixture("nudge_dialog"))
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain("test_nudge_dialog")
+        try await sdk.settle()
+
+        #expect(!sdk.isShowing("Dialog Test Nudge"))
+        expectDropped(try await sdk.sentToScriptedNetwork("test_nudge_dialog"), d, .initializationFailed, sendsEvents: false)
+        #expect(d.dropDetail == "Campaign fetch failed; trigger dropped")
+    }
+
+    // MARK: - Dropped or ended by the plugin and the watchdog
+
+    // As coded: the SDK has no check for a missing `DigiaHost` (`host_not_mounted` is only the React Native
+    // guide renderer's), so a nudge with no host to draw it waits out the 15 s acceptance watchdog and drops
+    // `timeout`. This is also the one `timeout` reachable through the CEP flow in real time.
+    @Test("D6 D7 no DigiaHost mounted: the nudge never shows and drops timeout after 15 s, as coded", .tags(.slow))
+    func noHostMountedTimesOut() async throws {
+        let campaign = fixture("nudge_dialog")
+        let sdk = try await SdkHarness.startWithoutHost(campaign)
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain("test_nudge_dialog")
+        try await sdk.waitUntil("the acceptance watchdog", timeout: 20) { d.outcome != nil }
+
+        #expect(!sdk.isShowing("Dialog Test Nudge"))
+        expectDroppedWire(
+            try await sdk.sentToScriptedNetwork("test_nudge_dialog"), d, .timeout, campaign, screen: nil,
+            extras: ["surface_kind": "nudge", "timeout_ms": 15000, "app_backgrounded": false],
+            detail: "never displayed within the acceptance window")
+    }
+
+    // As coded: the CEP's outcome is `dismissed(plugin_detached)`; Digia is told nothing and the nudge stays up
+    // until the user closes it (the replaced plugin only loses its slot).
+    @Test("D16 the CEP plugin is replaced while a nudge shows: the CEP hears plugin_detached, as coded")
+    func pluginDetachedWhileShowing() async throws {
+        let campaign = fixture("nudge_dialog")
+        let sdk = try await start([campaign])
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain("test_nudge_dialog")
+        try await show(sdk, "Dialog Test Nudge")
+
+        Digia.register(FakeCep())
+        try await sdk.settle()
+
+        #expect(d.timeline == ["displayed", "hold", "outcome"])
+        #expect(d.outcome == .dismissed(reason: .pluginDetached, completed: false))
+        #expect(names(await sdk.sent("test_nudge_dialog")) == [Chain.triggered, Chain.viewed])
+        #expect(sdk.isShowing("Dialog Test Nudge"), "the nudge stays on screen")
+    }
+
     // MARK: - Drags and a double tap
 
     // `DigiaBottomSheet` closes on distance alone (`shouldDismissBottomSheet`: at least 120 pt or a quarter of

@@ -234,6 +234,133 @@ struct FloaterCampaignBehaviourTests {
             hold: .floating)
     }
 
+    // MARK: - Dropped
+
+    @Test("D11 pip: over its cap: frequency_capped, and the first chain intact")
+    func pipOverItsCap() async throws {
+        let key = "test_pip_close_dismiss"
+        let campaign = fixture("campaigns/pip/pip_close_dismiss.json").cappedAtOne()
+        let sdk = try await SdkHarness.startChain([campaign]) { Text("App home") }
+        defer { sdk.tearDown() }
+        let first = try sdk.deliverChain(key)
+        try await show(sdk, first)
+        try await pressButton(sdk, .topTrailing)
+
+        let second = try sdk.deliverChain(key)
+        try await sdk.settle(1.5)
+        #expect(SDKInstance.shared.floaterOrchestrator.state == nil)
+
+        let events = await sdk.sent(key)
+        expectChain(
+            eventsOf(first, in: events), first, names: [Chain.triggered, Chain.viewed, Chain.dismissed],
+            reason: .userClose, hold: .floating)
+        expectDroppedWire(
+            eventsOf(second, in: events), second, .frequencyCapped, campaign, screen: nil,
+            extras: ["cap_rule": "max_total", "cap_limit": 1])
+    }
+
+    @Test("D11 story floater: over its cap: frequency_capped, and the first chain intact")
+    func storyOverItsCap() async throws {
+        let key = "test_floater_close"
+        let campaign = fixture("campaigns/floater/floater_close_button.json").cappedAtOne()
+        let sdk = try await SdkHarness.startChain([campaign]) { Text("App home") }
+        defer { sdk.tearDown() }
+        let first = try sdk.deliverChain(key)
+        try await show(sdk, first)
+        try await pressButton(sdk, .topTrailing)
+
+        let second = try sdk.deliverChain(key)
+        try await sdk.settle(1.5)
+        #expect(SDKInstance.shared.floaterStoryOrchestrator.state == nil)
+
+        let events = await sdk.sent(key)
+        expectChain(
+            eventsOf(first, in: events), first,
+            names: [Chain.triggered, Chain.viewed, Chain.clicked, Chain.dismissed], reason: .userClose, cepClicks: 0,
+            hold: .floating)
+        expectDroppedWire(
+            eventsOf(second, in: events), second, .frequencyCapped, campaign, screen: nil,
+            extras: ["cap_rule": "max_total", "cap_limit": 1])
+    }
+
+    @Test("D12 pip: CEP cancel before it shows: cancelled")
+    func pipCepCancelBeforeShowing() async throws {
+        let key = "test_pip_close_dismiss"
+        let campaign = fixture("campaigns/pip/pip_close_dismiss.json")
+        let sdk = try await SdkHarness.startChain([campaign]) { Text("App home") }
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        d.presentation.cancel()
+        try await sdk.settle(2)
+        #expect(SDKInstance.shared.floaterOrchestrator.state == nil)
+        #expect(!d.displayed)
+
+        expectDroppedWire(
+            await sdk.sent(key), d, .cancelled, campaign, screen: nil,
+            extras: ["cancel_cause": "cep_cancel"], detail: "ended before it displayed (cancelled)")
+    }
+
+    // Fails today: Digia also sends a Viewed for a story floater the CEP was told was cancelled before it displayed
+    // (expected Triggered, Dropped only).
+    @Test("D12 story floater: CEP cancel before it shows: cancelled")
+    func storyCepCancelBeforeShowing() async throws {
+        let key = "test_floater_close"
+        let campaign = fixture("campaigns/floater/floater_close_button.json")
+        let sdk = try await SdkHarness.startChain([campaign]) { Text("App home") }
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        d.presentation.cancel()
+        try await sdk.settle(2)
+        #expect(SDKInstance.shared.floaterStoryOrchestrator.state == nil)
+        #expect(!d.displayed)
+
+        expectDroppedWire(
+            await sdk.sent(key), d, .cancelled, campaign, screen: nil,
+            extras: ["cancel_cause": "cep_cancel"], detail: "ended before it displayed (cancelled)")
+    }
+
+    @Test("D13 story floater: off its target screen: screen_not_targeted")
+    func storyOffTargetScreen() async throws {
+        let key = "test_floater_story_screen_change_home_only"
+        let campaign = fixture("campaigns/floater/floater_story_screen_change_home_only.json")
+        let sdk = try await SdkHarness.startChain([campaign]) { Text("App home") }
+        defer { sdk.tearDown() }
+        Digia.setCurrentScreen(name: "search")
+        let d = try sdk.deliverChain(key)
+        try await sdk.settle(1.5)
+
+        expectDroppedWire(
+            await sdk.sent(key), d, .screenNotTargeted, campaign, screen: "search",
+            extras: ["target_screens": ["home"]], detail: "currentScreen=search targetScreenNames=[\"home\"]")
+    }
+
+    // As coded: the image answers 404, so the PiP has no media to float; its window never opens, and the media
+    // end it reports reaches the CEP as a cancel (`cancelled`), with the media end as the cause.
+    @Test("D14 pip: its image fails to load: dropped as cancelled, as coded")
+    func pipMediaFailsToLoad() async throws {
+        let key = "test_pip_close_dismiss"
+        let base = fixture("campaigns/pip/pip_close_dismiss.json")
+        var json = base.json
+        var template = try #require(json["templateConfig"] as? [String: any Sendable])
+        var media = try #require(template["media"] as? [String: any Sendable])
+        media["url"] = "https://images.example.test/missing.jpg"
+        template["media"] = media
+        json["templateConfig"] = template
+        let campaign = WorkspaceFixtures.Campaign(name: base.name, json: json)
+        let sdk = try await SdkHarness.startChain(
+            [campaign], backend: StubBackend.Options(foreignImagesAsStandIn: false)
+        ) { Text("App home") }
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await sdk.waitUntil("the PiP gives up", timeout: 15) { d.outcome != nil }
+        #expect(SDKInstance.shared.floaterOrchestrator.state == nil)
+        #expect(!d.displayed)
+
+        expectDroppedWire(
+            await sdk.sent(key), d, .cancelled, campaign, screen: nil, extras: ["cancel_cause": "auto_timeout"],
+            detail: "ended before it displayed (auto_timeout)")
+    }
+
     // MARK: - PiP: moved, and starting expanded
 
     /// Asserts a floater still running: the exact chain so far and its one impression id, the CEP's hold back

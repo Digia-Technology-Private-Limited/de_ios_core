@@ -569,4 +569,130 @@ struct InlineCampaignBehaviourTests {
         expectInlineChain(events, d, names: [Chain.triggered, Chain.viewed, Chain.clicked, Chain.stepViewed], cepClicks: 1)
         #expect(steps(events, Chain.stepViewed) == ["(1, 2)"])
     }
+
+    // MARK: - Dropped
+
+    /// Mounts or unmounts `home_banner` while a test runs, so a campaign can be delivered before its slot exists.
+    @MainActor
+    final class SlotSwitch: ObservableObject {
+        @Published var mounted = false
+    }
+
+    private struct SwitchedSlot: View {
+        @ObservedObject var slot: SlotSwitch
+        var body: some View {
+            VStack(spacing: 0) {
+                if slot.mounted { DigiaSlot("home_banner") }
+                Spacer()
+            }
+        }
+    }
+
+    private func secondCanvas() -> WorkspaceFixtures.Campaign {
+        var json = canvasCta().json
+        json["campaignKey"] = "test_inline_canvas_second"
+        json["id"] = "mock-inline-canvas-second"
+        return WorkspaceFixtures.Campaign(name: "inline_canvas_second", json: json)
+    }
+
+    // The slot has no view yet, so the first campaign has not displayed and the newer one takes its place.
+    @Test("D5 a newer campaign for a slot nothing has displayed in: the older one drops superseded")
+    func supersededBeforeDisplay() async throws {
+        let first = canvasCta()
+        let second = secondCanvas()
+        let slot = SlotSwitch()
+        let sdk = try await SdkHarness.startChain([first, second]) { SwitchedSlot(slot: slot) }
+        defer { sdk.tearDown() }
+        let older = try sdk.deliverChain("test_inline_canvas_cta")
+        try await sdk.settle(0.3)  // long enough to watch the CEP get its hold back at acceptance
+        let newer = try sdk.deliverChain("test_inline_canvas_second")
+        try await sdk.settle(0.5)
+        slot.mounted = true
+        try await show(sdk, newer)
+        #expect(sdk.isShowing("Special Wellness Program"))
+
+        expectDroppedWire(
+            await sdk.sent("test_inline_canvas_cta"), older, .superseded, first, screen: nil,
+            extras: [
+                "superseded_by_campaign_key": "test_inline_canvas_second",
+                "superseded_by_campaign_id": "mock-inline-canvas-second", "superseded_by_kind": "inline",
+            ],
+            detail: "ended before it displayed (superseded)", timeline: ["hold early", "outcome"])
+        expectInlineChain(await sdk.sent("test_inline_canvas_second"), newer, names: [Chain.triggered, Chain.viewed])
+    }
+
+    // Registering another plugin is how a CEP integration is unregistered: the SDK settles what the old one owns.
+    @Test("D8 the CEP plugin is replaced while its inline campaign waits for a slot: plugin_detached")
+    func pluginDetachedBeforeDisplay() async throws {
+        let campaign = canvasCta()
+        let slot = SlotSwitch()
+        let sdk = try await SdkHarness.startChain([campaign]) { SwitchedSlot(slot: slot) }
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain("test_inline_canvas_cta")
+        try await sdk.settle(0.5)
+
+        Digia.register(FakeCep())
+        try await sdk.settle(0.5)
+
+        expectDroppedWire(
+            await sdk.sent("test_inline_canvas_cta"), d, .pluginDetached, campaign, screen: nil,
+            timeline: ["hold early", "outcome"])
+    }
+
+    // As coded: inline campaigns are never frequency-capped (on every stack), so a cap of one does not stop the
+    // same campaign showing again once its slot is cleared.
+    @Test("D11 inline: never frequency-capped, as coded")
+    func neverCapped() async throws {
+        let key = "test_inline_canvas_cta"
+        let sdk = try await start([canvasCta().cappedAtOne()], slot: "home_banner")
+        defer { sdk.tearDown() }
+        let first = try sdk.deliverChain(key)
+        try await show(sdk, first)
+        Digia.clearInlineContent("home_banner")
+        try await sdk.waitUntil("the slot is empty") { !sdk.isShowing("Special Wellness Program") }
+
+        let second = try sdk.deliverChain(key)
+        try await show(sdk, second)
+        #expect(sdk.isShowing("Special Wellness Program"))
+
+        let events = await sdk.sent(key)
+        expectInlineChain(eventsOf(first, in: events), first, names: [Chain.triggered, Chain.viewed], endedAs: .cancelled)
+        expectInlineChain(eventsOf(second, in: events), second, names: [Chain.triggered, Chain.viewed])
+    }
+
+    @Test("D12 inline: CEP cancel before it shows: cancelled")
+    func cepCancelBeforeShowing() async throws {
+        let key = "test_inline_canvas_cta"
+        let campaign = canvasCta()
+        let slot = SlotSwitch()
+        let sdk = try await SdkHarness.startChain([campaign]) { SwitchedSlot(slot: slot) }
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await sdk.settle(0.3)
+        d.presentation.cancel()
+        try await sdk.settle(0.5)
+        slot.mounted = true
+        try await sdk.settle(1)
+        #expect(!sdk.isShowing("Special Wellness Program"), "nothing is drawn once the slot appears")
+
+        expectDroppedWire(
+            await sdk.sent(key), d, .cancelled, campaign, screen: nil, extras: ["cancel_cause": "cep_cancel"],
+            detail: "ended before it displayed (cancelled)", timeline: ["hold early", "outcome"])
+    }
+
+    @Test("D13 inline: off its target screen: screen_not_targeted")
+    func offItsTargetScreen() async throws {
+        let key = "test_inline_canvas_cta"
+        let campaign = canvasCta().targeting(["home"])
+        let sdk = try await start([campaign], slot: "home_banner")
+        defer { sdk.tearDown() }
+        Digia.setCurrentScreen(name: "search")
+        let d = try sdk.deliverChain(key)
+        try await sdk.settle(1)
+        #expect(!sdk.isShowing("Special Wellness Program"))
+
+        expectDroppedWire(
+            await sdk.sent(key), d, .screenNotTargeted, campaign, screen: "search",
+            extras: ["target_screens": ["home"]], detail: "currentScreen=search targetScreenNames=[\"home\"]")
+    }
 }

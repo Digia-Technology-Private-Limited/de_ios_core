@@ -89,14 +89,21 @@ final class Delivery {
         if case .dismissed(let reason, _) = outcome { return reason }
         return nil
     }
+
+    /// The free text a drop carries to the CEP.
+    var dropDetail: String? {
+        if case .dropped(_, let detail) = outcome { return detail }
+        return nil
+    }
 }
 
 extension SdkHarness {
     /// ``start(_:actionHandlers:backend:content:)`` for a chain test: only this test's events reach the wire it reads.
     static func startChain<Content: View>(
-        _ campaigns: [WorkspaceFixtures.Campaign], @ViewBuilder content: () -> Content
+        _ campaigns: [WorkspaceFixtures.Campaign], backend: StubBackend.Options = StubBackend.Options(),
+        @ViewBuilder content: () -> Content
     ) async throws -> SdkHarness {
-        let sdk = try await start(campaigns, content: content)
+        let sdk = try await start(campaigns, backend: backend, content: content)
         // A CTA authored to open a URL must not leave the app: the next test would run in the background.
         ActionPlatform.current = sdk.platform.actionPlatform
         ComponentTestHost.enableAccessibilityAutomation()
@@ -249,4 +256,151 @@ func expectInlineChain(
     } else {
         #expect(delivery.outcome == nil, sourceLocation: sourceLocation)
     }
+}
+
+// MARK: - Boots before the SDK is ready
+
+extension SdkHarness {
+    /// The SDK before `Digia.initialize` is ever called, with the CEP plugin registered and attached.
+    static func startUninitialized() async throws -> SdkHarness {
+        await SdkGate.shared.enter()
+        do {
+            let sdk = try create()
+            sdk.tearDownHooks.append { Task { await SdkGate.shared.leave() } }
+            try await sdk.mount { Text("App home") }
+            Digia.register(sdk.cep)
+            try await sdk.waitUntil("the plugin is attached") { sdk.cep.host != nil }
+            return sdk
+        } catch {
+            await SdkGate.shared.leave()
+            throw error
+        }
+    }
+
+    /// The SDK while its campaign fetch is held open, with the CEP plugin attached.
+    static func startFetchHeld(_ campaign: WorkspaceFixtures.Campaign) async throws -> SdkHarness {
+        await SdkGate.shared.enter()
+        do {
+            let sdk = try await startHeld(campaign.json)
+            sdk.tearDownHooks.append { Task { await SdkGate.shared.leave() } }
+            try sdk.mount { Text("App home") }
+            return sdk
+        } catch {
+            await SdkGate.shared.leave()
+            throw error
+        }
+    }
+
+    /// The SDK after its campaign fetch failed with `status`, with the CEP plugin attached.
+    static func startFetchFailed(_ campaign: WorkspaceFixtures.Campaign, status: Int = 500) async throws -> SdkHarness {
+        await SdkGate.shared.enter()
+        do {
+            let sdk = try create(campaigns: [campaign.json])
+            sdk.tearDownHooks.append { Task { await SdkGate.shared.leave() } }
+            sdk.bundleStatus = status
+            try? await sdk.initialize()
+            try await sdk.waitUntil("the fetch has failed", timeout: 10) { sdk.sdk.sdkState == .failed }
+            try sdk.mount { Text("App home") }
+            try await sdk.attachCep()
+            return sdk
+        } catch {
+            await SdkGate.shared.leave()
+            throw error
+        }
+    }
+
+    /// The SDK ready, with the CEP plugin attached and no `DigiaHost` mounted anywhere.
+    static func startWithoutHost(_ campaign: WorkspaceFixtures.Campaign) async throws -> SdkHarness {
+        await SdkGate.shared.enter()
+        do {
+            let sdk = try await start(campaigns: [campaign.json])
+            sdk.tearDownHooks.append { Task { await SdkGate.shared.leave() } }
+            return sdk
+        } catch {
+            await SdkGate.shared.leave()
+            throw error
+        }
+    }
+
+    /// The experience events of `campaignKey` the SDK sent through the scripted network these boots use.
+    func sentToScriptedNetwork(_ campaignKey: String) async throws -> [WireEvent] {
+        try await events().filter {
+            $0["campaign_key"] as? String == campaignKey && ($0["event_name"] as? String)?.hasPrefix("Digia ") == true
+        }
+    }
+}
+
+/// Asserts a delivery that never displayed, field by field: Triggered then Dropped, each with the envelope of
+/// the delivered campaign (`campaign`'s key, id and type, one impression id, the event ids, the order of time)
+/// and exactly the properties a drop carries: `trigger_source` (the CEP's id), `screen_name` when `screen` is
+/// set, `drop_reason`, and `extras` (e.g. `target_screens`, `cap_limit`) on the Dropped. The CEP sees the hold
+/// and then the same drop with `detail`, in `timeline`.
+@MainActor
+func expectDroppedWire(
+    _ events: [WireEvent],
+    _ delivery: Delivery,
+    _ reason: DropReason,
+    _ campaign: WorkspaceFixtures.Campaign,
+    screen: String?,
+    extras: [String: Any] = [:],
+    detail: String? = nil,
+    timeline: [String] = ["hold", "outcome"],
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    #expect(names(events) == [Chain.triggered, Chain.dropped], sourceLocation: sourceLocation)
+    #expect(impressionIds(events) == [delivery.presentation.id], sourceLocation: sourceLocation)
+    #expect(Set(events.compactMap { $0["event_id"] as? String }).count == events.count, sourceLocation: sourceLocation)
+    #expect(Set(events.compactMap { $0["anonymous_id"] as? String }).count == 1, sourceLocation: sourceLocation)
+    #expect(Set(events.compactMap { $0["session_id"] as? String }).count == 1, sourceLocation: sourceLocation)
+    let times = events.compactMap { $0["occurred_at"] as? String }
+    #expect(times.count == events.count && times == times.sorted(), "occurred_at never goes back", sourceLocation: sourceLocation)
+    let common: Set<String> = [
+        "app_locale", "app_version", "app_build_number", "app_package_name", "device_make", "device_model",
+        "device_platform", "os_version", "sdk_platform", "sdk_version",
+    ]
+    for (index, event) in events.enumerated() {
+        #expect(event["campaign_key"] as? String == campaign.campaignKey, sourceLocation: sourceLocation)
+        #expect(event["campaign_id"] as? String == campaign.json["id"] as? String, sourceLocation: sourceLocation)
+        #expect(event["campaign_type"] as? String == campaign.json["campaignType"] as? String, sourceLocation: sourceLocation)
+        let props = event["properties"] as? [String: Any] ?? [:]
+        #expect(props["sdk_platform"] as? String == "ios", sourceLocation: sourceLocation)
+        #expect(props["device_platform"] as? String == "ios", sourceLocation: sourceLocation)
+        #expect((props["sdk_version"] as? String)?.hasPrefix("s=1|b=native|p=ios|c=") == true, sourceLocation: sourceLocation)
+        var expected: [String: Any] = ["trigger_source": "action-test"]
+        if let screen { expected["screen_name"] = screen }
+        if index == 1 {
+            expected["drop_reason"] = reason.wire
+            expected.merge(extras) { $1 }
+        }
+        let own = props.filter { !common.contains($0.key) }
+        #expect(Set(own.keys) == Set(expected.keys), "\(event["event_name"] ?? "?") properties: \(own.keys.sorted())", sourceLocation: sourceLocation)
+        for (name, value) in expected {
+            #expect((own[name] as? NSObject) == (value as? NSObject), "\(name) = \(String(describing: own[name]))", sourceLocation: sourceLocation)
+        }
+    }
+    #expect(delivery.timeline == timeline, "CEP markings and hold, in order", sourceLocation: sourceLocation)
+    #expect(delivery.dropReason == reason, sourceLocation: sourceLocation)
+    #expect(delivery.dropDetail == detail, "CEP drop detail", sourceLocation: sourceLocation)
+}
+
+extension WorkspaceFixtures.Campaign {
+    /// The same campaign allowed one showing in all (the cap-1 pattern).
+    func cappedAtOne() -> WorkspaceFixtures.Campaign {
+        var json = self.json
+        json["frequency"] = ["maxTotal": NSNumber(value: 1)] as [String: any Sendable]
+        return WorkspaceFixtures.Campaign(name: name, json: json)
+    }
+
+    /// The same campaign scoped to `screens`.
+    func targeting(_ screens: [String]) -> WorkspaceFixtures.Campaign {
+        var json = self.json
+        json["targetScreenNames"] = ["names": screens] as [String: any Sendable]
+        return WorkspaceFixtures.Campaign(name: name, json: json)
+    }
+}
+
+/// `events` of the delivery `d` alone, where one test sends several deliveries of a campaign.
+@MainActor
+func eventsOf(_ d: Delivery, in events: [WireEvent]) -> [WireEvent] {
+    events.filter { $0["impression_id"] as? String == d.presentation.id }
 }

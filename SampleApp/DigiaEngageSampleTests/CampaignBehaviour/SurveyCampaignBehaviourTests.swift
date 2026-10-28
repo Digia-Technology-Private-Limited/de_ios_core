@@ -157,4 +157,61 @@ struct SurveyCampaignBehaviourTests {
 
         expectDropped(await sdk.sent(key), d, .surfaceBusy)
     }
+
+    @Test("D11 over its cap: frequency_capped, and the first chain intact")
+    func overItsCap() async throws {
+        let key = "test_survey_stacked_cta"
+        let campaign = survey("survey_stacked_cta").cappedAtOne()
+        let sdk = try await start([campaign])
+        defer { sdk.tearDown() }
+        let first = try sdk.deliverChain(key)
+        try await show(sdk, "Option Alpha")
+        try await tapScrim(sdk)
+        try await sdk.waitUntil("the survey is gone") { !sdk.isShowing("Option Alpha") }
+
+        let second = try sdk.deliverChain(key)
+        try await sdk.settle(1.2)
+        #expect(!sdk.isShowing("Option Alpha"))
+
+        let events = await sdk.sent(key)
+        expectChain(
+            eventsOf(first, in: events), first,
+            names: [Chain.triggered, Chain.viewed, Chain.questionViewed, Chain.dismissed], reason: .userClose)
+        expectDroppedWire(
+            eventsOf(second, in: events), second, .frequencyCapped, campaign, screen: nil,
+            extras: ["cap_rule": "max_total", "cap_limit": 1])
+    }
+
+    @Test("D12 CEP cancel before it shows: cancelled")
+    func cepCancelBeforeShowing() async throws {
+        let key = "test_survey_stacked_cta"
+        let campaign = survey("survey_stacked_cta")
+        let sdk = try await start([campaign])
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        d.presentation.cancel()
+        try await sdk.settle(1.2)
+        #expect(!sdk.isShowing("Option Alpha"))
+
+        expectDroppedWire(
+            await sdk.sent(key), d, .cancelled, campaign, screen: nil,
+            extras: ["cancel_cause": "cep_cancel"])
+    }
+
+    @Test("D13 off its target screen: screen_not_targeted")
+    func offItsTargetScreen() async throws {
+        let key = "test_survey_backdrop_locked"
+        let campaign = survey("survey_backdrop_locked")
+        let sdk = try await start([campaign])
+        defer { sdk.tearDown() }
+        Digia.setCurrentScreen(name: "search")
+        let d = try sdk.deliverChain(key)
+        try await sdk.settle(1.2)
+        #expect(!sdk.isShowing("Option A"))
+
+        expectDroppedWire(
+            await sdk.sent(key), d, .screenNotTargeted, campaign, screen: "search",
+            extras: ["target_screens": ["home", "brands"]],
+            detail: "currentScreen=search targetScreenNames=[\"home\", \"brands\"]")
+    }
 }
