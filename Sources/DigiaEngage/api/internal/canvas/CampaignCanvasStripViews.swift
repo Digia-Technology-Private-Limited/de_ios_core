@@ -280,6 +280,64 @@ struct ScaledCanvasStage: View {
     }
 }
 
+/// The scale the host draws a box at, read back from the screen.
+private struct HostScaleKey: PreferenceKey {
+    static let defaultValue: CGFloat = 1
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// The scale a box is drawn at, read back from its global vs local width.
+/// Pure so unit tests can pin it without hosting a view. Degrades to 1
+/// (the unscaled layout) for degenerate inputs rather than vanishing.
+internal func unscaledHostScale(globalWidth: CGFloat, localWidth: CGFloat) -> CGFloat {
+    guard localWidth > 0, globalWidth > 0 else { return 1 }
+    let scale = globalWidth / localWidth
+    guard scale.isFinite, scale > 0 else { return 1 }
+    return scale
+}
+
+/// Hosts a UIKit-backed scroll view at its on-screen size inside a scaled canvas.
+///
+/// Canvas hosts draw the whole canvas through a SwiftUI `scaleEffect`. A scroll
+/// view inside that scale sees every finger distance and velocity divided by the
+/// scale, so on a tablet short swipes snap back and taps with a little finger
+/// movement turn into drags. This measures the scale the box is actually drawn
+/// at, lays `content` out that many times larger and draws it back at 1/scale,
+/// so the scroll view sees no scale at all. `content` receives the scaled size
+/// and the scale, and must size anything it reads in authored units with it.
+/// Until the scale is measured it falls back to 1, the unscaled layout.
+struct UnscaledHostBox<Content: View>: View {
+    @ViewBuilder let content: (_ size: CGSize, _ scale: CGFloat) -> Content
+
+    @State private var hostScale: CGFloat = 1
+
+    var body: some View {
+        GeometryReader { proxy in
+            let scale = hostScale
+            let scaled = CGSize(width: proxy.size.width * scale, height: proxy.size.height * scale)
+            content(scaled, scale)
+                .frame(width: scaled.width, height: scaled.height, alignment: .topLeading)
+                .scaleEffect(1 / scale, anchor: .topLeading)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+                .background(
+                    GeometryReader { measured in
+                        let width = measured.size.width
+                        Color.clear.preference(
+                            key: HostScaleKey.self,
+                            value: unscaledHostScale(
+                                globalWidth: measured.frame(in: .global).width,
+                                localWidth: width
+                            )
+                        )
+                    }
+                )
+        }
+        .onPreferenceChange(HostScaleKey.self) { measured in
+            if measured > 0, abs(measured - hostScale) > 0.001 { hostScale = measured }
+        }
+    }
+}
+
 /// Draws a carousel: the current slide, the peek of the next, and the dot row.
 ///
 /// Everything is measured from the widget's own box rather than from the slot,
@@ -333,12 +391,20 @@ struct CanvasCarouselRenderer: View {
         ) = widget, !slides.isEmpty else { return AnyView(EmptyView()) }
 
         return AnyView(
-            GeometryReader { proxy in
+            UnscaledHostBox { size, scale in
+                // `size` is on-screen; authored sizes are multiplied by `scale` to match.
+                let itemSpacing = itemSpacing * scale
+                let cornerRadius = cornerRadius * scale
+                let dotWidth = dotWidth * scale
+                let dotHeight = dotHeight * scale
+                let dotSpacing = dotSpacing * scale
+                let indicatorGap = indicatorGap * scale
+                let indicatorBottom = indicatorBottom * scale
                 let indicatorHeight = showIndicator ? indicatorGap + dotHeight + indicatorBottom : 0
-                let stripHeight = proxy.size.height - indicatorHeight
+                let stripHeight = size.height - indicatorHeight
                 // The spacing is inset around each slide, taking it out of the
                 // slide's own width — the same arithmetic the dashboard runs.
-                let slideWidth = proxy.size.width * viewportFraction - itemSpacing
+                let slideWidth = size.width * viewportFraction - itemSpacing
 
                 if stripHeight > 0 && slideWidth > 0 {
                     let loopEnabled = infiniteScroll && slides.count > 1
@@ -386,7 +452,7 @@ struct CanvasCarouselRenderer: View {
                             }
                             .contentMargins(
                                 .horizontal,
-                                max(0, (proxy.size.width - slideWidth) / 2),
+                                max(0, (size.width - slideWidth) / 2),
                                 for: .scrollContent
                             )
                             .scrollPosition(id: $scrollPosition)
