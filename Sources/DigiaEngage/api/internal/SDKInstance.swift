@@ -268,9 +268,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
         )
         inlineController.onCampaignRemoved = { [weak self] payload, reason in
-            // Removed before its impression: the CEP still hears `user_close`;
-            // delivery detail says what actually happened.
-            if reason == .userClose, let presentation = self?.coordinator.ownerOf(payload),
+            // Removed before its impression: delivery detail says what actually
+            // happened.
+            if reason != .superseded, let presentation = self?.coordinator.ownerOf(payload),
                presentation.state == .pending
             {
                 presentation.noteDropDetail("cancel_cause", "slot_removed")
@@ -2505,7 +2505,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         timerContext: TimerEventContext? = nil
     ) {
         if inlineController.getCampaign(slotKey) != payload { return }
-        inlineController.dismissCampaign(slotKey)
+        // The author's Hide: the one inline removal that is the user closing it.
+        inlineController.dismissCampaign(slotKey, reason: .userClose)
         var event: EngageAnalyticsEvent = NudgeEvent.Dismissed(
             dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId)
         )
