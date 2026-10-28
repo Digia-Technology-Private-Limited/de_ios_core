@@ -183,6 +183,13 @@ final class SdkHarness {
         await settle(0.5)
     }
 
+    /// As ``tap(id:)``, for the element whose shown text or accessibility label is exactly [label]: an SDK glyph
+    /// ("Close") or a SwiftUI text, which ``tap(text:)`` does not see in a harness started from workspace fixtures.
+    func tap(label: String) async throws {
+        try await tap("label \(label)") { Self.shownText(of: $0) == label }
+        await settle(0.5)
+    }
+
     private func tap(_ what: String, where match: @escaping (NSObject) -> Bool) async throws {
         let window = try #require(window)
         var last: CGRect?
