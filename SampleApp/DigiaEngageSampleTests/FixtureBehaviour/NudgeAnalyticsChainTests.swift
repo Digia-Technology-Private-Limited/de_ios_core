@@ -181,6 +181,87 @@ struct NudgeAnalyticsChainTests {
         #expect(next.timeline == ["displayed"])
     }
 
+    // MARK: - Backdrop off
+
+    // A bottom sheet authored `backdropDismissible: false`, `draggable: false`: only its Dismiss button (primary,
+    // `Action.hideBottomSheet`) ends it.
+
+    private let backdropOffKey = "test_nudge_bottomsheet_backdrop_off"
+    private let backdropOffTitle = "Backdrop Tap Dismiss Off"
+
+    private func showBackdropOff() async throws -> (SdkHarness, Delivery) {
+        let sdk = try await start([fixture("nudge_bottomsheet_backdrop_off")])
+        let d = try sdk.deliverChain(backdropOffKey)
+        try await show(sdk, backdropOffTitle)
+        // Past the sheet's presentation, so a position read now is where it rests.
+        await sdk.settle(1)
+        return (sdk, d)
+    }
+
+    /// Asserts it is still up and only shown: Viewed, and the CEP still held.
+    private func expectStillShown(_ sdk: SdkHarness, _ d: Delivery, sourceLocation: SourceLocation = #_sourceLocation)
+        async
+    {
+        #expect(sdk.isShowing(backdropOffTitle), sourceLocation: sourceLocation)
+        let events = await sdk.sent(backdropOffKey)
+        #expect(names(events) == [Chain.triggered, Chain.viewed], sourceLocation: sourceLocation)
+        #expect(
+            propsOf(events, Chain.viewed, sourceLocation: sourceLocation)["display_style"] as? String == "bottom_sheet",
+            sourceLocation: sourceLocation)
+        #expect(d.timeline == ["displayed"], "still showing, still holding the CEP", sourceLocation: sourceLocation)
+    }
+
+    /// Drags the sheet down by its title.
+    private func dragSheetDown(_ sdk: SdkHarness) async throws -> (before: CGPoint, after: CGPoint) {
+        let window = try #require(sdk.window)
+        let before = try #require(UIProbe.center(ofText: backdropOffTitle, in: window))
+        try await sdk.swipe(from: before, to: CGPoint(x: before.x, y: before.y + 300))
+        return (before, try #require(UIProbe.center(ofText: backdropOffTitle, in: window)))
+    }
+
+    @Test("backdrop off: a scrim tap does nothing")
+    func backdropOffScrimTap() async throws {
+        let (sdk, d) = try await showBackdropOff()
+        defer { sdk.tearDown() }
+
+        try await sdk.touch(CGPoint(x: 24, y: 140))
+
+        await expectStillShown(sdk, d)
+    }
+
+    // As coded: `draggable: false` holds the sheet where it is; it does not even move to snap back.
+    @Test("backdrop off: a drag down does nothing, as coded")
+    func backdropOffDragDown() async throws {
+        let (sdk, d) = try await showBackdropOff()
+        defer { sdk.tearDown() }
+
+        let (before, after) = try await dragSheetDown(sdk)
+        #expect(abs(after.y - before.y) < 1, "the sheet did not move")
+
+        await expectStillShown(sdk, d)
+    }
+
+    @Test("backdrop off: the Dismiss button closes it as cta_action")
+    func backdropOffDismissButton() async throws {
+        let (sdk, d) = try await showBackdropOff()
+        defer { sdk.tearDown() }
+        try await sdk.touch(CGPoint(x: 24, y: 140))
+        _ = try await dragSheetDown(sdk)
+
+        try await sdk.tap(id: "button")  // "Dismiss"
+        try await sdk.waitUntil("the sheet is gone") { !sdk.isShowing(backdropOffTitle) }
+
+        let events = await sdk.sent(backdropOffKey)
+        expectChain(
+            events, d, names: [Chain.triggered, Chain.viewed, Chain.clicked, Chain.dismissed], reason: .ctaAction)
+        let clicked = propsOf(events, Chain.clicked)
+        #expect(clicked["element_id"] as? String == "cta_primary")
+        #expect(clicked["cta_role"] as? String == "primary")
+        #expect(clicked["cta_label"] as? String == "Dismiss")
+        #expect(clicked["action_type"] as? String == "dismiss")
+        #expect(d.signals.compactMap { if case .clicked(let id) = $0 { id } else { nil } } == ["cta_primary"])
+    }
+
     // MARK: - Dropped
 
     @Test("off its target screen: screen_not_targeted")

@@ -140,6 +140,12 @@ extension SdkHarness {
         try TouchSynthesizer.tap(at: point, in: try #require(window))
         await settle(0.5)
     }
+
+    /// A real one-finger swipe from `start` to `end`, in window coordinates, then time for what it starts to settle.
+    func swipe(from start: CGPoint, to end: CGPoint) async throws {
+        try TouchSynthesizer.drag(from: start, to: end, in: try #require(window))
+        await settle(1)
+    }
 }
 
 // MARK: - Assertions

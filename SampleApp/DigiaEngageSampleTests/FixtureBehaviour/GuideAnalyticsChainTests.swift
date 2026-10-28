@@ -200,6 +200,80 @@ struct GuideAnalyticsChainTests {
             reason: .targetLost)
     }
 
+    // As coded, per ADR-004: a single-step guide's CTA completes it, even one whose only action is a plain
+    // dismiss ("Skip Tour").
+    // Fails today: no Digia Step Viewed for a single-step anchored guide (expected one per step, as on Flutter).
+    @Test("Skip Tour: completed, dismissed as completed, as coded")
+    func skipTour() async throws {
+        let key = "test_guide_tooltip_skip"
+        let sdk = try await start("guide_tooltip_skip_action")
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await show(sdk, "Tooltip Walkthrough (Step 1)")
+
+        try await sdk.tap(id: "skip_btn")  // "Skip Tour"
+        try await sdk.waitUntil("the guide is gone") { !sdk.isShowing("Tooltip Walkthrough (Step 1)") }
+
+        let events = await sdk.sent(key)
+        expectChain(
+            events, d,
+            names: [
+                Chain.triggered, Chain.viewed, Chain.stepViewed, Chain.stepClicked, Chain.completed, Chain.dismissed,
+            ],
+            reason: .completed, cepClicks: 0)
+        let stepClicked = propsOf(events, Chain.stepClicked)
+        #expect(stepClicked["item_index"] as? Int == 1)
+        #expect(stepClicked["cta_label"] as? String == "Skip Tour")
+        #expect(stepClicked["action_type"] as? String == "dismiss")
+        #expect(propsOf(events, Chain.completed)["item_total"] as? Int == 1)
+        guard case .dismissed(_, let completed) = d.outcome else {
+            Issue.record("not dismissed: \(String(describing: d.outcome))")
+            return
+        }
+        #expect(completed)
+    }
+
+    // As coded, with the case above.
+    @Test("Skip Tour: no Step Dismissed, as coded")
+    func skipTourNoStepDismissed() async throws {
+        let key = "test_guide_tooltip_skip"
+        let sdk = try await start("guide_tooltip_skip_action")
+        defer { sdk.tearDown() }
+        _ = try sdk.deliverChain(key)
+        try await show(sdk, "Tooltip Walkthrough (Step 1)")
+
+        try await sdk.tap(id: "skip_btn")
+        try await sdk.waitUntil("the guide is gone") { !sdk.isShowing("Tooltip Walkthrough (Step 1)") }
+
+        #expect(steps(await sdk.sent(key), Chain.stepDismissed).isEmpty)
+    }
+
+    // MARK: - Stays
+
+    // Fails today: no Digia Step Viewed for a single-step anchored guide (expected one per step, as on Flutter).
+    @Test("a tap on the tooltip bubble does nothing")
+    func tapOnTheBubble() async throws {
+        let key = "test_guide_tooltip_outside_dismiss"
+        let sdk = try await start("guide_tooltip_outside_dismiss")
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await show(sdk, "Tap Outside to Dismiss Tooltip")
+
+        try await sdk.tap(text: "Tap Outside to Dismiss Tooltip")
+        #expect(sdk.isShowing("Tap Outside to Dismiss Tooltip"))
+
+        let events = await sdk.sent(key)
+        #expect(names(events) == [Chain.triggered, Chain.viewed, Chain.stepViewed])
+        let stepViewed = propsOf(events, Chain.stepViewed)
+        #expect(stepViewed["item_index"] as? Int == 1)
+        #expect(stepViewed["item_total"] as? Int == 1)
+        #expect(d.timeline == ["displayed"], "still showing, still holding the CEP")
+
+        // End it, so nothing outlives the test.
+        try await tapOutside(sdk)
+        try await sdk.waitUntil("the guide is gone") { !sdk.isShowing("Tap Outside to Dismiss Tooltip") }
+    }
+
     // MARK: - Dropped
 
     @Test("no anchor on screen: anchor_not_registered")
