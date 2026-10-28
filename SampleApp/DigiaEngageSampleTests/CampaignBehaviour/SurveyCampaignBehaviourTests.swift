@@ -9,7 +9,7 @@ import UIKit
 /// only at its authored end, and one Clicked — welcome Start, or the first question's CTA when there is no
 /// welcome screen, which stays Digia only. Real touches through `SdkHarness`.
 ///
-/// platform note: the Dart twin is `test/analytics_chain/survey_chain_test.dart`. Its system-back case has
+/// platform note: the Dart twin is `test/campaign_behaviour/survey_campaign_behaviour_test.dart`. Its system-back case has
 /// no iOS counterpart.
 @MainActor
 @Suite("Survey campaign behaviour", .serialized, .tags(.integration, .survey, .analytics))

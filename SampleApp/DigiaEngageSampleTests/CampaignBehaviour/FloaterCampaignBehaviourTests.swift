@@ -11,7 +11,7 @@ import UIKit
 /// The chrome's glyph buttons carry no accessibility label, so a test tells them apart by the fixed corner
 /// each sits in; the touch on them is still a real one.
 ///
-/// platform note: the Dart twin is `test/analytics_chain/floating_chain_test.dart`.
+/// platform note: the Dart twin is `test/campaign_behaviour/floating_campaign_behaviour_test.dart`.
 @MainActor
 @Suite("Floater campaign behaviour", .serialized, .tags(.integration, .floater, .pip, .analytics))
 struct FloaterCampaignBehaviourTests {

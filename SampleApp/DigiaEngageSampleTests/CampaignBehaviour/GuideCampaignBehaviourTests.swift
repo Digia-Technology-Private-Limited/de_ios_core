@@ -9,7 +9,7 @@ import UIKit
 /// Clicked per CTA, Completed only from the last step's CTA, and a Step Dismissed when it ends short of that.
 /// Real touches through `SdkHarness`, on the anchors of `GuideHostScreen`.
 ///
-/// platform note: the Dart twin is `test/analytics_chain/guide_chain_test.dart`. Its system-back case (back
+/// platform note: the Dart twin is `test/campaign_behaviour/guide_campaign_behaviour_test.dart`. Its system-back case (back
 /// pops the host screen) has no iOS counterpart; the anchors-leaving case below covers the same end.
 @MainActor
 @Suite("Guide campaign behaviour", .serialized, .tags(.integration, .guide, .analytics))

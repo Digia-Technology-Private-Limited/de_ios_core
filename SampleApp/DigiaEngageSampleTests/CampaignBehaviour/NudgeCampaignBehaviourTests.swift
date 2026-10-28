@@ -11,7 +11,7 @@ import UIKit
 /// Scrim and drag closes report `user_close` as coded: the nudge only tells apart the closes it marks
 /// beforehand (CTA, auto-dismiss, screen exit).
 ///
-/// platform note: the Dart twin is `test/analytics_chain/nudge_chain_test.dart`. Its system-back case has no
+/// platform note: the Dart twin is `test/campaign_behaviour/nudge_campaign_behaviour_test.dart`. Its system-back case has no
 /// iOS counterpart: an iOS nudge has no back gesture.
 @MainActor
 @Suite("Nudge campaign behaviour", .serialized, .tags(.integration, .nudge, .analytics))

@@ -7,7 +7,7 @@ import UIKit
 /// flush rather than off the emitter, beside what the CEP holding the same presentation sees. Helpers over
 /// `SdkHarness`, as Android's `support/AnalyticsChain.kt` is over its harness.
 ///
-/// platform note: the Dart twin is `test/analytics_chain/support/chain.dart`.
+/// platform note: the Dart twin is `test/campaign_behaviour/support/campaign_behaviour.dart`.
 enum Chain {
     static let triggered = "Digia Experience Triggered"
     static let viewed = "Digia Experience Viewed"

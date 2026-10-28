@@ -9,7 +9,7 @@ import UIKit
 /// any impression, and the content sends no Digia Dismissed: when its slot is cleared, only the CEP hears of
 /// it. Real touches through `SdkHarness`.
 ///
-/// platform note: the Dart twin is `test/analytics_chain/inline_chain_test.dart`.
+/// platform note: the Dart twin is `test/campaign_behaviour/inline_campaign_behaviour_test.dart`.
 @MainActor
 @Suite("Inline campaign behaviour", .serialized, .tags(.integration, .inline, .analytics))
 struct InlineCampaignBehaviourTests {
