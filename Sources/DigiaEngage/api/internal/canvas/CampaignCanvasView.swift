@@ -1777,11 +1777,13 @@ private struct CanvasProgressRenderer: View {
     var body: some View {
         CampaignCanvasBoxView(box: box, isDark: isDark) {
             GeometryReader { geometry in
+                let indicatorSize = CGSize(width: geometry.size.width * displayed, height: geometry.size.height)
                 ZStack(alignment: .leading) {
                     CampaignCanvasPaintView(paint: track, isDark: isDark)
-                    CampaignCanvasPaintView(paint: indicator, isDark: isDark).frame(
-                        width: geometry.size.width * displayed)
-                }.clipShape(CampaignCanvasRoundedShape(radius: cornerRadius))
+                    CampaignCanvasPaintView(paint: indicator, isDark: isDark)
+                        .clipShape(CampaignCanvasRoundedShape(radius: capped(cornerRadius, to: indicatorSize)))
+                        .frame(width: indicatorSize.width)
+                }.clipShape(CampaignCanvasRoundedShape(radius: capped(cornerRadius, to: geometry.size)))
             }
         }
         .onAppear {
@@ -1801,6 +1803,17 @@ private struct CanvasProgressRenderer: View {
                 withTransaction(transaction) { displayed = value }
             }
         }
+    }
+
+    /// Each corner is capped at half the shorter side of the rect it rounds, so a large radius is a pill.
+    private func capped(_ radius: CampaignCanvasCornerRadius, to size: CGSize) -> CampaignCanvasCornerRadius {
+        let cap = max(0, min(size.width, size.height) / 2)
+        return CampaignCanvasCornerRadius(
+            topLeft: min(max(radius.topLeft, 0), cap),
+            topRight: min(max(radius.topRight, 0), cap),
+            bottomRight: min(max(radius.bottomRight, 0), cap),
+            bottomLeft: min(max(radius.bottomLeft, 0), cap)
+        )
     }
 }
 
@@ -2071,21 +2084,26 @@ private struct CanvasDividerRenderer: View {
         CampaignCanvasBoxView(box: box, isDark: isDark) {
             Canvas { context, size in
                 let horizontal = axis == .horizontal
+                let thickness = horizontal ? size.height : size.width
+                let length = horizontal ? size.width : size.height
+                let dotted = pattern == .dotted
+                let lineStart = inset + (dotted ? thickness / 2 : 0)
+                let lineEnd = max(lineStart, length - lineStart)
                 var path = Path()
                 path.move(
                     to: horizontal
-                        ? CGPoint(x: inset, y: size.height / 2)
-                        : CGPoint(x: size.width / 2, y: inset))
+                        ? CGPoint(x: lineStart, y: size.height / 2)
+                        : CGPoint(x: size.width / 2, y: lineStart))
                 path.addLine(
                     to: horizontal
-                        ? CGPoint(x: size.width - inset, y: size.height / 2)
-                        : CGPoint(x: size.width / 2, y: size.height - inset))
-                let thickness = horizontal ? size.height : size.width
+                        ? CGPoint(x: lineEnd, y: size.height / 2)
+                        : CGPoint(x: size.width / 2, y: lineEnd))
                 let dash = canvasDividerDashPattern(
                     pattern: pattern, thickness: thickness, dashPattern: dashPattern)
                 context.stroke(
                     path, with: .color(CampaignCanvasTheme.shared.color(color, isDark: isDark)),
-                    style: StrokeStyle(lineWidth: thickness, lineCap: strokeCap.lineCap, dash: dash)
+                    style: StrokeStyle(
+                        lineWidth: thickness, lineCap: dotted ? .round : strokeCap.lineCap, dash: dash)
                 )
             }
         }
@@ -2140,17 +2158,27 @@ private struct CampaignCanvasShadowView: View {
     var body: some View {
         if shadow.blur > 0 || shadow.spread > 0 || shadow.offsetX != 0 || shadow.offsetY != 0 {
             if outsideOnly {
-                ZStack {
-                    shadowShape
-                    CampaignCanvasRoundedShape(radius: cornerRadius)
-                        .fill(Color.black)
-                        .blendMode(.destinationOut)
-                }
-                .compositingGroup()
+                // Clip the blurred shadow to the region outside the border box. Punching the
+                // interior with destinationOut does not survive CALayer.render(in:) (the golden
+                // snapshot path): the punch fill stays opaque and the interior snapshots black.
+                shadowShape
+                    .padding(outsideBleed)
+                    .clipShape(
+                        CanvasOutsideShadowRing(
+                            radius: cornerRadius, inset: shadow.spread + outsideBleed),
+                        style: FillStyle(eoFill: true)
+                    )
+                    .padding(-outsideBleed)
             } else {
                 shadowShape
             }
         }
+    }
+    /// Past the spread-expanded border box, how far the shadow artwork can reach: the offset
+    /// plus a cutoff for the blur falloff. The ring's outer edge clears it, so the falloff is
+    /// never cut; the transient padding is removed right after and lays out nothing.
+    private var outsideBleed: CGFloat {
+        ceil(shadow.blur * 3 + max(abs(shadow.offsetX), abs(shadow.offsetY)) + 2)
     }
     private var shadowShape: some View {
         CampaignCanvasRoundedShape(radius: cornerRadius)
@@ -2352,6 +2380,22 @@ private struct CanvasImageFit: ViewModifier {
     }
 }
 
+/// The region outside a widget's rounded border box: an even-odd ring whose outer edge
+/// clears the shadow's blur falloff and offset, so clipping the blurred shadow artwork to it
+/// leaves a ring outside the border and a transparent interior.
+private struct CanvasOutsideShadowRing: Shape {
+    let radius: CampaignCanvasCornerRadius
+    let inset: CGFloat
+    func path(in rect: CGRect) -> Path {
+        var path = Path(rect)
+        let inner = rect.insetBy(dx: inset, dy: inset)
+        if inner.width > 0 && inner.height > 0 {
+            path.addPath(CampaignCanvasRoundedShape(radius: radius).path(in: inner))
+        }
+        return path
+    }
+}
+
 struct CampaignCanvasRoundedShape: InsettableShape {
     let radius: CampaignCanvasCornerRadius
     var insetAmount: CGFloat = 0
@@ -2433,7 +2477,7 @@ private struct CanvasPlaceholder: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#F1F1F5") ?? Color(.systemGray6))
-            Text(label).font(.system(size: 11)).foregroundStyle(Color(hex: "#9A9AAD") ?? .secondary)
+            Text(label).font(digiaFont(size: 11)).foregroundStyle(Color(hex: "#9A9AAD") ?? .secondary)
         }
     }
 }
@@ -2539,7 +2583,7 @@ internal func canvasDividerDashPattern(
     case .solid:
         return []
     case .dotted:
-        return [0, max(thickness, dashPattern.dropFirst().first ?? 4)]
+        return [0, max(thickness * 2, 2)]
     case .dashed:
         return dashPattern
     }
