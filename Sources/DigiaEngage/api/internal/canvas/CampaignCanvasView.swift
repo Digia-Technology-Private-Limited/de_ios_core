@@ -1779,8 +1779,9 @@ private struct CanvasProgressRenderer: View {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     CampaignCanvasPaintView(paint: track, isDark: isDark)
-                    CampaignCanvasPaintView(paint: indicator, isDark: isDark).frame(
-                        width: geometry.size.width * displayed)
+                    CampaignCanvasPaintView(paint: indicator, isDark: isDark)
+                        .clipShape(CampaignCanvasRoundedShape(radius: cornerRadius))
+                        .frame(width: geometry.size.width * displayed)
                 }.clipShape(CampaignCanvasRoundedShape(radius: cornerRadius))
             }
         }
