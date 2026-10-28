@@ -41,6 +41,7 @@ public enum ComponentTestHost {
         size: CGSize,
         backgroundColor: UIColor = .white
     ) -> UIHostingController<Content> {
+        GoldenFonts.install()
         let controller = UIHostingController(rootView: rootView)
         controller.view.bounds = CGRect(origin: .zero, size: size)
         controller.view.backgroundColor = backgroundColor
@@ -64,6 +65,7 @@ public enum ComponentTestHost {
         guard let size = device.size else {
             fatalError("Device configuration must have a concrete size")
         }
+        GoldenFonts.install()
         let hostWidth = size.width
         let hostHeight = size.height
         let hostVC = UIViewController()
@@ -402,6 +404,7 @@ public enum ComponentTestHost {
         drainDuration: TimeInterval = 0.05
     ) -> UIWindow {
         enableAccessibilityAutomation()
+        GoldenFonts.install()
         if #available(iOS 16.4, *) {
             controller.safeAreaRegions = []
         }
