@@ -3,9 +3,10 @@ License text copyright (c) 2020 MariaDB Corporation Ab, All Rights Reserved.
 
 Parameters
 
-Licensor:             Digia Technology Private Limited
-Licensed Work:        Digia Engage iOS SDK and any associated components and libraries
-                      (c) 2026 Digia Technology Private Limited
+Licensor:             Tinkerbox Technology Private Limited
+Licensed Work:        Digia Engage Core SDK (iOS) and any associated components and
+                      libraries
+                      (c) 2026 Tinkerbox Technology Private Limited
 Additional Use Grant: You may make personal, commercial, and production use of the
                       Licensed Work, provided Your use does not include offering the
                       Licensed Work, or any derivative work thereof, as part of a
@@ -65,7 +66,7 @@ this License still applies.
 Any use of the Licensed Work in violation of this License will automatically
 terminate your rights under this License for the current and all other versions.
 
-This License does not grant you any right in any trademark or logo of Digia
+This License does not grant you any right in any trademark or logo of Tinkerbox
 Technology Private Limited or its affiliates (provided that you may use a
 trademark or logo of the Licensor as expressly required by this License).
 
