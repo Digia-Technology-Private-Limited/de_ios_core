@@ -223,8 +223,11 @@ struct FloaterCampaignBehaviourTests {
         try await show(sdk, d)
 
         Digia.setCurrentScreen(name: "search")
-        try await sdk.settle()
-        #expect(SDKInstance.shared.floaterStoryOrchestrator.state == nil)
+        // The window fades out before its state clears; wait for that rather than a fixed delay
+        // the same length as the fade.
+        try await sdk.waitUntil("the story floater is gone") {
+            SDKInstance.shared.floaterStoryOrchestrator.state == nil
+        }
 
         expectChain(
             await sdk.sent(key), d, names: [Chain.triggered, Chain.viewed, Chain.dismissed], reason: .screenExit,
