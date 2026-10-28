@@ -267,7 +267,7 @@ struct CampaignCanvasParser {
         var labelSpans: [CampaignTimerUnit: [CampaignCanvasTextSpan]] = [:]
         let rawSpans = propertyObject(props["labelSpans"]) ?? [:]
         for unit in CampaignTimerUnit.allCases {
-            if let spans = rawSpans[unit.rawValue] as? [[String: Any]] {
+            if let spans = (rawSpans[unit.rawValue] as? [Any])?.compactMap({ $0 as? [String: Any] }) {
                 labelSpans[unit] = try parseSpans(spans)
             }
         }
@@ -278,7 +278,7 @@ struct CampaignCanvasParser {
             for part in ["digits", "label"] {
                 guard var node = propertyObject(parts[part]), node["type"] as? String == "digia/text" else { continue }
                 var textProps = propertyObject(node["props"]) ?? [:]
-                if let spans = textProps["spans"] as? [[String: Any]] {
+                if let spans = (textProps["spans"] as? [Any])?.compactMap({ $0 as? [String: Any] }) {
                     textProps["spans"] = spans.map { span in
                         var value = span
                         value.removeValue(forKey: "onClick")
@@ -499,6 +499,10 @@ struct CampaignCanvasParser {
         )
     }
 
+    private static let progressTrackDefault = CampaignCanvasPaint.solid(.literal("#FFE0E0E0"))
+    private static let progressIndicatorDefault = CampaignCanvasPaint.solid(.literal("#FF4945FF"))
+    private static let progressCornerRadiusDefault: CGFloat = 4
+
     private func parseProgress(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget {
         let animation = propertyObject(props["animateOnAppear"]) ?? [:]
         return .progress(
@@ -507,14 +511,24 @@ struct CampaignCanvasParser {
             rangeStart: rawString(props["rangeStart"], fallback: "0"),
             rangeCurrent: rawString(props["rangeCurrent"], fallback: "0"),
             rangeEnd: rawString(props["rangeEnd"], fallback: "100"),
-            indicator: try parsePaint(propertyObject(props["indicator"]), allowImage: false),
-            track: try parsePaint(propertyObject(props["track"]), allowImage: false),
-            cornerRadius: parseCornerRadius(props["cornerRadius"], fallback: 0),
+            indicator: parseProgressPaint(props["indicator"], fallback: Self.progressIndicatorDefault),
+            track: parseProgressPaint(props["track"], fallback: Self.progressTrackDefault),
+            cornerRadius: parseCornerRadius(props["cornerRadius"], fallback: Self.progressCornerRadiusDefault),
             animateOnAppear: CampaignCanvasAppearAnimation(
                 enabled: animation["enabled"] as? Bool ?? false,
                 durationMs: min(max((animation["durationMs"] as? NSNumber)?.intValue ?? 600, 0), 5000)
             )
         )
+    }
+
+    // A malformed colour must degrade to the authored default, not drop the whole campaign.
+    private func parseProgressPaint(_ raw: Any?, fallback: CampaignCanvasPaint) -> CampaignCanvasPaint {
+        do {
+            return try parsePaint(propertyObject(raw), allowImage: false, fallback: fallback)
+        } catch {
+            log.e("Progress bar paint fallback: \(error)")
+            return fallback
+        }
     }
 
     private func parseLottie(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget {
@@ -550,11 +564,13 @@ struct CampaignCanvasParser {
     private func parsePaint(
         _ json: [String: Any]?,
         allowImage: Bool,
-        imageScaleLimit: Double = 4
+        imageScaleLimit: Double = 4,
+        fallback: CampaignCanvasPaint = .none
     ) throws -> CampaignCanvasPaint {
-        guard let json else { return .none }
+        guard let json else { return fallback }
         switch json["type"] as? String {
-        case "solid": return try designTokens.resolveColor(json["color"]).map(CampaignCanvasPaint.solid) ?? .none
+        case "none": return .none
+        case "solid": return try designTokens.resolveColor(json["color"]).map(CampaignCanvasPaint.solid) ?? fallback
         case "gradient":
             return .gradient(
                 type: { switch json["gradientType"] as? String { case "radial": .radial; case "sweep": .sweep; default: .linear } }(),
@@ -568,7 +584,7 @@ struct CampaignCanvasParser {
             )
         case "image" where allowImage:
             return .image(source: parseMediaSource(json["source"]), positionX: clamp(propertyNumber(json["positionX"]) ?? 0.5, 0, 1), positionY: clamp(propertyNumber(json["positionY"]) ?? 0.5, 0, 1), scale: clamp(propertyNumber(json["scale"]) ?? 1, 0.1, imageScaleLimit))
-        default: return .none
+        default: return fallback
         }
     }
 

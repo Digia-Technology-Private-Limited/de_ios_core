@@ -338,13 +338,59 @@ struct CampaignCanvasContractTests {
         #expect(progressType == .sweep)
         #expect(stops.map(\.offset) == [0, 1])
         #expect(start == 30); #expect(end == 240)
-        #expect(track == .none)
+        #expect(track == .solid(.literal("#FFE0E0E0")))
         #expect(animation.durationMs == 5_000)
 
         guard case .container(let fill, _, _, let shadow) = widgets[6], case .image = fill else {
             Issue.record("Expected image-filled container"); return
         }
         #expect(shadow?.spread == 5)
+    }
+
+    @Test("progress bar paints and radius degrade to the authored defaults")
+    func progressDefaults() throws {
+        func progress(_ props: String) throws -> (CampaignCanvasPaint, CampaignCanvasPaint, CampaignCanvasCornerRadius) {
+            let json = try #require(try JSONSerialization.jsonObject(with: Data("""
+            {"version":2,"canvasWidth":100,"canvasHeight":100,"children":[{"kind":"widget","id":"p","rect":{"x":0,"y":0,"width":1,"height":1},
+            "widget":{"type":"digia/linearProgressBar","props":\(props)}}]}
+            """.utf8)) as? [String: Any])
+            let canvas = try CampaignCanvasParser().parse(json)
+            guard case .widget(_, _, .progress(_, _, _, _, _, _, let indicator, let track, let radius, _)) = canvas.children[0] else {
+                Issue.record("Expected progress"); return (.none, .none, .init())
+            }
+            return (indicator, track, radius)
+        }
+        let defaultIndicator = CampaignCanvasPaint.solid(.literal("#FF4945FF"))
+        let defaultTrack = CampaignCanvasPaint.solid(.literal("#FFE0E0E0"))
+
+        let missing = try progress("{}")
+        #expect(missing.0 == defaultIndicator); #expect(missing.1 == defaultTrack)
+        #expect(missing.2 == CampaignCanvasCornerRadius(topLeft: 4, topRight: 4, bottomRight: 4, bottomLeft: 4))
+
+        let malformed = try progress(##"{"indicator":{"type":"solid","color":"#ZZZ"},"track":{"type":"mystery"},"cornerRadius":0}"##)
+        #expect(malformed.0 == defaultIndicator); #expect(malformed.1 == defaultTrack)
+        #expect(malformed.2 == CampaignCanvasCornerRadius())
+
+        let none = try progress(#"{"track":{"type":"none"}}"#)
+        #expect(none.1 == .none)
+    }
+
+    @Test("timer label spans skip malformed entries instead of dropping the array")
+    func timerSpansSkipBadEntries() throws {
+        let json = try #require(try JSONSerialization.jsonObject(with: Data("""
+        {"version":2,"canvasWidth":100,"canvasHeight":100,"children":[{"kind":"widget","id":"t","rect":{"x":0,"y":0,"width":1,"height":1},
+        "widget":{"type":"digia/timer","props":{"preset":"text","labelSpans":{"hours":[{"text":"Hrs"},"junk",7]},
+        "textWidgets":{"hours":{"label":{"type":"digia/text","props":{"spans":[{"text":"H"},null]}}}}}}}]}
+        """.utf8)) as? [String: Any])
+        let canvas = try CampaignCanvasParser().parse(json)
+        guard case .widget(_, _, .timer(_, _, _, _, _, let labelSpans, let textWidgets, _, _, _)) = canvas.children[0] else {
+            Issue.record("Expected timer"); return
+        }
+        #expect(labelSpans[.hours]?.map(\.text) == ["Hrs"])
+        guard case .text(_, let block, _) = textWidgets[.hours]?["label"] else {
+            Issue.record("Expected label text widget"); return
+        }
+        #expect(block.spans.map(\.text) == ["H"])
     }
 
     @Test("text spans accept direct and style level typography overrides")
