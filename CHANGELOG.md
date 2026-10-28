@@ -2,6 +2,13 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.14.3] - 2026-10-28
+
+### Bug Fixes
+- **Canvas dialog backdrop dismiss** — canvas dialogs with the close button
+  placed outside the card now close when the user taps the dimmed background
+  (when backdrop dismiss is enabled), matching Android.
+
 ## [3.14.2] - 2026-10-28
 
 ### Bug Fixes
