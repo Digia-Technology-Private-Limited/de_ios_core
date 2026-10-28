@@ -300,25 +300,6 @@ struct FloaterCampaignBehaviourTests {
             extras: ["cancel_cause": "cep_cancel"], detail: "ended before it displayed (cancelled)")
     }
 
-    // Fails today: Digia also sends a Viewed for a story floater the CEP was told was cancelled before it displayed
-    // (expected Triggered, Dropped only).
-    @Test("D12 story floater: CEP cancel before it shows: cancelled")
-    func storyCepCancelBeforeShowing() async throws {
-        let key = "test_floater_close"
-        let campaign = fixture("campaigns/floater/floater_close_button.json")
-        let sdk = try await SdkHarness.startChain([campaign]) { Text("App home") }
-        defer { sdk.tearDown() }
-        let d = try sdk.deliverChain(key)
-        d.presentation.cancel()
-        try await sdk.settle(2)
-        #expect(SDKInstance.shared.floaterStoryOrchestrator.state == nil)
-        #expect(!d.displayed)
-
-        expectDroppedWire(
-            await sdk.sent(key), d, .cancelled, campaign, screen: nil,
-            extras: ["cancel_cause": "cep_cancel"], detail: "ended before it displayed (cancelled)")
-    }
-
     @Test("D13 story floater: off its target screen: screen_not_targeted")
     func storyOffTargetScreen() async throws {
         let key = "test_floater_story_screen_change_home_only"

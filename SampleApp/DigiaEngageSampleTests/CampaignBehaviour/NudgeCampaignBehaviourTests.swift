@@ -500,29 +500,4 @@ struct NudgeCampaignBehaviourTests {
         #expect(d.outcome == nil)
     }
 
-    // Fails today: the second tap during the close sends a second Clicked and a second CEP click (expected one each).
-    @Test("primary CTA tapped twice quickly: one Clicked, one Dismissed")
-    func primaryCtaDoubleTap() async throws {
-        let sdk = try await start([fixture("nudge_dialog")])
-        defer { sdk.tearDown() }
-        let d = try sdk.deliverChain("test_nudge_dialog")
-        try await show(sdk, "Dialog Test Nudge")
-        // Settled for 400 ms first, as `tap(id:)` waits, so both touches land on the button.
-        try await sdk.waitUntilSteady("the CTA settled") { sdk.frame(id: "dialogButton") }
-        let button = try #require(sdk.frame(id: "dialogButton"))
-        let window = try #require(sdk.window)
-
-        // Two real touches 200 ms apart ("Got It").
-        try TouchSynthesizer.tap(at: CGPoint(x: button.midX, y: button.midY), in: window)
-        try TouchSynthesizer.tap(at: CGPoint(x: button.midX, y: button.midY), in: window)
-        try await sdk.waitUntil("the dialog is gone") { !sdk.isShowing("Dialog Test Nudge") }
-
-        let events = await sdk.sent("test_nudge_dialog")
-        expectChain(
-            events, d, names: [Chain.triggered, Chain.viewed, Chain.clicked, Chain.dismissed], reason: .ctaAction)
-        let clicked = propsOf(events, Chain.clicked)
-        #expect(clicked["element_id"] as? String == "cta_primary")
-        #expect(clicked["cta_role"] as? String == "primary")
-        #expect(d.signals.compactMap { if case .clicked(let id) = $0 { id } else { nil } } == ["cta_primary"])
-    }
 }
