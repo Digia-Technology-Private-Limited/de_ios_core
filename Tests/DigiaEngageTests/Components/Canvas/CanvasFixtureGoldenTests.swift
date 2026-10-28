@@ -29,10 +29,7 @@ extension RenderedUITests {
 @Suite("Test Kit inline Canvas fixture goldens", .serialized, .tags(.canvas, .inline))
 struct CanvasFixtureGoldenTests {
 
-    /// Fixtures with no iOS golden.
-    private static let excluded: Set<String> = ["canvas_divider_vertical"]
-
-    private static let canvasFixtures = FixtureLoader.fixtureNames(campaignType: "canvas").filter { !excluded.contains($0) }
+    private static let canvasFixtures = FixtureLoader.fixtureNames(campaignType: "canvas")
     private static let inlineCanvasFixtures = FixtureLoader.fixtureNames(campaignType: "inline_canvas")
 
     /// The Lottie is held at this point of its timeline: its first frame is not representative.

@@ -92,12 +92,10 @@ struct PipFixtureGoldenTests {
             try TouchSynthesizer.tap(at: collapse, in: window)
             #expect(orchestrator.surface == .collapsed, "Tapping the collapse button did not collapse the PiP")
         } else if !config.behavior.tapExpands {
-            // Authored `onTap: none`: a tap must leave the window as it is, so there is no second
-            // state to capture.
+            // Authored `onTap: none`: a tap must leave the window as it is, so its `expanded` golden
+            // is the collapsed window it stays as.
             try FloaterTap.tapWindow(in: window)
-            try await awaitTransition(config)
             #expect(orchestrator.surface == .collapsed, "Tapping a PiP authored onTap: none expanded it")
-            return
         } else {
             try FloaterTap.tapWindow(in: window)
             #expect(orchestrator.surface == .expanded, "Tapping the PiP did not expand it")
