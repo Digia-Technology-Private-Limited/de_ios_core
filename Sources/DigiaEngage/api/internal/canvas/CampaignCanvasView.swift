@@ -2477,7 +2477,7 @@ private struct CanvasPlaceholder: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#F1F1F5") ?? Color(.systemGray6))
-            Text(label).font(.system(size: 11)).foregroundStyle(Color(hex: "#9A9AAD") ?? .secondary)
+            Text(label).font(digiaFont(size: 11)).foregroundStyle(Color(hex: "#9A9AAD") ?? .secondary)
         }
     }
 }
