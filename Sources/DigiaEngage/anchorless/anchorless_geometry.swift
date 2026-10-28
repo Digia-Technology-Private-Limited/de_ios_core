@@ -50,7 +50,6 @@ struct AnchorlessTarget: Equatable {
               bounds.height.isFinite,
               bounds.width > 0,
               bounds.width < bounds.height,
-              min(bounds.width, bounds.height) < 600,
               window.effectiveUserInterfaceLayoutDirection == .leftToRight
         else { return .failure(.unsupportedLayout) }
 
