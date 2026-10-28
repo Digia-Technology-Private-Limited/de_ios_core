@@ -22,7 +22,7 @@ struct FloaterTapTests {
 
     @Test("a tap on a collapsed PiP expands it")
     func tapOnCollapsedPipExpandsIt() async throws {
-        let (orchestrator, window) = try await startPip("pip-media-image")
+        let (orchestrator, window) = try await startPip("pip_media_image")
         defer { tearDown(window) }
         #expect(orchestrator.surface == .collapsed)
 
@@ -34,7 +34,7 @@ struct FloaterTapTests {
     /// Control: a tap that misses the PiP must not expand it, or the test above proves nothing.
     @Test("a tap outside a PiP leaves it collapsed")
     func tapOutsidePipDoesNotExpandIt() async throws {
-        let (orchestrator, window) = try await startPip("pip-media-image")
+        let (orchestrator, window) = try await startPip("pip_media_image")
         defer { tearDown(window) }
         let rect = try FloaterTap.windowRect(in: window)
         let miss = CGPoint(x: 40, y: rect.minY > 300 ? 200 : 700)
@@ -47,7 +47,7 @@ struct FloaterTapTests {
 
     @Test("a tap on a story floater opens its story")
     func tapOnStoryFloaterOpensStory() async throws {
-        let json = try #require(FixtureLoader.loadFixture(campaignType: "floater", fileName: "floater-story-window"))
+        let json = try #require(FixtureLoader.loadFixture(campaignType: "floater", fileName: "floater_story_window"))
         let campaign = try #require(try CampaignModel.fromJson(json))
         let orchestrator = SDKInstance.shared.floaterStoryOrchestrator!
         try #require(orchestrator.start(campaign, payload: payload(campaign), screenName: nil),

@@ -9,14 +9,14 @@ import UIKit
 extension RenderedUITests {
 /// Component test for the canonical Nudge Dialog scenario (`test_nudge_dialog`).
 ///
-/// Uses the canonical `nudge-dialog.json` fixture for Tier-2 verification of:
+/// Uses the canonical `nudge_dialog.json` fixture for Tier-2 verification of:
 /// 1. Wire schema and layout parsing into `NudgeConfig` and `CampaignCanvas`
 /// 2. Child widget attributes and CTA action metadata
 /// 3. Visual pixel snapshot diffing (`.image`)
 @Suite("Dialog", .serialized, .tags(.nudge))
 struct NudgeDialogComponentTests {
 
-    private func loadNudgeDialogFixture(named fileName: String = "nudge-dialog.json") throws
+    private func loadNudgeDialogFixture(named fileName: String = "nudge_dialog.json") throws
         -> [String: Any]
     {
         guard
@@ -108,7 +108,7 @@ struct NudgeDialogComponentTests {
 
         let hostView = ComponentTestHost.makeRealDialogHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax
+            device: .engageGolden
         )
         defer {
             ComponentTestHost.cleanupOverlayWindow(hostView)
@@ -136,12 +136,12 @@ struct NudgeDialogComponentTests {
         "parses dialog layout variant contracts",
         .tags(.contract),
         arguments: [
-            DialogLayoutVariantCase(fixtureName: "nudge-dialog-radius-0.json", expectedCornerRadius: 0, expectedMargin: 24, expectedWidth: 320, expectedTitle: "Sharp Corners Dialog"),
-            DialogLayoutVariantCase(fixtureName: "nudge-dialog-radius-28.json", expectedCornerRadius: 28, expectedMargin: 24, expectedWidth: 320, expectedTitle: "Rounded Dialog 28"),
-            DialogLayoutVariantCase(fixtureName: "nudge-dialog-margin-zero.json", expectedCornerRadius: 18, expectedMargin: 0, expectedWidth: 360, expectedTitle: "Edge-to-Edge Margin Dialog"),
-            DialogLayoutVariantCase(fixtureName: "nudge-dialog-margin-large.json", expectedCornerRadius: 18, expectedMargin: 48, expectedWidth: 320, expectedTitle: "Constrained Margin Dialog"),
-            DialogLayoutVariantCase(fixtureName: "nudge-dialog-width-narrow.json", expectedCornerRadius: 18, expectedMargin: 24, expectedWidth: 260, expectedTitle: "Narrow Alert Dialog"),
-            DialogLayoutVariantCase(fixtureName: "nudge-dialog-width-wide.json", expectedCornerRadius: 18, expectedMargin: 24, expectedWidth: 340, expectedTitle: "Wide Modal Dialog"),
+            DialogLayoutVariantCase(fixtureName: "nudge_dialog_radius_0.json", expectedCornerRadius: 0, expectedMargin: 24, expectedWidth: 320, expectedTitle: "Sharp Corners Dialog"),
+            DialogLayoutVariantCase(fixtureName: "nudge_dialog_radius_28.json", expectedCornerRadius: 28, expectedMargin: 24, expectedWidth: 320, expectedTitle: "Rounded Dialog 28"),
+            DialogLayoutVariantCase(fixtureName: "nudge_dialog_margin_zero.json", expectedCornerRadius: 18, expectedMargin: 0, expectedWidth: 360, expectedTitle: "Edge-to-Edge Margin Dialog"),
+            DialogLayoutVariantCase(fixtureName: "nudge_dialog_margin_large.json", expectedCornerRadius: 18, expectedMargin: 48, expectedWidth: 320, expectedTitle: "Constrained Margin Dialog"),
+            DialogLayoutVariantCase(fixtureName: "nudge_dialog_width_narrow.json", expectedCornerRadius: 18, expectedMargin: 24, expectedWidth: 260, expectedTitle: "Narrow Alert Dialog"),
+            DialogLayoutVariantCase(fixtureName: "nudge_dialog_width_wide.json", expectedCornerRadius: 18, expectedMargin: 24, expectedWidth: 340, expectedTitle: "Wide Modal Dialog"),
         ]
     )
     @MainActor
@@ -167,7 +167,7 @@ struct NudgeDialogComponentTests {
 
     @Test("parses the dark-theme dialog contract", .tags(.contract)) @MainActor
     func testNudgeDialogDarkThemeVariantContract() throws {
-        let darkFixture = try loadNudgeDialogFixture(named: "nudge-dialog-bg-dark.json")
+        let darkFixture = try loadNudgeDialogFixture(named: "nudge_dialog_bg_dark.json")
         let darkTemplate = try #require(darkFixture["templateConfig"] as? [String: Any])
         let darkConfig = try #require(try NudgeConfig.fromJson(darkTemplate))
         let darkCanvas = try #require(darkConfig.canvas)
@@ -198,7 +198,7 @@ struct NudgeDialogComponentTests {
 
     @Test("matches the sharp-corner dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogRadius0VisualGolden() throws {
-        let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-radius-0.json")
+        let fixture = try loadNudgeDialogFixture(named: "nudge_dialog_radius_0.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
@@ -209,8 +209,8 @@ struct NudgeDialogComponentTests {
 
         let hostView = ComponentTestHost.makeRealDialogHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: .engageGolden,
+            style: .striped
         )
         defer {
             ComponentTestHost.cleanupOverlayWindow(hostView)
@@ -225,7 +225,7 @@ struct NudgeDialogComponentTests {
 
     @Test("matches the rounded-corner dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogRadius28VisualGolden() throws {
-        let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-radius-28.json")
+        let fixture = try loadNudgeDialogFixture(named: "nudge_dialog_radius_28.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
@@ -236,8 +236,8 @@ struct NudgeDialogComponentTests {
 
         let hostView = ComponentTestHost.makeRealDialogHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: .engageGolden,
+            style: .striped
         )
         defer {
             ComponentTestHost.cleanupOverlayWindow(hostView)
@@ -252,7 +252,7 @@ struct NudgeDialogComponentTests {
 
     @Test("matches the zero-margin dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogMarginZeroVisualGolden() throws {
-        let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-margin-zero.json")
+        let fixture = try loadNudgeDialogFixture(named: "nudge_dialog_margin_zero.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
@@ -263,8 +263,8 @@ struct NudgeDialogComponentTests {
 
         let hostView = ComponentTestHost.makeRealDialogHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: .engageGolden,
+            style: .striped
         )
         defer {
             ComponentTestHost.cleanupOverlayWindow(hostView)
@@ -279,7 +279,7 @@ struct NudgeDialogComponentTests {
 
     @Test("matches the large-margin dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogMarginLargeVisualGolden() throws {
-        let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-margin-large.json")
+        let fixture = try loadNudgeDialogFixture(named: "nudge_dialog_margin_large.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
@@ -290,8 +290,8 @@ struct NudgeDialogComponentTests {
 
         let hostView = ComponentTestHost.makeRealDialogHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: .engageGolden,
+            style: .striped
         )
         defer {
             ComponentTestHost.cleanupOverlayWindow(hostView)
@@ -306,7 +306,7 @@ struct NudgeDialogComponentTests {
 
     @Test("matches the narrow dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogWidthNarrowVisualGolden() throws {
-        let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-width-narrow.json")
+        let fixture = try loadNudgeDialogFixture(named: "nudge_dialog_width_narrow.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
@@ -317,8 +317,8 @@ struct NudgeDialogComponentTests {
 
         let hostView = ComponentTestHost.makeRealDialogHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: .engageGolden,
+            style: .striped
         )
         defer {
             ComponentTestHost.cleanupOverlayWindow(hostView)
@@ -333,7 +333,7 @@ struct NudgeDialogComponentTests {
 
     @Test("matches the wide dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogWidthWideVisualGolden() throws {
-        let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-width-wide.json")
+        let fixture = try loadNudgeDialogFixture(named: "nudge_dialog_width_wide.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
@@ -344,8 +344,8 @@ struct NudgeDialogComponentTests {
 
         let hostView = ComponentTestHost.makeRealDialogHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: .engageGolden,
+            style: .striped
         )
         defer {
             ComponentTestHost.cleanupOverlayWindow(hostView)
@@ -360,7 +360,7 @@ struct NudgeDialogComponentTests {
 
     @Test("matches the dark-theme dialog golden", .tags(.golden)) @MainActor
     func testNudgeDialogDarkThemeVisualGolden() throws {
-        let fixture = try loadNudgeDialogFixture(named: "nudge-dialog-bg-dark.json")
+        let fixture = try loadNudgeDialogFixture(named: "nudge_dialog_bg_dark.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
             let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
             nudgeConfig.canvas != nil
@@ -371,8 +371,8 @@ struct NudgeDialogComponentTests {
 
         let hostView = ComponentTestHost.makeRealDialogHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: .engageGolden,
+            style: .striped
         )
         defer {
             ComponentTestHost.cleanupOverlayWindow(hostView)

@@ -299,7 +299,7 @@ private struct FloaterSessionView: View {
                     }
                 }
                 .frame(width: width, height: height)
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+                .clipShape(ClampedRoundedRectangle(cornerRadius: cornerRadius))
                 // Flutter's `BoxShadow(color: Color(0x73000000), blurRadius: 24, offset:
                 // Offset(0, 8))`. Unlike Compose (no directly-offset drop-shadow modifier),
                 // SwiftUI's `.shadow` takes an explicit `x`/`y` offset directly, so this can
@@ -324,7 +324,7 @@ private struct FloaterSessionView: View {
                 // it." Keeping the SAME `RoundedRectangle` shape always mounted and animating
                 // `lineWidth` to `0` instead lets it interpolate alongside everything else.
                 .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius)
+                    ClampedRoundedRectangle(cornerRadius: cornerRadius)
                         .stroke(
                             config.collapsed.borderColor.map {
                                 canvasTheme.color($0, isDark: isDark)

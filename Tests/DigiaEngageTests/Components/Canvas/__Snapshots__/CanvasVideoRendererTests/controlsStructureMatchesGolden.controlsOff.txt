@@ -1,4 +1,0 @@
-AVPlayerView
-  AVPlayerViewControllerContentView
-    AVPlaybackContentContainerView
-      __AVPlayerLayerView

@@ -9,9 +9,9 @@ struct DigiaOverlayControllerTests {
         id: String,
         autoDismissAfterMs: Int = 0
     ) -> DigiaNudgePresentation {
-        guard let fixture = FixtureLoader.loadFixture(campaignType: "nudge_dialog", fileName: "nudge-dialog"),
+        guard let fixture = FixtureLoader.loadFixture(campaignType: "nudge_dialog", fileName: "nudge_dialog"),
               var templateConfig = fixture["templateConfig"] as? [String: Any] else {
-            fatalError("Failed to load nudge-dialog fixture")
+            fatalError("Failed to load nudge_dialog fixture")
         }
         var container = templateConfig["container"] as? [String: Any] ?? [:]
         container["autoDismissAfterMs"] = autoDismissAfterMs

@@ -13,9 +13,9 @@ struct NudgeFullScreenComponentTests {
         showCloseButton: Bool = false,
         placement: [String: Any]? = nil
     ) -> NudgeConfig {
-        guard let fixture = FixtureLoader.loadFixture(campaignType: "nudge_dialog", fileName: "nudge-dialog"),
+        guard let fixture = FixtureLoader.loadFixture(campaignType: "nudge_dialog", fileName: "nudge_dialog"),
               var templateConfig = fixture["templateConfig"] as? [String: Any] else {
-            fatalError("Failed to load nudge-dialog fixture")
+            fatalError("Failed to load nudge_dialog fixture")
         }
         var container = templateConfig["container"] as? [String: Any] ?? [:]
         container["displayType"] = "full_screen"

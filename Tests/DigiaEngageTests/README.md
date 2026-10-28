@@ -10,7 +10,7 @@ This directory contains the automated test suites for the Digia Engage iOS SDK (
 
 ### Why:
 - **UIKit & SwiftUI Engine**: `CampaignCanvasView`, `NudgeOverlayView`, and `UIHostingController` rely on iOS-specific layout passes, UIKit window hierarchies, and CoreText typography rendering that exist only in `iPhoneSimulator.platform` (not the host macOS runtime).
-- **Pixel-Accurate Rendering**: Point-Free `SnapshotTesting` captures pixel buffers at retina scale (`@3x` on Pro Max, `@2x` on standard models). Font rasterization and colors must execute against the pinned iOS Simulator profile to match reference goldens deterministically.
+- **Pixel-Accurate Rendering**: Point-Free `SnapshotTesting` renders the goldens at `@1x` (`ComponentTestHost.renderImage`), as Flutter and Android do, so a pixel in the PNG is a point. Font rasterization and colors must execute against the pinned iOS Simulator profile to match reference goldens deterministically.
 - **Headless Execution**: While a simulator runtime is required, **no interactive simulator window needs to be open**. `xcodebuild test` runs headlessly in background/CI environments.
 
 ---
@@ -26,14 +26,14 @@ Visual golden diffing (`.image`) requires a deterministic pixel grid, scale fact
 
 | Parameter | Pinned Value | Details / Verification |
 | :--- | :--- | :--- |
-| **Device Model** | `iPhone 17 Pro Max` | Pinned flagship form factor |
+| **Device Model** | `iPhone 17e` | The screen of the Flutter and Android goldens (390x844) |
 | **OS Version** | `iOS 26.0` (or `iOS 26.x`) | Target simulator runtime |
 | **Display Scale** | `@3x` (3.0 scale) | 3 physical pixels per point |
-| **Physical Resolution** | `1320 x 2868` px | 460 ppi density |
-| **Logical Dimensions** | `440 x 956` pt | Fixed viewport bounds |
+| **Physical Resolution** | `1170 x 2532` px | |
+| **Logical Dimensions** | `390 x 844` pt | Fixed viewport bounds (`ViewImageConfig.engageGolden`) |
 | **UI Appearance** | `Light` | Standard light theme (no dark mode overrides) |
 | **Dynamic Type Size** | `large` | Standard iOS default font scale |
-| **Safe Area Insets** | Top: 59 pt, Bottom: 34 pt | Dynamic Island & Home Indicator |
+| **Safe Area Insets** | Top: 47 pt, Bottom: 34 pt | Notch & Home Indicator, as Flutter's `_safeTop` / `_safeBottom` |
 
 ---
 
@@ -43,22 +43,22 @@ Visual golden diffing (`.image`) requires a deterministic pixel grid, scale fact
 ```bash
 xcrun simctl list devices booted
 ```
-Verify that `iPhone 17 Pro Max` is listed as `(Booted)`.
+Verify that `iPhone 17e` is listed as `(Booted)`.
 
 #### 2. Boot or switch to the pinned device:
 ```bash
 # Boot the pinned simulator
-xcrun simctl boot "iPhone 17 Pro Max"
+xcrun simctl boot "iPhone 17e"
 
 # Set UI appearance to Light mode
-xcrun simctl ui "iPhone 17 Pro Max" appearance light
+xcrun simctl ui "iPhone 17e" appearance light
 
 # Set Dynamic Type to standard default
-xcrun simctl ui "iPhone 17 Pro Max" content_size large
+xcrun simctl ui "iPhone 17e" content_size large
 ```
 
 #### 3. Automatic Device Enforcement:
-The [`./run-tests.sh`](../run-tests.sh) convenience runner automatically detects any booted `iPhone 17 Pro Max`. If none is booted, it instructs `xcodebuild` to target the pinned `iPhone 17 Pro Max` profile directly.
+The [`./run-tests.sh`](../run-tests.sh) convenience runner automatically detects any booted `iPhone 17e`. If none is booted, it instructs `xcodebuild` to target the pinned `iPhone 17e` profile directly.
 
 ---
 
@@ -105,16 +105,11 @@ DigiaEngageTests/
 ├── Components/                             <-- [Tier 2] Visual Goldens & Contracts
 │   ├── Common/
 │   │   ├── SnapshotTestingExtensions.swift <-- Device profile & golden helpers
-│   │   └── FixtureLoader.swift             <-- Loads testkit/campaigns/... fixtures
+│   │   └── FixtureLoader.swift             <-- Loads <workspace>/sdk_testing_fixtures/... fixtures
 │   │
 │   ├── Nudge/
 │   │   ├── NudgeDialogComponentTests.swift
-│   │   ├── NudgeBottomSheetComponentTests.swift
-│   │   └── __Snapshots__/                  <-- Co-located golden baselines
-│   │       ├── NudgeDialogComponentTests/
-│   │       │   └── testNudgeDialogVisualImageGolden.1.png
-│   │       └── NudgeBottomSheetComponentTests/
-│   │           └── testNudgeBottomSheetVisualImageGolden.1.png
+│   │   └── NudgeBottomSheetComponentTests.swift
 │   │
 │   ├── Survey/                             <-- Canvas survey component tests
 │   ├── Guide/                              <-- Tooltip & spotlight native hosts
@@ -132,26 +127,51 @@ DigiaEngageTests/
 
 ---
 
+## 4a. Shared fixtures, the SDK harness and fixture-behaviour tests
+
+Every fixture-driven suite reads the shared catalog in `<workspace>/sdk_testing_fixtures/`
+(`campaigns/<surface>/<name>.json`, `actions/*.json`) — the same files the Flutter and Android tests
+read — through `Components/Common/FixtureLoader.swift`. A fixture added there is picked up by the
+fixture goldens with no code change (record it, see §6). `{{TESTKIT_ASSET_ORIGIN}}` resolves to the
+Test Kit mock server's directory on disk, so no media is fetched.
+
+`Support/SdkHarness.swift` is the port of `flutter/core/test/support/sdk_harness.dart`: it boots the
+real `SDKInstance.shared` over a scripted backend (campaign bundle, status, headers, seeded storage
+such as frequency state), registers a fake CEP plugin, mounts the app inside `DigiaHost`, delivers
+triggers and records what the SDK asked iOS to do (`RecordingPlatform`), the events it tracked and
+its diagnostic timeline. It is compiled into both test targets:
+
+- here, where a control is reached through accessibility (`activate(id:)`): no `UIApplication`, so a
+  synthesized touch never becomes a gesture;
+- in `SampleApp/DigiaEngageSampleTests` (hosted by the sample app), whose `SdkHarness+Touch.swift`
+  adds real touches (`tap(id:)`, `tap(text:)`). Drags, backdrop taps, floaters, guides, surveys and
+  the action suites live there.
+
+`FixtureBehaviour/` (here and in the sample app) holds the ports of
+`flutter/core/test/fixture_behaviour/`, tagged `behaviour`. Each test names, in a `// Fails if:`
+comment, the production line whose change turns it red. Where iOS knowingly differs from Flutter the
+assertion is wrapped in `withKnownIssue`, so the test fails the day the gap closes.
+
 ## 5. Running Tests by Tag
 
 Tagged Swift Testing suites use tags declared in [`TestingTags.swift`](TestingTags.swift): one **kind** (`unit`, `contract`, `component`, `golden`, `integration`), optional **gate** tags (`smoke`, `slow`), and one or more **areas** (`nudge`, `session`, `analytics`, ...). `xcodebuild` selects by tag natively, so no `.xctestplan` is needed.
 
 ### Using the Convenience Wrapper (`./run-tests.sh`)
-The wrapper pins the iPhone 17 Pro Max simulator, enables code coverage, validates the tag against `TestingTags.swift`, and fails if a filter matched no tests (xcodebuild alone reports success on zero tests):
+The wrapper pins the iPhone 17e simulator, enables code coverage, validates the tag against `TestingTags.swift`, and fails if a filter matched no tests (xcodebuild alone reports success on zero tests):
 ```bash
 ./run-tests.sh            # everything under Tests/ (default; same as `all`)
 ./run-tests.sh golden     # pixel goldens only
 ./run-tests.sh nudge      # one tag
 ./run-tests.sh quick      # everything except `slow`
 ```
-Every run, pass or fail, writes line coverage of `Sources/` as LCOV to `coverage/lcov.info` and, when `genhtml` is installed (`brew install lcov`), an HTML report at `coverage/html/index.html` (both gitignored).
+`run-tests.sh` runs the package suites, then the suites hosted by the sample app with the same tag filter (`HOSTED=false` skips them). Every run, pass or fail, merges both runs' line coverage of `Sources/` (`Scripts/merge-lcov.py`) and writes it as LCOV to `coverage/lcov.info` and, when `genhtml` is installed (`brew install lcov`), an HTML report at `coverage/html/index.html` (both gitignored).
 
 ### Native Xcode commands
 ```bash
-xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -enableCodeCoverage YES -only-testing-tags nudge
-xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -enableCodeCoverage YES -skip-testing-tags slow
+xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17e" -enableCodeCoverage YES -only-testing-tags nudge
+xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17e" -enableCodeCoverage YES -skip-testing-tags slow
 # One nested suite, without tags:
-xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max" -enableCodeCoverage YES -only-testing:DigiaEngageTests/NudgeComponentTests/Dialog
+xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17e" -enableCodeCoverage YES -only-testing:DigiaEngageTests/NudgeComponentTests/Dialog
 ```
 `XCTestCase` classes cannot carry tags; they run only under `all`/`quick` or `-only-testing:`.
 
@@ -159,14 +179,19 @@ xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iP
 
 ## 6. Updating Golden Snapshots
 
+The baselines are not in this repository: every snapshot is read from and recorded into
+`de_workspace/goldens/ios/<TestFile>/<test>.<name>.png` (`goldenDirectory(filePath:)` in
+`SnapshotTestingExtensions.swift`), beside the Flutter and Android goldens the goldens reviewer
+compares. Commit them in `de_workspace`.
+
 When visual designs intentionally change, update the golden baselines using the `RECORD_SNAPSHOTS` environment variable:
 
 ```bash
 # 1. Re-record goldens for a tag (the run always fails in record mode, by design):
 ./run-tests.sh nudge record        # or: RECORD_SNAPSHOTS=true ./run-tests.sh nudge
 
-# 2. Verify git diff:
-git diff Tests/DigiaEngageTests/Components/
+# 2. Verify git diff (in de_workspace):
+git -C ../.. diff --stat goldens/ios
 
 # 3. Perform a fresh verification run (must pass without record mode):
 ./run-tests.sh nudge
@@ -182,7 +207,7 @@ When a visual golden fails, `SnapshotTesting` does not alter scripts or project 
 error: testNudgeBottomSheetVisualImageGolden() : failed - Snapshot does not match reference.
 
 @− (Baseline):
-"file:///Users/ram/.../__Snapshots__/NudgeBottomSheetComponentTests/testNudgeBottomSheetVisualImageGolden.1.png"
+"file:///Users/ram/.../de_workspace/goldens/ios/NudgeBottomSheetComponentTests/testNudgeBottomSheetVisualImageGolden.1.png"
 
 @+ (Failure):
 "file:///Users/ram/Library/.../CoreSimulator/Devices/.../testNudgeBottomSheetVisualImageGolden.1.png"

@@ -7,7 +7,7 @@ import UIKit
 extension HostedUITests {
 /// Pixel goldens for every Test Kit anchorless guide fixture.
 ///
-/// The arguments are read from `testkit/campaigns/anchorless/fixtures/`, so a fixture added to the
+/// The arguments are read from `sdk_testing_fixtures/campaigns/anchorless/`, so a fixture added to the
 /// Test Kit is covered with no code change (record it by running this target's tests with
 /// `TEST_RUNNER_RECORD_SNAPSHOTS=true`; see `SampleApp/README.md`). Each fixture is decoded by
 /// `CampaignModel.fromJson` for iOS, started on the SDK's guide orchestrator, and drawn by the
@@ -23,8 +23,8 @@ struct AnchorlessFixtureGoldenTests {
     ///   - a target captured on another page;
     ///   - a target placed off screen.
     private static let notShown: Set<String> = [
-        "anchorless-mismatch",
-        "anchorless-out-of-bounds",
+        "anchorless_mismatch",
+        "anchorless_out_of_bounds",
     ]
 
     private static let fixtures = FixtureLoader.fixtureNames(campaignType: "anchorless")
@@ -71,7 +71,7 @@ struct AnchorlessFixtureGoldenTests {
             "Failed to load fixture anchorless/\(fixture).json"
         )
         let campaign = try #require(
-            try CampaignModel.fromJson(json, devicePlatform: "ios"),
+            try CampaignModel.fromJson(json, designTokens: fixtureTokens(json), devicePlatform: "ios"),
             "Fixture must decode to a guide"
         )
         let workspace = try #require(FixtureLoader.workspaceURL(), "Test Kit not found")

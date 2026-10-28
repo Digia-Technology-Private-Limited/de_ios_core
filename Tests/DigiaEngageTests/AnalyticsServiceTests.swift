@@ -32,8 +32,7 @@ final class FakeAnalyticsSender: NetworkClient, @unchecked Sendable {
     var responseFactory: (Int) -> Int
     /// How long a track call takes to answer — lets a test capture while a send is in flight.
     var responseDelayMs: UInt64 = 0
-    /// While true a track call does not answer — lets a test capture while a send is in flight
-    /// without guessing how long that window stays open on a busy main actor.
+    /// While true, a track call does not answer — holds a send in flight.
     var holdsResponses = false
     /// The events of each track body, in send order.
     private(set) var batches: [[[String: Any]]] = []

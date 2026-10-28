@@ -7,10 +7,10 @@ import UIKit
 @testable import DigiaEngage
 
 extension RenderedUITests {
-/// Pixel goldens for every Test Kit inline carousel, story and timer fixture.
+/// Pixel goldens for every shared inline banner, carousel, story and timer fixture.
 ///
-/// The arguments are read from `testkit/campaigns/inline_carousel/`, `inline_story/` and
-/// `inline_timer/` `fixtures/`, so a fixture added to the Test Kit is covered with no code change
+/// The arguments are read from `sdk_testing_fixtures/campaigns/inline_banner/`, `inline_carousel/`,
+/// `inline_story/` and `inline_timer/`, so a fixture added there is covered with no code change
 /// (record it with `RECORD_SNAPSHOTS=true ./run-tests.sh inline`). Each fixture is decoded by
 /// `CampaignModel.fromJson` and drawn by the view `DigiaSlot` picks for its config
 /// (`DigiaInlineCanvasView`, `DigiaInlineStoryView`, ...), placed in a scrolling host screen. As in
@@ -22,16 +22,23 @@ extension RenderedUITests {
 ///     each golden shows the layout, not the authored photo;
 ///   - carousel autoplay is held off for a day, so the first slide is captured;
 ///   - timers are parsed against a frozen clock at `timerNow`.
-@Suite("Test Kit inline carousel, story and timer fixture goldens", .serialized, .tags(.inline))
+@Suite("Test Kit inline banner, carousel, story and timer fixture goldens", .serialized, .tags(.inline))
 struct InlineFixtureGoldenTests {
 
-    /// 2029-12-29T10:15:30Z: 2d 13h 44m 30s before the timer fixtures' 2030 deadline, so every
-    /// unit box shows a different digit.
-    private static let timerNowMs: Int64 = 1_893_233_730_000
+    /// 2d 03h 45m 13s before the timer fixtures' 2030-01-01 deadline: the countdown the Android and
+    /// Flutter goldens show.
+    private static let timerNowMs: Int64 = 1_893_269_687_000
 
     /// A clock that never advances: `nowMs()` adds the monotonic time elapsed since
     /// `continuousNanoseconds`, which is none when that is the largest value the clock can read.
     private static let timerNow = TrustedTimeAnchor(serverEpochMs: timerNowMs, continuousNanoseconds: .max)
+
+    @Test("matches the inline banner fixture golden", .tags(.golden),
+          arguments: FixtureLoader.fixtureNames(campaignType: "inline_banner"))
+    @MainActor
+    func testInlineBannerFixtureGolden(fixture: String) async throws {
+        try await assertInlineFixture(fixture, campaignType: "inline_banner", function: "testInlineBannerFixtureGolden")
+    }
 
     @Test("matches the inline carousel fixture golden", .tags(.golden),
           arguments: FixtureLoader.fixtureNames(campaignType: "inline_carousel"))
@@ -54,7 +61,7 @@ struct InlineFixtureGoldenTests {
         try await assertInlineFixture(fixture, campaignType: "inline_timer", function: "testInlineTimerFixtureGolden")
     }
 
-    /// Snapshot file: `__Snapshots__/InlineFixtureGoldenTests/<test>.<fixture>.png`.
+    /// Snapshot file: `de_workspace/goldens/ios/InlineFixtureGoldenTests/<test>.<fixture>.png`.
     @MainActor
     private func assertInlineFixture(_ fixture: String, campaignType: String, function: StaticString) async throws {
         let json = try #require(
@@ -63,7 +70,7 @@ struct InlineFixtureGoldenTests {
         )
         let (standIn, imageURLs) = withLocalImages(json, fixture: fixture)
         let campaign = try #require(
-            try CampaignModel.fromJson(withAutoPlayHeld(standIn) as! [String: Any], timeAnchor: Self.timerNow),
+            try CampaignModel.fromJson(withAutoPlayHeld(standIn) as! [String: Any], designTokens: fixtureTokens(json), timeAnchor: Self.timerNow),
             "Fixture must decode to a campaign"
         )
         let payload = CEPTriggerPayload(cepCampaignId: "test_inline", campaignKey: campaign.campaignKey, cepMetadata: [:])
@@ -80,7 +87,7 @@ struct InlineFixtureGoldenTests {
             return
         }
 
-        let window = makeSlotWindow(content: content, device: .iPhone17ProMax)
+        let window = makeSlotWindow(content: content, device: .engageGolden)
         defer { ComponentTestHost.cleanupOverlayWindow(window) }
         await awaitImagesLoaded(imageURLs)
         // A carousel rebuilds its slides as it settles on its first page, and a rebuilt `WebImage`

@@ -8,7 +8,7 @@ import UIKit
 extension RenderedUITests {
 /// Pixel goldens for every Test Kit nudge fixture that has no hand-written golden test.
 ///
-/// The arguments are read from `testkit/campaigns/<campaign>/fixtures/`, so a fixture added to the
+/// The arguments are read from `sdk_testing_fixtures/campaigns/<campaign>/`, so a fixture added to the
 /// Test Kit gets a golden with no code change (record it with
 /// `RECORD_SNAPSHOTS=true ./run-tests.sh nudge`). Each fixture is decoded by `NudgeConfig.fromJson`
 /// and presented through the production `NudgeOverlayView`, like the hand-written goldens.
@@ -18,18 +18,18 @@ struct NudgeFixtureGoldenTests {
 
     /// Fixtures with a golden in `NudgeBottomSheetComponentTests` / `NudgeDialogComponentTests`.
     private static let coveredElsewhere: Set<String> = [
-        "nudge-bottomsheet-compact",
-        "nudge-bottomsheet-safe-area",
-        "nudge-bottomsheet-safe-area-surface",
-        "nudge-bottomsheet-safe-area-none",
-        "nudge-dialog",
-        "nudge-dialog-radius-0",
-        "nudge-dialog-radius-28",
-        "nudge-dialog-margin-zero",
-        "nudge-dialog-margin-large",
-        "nudge-dialog-width-narrow",
-        "nudge-dialog-width-wide",
-        "nudge-dialog-bg-dark",
+        "nudge_bottomsheet_compact",
+        "nudge_bottomsheet_safe_area",
+        "nudge_bottomsheet_safe_area_surface",
+        "nudge_bottomsheet_safe_area_none",
+        "nudge_dialog",
+        "nudge_dialog_radius_0",
+        "nudge_dialog_radius_28",
+        "nudge_dialog_margin_zero",
+        "nudge_dialog_margin_large",
+        "nudge_dialog_width_narrow",
+        "nudge_dialog_width_wide",
+        "nudge_dialog_bg_dark",
     ]
 
     private static func fixtures(_ campaignType: String) -> [String] {
@@ -54,7 +54,7 @@ struct NudgeFixtureGoldenTests {
         try assertFixtureGolden(campaignType: "nudge_fullscreen", fixture: fixture, test: "testFullScreenFixtureGolden")
     }
 
-    /// Snapshot file: `__Snapshots__/NudgeFixtureGoldenTests/<test>.<fixture>.png`.
+    /// Snapshot file: `de_workspace/goldens/ios/NudgeFixtureGoldenTests/<test>.<fixture>.png`.
     @MainActor
     private func assertFixtureGolden(campaignType: String, fixture: String, test: StaticString) throws {
         let json = try #require(
@@ -62,12 +62,12 @@ struct NudgeFixtureGoldenTests {
             "Failed to load fixture \(campaignType)/\(fixture).json"
         )
         let templateConfig = try #require(json["templateConfig"] as? [String: Any], "Missing templateConfig")
-        let nudgeConfig = try #require(try NudgeConfig.fromJson(templateConfig), "Fixture must decode to a nudge")
+        let nudgeConfig = try #require(try NudgeConfig.fromJson(templateConfig, designTokens: fixtureTokens(json)), "Fixture must decode to a nudge")
 
         let hostView = ComponentTestHost.makeRealOverlayWindow(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: .engageGolden,
+            style: .striped
         )
         defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
 

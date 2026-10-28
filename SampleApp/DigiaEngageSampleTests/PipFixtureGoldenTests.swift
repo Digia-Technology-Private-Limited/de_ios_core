@@ -12,7 +12,7 @@ import UIKit
 extension HostedUITests {
 /// Pixel goldens for every Test Kit PiP fixture, collapsed and expanded.
 ///
-/// The arguments are read from `testkit/campaigns/pip/fixtures/`, so a fixture added to the Test
+/// The arguments are read from `sdk_testing_fixtures/campaigns/pip/`, so a fixture added to the Test
 /// Kit is covered with no code change (record it by running this target's tests with
 /// `TEST_RUNNER_RECORD_SNAPSHOTS=true`; see `SampleApp/README.md`). Each fixture is decoded by
 /// `CampaignModel.fromJson`, started on the SDK's floater orchestrator, and drawn by the production
@@ -58,7 +58,7 @@ struct PipFixtureGoldenTests {
 
         // Pin the screen and its notch / home-indicator insets to the golden's device, so the
         // goldens do not depend on which simulator the host app runs on.
-        let device = ViewImageConfig.iPhone17ProMax
+        let device = ViewImageConfig.engageGolden
         let insets = device.safeArea
         activeFloaterWindowGeometryOverride = (
             CGRect(origin: .zero, size: device.size!),
@@ -91,7 +91,8 @@ struct PipFixtureGoldenTests {
         // window. Real touches: a tap the shield refuses or a recognizer swallows fails here.
         let startsExpanded = config.behavior.startExpanded
         try await assertState(
-            startsExpanded ? "expanded" : "collapsed", fixture: fixture, window: window)
+            startsExpanded ? "expanded" : "collapsed", fixture: fixture, window: window,
+            drawsImage: config.media.kind == .image)
         if startsExpanded {
             let collapse = try #require(
                 collapseButtonCenter(in: window, config: config),
@@ -99,26 +100,40 @@ struct PipFixtureGoldenTests {
             )
             try TouchSynthesizer.tap(at: collapse, in: window)
             #expect(orchestrator.surface == .collapsed, "Tapping the collapse button did not collapse the PiP")
+        } else if !config.behavior.tapExpands {
+            // Authored `onTap: none`: a tap must leave the window as it is, so there is no second
+            // state to capture.
+            try FloaterTap.tapWindow(in: window)
+            try await awaitTransition(config)
+            #expect(orchestrator.surface == .collapsed, "Tapping a PiP authored onTap: none expanded it")
+            return
         } else {
             try FloaterTap.tapWindow(in: window)
             #expect(orchestrator.surface == .expanded, "Tapping the PiP did not expand it")
         }
         try await awaitTransition(config)
         try await assertState(
-            startsExpanded ? "collapsed" : "expanded", fixture: fixture, window: window)
+            startsExpanded ? "collapsed" : "expanded", fixture: fixture, window: window,
+            drawsImage: config.media.kind == .image)
     }
 
     @MainActor
-    private func assertState(_ state: String, fixture: String, window: UIWindow) async throws {
+    private func assertState(
+        _ state: String, fixture: String, window: UIWindow, drawsImage: Bool
+    ) async throws {
         // `WebImage` can drop the update that publishes a loaded image (it publishes inside the
         // view update that asked for it), leaving the media black. Flipping the trait environment
         // re-evaluates every environment-reading view, which draws the already-loaded image (as
         // the floater suite and `ComponentTestHost.makeCanvasSlotHost` do). Before every capture,
-        // since a tap re-renders the media at its new size.
-        window.overrideUserInterfaceStyle = .dark
-        ComponentTestHost.drainRunLoop(for: 0.3)
-        window.overrideUserInterfaceStyle = .light
-        ComponentTestHost.drainRunLoop(for: 0.3)
+        // since a tap re-renders the media at its new size. One flip is not always enough, so an
+        // image PiP flips again while the window still shows the empty black media frame.
+        for _ in 0..<5 {
+            window.overrideUserInterfaceStyle = .dark
+            ComponentTestHost.drainRunLoop(for: 0.3)
+            window.overrideUserInterfaceStyle = .light
+            ComponentTestHost.drainRunLoop(for: 0.3)
+            guard drawsImage, showsEmptyMediaFrame(window) else { break }
+        }
         // The Lottie plays on wall-clock time, and every SwiftUI update re-applies its authored
         // `.playing` mode, so it is pinned after each transition, right before the capture.
         holdLottie(in: window)
@@ -130,6 +145,28 @@ struct PipFixtureGoldenTests {
             named: "\(fixture)-\(state)",
             function: "testPipFixtureGolden"
         )
+    }
+
+    /// Whether the window shows an empty media frame: a block of pure black. Nothing else in these
+    /// goldens is pure black (the host is teal and amber, the media a photo), so a few hundred black pixels
+    /// at a quarter of the point size means the image was dropped.
+    @MainActor
+    private func showsEmptyMediaFrame(_ window: UIWindow) -> Bool {
+        guard let cg = ComponentTestHost.renderImage(of: window).cgImage else { return false }
+        let width = Int(window.bounds.width / 4), height = Int(window.bounds.height / 4)
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        guard let context = CGContext(
+            data: &pixels, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return false }
+        context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+        var black = 0
+        for index in stride(from: 0, to: pixels.count, by: 4)
+        where pixels[index] < 6 && pixels[index + 1] < 6 && pixels[index + 2] < 6 {
+            black += 1
+        }
+        return black > 300
     }
 
     /// Where the expanded chrome's collapse button is on screen, or nil when it is hidden. The
@@ -234,7 +271,7 @@ struct PipFixtureGoldenTests {
             template["behavior"] = behavior
             json["templateConfig"] = template
         }
-        return try? CampaignModel.fromJson(json)
+        return try? CampaignModel.fromJson(json, designTokens: fixtureTokens(json))
     }
 
     /// A key window with the floater layer over a plain host, as `DigiaHost` stacks them.
@@ -248,8 +285,7 @@ struct PipFixtureGoldenTests {
 
         let rootVC = ComponentTestHost.makeDeviceHost(
             device: device,
-            // Not white: an expanded PiP has a white background.
-            style: .solid(UIColor(red: 0x26 / 255, green: 0xA6 / 255, blue: 0x9A / 255, alpha: 1)),
+            style: .striped,
             scrimColor: nil,
             showHomeIndicator: false
         )

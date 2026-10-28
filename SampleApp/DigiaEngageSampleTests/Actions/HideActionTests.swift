@@ -11,12 +11,12 @@ extension HostedUITests {
 @MainActor
 struct HideActionTests {
 
-    /// The `nudge-dialog`, unchanged, whose "Got It" CTA (`dialogButton`) is authored
+    /// The `nudge_dialog`, unchanged, whose "Got It" CTA (`dialogButton`) is authored
     /// `Action.dismissDialog`. The showing must settle as dismissed, not merely vanish.
     @Test("tapping a CTA authored with dismiss closes the nudge")
     func dismissClosesTheNudge() async throws {
         let sdk = try await SdkHarness.start(
-            loadCampaign("Campaigns/nudge_dialog/fixtures/nudge-dialog.json"))
+            loadCampaign("campaigns/nudge_dialog/nudge_dialog.json"))
         defer { sdk.tearDown() }
         try sdk.mount { Text("App home") }
         let presentation = try sdk.deliver("test_nudge_dialog")
@@ -33,12 +33,12 @@ struct HideActionTests {
         #expect(sdk.isShowing("App home"))
     }
 
-    /// The `guide-tooltip-single-step`, unchanged, whose "Close" button (`dismiss_btn`) is authored
+    /// The `guide_tooltip_single_step`, unchanged, whose "Close" button (`dismiss_btn`) is authored
     /// `Action.dismiss`.
     @Test("tapping a button authored with dismiss closes the guide")
     func dismissClosesTheGuide() async throws {
         let sdk = try await SdkHarness.start(
-            loadCampaign("Campaigns/guide_tooltip/fixtures/guide-tooltip-single-step.json"))
+            loadCampaign("campaigns/guide_tooltip/guide_tooltip_single_step.json"))
         defer { sdk.tearDown() }
         try sdk.mount { GuideHostScreen() }
         try sdk.deliver("test_guide_tooltip_single")
@@ -50,13 +50,13 @@ struct HideActionTests {
         #expect(SDKInstance.shared.guideOrchestrator.state == nil)
     }
 
-    /// The `survey-stacked-cta`, unchanged. Its result scene's "Close Survey" button
+    /// The `survey_stacked_cta`, unchanged. Its result scene's "Close Survey" button
     /// (`btn_scene_stacked_done`) is authored `Action.hideBottomSheet`; the test answers the one
     /// question to reach it.
     @Test("tapping a button authored with dismiss closes the survey")
     func dismissClosesTheSurvey() async throws {
         let sdk = try await SdkHarness.start(
-            loadCampaign("Campaigns/survey/fixtures/survey-stacked-cta.json"))
+            loadCampaign("campaigns/survey/survey_stacked_cta.json"))
         defer { sdk.tearDown() }
         try sdk.mount { Text("App home") }
         try sdk.deliver("test_survey_stacked_cta")
@@ -72,7 +72,7 @@ struct HideActionTests {
         #expect(sdk.isShowing("App home"))
     }
 
-    /// The `action_hide_pip`: `pip-expanded-canvas-cta` opened full screen, with its CTA
+    /// The `action_hide_pip`: `pip_expanded_canvas_cta` opened full screen, with its CTA
     /// (`pip_cta_button`) authored `Action.dismiss`. The PiP shows only once its image has loaded,
     /// and that image is the Test Kit's.
     ///
@@ -84,7 +84,7 @@ struct HideActionTests {
     @Test("tapping a CTA authored with dismiss closes the PiP",
           .enabled(if: testkitAvailable, testkitSkipReason))
     func dismissClosesThePip() async throws {
-        let sdk = try await SdkHarness.start(loadCampaign("Actions/Fixtures/action_hide_pip.json"))
+        let sdk = try await SdkHarness.start(loadCampaign("actions/action_hide_pip.json"))
         defer { sdk.tearDown() }
         try sdk.mount { Text("App home") }
         try sdk.deliver("test_action_hide_pip")
@@ -102,13 +102,13 @@ struct HideActionTests {
         }
     }
 
-    /// The `action_hide_floater_story`: `floater-story-window` with a story page whose CTA
+    /// The `action_hide_floater_story`: `floater_story_window` with a story page whose CTA
     /// (`story_hide_button`) is authored `Action.dismiss`. The collapsed window opens the story;
     /// the CTA then ends the story, and Flutter ends its window with it.
     @Test("tapping a CTA authored with dismiss closes the story")
     func dismissClosesTheStoryFloater() async throws {
         let sdk = try await SdkHarness.start(
-            loadCampaign("Actions/Fixtures/action_hide_floater_story.json"))
+            loadCampaign("actions/action_hide_floater_story.json"))
         defer { sdk.tearDown() }
         try sdk.mount { Text("App home") }
         try sdk.deliver("test_action_hide_floater_story")
