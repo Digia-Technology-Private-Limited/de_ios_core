@@ -16,9 +16,19 @@ The sample app now initializes the SDK from `DigiaSampleRootView`, so startup fa
 ## Tests
 
 `DigiaEngageSampleTests` is a unit-test target hosted by this app. Tests that need real UIKit
-touch delivery live here: the package's own test bundle (`swift test` / `run-tests.sh`) has no
-`UIApplication`, so a synthesized touch never becomes a gesture there. `FloaterTapTests` taps the
-PiP and story floater through `TouchSynthesizer` and checks the production tap handlers ran.
+touch delivery live here: the package's own test bundle has no `UIApplication`, so a synthesized
+touch never becomes a gesture there. The suites drive the real SDK through the shared `SdkHarness`
+(`../Tests/DigiaEngageTests/Support/SdkHarness.swift`, plus real touches from
+`Support/SdkHarness+Touch.swift` and `TouchSynthesizer`): `Actions/` (one suite per authored
+action), `FixtureBehaviour/` (ports of Flutter's fixture-behaviour tests), and the PiP, floater and
+anchorless fixture goldens. Fixtures come from `<workspace>/sdk_testing_fixtures/`.
+
+The test folder is a filesystem-synchronized group: a new `.swift` file is compiled with no project
+change (`Support/CropAssets/` is excluded from the bundle). Its goldens are recorded in
+`<workspace>/goldens/ios/`, not here.
+
+`../run-tests.sh` runs these suites after the package suites, with the same tag filter, and merges
+their coverage into `coverage/lcov.info`.
 
 ```bash
 xcodebuild test -project DigiaEngageSample.xcodeproj -scheme DigiaEngageSample \

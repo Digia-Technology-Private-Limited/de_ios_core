@@ -78,7 +78,7 @@ struct AnchorlessFormatsGoldenTests {
     }
 
     /// Exact within the perceptual tolerance, as the other fixture goldens. Snapshot file:
-    /// `__Snapshots__/AnchorlessFormatsGoldenTests/testCropGolden.<name>.png`.
+    /// `de_workspace/goldens/ios/AnchorlessFormatsGoldenTests/testCropGolden.<name>.png`.
     @MainActor
     private func assertGolden(_ image: UIImage, named name: String) {
         assertVisualGolden(
@@ -99,7 +99,7 @@ struct AnchorlessFormatsGoldenTests {
         let assets = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .appendingPathComponent("Support/CropAssets")
-        return try AnchorlessGuideHost.show(campaign) { url in
+        return try AnchorlessGuideHost.show(campaign, anchors: false) { url in
             // The crop picture in the format the URL's extension names.
             try? Data(contentsOf: assets.appendingPathComponent("crop_stripes.\(url.pathExtension)"))
         }

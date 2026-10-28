@@ -2072,21 +2072,26 @@ private struct CanvasDividerRenderer: View {
         CampaignCanvasBoxView(box: box, isDark: isDark) {
             Canvas { context, size in
                 let horizontal = axis == .horizontal
+                let thickness = horizontal ? size.height : size.width
+                let length = horizontal ? size.width : size.height
+                let dotted = pattern == .dotted
+                let lineStart = inset + (dotted ? thickness / 2 : 0)
+                let lineEnd = max(lineStart, length - lineStart)
                 var path = Path()
                 path.move(
                     to: horizontal
-                        ? CGPoint(x: inset, y: size.height / 2)
-                        : CGPoint(x: size.width / 2, y: inset))
+                        ? CGPoint(x: lineStart, y: size.height / 2)
+                        : CGPoint(x: size.width / 2, y: lineStart))
                 path.addLine(
                     to: horizontal
-                        ? CGPoint(x: size.width - inset, y: size.height / 2)
-                        : CGPoint(x: size.width / 2, y: size.height - inset))
-                let thickness = horizontal ? size.height : size.width
+                        ? CGPoint(x: lineEnd, y: size.height / 2)
+                        : CGPoint(x: size.width / 2, y: lineEnd))
                 let dash = canvasDividerDashPattern(
                     pattern: pattern, thickness: thickness, dashPattern: dashPattern)
                 context.stroke(
                     path, with: .color(CampaignCanvasTheme.shared.color(color, isDark: isDark)),
-                    style: StrokeStyle(lineWidth: thickness, lineCap: strokeCap.lineCap, dash: dash)
+                    style: StrokeStyle(
+                        lineWidth: thickness, lineCap: dotted ? .round : strokeCap.lineCap, dash: dash)
                 )
             }
         }
@@ -2540,7 +2545,7 @@ internal func canvasDividerDashPattern(
     case .solid:
         return []
     case .dotted:
-        return [0, max(thickness, dashPattern.dropFirst().first ?? 4)]
+        return [0, max(thickness * 2, 2)]
     case .dashed:
         return dashPattern
     }

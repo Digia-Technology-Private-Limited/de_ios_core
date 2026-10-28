@@ -11,8 +11,8 @@ import UIKit
 extension RenderedUITests {
 /// Pixel goldens for every Test Kit inline Canvas fixture.
 ///
-/// The arguments are read from `testkit/campaigns/canvas/fixtures/` and
-/// `testkit/campaigns/inline_canvas/fixtures/`, so a fixture added to the Test Kit is covered with
+/// The arguments are read from `sdk_testing_fixtures/campaigns/canvas/` and
+/// `sdk_testing_fixtures/campaigns/inline_canvas/`, so a fixture added to the Test Kit is covered with
 /// no code change (record it with `./run-tests.sh canvas record`). Each fixture is decoded by
 /// `CampaignModel.fromJson` and drawn by `DigiaInlineCanvasView` — exactly what `DigiaSlot`
 /// renders for an inline Canvas campaign — placed in a scrolling host screen, so each golden is the
@@ -23,14 +23,14 @@ extension RenderedUITests {
 ///
 /// Images and Lottie files are read from the Test Kit mock server's directory. Two goldens record
 /// a stand-in rather than the authored media:
-///   - canvas-bg-image: `image-1.png` is missing from the mock server, so `strawberry.jpg` is
+///   - canvas_bg_image: `image-1.png` is missing from the mock server, so `strawberry.jpg` is
 ///     drawn in its place;
-///   - canvas-lottie-animation: `static-lottie.json` is missing, so the Lottie placeholder is drawn.
+///   - canvas_lottie_animation: `static-lottie.json` is missing, so the Lottie placeholder is drawn.
 @Suite("Test Kit inline Canvas fixture goldens", .serialized, .tags(.canvas, .inline))
 struct CanvasFixtureGoldenTests {
 
     /// Fixtures with no iOS golden.
-    private static let excluded: Set<String> = ["canvas-divider-vertical"]
+    private static let excluded: Set<String> = ["canvas_divider_vertical"]
 
     private static let canvasFixtures = FixtureLoader.fixtureNames(campaignType: "canvas").filter { !excluded.contains($0) }
     private static let inlineCanvasFixtures = FixtureLoader.fixtureNames(campaignType: "inline_canvas")
@@ -61,7 +61,7 @@ struct CanvasFixtureGoldenTests {
             "Fixture must load"
         )
         let standIn = withMissingImagesReplaced(json) as! [String: Any]
-        let campaign = try #require(try CampaignModel.fromJson(standIn), "Fixture must decode to a campaign")
+        let campaign = try #require(try CampaignModel.fromJson(standIn, designTokens: fixtureTokens(json)), "Fixture must decode to a campaign")
         guard case .inlineCanvas(let config) = campaign.config else {
             Issue.record("Fixture must decode to an inline canvas")
             return
@@ -72,7 +72,7 @@ struct CanvasFixtureGoldenTests {
         SDImageCache.shared.clearMemory()
 
         let payload = CEPTriggerPayload(cepCampaignId: "test_canvas", campaignKey: campaign.campaignKey, cepMetadata: [:])
-        let window = makeSlotWindow(config: config, payload: payload, device: .iPhone17ProMax)
+        let window = makeSlotWindow(config: config, payload: payload, device: .engageGolden)
         defer { ComponentTestHost.cleanupOverlayWindow(window) }
 
         // Media loads asynchronously (a file read, a Lottie decode); wait for it rather than for a
@@ -148,7 +148,7 @@ struct CanvasFixtureGoldenTests {
     }
 
     private func isImage(_ url: URL) -> Bool {
-        ["png", "jpg", "jpeg", "webp", "gif"].contains(url.pathExtension.lowercased())
+        ["png", "jpg", "jpeg", "webp", "gif", "svg"].contains(url.pathExtension.lowercased())
     }
 
     /// Every Test Kit image URL in [value].

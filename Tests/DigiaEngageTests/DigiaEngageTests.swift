@@ -4,6 +4,12 @@ import SwiftUI
 @testable import DigiaEngage
 import Testing
 
+/// `DigiaEngageTests` and the suites nested in it drive `SDKInstance.shared`, as the rendered
+/// suites do; nesting it in `RenderedUITests` runs all of them one at a time, so no two reset or
+/// show on the shared instance at once.
+typealias DigiaEngageTests = RenderedUITests.DigiaEngageTests
+
+extension RenderedUITests {
 @MainActor
 @Suite("DigiaEngage", .serialized)
 struct DigiaEngageTests {
@@ -987,6 +993,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.reportPrimaryCTAClick(elementId: "primary", isPrimary: true)
         #expect(recorder.clickedElementIds == ["cta_primary", "primary"])
     }
+}
 }
 
 @Suite("EngageActionParser")

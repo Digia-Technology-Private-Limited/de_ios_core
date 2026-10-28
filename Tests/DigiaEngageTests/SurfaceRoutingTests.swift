@@ -388,22 +388,3 @@ func inlineJson(_ key: String, slotKey: String = "home_hero") -> [String: Any] {
         ] as [String: Any],
     ]
 }
-
-private final class TimelineRecorder: DiagnosticSink, @unchecked Sendable {
-    private let lock = NSLock()
-    private var stored: [TimelineRecord] = []
-
-    var records: [TimelineRecord] {
-        lock.lock()
-        defer { lock.unlock() }
-        return stored
-    }
-
-    func accepts(_ record: TimelineRecord) -> Bool { true }
-
-    func emit(_ record: TimelineRecord) {
-        lock.lock()
-        stored.append(record)
-        lock.unlock()
-    }
-}
