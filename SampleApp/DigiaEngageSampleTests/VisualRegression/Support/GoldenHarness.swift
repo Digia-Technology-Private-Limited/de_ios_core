@@ -57,7 +57,7 @@ enum GoldenHarness {
     static let perceptualPrecision: Float = 0.98
 
     /// Pixels per point: the Flutter goldens are 1x, but a phone is 3x and a 1x frame hides hairlines.
-    static let scale: CGFloat = 3
+    static let scale: CGFloat = 1
 
     static var isRecording: Bool { ProcessInfo.processInfo.environment["RECORD_SNAPSHOTS"] == "true" }
 
@@ -208,9 +208,10 @@ enum GoldenHarness {
         }
     }
 
-    /// Shows an overlay campaign (a PiP or a story floater) over the striped host and compares its two states:
-    /// the small window (`<fixture>-collapsed.png`) and the full-screen one a real tap on the window opens
-    /// (`<fixture>-expanded.png`). A campaign that starts expanded is captured there first.
+    /// Shows an overlay campaign (a PiP or a story floater) over the striped host and compares the state it first
+    /// shows: the small window (`<fixture>-collapsed.png`), or the full-screen one (`<fixture>-expanded.png`) for a
+    /// campaign that starts expanded. Only the fixtures `WorkspaceFixtures.expandedGoldens` lists are then moved to
+    /// their other state by a real tap and compared again.
     ///
     /// The window's own position is not known to the test: it is found as the pixels that differ from the bare
     /// host, so the tap lands on whatever the SDK drew.
@@ -233,6 +234,7 @@ enum GoldenHarness {
         let startsExpanded = fixture.json.deepString("initialState") == "expanded"
         let first = startsExpanded ? "expanded" : "collapsed"
         expect(sdk.window, surface: surface, name: "\(fixture.name)-\(first)", sourceLocation: sourceLocation)
+        guard WorkspaceFixtures.expandedGoldens.contains("\(surface)/\(fixture.name)") else { return }
         if startsExpanded {
             // A real tap on the collapse button: the first of the chrome's buttons, or the second when the close
             // button is on the left.

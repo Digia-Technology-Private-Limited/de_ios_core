@@ -70,9 +70,8 @@ public enum FixtureLoader {
     }
 
     /// Names (without `.json`) of every fixture in `sdk_testing_fixtures/campaigns/<campaignType>/`,
-    /// sorted, so a fixture added to the catalog is picked up without a code change. Leaves out the
-    /// fixtures `campaigns/behaviour_only.json` lists: only behaviour tests read those, by path.
-    /// Empty when the fixtures aren't found.
+    /// sorted, so a fixture added to the catalog is picked up without a code change. Empty when the
+    /// fixtures aren't found.
     public static func fixtureNames(campaignType: String, file: StaticString = #filePath)
         -> [String]
     {
@@ -82,11 +81,9 @@ public enum FixtureLoader {
                 includingPropertiesForKeys: nil
               )
         else { return [] }
-        let behaviourOnly = load("campaigns/behaviour_only.json", file: file) ?? [:]
         return files
             .filter { $0.pathExtension == "json" }
             .map { $0.deletingPathExtension().lastPathComponent }
-            .filter { behaviourOnly["\(campaignType)/\($0)"] == nil }
             .sorted()
     }
 }
