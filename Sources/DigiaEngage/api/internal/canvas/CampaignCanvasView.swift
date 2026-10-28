@@ -1809,8 +1809,10 @@ private struct CanvasProgressRenderer: View {
     private func capped(_ radius: CampaignCanvasCornerRadius, to size: CGSize) -> CampaignCanvasCornerRadius {
         let cap = max(0, min(size.width, size.height) / 2)
         return CampaignCanvasCornerRadius(
-            topLeft: min(radius.topLeft, cap), topRight: min(radius.topRight, cap),
-            bottomRight: min(radius.bottomRight, cap), bottomLeft: min(radius.bottomLeft, cap)
+            topLeft: min(max(radius.topLeft, 0), cap),
+            topRight: min(max(radius.topRight, 0), cap),
+            bottomRight: min(max(radius.bottomRight, 0), cap),
+            bottomLeft: min(max(radius.bottomLeft, 0), cap)
         )
     }
 }
