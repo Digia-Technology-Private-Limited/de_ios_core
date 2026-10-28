@@ -16,7 +16,7 @@ import SwiftUI
 //   collapsed  { widthFraction, aspectRatio, position, marginDp{t,r,b,l}, cornerRadiusDp,
 //                border?{widthDp,color}, shadow, entryAnimation, exitAnimation }
 //   controls   { draggable, snapToEdge, showClose, iconSize, marginDp{t,r,b,l} }
-//   behavior   { onTap{type:"showStory"}, scope, onStoryEnd, autoDismissAfterMs,
+//   behavior   { onTap{type:"showStory"}, initialState, scope, onStoryEnd, autoDismissAfterMs,
 //                reshowOnReturn, pauseWhenObscured }
 //   canvas     <canvas>       // the window's content
 //   story      <story props>  // pages + chromeCanvas, as a canvasStory widget carries them
@@ -138,6 +138,10 @@ struct FloaterStoryTransition: Equatable {
 /// Lifecycle and interaction behaviour.
 struct FloaterStoryBehaviorConfig: Equatable {
     let onStoryEnd: FloaterStoryEnd
+    /// `true` when the showing opens straight into the story instead of waiting for a tap on
+    /// the window. Wire `initialState: "expanded"`; anything else — including an absent key —
+    /// starts collapsed, the same rule a PiP's `behavior.initialState` follows.
+    let startExpanded: Bool
     /// How the window opens into the story.
     let expandTransition: FloaterStoryTransition
     /// Shorter than the expand by default: the user has already decided to leave, so a collapse
@@ -154,6 +158,7 @@ struct FloaterStoryBehaviorConfig: Equatable {
         let j = json ?? [:]
         return FloaterStoryBehaviorConfig(
             onStoryEnd: FloaterStoryEnd.from(j.nonBlankString("onStoryEnd")),
+            startExpanded: j.string("initialState", default: "collapsed") == "expanded",
             expandTransition: .sdkExpand,
             collapseTransition: .sdkCollapse,
             autoDismissAfterMs: j.positiveInt("autoDismissAfterMs"),
