@@ -3158,7 +3158,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 payload: payload
             )
         }
-        if !stepWasReported && (total > 1 || state.currentStep?.target.anchorlessTarget != nil) {
+        // Every step, a single one included, as on Flutter and Android; `stepWasReported` keeps it once.
+        if !stepWasReported {
             lastReportedGuideStep = (state.token, state.stepIndex)
             events.toDigia(
                 GuideEvent.StepViewed(

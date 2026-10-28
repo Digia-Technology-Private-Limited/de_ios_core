@@ -42,7 +42,6 @@ struct GuideCampaignBehaviourTests {
 
     // MARK: - Closed
 
-    // Fails today: no Digia Step Viewed for a single-step anchored guide; reportGuideShown sends it only when total > 1. Flutter sends it for every step.
     @Test("single step CTA: completed, dismissed as completed")
     func singleStepCta() async throws {
         let key = "test_guide_tooltip_single"
@@ -118,7 +117,6 @@ struct GuideCampaignBehaviourTests {
             reason: .completed, cepClicks: 0)
     }
 
-    // Fails today: no Digia Step Viewed for a single-step anchored guide; reportGuideShown sends it only when total > 1. Flutter sends it for every step.
     @Test("outside tap on a single step: scrim_tap, no step dismissed")
     func outsideTapSingleStep() async throws {
         let key = "test_guide_tooltip_outside_dismiss"
@@ -202,7 +200,6 @@ struct GuideCampaignBehaviourTests {
 
     // As coded, per ADR-004: a single-step guide's CTA completes it, even one whose only action is a plain
     // dismiss ("Skip Tour").
-    // Fails today: no Digia Step Viewed for a single-step anchored guide (expected one per step, as on Flutter).
     @Test("Skip Tour: completed, dismissed as completed, as coded")
     func skipTour() async throws {
         let key = "test_guide_tooltip_skip"
@@ -250,7 +247,6 @@ struct GuideCampaignBehaviourTests {
 
     // MARK: - Stays
 
-    // Fails today: no Digia Step Viewed for a single-step anchored guide (expected one per step, as on Flutter).
     @Test("a tap on the tooltip bubble does nothing")
     func tapOnTheBubble() async throws {
         let key = "test_guide_tooltip_outside_dismiss"
