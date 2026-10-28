@@ -150,6 +150,7 @@ enum GoldenHarness {
         sendFallbackVariables: Bool = false,
         sourceLocation: SourceLocation = #_sourceLocation
     ) async throws {
+        ComponentTestHost.useGoldenFonts()
         let sdk: SdkHarness
         switch host {
         case .striped: sdk = try await SdkHarness.start([fixture], backend: backend) { StripedHost() }
@@ -178,6 +179,7 @@ enum GoldenHarness {
         _ fixture: WorkspaceFixtures.Campaign,
         sourceLocation: SourceLocation = #_sourceLocation
     ) async throws {
+        ComponentTestHost.useGoldenFonts()
         let sdk = try await SdkHarness.start([fixture]) { GuideHost() }
         defer { sdk.tearDown() }
         Digia.setCurrentScreen(name: fixture.targetScreens.first ?? guideScreenName)
@@ -194,6 +196,7 @@ enum GoldenHarness {
         _ fixture: WorkspaceFixtures.Campaign,
         sourceLocation: SourceLocation = #_sourceLocation
     ) async throws {
+        ComponentTestHost.useGoldenFonts()
         let sdk = try await SdkHarness.start([fixture]) { GuideHost() }
         defer { sdk.tearDown() }
         let presentation = try #require(sdk.cep.deliver(fixture.campaignKey), sourceLocation: sourceLocation)
@@ -216,6 +219,7 @@ enum GoldenHarness {
         settle: TimeInterval = 2,
         sourceLocation: SourceLocation = #_sourceLocation
     ) async throws {
+        ComponentTestHost.useGoldenFonts()
         let fixture = fixture.holdingTimers()
         let sdk = try await SdkHarness.start([fixture]) { StripedHost() }
         defer { sdk.tearDown() }

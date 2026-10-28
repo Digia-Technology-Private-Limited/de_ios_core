@@ -1,3 +1,4 @@
+import CoreText
 import Foundation
 import SDWebImage
 import SnapshotTesting
@@ -32,6 +33,7 @@ public enum ComponentTestHost {
         size: CGSize,
         backgroundColor: UIColor = .white
     ) -> UIHostingController<Content> {
+        useGoldenFonts()
         let controller = UIHostingController(rootView: rootView)
         controller.view.bounds = CGRect(origin: .zero, size: size)
         controller.view.backgroundColor = backgroundColor
@@ -52,6 +54,7 @@ public enum ComponentTestHost {
         scrimColor: UIColor? = UIColor.black.withAlphaComponent(0.4),
         showHomeIndicator: Bool = false
     ) -> UIViewController {
+        useGoldenFonts()
         guard let size = device.size else {
             fatalError("Device configuration must have a concrete size")
         }
@@ -105,6 +108,7 @@ public enum ComponentTestHost {
         sheetHeight: CGFloat,
         in hostVC: UIViewController
     ) -> UIHostingController<Content> {
+        useGoldenFonts()
         let sheetVC = UIHostingController(rootView: rootView)
         let hostBounds = hostVC.view.bounds
         sheetVC.view.frame = CGRect(
@@ -132,6 +136,7 @@ public enum ComponentTestHost {
         dialogSize: CGSize,
         in hostVC: UIViewController
     ) -> UIHostingController<Content> {
+        useGoldenFonts()
         let dialogVC = UIHostingController(rootView: rootView)
         let hostBounds = hostVC.view.bounds
         let x = (hostBounds.width - dialogSize.width) / 2
@@ -160,6 +165,7 @@ public enum ComponentTestHost {
         device: ViewImageConfig = .iPhone17ProMax,
         style: BackgroundStyle = .solid(.white)
     ) -> UIWindow {
+        useGoldenFonts()
         guard let size = device.size else {
             fatalError("Device configuration must have a concrete size")
         }
@@ -318,6 +324,7 @@ public enum ComponentTestHost {
         drainDuration: TimeInterval = 0.2,
         rendersLoadedMedia: Bool = false
     ) -> UIView {
+        useGoldenFonts()
         let payload = CEPTriggerPayload(
             cepCampaignId: "test_inline_canvas_\(config.slotKey)",
             campaignKey: "test_inline_canvas_key",
@@ -387,6 +394,7 @@ public enum ComponentTestHost {
         _ controller: UIHostingController<Content>,
         drainDuration: TimeInterval = 0.05
     ) -> UIWindow {
+        useGoldenFonts()
         enableAccessibilityAutomation()
         if #available(iOS 16.4, *) {
             controller.safeAreaRegions = []
@@ -503,6 +511,7 @@ public enum ComponentTestHost {
         drainDuration: TimeInterval = 0.05,
         onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
     ) -> (window: UIWindow, controller: UIHostingController<AnyView>) {
+        useGoldenFonts()
         let stageHost = CanvasStageHost(
             canvas: canvas,
             authoredCornerRadius: authoredCornerRadius,
@@ -527,6 +536,38 @@ public enum ComponentTestHost {
             drainDuration: drainDuration
         )
         return (window, controller)
+    }
+
+    // MARK: - Golden Fonts
+
+    /// Registers the workspace's `sdk_testing_fixtures/fonts` Roboto with this process and makes it the system
+    /// font, once. Text with no authored family falls back to `UIFont.systemFont`, so without this every golden
+    /// with text drew SF and differed from Flutter's and Android's, which draw this Roboto.
+    ///
+    /// The swap lasts for the rest of the process and reaches every caller of `systemFont(ofSize:)` and
+    /// `systemFont(ofSize:weight:)`, the host chrome drawn here included. SwiftUI's `.system` fonts do not go
+    /// through UIFont and stay SF.
+    private static let goldenFontsInstalled: Bool = {
+        guard let root = FixtureLoader.workspaceURL() else { return false }
+        let dir = root.appendingPathComponent("sdk_testing_fixtures/fonts")
+        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+        let fonts = files.filter { $0.pathExtension == "ttf" }
+        guard !fonts.isEmpty else { return false }
+        CTFontManagerRegisterFontURLs(fonts as CFArray, .process, true, nil)
+        swapClassMethod(#selector(UIFont.systemFont(ofSize:weight:)), #selector(UIFont.goldenRoboto(ofSize:weight:)))
+        swapClassMethod(#selector(UIFont.systemFont(ofSize:)), #selector(UIFont.goldenRoboto(ofSize:)))
+        return true
+    }()
+
+    private static func swapClassMethod(_ original: Selector, _ replacement: Selector) {
+        guard let a = class_getClassMethod(UIFont.self, original),
+              let b = class_getClassMethod(UIFont.self, replacement) else { return }
+        method_exchangeImplementations(a, b)
+    }
+
+    /// Called by every mount here, and by the SampleApp's `GoldenHarness`, whose goldens boot the SDK instead.
+    static func useGoldenFonts() {
+        precondition(goldenFontsInstalled, "Roboto not found in sdk_testing_fixtures/fonts; run `bash clone.sh` in de_workspace")
     }
 
     // MARK: - Private Mock UI Builders
@@ -629,5 +670,27 @@ public enum ComponentTestHost {
         }
 
         return container
+    }
+}
+
+extension UIFont {
+    /// Stands in for `systemFont(ofSize:weight:)` once `ComponentTestHost` swaps them: the golden Roboto at the
+    /// same weight. After the swap this selector holds the original, so SF is still reachable if Roboto is not.
+    @objc class func goldenRoboto(ofSize size: CGFloat, weight: UIFont.Weight) -> UIFont {
+        roboto(size, weight) ?? goldenRoboto(ofSize: size, weight: weight)
+    }
+
+    /// Stands in for `systemFont(ofSize:)`: the golden Roboto Regular, or the original if Roboto is not there.
+    @objc class func goldenRoboto(ofSize size: CGFloat) -> UIFont {
+        roboto(size, .regular) ?? goldenRoboto(ofSize: size)
+    }
+
+    private static func roboto(_ size: CGFloat, _ weight: UIFont.Weight) -> UIFont? {
+        let descriptor = UIFontDescriptor(fontAttributes: [
+            .family: "Roboto",
+            .traits: [UIFontDescriptor.TraitKey.weight: weight],
+        ])
+        let font = UIFont(descriptor: descriptor, size: size)
+        return font.familyName == "Roboto" ? font : nil
     }
 }
