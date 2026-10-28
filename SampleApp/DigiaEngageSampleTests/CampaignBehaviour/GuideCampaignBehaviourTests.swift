@@ -159,7 +159,7 @@ struct GuideCampaignBehaviourTests {
         #expect(steps(events, Chain.stepDismissed) == [2])
     }
 
-    @Test("leaving its screen: dismissed as screen_exit")
+    @Test("guide: leaving its screen: dismissed as screen_exit")
     func leavingItsScreen() async throws {
         let key = "test_guide_tooltip_walkthrough"
         let sdk = try await start("guide_tooltip_walkthrough")

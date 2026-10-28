@@ -137,7 +137,7 @@ struct NudgeCampaignBehaviourTests {
             await sdk.sent("test_nudge_fullscreen_close_button"), d, names: shownThenClosed, reason: .userClose)
     }
 
-    @Test("leaving its screen: dismissed as screen_exit")
+    @Test("nudge: leaving its screen: dismissed as screen_exit")
     func leavingItsScreen() async throws {
         let key = "test_nudge_dialog_screen_change_home_only"
         let sdk = try await start([fixture("nudge_dialog_screen_change_home_only")])
