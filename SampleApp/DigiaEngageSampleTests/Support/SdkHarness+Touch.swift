@@ -1,9 +1,14 @@
+import SwiftUI
 import Testing
 import UIKit
+@testable import DigiaEngage
 
-/// The part of ``SdkHarness`` that needs the sample app host: real touches through
-/// `TouchSynthesizer`, and the view controller presented over the app. The core harness, compiled
-/// into the package's test target too, is `Tests/DigiaEngageTests/Support/SdkHarness.swift`.
+/// Real touches for the shared `SdkHarness` (`Tests/DigiaEngageTests/Support/SdkHarness.swift`).
+///
+/// The package test bundle has no `UIApplication`, so there a control is activated through
+/// accessibility. Hosted by the sample app, a test taps the way a finger does: `TouchSynthesizer`
+/// hands UIKit a digitizer event, and UIKit hit-tests and dispatches it, so a tap the surface
+/// refuses or a recognizer swallows fails the test.
 extension SdkHarness {
 
     /// A real touch at the centre of the canvas element authored with [id] (`TestView` sets it as
@@ -20,20 +25,32 @@ extension SdkHarness {
     }
 
     /// As ``tap(id:)``, for the element that shows [text] (an option label has no id of its own).
-    func tap(text: String) async throws {
-        try await tap("text \(text)") { Self.shownText(of: $0)?.contains(text) == true }
+    ///
+    /// A harness started from workspace fixtures finds the text with `UIProbe` instead, and settles after.
+    func tap(text: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
+        guard servesWorkspaceFixtures else {
+            try await tap("text \(text)") { Self.shownText(of: $0)?.contains(text) == true }
+            return
+        }
+        let point = try #require(
+            UIProbe.center(ofText: text, in: window), "nothing on screen shows \"\(text)\"",
+            sourceLocation: sourceLocation)
+        try TouchSynthesizer.tap(at: point, in: window)
+        try await settle(0.5)
     }
 
-    /// The view controller presented over the app (a full-screen viewer, a sheet), if any.
-    var presentedViewer: UIViewController? {
-        window?.rootViewController?.presentedViewController
+    /// As ``tap(id:)``, for the element whose shown text or accessibility label is exactly [label]: an SDK glyph
+    /// ("Close") or a SwiftUI text, which ``tap(text:)`` does not see in a harness started from workspace fixtures.
+    func tap(label: String) async throws {
+        try await tap("label \(label)") { Self.shownText(of: $0) == label }
+        try await settle(0.5)
     }
 
     private func tap(_ what: String, where match: @escaping (NSObject) -> Bool) async throws {
         let window = try #require(window)
         var last: CGRect?
         var steadyReads = 0
-        try await waitUntil("\(what) settled on screen") {
+        try await waitUntil("\(what) settled on screen", timeout: 8) {
             guard let frame = Self.find(in: window, where: match)?.accessibilityFrame, !frame.isEmpty
             else { return false }
             steadyReads = frame == last ? steadyReads + 1 : 0
@@ -42,11 +59,5 @@ extension SdkHarness {
         }
         let frame = window.convert(try #require(last), from: window.screen.coordinateSpace)
         try TouchSynthesizer.tap(at: CGPoint(x: frame.midX, y: frame.midY), in: window)
-    }
-
-    private static func identifier(of object: NSObject) -> String? {
-        let selector = NSSelectorFromString("accessibilityIdentifier")
-        guard object.responds(to: selector) else { return nil }
-        return object.perform(selector)?.takeUnretainedValue() as? String
     }
 }

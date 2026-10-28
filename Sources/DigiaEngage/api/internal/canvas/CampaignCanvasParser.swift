@@ -189,7 +189,8 @@ struct CampaignCanvasParser {
         let width = positive(propertyNumber(json["canvasWidth"]) ?? 360, fallback: 360)
         let height = positive(propertyNumber(json["canvasHeight"]) ?? 420, fallback: 420)
         var children: [CampaignCanvasChild] = []
-        for child in json["children"] as? [[String: Any]] ?? [] {
+        // Each child is skipped on its own: a non-object entry must not drop its valid siblings.
+        for case let child as [String: Any] in json["children"] as? [Any] ?? [] {
             guard let rectJSON = propertyObject(child["rect"]) else { continue }
             let rect = CampaignCanvasRect(
                 x: CGFloat(propertyNumber(rectJSON["x"]) ?? 0) * width,
@@ -267,7 +268,7 @@ struct CampaignCanvasParser {
         var labelSpans: [CampaignTimerUnit: [CampaignCanvasTextSpan]] = [:]
         let rawSpans = propertyObject(props["labelSpans"]) ?? [:]
         for unit in CampaignTimerUnit.allCases {
-            if let spans = rawSpans[unit.rawValue] as? [[String: Any]] {
+            if let spans = (rawSpans[unit.rawValue] as? [Any])?.compactMap({ $0 as? [String: Any] }) {
                 labelSpans[unit] = try parseSpans(spans)
             }
         }
@@ -278,7 +279,7 @@ struct CampaignCanvasParser {
             for part in ["digits", "label"] {
                 guard var node = propertyObject(parts[part]), node["type"] as? String == "digia/text" else { continue }
                 var textProps = propertyObject(node["props"]) ?? [:]
-                if let spans = textProps["spans"] as? [[String: Any]] {
+                if let spans = (textProps["spans"] as? [Any])?.compactMap({ $0 as? [String: Any] }) {
                     textProps["spans"] = spans.map { span in
                         var value = span
                         value.removeValue(forKey: "onClick")
@@ -399,7 +400,7 @@ struct CampaignCanvasParser {
             maxLines: max(0, (json["maxLines"] as? NSNumber)?.intValue ?? (buttonDefaults ? 1 : 0)),
             overflow: json["overflow"] as? String ?? (buttonDefaults ? "ellipsis" : "visible"),
             sizingMode: ["wrap", "hug", "fixed"].contains(json["sizingMode"] as? String ?? "wrap") ? (json["sizingMode"] as? String ?? "wrap") : "wrap",
-            spans: try parseSpans(json["spans"] as? [[String: Any]])
+            spans: try parseSpans((json["spans"] as? [Any])?.compactMap { $0 as? [String: Any] })
         )
     }
 
@@ -425,7 +426,7 @@ struct CampaignCanvasParser {
             typography: typography.isEmpty ? nil : typography,
             color: try designTokens.resolveColor(firstPresent(span["color"], span["textColor"], style["color"], style["textColor"])),
             highlightColor: try designTokens.resolveColor(firstPresent(span["highlightColor"], style["highlightColor"])),
-            italic: (span["italic"] as? Bool ?? false) || ((style["fontStyle"] as? String) == "italic"),
+            italic: isJSONTrue(span["italic"]) || ((style["fontStyle"] as? String) == "italic"),
             decoration: {
                 switch rawString(firstPresent(style["decoration"], span["decoration"]), fallback: "none") {
                 case "underline": .underline
@@ -455,17 +456,29 @@ struct CampaignCanvasParser {
         let label = try parseTextBlock(propertyObject(props["label"]) ?? [:], buttonDefaults: true)
         let styleJSON = propertyObject(props["style"]) ?? [:]
         let style: CampaignCanvasButtonStyle
-        switch styleJSON["variant"] as? String ?? "fill" {
+        let outlineJSON = propertyObject(styleJSON["outline"])
+        let declaredVariant = rawString(firstPresent(styleJSON["variant"], props["variant"]), fallback: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch declaredVariant.isEmpty && outlineJSON != nil ? "outline" : declaredVariant {
         case "outline":
+            let outlineFill = try parsePaint(propertyObject(styleJSON["fill"]), allowImage: false)
+            var missingColor = CampaignColor.literal("#FF4945FF")
+            if case .solid(let color) = outlineFill { missingColor = color }
+            let outline = try parseBorder(outlineJSON, missingColor: missingColor)
+                ?? CampaignCanvasBorder(color: missingColor, width: 1.5)
             style = .outline(
-                fill: try parsePaint(propertyObject(styleJSON["fill"]), allowImage: false),
-                outline: try parseBorder(propertyObject(styleJSON["outline"])) ?? CampaignCanvasBorder(color: .literal("#FF4945FF"), width: 1.5)
+                fill: outlineFill,
+                outline: CampaignCanvasBorder(color: outline.color, width: outline.width > 0 ? outline.width : 1.5)
             )
         case "text": style = .text
         default:
-            style = .fill(
-                fill: try parsePaint(propertyObject(styleJSON["fill"]), allowImage: false)
-            )
+            let fillJSON = propertyObject(styleJSON["fill"])
+            let paint = try parsePaint(fillJSON, allowImage: false)
+            if case .none = paint, fillJSON?["type"] as? String != "none" {
+                style = .fill(fill: .solid(.literal("#FF4945FF")))
+            } else {
+                style = .fill(fill: paint)
+            }
         }
         let confirm = propertyObject(props["confirm"]) ?? [:]
         return .button(
@@ -487,6 +500,10 @@ struct CampaignCanvasParser {
         )
     }
 
+    private static let progressTrackDefault = CampaignCanvasPaint.solid(.literal("#FFE0E0E0"))
+    private static let progressIndicatorDefault = CampaignCanvasPaint.solid(.literal("#FF4945FF"))
+    private static let progressCornerRadiusDefault: CGFloat = 4
+
     private func parseProgress(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget {
         let animation = propertyObject(props["animateOnAppear"]) ?? [:]
         return .progress(
@@ -495,14 +512,24 @@ struct CampaignCanvasParser {
             rangeStart: rawString(props["rangeStart"], fallback: "0"),
             rangeCurrent: rawString(props["rangeCurrent"], fallback: "0"),
             rangeEnd: rawString(props["rangeEnd"], fallback: "100"),
-            indicator: try parsePaint(propertyObject(props["indicator"]), allowImage: false),
-            track: try parsePaint(propertyObject(props["track"]), allowImage: false),
-            cornerRadius: parseCornerRadius(props["cornerRadius"], fallback: 0),
+            indicator: parseProgressPaint(props["indicator"], fallback: Self.progressIndicatorDefault),
+            track: parseProgressPaint(props["track"], fallback: Self.progressTrackDefault),
+            cornerRadius: parseCornerRadius(props["cornerRadius"], fallback: Self.progressCornerRadiusDefault),
             animateOnAppear: CampaignCanvasAppearAnimation(
                 enabled: animation["enabled"] as? Bool ?? false,
                 durationMs: min(max((animation["durationMs"] as? NSNumber)?.intValue ?? 600, 0), 5000)
             )
         )
+    }
+
+    // A malformed colour must degrade to the authored default, not drop the whole campaign.
+    private func parseProgressPaint(_ raw: Any?, fallback: CampaignCanvasPaint) -> CampaignCanvasPaint {
+        do {
+            return try parsePaint(propertyObject(raw), allowImage: false, fallback: fallback)
+        } catch {
+            log.e("Progress bar paint fallback: \(error)")
+            return fallback
+        }
     }
 
     private func parseLottie(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget {
@@ -538,11 +565,13 @@ struct CampaignCanvasParser {
     private func parsePaint(
         _ json: [String: Any]?,
         allowImage: Bool,
-        imageScaleLimit: Double = 4
+        imageScaleLimit: Double = 4,
+        fallback: CampaignCanvasPaint = .none
     ) throws -> CampaignCanvasPaint {
-        guard let json else { return .none }
+        guard let json else { return fallback }
         switch json["type"] as? String {
-        case "solid": return try designTokens.resolveColor(json["color"]).map(CampaignCanvasPaint.solid) ?? .none
+        case "none": return .none
+        case "solid": return try designTokens.resolveColor(json["color"]).map(CampaignCanvasPaint.solid) ?? fallback
         case "gradient":
             return .gradient(
                 type: { switch json["gradientType"] as? String { case "radial": .radial; case "sweep": .sweep; default: .linear } }(),
@@ -556,7 +585,7 @@ struct CampaignCanvasParser {
             )
         case "image" where allowImage:
             return .image(source: parseMediaSource(json["source"]), positionX: clamp(propertyNumber(json["positionX"]) ?? 0.5, 0, 1), positionY: clamp(propertyNumber(json["positionY"]) ?? 0.5, 0, 1), scale: clamp(propertyNumber(json["scale"]) ?? 1, 0.1, imageScaleLimit))
-        default: return .none
+        default: return fallback
         }
     }
 
@@ -586,8 +615,11 @@ struct CampaignCanvasParser {
         return CampaignCanvasCornerRadius(topLeft: CGFloat(propertyNumber(json["topLeft"]) ?? 0), topRight: CGFloat(propertyNumber(json["topRight"]) ?? 0), bottomRight: CGFloat(propertyNumber(json["bottomRight"]) ?? 0), bottomLeft: CGFloat(propertyNumber(json["bottomLeft"]) ?? 0))
     }
 
-    private func parseBorder(_ json: [String: Any]?) throws -> CampaignCanvasBorder? {
-        guard let json, let color = try designTokens.resolveColor(json["color"]) else { return nil }
+    private func parseBorder(
+        _ json: [String: Any]?, missingColor: CampaignColor = .literal("#FFE5E7EB")
+    ) throws -> CampaignCanvasBorder? {
+        guard let json else { return nil }
+        let color = try designTokens.resolveColor(json["color"]) ?? missingColor
         return CampaignCanvasBorder(color: color, width: max(0, CGFloat(propertyNumber(json["width"]) ?? 1)))
     }
 
@@ -618,8 +650,12 @@ struct CampaignCanvasParser {
         guard let value = designNumber(unwrapLiteral(raw)), value.isFinite else { return nil }
         return value
     }
+    private func isJSONTrue(_ raw: Any?) -> Bool {
+        guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return false }
+        return number.boolValue
+    }
     private func propertyObject(_ raw: Any?) -> [String: Any]? { unwrapLiteral(raw) as? [String: Any] }
-    private func propertyArray(_ raw: Any?) -> [[String: Any]]? { unwrapLiteral(raw) as? [[String: Any]] }
+    private func propertyArray(_ raw: Any?) -> [[String: Any]]? { (unwrapLiteral(raw) as? [Any])?.compactMap { $0 as? [String: Any] } }
     private func positive(_ value: Double, fallback: CGFloat) -> CGFloat { value.isFinite && value > 0 ? CGFloat(value) : fallback }
     private func clamp(_ value: Double, _ lower: Double, _ upper: Double) -> CGFloat { CGFloat(min(max(value, lower), upper)) }
     private func rawString(_ raw: Any?, fallback: String) -> String {

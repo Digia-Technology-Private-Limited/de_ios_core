@@ -89,7 +89,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private lazy var actionExecutor = EngageActionExecutor(
         hostActionExecutor: hostActionExecutor
     )
-    private(set) var font = DigiaFont()
+    var font = DigiaFont()
     /// Mirrors Android's `ScreenTracker`: the last screen name reported via
     /// `Digia.setCurrentScreen`, forwarded to the active plugin and read into
     /// analytics events (`screenName`).
@@ -268,9 +268,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
         )
         inlineController.onCampaignRemoved = { [weak self] payload, reason in
-            // Removed before its impression: the CEP still hears `user_close`;
-            // delivery detail says what actually happened.
-            if reason == .userClose, let presentation = self?.coordinator.ownerOf(payload),
+            // Removed before its impression: delivery detail says what actually
+            // happened.
+            if reason != .superseded, let presentation = self?.coordinator.ownerOf(payload),
                presentation.state == .pending
             {
                 presentation.noteDropDetail("cancel_cause", "slot_removed")
@@ -916,7 +916,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             activeExternalGuide = nil
         }
         if owns(controller.activeNudge?.payload) {
-            controller.dismissNudge()
+            // A CEP cancel of a nudge on screen ends it like any close: Digia gets its Dismissed(cancelled),
+            // and the CEP the same outcome. A watchdog's teardown reaches here already settled, unseen, and
+            // stays silent.
+            if coordinator.ownerOf(payload)?.state == .displaying {
+                markNudgeDismissed(reason: .cancelled)
+            } else {
+                controller.dismissNudge()
+            }
         }
         if owns(surveyOrchestrator.state?.payload) {
             surveyOrchestrator.dismiss()
@@ -1189,31 +1196,27 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     message: "screen changed before the Guide was shown"
                 )
                 dismissGuide(reason: .screenExit)
-            } else {
-                dismissForScreenChangeIfNeeded(
-                    campaignKey: guide.campaign.campaignKey,
-                    campaignType: "guide",
-                    campaign: guide.campaign,
-                    dismiss: {
-                        self.liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
-                            DropReason.screenNotTargeted,
-                            message: "screen changed before the Guide was shown"
-                        )
-                        self.dismissGuide(reason: .screenExit)
-                    }
+            } else if guide.steps.first?.target.anchorlessTarget == nil {
+                // An anchored guide ends on any screen change, whatever its targetScreenNames, as on
+                // Flutter: its steps point at views on the screen it opened on. An empty allowlist means
+                // "every screen" for a nudge, and read that way it kept a guide up over a screen it no
+                // longer belonged to.
+                log.d("Dismissed — screen changed (type=guide, currentScreen=\(_currentScreen ?? "<unset>"))",
+                      campaign: guide.campaign.campaignKey)
+                liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
+                    DropReason.screenNotTargeted,
+                    message: "screen changed before the Guide was shown"
                 )
+                dismissGuide(reason: .screenExit)
             }
         }
 
         if let guide = activeExternalGuide {
-            dismissForScreenChangeIfNeeded(
-                campaignKey: guide.campaign.campaignKey,
-                campaignType: "guide",
-                campaign: guide.campaign
-            ) {
-                activeExternalGuide = nil
-                events.toCep(.dismissed(reason: .screenExit), payload: guide.payload)
-            }
+            // Same rule for a guide the host renders itself.
+            log.d("Dismissed — screen changed (type=guide, currentScreen=\(_currentScreen ?? "<unset>"))",
+                  campaign: guide.campaign.campaignKey)
+            activeExternalGuide = nil
+            events.toCep(.dismissed(reason: .screenExit), payload: guide.payload)
         }
 
         // Floater and Floater Story orchestrators evaluate screen changes against their
@@ -2167,7 +2170,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// An eligible optional question was skipped (advanced without an answer).
     func reportSurveyQuestionSkipped(nodeId: String, itemIndex: Int) {
         guard let state = surveyOrchestrator.state else { return }
-        ensureWelcomeStartIfNoWelcome(state)
+        // No welcome-start Clicked here: a skip is not an engagement with the survey, as on Flutter. Only an
+        // answer stands in for the missing welcome's Start.
         guard let block = state.config.blockForNode(nodeId) else { return }
         questionViewedAt.removeValue(forKey: Self.questionKey(token: state.token, nodeId: nodeId))
         events.toDigia(
@@ -2501,7 +2505,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         timerContext: TimerEventContext? = nil
     ) {
         if inlineController.getCampaign(slotKey) != payload { return }
-        inlineController.dismissCampaign(slotKey)
+        // The author's Hide: the one inline removal that is the user closing it.
+        inlineController.dismissCampaign(slotKey, reason: .userClose)
         var event: EngageAnalyticsEvent = NudgeEvent.Dismissed(
             dwellMs: dwellTracker.consumeDwellMs(payload.cepCampaignId)
         )
@@ -2765,8 +2770,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             await executeActionFlow(
                 request.actions, variables: state.variableContext,
                 campaignKey: state.payload.campaignKey,
+                // A dismiss authored on a CTA is the CTA taken, not the user closing it (the
+                // window's × stays .userClose), as on the PiP.
                 localActionExecutor: LocalActionExecutor(dismiss: { [weak self] in
-                    self?.floaterStoryOrchestrator.dismiss(.userClose)
+                    self?.floaterStoryOrchestrator.dismiss(.ctaTaken)
                 }, showStory: { [weak self] index in
                     self?.floaterStoryOrchestrator.openStory(initialIndex: index)
                 })
@@ -2802,7 +2809,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .banner(let cfg):
             viewed = BannerEvent.Viewed(slotKey: cfg.slotKey, screenName: _currentScreen)
         case .story(let cfg):
-            viewed = StoriesEvent.Viewed(slotKey: cfg.slotKey, screenName: _currentScreen)
+            viewed = StoriesEvent.Viewed(
+                itemTotal: cfg.items.count, slotKey: cfg.slotKey, screenName: _currentScreen)
         case .inlineCanvas(let cfg):
             viewed = InlineCanvasEvent.Viewed(
                 slotKey: cfg.slotKey,
@@ -2845,6 +2853,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     func reportCarouselStepViewed(
         payload: CEPTriggerPayload, itemIndex: Int, itemTotal: Int, auto: Bool
     ) {
+        // The slot's Viewed comes first. The step gate fires as soon as the slot is exposed, which can be
+        // before the slot's first-render report; the impression is sent once, so this only fixes the order (F13).
+        reportSlotFirstRender(payload)
         events.toDigia(
             CarouselEvent.StepViewed(itemIndex: itemIndex, itemTotal: itemTotal, auto: auto),
             payload: payload
@@ -2893,8 +2904,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         events.toDigia(StoriesEvent.Opened(), payload: payload)
     }
 
-    func reportClassicStoryOpened(_ payload: CEPTriggerPayload) {
-        events.clicked(payload: payload, elementId: "story_thumbnail")
+    /// The CEP's click names the story opened, `story_item_<n>` (1-based), as on Flutter.
+    func reportClassicStoryOpened(_ payload: CEPTriggerPayload, index: Int) {
+        events.clicked(payload: payload, elementId: "story_item_\(index + 1)")
     }
 
     /// A story frame became visible. `itemIndex` is 1-based; `itemTotal` = frames.
@@ -3148,7 +3160,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 payload: payload
             )
         }
-        if !stepWasReported && (total > 1 || state.currentStep?.target.anchorlessTarget != nil) {
+        // Every step, a single one included, as on Flutter and Android; `stepWasReported` keeps it once.
+        if !stepWasReported {
             lastReportedGuideStep = (state.token, state.stepIndex)
             events.toDigia(
                 GuideEvent.StepViewed(

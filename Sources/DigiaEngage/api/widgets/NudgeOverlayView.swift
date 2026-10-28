@@ -416,6 +416,13 @@ struct NudgeDialogContainer: View {
                                 .padding(.bottom, top ? 0 : extent)
                                 // Centre like the inside-close branch; scroll only on overflow.
                                 .frame(maxWidth: .infinity, minHeight: height)
+                                // The ScrollView covers the scrim and swallows its taps, so the
+                                // area around the card carries the backdrop dismiss itself.
+                                .background(
+                                    Color.clear
+                                        .contentShape(Rectangle())
+                                        .onTapGesture { if surface.backdropDismissible { dismiss() } }
+                                )
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
@@ -509,7 +516,8 @@ struct NudgeDialogContainer: View {
             ScrollView {
                 VStack(spacing: 0) { renderedContent }
                     .padding(surface.padding)
-                    .frame(width: width)
+                    // A column narrower than the panel starts at its leading edge.
+                    .frame(width: width, alignment: .leading)
                     .background(
                         GeometryReader { geometry in
                             Color.clear.preference(
@@ -537,15 +545,23 @@ struct NudgeDialogContainer: View {
 }
 
 @MainActor private var activeWindowSize: CGSize {
-    UIApplication.shared.connectedScenes
+    if let override = activeFloaterWindowGeometryOverride { return override.bounds.size }
+    return UIApplication.shared.connectedScenes
         .compactMap { $0 as? UIWindowScene }
         .first(where: { $0.activationState == .foregroundActive })?
         .windows.first(where: \.isKeyWindow)?
         .bounds.size ?? UIScreen.main.bounds.size
 }
 
+/// Honours `activeFloaterWindowGeometryOverride`, the test seam for the window lookup; `nil` in
+/// production, where the key window of the active scene is read as before.
 @MainActor private var activeWindowSafeAreaInsets: UIEdgeInsets {
-    UIApplication.shared.connectedScenes
+    if let override = activeFloaterWindowGeometryOverride {
+        return UIEdgeInsets(
+            top: override.safeArea.top, left: override.safeArea.leading,
+            bottom: override.safeArea.bottom, right: override.safeArea.trailing)
+    }
+    return UIApplication.shared.connectedScenes
         .compactMap { $0 as? UIWindowScene }
         .first(where: { $0.activationState == .foregroundActive })?
         .windows.first(where: \.isKeyWindow)?

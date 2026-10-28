@@ -262,6 +262,7 @@ struct ScaledCanvasStage: View {
     let cornerRadius: CGFloat
     let isDark: Bool
     let onAction: (CampaignCanvasActionRequest) -> Void
+    var showBackground = true
 
     private var scale: CGFloat { canvas.width > 0 ? width / canvas.width : 1 }
 
@@ -270,7 +271,7 @@ struct ScaledCanvasStage: View {
             canvas: canvas,
             authoredCornerRadius: 0,
             isDark: isDark,
-            showBackground: true,
+            showBackground: showBackground,
             onAction: onAction
         )
         .scaleEffect(scale, anchor: .topLeading)
@@ -573,6 +574,10 @@ struct CanvasStoryRailRenderer: View {
                         cardSpacing: cardSpacing,
                         overlayOpen: openIndex != nil
                     ) { index in
+                        // Reported at the tap, not in the viewer's onAppear: the viewer's own onAppear
+                        // reports its first page, and a child appears before its parent, so the page's
+                        // Step Viewed went out ahead of the open (F13).
+                        reportInteraction(.storyOpened(index: index, total: pages.count))
                         openIndex = index
                     }
                 }
@@ -593,11 +598,6 @@ struct CanvasStoryRailRenderer: View {
                     safeAreaInsets: activeFloaterWindowSafeAreaInsets
                 )
                 .ignoresSafeArea()
-                .onAppear {
-                    reportInteraction(
-                        .storyOpened(index: openIndex ?? 0, total: pages.count)
-                    )
-                }
             }
         )
     }
@@ -728,7 +728,9 @@ struct CanvasStoryViewer: View {
                     height: chrome.height * scale,
                     cornerRadius: 0,
                     isDark: isDark,
-                    onAction: pageAction
+                    onAction: pageAction,
+                    // Transparent by design — the page shows through, as on Flutter.
+                    showBackground: false
                 )
                 .environment(
                     \.canvasStoryViewer,

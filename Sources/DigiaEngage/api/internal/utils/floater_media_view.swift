@@ -21,13 +21,19 @@ struct FloaterMediaView: View {
     let player: AVPlayer?
     let cover: Bool
     let resolvedUrl: String
+    /// The orchestrator's already-decoded image, drawn in place of a `WebImage` load.
+    let preloadedImage: UIImage?
 
-    init(media: FloaterMediaConfig, player: AVPlayer?, cover: Bool, resolvedUrl: String) {
+    init(
+        media: FloaterMediaConfig, player: AVPlayer?, cover: Bool, resolvedUrl: String,
+        preloadedImage: UIImage?
+    ) {
         DigiaImagePipeline.configureIfNeeded()
         self.media = media
         self.player = player
         self.cover = cover
         self.resolvedUrl = resolvedUrl
+        self.preloadedImage = preloadedImage
     }
 
     var body: some View {
@@ -74,7 +80,11 @@ struct FloaterMediaView: View {
         // outright when it is not — so by the time this composes, the asset is
         // already fetchable (though not necessarily SDWebImage-cache-warm; see
         // FloaterOrchestrator.preloadImage's kdoc on the plain-URLSession trade-off).
-        if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{"), let url = URL(string: resolvedUrl) {
+        if let preloadedImage {
+            Image(uiImage: preloadedImage)
+                .resizable()
+                .aspectRatio(contentMode: cover ? .fill : .fit)
+        } else if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{"), let url = URL(string: resolvedUrl) {
             WebImage(url: url) { $0.resizable() } placeholder: { Color.black }
                 .aspectRatio(contentMode: cover ? .fill : .fit)
         }

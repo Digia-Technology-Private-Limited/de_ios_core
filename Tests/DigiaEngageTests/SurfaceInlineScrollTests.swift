@@ -18,9 +18,9 @@ extension DigiaEngageTests {
         private let rowHeight: CGFloat = 200
 
         private func start() async throws -> SdkHarness {
-            try await SdkHarness.start(
+            try await SdkHarness.start(campaigns: [
                 inlineJson("feed-a", slotKey: Self.slotKey),
-                inlineJson("feed-b", slotKey: Self.slotKey))
+                inlineJson("feed-b", slotKey: Self.slotKey)])
         }
 
         /// Tall rows, the slot, more tall rows: the slot starts far below the first screen.
@@ -51,7 +51,7 @@ extension DigiaEngageTests {
             let scroll = try #require(scrollView(in: window))
             scroll.setContentOffset(CGPoint(x: 0, y: y), animated: false)
             window.layoutIfNeeded()
-            await sdk.settle()
+            try await sdk.settle()
         }
 
         private func occupant() -> String? {
@@ -75,14 +75,14 @@ extension DigiaEngageTests {
             let first = try sdk.deliver("feed-a")
             // The harness reports outcomes; the `.displayed` signal is read through the recorder.
             let firstSignals = PresentationRecorder(first)
-            await sdk.settle()
+            try await sdk.settle()
             #expect(!firstSignals.displayed, "the slot is not built yet")
             try await scroll(sdk, to: CGFloat(rows) * rowHeight - rowHeight)
             #expect(firstSignals.displayed, "the first is displayed once scrolled to")
 
             try await scroll(sdk, to: 0)
             let second = try sdk.deliver("feed-b")
-            await sdk.settle()
+            try await sdk.settle()
 
             #expect(dropReason(sdk.outcome(of: second)) == .surfaceBusy)
             #expect(sdk.outcome(of: first) == nil, "the first is not settled")
@@ -100,11 +100,11 @@ extension DigiaEngageTests {
 
             let first = try sdk.deliver("feed-a")
             let firstSignals = PresentationRecorder(first)
-            await sdk.settle()
+            try await sdk.settle()
             #expect(!firstSignals.displayed, "the slot is not built")
             let second = try sdk.deliver("feed-b")
             let secondSignals = PresentationRecorder(second)
-            await sdk.settle()
+            try await sdk.settle()
 
             #expect(dropReason(sdk.outcome(of: first)) == .superseded)
             #expect(sdk.outcome(of: second) == nil, "the second is not settled")

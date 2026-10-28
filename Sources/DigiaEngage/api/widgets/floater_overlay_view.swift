@@ -33,7 +33,10 @@ struct FloaterOverlayView: View {
         if let state = orchestrator.state, !orchestrator.awaitingMedia {
             FloaterSessionView(state: state, orchestrator: orchestrator)
                 .id(state.token)
-                .ignoresSafeArea(.all, edges: orchestrator.surface == .expanded ? .all : [])
+                // Full-bleed in both states, and placed inside the real window insets below, as
+                // the story floater is. Respecting the container's safe area as well inset the
+                // collapsed window twice: once by the container, again by the insets it reported.
+                .ignoresSafeArea()
         }
     }
 }
@@ -188,10 +191,10 @@ private struct FloaterSessionView: View {
     var body: some View {
         GeometryReader { geo in
             let screenSize = geo.size
-            // Expanded media is deliberately full-bleed, which makes this
-            // GeometryReader report zero safe-area insets. Keep the video edge-to-edge,
-            // but source the real window insets for chrome and canvas overlays.
-            let safe = expanded ? activeFloaterWindowSafeAreaInsets : geo.safeAreaInsets
+            // The overlay is full-bleed, which makes this GeometryReader report zero
+            // safe-area insets. Keep media edge-to-edge, but source the real window insets
+            // for the collapsed window, chrome and canvas overlays.
+            let safe = activeFloaterWindowSafeAreaInsets
             let resting = collapsedRect(
                 config: config, screenSize: screenSize, safeInsets: safe,
                 dragFraction: orchestrator.dragFraction
@@ -282,7 +285,8 @@ private struct FloaterSessionView: View {
                     FloaterMediaView(
                         media: config.media, player: orchestrator.player,
                         cover: !expanded || config.expanded.cover,
-                        resolvedUrl: state.resolvedMediaUrl
+                        resolvedUrl: state.resolvedMediaUrl,
+                        preloadedImage: orchestrator.preloadedImage
                     )
                     .allowsHitTesting(false)
                     .zIndex(0)
@@ -296,7 +300,7 @@ private struct FloaterSessionView: View {
                     }
                 }
                 .frame(width: width, height: height)
-                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+                .clipShape(ClampedRoundedRectangle(cornerRadius: cornerRadius))
                 // Flutter's `BoxShadow(color: Color(0x73000000), blurRadius: 24, offset:
                 // Offset(0, 8))`. Unlike Compose (no directly-offset drop-shadow modifier),
                 // SwiftUI's `.shadow` takes an explicit `x`/`y` offset directly, so this can
@@ -321,7 +325,7 @@ private struct FloaterSessionView: View {
                 // it." Keeping the SAME `RoundedRectangle` shape always mounted and animating
                 // `lineWidth` to `0` instead lets it interpolate alongside everything else.
                 .overlay(
-                    RoundedRectangle(cornerRadius: cornerRadius)
+                    ClampedRoundedRectangle(cornerRadius: cornerRadius)
                         .stroke(
                             config.collapsed.borderColor.map {
                                 canvasTheme.color($0, isDark: isDark)
@@ -394,6 +398,10 @@ private struct FloaterSessionView: View {
             }
         }
         .onAppear {
+            // A `startExpanded` showing is already expanded when this view is created, so
+            // `.onChange(of: orchestrator.surface)` never fires for it and its canvas would
+            // never mount. There is no grow transition to wait for: show it from the first frame.
+            if expanded { expandedContentVisible = true }
             runEntryAnimation()
             // The impression is the first drawn frame, not the media load (SR62).
             orchestrator.markDrawn(token: state.token)
@@ -834,7 +842,9 @@ private struct FloaterExpandedContentView: View {
                 surface: floaterCanvasSurface,
                 designWidth: config.designWidth,
                 availableSize: geo.size,
-                onAction: { request in performFloaterCanvasAction(request, state: state) }
+                onAction: { request in performFloaterCanvasAction(request, state: state) },
+                // Composited over the media; `expanded.backgroundColor` is drawn behind it, as on Flutter.
+                showBackground: false
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.top, topInset)
@@ -875,8 +885,12 @@ private func performFloaterCanvasAction(
         await SDKInstance.shared.executeActionFlow(
             request.actions, variables: state.variableContext,
             campaignKey: state.payload.campaignKey,
+            // A dismiss authored on a CTA is the CTA taken, not the user closing it (the
+            // window's × stays .userClose), as on Android and Flutter. It ends the showing
+            // here, at its place in the flow; the call after the flow then finds it closing
+            // and does nothing, and still ends a CTA that has no dismiss.
             localActionExecutor: LocalActionExecutor(dismiss: {
-                SDKInstance.shared.dismissFloater(.userClose)
+                SDKInstance.shared.onFloaterActionCompleted()
             })
         )
         SDKInstance.shared.onFloaterActionCompleted()

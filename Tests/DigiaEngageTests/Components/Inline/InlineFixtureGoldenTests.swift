@@ -7,10 +7,10 @@ import UIKit
 @testable import DigiaEngage
 
 extension RenderedUITests {
-/// Pixel goldens for every Test Kit inline carousel, story and timer fixture.
+/// Pixel goldens for every shared inline banner, carousel, story and timer fixture.
 ///
-/// The arguments are read from `testkit/campaigns/inline_carousel/`, `inline_story/` and
-/// `inline_timer/` `fixtures/`, so a fixture added to the Test Kit is covered with no code change
+/// The arguments are read from `sdk_testing_fixtures/campaigns/inline_banner/`, `inline_carousel/`,
+/// `inline_story/` and `inline_timer/`, so a fixture added there is covered with no code change
 /// (record it with `RECORD_SNAPSHOTS=true ./run-tests.sh inline`). Each fixture is decoded by
 /// `CampaignModel.fromJson` and drawn by the view `DigiaSlot` picks for its config
 /// (`DigiaInlineCanvasView`, `DigiaInlineStoryView`, ...), placed in a scrolling host screen. As in
@@ -22,16 +22,23 @@ extension RenderedUITests {
 ///     each golden shows the layout, not the authored photo;
 ///   - carousel autoplay is held off for a day, so the first slide is captured;
 ///   - timers are parsed against a frozen clock at `timerNow`.
-@Suite("Test Kit inline carousel, story and timer fixture goldens", .serialized, .tags(.inline))
+@Suite("Test Kit inline banner, carousel, story and timer fixture goldens", .serialized, .tags(.inline))
 struct InlineFixtureGoldenTests {
 
-    /// 2029-12-29T10:15:30Z: 2d 13h 44m 30s before the timer fixtures' 2030 deadline, so every
-    /// unit box shows a different digit.
-    private static let timerNowMs: Int64 = 1_893_233_730_000
+    /// 2d 03h 45m 13s before the timer fixtures' 2030-01-01 deadline: the countdown the Android and
+    /// Flutter goldens show.
+    private static let timerNowMs: Int64 = 1_893_269_687_000
 
     /// A clock that never advances: `nowMs()` adds the monotonic time elapsed since
     /// `continuousNanoseconds`, which is none when that is the largest value the clock can read.
     private static let timerNow = TrustedTimeAnchor(serverEpochMs: timerNowMs, continuousNanoseconds: .max)
+
+    @Test("matches the inline banner fixture golden", .tags(.golden),
+          arguments: FixtureLoader.fixtureNames(campaignType: "inline_banner"))
+    @MainActor
+    func testInlineBannerFixtureGolden(fixture: String) async throws {
+        try await assertInlineFixture(fixture, campaignType: "inline_banner", function: "testInlineBannerFixtureGolden")
+    }
 
     @Test("matches the inline carousel fixture golden", .tags(.golden),
           arguments: FixtureLoader.fixtureNames(campaignType: "inline_carousel"))
@@ -54,7 +61,7 @@ struct InlineFixtureGoldenTests {
         try await assertInlineFixture(fixture, campaignType: "inline_timer", function: "testInlineTimerFixtureGolden")
     }
 
-    /// Snapshot file: `__Snapshots__/InlineFixtureGoldenTests/<test>.<fixture>.png`.
+    /// Snapshot file: `de_workspace/goldens/ios/InlineFixtureGoldenTests/<test>.<fixture>.png`.
     @MainActor
     private func assertInlineFixture(_ fixture: String, campaignType: String, function: StaticString) async throws {
         let json = try #require(
@@ -63,7 +70,7 @@ struct InlineFixtureGoldenTests {
         )
         let (standIn, imageURLs) = withLocalImages(json, fixture: fixture)
         let campaign = try #require(
-            try CampaignModel.fromJson(withAutoPlayHeld(standIn) as! [String: Any], timeAnchor: Self.timerNow),
+            try CampaignModel.fromJson(withAutoPlayHeld(standIn) as! [String: Any], designTokens: fixtureTokens(json), timeAnchor: Self.timerNow),
             "Fixture must decode to a campaign"
         )
         let payload = CEPTriggerPayload(cepCampaignId: "test_inline", campaignKey: campaign.campaignKey, cepMetadata: [:])
@@ -80,7 +87,7 @@ struct InlineFixtureGoldenTests {
             return
         }
 
-        let window = makeSlotWindow(content: content, device: .iPhone17ProMax)
+        let window = makeSlotWindow(content: content, device: .engageGolden)
         defer { ComponentTestHost.cleanupOverlayWindow(window) }
         await awaitImagesLoaded(imageURLs)
         // A carousel rebuilds its slides as it settles on its first page, and a rebuilt `WebImage`
@@ -136,48 +143,40 @@ struct InlineFixtureGoldenTests {
     /// asked for it), so every image must take the asynchronous load, which does publish — without
     /// clearing the shared cache under the other suites. Returns the stand-in URLs to wait for.
     private func withLocalImages(_ json: [String: Any], fixture: String) -> (Any, [String]) {
-        let remote = Set(remoteImageURLs(in: json)).sorted()
-        guard !remote.isEmpty, let workspace = FixtureLoader.workspaceURL() else { return (json, []) }
+        guard let workspace = FixtureLoader.workspaceURL() else { return (json, []) }
         let file = workspace.appendingPathComponent("testkit/mock-server/assets/strawberry.jpg")
-        var standIns: [String: String] = [:]
-        for (index, url) in remote.enumerated() {
-            standIns[url] = "\(file.absoluteString)?standIn=\(fixture)-\(index)"
+        // One stand-in per occurrence, not per distinct URL: two views of the same URL would share a
+        // cache key, and the second takes the synchronous hit `WebImage` drops.
+        var standIns: [String] = []
+        let replaced = replacingRemoteImages(json) {
+            let url = "\(file.absoluteString)?standIn=\(fixture)-\(standIns.count)"
+            standIns.append(url)
+            return url
         }
-        return (replacingRemoteImages(json, with: standIns), Array(standIns.values))
+        guard !standIns.isEmpty else { return (json, []) }
+        return (replaced, standIns)
     }
 
-    /// Remote URLs outside action objects: an action's URL is a link, not an image.
-    private func remoteImageURLs(in value: Any) -> [String] {
+    private func replacingRemoteImages(_ value: Any, with standIn: () -> String) -> Any {
         switch value {
         case let string as String:
-            return isRemote(string) ? [string] : []
-        case let dictionary as [String: Any]:
-            if isAction(dictionary) { return [] }
-            return dictionary.values.flatMap(remoteImageURLs)
-        case let array as [Any]:
-            return array.flatMap(remoteImageURLs)
-        default:
-            return []
-        }
-    }
-
-    private func replacingRemoteImages(_ value: Any, with standIns: [String: String]) -> Any {
-        switch value {
-        case let string as String:
-            return standIns[string] ?? string
+            return isRemote(string) ? standIn() : string
         case let dictionary as [String: Any]:
             if isAction(dictionary) { return dictionary }
-            return dictionary.mapValues { replacingRemoteImages($0, with: standIns) }
+            // Sorted keys keep the occurrence numbering stable between runs.
+            return Dictionary(uniqueKeysWithValues: dictionary.keys.sorted().map { ($0, replacingRemoteImages(dictionary[$0]!, with: standIn)) })
         case let array as [Any]:
-            return array.map { replacingRemoteImages($0, with: standIns) }
+            return array.map { replacingRemoteImages($0, with: standIn) }
         default:
             return value
         }
     }
 
     private func isRemote(_ string: String) -> Bool {
-        guard let scheme = URL(string: string)?.scheme?.lowercased() else { return false }
-        return scheme == "http" || scheme == "https"
+        guard let url = URL(string: string), let scheme = url.scheme?.lowercased() else { return false }
+        if scheme == "http" || scheme == "https" { return true }
+        // `FixtureLoader` has already pointed `{{TESTKIT_ASSET_ORIGIN}}` at a local file.
+        return scheme == "file" && ["jpg", "jpeg", "png", "webp"].contains(url.pathExtension.lowercased())
     }
 
     private func isAction(_ dictionary: [String: Any]) -> Bool {

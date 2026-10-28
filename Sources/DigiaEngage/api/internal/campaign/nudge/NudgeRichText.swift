@@ -83,7 +83,8 @@ final class DigiaDecorationLayoutManager: NSLayoutManager {
         guard customThickness != nil || offset != nil else { return false }
         let customColor = attrs[.digiaDecorationColor] as? UIColor
 
-        let font = (attrs[.font] as? UIFont) ?? .systemFont(ofSize: UIFont.systemFontSize)
+        let font = (attrs[.font] as? UIFont)
+            ?? DigiaFont().resolve(size: Double(UIFont.systemFontSize), weight: 400, italic: false)
         let ctFont = font as CTFont
         let rect = boundingRect(forGlyphRange: glyphRange, in: container)
         let baselineY = lineFragmentRect.minY + location(forGlyphAt: glyphRange.location).y + containerOrigin.y

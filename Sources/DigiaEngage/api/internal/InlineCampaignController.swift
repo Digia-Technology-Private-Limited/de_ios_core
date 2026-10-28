@@ -104,7 +104,9 @@ final class InlineCampaignController: ObservableObject {
         notifyRemovedCampaigns(removedPayloads)
     }
 
-    func dismissCampaign(_ placementKey: String, reason: DismissReason = .userClose) {
+    /// Removes the campaign at `placementKey`. The SDK or the host clearing a slot is `cancelled`, as
+    /// on Flutter and Android; the author's Hide passes `userClose`.
+    func dismissCampaign(_ placementKey: String, reason: DismissReason = .cancelled) {
         let removed = campaigns.removeValue(forKey: placementKey)
         carouselConfigs.removeValue(forKey: placementKey)
         bannerConfigs.removeValue(forKey: placementKey)
@@ -124,7 +126,7 @@ final class InlineCampaignController: ObservableObject {
     }
 
     private func notifyRemovedCampaigns(
-        _ removed: [CEPTriggerPayload], reason: DismissReason = .userClose
+        _ removed: [CEPTriggerPayload], reason: DismissReason = .cancelled
     ) {
         var remainingIds = Set(campaigns.values.map(\.cepCampaignId))
         for payload in removed where remainingIds.insert(payload.cepCampaignId).inserted {

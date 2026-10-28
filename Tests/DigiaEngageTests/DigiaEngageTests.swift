@@ -4,6 +4,12 @@ import SwiftUI
 @testable import DigiaEngage
 import Testing
 
+/// `DigiaEngageTests` and the suites nested in it drive `SDKInstance.shared`, as the rendered
+/// suites do; nesting it in `RenderedUITests` runs all of them one at a time, so no two reset or
+/// show on the shared instance at once.
+typealias DigiaEngageTests = RenderedUITests.DigiaEngageTests
+
+extension RenderedUITests {
 @MainActor
 @Suite("DigiaEngage", .serialized)
 struct DigiaEngageTests {
@@ -905,14 +911,14 @@ struct DigiaEngageTests {
         SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: "secondary", isPrimary: false)
         #expect(recorder.signals.isEmpty)
 
-        SDKInstance.shared.reportClassicStoryOpened(payload)
+        SDKInstance.shared.reportClassicStoryOpened(payload, index: 0)
         SDKInstance.shared.reportClassicCarouselContainerClicked(payload)
         SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: "primary", isPrimary: true)
         // A click promotes a presentation that never reported an impression, so
         // G3's "displayed first" holds for the plugin either way.
         #expect(recorder.displayed)
         #expect(recorder.clickedElementIds == [
-            "story_thumbnail", "carousel_container", "primary",
+            "story_item_1", "carousel_container", "primary",
         ])
     }
 
@@ -987,6 +993,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.reportPrimaryCTAClick(elementId: "primary", isPrimary: true)
         #expect(recorder.clickedElementIds == ["cta_primary", "primary"])
     }
+}
 }
 
 @Suite("EngageActionParser")

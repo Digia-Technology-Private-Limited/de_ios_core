@@ -1,5 +1,7 @@
+// tags: action
 import SwiftUI
 import Testing
+import UIKit
 
 @testable import DigiaEngage
 
@@ -13,7 +15,7 @@ extension HostedUITests {
         @Test("tapping a button authored with copyToClipBoard puts its text on the pasteboard")
         func copyPutsTextOnThePasteboard() async throws {
             let sdk = try await SdkHarness.start(
-                loadCampaign("Actions/Fixtures/action_copy_to_clipboard.json"))
+                loadCampaign("actions/action_copy_to_clipboard.json"))
             defer { sdk.tearDown() }
             try sdk.mount { DigiaSlot(SdkHarness.buttonSlotKey) { EmptyView() } }
             try sdk.deliver("test_action_copy_to_clipboard")
@@ -23,5 +25,27 @@ extension HostedUITests {
             try await sdk.waitUntil("the text is copied") { !sdk.platform.copied.isEmpty }
             #expect(sdk.platform.copied == ["SAVE20"])
         }
+    }
+}
+
+/// `Action.copyToClipboard`: the boundary is the system pasteboard.
+@MainActor
+@Suite("copy_to_clipboard action (workspace fixture)", .serialized)
+struct CopyToClipboardWorkspaceFixtureTests {
+    // Fails if `GlobalActionExecutor.execute` stops sending `.copyToClipboard` text to its `copy` closure.
+    @Test("tapping a button authored with copyToClipBoard puts its text on the pasteboard")
+    func copiesText() async throws {
+        let campaign = WorkspaceFixtures.campaign("actions/action_copy_to_clipboard.json")
+        let sdk = try await SdkHarness.start([campaign]) {
+            DigiaSlot("home_banner") { Color.clear }
+        }
+        defer { sdk.tearDown() }
+        sdk.cep.deliver(campaign.campaignKey)
+        try try await sdk.settle(1)
+        UIPasteboard.general.string = ""
+
+        try await sdk.tap(text: "Confirm & Claim")
+
+        #expect(UIPasteboard.general.string == "SAVE20")
     }
 }
