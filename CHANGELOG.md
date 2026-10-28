@@ -2,6 +2,19 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [4.2.0] - 2026-10-29
+
+### Bug Fixes
+- A malformed canvas child, span or button, border or progress-bar value no longer discards valid siblings or the whole campaign.
+- Canvas rendering now matches the dashboard for sweep gradients, shadows, text shadows, underlines, dotted dividers and progress bars.
+- Canvas dialogs stay centered with inside or outside close buttons, and outside-close dialogs honor backdrop dismissal.
+- Collapsed PiP safe area, floater corners, transparent story backgrounds and expanded PiP layering now render correctly.
+- Static-image floaters no longer appear black.
+- Host font weights now select the correct font face.
+- Survey answer controls render as circles and pills, and two-digit NPS values fit.
+- Legacy carousel indicators now render as pills.
+- Survey, carousel, canvas-story, inline-story and anchored-guide analytics events are now ordered and populated correctly.
+
 ## [4.1.0] - 2026-10-22
 
 ### New Features
