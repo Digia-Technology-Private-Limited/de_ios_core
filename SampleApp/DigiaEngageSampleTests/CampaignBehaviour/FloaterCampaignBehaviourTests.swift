@@ -101,7 +101,7 @@ struct FloaterCampaignBehaviourTests {
             cepClicks: 0, hold: .floating)
     }
 
-    // Fails today: a PiP authored to start expanded never mounts its expanded canvas (FloaterSessionView mounts it only when the surface changes to expanded), so there is no CTA to press. Flutter then sends its Step Clicked after Dismissed, with dismiss_reason cta_taken.
+    // Fails today: the CTA's authored dismiss ends the PiP as user_close (Digia and CEP); performFloaterCanvasAction's LocalActionExecutor dismisses with .userClose before onFloaterActionCompleted's .ctaTaken. Flutter and Android end it as cta_taken / cta_action.
     @Test("pip: full screen CTA authored dismiss: dismissed as cta_action")
     func pipFullScreenCtaDismiss() async throws {
         let key = "test_action_hide_pip"
@@ -117,7 +117,7 @@ struct FloaterCampaignBehaviourTests {
         expectChain(
             await sdk.sent(key), d,
             names: [Chain.triggered, Chain.viewed, Chain.stepViewed, Chain.stepClicked, Chain.completed, Chain.dismissed],
-            reason: .ctaAction, cepClicks: 0, hold: .floating)
+            reason: .ctaAction, cepClicks: 0, hold: .floating, wireReason: "cta_taken")
     }
 
     @Test("pip: leaving its screen: dismissed as screen_exit")

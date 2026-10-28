@@ -398,6 +398,10 @@ private struct FloaterSessionView: View {
             }
         }
         .onAppear {
+            // A `startExpanded` showing is already expanded when this view is created, so
+            // `.onChange(of: orchestrator.surface)` never fires for it and its canvas would
+            // never mount. There is no grow transition to wait for: show it from the first frame.
+            if expanded { expandedContentVisible = true }
             runEntryAnimation()
             // The impression is the first drawn frame, not the media load (SR62).
             orchestrator.markDrawn(token: state.token)
