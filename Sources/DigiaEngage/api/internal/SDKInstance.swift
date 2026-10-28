@@ -89,7 +89,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private lazy var actionExecutor = EngageActionExecutor(
         hostActionExecutor: hostActionExecutor
     )
-    private(set) var font = DigiaFont()
+    var font = DigiaFont()
     /// Mirrors Android's `ScreenTracker`: the last screen name reported via
     /// `Digia.setCurrentScreen`, forwarded to the active plugin and read into
     /// analytics events (`screenName`).

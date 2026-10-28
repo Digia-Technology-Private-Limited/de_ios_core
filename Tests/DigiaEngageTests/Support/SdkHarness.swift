@@ -87,6 +87,7 @@ final class SdkHarness {
         let sdk = SDKInstance.shared
         sdk.resetForTesting()
         ComponentTestHost.enableAccessibilityAutomation()
+        GoldenFonts.install()  // registers the TTFs; `initialize` then names the family via DigiaConfig
 
         let defaults = try #require(UserDefaults(suiteName: storageSuite))
         defaults.removePersistentDomain(forName: storageSuite)
@@ -170,7 +171,7 @@ final class SdkHarness {
 
     /// Runs `Digia.initialize`, which returns once the bundle fetch has settled the SDK state.
     func initialize(actionHandlers: DigiaActionHandlers = DigiaActionHandlers()) async throws {
-        try await Digia.initialize(DigiaConfig(apiKey: "test-api-key", actionHandlers: actionHandlers))
+        try await Digia.initialize(DigiaConfig(apiKey: "test-api-key", fontFamily: GoldenFonts.family, actionHandlers: actionHandlers))
     }
 
     func requireReady() throws {
