@@ -233,4 +233,177 @@ struct FloaterCampaignBehaviourTests {
             await sdk.sent(key), d, names: [Chain.triggered, Chain.viewed, Chain.dismissed], reason: .screenExit,
             hold: .floating)
     }
+
+    // MARK: - PiP: moved, and starting expanded
+
+    /// Asserts a floater still running: the exact chain so far and its one impression id, the CEP's hold back
+    /// at the impression, and no outcome.
+    private func expectStillRunning(
+        _ events: [WireEvent], _ d: Delivery, names expected: [String],
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) {
+        #expect(names(events) == expected, sourceLocation: sourceLocation)
+        #expect(impressionIds(events) == [d.presentation.id], sourceLocation: sourceLocation)
+        #expect(d.timeline == ["displayed", "hold early"], "CEP markings and hold, in order", sourceLocation: sourceLocation)
+        #expect(d.outcome == nil, sourceLocation: sourceLocation)
+    }
+
+    @Test("pip: dragged to another corner, then closed: moves 1 and the new last_position")
+    func pipMovedThenClosed() async throws {
+        let key = "test_pip_close_dismiss"
+        let sdk = try await start("campaigns/pip/pip_close_dismiss.json")
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await show(sdk, d)
+        let rect = try sdk.pipRect()
+
+        // Past the middle and released at rest: it snaps to the bottom-left corner.
+        try FloaterBehaviourDrag.drag(
+            from: CGPoint(x: rect.midX, y: rect.midY), by: CGVector(dx: -250, dy: 0),
+            in: try #require(sdk.window), duration: 0.5, hold: 0.3)
+        try await sdk.waitUntil("the drop is recorded", timeout: 6) { sdk.pip.dragFraction != nil }
+        #expect(sdk.pip.dragFraction == FloaterFraction(x: 0, y: 1))
+        try await sdk.waitUntilSteady("the PiP settled") { sdk.pip.activeRect }
+
+        try sdk.tapFloater(at: try sdk.pipCloseButton())
+        try await sdk.waitUntil("the PiP is gone", timeout: 6) { sdk.pip.state == nil }
+
+        let events = await sdk.sent(key)
+        expectChain(
+            events, d, names: [Chain.triggered, Chain.viewed, Chain.dismissed], reason: .userClose, hold: .floating)
+        let dismissed = propsOf(events, Chain.dismissed)
+        #expect(dismissed["moves"] as? Int == 1)
+        #expect(dismissed["last_position"] as? String == "bottom_left")
+        #expect(dismissed["expands"] as? Int == 0)
+    }
+
+    // The fixture authors no `expanded.onBack`: it collapses by default. As coded, the swipe is reported as a
+    // click on the full-screen × (`pip_close`, action `collapse`), the control it stands in for.
+    @Test("pip: starts expanded; a swipe down on its top strip (iOS's back) collapses it, as coded")
+    func pipInitialExpandedSwipeDown() async throws {
+        let key = "test_pip_initial_expanded"
+        let sdk = try await start("campaigns/pip/pip_initial_expanded.json")
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await show(sdk, d)
+        #expect(sdk.pip.surface == .expanded)
+
+        try sdk.swipeDownExpandedPip()
+        try await sdk.waitUntil("full screen collapses", timeout: 6) { sdk.pip.surface == .collapsed }
+        #expect(sdk.pip.isShowing)
+
+        let events = await sdk.sent(key)
+        expectStillRunning(
+            events, d,
+            names: [Chain.triggered, Chain.viewed, Chain.stepViewed, Chain.clicked, Chain.stepDismissed])
+        expectCollapseClick(events)
+    }
+
+    /// The one Clicked: the full-screen ×, collapsing it (the fixture's default `expanded.onClose`), Digia only.
+    private func expectCollapseClick(_ events: [WireEvent], sourceLocation: SourceLocation = #_sourceLocation) {
+        let clicked = propsOf(events, Chain.clicked, sourceLocation: sourceLocation)
+        #expect(clicked["element_id"] as? String == "pip_close", sourceLocation: sourceLocation)
+        #expect(clicked["action_type"] as? String == "collapse", sourceLocation: sourceLocation)
+        #expect(clicked["pip_state"] as? String == "expanded", sourceLocation: sourceLocation)
+        #expect(clicked["cta_role"] as? String == "secondary", sourceLocation: sourceLocation)
+    }
+
+    // As P3: collapsing is a Digia click (here the ×, `pip_close`), and a showing that was full screen ends
+    // Completed.
+    @Test("pip: starts expanded, collapsed, then closed: expands 0")
+    func pipInitialExpandedCollapseThenClose() async throws {
+        let key = "test_pip_initial_expanded"
+        let sdk = try await start("campaigns/pip/pip_initial_expanded.json")
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await show(sdk, d)
+        #expect(sdk.pip.surface == .expanded)
+
+        // The ×, which collapses by default.
+        try sdk.tapFloater(at: try #require(sdk.expandedPipTopRow().last))
+        try await sdk.waitUntil("full screen collapses", timeout: 6) { sdk.pip.surface == .collapsed }
+        try await sdk.waitUntilSteady("the PiP settled") { sdk.pip.activeRect }
+        expectStillRunning(
+            await sdk.sent(key), d,
+            names: [Chain.triggered, Chain.viewed, Chain.stepViewed, Chain.clicked, Chain.stepDismissed])
+
+        try sdk.tapFloater(at: try sdk.pipCloseButton())
+        try await sdk.waitUntil("the PiP is gone", timeout: 6) { sdk.pip.state == nil }
+
+        let events = await sdk.sent(key)
+        expectChain(
+            events, d,
+            names: [
+                Chain.triggered, Chain.viewed, Chain.stepViewed, Chain.clicked, Chain.stepDismissed, Chain.completed,
+                Chain.dismissed,
+            ],
+            reason: .userClose, cepClicks: 0, hold: .floating)
+        expectCollapseClick(events)
+        let dismissed = propsOf(events, Chain.dismissed)
+        #expect(dismissed["expands"] as? Int == 0)
+        #expect(dismissed["moves"] as? Int == 0)
+        #expect(dismissed["last_position"] as? String == "bottom_right")
+    }
+
+    // MARK: - Story floater: starting expanded, and running to its end
+
+    @Test("story floater: starts expanded: its story page is drawn without a tap")
+    func storyInitialExpanded() async throws {
+        let key = "test_floater_story_initial_expanded"
+        let sdk = try await start("campaigns/floater/floater_story_initial_expanded.json")
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await sdk.waitUntil("the floater's impression", timeout: 5) { d.displayed }
+        let window = try #require(sdk.window)
+
+        try await sdk.waitUntil("the story page is drawn", timeout: 5) {
+            let texts = UIProbe.texts(in: window)
+            return texts.contains("Weekend Health Drop") && texts.contains("No Thanks")
+        }
+        let opened = await sdk.sent(key)
+        expectStillRunning(opened, d, names: [Chain.triggered, Chain.viewed, Chain.stepViewed])
+        let step = propsOf(opened, Chain.stepViewed)
+        #expect(step["item_index"] as? Int == 1)
+        #expect(step["item_total"] as? Int == 1)
+
+        try await sdk.tap(id: "story_hide_button")  // "No Thanks"
+        try await sdk.waitUntil("the story floater is gone") { SDKInstance.shared.floaterStoryOrchestrator.state == nil }
+
+        let events = await sdk.sent(key)
+        expectChain(
+            events, d, names: [Chain.triggered, Chain.viewed, Chain.stepViewed, Chain.stepClicked, Chain.dismissed],
+            reason: .ctaAction, cepClicks: 0, hold: .floating, wireReason: "cta_taken")
+        #expect(propsOf(events, Chain.dismissed)["expands"] as? Int == 0)
+    }
+
+    // As coded: `closeStory` ends an `onStoryEnd: dismiss` showing as `cta_taken` (`cta_action` to the CEP).
+    @Test("story floater: three pages run out, then it ends per onStoryEnd: dismiss, as coded", .tags(.slow))
+    func storyRunsToItsEnd() async throws {
+        let key = "test_floater_story_gradient_window_multipage"
+        let sdk = try await start("campaigns/floater/floater_story_gradient_window_multipage.json")
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await show(sdk, d)
+
+        try FloaterTap.tapWindow(in: try #require(sdk.window))
+        try await sdk.waitUntil("the story is open") { sdk.isShowing("Page 1 of 3 (2s)") }
+        // Pages of 2 s, 8 s and the default 5 s.
+        try await sdk.waitUntil("the story floater is gone", timeout: 20) {
+            SDKInstance.shared.floaterStoryOrchestrator.state == nil
+        }
+
+        let events = await sdk.sent(key)
+        expectChain(
+            events, d,
+            names: [
+                Chain.triggered, Chain.viewed, Chain.clicked, Chain.stepViewed, Chain.stepViewed, Chain.stepViewed,
+                Chain.completed, Chain.dismissed,
+            ],
+            reason: .ctaAction, cepClicks: 0, hold: .floating, wireReason: "cta_taken")
+        let pages = events.filter { $0["event_name"] as? String == Chain.stepViewed }
+            .map { $0["properties"] as? [String: Any] ?? [:] }
+        #expect(pages.map { $0["item_index"] as? Int } == [1, 2, 3])
+        #expect(pages.map { $0["item_total"] as? Int } == [3, 3, 3])
+        #expect(propsOf(events, Chain.dismissed)["expands"] as? Int == 1)
+    }
 }

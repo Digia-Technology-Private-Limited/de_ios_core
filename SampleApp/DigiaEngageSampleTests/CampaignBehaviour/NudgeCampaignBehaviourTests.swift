@@ -356,4 +356,89 @@ struct NudgeCampaignBehaviourTests {
 
         expectDropped(await sdk.sent("test_no_such_campaign"), d, .unknownCampaignKey, sendsEvents: false)
     }
+
+    // MARK: - Drags and a double tap
+
+    // `DigiaBottomSheet` closes on distance alone (`shouldDismissBottomSheet`: at least 120 pt or a quarter of
+    // the sheet's height), never on velocity.
+
+    /// The sheet's title, settled where it rests: where a finger grabs the sheet, and how far it has moved.
+    private func restingTitle(_ sdk: SdkHarness, _ title: String) async throws -> CGRect {
+        try await sdk.waitUntilSteady(text: title)
+        return try #require(sdk.frame(text: title))
+    }
+
+    @Test("bottom sheet: a short drag springs back and sends nothing; a long one closes it as user_close")
+    func sheetDragSnapBackThenClose() async throws {
+        let key = "test_nudge_bottomsheet_drag_snap_back"
+        let title = "Drag Snap Back Test"
+        let sdk = try await start([fixture("nudge_bottomsheet_drag_snap_back")])
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await show(sdk, title)
+        let resting = try await restingTitle(sdk, title)
+
+        // 60 pt, short of the 120 pt minimum, over 320 ms.
+        try sdk.drag(from: CGPoint(x: resting.midX, y: resting.midY), by: CGVector(dx: 0, dy: 60))
+        let back = try await restingTitle(sdk, title)
+        #expect(abs(back.minY - resting.minY) < 1, "the sheet springs back")
+        #expect(names(await sdk.sent(key)) == [Chain.triggered, Chain.viewed], "a snap back sends nothing")
+        #expect(d.timeline == ["displayed"], "still showing, still holding the CEP")
+
+        // 300 pt: past the threshold.
+        try sdk.drag(from: CGPoint(x: back.midX, y: back.midY), by: CGVector(dx: 0, dy: 300))
+        try await sdk.waitUntil("the sheet is gone") { !sdk.isShowing(title) }
+
+        let events = await sdk.sent(key)
+        expectChain(events, d, names: shownThenClosed, reason: .userClose)
+        #expect(propsOf(events, Chain.viewed)["display_style"] as? String == "bottom_sheet")
+    }
+
+    // As coded: velocity never closes an iOS sheet, so a fast flick short of the threshold springs back.
+    @Test("bottom sheet: a fast short flick downward springs back, as coded")
+    func sheetFastShortFlick() async throws {
+        let key = "test_nudge_bottomsheet_drag_dismiss"
+        let title = "Drag To Dismiss"
+        let sdk = try await start([fixture("nudge_bottomsheet_drag_dismiss")])
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await show(sdk, title)
+        let resting = try await restingTitle(sdk, title)
+
+        // 60 pt in 3 moves of 16 ms: well over 1000 pt/s.
+        try sdk.drag(from: CGPoint(x: resting.midX, y: resting.midY), by: CGVector(dx: 0, dy: 60), steps: 3)
+        let after = try await restingTitle(sdk, title)
+
+        #expect(abs(after.minY - resting.minY) < 1, "the sheet springs back")
+        #expect(sdk.isShowing(title))
+        #expect(names(await sdk.sent(key)) == [Chain.triggered, Chain.viewed])
+        #expect(d.timeline == ["displayed"], "still showing, still holding the CEP")
+        #expect(d.outcome == nil)
+    }
+
+    // Fails today: the second tap during the close sends a second Clicked and a second CEP click (expected one each).
+    @Test("primary CTA tapped twice quickly: one Clicked, one Dismissed")
+    func primaryCtaDoubleTap() async throws {
+        let sdk = try await start([fixture("nudge_dialog")])
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain("test_nudge_dialog")
+        try await show(sdk, "Dialog Test Nudge")
+        // Settled for 400 ms first, as `tap(id:)` waits, so both touches land on the button.
+        try await sdk.waitUntilSteady("the CTA settled") { sdk.frame(id: "dialogButton") }
+        let button = try #require(sdk.frame(id: "dialogButton"))
+        let window = try #require(sdk.window)
+
+        // Two real touches 200 ms apart ("Got It").
+        try TouchSynthesizer.tap(at: CGPoint(x: button.midX, y: button.midY), in: window)
+        try TouchSynthesizer.tap(at: CGPoint(x: button.midX, y: button.midY), in: window)
+        try await sdk.waitUntil("the dialog is gone") { !sdk.isShowing("Dialog Test Nudge") }
+
+        let events = await sdk.sent("test_nudge_dialog")
+        expectChain(
+            events, d, names: [Chain.triggered, Chain.viewed, Chain.clicked, Chain.dismissed], reason: .ctaAction)
+        let clicked = propsOf(events, Chain.clicked)
+        #expect(clicked["element_id"] as? String == "cta_primary")
+        #expect(clicked["cta_role"] as? String == "primary")
+        #expect(d.signals.compactMap { if case .clicked(let id) = $0 { id } else { nil } } == ["cta_primary"])
+    }
 }

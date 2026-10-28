@@ -300,6 +300,37 @@ struct GuideCampaignBehaviourTests {
 
         expectDropped(await sdk.sent(key), d, .surfaceBusy)
     }
+
+    // MARK: - A double tap
+
+    // Fails today: the second tap is a second Step Clicked(1) and ends the guide (Completed, Dismissed) before step 2 shows (expected one Step Clicked, step 2 on screen).
+    @Test("Next tapped twice quickly: one Step Clicked for step 1, and the guide is on step 2")
+    func nextDoubleTap() async throws {
+        let key = "test_guide_tooltip_walkthrough"
+        let sdk = try await start("guide_tooltip_walkthrough")
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await show(sdk, "Quick Search")
+        // Settled for 400 ms first, as `tap(id:)` waits, so both touches land where "Next" rests.
+        try await sdk.waitUntilSteady("Next settled") { sdk.frame(id: "cta_next") }
+        let next = try #require(sdk.frame(id: "cta_next"))
+        let window = try #require(sdk.window)
+
+        // Two real touches 200 ms apart.
+        try TouchSynthesizer.tap(at: CGPoint(x: next.midX, y: next.midY), in: window)
+        try TouchSynthesizer.tap(at: CGPoint(x: next.midX, y: next.midY), in: window)
+        // Past the step change, and long enough for a second step change to show.
+        try await sdk.settle(1)
+        #expect(sdk.isShowing("Featured Deals"), "on step 2")
+
+        let events = await sdk.sent(key)
+        #expect(
+            names(events) == [Chain.triggered, Chain.viewed, Chain.stepViewed, Chain.stepClicked, Chain.stepViewed])
+        #expect(impressionIds(events) == [d.presentation.id])
+        #expect(steps(events, Chain.stepViewed) == [1, 2])
+        #expect(steps(events, Chain.stepClicked) == [1])
+        #expect(d.timeline == ["displayed"], "still showing, still holding the CEP")
+    }
 }
 
 @MainActor

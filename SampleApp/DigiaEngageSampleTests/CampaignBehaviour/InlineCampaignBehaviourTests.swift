@@ -467,4 +467,106 @@ struct InlineCampaignBehaviourTests {
             cepClicks: 2)
         #expect(clickedElements(d) == ["story_item_1", "story_item_1"])
     }
+
+    // MARK: - Carousel timing
+
+    @Test("carousel without autoplay stays on slide 1", .tags(.slow))
+    func noAutoplayStays() async throws {
+        let key = "test_inline_carousel_infinite"
+        let (sdk, d) = try await startCarousel("inline_carousel_infinite_scroll", key: key)
+        defer { sdk.tearDown() }
+
+        try await sdk.settle(5)
+        #expect(try slideShown(sdk, slides: 2) == 1)
+
+        let events = await sdk.sent(key)
+        expectInlineChain(events, d, names: [Chain.triggered, Chain.viewed, Chain.stepViewed])
+        #expect(stepsViewed(events) == ["(1, 2, 0)"])
+    }
+
+    // As coded: a swipe does not restart the autoplay timer (`startAutoPlay` runs only on appear), so the next
+    // advance comes on the timer's first schedule, about 1 s after a swipe at about 1 s, not 2 s after it.
+    @Test("carousel autoplay: the next advance after a swipe keeps the timer's schedule, as coded")
+    func autoplayAfterASwipe() async throws {
+        let key = "test_inline_carousel_autoplay"
+        let sdk = try await start([carousel("inline_carousel_autoplay")], slot: "home_featured_carousel")
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await sdk.waitUntil("the inline impression", timeout: 5) { d.displayed }
+        try await sdk.settle(0.6)
+
+        // A finger flick to slide 2 at about 0.6–0.85 s.
+        let scroller = try carouselScroller(sdk)
+        let window = try #require(sdk.window)
+        let frame = scroller.convert(scroller.bounds, to: window)
+        try TouchSynthesizer.drag(
+            from: CGPoint(x: frame.midX + 120, y: frame.midY), to: CGPoint(x: frame.midX - 120, y: frame.midY),
+            in: window)
+        let swipedAt = Date()
+        try await waitForSlide(sdk, 2, timeout: 1.5)
+        try await waitForSlide(sdk, 1, timeout: 3)
+        let advancedAfter = Date().timeIntervalSince(swipedAt)
+
+        #expect(advancedAfter < 1.6, "advanced \(advancedAfter) s after the swipe")
+        let events = await sdk.sent(key)
+        expectInlineChain(
+            events, d, names: [Chain.triggered, Chain.viewed, Chain.stepViewed, Chain.stepViewed, Chain.stepViewed])
+        #expect(stepsViewed(events) == ["(1, 2, 0)", "(2, 2, 0)", "(1, 2, 1)"])
+    }
+
+    // MARK: - Story timing and swipes
+
+    private func storyOpen() -> Bool { SDKInstance.shared.controller.activeStoryOverlay != nil }
+
+    // As coded: past its last item the viewer sends Completed and closes; no Step Dismissed, no outcome.
+    @Test("story auto advance: each item in turn, then Completed and the viewer closes, as coded", .tags(.slow))
+    func storyAutoAdvance() async throws {
+        let key = "test_inline_story_auto_advance"
+        let sdk = try await start(
+            [WorkspaceFixtures.campaign("campaigns/inline_story/inline_story_auto_advance.json")],
+            slot: "test_inline_stories")
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await show(sdk, d)
+
+        try await sdk.touch(try slotPoint(sdk, dx: 40, dy: 40))
+        try await sdk.waitUntil("the first item", timeout: 5) { sdk.isShowing("First Offer") }
+        // 3 s per item.
+        try await sdk.waitUntil("the second item", timeout: 5) { sdk.isShowing("Second Offer") }
+        try await sdk.waitUntil("the viewer closes", timeout: 5) { !storyOpen() }
+        #expect(SDKInstance.shared.inlineController.getCampaign("test_inline_stories") != nil, "the slot keeps it")
+
+        let events = await sdk.sent(key)
+        expectInlineChain(
+            events, d,
+            names: [Chain.triggered, Chain.viewed, Chain.clicked, Chain.stepViewed, Chain.stepViewed, Chain.completed],
+            cepClicks: 1)
+        #expect(steps(events, Chain.stepViewed) == ["(1, 2)", "(2, 2)"])
+        #expect(propsOf(events, Chain.completed)["item_total"] as? Int == 2)
+    }
+
+    // As coded: the iOS viewer pages by its tap zones; a horizontal swipe is no gesture of its own (only a
+    // swipe down, or right from the left edge, closes it), so it stays on item 1 and sends nothing.
+    @Test("story swipe next: a swipe left on the viewer, as coded")
+    func storySwipeNext() async throws {
+        let key = "test_inline_story_swipe"
+        let sdk = try await start(
+            [WorkspaceFixtures.campaign("campaigns/inline_story/inline_story_swipe_next.json")],
+            slot: "test_inline_stories")
+        defer { sdk.tearDown() }
+        let d = try sdk.deliverChain(key)
+        try await show(sdk, d)
+
+        try await sdk.touch(try slotPoint(sdk, dx: 40, dy: 40))
+        try await sdk.waitUntil("the story viewer is open", timeout: 5) { storyOpen() }
+        try await sdk.settle(0.5)
+        let bounds = try #require(sdk.window).bounds
+        try await sdk.swipe(
+            from: CGPoint(x: bounds.midX + 120, y: bounds.midY), to: CGPoint(x: bounds.midX - 120, y: bounds.midY))
+        #expect(storyOpen(), "the viewer stays open")
+
+        let events = await sdk.sent(key)
+        expectInlineChain(events, d, names: [Chain.triggered, Chain.viewed, Chain.clicked, Chain.stepViewed], cepClicks: 1)
+        #expect(steps(events, Chain.stepViewed) == ["(1, 2)"])
+    }
 }
