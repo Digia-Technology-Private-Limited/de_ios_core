@@ -190,7 +190,6 @@ struct FloaterAnalyticsChainTests {
             hold: .floating)
     }
 
-    // Fails today: a story CTA authored dismiss ends the floater as user_close (Dismissed and the CEP outcome); the nudge reports its CTA close as cta_action.
     @Test("story floater: open the story, CTA authored dismiss: cta_action")
     func storyCtaAuthoredDismiss() async throws {
         let key = "test_action_hide_floater_story"
@@ -211,7 +210,8 @@ struct FloaterAnalyticsChainTests {
             names: [
                 Chain.triggered, Chain.viewed, Chain.clicked, Chain.stepViewed, Chain.stepClicked, Chain.dismissed,
             ],
-            reason: .ctaAction, cepClicks: 0, hold: .floating)
+            // The floater's own name for a CTA ending; the CEP gets cta_action.
+            reason: .ctaAction, cepClicks: 0, hold: .floating, wireReason: "cta_taken")
     }
 
     @Test("story floater: leaving its screen: dismissed as screen_exit")

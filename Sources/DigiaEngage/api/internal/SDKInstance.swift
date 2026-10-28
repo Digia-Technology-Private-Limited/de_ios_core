@@ -2761,8 +2761,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             await executeActionFlow(
                 request.actions, variables: state.variableContext,
                 campaignKey: state.payload.campaignKey,
+                // A dismiss authored on a CTA is the CTA taken, not the user closing it (the
+                // window's × stays .userClose), as on the PiP.
                 localActionExecutor: LocalActionExecutor(dismiss: { [weak self] in
-                    self?.floaterStoryOrchestrator.dismiss(.userClose)
+                    self?.floaterStoryOrchestrator.dismiss(.ctaTaken)
                 }, showStory: { [weak self] index in
                     self?.floaterStoryOrchestrator.openStory(initialIndex: index)
                 })

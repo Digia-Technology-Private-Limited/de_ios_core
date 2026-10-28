@@ -176,6 +176,9 @@ func expectChain(
     reason: DismissReason,
     cepClicks: Int? = nil,
     hold: Hold = .modal,
+    // Digia's own `dismiss_reason` where the surface's analytics names are finer than the CEP's:
+    // a floater's CTA ends as `cta_taken`, `cta_action` to the CEP.
+    wireReason: String? = nil,
     sourceLocation: SourceLocation = #_sourceLocation
 ) {
     let cepClickCount = cepClicks ?? expected.filter { $0 == Chain.clicked }.count
@@ -193,7 +196,7 @@ func expectChain(
     #expect(impressionIds(events) == [delivery.presentation.id], sourceLocation: sourceLocation)
 
     let ending = propsOf(events, Chain.dismissed, sourceLocation: sourceLocation)
-    #expect(ending["dismiss_reason"] as? String == reason.wire, sourceLocation: sourceLocation)
+    #expect(ending["dismiss_reason"] as? String == (wireReason ?? reason.wire), sourceLocation: sourceLocation)
     #expect(ending["dwell_ms"] as? Int != nil, sourceLocation: sourceLocation)
 
     #expect(delivery.dismissReason == reason, sourceLocation: sourceLocation)
