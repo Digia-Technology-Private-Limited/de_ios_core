@@ -60,7 +60,18 @@ struct CanvasFixtureGoldenTests {
             FixtureLoader.loadFixture(campaignType: campaignType, fileName: fixture),
             "Fixture must load"
         )
-        let standIn = withMissingImagesReplaced(json) as! [String: Any]
+        let replaced = withMissingImagesReplaced(json) as! [String: Any]
+        // Unreachable fixture media (RFC 2606 `.invalid` hosts, which can never
+        // resolve) must fail locally and deterministically instead of racing the
+        // real network against the snapshot. The stub answers Lottie loads
+        // immediately — the same role as Android's TestkitImages failure answers
+        // and Flutter's MockClient 404s — and unreachable images are rewritten
+        // below to a local file that fails decoding through the production
+        // `WebImage` path. The renderers keep their production loading path.
+        URLProtocol.registerClass(UnreachableFixtureMediaProtocol.self)
+        defer { URLProtocol.unregisterClass(UnreachableFixtureMediaProtocol.self) }
+        let unreachable = unreachableImageURLs(in: replaced) + unreachableLottieURLs(in: replaced)
+        let standIn = withUnreachableImagesFailedLocally(replaced) as! [String: Any]
         let campaign = try #require(try CampaignModel.fromJson(standIn, designTokens: fixtureTokens(json)), "Fixture must decode to a campaign")
         guard case .inlineCanvas(let config) = campaign.config else {
             Issue.record("Fixture must decode to an inline canvas")
@@ -80,9 +91,24 @@ struct CanvasFixtureGoldenTests {
         try await awaitImagesLoaded(imageURLs(in: standIn))
         if hasExistingLottie(standIn) { try await awaitLottieLoaded(in: window) }
 
+        // Unreachable media fails asynchronously after the stub answers. Give the
+        // renderers room to flip to their failure placeholders on the run loop,
+        // then require the placeholders on the captured image itself: a blank
+        // capture against a blank reference would otherwise pass silently.
+        let expectsFailurePlaceholders = !unreachable.isEmpty
+        if expectsFailurePlaceholders {
+            ComponentTestHost.drainRunLoop(for: 2.0)
+        }
+        let rendered = ComponentTestHost.settledImage(of: window)
+        if expectsFailurePlaceholders {
+            try #require(
+                failurePlaceholderPixelCount(in: rendered) > 5000,
+                "Failure placeholders never rendered")
+        }
+
         // Exact within the perceptual tolerance, as the other fixture goldens.
         assertVisualGolden(
-            matching: ComponentTestHost.settledImage(of: window),
+            matching: rendered,
             precision: 1.0,
             perceptualPrecision: 0.98,
             named: fixture,
@@ -156,6 +182,38 @@ struct CanvasFixtureGoldenTests {
         ["png", "jpg", "jpeg", "webp", "gif", "svg"].contains(url.pathExtension.lowercased())
     }
 
+    /// Rewrites unreachable remote images (RFC 2606 `.invalid` hosts) to a local
+    /// file that fails decoding, so the failure is fast and deterministic: the
+    /// missing file errors immediately through the production `WebImage` path
+    /// and the renderer shows its failure placeholder — the same outcome as an
+    /// unreachable server, without touching the real network. Lottie needs no
+    /// rewrite: the stub answers it (see `UnreachableFixtureMediaProtocol`).
+    private func withUnreachableImagesFailedLocally(_ value: Any) -> Any {
+        switch value {
+        case let string as String:
+            guard let url = URL(string: string), !url.isFileURL,
+                  url.host?.lowercased().hasSuffix(".invalid") == true,
+                  isImage(url),
+                  let missing = missingFixtureAssetURL(named: "missing.json")
+            else { return string }
+            return missing.absoluteString
+        case let dictionary as [String: Any]:
+            return dictionary.mapValues(withUnreachableImagesFailedLocally)
+        case let array as [Any]:
+            return array.map(withUnreachableImagesFailedLocally)
+        default:
+            return value
+        }
+    }
+
+    /// A Test Kit mock-server asset that is never shipped, so any load of it
+    /// fails locally with no network involved.
+    private func missingFixtureAssetURL(named fileName: String) -> URL? {
+        guard let workspaceUrl = FixtureLoader.workspaceURL() else { return nil }
+        return workspaceUrl.appendingPathComponent("testkit/mock-server/assets")
+            .appendingPathComponent(fileName)
+    }
+
     /// Every Test Kit image URL in [value].
     private func imageURLs(in value: Any) -> [String] {
         switch value {
@@ -189,6 +247,36 @@ struct CanvasFixtureGoldenTests {
         }
     }
 
+    /// Every remote image URL in [value] that can never load: an RFC 2606
+    /// `.invalid` host never resolves, so the stub answers it (see
+    /// `UnreachableFixtureMediaProtocol`) and the renderer shows its failure
+    /// placeholder. File URLs load from disk through the production path.
+    private func unreachableImageURLs(in value: Any) -> [URL] {
+        unreachableMediaURLs(in: value, matching: isImage)
+    }
+
+    /// Every remote Lottie URL in [value] that can never load (see above).
+    private func unreachableLottieURLs(in value: Any) -> [URL] {
+        unreachableMediaURLs(in: value) { ["lottie", "json"].contains($0.pathExtension.lowercased()) }
+    }
+
+    private func unreachableMediaURLs(in value: Any, matching isMedia: (URL) -> Bool) -> [URL] {
+        switch value {
+        case let string as String:
+            guard let url = URL(string: string), !url.isFileURL,
+                  url.host?.lowercased().hasSuffix(".invalid") == true,
+                  isMedia(url)
+            else { return [] }
+            return [url]
+        case let dictionary as [String: Any]:
+            return dictionary.values.flatMap { unreachableMediaURLs(in: $0, matching: isMedia) }
+        case let array as [Any]:
+            return array.flatMap { unreachableMediaURLs(in: $0, matching: isMedia) }
+        default:
+            return []
+        }
+    }
+
     /// Polls until `WebImage` has stored each decoded image (it does so just before publishing it),
     /// up to 5s; the capture then waits for the frame to settle.
     @MainActor
@@ -210,12 +298,58 @@ struct CanvasFixtureGoldenTests {
         try #require(hasLoadedLottie(window), "Lottie did not load")
     }
 
+    /// Counts pixels close to the labelled failure placeholder's fill
+    /// (#F1F1F5). The channel-sum comparison is order-free, so BGRA and RGBA
+    /// layouts compare alike. Blank slots show only hundreds of such pixels
+    /// (text anti-aliasing); both placeholders show tens of thousands.
+    private func failurePlaceholderPixelCount(in image: UIImage) -> Int {
+        guard let cgImage = image.cgImage, let data = cgImage.dataProvider?.data,
+              let bytes = CFDataGetBytePtr(data)
+        else { return 0 }
+        let bytesPerPixel = max(cgImage.bitsPerPixel / 8, 3)
+        var count = 0
+        for pixel in stride(from: 0, to: cgImage.width * cgImage.height, by: 1) {
+            let offset = pixel * bytesPerPixel
+            let diff =
+                abs(Int(bytes[offset]) - 242) + abs(Int(bytes[offset + 1]) - 242)
+                + abs(Int(bytes[offset + 2]) - 244)
+            if diff <= 6 { count += 1 }
+        }
+        return count
+    }
+
     @MainActor
     private func hasLoadedLottie(_ view: UIView) -> Bool {
         if let lottie = view as? LottieAnimationView, lottie.animation != nil { return true }
         return view.subviews.contains { hasLoadedLottie($0) }
     }
 }
+}
+
+/// Answers the fixture goldens' unreachable media (RFC 2606 `.invalid` hosts,
+/// which can never resolve) as immediately unreachable, instead of racing the
+/// real network against the snapshot.
+///
+/// Every real Test Kit image/Lottie in these goldens is a file:// URL into the
+/// mock-server directory on disk; the only http(s) media the fixtures author is
+/// this failure pair. The renderers keep their production loading path —
+/// `WebImage` and `loadLottieSource` fail through it exactly as they would
+/// against an unreachable server — only the transport answers locally. Same
+/// role as Android's `TestkitImages` failure answers and Flutter's `MockClient`
+/// 404s; same technique as `MediaFloaterLottieProtocol` for `URLSession.shared`.
+final class UnreachableFixtureMediaProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool {
+        request.url?.host?.lowercased().hasSuffix(".invalid") == true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let client = client else { return }
+        client.urlProtocol(self, didFailWithError: URLError(.cannotFindHost))
+    }
+
+    override func stopLoading() {}
 }
 
 /// The host app screen: the slot between a teal and a yellow block on a grey page, below the
