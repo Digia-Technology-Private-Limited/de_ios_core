@@ -2,6 +2,15 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.14.2] - 2026-10-28
+
+### Bug Fixes
+- **Canvas dialog position** — canvas dialogs are centred on screen again,
+  matching the dashboard preview and Android. A dialog whose close button sits
+  inside the card no longer stretches to the top of the screen, and a dialog
+  with an outside close button no longer sits at the top when it fits on screen
+  (it still scrolls when the card and close button do not fit together).
+
 ## [3.14.1] - 2026-09-24
 
 ### Improvements

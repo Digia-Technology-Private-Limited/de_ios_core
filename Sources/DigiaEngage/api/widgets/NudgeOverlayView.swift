@@ -397,6 +397,8 @@ private struct NudgeDialogContainer: View {
                             panel
                                 .padding(.top, top ? extent : 0)
                                 .padding(.bottom, top ? 0 : extent)
+                                // Centre like the inside-close branch; scroll only on overflow.
+                                .frame(maxWidth: .infinity, minHeight: height)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
@@ -444,18 +446,20 @@ private struct NudgeDialogContainer: View {
         runtimeViewportWidth: CGFloat,
         availableSize: CGSize
     ) -> some View {
-        ZStack(alignment: .topTrailing) {
-            CampaignCanvasView(
-                canvas: canvas,
-                surface: authoredSurface,
-                designWidth: presentation.config.designWidth,
-                runtimeViewportWidth: runtimeViewportWidth,
-                availableSize: availableSize,
-                onAction: { request in
-                    performCanvasAction(
-                        request, variables: presentation.variables, dismiss: dismiss)
-                }
-            )
+        CampaignCanvasView(
+            canvas: canvas,
+            surface: authoredSurface,
+            designWidth: presentation.config.designWidth,
+            runtimeViewportWidth: runtimeViewportWidth,
+            availableSize: availableSize,
+            onAction: { request in
+                performCanvasAction(
+                    request, variables: presentation.variables, dismiss: dismiss)
+            }
+        )
+        // An overlay, not a ZStack sibling: the GeometryReader below would otherwise
+        // expand the panel to the whole viewport and pin the canvas to its top edge.
+        .overlay(alignment: .topTrailing) {
             if surface.showCloseButton, surface.closeButton.placement?.mode == .inside {
                 GeometryReader { geometry in
                     CanvasNudgeCloseOverlay(
