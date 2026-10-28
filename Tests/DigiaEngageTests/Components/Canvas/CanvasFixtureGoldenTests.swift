@@ -148,7 +148,7 @@ struct CanvasFixtureGoldenTests {
     }
 
     private func isImage(_ url: URL) -> Bool {
-        ["png", "jpg", "jpeg", "webp", "gif"].contains(url.pathExtension.lowercased())
+        ["png", "jpg", "jpeg", "webp", "gif", "svg"].contains(url.pathExtension.lowercased())
     }
 
     /// Every Test Kit image URL in [value].

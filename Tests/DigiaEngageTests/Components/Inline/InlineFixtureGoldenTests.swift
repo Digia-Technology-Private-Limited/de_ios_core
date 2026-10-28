@@ -25,9 +25,9 @@ extension RenderedUITests {
 @Suite("Test Kit inline banner, carousel, story and timer fixture goldens", .serialized, .tags(.inline))
 struct InlineFixtureGoldenTests {
 
-    /// 2029-12-29T10:15:30Z: 2d 13h 44m 30s before the timer fixtures' 2030 deadline, so every
-    /// unit box shows a different digit.
-    private static let timerNowMs: Int64 = 1_893_233_730_000
+    /// 2d 03h 45m 13s before the timer fixtures' 2030-01-01 deadline: the countdown the Android and
+    /// Flutter goldens show.
+    private static let timerNowMs: Int64 = 1_893_269_687_000
 
     /// A clock that never advances: `nowMs()` adds the monotonic time elapsed since
     /// `continuousNanoseconds`, which is none when that is the largest value the clock can read.

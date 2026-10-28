@@ -174,7 +174,7 @@ private struct FloaterStorySessionView: View {
                 if windowAlpha > 0 {
                     windowBox(width: resting.width)
                         .frame(width: resting.width, height: resting.height, alignment: .topLeading)
-                        .clipShape(RoundedRectangle(cornerRadius: config.window.cornerRadiusDp))
+                        .clipShape(ClampedRoundedRectangle(cornerRadius: config.window.cornerRadiusDp))
                         .shadow(
                             color: config.window.shadow ? Color.black.opacity(0.45) : .clear,
                             radius: config.window.shadow ? 12 : 0,
@@ -182,7 +182,7 @@ private struct FloaterStorySessionView: View {
                             y: config.window.shadow ? 8 : 0
                         )
                         .overlay(
-                            RoundedRectangle(cornerRadius: config.window.cornerRadiusDp)
+                            ClampedRoundedRectangle(cornerRadius: config.window.cornerRadiusDp)
                                 .stroke(
                                     config.window.borderColor.map {
                                         canvasTheme.color($0, isDark: isDark)

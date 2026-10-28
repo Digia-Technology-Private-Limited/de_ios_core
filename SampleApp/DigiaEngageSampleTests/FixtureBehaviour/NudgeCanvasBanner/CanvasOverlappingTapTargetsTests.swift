@@ -4,7 +4,7 @@ import Testing
 
 extension HostedUITests {
 /// Which element of an inline canvas receives a tap when children overlap.
-/// `canvas/canvas_overlapping_tap_targets` stacks a tap region and a button in three orders; every
+/// `canvas_tap_targets/canvas_overlapping_tap_targets` stacks a tap region and a button in three orders; every
 /// tap is a real touch on the card the SDK rendered in the app's `DigiaSlot`, and the proof is the
 /// URL the host's open-URL handler is asked to open.
 ///
@@ -17,7 +17,7 @@ struct CanvasOverlappingTapTargetsTests {
     /// Shows the card and taps the middle of the button authored with [id] (its label is drawn
     /// there), returning every URL the host was asked to open.
     private func tap(_ id: String) async throws -> [String] {
-        let campaign = try fixture("canvas/canvas_overlapping_tap_targets")
+        let campaign = try fixture("canvas_tap_targets/canvas_overlapping_tap_targets")
         let sdk = try await SdkHarness.start(campaign)
         defer { sdk.tearDown() }
         let opened = Received<String>()
