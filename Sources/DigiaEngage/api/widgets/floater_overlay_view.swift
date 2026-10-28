@@ -387,7 +387,13 @@ private struct FloaterSessionView: View {
                 }
             }
         }
-        .onAppear { runEntryAnimation() }
+        .onAppear {
+            // A `startExpanded` showing is already expanded when this view is created, so
+            // `.onChange(of: orchestrator.surface)` never fires for it and its canvas would
+            // never mount. There is no grow transition to wait for: show it from the first frame.
+            if expanded { expandedContentVisible = true }
+            runEntryAnimation()
+        }
         .onChange(of: orchestrator.closing) { closing in
             if closing { runExitAnimation() }
         }
