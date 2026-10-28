@@ -2904,8 +2904,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         events.toDigia(StoriesEvent.Opened(), payload: payload)
     }
 
-    func reportClassicStoryOpened(_ payload: CEPTriggerPayload) {
-        events.clicked(payload: payload, elementId: "story_thumbnail")
+    /// The CEP's click names the story opened, `story_item_<n>` (1-based), as on Flutter.
+    func reportClassicStoryOpened(_ payload: CEPTriggerPayload, index: Int) {
+        events.clicked(payload: payload, elementId: "story_item_\(index + 1)")
     }
 
     /// A story frame became visible. `itemIndex` is 1-based; `itemTotal` = frames.
