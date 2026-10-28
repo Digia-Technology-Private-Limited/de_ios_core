@@ -98,7 +98,6 @@ struct SurveyCampaignBehaviourTests {
         #expect(propsOf(events, Chain.clicked)["element_id"] as? String == "welcome_start")
     }
 
-    // Fails today: with no welcome screen, a skip sends Digia Experience Clicked (welcome_start); reportSurveyQuestionSkipped calls ensureWelcomeStartIfNoWelcome. Flutter sends no Clicked for a skip.
     @Test("optional question skipped: skipped, then completed")
     func optionalQuestionSkipped() async throws {
         let key = "test_survey_optional_skip"

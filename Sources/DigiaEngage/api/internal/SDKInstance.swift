@@ -2170,7 +2170,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// An eligible optional question was skipped (advanced without an answer).
     func reportSurveyQuestionSkipped(nodeId: String, itemIndex: Int) {
         guard let state = surveyOrchestrator.state else { return }
-        ensureWelcomeStartIfNoWelcome(state)
+        // No welcome-start Clicked here: a skip is not an engagement with the survey, as on Flutter. Only an
+        // answer stands in for the missing welcome's Start.
         guard let block = state.config.blockForNode(nodeId) else { return }
         questionViewedAt.removeValue(forKey: Self.questionKey(token: state.token, nodeId: nodeId))
         events.toDigia(
