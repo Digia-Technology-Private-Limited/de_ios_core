@@ -358,6 +358,8 @@ struct CanvasCarouselRenderer: View {
     /// which is the distinction the legacy carousel's `auto` flag draws.
     @State private var advancedAutomatically = false
     @State private var isRecentering = false
+    /// True while a finger is on the strip; resets itself if the touch is cancelled.
+    @GestureState private var isTouching = false
     @State private var lastReportedDisplayIndex: Int?
     @Environment(\.canvasInteractions) private var reportInteraction
 
@@ -458,6 +460,27 @@ struct CanvasCarouselRenderer: View {
                             .scrollPosition(id: $scrollPosition)
                             .scrollTargetBehavior(.viewAligned)
                             .frame(height: stripHeight)
+                            // A finger down pauses autoplay and lifting it restarts a full
+                            // interval, so the strip never advances under a drag: a tick
+                            // landing mid-drag would otherwise cancel the gesture.
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 0)
+                                    .updating($isTouching) { _, state, _ in state = true }
+                            )
+                            .onChange(of: isTouching) { _, touching in
+                                if touching {
+                                    stopAutoPlay()
+                                } else {
+                                    startAutoPlay(
+                                        autoPlay: autoPlay,
+                                        autoPlayInterval: autoPlayInterval,
+                                        animationDuration: animationDuration,
+                                        displayCount: displayCount,
+                                        slideCount: slides.count,
+                                        loopEnabled: loopEnabled
+                                    )
+                                }
+                            }
                             // A slide is viewed when it comes to rest. The first visible slide is
                             // reported on appear too, matching the legacy carousel.
                             .onAppear {
