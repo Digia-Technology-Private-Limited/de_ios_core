@@ -77,6 +77,20 @@ struct DigiaFont {
     /// nearest `weight` by CSS font-matching. UIFont.Weight and CoreText weight traits
     /// are on different scales, so matching on traits picks the wrong face (600 -> Bold).
     private static func nearestFace(family: String, weight: Int) -> String? {
+        let faces = uprightFaces(family: family)
+        guard let target = nearestWeight(to: weight, in: faces.map(\.weight)) else { return nil }
+        return faces.first { $0.weight == target }?.name
+    }
+
+    /// Guards ``faceCache``: fonts resolve on the main actor and on TextKit layout threads.
+    private static let faceCacheLock = NSLock()
+    nonisolated(unsafe) private static var faceCache: [String: [(name: String, weight: Int)]] = [:]
+
+    /// Upright faces of `family` with their `usWeightClass`, read once per family.
+    private static func uprightFaces(family: String) -> [(name: String, weight: Int)] {
+        faceCacheLock.lock()
+        defer { faceCacheLock.unlock() }
+        if let cached = faceCache[family] { return cached }
         var faces: [(name: String, weight: Int)] = []
         for name in UIFont.fontNames(forFamilyName: family) {
             let font = UIFont(name: name, size: 12) ?? UIFont.systemFont(ofSize: 12)
@@ -85,15 +99,15 @@ struct DigiaFont {
                   let weightClass = usWeightClass(of: font) else { continue }
             faces.append((name, weightClass))
         }
-        guard let target = nearestWeight(to: weight, in: faces.map(\.weight)) else { return nil }
-        return faces.first { $0.weight == target }?.name
+        faceCache[family] = faces
+        return faces
     }
 
     /// OS/2 table `usWeightClass` (big-endian UInt16 at byte offset 4), or nil if absent.
     private static func usWeightClass(of font: UIFont) -> Int? {
         guard let data = CTFontCopyTable(font as CTFont, CTFontTableTag(kCTFontTableOS2), []),
-              CFDataGetLength(data) >= 6 else { return nil }
-        let bytes = CFDataGetBytePtr(data)!
+              CFDataGetLength(data) >= 6,
+              let bytes = CFDataGetBytePtr(data) else { return nil }
         let value = Int(bytes[4]) << 8 | Int(bytes[5])
         return value > 0 ? value : nil
     }
