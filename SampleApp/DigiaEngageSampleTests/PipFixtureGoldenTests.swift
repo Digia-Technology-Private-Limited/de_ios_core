@@ -1,7 +1,6 @@
 import AVFoundation
 import Foundation
 import Lottie
-import SDWebImage
 import SnapshotTesting
 import SwiftUI
 import Testing
@@ -12,7 +11,7 @@ import UIKit
 extension HostedUITests {
 /// Pixel goldens for every Test Kit PiP fixture, collapsed and expanded.
 ///
-/// The arguments are read from `testkit/campaigns/pip/fixtures/`, so a fixture added to the Test
+/// The arguments are read from `sdk_testing_fixtures/campaigns/pip/`, so a fixture added to the Test
 /// Kit is covered with no code change (record it by running this target's tests with
 /// `TEST_RUNNER_RECORD_SNAPSHOTS=true`; see `SampleApp/README.md`). Each fixture is decoded by
 /// `CampaignModel.fromJson`, started on the SDK's floater orchestrator, and drawn by the production
@@ -33,14 +32,6 @@ struct PipFixtureGoldenTests {
     func testPipFixtureGolden(fixture: String) async throws {
         let campaign = try #require(loadCampaign(fixture), "Fixture must decode to a campaign")
         let config = try #require(campaign.floaterConfig, "Fixture must decode to a PiP")
-        // The window's `WebImage` drops a synchronous memory-cache hit (it publishes inside the
-        // view update that asked for it), and nothing re-evaluates it until the window is resized.
-        // Start from empty caches so every fixture takes the asynchronous load, which does
-        // publish, and wait for it below. The disk cache too: in the host app it persists between
-        // runs, and a disk hit can come back synchronously and be dropped the same way.
-        SDImageCache.shared.clearMemory()
-        await withCheckedContinuation { done in SDImageCache.shared.clearDisk { done.resume() } }
-
         let orchestrator = SDKInstance.shared.floaterOrchestrator!
         // A player that stays paused at zero on the local file: it reaches `readyToPlay` (which is
         // what reveals the window) without the network, and autoplay cannot move it.
@@ -58,7 +49,7 @@ struct PipFixtureGoldenTests {
 
         // Pin the screen and its notch / home-indicator insets to the golden's device, so the
         // goldens do not depend on which simulator the host app runs on.
-        let device = ViewImageConfig.iPhone17ProMax
+        let device = ViewImageConfig.engageGolden
         let insets = device.safeArea
         activeFloaterWindowGeometryOverride = (
             CGRect(origin: .zero, size: device.size!),
@@ -81,7 +72,8 @@ struct PipFixtureGoldenTests {
             ComponentTestHost.cleanupOverlayWindow(window)
         }
         switch config.media.kind {
-        case .image: try await awaitImageLoaded(orchestrator.state!.resolvedMediaUrl)
+        // The window draws the image the orchestrator decoded before revealing it.
+        case .image: try #require(orchestrator.preloadedImage != nil, "Media image was not preloaded")
         case .lottie: try await awaitLottieLoaded(in: window)
         default: break
         }
@@ -99,6 +91,13 @@ struct PipFixtureGoldenTests {
             )
             try TouchSynthesizer.tap(at: collapse, in: window)
             #expect(orchestrator.surface == .collapsed, "Tapping the collapse button did not collapse the PiP")
+        } else if !config.behavior.tapExpands {
+            // Authored `onTap: none`: a tap must leave the window as it is, so there is no second
+            // state to capture.
+            try FloaterTap.tapWindow(in: window)
+            try await awaitTransition(config)
+            #expect(orchestrator.surface == .collapsed, "Tapping a PiP authored onTap: none expanded it")
+            return
         } else {
             try FloaterTap.tapWindow(in: window)
             #expect(orchestrator.surface == .expanded, "Tapping the PiP did not expand it")
@@ -109,16 +108,9 @@ struct PipFixtureGoldenTests {
     }
 
     @MainActor
-    private func assertState(_ state: String, fixture: String, window: UIWindow) async throws {
-        // `WebImage` can drop the update that publishes a loaded image (it publishes inside the
-        // view update that asked for it), leaving the media black. Flipping the trait environment
-        // re-evaluates every environment-reading view, which draws the already-loaded image (as
-        // the floater suite and `ComponentTestHost.makeCanvasSlotHost` do). Before every capture,
-        // since a tap re-renders the media at its new size.
-        window.overrideUserInterfaceStyle = .dark
-        ComponentTestHost.drainRunLoop(for: 0.3)
-        window.overrideUserInterfaceStyle = .light
-        ComponentTestHost.drainRunLoop(for: 0.3)
+    private func assertState(
+        _ state: String, fixture: String, window: UIWindow
+    ) async throws {
         // The Lottie plays on wall-clock time, and every SwiftUI update re-applies its authored
         // `.playing` mode, so it is pinned after each transition, right before the capture.
         holdLottie(in: window)
@@ -175,18 +167,6 @@ struct PipFixtureGoldenTests {
             !orchestrator.awaitingMedia, "Media did not load within the orchestrator's timeout")
     }
 
-    /// Polls until `WebImage` has stored the decoded image (it does so just before publishing it),
-    /// up to 5s; the capture then waits for the frame to settle.
-    @MainActor
-    private func awaitImageLoaded(_ url: String) async throws {
-        for _ in 0..<250 where SDImageCache.shared.imageFromMemoryCache(forKey: url) == nil {
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
-        try #require(
-            SDImageCache.shared.imageFromMemoryCache(forKey: url) != nil, "Media image did not load"
-        )
-    }
-
     /// The window's `LottieView` decodes the file again on its own, after the orchestrator's
     /// preload; polls until it has an animation installed, up to 5s.
     @MainActor
@@ -234,7 +214,7 @@ struct PipFixtureGoldenTests {
             template["behavior"] = behavior
             json["templateConfig"] = template
         }
-        return try? CampaignModel.fromJson(json)
+        return try? CampaignModel.fromJson(json, designTokens: fixtureTokens(json))
     }
 
     /// A key window with the floater layer over a plain host, as `DigiaHost` stacks them.
@@ -248,8 +228,7 @@ struct PipFixtureGoldenTests {
 
         let rootVC = ComponentTestHost.makeDeviceHost(
             device: device,
-            // Not white: an expanded PiP has a white background.
-            style: .solid(UIColor(red: 0x26 / 255, green: 0xA6 / 255, blue: 0x9A / 255, alpha: 1)),
+            style: .striped,
             scrimColor: nil,
             showHomeIndicator: false
         )

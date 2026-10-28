@@ -36,7 +36,7 @@ public struct DigiaDebugSettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Campaign timeline")
                             Text("What Digia did with your campaigns, newest first.")
-                                .font(.caption)
+                                .font(digiaFont(size: 12))
                                 .foregroundColor(.secondary)
                         }
                     }
@@ -161,7 +161,7 @@ private struct LiveTestingDetailsScreen: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Device name")
                         Text(liveTest.deviceName ?? "Not set — using the device model")
-                            .font(.caption)
+                            .font(digiaFont(size: 12))
                             .foregroundColor(.secondary)
                     }
                     Spacer()
@@ -172,7 +172,7 @@ private struct LiveTestingDetailsScreen: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text("Device ID")
                 Text(liveTest.deviceId ?? "")
-                    .font(.caption)
+                    .font(digiaFont(size: 12))
                     .foregroundColor(.secondary)
                     .textSelection(.enabled)
             }
@@ -206,7 +206,7 @@ private struct DeviceNameEditor: View {
                         }
                     }
                 Text("Shown in the dashboard device list.")
-                    .font(.footnote)
+                    .font(digiaFont(size: 13))
                     .foregroundColor(.secondary)
             }
             .navigationTitle("Device name")

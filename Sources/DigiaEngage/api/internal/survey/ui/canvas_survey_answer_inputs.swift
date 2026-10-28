@@ -207,8 +207,7 @@ private struct ChoiceTile: View {
         let scaledRadius = min(max(effective.cornerRadius * scaleFactor, 0.0), 32.0)
         // Circular corners capped at half the box, as Android and Flutter draw a radio: SwiftUI's default
         // continuous corners turn a pill radius into a squircle whose stroke leaves bars at each edge.
-        let indicatorRadius = inputType == .singleSelect
-            ? scaledIndicatorSize / 2 : min(max(4.0 * scaleFactor, 2.0), 12.0)
+        let indicatorRadius = inputType == .singleSelect ? scaledIndicatorSize / 2 : min(max(4.0 * scaleFactor, 2.0), 12.0, scaledIndicatorSize / 2)
         let scaledBorderWidth = min(max(effective.borderWidth * scaleFactor, 0.5), 4.0)
         let baseFontSize = text?.typography.fontSize ?? effective.fontSize
         let scaledFontSize = min(max(baseFontSize * scaleFactor, 9.0), 28.0)
@@ -723,7 +722,8 @@ private struct NumericNpsScale: View {
             let tileSize = min(maxCellH, min(32.0 * scaleFactor, maxCellWidth))
             let scaledRadius = circular ? tileSize / 2.0 : min(max(0.0, style.cornerRadius * scaleFactor), tileSize / 2.0)
             let scaledBorderWidth = min(max(style.borderWidth * scaleFactor, 0.5), 4.0)
-            let scaledFontSize = min(max(12.0 * scaleFactor, 8.0), 24.0)
+            // The digits follow the tile too (eleven share one row), or "10" would not fit its circle.
+            let scaledFontSize = max(min(max(12.0 * scaleFactor, 8.0), 24.0, tileSize * 0.5), 6.0)
             let spacing = count > 1 ? max(minGap, (availableWidth - tileSize * CGFloat(count)) / CGFloat(count - 1)) : 0
 
             HStack(spacing: spacing) {

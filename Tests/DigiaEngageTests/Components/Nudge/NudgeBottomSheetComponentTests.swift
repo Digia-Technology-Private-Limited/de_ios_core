@@ -20,9 +20,9 @@ struct NudgeBottomSheetComponentTests {
     private func loadCompactBottomSheetFixture() throws -> [String: Any] {
         guard let fixture = FixtureLoader.loadFixture(
             campaignType: "nudge_bottomsheet",
-            fileName: "nudge-bottomsheet-compact.json"
+            fileName: "nudge_bottomsheet_compact.json"
         ) else {
-            Issue.record("Failed to load fixture for nudge_bottomsheet/nudge-bottomsheet-compact.json")
+            Issue.record("Failed to load fixture for nudge_bottomsheet/nudge_bottomsheet_compact.json")
             return [:]
         }
         return fixture
@@ -31,9 +31,9 @@ struct NudgeBottomSheetComponentTests {
     private func loadCloseButtonBottomSheetFixture() throws -> [String: Any] {
         guard let fixture = FixtureLoader.loadFixture(
             campaignType: "nudge_bottomsheet",
-            fileName: "nudge-bottomsheet-close-button.json"
+            fileName: "nudge_bottomsheet_close_button.json"
         ) else {
-            Issue.record("Failed to load fixture for nudge_bottomsheet/nudge-bottomsheet-close-button.json")
+            Issue.record("Failed to load fixture for nudge_bottomsheet/nudge_bottomsheet_close_button.json")
             return [:]
         }
         return fixture
@@ -145,7 +145,7 @@ struct NudgeBottomSheetComponentTests {
 
         let hostView = ComponentTestHost.makeRealBottomSheetHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax
+            device: .engageGolden
         )
         defer {
             ComponentTestHost.cleanupOverlayWindow(hostView)
@@ -172,8 +172,8 @@ struct NudgeBottomSheetComponentTests {
 
         let hostView = ComponentTestHost.makeRealBottomSheetHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: .engageGolden,
+            style: .striped
         )
         defer {
             ComponentTestHost.cleanupOverlayWindow(hostView)
@@ -189,7 +189,7 @@ struct NudgeBottomSheetComponentTests {
 
     @Test("matches the inset-content safe-area golden", .tags(.golden)) @MainActor
     func testNudgeBottomSheetSafeAreaInsetContentVariant() throws {
-        let fixture = try loadSafeAreaFixture(named: "nudge-bottomsheet-safe-area.json")
+        let fixture = try loadSafeAreaFixture(named: "nudge_bottomsheet_safe_area.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
               let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
               let _ = nudgeConfig.canvas else {
@@ -201,8 +201,8 @@ struct NudgeBottomSheetComponentTests {
 
         let hostView = ComponentTestHost.makeRealBottomSheetHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: .engageGolden,
+            style: .striped
         )
         defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
 
@@ -215,7 +215,7 @@ struct NudgeBottomSheetComponentTests {
 
     @Test("matches the inset-surface safe-area golden", .tags(.golden)) @MainActor
     func testNudgeBottomSheetSafeAreaInsetSurfaceVariant() throws {
-        let fixture = try loadSafeAreaFixture(named: "nudge-bottomsheet-safe-area-surface.json")
+        let fixture = try loadSafeAreaFixture(named: "nudge_bottomsheet_safe_area_surface.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
               let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
               let _ = nudgeConfig.canvas else {
@@ -227,8 +227,8 @@ struct NudgeBottomSheetComponentTests {
 
         let hostView = ComponentTestHost.makeRealBottomSheetHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: .engageGolden,
+            style: .striped
         )
         defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
 
@@ -241,7 +241,7 @@ struct NudgeBottomSheetComponentTests {
 
     @Test("matches the edge-to-edge safe-area golden", .tags(.golden)) @MainActor
     func testNudgeBottomSheetSafeAreaNoneVariant() throws {
-        let fixture = try loadSafeAreaFixture(named: "nudge-bottomsheet-safe-area-none.json")
+        let fixture = try loadSafeAreaFixture(named: "nudge_bottomsheet_safe_area_none.json")
         guard let templateConfig = fixture["templateConfig"] as? [String: Any],
               let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
               let _ = nudgeConfig.canvas else {
@@ -253,8 +253,8 @@ struct NudgeBottomSheetComponentTests {
 
         let hostView = ComponentTestHost.makeRealBottomSheetHost(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: .engageGolden,
+            style: .striped
         )
         defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
 

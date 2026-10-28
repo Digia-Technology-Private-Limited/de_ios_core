@@ -3,6 +3,7 @@ internal import Lottie
 internal import SDWebImageSVGCoder
 import Foundation
 import Combine
+import ImageIO
 import UIKit
 
 /// The SDK's one logging style — see ``DigiaLogger``.
@@ -148,6 +149,11 @@ final class FloaterOrchestrator: ObservableObject {
     @Published var activeRect: CGRect?
 
     private(set) var player: AVPlayer?
+    /// The image `preloadImage` decoded, drawn by the window on its first frame. A second
+    /// load through `WebImage` showed its black placeholder and could drop the update that
+    /// swaps the image in, leaving the window black. `nil` for every other kind, and for an
+    /// SVG or animated image, which `WebImage` still loads so it renders and animates.
+    @Published private(set) var preloadedImage: UIImage?
 
     /// `true` while another campaign or a host modal covers the window. Playback
     /// pauses (if configured) and visible-time accounting stops, but the floater is
@@ -431,16 +437,17 @@ final class FloaterOrchestrator: ObservableObject {
         // Plain URLSession, not SDWebImage's imperative loader — the latter's core
         // (non-SwiftUI) module isn't an explicit Package.swift product dependency
         // today, only SDWebImageSwiftUI is, and importing it unverified risks a
-        // build break with no way to catch it before a device build. This means the
-        // renderer's `WebImage` view re-fetches the URL instead of reading a
-        // pre-warmed SDWebImage cache — a real but minor inefficiency (one extra
-        // network round-trip), not a correctness issue, and worth revisiting once
-        // this SDK has a working local build/test loop again.
+        // build break with no way to catch it before a device build. The decoded
+        // image is kept in `preloadedImage` for the window to draw; only an SVG or
+        // animated image is fetched again by the renderer's `WebImage`.
         let task = URLSession.shared.dataTask(with: parsed) { [weak self] data, response, _ in
             let status = (response as? HTTPURLResponse)?.statusCode
             Task { @MainActor in
                 guard let self, self.state?.token == token else { return }
-                if let data, (UIImage(data: data) != nil || SDImageSVGCoder.shared.decodedImage(with: data, options: nil) != nil) {
+                if let data, let image = UIImage(data: data) {
+                    if !isAnimatedImage(data) { self.preloadedImage = image }
+                    self.markVisible(token: token)
+                } else if let data, SDImageSVGCoder.shared.decodedImage(with: data, options: nil) != nil {
                     self.markVisible(token: token)
                 } else {
                     self.abandonMedia(
@@ -678,6 +685,7 @@ final class FloaterOrchestrator: ObservableObject {
         endTimeObserverToken = nil
         player?.pause()
         player = nil
+        preloadedImage = nil
     }
 
     /// Called when the host reports a new current screen. A floater belongs to one
@@ -739,6 +747,7 @@ final class FloaterOrchestrator: ObservableObject {
         endTimeObserverToken = nil
         player?.pause()
         player = nil
+        preloadedImage = nil
         state = nil
         surface = .collapsed
         dragFraction = nil
@@ -752,4 +761,11 @@ final class FloaterOrchestrator: ObservableObject {
         completed = false
         isPlaying = false
     }
+}
+
+/// Whether `data` holds more than one frame (an animated GIF, APNG or WebP). `UIImage(data:)`
+/// keeps only the first, so such an image is left to `WebImage`, which animates it.
+private func isAnimatedImage(_ data: Data) -> Bool {
+    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return false }
+    return CGImageSourceGetCount(source) > 1
 }

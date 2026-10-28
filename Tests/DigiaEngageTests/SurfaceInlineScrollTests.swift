@@ -13,47 +13,31 @@ extension DigiaEngageTests {
     @MainActor
     @Suite("SR05 inline slot in a scrolling list", .serialized)
     struct SurfaceInlineScrollTests {
-        private var sdk: SDKInstance { SDKInstance.shared }
-        private let slotKey = "slot_feed"
+        private static let slotKey = "slot_feed"
         private let rows = 30
         private let rowHeight: CGFloat = 200
 
-        private func deliver(_ campaignKey: String) -> PresentationRecorder {
-            PresentationRecorder(
-                sdk.deliver(
-                    CEPTriggerPayload(cepCampaignId: "cep-\(campaignKey)", campaignKey: campaignKey, cepMetadata: [:])
-                )
-            )
+        private func start() async throws -> SdkHarness {
+            try await SdkHarness.start(campaigns: [
+                inlineJson("feed-a", slotKey: Self.slotKey),
+                inlineJson("feed-b", slotKey: Self.slotKey)])
         }
 
-        private func start() throws {
-            sdk.resetForTesting()
-            sdk.setCampaignsForTesting(try [
-                inlineJson("feed-a", slotKey: slotKey),
-                inlineJson("feed-b", slotKey: slotKey),
-            ].map { try #require(try CampaignModel.fromJson($0)) })
-        }
-
-        /// Tall rows, the slot, more tall rows, in a window: the slot starts far below the first screen.
-        private func showFeed() -> (UIWindow, UIHostingController<AnyView>) {
-            let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
-            let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow()
-            window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
-            let feed = ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(0..<(rows * 2 + 1), id: \.self) { i in
-                        if i == rows {
-                            DigiaSlot(slotKey)
-                        } else {
-                            Text("row \(i)").frame(height: rowHeight)
+        /// Tall rows, the slot, more tall rows: the slot starts far below the first screen.
+        private func showFeed(_ sdk: SdkHarness) throws {
+            try sdk.mount {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(0..<(rows * 2 + 1), id: \.self) { i in
+                            if i == rows {
+                                DigiaSlot(Self.slotKey)
+                            } else {
+                                Text("row \(i)").frame(height: rowHeight)
+                            }
                         }
                     }
                 }
             }
-            let host = UIHostingController(rootView: AnyView(feed))
-            window.rootViewController = host
-            window.isHidden = false
-            return (window, host)
         }
 
         private func scrollView(in view: UIView) -> UIScrollView? {
@@ -62,22 +46,21 @@ extension DigiaEngageTests {
             return nil
         }
 
-        private func scroll(_ host: UIHostingController<AnyView>, to y: CGFloat) async throws {
-            let scroll = try #require(scrollView(in: host.view))
+        private func scroll(_ sdk: SdkHarness, to y: CGFloat) async throws {
+            let window = try #require(sdk.window)
+            let scroll = try #require(scrollView(in: window))
             scroll.setContentOffset(CGPoint(x: 0, y: y), animated: false)
-            host.view.layoutIfNeeded()
-            await settle()
-        }
-
-        private func settle() async {
-            for _ in 0..<5 {
-                await Task.yield()
-                try? await Task.sleep(nanoseconds: 50_000_000)
-            }
+            window.layoutIfNeeded()
+            try await sdk.settle()
         }
 
         private func occupant() -> String? {
-            sdk.inlineController.getCampaign(slotKey)?.campaignKey
+            SDKInstance.shared.inlineController.getCampaign(Self.slotKey)?.campaignKey
+        }
+
+        private func dropReason(_ outcome: PresentationOutcome?) -> DropReason? {
+            if case .dropped(let reason, _) = outcome { return reason }
+            return nil
         }
 
         // Fails if a seen campaign stops blocking once its slot scrolls away: `hasDisplayed:
@@ -85,23 +68,24 @@ extension DigiaEngageTests {
         // screen, is what counts).
         @Test("a campaign seen, then scrolled away, keeps its slot")
         func seenThenScrolledAwayKeepsItsSlot() async throws {
-            try start()
-            let (window, host) = showFeed()
-            defer { window.isHidden = true; window.rootViewController = nil }
-            await settle()
+            let sdk = try await start()
+            defer { sdk.tearDown() }
+            try showFeed(sdk)
 
-            let first = deliver("feed-a")
-            await settle()
-            #expect(!first.displayed, "the slot is not built yet")
-            try await scroll(host, to: CGFloat(rows) * rowHeight - rowHeight)
-            #expect(first.displayed, "the first is drawn once scrolled to")
+            let first = try sdk.deliver("feed-a")
+            // The harness reports outcomes; the `.displayed` signal is read through the recorder.
+            let firstSignals = PresentationRecorder(first)
+            try await sdk.settle()
+            #expect(!firstSignals.displayed, "the slot is not built yet")
+            try await scroll(sdk, to: CGFloat(rows) * rowHeight - rowHeight)
+            #expect(firstSignals.displayed, "the first is displayed once scrolled to")
 
-            try await scroll(host, to: 0)
-            let second = deliver("feed-b")
-            await settle()
+            try await scroll(sdk, to: 0)
+            let second = try sdk.deliver("feed-b")
+            try await sdk.settle()
 
-            #expect(second.dropReason == .surfaceBusy)
-            #expect(!first.isSettled, "the first still holds the slot")
+            #expect(dropReason(sdk.outcome(of: second)) == .surfaceBusy)
+            #expect(sdk.outcome(of: first) == nil, "the first is not settled")
             #expect(occupant() == "feed-a")
         }
 
@@ -110,21 +94,23 @@ extension DigiaEngageTests {
         // a campaign".
         @Test("a campaign whose slot was never built is superseded by the next")
         func neverBuiltIsSuperseded() async throws {
-            try start()
-            let (window, host) = showFeed()
-            defer { window.isHidden = true; window.rootViewController = nil }
-            await settle()
+            let sdk = try await start()
+            defer { sdk.tearDown() }
+            try showFeed(sdk)
 
-            let first = deliver("feed-a")
-            await settle()
-            let second = deliver("feed-b")
-            await settle()
+            let first = try sdk.deliver("feed-a")
+            let firstSignals = PresentationRecorder(first)
+            try await sdk.settle()
+            #expect(!firstSignals.displayed, "the slot is not built")
+            let second = try sdk.deliver("feed-b")
+            let secondSignals = PresentationRecorder(second)
+            try await sdk.settle()
 
-            #expect(first.dropReason == .superseded)
-            #expect(!second.isSettled, "the second holds the slot")
+            #expect(dropReason(sdk.outcome(of: first)) == .superseded)
+            #expect(sdk.outcome(of: second) == nil, "the second is not settled")
             #expect(occupant() == "feed-b")
-            try await scroll(host, to: CGFloat(rows) * rowHeight - rowHeight)
-            #expect(second.displayed, "the second is drawn once scrolled to")
+            try await scroll(sdk, to: CGFloat(rows) * rowHeight - rowHeight)
+            #expect(secondSignals.displayed, "the second is displayed once scrolled to")
         }
     }
 }

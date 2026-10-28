@@ -3,7 +3,7 @@
 # Digia Engage iOS Test Runner
 #
 # Runs Swift Testing suites by tag on the pinned reference simulator
-# (iPhone 17 Pro Max) using xcodebuild's -only-testing-tags / -skip-testing-tags.
+# (iPhone 17e: 390x844 points, the screen of the Flutter and Android goldens) using xcodebuild's -only-testing-tags / -skip-testing-tags.
 # No .xctestplan is involved; tags are declared in Tests/DigiaEngageTests/TestingTags.swift.
 #
 # Usage: ./run-tests.sh [tag|all|quick] [record]
@@ -13,7 +13,10 @@
 #   record  `record`/`true`/`1` records snapshot goldens (also: RECORD_SNAPSHOTS=true)
 # Recording always fails the run by design; run again without `record` to verify.
 #
-# After the run, line coverage of Sources/ is exported as LCOV to coverage/lcov.info,
+# The package suites run first, then the suites hosted by SampleApp/ (real touches), with the same
+# tag filter; HOSTED=false skips the hosted run.
+#
+# After the run, line coverage of Sources/ from both runs is merged and exported as LCOV to coverage/lcov.info,
 # plus an HTML report at coverage/html/index.html when genhtml (brew install lcov) is present.
 #
 # Allure: every run converts the Xcode result bundle into raw results in allure-results/ (cleared first) and
@@ -70,7 +73,7 @@ else
   RECORD="false"
 fi
 
-PINNED_DEVICE_NAME="iPhone 17 Pro Max"
+PINNED_DEVICE_NAME="iPhone 17e"
 
 # 1. Resolve Pinned Simulator
 BOOTED_PINNED_ID=$(xcrun simctl list devices booted | grep "$PINNED_DEVICE_NAME" | grep -E -o '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}' | head -n 1 || true)
@@ -130,27 +133,66 @@ TEST_RUNNER_RECORD_SNAPSHOTS="$RECORD" xcodebuild test \
   -resultBundlePath "$RESULT_BUNDLE" \
   ${TAG_FLAGS[@]+"${TAG_FLAGS[@]}"} 2>&1 | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
+
+# 4b. The suites that need real touches (actions, PiP, floaters, anchorless guides) run hosted by
+#     the sample app: the package bundle has no UIApplication. Same tags, same simulator. A tag no
+#     hosted suite carries runs nothing there, which is fine. HOSTED=false skips them.
+HOSTED_DERIVED_DATA="$SCRIPT_DIR/.derivedData/hosted"
+HOSTED_RESULT_BUNDLE="$HOSTED_DERIVED_DATA/allure.xcresult"
+HOSTED_LOG="$(mktemp -t digia-hosted-tests)"
+trap 'rm -f "$LOG" "$HOSTED_LOG"' EXIT
+rm -rf "$HOSTED_RESULT_BUNDLE"
+if [[ "${HOSTED:-true}" != "false" ]]; then
+  TEST_RUNNER_RECORD_SNAPSHOTS="$RECORD" xcodebuild test \
+    -project "$SCRIPT_DIR/SampleApp/DigiaEngageSample.xcodeproj" \
+    -scheme DigiaEngageSample \
+    -destination "$DESTINATION" \
+    -derivedDataPath "$HOSTED_DERIVED_DATA" \
+    -enableCodeCoverage YES \
+    -resultBundlePath "$HOSTED_RESULT_BUNDLE" \
+    ${TAG_FLAGS[@]+"${TAG_FLAGS[@]}"} 2>&1 | tee "$HOSTED_LOG"
+  HOSTED_STATUS=${PIPESTATUS[0]}
+  # A tag that matches no hosted suite is not a failure of the hosted run.
+  if grep -qE '^◇ Test .* started|^Test Case .* started' "$HOSTED_LOG"; then
+    [[ "$HOSTED_STATUS" -ne 0 ]] && STATUS=$HOSTED_STATUS
+  fi
+fi
 set -e
 
 # 5. xcodebuild reports success when a filter matches nothing; treat that as a failure.
-if ! grep -qE '^◇ Test .* started|^Test Case .* started' "$LOG"; then
+if ! grep -qE '^◇ Test .* started|^Test Case .* started' "$LOG" "$HOSTED_LOG"; then
   echo "Error: no tests ran for '$TAG_NAME'. Is the tag applied to any suite?" >&2
   exit 1
 fi
 
 # 6. Export coverage of Sources/ as LCOV, even when tests failed, so partial runs still report.
-PROFDATA=$(find "$DERIVED_DATA/Build/ProfileData" -name Coverage.profdata -print0 2>/dev/null \
-  | xargs -0 ls -t 2>/dev/null | head -n 1 || true)
-TEST_BINARY="$DERIVED_DATA/Build/Products/Debug-iphonesimulator/DigiaEngageTests.xctest/DigiaEngageTests"
-COVERAGE_IGNORE='/(Tests|SourcePackages|\.build|\.derivedData)/'
-if [[ -n "$PROFDATA" && -f "$TEST_BINARY" ]]; then
-  mkdir -p "$COVERAGE_DIR"
-  xcrun llvm-cov export -format=lcov \
-    -instr-profile "$PROFDATA" "$TEST_BINARY" \
-    -ignore-filename-regex "$COVERAGE_IGNORE" > "$COVERAGE_DIR/lcov.info"
+#    Both runs are exported and merged: a line either covers counts as covered.
+COVERAGE_IGNORE='/(Tests|SourcePackages|\.build|\.derivedData|SampleApp)/'
+export_lcov() { # <derived data> <binary> <out>
+  local profdata
+  profdata=$(find "$1/Build/ProfileData" -name Coverage.profdata -print0 2>/dev/null \
+    | xargs -0 ls -t 2>/dev/null | head -n 1 || true)
+  [[ -n "$profdata" && -f "$2" ]] || return 1
+  xcrun llvm-cov export -format=lcov -instr-profile "$profdata" "$2" \
+    -ignore-filename-regex "$COVERAGE_IGNORE" > "$3"
+}
+mkdir -p "$COVERAGE_DIR"
+PARTS=()
+export_lcov "$DERIVED_DATA" \
+  "$DERIVED_DATA/Build/Products/Debug-iphonesimulator/DigiaEngageTests.xctest/DigiaEngageTests" \
+  "$COVERAGE_DIR/lcov.package.info" && PARTS+=("$COVERAGE_DIR/lcov.package.info")
+if grep -qE '^◇ Test .* started|^Test Case .* started' "$HOSTED_LOG" 2>/dev/null; then
+  # Debug builds keep the app's code, the SDK included, in `<App>.debug.dylib`; the executable is a stub.
+  HOSTED_APP="$HOSTED_DERIVED_DATA/Build/Products/Debug-iphonesimulator/DigiaEngageSample.app"
+  HOSTED_BINARY="$HOSTED_APP/DigiaEngageSample.debug.dylib"
+  [[ -f "$HOSTED_BINARY" ]] || HOSTED_BINARY="$HOSTED_APP/DigiaEngageSample"
+  export_lcov "$HOSTED_DERIVED_DATA" "$HOSTED_BINARY" \
+    "$COVERAGE_DIR/lcov.hosted.info" && PARTS+=("$COVERAGE_DIR/lcov.hosted.info")
+fi
+if [[ ${#PARTS[@]} -gt 0 ]]; then
+  python3 -I "$SCRIPT_DIR/Scripts/merge-lcov.py" "$COVERAGE_DIR/lcov.info" "${PARTS[@]}"
+  rm -f "${PARTS[@]}"
   echo "=================================================================="
-  xcrun llvm-cov report -instr-profile "$PROFDATA" "$TEST_BINARY" \
-    -ignore-filename-regex "$COVERAGE_IGNORE" | tail -n 1
   echo " LCOV report: $COVERAGE_DIR/lcov.info"
   if command -v genhtml >/dev/null 2>&1; then
     rm -rf "$COVERAGE_DIR/html"
@@ -165,13 +207,14 @@ else
 fi
 
 # 7. Allure: convert the result bundle, then build the report. Neither may change the exit code.
-if [[ -d "$RESULT_BUNDLE" ]]; then
+for bundle in "$RESULT_BUNDLE" "$HOSTED_RESULT_BUNDLE"; do
+  [[ -d "$bundle" ]] || continue
   if command -v python3 >/dev/null 2>&1; then
-    python3 -I "$SCRIPT_DIR/Scripts/xcresult-to-allure.py" "$RESULT_BUNDLE" "$ALLURE_RESULTS" || echo "Warning: converting the result bundle to Allure results failed." >&2
+    python3 -I "$SCRIPT_DIR/Scripts/xcresult-to-allure.py" "$bundle" "$ALLURE_RESULTS" || echo "Warning: converting the result bundle to Allure results failed." >&2
   else
     echo "Allure: python3 not found, so the result bundle was not converted." >&2
   fi
-fi
+done
 generate_allure_report || true
 
 exit "$STATUS"

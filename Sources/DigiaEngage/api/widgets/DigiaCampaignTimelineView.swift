@@ -65,18 +65,18 @@ struct DigiaCampaignTimelineView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(records.first?.campaignKey ?? "Campaign")
-                    .font(.subheadline.weight(.semibold))
+                    .font(digiaFont(size: 15, weight: 600))
                     .lineLimit(1)
                 Spacer()
                 Text(Self.clock(records.first?.timestamp ?? Date()))
-                    .font(.caption)
+                    .font(digiaFont(size: 12))
                     .foregroundColor(.secondary)
             }
             ForEach(Array(records.enumerated()), id: \.offset) { _, record in
                 HStack(alignment: .top, spacing: 10) {
                     dot(record.severity)
                     Text(Self.sentence(record))
-                        .font(.footnote)
+                        .font(digiaFont(size: 13))
                     Spacer(minLength: 0)
                 }
             }
@@ -89,10 +89,10 @@ struct DigiaCampaignTimelineView: View {
         HStack(alignment: .top, spacing: 10) {
             dot(record.severity)
             Text(Self.sentence(record))
-                .font(.footnote)
+                .font(digiaFont(size: 13))
             Spacer(minLength: 0)
             Text(Self.clock(record.timestamp))
-                .font(.caption)
+                .font(digiaFont(size: 12))
                 .foregroundColor(.secondary)
         }
     }

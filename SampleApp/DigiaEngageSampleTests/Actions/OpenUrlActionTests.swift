@@ -16,7 +16,7 @@ struct OpenUrlActionTests {
     @Test("tapping a button authored with openUrl hands that URL to iOS")
     func openUrlOpensTheAuthoredUrl() async throws {
         let sdk = try await SdkHarness.start(
-            loadCampaign("Actions/Fixtures/action_open_url.json"))
+            loadCampaign("actions/action_open_url.json"))
         defer { sdk.tearDown() }
         try sdk.mount { DigiaSlot(SdkHarness.buttonSlotKey) { EmptyView() } }
         try sdk.deliver("test_action_open_url")

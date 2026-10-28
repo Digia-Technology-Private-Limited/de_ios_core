@@ -16,7 +16,7 @@ struct OpenDeeplinkActionTests {
     @Test("tapping a button authored as a deep link hands it to iOS")
     func deepLinkOpensTheAuthoredLink() async throws {
         let sdk = try await SdkHarness.start(
-            loadCampaign("Actions/Fixtures/action_open_deeplink.json"))
+            loadCampaign("actions/action_open_deeplink.json"))
         defer { sdk.tearDown() }
         try sdk.mount { DigiaSlot(SdkHarness.buttonSlotKey) { EmptyView() } }
         try sdk.deliver("test_action_open_deeplink")

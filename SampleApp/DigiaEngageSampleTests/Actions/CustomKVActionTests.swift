@@ -14,7 +14,7 @@ struct CustomKVActionTests {
     func customKVReachesTheAppHandler() async throws {
         let received = Received()
         let sdk = try await SdkHarness.start(
-            loadCampaign("Actions/Fixtures/action_custom_kv.json"),
+            loadCampaign("actions/action_custom_kv.json"),
             actionHandlers: DigiaActionHandlers(customKV: { received.payloads.append($0) })
         )
         defer { sdk.tearDown() }

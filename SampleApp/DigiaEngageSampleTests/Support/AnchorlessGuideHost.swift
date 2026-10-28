@@ -33,7 +33,7 @@ final class StubCropProtocol: URLProtocol {
     override func stopLoading() {}
 }
 
-/// Shows an anchorless guide over a plain host screen in the sample app's own window scene, as
+/// Shows an anchorless guide over the Flutter and Android guide host screen in the sample app's own window scene, as
 /// `DigiaHost` stacks the guide layer. The package test bundle has no scene, so the guide layer
 /// there fails every anchorless step with `invalidGeometry`; this host is why these suites live here.
 @MainActor
@@ -46,18 +46,21 @@ enum AnchorlessGuideHost {
         let end: @MainActor () -> Void
     }
 
-    /// The window's safe area is the iPhone 17 Pro Max's whatever simulator runs the test: an
+    /// The window's safe area is the golden viewport's whatever simulator runs the test: an
     /// anchorless step is placed inside it, so the real insets would move the cutout between devices.
     private final class PinnedInsetsWindow: UIWindow {
-        override var safeAreaInsets: UIEdgeInsets { ViewImageConfig.iPhone17ProMax.safeArea }
+        override var safeAreaInsets: UIEdgeInsets { ViewImageConfig.engageGolden.safeArea }
     }
 
-    /// Serves [crop] for every https URL the guide asks for until `end` runs.
-    static func show(_ campaign: CampaignModel, crop: @escaping (URL) -> Data?) throws -> Showing {
+    /// Serves [crop] for every https URL the guide asks for until `end` runs. Without [anchors] the
+    /// host is the bare grey page, as the Flutter and Android anchorless-format goldens draw it.
+    static func show(
+        _ campaign: CampaignModel, anchors: Bool = true, crop: @escaping (URL) -> Data?
+    ) throws -> Showing {
         let scene = try #require(
             UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first,
             "No window scene: run in the sample app host")
-        let device = ViewImageConfig.iPhone17ProMax
+        let device = ViewImageConfig.engageGolden
         let size = device.size!
 
         StubCropProtocol.data = crop
@@ -67,10 +70,11 @@ enum AnchorlessGuideHost {
         window.frame = CGRect(origin: .zero, size: size)
         let rootVC = ComponentTestHost.makeDeviceHost(
             device: device,
-            style: .solid(UIColor(white: 0.96, alpha: 1)),
+            style: .solid(ComponentTestHost.hostPage),
             scrimColor: nil,
             showHomeIndicator: false
         )
+        if anchors { ComponentTestHost.addGuideAnchors(to: rootVC.view, safeTop: device.safeArea.top) }
         let overlayVC = UIHostingController(rootView: GuideOverlayView())
         overlayVC.view.frame = CGRect(origin: .zero, size: size)
         overlayVC.view.backgroundColor = .clear

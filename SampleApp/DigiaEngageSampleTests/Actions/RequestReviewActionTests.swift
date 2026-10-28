@@ -12,7 +12,7 @@ struct RequestReviewActionTests {
     @Test("tapping a button authored with requestReview asks iOS for the review prompt once")
     func requestReviewAsksForThePrompt() async throws {
         let sdk = try await SdkHarness.start(
-            loadCampaign("Actions/Fixtures/action_request_review.json"))
+            loadCampaign("actions/action_request_review.json"))
         defer { sdk.tearDown() }
         try sdk.mount { DigiaSlot(SdkHarness.buttonSlotKey) { EmptyView() } }
         try sdk.deliver("test_action_request_review")

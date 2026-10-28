@@ -6,34 +6,19 @@ import UIKit
 @testable import DigiaEngage
 
 extension RenderedUITests {
-/// Pixel goldens for every Test Kit nudge fixture that has no hand-written golden test.
+/// Pixel goldens for every Test Kit nudge fixture.
 ///
-/// The arguments are read from `testkit/campaigns/<campaign>/fixtures/`, so a fixture added to the
+/// The arguments are read from `sdk_testing_fixtures/campaigns/<campaign>/`, so a fixture added to the
 /// Test Kit gets a golden with no code change (record it with
 /// `RECORD_SNAPSHOTS=true ./run-tests.sh nudge`). Each fixture is decoded by `NudgeConfig.fromJson`
 /// and presented through the production `NudgeOverlayView`, like the hand-written goldens.
-/// Fixtures those tests already cover are left out so no fixture has two goldens.
+/// Fixtures the hand-written tests also cover get a golden here too, so every fixture has one under
+/// its own name for the goldens reviewer.
 @Suite("Test Kit fixture goldens", .serialized, .tags(.nudge))
 struct NudgeFixtureGoldenTests {
 
-    /// Fixtures with a golden in `NudgeBottomSheetComponentTests` / `NudgeDialogComponentTests`.
-    private static let coveredElsewhere: Set<String> = [
-        "nudge-bottomsheet-compact",
-        "nudge-bottomsheet-safe-area",
-        "nudge-bottomsheet-safe-area-surface",
-        "nudge-bottomsheet-safe-area-none",
-        "nudge-dialog",
-        "nudge-dialog-radius-0",
-        "nudge-dialog-radius-28",
-        "nudge-dialog-margin-zero",
-        "nudge-dialog-margin-large",
-        "nudge-dialog-width-narrow",
-        "nudge-dialog-width-wide",
-        "nudge-dialog-bg-dark",
-    ]
-
     private static func fixtures(_ campaignType: String) -> [String] {
-        FixtureLoader.fixtureNames(campaignType: campaignType).filter { !coveredElsewhere.contains($0) }
+        FixtureLoader.fixtureNames(campaignType: campaignType)
     }
 
     @Test("matches the bottom-sheet fixture golden", .tags(.golden), arguments: fixtures("nudge_bottomsheet"))
@@ -54,7 +39,7 @@ struct NudgeFixtureGoldenTests {
         try assertFixtureGolden(campaignType: "nudge_fullscreen", fixture: fixture, test: "testFullScreenFixtureGolden")
     }
 
-    /// Snapshot file: `__Snapshots__/NudgeFixtureGoldenTests/<test>.<fixture>.png`.
+    /// Snapshot file: `de_workspace/goldens/ios/NudgeFixtureGoldenTests/<test>.<fixture>.png`.
     @MainActor
     private func assertFixtureGolden(campaignType: String, fixture: String, test: StaticString) throws {
         let json = try #require(
@@ -62,14 +47,29 @@ struct NudgeFixtureGoldenTests {
             "Failed to load fixture \(campaignType)/\(fixture).json"
         )
         let templateConfig = try #require(json["templateConfig"] as? [String: Any], "Missing templateConfig")
-        let nudgeConfig = try #require(try NudgeConfig.fromJson(templateConfig), "Fixture must decode to a nudge")
+        let nudgeConfig = try #require(try NudgeConfig.fromJson(templateConfig, designTokens: fixtureTokens(json)), "Fixture must decode to a nudge")
 
+        // The package's test bundle has no host app, so the SDK's window lookup finds no window
+        // and reads zero insets. Pin the golden device's screen and its notch / home-indicator
+        // insets (47pt top, 34pt bottom) for the full-screen and dialog nudges, which lay out
+        // against them on a device.
+        let device = ViewImageConfig.engageGolden
+        if nudgeConfig.surface.isFullScreen || nudgeConfig.surface.displayType == .dialog {
+            let insets = device.safeArea
+            activeFloaterWindowGeometryOverride = (
+                CGRect(origin: .zero, size: device.size!),
+                EdgeInsets(top: insets.top, leading: insets.left, bottom: insets.bottom, trailing: insets.right)
+            )
+        }
         let hostView = ComponentTestHost.makeRealOverlayWindow(
             nudgeConfig: nudgeConfig,
-            device: .iPhone17ProMax,
-            style: .solid(.systemBackground)
+            device: device,
+            style: .striped
         )
-        defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
+        defer {
+            activeFloaterWindowGeometryOverride = nil
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
 
         // Every pixel must match within the perceptual tolerance: 0.999 (used by the
         // hand-written goldens) lets ~3,800 pixels differ, enough to hide a short text change.

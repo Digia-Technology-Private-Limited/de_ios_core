@@ -564,6 +564,7 @@ struct CanvasVideoRendererTests {
             as: .lines,
             named: name,
             record: isSnapshotRecordingEnabled ? .all : nil,
+            snapshotDirectory: goldenDirectory(filePath: "\(filePath)"),
             fileID: fileID,
             file: filePath,
             testName: String(describing: function).components(separatedBy: "(").first ?? "",

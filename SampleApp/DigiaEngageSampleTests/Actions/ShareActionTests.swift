@@ -11,7 +11,7 @@ struct ShareActionTests {
     @Test("tapping a button authored with share opens the share sheet with its text")
     func shareOpensTheShareSheet() async throws {
         let sdk = try await SdkHarness.start(
-            loadCampaign("Actions/Fixtures/action_share.json"))
+            loadCampaign("actions/action_share.json"))
         defer { sdk.tearDown() }
         try sdk.mount { DigiaSlot(SdkHarness.buttonSlotKey) { EmptyView() } }
         try sdk.deliver("test_action_share")
