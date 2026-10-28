@@ -101,7 +101,6 @@ struct FloaterCampaignBehaviourTests {
             cepClicks: 0, hold: .floating)
     }
 
-    // Fails today: the CTA's authored dismiss ends the PiP as user_close (Digia and CEP); performFloaterCanvasAction's LocalActionExecutor dismisses with .userClose before onFloaterActionCompleted's .ctaTaken. Flutter and Android end it as cta_taken / cta_action.
     @Test("pip: full screen CTA authored dismiss: dismissed as cta_action")
     func pipFullScreenCtaDismiss() async throws {
         let key = "test_action_hide_pip"
