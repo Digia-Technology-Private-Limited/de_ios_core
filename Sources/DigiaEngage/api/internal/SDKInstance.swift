@@ -2808,7 +2808,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .banner(let cfg):
             viewed = BannerEvent.Viewed(slotKey: cfg.slotKey, screenName: _currentScreen)
         case .story(let cfg):
-            viewed = StoriesEvent.Viewed(slotKey: cfg.slotKey, screenName: _currentScreen)
+            viewed = StoriesEvent.Viewed(
+                itemTotal: cfg.items.count, slotKey: cfg.slotKey, screenName: _currentScreen)
         case .inlineCanvas(let cfg):
             viewed = InlineCanvasEvent.Viewed(
                 slotKey: cfg.slotKey,

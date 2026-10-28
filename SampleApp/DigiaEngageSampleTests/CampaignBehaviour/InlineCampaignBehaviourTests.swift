@@ -407,7 +407,7 @@ struct InlineCampaignBehaviourTests {
         d.signals.compactMap { if case .clicked(let elementId) = $0 { elementId } else { nil } }
     }
 
-    // Fails today: Viewed carries no item_total, and the CEP's click is element story_thumbnail (expected item_total 1 and story_item_1, as on Flutter).
+    // Fails today: the CEP's click is element story_thumbnail (expected story_item_1, as on Flutter).
     @Test("story close: the viewer shows the CTA")
     func storyViewerShowsCta() async throws {
         let key = "test_inline_story_close"
