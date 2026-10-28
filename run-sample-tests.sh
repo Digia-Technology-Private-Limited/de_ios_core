@@ -6,8 +6,11 @@ set -Eeuo pipefail
 #
 #   ./run-sample-tests.sh                                run every test
 #   ./run-sample-tests.sh golden                         run only tests tagged `golden` (any tag below:
-#                                                 kind    - golden, action, widget
+#                                                 kind    - golden, action, widget, campaign_behaviour
 #                                                 surface - nudge, canvas, floater, survey, pip, guide, inline)
+#   ./run-sample-tests.sh campaign_behaviour             campaign behaviour (CampaignBehaviour/*CampaignBehaviourTests): each
+#                                                 surface's Digia /track events, read off StubBackend after the
+#                                                 flush, beside the CEP's markings; known-bug tests run and fail
 #   RECORD_SNAPSHOTS=true ./run-sample-tests.sh golden   re-record every golden baseline instead of comparing
 #                                                 (tolerance: VisualRegression/Support/GoldenHarness.swift)
 #
@@ -34,7 +37,7 @@ set -Eeuo pipefail
 
 cd "$(dirname "$0")"
 
-VALID_TAGS="golden action widget nudge canvas floater survey pip guide inline"
+VALID_TAGS="golden action widget campaign_behaviour nudge canvas floater survey pip guide inline"
 
 # One pinned device and OS: goldens are rasterised by the simulator's own pipeline. Override with
 # SIMULATOR_NAME / SIMULATOR_OS (e.g. SIMULATOR_NAME="iPhone 17 Pro Max" SIMULATOR_OS=26.5).

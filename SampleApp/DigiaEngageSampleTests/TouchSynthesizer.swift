@@ -20,13 +20,7 @@ enum TouchSynthesizer {
 
     /// Taps `point`, in `window`'s coordinates, and drains the run loop so the tap's handler runs.
     static func tap(at point: CGPoint, in window: UIWindow) throws {
-        // `UIApplication.shared` is declared non-optional but is nil without a host app; ask the
-        // runtime so that case fails loudly instead of messaging nil.
-        guard let application = (UIApplication.self as AnyObject)
-            .perform(NSSelectorFromString("sharedApplication"))?.takeUnretainedValue() as? UIApplication
-        else {
-            throw Unavailable(description: "No UIApplication: the test bundle needs a host app")
-        }
+        let application = try sharedApplication()
         let hid = try HIDEvents()
         let contextID = try call(window, "_contextId") as UInt32
         // The digitizer reports screen points.
@@ -37,6 +31,39 @@ enum TouchSynthesizer {
         drainRunLoop(for: 0.05)
         try enqueue(hid.handEvent(at: location, touching: false, contextID: contextID), into: application, hid: hid)
         drainRunLoop(for: 0.15)
+    }
+
+    /// Drags one finger from `start` to `end`, in `window`'s coordinates, over `duration`: down, a run of
+    /// moves, then up, as the touchscreen reports a swipe. Scroll views and SwiftUI drag gestures see it.
+    static func drag(from start: CGPoint, to end: CGPoint, in window: UIWindow, duration: TimeInterval = 0.25) throws {
+        let application = try sharedApplication()
+        let hid = try HIDEvents()
+        let contextID = try call(window, "_contextId") as UInt32
+        let from = window.convert(start, to: nil)
+        let to = window.convert(end, to: nil)
+        let steps = 12
+
+        try enqueue(hid.handEvent(at: from, touching: true, contextID: contextID), into: application, hid: hid)
+        for step in 1...steps {
+            drainRunLoop(for: duration / Double(steps))
+            let t = CGFloat(step) / CGFloat(steps)
+            let point = CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
+            try enqueue(
+                hid.handEvent(at: point, touching: true, contextID: contextID, moved: true), into: application, hid: hid)
+        }
+        try enqueue(hid.handEvent(at: to, touching: false, contextID: contextID), into: application, hid: hid)
+        drainRunLoop(for: 0.15)
+    }
+
+    private static func sharedApplication() throws -> UIApplication {
+        // `UIApplication.shared` is declared non-optional but is nil without a host app; ask the
+        // runtime so that case fails loudly instead of messaging nil.
+        guard let application = (UIApplication.self as AnyObject)
+            .perform(NSSelectorFromString("sharedApplication"))?.takeUnretainedValue() as? UIApplication
+        else {
+            throw Unavailable(description: "No UIApplication: the test bundle needs a host app")
+        }
+        return application
     }
 
     private static func enqueue(_ event: UnsafeMutableRawPointer, into application: UIApplication, hid: HIDEvents) throws {
@@ -93,6 +120,7 @@ private struct HIDEvents {
     private static let transducerHand: UInt32 = 3
     private static let eventRange: UInt32 = 1
     private static let eventTouch: UInt32 = 2
+    private static let eventPosition: UInt32 = 4
     private static let fieldBuiltIn: UInt32 = 4
     /// `kIOHIDEventFieldDigitizerIsDisplayIntegrated`: digitizer field base (type 11 << 16) + 25.
     private static let fieldDisplayIntegrated: UInt32 = (11 << 16) + 25
@@ -128,13 +156,15 @@ private struct HIDEvents {
         cfRelease = try symbol(iokit, "CFRelease", as: Release.self)
     }
 
-    /// A +1 hand event with one finger at `location` (screen points), down or lifting; balance it
-    /// with `release`.
-    func handEvent(at location: CGPoint, touching: Bool, contextID: UInt32) throws -> UnsafeMutableRawPointer {
+    /// A +1 hand event with one finger at `location` (screen points), down, lifting, or `moved` while down;
+    /// balance it with `release`.
+    func handEvent(
+        at location: CGPoint, touching: Bool, contextID: UInt32, moved: Bool = false
+    ) throws -> UnsafeMutableRawPointer {
         let time = mach_absolute_time()
         let down: UInt8 = touching ? 1 : 0
-        // Range and touch both change on a tap's down and its up.
-        let changed = Self.eventRange | Self.eventTouch
+        // Range and touch both change on a tap's down and its up; only the position on a move.
+        let changed = moved ? Self.eventPosition : Self.eventRange | Self.eventTouch
         guard
             let hand = createDigitizerEvent(
                 nil, time, Self.transducerHand, 0, 0, changed, 0, 0, 0, 0, 0, 0, down, down, 0)

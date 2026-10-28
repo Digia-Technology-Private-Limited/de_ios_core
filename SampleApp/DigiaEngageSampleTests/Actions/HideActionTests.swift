@@ -75,12 +75,6 @@ struct HideActionTests {
     /// The `action_hide_pip`: `pip_expanded_canvas_cta` opened full screen, with its CTA
     /// (`pip_cta_button`) authored `Action.dismiss`. The PiP shows only once its image has loaded,
     /// and that image is the Test Kit's.
-    ///
-    /// Known gap, not a test problem: `FloaterSessionView` only mounts the expanded canvas when the
-    /// surface *changes* to expanded, so a PiP authored `initialState: expanded` shows its chrome
-    /// and image but never its canvas — the CTA is not there to tap. The PiP is delivered, its media
-    /// is ready and its surface is expanded; only the content is missing. This test marks that with
-    /// `withKnownIssue`, so it fails the day the content mounts, as the cue to drop the wrapper.
     @Test("tapping a CTA authored with dismiss closes the PiP",
           .enabled(if: testkitAvailable, testkitSkipReason))
     func dismissClosesThePip() async throws {
@@ -89,17 +83,15 @@ struct HideActionTests {
         try sdk.mount { Text("App home") }
         try sdk.deliver("test_action_hide_pip")
 
-        try await withKnownIssue("iOS never mounts a PiP's expanded canvas when it starts expanded") {
-            try await sdk.waitUntil("the PiP is on screen", timeout: 3) {
-                sdk.isShowing("Limited Time Health Drop")
-            }
-
-            try await sdk.tap(id: "pip_cta_button")
-
-            try await sdk.waitUntil("the PiP is gone") { !sdk.isShowing("Limited Time Health Drop") }
-            #expect(SDKInstance.shared.floaterOrchestrator.state == nil)
-            #expect(sdk.isShowing("App home"))
+        try await sdk.waitUntil("the PiP is on screen", timeout: 3) {
+            sdk.isShowing("Limited Time Health Drop")
         }
+
+        try await sdk.tap(id: "pip_cta_button")
+
+        try await sdk.waitUntil("the PiP is gone") { !sdk.isShowing("Limited Time Health Drop") }
+        #expect(SDKInstance.shared.floaterOrchestrator.state == nil)
+        #expect(sdk.isShowing("App home"))
     }
 
     /// The `action_hide_floater_story`: `floater_story_window` with a story page whose CTA

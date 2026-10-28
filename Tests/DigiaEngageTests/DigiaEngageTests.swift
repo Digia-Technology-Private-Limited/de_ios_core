@@ -911,14 +911,14 @@ struct DigiaEngageTests {
         SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: "secondary", isPrimary: false)
         #expect(recorder.signals.isEmpty)
 
-        SDKInstance.shared.reportClassicStoryOpened(payload)
+        SDKInstance.shared.reportClassicStoryOpened(payload, index: 0)
         SDKInstance.shared.reportClassicCarouselContainerClicked(payload)
         SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: "primary", isPrimary: true)
         // A click promotes a presentation that never reported an impression, so
         // G3's "displayed first" holds for the plugin either way.
         #expect(recorder.displayed)
         #expect(recorder.clickedElementIds == [
-            "story_thumbnail", "carousel_container", "primary",
+            "story_item_1", "carousel_container", "primary",
         ])
     }
 

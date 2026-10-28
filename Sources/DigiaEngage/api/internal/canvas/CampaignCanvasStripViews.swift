@@ -574,6 +574,10 @@ struct CanvasStoryRailRenderer: View {
                         cardSpacing: cardSpacing,
                         overlayOpen: openIndex != nil
                     ) { index in
+                        // Reported at the tap, not in the viewer's onAppear: the viewer's own onAppear
+                        // reports its first page, and a child appears before its parent, so the page's
+                        // Step Viewed went out ahead of the open (F13).
+                        reportInteraction(.storyOpened(index: index, total: pages.count))
                         openIndex = index
                     }
                 }
@@ -594,11 +598,6 @@ struct CanvasStoryRailRenderer: View {
                     safeAreaInsets: activeFloaterWindowSafeAreaInsets
                 )
                 .ignoresSafeArea()
-                .onAppear {
-                    reportInteraction(
-                        .storyOpened(index: openIndex ?? 0, total: pages.count)
-                    )
-                }
             }
         )
     }

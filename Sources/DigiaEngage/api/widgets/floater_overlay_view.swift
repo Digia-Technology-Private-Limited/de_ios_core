@@ -398,6 +398,10 @@ private struct FloaterSessionView: View {
             }
         }
         .onAppear {
+            // A `startExpanded` showing is already expanded when this view is created, so
+            // `.onChange(of: orchestrator.surface)` never fires for it and its canvas would
+            // never mount. There is no grow transition to wait for: show it from the first frame.
+            if expanded { expandedContentVisible = true }
             runEntryAnimation()
             // The impression is the first drawn frame, not the media load (SR62).
             orchestrator.markDrawn(token: state.token)
@@ -881,8 +885,12 @@ private func performFloaterCanvasAction(
         await SDKInstance.shared.executeActionFlow(
             request.actions, variables: state.variableContext,
             campaignKey: state.payload.campaignKey,
+            // A dismiss authored on a CTA is the CTA taken, not the user closing it (the
+            // window's × stays .userClose), as on Android and Flutter. It ends the showing
+            // here, at its place in the flow; the call after the flow then finds it closing
+            // and does nothing, and still ends a CTA that has no dismiss.
             localActionExecutor: LocalActionExecutor(dismiss: {
-                SDKInstance.shared.dismissFloater(.userClose)
+                SDKInstance.shared.onFloaterActionCompleted()
             })
         )
         SDKInstance.shared.onFloaterActionCompleted()
