@@ -152,7 +152,6 @@ struct NudgeCampaignBehaviourTests {
         expectChain(await sdk.sent(key), d, names: shownThenClosed, reason: .screenExit)
     }
 
-    // Fails today: the dialog closes and the CEP gets dismissed(cancelled), but no Digia Dismissed is sent; dismissSurfaces(for:) calls controller.dismissNudge(), not markNudgeDismissed
     @Test("CEP cancel while showing: dismissed as cancelled")
     func cepCancelWhileShowing() async throws {
         let sdk = try await start([fixture("nudge_dialog")])

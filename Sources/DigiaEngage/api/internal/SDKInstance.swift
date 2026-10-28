@@ -916,7 +916,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             activeExternalGuide = nil
         }
         if owns(controller.activeNudge?.payload) {
-            controller.dismissNudge()
+            // A CEP cancel of a nudge on screen ends it like any close: Digia gets its Dismissed(cancelled),
+            // and the CEP the same outcome. A watchdog's teardown reaches here already settled, unseen, and
+            // stays silent.
+            if coordinator.ownerOf(payload)?.state == .displaying {
+                markNudgeDismissed(reason: .cancelled)
+            } else {
+                controller.dismissNudge()
+            }
         }
         if owns(surveyOrchestrator.state?.payload) {
             surveyOrchestrator.dismiss()
