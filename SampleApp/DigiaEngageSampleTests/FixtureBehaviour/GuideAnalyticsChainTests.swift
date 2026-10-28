@@ -161,7 +161,6 @@ struct GuideAnalyticsChainTests {
         #expect(steps(events, Chain.stepDismissed) == [2])
     }
 
-    // Fails today: a guide with no targetScreenNames stays up on a screen change and sends nothing; Flutter ends it with Step Dismissed + Dismissed(screen_exit).
     @Test("leaving its screen: dismissed as screen_exit")
     func leavingItsScreen() async throws {
         let key = "test_guide_tooltip_walkthrough"

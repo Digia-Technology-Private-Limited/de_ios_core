@@ -1189,31 +1189,27 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     message: "screen changed before the Guide was shown"
                 )
                 dismissGuide(reason: .screenExit)
-            } else {
-                dismissForScreenChangeIfNeeded(
-                    campaignKey: guide.campaign.campaignKey,
-                    campaignType: "guide",
-                    campaign: guide.campaign,
-                    dismiss: {
-                        self.liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
-                            DropReason.screenNotTargeted,
-                            message: "screen changed before the Guide was shown"
-                        )
-                        self.dismissGuide(reason: .screenExit)
-                    }
+            } else if guide.steps.first?.target.anchorlessTarget == nil {
+                // An anchored guide ends on any screen change, whatever its targetScreenNames, as on
+                // Flutter: its steps point at views on the screen it opened on. An empty allowlist means
+                // "every screen" for a nudge, and read that way it kept a guide up over a screen it no
+                // longer belonged to.
+                log.d("Dismissed — screen changed (type=guide, currentScreen=\(_currentScreen ?? "<unset>"))",
+                      campaign: guide.campaign.campaignKey)
+                liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
+                    DropReason.screenNotTargeted,
+                    message: "screen changed before the Guide was shown"
                 )
+                dismissGuide(reason: .screenExit)
             }
         }
 
         if let guide = activeExternalGuide {
-            dismissForScreenChangeIfNeeded(
-                campaignKey: guide.campaign.campaignKey,
-                campaignType: "guide",
-                campaign: guide.campaign
-            ) {
-                activeExternalGuide = nil
-                events.toCep(.dismissed(reason: .screenExit), payload: guide.payload)
-            }
+            // Same rule for a guide the host renders itself.
+            log.d("Dismissed — screen changed (type=guide, currentScreen=\(_currentScreen ?? "<unset>"))",
+                  campaign: guide.campaign.campaignKey)
+            activeExternalGuide = nil
+            events.toCep(.dismissed(reason: .screenExit), payload: guide.payload)
         }
 
         // Floater and Floater Story orchestrators evaluate screen changes against their
