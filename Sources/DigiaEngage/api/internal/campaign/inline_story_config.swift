@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 // Ported from Android `InlineStoryConfig.kt`.
 
@@ -32,7 +33,7 @@ struct StoryItemConfig: Equatable {
     var actions: [EngageAction] = []
 
     static func fromJson(_ json: [String: Any]) -> StoryItemConfig? {
-        guard let url = json.nonBlankString("url") else { return nil }
+        guard let url = storyLiteral(json["url"]) as? String, !url.isEmpty else { return nil }
         let ctaActionJson = json.object("ctaAction")
         let actions = ctaActionJson?["steps"] != nil
             ? EngageActionParser().parse(ctaActionJson)
@@ -57,7 +58,7 @@ struct StoryItemConfig: Equatable {
                 json.string("thumbnailBoxFit", default: "cover"),
                 mediaType: mediaType
             ),
-            ctaEnabled: json.bool("ctaEnabled", default: false),
+            ctaEnabled: storyBool(json["ctaEnabled"], default: false),
             ctaText: json.nonBlankString("ctaText"),
             ctaFontWeight: DigiaFontWeight.value(json["ctaFontWeight"], default: 600),
             ctaTextColor: json.nonBlankString("ctaTextColor") ?? "#FFFFFF",
@@ -78,6 +79,25 @@ struct StoryItemConfig: Equatable {
         case "openUrl": [url.map { .openUrl($0) }, .dismiss].compactMap { $0 }
         default: [.dismiss]
         }
+    }
+}
+
+/// Unwraps the dashboard's `{ "value": … }` property envelope.
+private func storyLiteral(_ raw: Any?) -> Any? {
+    if let map = raw as? [String: Any], let value = map["value"] { return storyLiteral(value) }
+    return raw
+}
+
+private func storyBool(_ raw: Any?, default fallback: Bool) -> Bool {
+    switch storyLiteral(raw) {
+    case let value as Bool: return value
+    case let value as String:
+        switch value.lowercased() {
+        case "true": return true
+        case "false": return false
+        default: return fallback
+        }
+    default: return fallback
     }
 }
 
@@ -189,6 +209,41 @@ struct StoryCardConfig: Equatable {
     }
 }
 
+/// The campaign-level image that opens the story viewer at its first item.
+struct StoryPreviewImageConfig: Equatable {
+    let url: String
+    var boxFit: StoryMediaFit = .cover
+    var aspectRatio: Double = 0
+    var height: Double = 200
+    var cornerRadius: Double = 0
+    var padding: UIEdgeInsets = .zero
+
+    static func fromJson(_ json: [String: Any]?) -> StoryPreviewImageConfig? {
+        guard let json,
+              let url = storyLiteral(json["url"]) as? String,
+              !url.trimmingCharacters(in: .whitespaces).isEmpty
+        else { return nil }
+        func positive(_ key: String, _ fallback: Double, in map: [String: Any] = json) -> Double {
+            let value = map.double(key, default: fallback)
+            return value.isFinite && value > 0 ? value : fallback
+        }
+        let edges = json.object("padding") ?? [:]
+        return StoryPreviewImageConfig(
+            url: url,
+            boxFit: StoryMediaFit.fromWireValue(json.string("boxFit", default: "cover"), mediaType: .image),
+            aspectRatio: positive("aspectRatio", 0),
+            height: positive("height", 200),
+            cornerRadius: positive("cornerRadius", 0),
+            padding: UIEdgeInsets(
+                top: positive("top", 0, in: edges),
+                left: positive("left", 0, in: edges),
+                bottom: positive("bottom", 0, in: edges),
+                right: positive("right", 0, in: edges)
+            )
+        )
+    }
+}
+
 struct StoryIndicatorDisplayConfig: Equatable {
     var activeColor: String = "#FFFFFF"
     var disabledColor: String = "#555555"
@@ -237,6 +292,8 @@ struct InlineStoryConfig: Equatable {
     var restartOnCompleted: Bool = false
     var startMuted: Bool = false
     var card: StoryCardConfig = StoryCardConfig()
+    /// Set only for `previewMode: "singleImage"` with a usable `previewImage`; otherwise the strip.
+    var previewImage: StoryPreviewImageConfig?
     var indicator: StoryIndicatorDisplayConfig = StoryIndicatorDisplayConfig()
     var closeButton: StoryOverlayButtonConfig = StoryOverlayButtonConfig()
     var muteButton: StoryOverlayButtonConfig = StoryOverlayButtonConfig()
@@ -257,6 +314,9 @@ struct InlineStoryConfig: Equatable {
             restartOnCompleted: json.bool("restartOnCompleted", default: false),
             startMuted: json.bool("startMuted", default: false),
             card: StoryCardConfig.fromJson(json.object("card")),
+            previewImage: json.string("previewMode", default: "") == "singleImage"
+                ? StoryPreviewImageConfig.fromJson(json.object("previewImage"))
+                : nil,
             indicator: StoryIndicatorDisplayConfig.fromJson(json.object("indicator")),
             closeButton: StoryOverlayButtonConfig.fromJson(json.object("closeButton")),
             muteButton: StoryOverlayButtonConfig.fromJson(json.object("muteButton")),

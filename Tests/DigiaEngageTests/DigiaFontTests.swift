@@ -24,6 +24,20 @@ struct DigiaFontTests {
         #expect(bold.fontName == "AvenirNext-Bold")
     }
 
+    @Test("nearest weight follows CSS font matching")
+    func nearestWeightFollowsCssMatching() {
+        let all = [100, 200, 300, 400, 500, 600, 700, 800, 900]
+        #expect(DigiaFont.nearestWeight(to: 600, in: all) == 600)
+        #expect(DigiaFont.nearestWeight(to: 400, in: [300, 600, 700]) == 300)
+        #expect(DigiaFont.nearestWeight(to: 400, in: [300, 500]) == 500)
+        #expect(DigiaFont.nearestWeight(to: 500, in: [300, 400]) == 400)
+        #expect(DigiaFont.nearestWeight(to: 300, in: [200, 400]) == 200)
+        #expect(DigiaFont.nearestWeight(to: 300, in: [400, 700]) == 400)
+        #expect(DigiaFont.nearestWeight(to: 600, in: [400, 700]) == 700)
+        #expect(DigiaFont.nearestWeight(to: 800, in: [400, 700]) == 700)
+        #expect(DigiaFont.nearestWeight(to: 400, in: []) == nil)
+    }
+
     @Test("dashboard weights support the full numeric range")
     func dashboardWeightsSupportFullRange() {
         #expect(DigiaFontWeight.value("100") == 100)

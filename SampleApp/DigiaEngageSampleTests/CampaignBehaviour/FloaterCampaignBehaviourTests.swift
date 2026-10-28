@@ -24,7 +24,7 @@ struct FloaterCampaignBehaviourTests {
     /// Waits for the floater's impression: a PiP shows only once its media has loaded.
     private func show(_ sdk: SdkHarness, _ d: Delivery) async throws {
         try await sdk.waitUntil("the floater's impression", timeout: 5) { d.displayed }
-        await sdk.settle(1)
+        try await sdk.settle(1)
     }
 
     /// A real touch on the button nearest `corner` of the area the floater's buttons span.
@@ -39,7 +39,7 @@ struct FloaterCampaignBehaviourTests {
                 hypot($0.midX - target.x, $0.midY - target.y) < hypot($1.midX - target.x, $1.midY - target.y)
             })
         try await sdk.touch(window.convert(CGPoint(x: frame.midX, y: frame.midY), from: window.screen.coordinateSpace))
-        await sdk.settle(1)
+        try await sdk.settle(1)
     }
 
     // MARK: - PiP
@@ -130,7 +130,7 @@ struct FloaterCampaignBehaviourTests {
         try await show(sdk, d)
 
         Digia.setCurrentScreen(name: "search")
-        await sdk.settle()
+        try await sdk.settle()
 
         expectChain(
             await sdk.sent(key), d, names: [Chain.triggered, Chain.viewed, Chain.dismissed], reason: .screenExit,
@@ -144,7 +144,7 @@ struct FloaterCampaignBehaviourTests {
         defer { sdk.tearDown() }
         Digia.setCurrentScreen(name: "search")
         let d = try sdk.deliverChain(key)
-        await sdk.settle(1.5)
+        try await sdk.settle(1.5)
 
         expectDropped(await sdk.sent(key), d, .screenNotTargeted)
     }
@@ -201,7 +201,7 @@ struct FloaterCampaignBehaviourTests {
         try FloaterTap.tapWindow(in: try #require(sdk.window))
         try await sdk.waitUntil("the story is open") { sdk.isShowing("Weekend Health Drop") }
         // The story grows out of its window; let the expand finish before it takes touches.
-        await sdk.settle(1.5)
+        try await sdk.settle(1.5)
         try await sdk.tap(id: "story_hide_button")  // "No Thanks"
         try await sdk.waitUntil("the story is gone") { !sdk.isShowing("Weekend Health Drop") }
 
@@ -224,7 +224,7 @@ struct FloaterCampaignBehaviourTests {
         try await show(sdk, d)
 
         Digia.setCurrentScreen(name: "search")
-        await sdk.settle()
+        try await sdk.settle()
         #expect(SDKInstance.shared.floaterStoryOrchestrator.state == nil)
 
         expectChain(

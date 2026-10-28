@@ -19,6 +19,9 @@ extension Tag {
     @Tag static var golden: Self
     /// Several real collaborators wired together (SDK init, network + storage, CEP delivery).
     @Tag static var integration: Self
+    /// A shared fixture from `sdk_testing_fixtures/` driven through the real SDK (`SdkHarness`):
+    /// the ports of `flutter/core/test/fixture_behaviour/`. Also tagged `integration`.
+    @Tag static var behaviour: Self
 
     // MARK: - Gate: when it runs (optional)
 

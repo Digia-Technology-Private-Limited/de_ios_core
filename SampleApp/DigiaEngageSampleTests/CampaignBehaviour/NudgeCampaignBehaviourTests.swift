@@ -85,7 +85,7 @@ struct NudgeCampaignBehaviourTests {
         defer { sdk.tearDown() }
         let d = try sdk.deliverChain("test_nudge_dialog_backdrop_on")
         try await show(sdk, "Backdrop Tap Dialog")
-        await sdk.settle(0.4)
+        try await sdk.settle(0.4)
 
         // The scrim, well clear of the centred card.
         try await sdk.touch(CGPoint(x: 24, y: 140))
@@ -193,7 +193,7 @@ struct NudgeCampaignBehaviourTests {
         let d = try sdk.deliverChain(backdropOffKey)
         try await show(sdk, backdropOffTitle)
         // Past the sheet's presentation, so a position read now is where it rests.
-        await sdk.settle(1)
+        try await sdk.settle(1)
         return (sdk, d)
     }
 
@@ -270,7 +270,7 @@ struct NudgeCampaignBehaviourTests {
         defer { sdk.tearDown() }
         Digia.setCurrentScreen(name: "search")
         let d = try sdk.deliverChain(key)
-        await sdk.settle()
+        try await sdk.settle()
         #expect(!sdk.isShowing("Dialog Screen Change Home Only"))
 
         expectDropped(await sdk.sent(key), d, .screenNotTargeted)
@@ -289,7 +289,7 @@ struct NudgeCampaignBehaviourTests {
         try await sdk.waitUntil("the dialog is gone") { !sdk.isShowing("Dialog Test Nudge") }
 
         let second = try sdk.deliverChain("test_nudge_dialog")
-        await sdk.settle()
+        try await sdk.settle()
         #expect(!sdk.isShowing("Dialog Test Nudge"))
 
         let events = await sdk.sent("test_nudge_dialog")
@@ -311,7 +311,7 @@ struct NudgeCampaignBehaviourTests {
         try await show(sdk, "Dialog Test Nudge")
 
         let blocked = try sdk.deliverChain("test_nudge_dialog_backdrop_on")
-        await sdk.settle()
+        try await sdk.settle()
         #expect(sdk.isShowing("Dialog Test Nudge"))
 
         let events = await sdk.sent("test_nudge_dialog_backdrop_on")
@@ -328,7 +328,7 @@ struct NudgeCampaignBehaviourTests {
         defer { sdk.tearDown() }
         let d = try sdk.deliverChain("test_nudge_dialog")
         d.presentation.cancel()
-        await sdk.settle()
+        try await sdk.settle()
         #expect(!sdk.isShowing("Dialog Test Nudge"))
 
         expectDropped(await sdk.sent("test_nudge_dialog"), d, .cancelled)
@@ -342,7 +342,7 @@ struct NudgeCampaignBehaviourTests {
         let sdk = try await start([WorkspaceFixtures.Campaign(name: base.name, json: json)])
         defer { sdk.tearDown() }
         let d = try sdk.deliverChain("test_nudge_dialog")
-        await sdk.settle()
+        try await sdk.settle()
 
         expectDropped(await sdk.sent("test_nudge_dialog"), d, .unknownCampaignKey, sendsEvents: false)
     }
@@ -352,7 +352,7 @@ struct NudgeCampaignBehaviourTests {
         let sdk = try await start([fixture("nudge_dialog")])
         defer { sdk.tearDown() }
         let d = try sdk.deliverChain("test_no_such_campaign")
-        await sdk.settle()
+        try await sdk.settle()
 
         expectDropped(await sdk.sent("test_no_such_campaign"), d, .unknownCampaignKey, sendsEvents: false)
     }

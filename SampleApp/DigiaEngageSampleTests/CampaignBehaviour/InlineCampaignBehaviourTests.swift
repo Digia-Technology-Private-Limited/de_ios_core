@@ -42,7 +42,7 @@ struct InlineCampaignBehaviourTests {
 
     private func show(_ sdk: SdkHarness, _ d: Delivery) async throws {
         try await sdk.waitUntil("the inline impression", timeout: 5) { d.displayed }
-        await sdk.settle(0.5)
+        try await sdk.settle(0.5)
     }
 
     /// A point `dy` below the top of the slot, `dx` from its leading edge: the slot sits at the top of the
@@ -61,9 +61,9 @@ struct InlineCampaignBehaviourTests {
         try await show(sdk, d)
 
         try await sdk.tap(id: "canvas_button")  // "Explore Deals"
-        await sdk.settle(0.5)
+        try await sdk.settle(0.5)
         try await sdk.tap(id: "canvas_button")
-        await sdk.settle(0.5)
+        try await sdk.settle(0.5)
 
         let events = await sdk.sent(key)
         expectInlineChain(events, d, names: [Chain.triggered, Chain.viewed, Chain.clicked, Chain.clicked])
@@ -79,9 +79,9 @@ struct InlineCampaignBehaviourTests {
         try await show(sdk, d)
 
         try await sdk.tap(id: "canvas_button")
-        await sdk.settle(0.5)
+        try await sdk.settle(0.5)
         try await sdk.tap(id: "canvas_button")
-        await sdk.settle(0.5)
+        try await sdk.settle(0.5)
 
         let events = await sdk.sent(key)
         expectInlineChain(
@@ -116,7 +116,7 @@ struct InlineCampaignBehaviourTests {
         try await show(sdk, incumbent)
 
         let blocked = try sdk.deliverChain("test_inline_canvas_second")
-        await sdk.settle(1)
+        try await sdk.settle(1)
 
         let events = await sdk.sent("test_inline_canvas_second")
         expectDropped(events, blocked, .surfaceBusy)
@@ -137,9 +137,9 @@ struct InlineCampaignBehaviourTests {
         // The current slide, in the middle of the slot.
         let window = try #require(sdk.window)
         try await sdk.touch(try slotPoint(sdk, dx: window.bounds.midX, dy: 60))
-        await sdk.settle(1)
+        try await sdk.settle(1)
         try await sdk.touch(try slotPoint(sdk, dx: window.bounds.midX, dy: 60))
-        await sdk.settle(1)
+        try await sdk.settle(1)
 
         // Item taps stay Digia only; only a container tap reaches the CEP.
         expectInlineChain(
@@ -333,7 +333,7 @@ struct InlineCampaignBehaviourTests {
         try await show(sdk, d)
 
         try await sdk.tap(id: id)
-        await sdk.settle(0.5)
+        try await sdk.settle(0.5)
         #expect(sdk.platform.opened == [url], sourceLocation: sourceLocation)
 
         let events = await sdk.sent(key)
@@ -385,7 +385,7 @@ struct InlineCampaignBehaviourTests {
     private func openStory(_ sdk: SdkHarness) async throws {
         try await sdk.touch(try slotPoint(sdk, dx: 40, dy: 40))
         try await sdk.waitUntil("the story viewer is open", timeout: 5) { sdk.isShowing("Dismissable Offer") }
-        await sdk.settle(0.5)
+        try await sdk.settle(0.5)
     }
 
     private func swipeStoryDown(_ sdk: SdkHarness) async throws {

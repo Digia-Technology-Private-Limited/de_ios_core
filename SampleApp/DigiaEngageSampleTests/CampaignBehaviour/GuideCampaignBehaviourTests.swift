@@ -25,7 +25,7 @@ struct GuideCampaignBehaviourTests {
 
     private func show(_ sdk: SdkHarness, _ text: String) async throws {
         try await sdk.waitUntil("\"\(text)\" on screen") { sdk.isShowing(text) }
-        await sdk.settle(0.4)
+        try await sdk.settle(0.4)
     }
 
     /// The scrim below the host's anchors, clear of every tooltip.
@@ -171,7 +171,7 @@ struct GuideCampaignBehaviourTests {
         try await show(sdk, "Quick Search")
 
         Digia.setCurrentScreen(name: "search")
-        await sdk.settle()
+        try await sdk.settle()
         #expect(!sdk.isShowing("Quick Search"))
 
         expectChain(
@@ -283,7 +283,7 @@ struct GuideCampaignBehaviourTests {
         defer { sdk.tearDown() }
         let d = try sdk.deliverChain(key)
         // The guide waits two seconds for its anchor before giving up.
-        await sdk.settle(3)
+        try await sdk.settle(3)
 
         expectDropped(await sdk.sent(key), d, .anchorNotRegistered)
     }
@@ -299,7 +299,7 @@ struct GuideCampaignBehaviourTests {
         try await show(sdk, "Dialog Test Nudge")
 
         let d = try sdk.deliverChain(key)
-        await sdk.settle()
+        try await sdk.settle()
         #expect(!sdk.isShowing("Quick Search Callout"))
 
         expectDropped(await sdk.sent(key), d, .surfaceBusy)

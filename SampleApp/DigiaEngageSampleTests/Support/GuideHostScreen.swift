@@ -1,7 +1,7 @@
 import SwiftUI
 @testable import DigiaEngage
 
-/// A host screen carrying the anchors the `guide-spotlight-journey` steps point at, so
+/// A host screen carrying the anchors the `guide_spotlight_journey` steps point at, so
 /// each step has something on screen to highlight.
 struct GuideHostScreen: View {
     var body: some View {

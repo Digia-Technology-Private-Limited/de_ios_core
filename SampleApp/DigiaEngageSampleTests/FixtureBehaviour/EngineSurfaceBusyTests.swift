@@ -8,7 +8,7 @@ import UIKit
 /// A nudge on screen owns the surface: the next nudge is turned away, not stacked on top and not swapped in.
 /// Fixtures: `engine_surface_busy_first` / `engine_surface_busy_second`.
 @MainActor
-@Suite("engine surface busy", .serialized)
+@Suite("engine surface busy", .serialized, .tags(.integration, .behaviour, .surface))
 struct EngineSurfaceBusyTests {
     private let first = WorkspaceFixtures.campaign("campaigns/engine/engine_surface_busy_first.json")
     private let second = WorkspaceFixtures.campaign("campaigns/engine/engine_surface_busy_second.json")
@@ -19,11 +19,11 @@ struct EngineSurfaceBusyTests {
         let sdk = try await SdkHarness.start([first, second]) { Color.clear }
         defer { sdk.tearDown() }
         sdk.cep.deliver(first.campaignKey)
-        await sdk.settle()
+        try try await sdk.settle(1)
         #expect(UIProbe.texts(in: sdk.window).contains("First Nudge Holds The Surface"))
 
         let turnedAway = try #require(sdk.cep.deliver(second.campaignKey))
-        await sdk.settle()
+        try try await sdk.settle(1)
 
         // A peek, not an await: a nudge that is shown never settles, and the test must fail, not wait.
         guard case .dropped(let reason, _) = turnedAway.outcome.settledValue else {
@@ -42,10 +42,10 @@ struct EngineSurfaceBusyTests {
         let sdk = try await SdkHarness.start([first, second]) { Color.clear }
         defer { sdk.tearDown() }
         sdk.cep.deliver(first.campaignKey)
-        await sdk.settle()
+        try try await sdk.settle(1)
 
         let again = try #require(sdk.cep.deliver(first.campaignKey))
-        await sdk.settle()
+        try try await sdk.settle(1)
 
         guard case .dropped(let reason, _) = again.outcome.settledValue else {
             Issue.record("the redelivered nudge was not dropped")

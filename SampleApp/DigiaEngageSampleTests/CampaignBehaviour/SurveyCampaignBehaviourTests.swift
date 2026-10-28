@@ -25,7 +25,7 @@ struct SurveyCampaignBehaviourTests {
     /// The renderer presents a survey after a short delay, on a timer.
     private func show(_ sdk: SdkHarness, _ text: String) async throws {
         try await sdk.waitUntil("\"\(text)\" on screen") { sdk.isShowing(text) }
-        await sdk.settle(0.4)
+        try await sdk.settle(0.4)
     }
 
     /// The scrim above the sheet.
@@ -152,7 +152,7 @@ struct SurveyCampaignBehaviourTests {
         try await show(sdk, "Dialog Test Nudge")
 
         let d = try sdk.deliverChain(key)
-        await sdk.settle(1.2)
+        try await sdk.settle(1.2)
         #expect(!sdk.isShowing("Option Alpha"))
 
         expectDropped(await sdk.sent(key), d, .surfaceBusy)

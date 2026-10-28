@@ -8,7 +8,7 @@ import UIKit
 extension HostedUITests {
 /// Pixel goldens for every Test Kit story-floater fixture.
 ///
-/// The arguments are read from `testkit/campaigns/floater/fixtures/`, so a fixture added to the
+/// The arguments are read from `sdk_testing_fixtures/campaigns/floater/`, so a fixture added to the
 /// Test Kit is covered with no code change (record it by running this target's tests with
 /// `TEST_RUNNER_RECORD_SNAPSHOTS=true`; see `SampleApp/README.md`). Each fixture is decoded by
 /// `CampaignModel.fromJson`, started on the SDK's story-floater orchestrator, and drawn by the
@@ -42,7 +42,7 @@ struct FloaterFixtureGoldenTests {
 
         // Pin the screen and its notch / home-indicator insets to the golden's device, so the
         // goldens do not depend on which simulator the host app runs on.
-        let device = ViewImageConfig.iPhone17ProMax
+        let device = ViewImageConfig.engageGolden
         let insets = device.safeArea
         activeFloaterWindowGeometryOverride = (
             CGRect(origin: .zero, size: device.size!),
@@ -94,7 +94,7 @@ struct FloaterFixtureGoldenTests {
             template["story"] = story
             json["templateConfig"] = template
         }
-        return try? CampaignModel.fromJson(json)
+        return try? CampaignModel.fromJson(json, designTokens: fixtureTokens(json))
     }
 
     /// A key window with the floater layer over a plain host, as `DigiaHost` stacks them.
@@ -108,8 +108,7 @@ struct FloaterFixtureGoldenTests {
 
         let rootVC = ComponentTestHost.makeDeviceHost(
             device: device,
-            // Not white: a canvas without a background draws a white window.
-            style: .solid(UIColor(red: 0x26 / 255, green: 0xA6 / 255, blue: 0x9A / 255, alpha: 1)),
+            style: .striped,
             scrimColor: nil,
             showHomeIndicator: false
         )

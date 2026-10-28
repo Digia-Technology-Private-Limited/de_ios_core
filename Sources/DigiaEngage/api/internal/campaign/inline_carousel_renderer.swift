@@ -156,7 +156,9 @@ private struct InlineCarouselView: View {
                     HStack(spacing: CGFloat(ind.spacing)) {
                         ForEach(0 ..< items.count, id: \.self) { i in
                             let isActive = (currentIndex % items.count) == i
-                            Circle()
+                            // Pill, not circle: the frame is 18x6 (13.5x4.5 inactive),
+                            // and Circle would inscribe a small round dot instead.
+                            Ellipse()
                                 .fill(Color(hex: isActive ? ind.activeDotColor : ind.dotColor) ?? .gray)
                                 .frame(
                                     width: CGFloat(isActive ? ind.dotWidth : ind.dotWidth * 0.75),

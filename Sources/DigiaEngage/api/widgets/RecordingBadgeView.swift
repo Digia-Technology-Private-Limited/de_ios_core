@@ -148,7 +148,7 @@ private struct BadgeContent: View {
             }
             Button(action: onSettings) {
                 Text("Digia")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(digiaFont(size: 12, weight: 600))
                     .foregroundColor(.white)
             }
             if let dotColor {

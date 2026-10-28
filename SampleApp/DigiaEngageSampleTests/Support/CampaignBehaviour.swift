@@ -113,11 +113,12 @@ extension SdkHarness {
     /// `campaignKey`'s experience events as sent, once the queue has flushed. `sdk_health` diagnostics share the
     /// wire but are not in the chain.
     func sent(_ campaignKey: String) async -> [WireEvent] {
-        await settle(0.3)
+        // `settle` throws only on cancellation; a cancelled test reads what was sent so far.
+        try? await settle(0.3)
         if let analytics = SDKInstance.shared.services?.analyticsService {
             for _ in 0..<50 {
                 analytics.flush()
-                await settle(0.1)
+                try? await settle(0.1)
                 if await analytics.queue.count() == 0 { break }
             }
         }
@@ -138,13 +139,13 @@ extension SdkHarness {
     /// A real touch at `point`, in window coordinates: a scrim, or a control with nothing to find it by.
     func touch(_ point: CGPoint) async throws {
         try TouchSynthesizer.tap(at: point, in: try #require(window))
-        await settle(0.5)
+        try await settle(0.5)
     }
 
     /// A real one-finger swipe from `start` to `end`, in window coordinates, then time for what it starts to settle.
     func swipe(from start: CGPoint, to end: CGPoint) async throws {
         try TouchSynthesizer.drag(from: start, to: end, in: try #require(window))
-        await settle(1)
+        try await settle(1)
     }
 }
 

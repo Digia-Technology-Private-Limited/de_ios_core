@@ -32,6 +32,25 @@ struct DigiaInlineStoryView: View {
     }
 
     var body: some View {
+        if let image = config.previewImage {
+            SingleImageStoryPreview(image: image) { openStory(at: 0) }
+                .environment(\.digiaCampaignKey, payload.campaignKey)
+        } else {
+            rail
+        }
+    }
+
+    private func openStory(at index: Int) {
+        SDKInstance.shared.reportStoryOpened(payload)
+        SDKInstance.shared.reportClassicStoryOpened(payload)
+        SDKInstance.shared.controller.showStoryOverlay(
+            config: config,
+            initialIndex: index,
+            payload: payload
+        )
+    }
+
+    private var rail: some View {
         StoryThumbnailRailView(
             items: config.items,
             mode: config.thumbnailVideoPlayback,
@@ -40,16 +59,33 @@ struct DigiaInlineStoryView: View {
             cardCornerRadius: CGFloat(config.card.borderRadius),
             cardSpacing: CGFloat(config.card.spacing),
             overlayOpen: overlayController.activeStoryOverlay != nil
-        ) { index in
-            SDKInstance.shared.reportStoryOpened(payload)
-            SDKInstance.shared.reportClassicStoryOpened(payload)
-            SDKInstance.shared.controller.showStoryOverlay(
-                config: config,
-                initialIndex: index,
-                payload: payload
-            )
-        }
+        ) { openStory(at: $0) }
         .environment(\.digiaCampaignKey, payload.campaignKey)
+    }
+}
+
+@MainActor
+private struct SingleImageStoryPreview: View {
+    let image: StoryPreviewImageConfig
+    let onTap: () -> Void
+
+    var body: some View {
+        let media = Color.black
+            .overlay(StoryRemoteImage(urlString: image.url, fit: image.boxFit))
+            .clipShape(RoundedRectangle(cornerRadius: CGFloat(image.cornerRadius), style: .continuous))
+        Group {
+            if image.aspectRatio > 0 {
+                media.aspectRatio(CGFloat(image.aspectRatio), contentMode: .fit)
+            } else {
+                media.frame(height: CGFloat(image.height))
+            }
+        }
+        .padding(EdgeInsets(
+            top: image.padding.top, leading: image.padding.left,
+            bottom: image.padding.bottom, trailing: image.padding.right
+        ))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
     }
 }
 

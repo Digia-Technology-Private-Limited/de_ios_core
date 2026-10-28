@@ -67,7 +67,7 @@ struct DigiaRecordedSessionScreen: View {
                                 Text(entry.key)
                                 if let screenName = entry.screenName {
                                     Text("screen: \(screenName)")
-                                        .font(.caption)
+                                        .font(digiaFont(size: 12))
                                         .foregroundColor(.secondary)
                                 }
                             }
@@ -111,7 +111,7 @@ private struct TypeTag: View {
 
     var body: some View {
         Text(type)
-            .font(.caption2.bold())
+            .font(digiaFont(size: 11, weight: 700))
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(Color.accentColor.opacity(0.15))

@@ -8,7 +8,7 @@ import UIKit
 extension RenderedUITests {
 /// Pixel goldens for every Test Kit survey fixture.
 ///
-/// The arguments are read from `testkit/campaigns/survey/fixtures/`, so a fixture added to the
+/// The arguments are read from `sdk_testing_fixtures/campaigns/survey/`, so a fixture added to the
 /// Test Kit gets a golden with no code change (record it with
 /// `RECORD_SNAPSHOTS=true ./run-tests.sh survey`). Each fixture is decoded by
 /// `CampaignModel.fromJson`, started on the SDK's survey orchestrator, and drawn by the production
@@ -24,7 +24,7 @@ struct SurveyFixtureGoldenTests {
             FixtureLoader.loadFixture(campaignType: "survey", fileName: fixture),
             "Failed to load fixture survey/\(fixture).json"
         )
-        let campaign = try #require(try CampaignModel.fromJson(json), "Fixture must decode to a campaign")
+        let campaign = try #require(try CampaignModel.fromJson(json, designTokens: fixtureTokens(json)), "Fixture must decode to a campaign")
         let config = try #require(campaign.surveyConfig, "Fixture must decode to a survey")
 
         let orchestrator = SDKInstance.shared.surveyOrchestrator
@@ -65,8 +65,7 @@ struct SurveyFixtureGoldenTests {
 
         let rootVC = UIViewController()
         rootVC.view.frame = bounds
-        // Not white: the survey's light surfaces would blend into a white host.
-        rootVC.view.backgroundColor = UIColor(red: 0x26 / 255, green: 0xA6 / 255, blue: 0x9A / 255, alpha: 1)
+        ComponentTestHost.addStripes(to: rootVC.view)
         let overlayVC = UIHostingController(
             rootView: SurveyRenderer(orchestrator: SDKInstance.shared.surveyOrchestrator)
         )

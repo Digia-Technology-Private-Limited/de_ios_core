@@ -6,7 +6,8 @@ import UIKit
 @testable import DigiaEngage
 
 /// Draws a campaign fixture through the real SDK and compares the settled frame with
-/// `__Snapshots__/<surface>/<name>.png`.
+/// `de_workspace/goldens/ios/<surface>/<name>.png`, beside the Flutter and Android copies, never in
+/// this repository.
 ///
 /// The comparison is `swift-snapshot-testing`'s image diffing. The file layout is ours, so a baseline is
 /// `<fixture>.png` as on Flutter, and recording is a plain write that does not fail the run.
@@ -60,9 +61,12 @@ enum GoldenHarness {
 
     static var isRecording: Bool { ProcessInfo.processInfo.environment["RECORD_SNAPSHOTS"] == "true" }
 
-    private static let snapshots = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent().deletingLastPathComponent()
-        .appendingPathComponent("__Snapshots__")
+    private static let snapshots: URL = {
+        guard let workspace = FixtureLoader.workspaceURL() else {
+            preconditionFailure("No de_workspace above \(#filePath): the goldens live in its goldens/ios/")
+        }
+        return workspace.appendingPathComponent("goldens/ios", isDirectory: true)
+    }()
 
     /// What the campaign is shown over.
     enum Host {
@@ -163,7 +167,7 @@ enum GoldenHarness {
         else if case .guide = host { Digia.setCurrentScreen(name: guideScreenName) }
         // `sendFallbackVariables`: the CEP supplies every runtime variable, here with the fixture's own fallback.
         let presentation = sdk.cep.deliver(fixture.campaignKey, variables: sendFallbackVariables ? fixture.fallbackVariables : nil)
-        await sdk.settle(settle)
+        try await sdk.settle(settle)
         if let outcome = presentation?.outcome.settledValue {
             // A campaign the SDK turns away shows nothing; the golden is then the bare host, and only a
             // fixture named for that (`..._shows_nothing`) may do so.
@@ -184,7 +188,7 @@ enum GoldenHarness {
         let hostOnly = render(sdk.window)
         sdk.cep.deliver(fixture.campaignKey)
         // Past the manager's two-second wait for a missing anchor.
-        await sdk.settle(2.6)
+        try await sdk.settle(2.6)
         #expect(SDKInstance.shared.guideOrchestrator.state == nil, "\(fixture.name) is showing a guide; it now needs a golden", sourceLocation: sourceLocation)
         #expect(render(sdk.window).pngData() == hostOnly.pngData(), "\(fixture.name) changed the screen; it now needs a golden", sourceLocation: sourceLocation)
     }
@@ -197,7 +201,7 @@ enum GoldenHarness {
         let sdk = try await SdkHarness.start([fixture]) { GuideHost() }
         defer { sdk.tearDown() }
         let presentation = try #require(sdk.cep.deliver(fixture.campaignKey), sourceLocation: sourceLocation)
-        await sdk.settle(0.5)
+        try await sdk.settle(0.5)
         guard case .dropped = presentation.outcome.settledValue else {
             Issue.record("\(fixture.name) was not dropped; it now needs a golden", sourceLocation: sourceLocation)
             return
@@ -223,7 +227,7 @@ enum GoldenHarness {
         if let screen = fixture.targetScreens.first { Digia.setCurrentScreen(name: screen) }
         let hostOnly = render(sdk.window)
         let presentation = sdk.cep.deliver(fixture.campaignKey)
-        await sdk.settle(settle)
+        try await sdk.settle(settle)
         #expect(presentation?.outcome.settledValue == nil, "the campaign was turned away: \(String(describing: presentation?.outcome.settledValue))", sourceLocation: sourceLocation)
 
         let startsExpanded = fixture.json.deepString("initialState") == "expanded"
@@ -239,7 +243,7 @@ enum GoldenHarness {
                 return
             }
             try TouchSynthesizer.tap(at: CGPoint(x: button.midX, y: button.midY), in: sdk.window)
-            await sdk.settle(1.5)
+            try await sdk.settle(1.5)
             expect(sdk.window, surface: surface, name: "\(fixture.name)-collapsed", sourceLocation: sourceLocation)
             return
         }
@@ -249,7 +253,7 @@ enum GoldenHarness {
             return
         }
         try TouchSynthesizer.tap(at: CGPoint(x: point.x, y: point.y), in: sdk.window)
-        await sdk.settle(2.5)
+        try await sdk.settle(2.5)
         expect(sdk.window, surface: surface, name: "\(fixture.name)-expanded", sourceLocation: sourceLocation)
     }
 
