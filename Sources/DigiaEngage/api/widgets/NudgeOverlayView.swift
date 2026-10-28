@@ -509,7 +509,8 @@ struct NudgeDialogContainer: View {
             ScrollView {
                 VStack(spacing: 0) { renderedContent }
                     .padding(surface.padding)
-                    .frame(width: width)
+                    // A column narrower than the panel starts at its leading edge.
+                    .frame(width: width, alignment: .leading)
                     .background(
                         GeometryReader { geometry in
                             Color.clear.preference(
