@@ -6,34 +6,19 @@ import UIKit
 @testable import DigiaEngage
 
 extension RenderedUITests {
-/// Pixel goldens for every Test Kit nudge fixture that has no hand-written golden test.
+/// Pixel goldens for every Test Kit nudge fixture.
 ///
 /// The arguments are read from `sdk_testing_fixtures/campaigns/<campaign>/`, so a fixture added to the
 /// Test Kit gets a golden with no code change (record it with
 /// `RECORD_SNAPSHOTS=true ./run-tests.sh nudge`). Each fixture is decoded by `NudgeConfig.fromJson`
 /// and presented through the production `NudgeOverlayView`, like the hand-written goldens.
-/// Fixtures those tests already cover are left out so no fixture has two goldens.
+/// Fixtures the hand-written tests also cover get a golden here too, so every fixture has one under
+/// its own name for the goldens reviewer.
 @Suite("Test Kit fixture goldens", .serialized, .tags(.nudge))
 struct NudgeFixtureGoldenTests {
 
-    /// Fixtures with a golden in `NudgeBottomSheetComponentTests` / `NudgeDialogComponentTests`.
-    private static let coveredElsewhere: Set<String> = [
-        "nudge_bottomsheet_compact",
-        "nudge_bottomsheet_safe_area",
-        "nudge_bottomsheet_safe_area_surface",
-        "nudge_bottomsheet_safe_area_none",
-        "nudge_dialog",
-        "nudge_dialog_radius_0",
-        "nudge_dialog_radius_28",
-        "nudge_dialog_margin_zero",
-        "nudge_dialog_margin_large",
-        "nudge_dialog_width_narrow",
-        "nudge_dialog_width_wide",
-        "nudge_dialog_bg_dark",
-    ]
-
     private static func fixtures(_ campaignType: String) -> [String] {
-        FixtureLoader.fixtureNames(campaignType: campaignType).filter { !coveredElsewhere.contains($0) }
+        FixtureLoader.fixtureNames(campaignType: campaignType)
     }
 
     @Test("matches the bottom-sheet fixture golden", .tags(.golden), arguments: fixtures("nudge_bottomsheet"))

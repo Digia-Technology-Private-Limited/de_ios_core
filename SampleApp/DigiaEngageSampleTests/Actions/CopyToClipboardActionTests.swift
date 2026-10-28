@@ -41,7 +41,7 @@ struct CopyToClipboardWorkspaceFixtureTests {
         }
         defer { sdk.tearDown() }
         sdk.cep.deliver(campaign.campaignKey)
-        await sdk.settle()
+        try try await sdk.settle(1)
         UIPasteboard.general.string = ""
 
         try await sdk.tap(text: "Confirm & Claim")

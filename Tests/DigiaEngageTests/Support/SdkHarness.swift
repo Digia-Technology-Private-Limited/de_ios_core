@@ -38,7 +38,13 @@ final class SdkHarness {
     let plugin = FakeCep()
     /// The CEP plugin, under the name the held-boot suites use.
     var cep: FakeCep { plugin }
-    private(set) var window: UIWindow?
+    var window: UIWindow!
+
+    /// Set by the sample app's workspace-fixture boot (`SdkHarness+Fixtures.swift`): the app is laid
+    /// out full screen and the network is `StubBackend`, not `MockNetworkClient`.
+    var servesWorkspaceFixtures = false
+    /// Run last by ``tearDown()``: what a boot outside this file installed and must undo.
+    var tearDownHooks: [() -> Void] = []
 
     /// Holds the bundle fetch for ``startHeld(_:actionHandlers:)``; nil for every other boot.
     private var heldNetwork: HeldBundleNetwork?
@@ -68,7 +74,7 @@ final class SdkHarness {
     /// Requests sent before `start` returned: earlier tests' queued events, not this test's.
     private var eventBaseline = 0
 
-    private init(campaigns: [[String: Any]]) {
+    init(campaigns: [[String: Any]]) {
         backend = ScriptedBackend(campaigns: campaigns)
     }
 
@@ -376,11 +382,15 @@ final class SdkHarness {
         initialization?.cancel()
         initialization = nil
         DigiaLogger.unregisterSink(recorder)
-        if let window { ComponentTestHost.cleanupOverlayWindow(window) }
+        if let window {
+            if servesWorkspaceFixtures { window.isHidden = true } else { ComponentTestHost.cleanupOverlayWindow(window) }
+        }
         window = nil
         SDKInstance.shared.floaterOrchestrator.dismiss(.hostTeardown)
         SDKInstance.shared.floaterStoryOrchestrator.dismiss(.hostTeardown)
         SDKInstance.shared.resetForTesting()
+        for hook in tearDownHooks { hook() }
+        tearDownHooks = []
     }
 
     // MARK: - Accessibility tree
@@ -463,6 +473,14 @@ final class FakeCep: DigiaCEPPlugin {
 
     func onHostReady() {
         for trigger in buffer.takeAll() { deliver(trigger) }
+    }
+
+    /// What the CEP does when its campaign fires, with the runtime [variables] it supplies.
+    @discardableResult
+    func deliver(_ campaignKey: String, variables: [String: String]? = nil) -> CampaignPresentation? {
+        deliver(CEPTriggerPayload(
+            cepCampaignId: "cep-\(campaignKey)", campaignKey: campaignKey, cepMetadata: [:],
+            variables: variables))
     }
 
     /// What a real plugin does when its CEP calls back: delivers if the host is ready, otherwise
