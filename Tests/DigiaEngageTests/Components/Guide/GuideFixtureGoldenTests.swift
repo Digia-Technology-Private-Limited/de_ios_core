@@ -24,7 +24,8 @@ extension RenderedUITests {
 struct GuideFixtureGoldenTests {
 
     /// Fixtures this SDK draws nothing for. Each is asserted to stay invisible, and fails once it
-    /// draws so it can get a golden instead.
+    /// draws; the bare host screen is also its golden, proving nothing was drawn, recorded under the
+    /// sibling fixture test's name.
     ///   - classic-layout tooltips: the native overlay draws only `layoutMode: canvas` steps;
     ///   - a step whose anchor is not on screen.
     private static let drawsNothing: Set<String> = [
@@ -49,7 +50,7 @@ struct GuideFixtureGoldenTests {
         try await assertGuideFixture(fixture, campaignType: "guide_spotlight", function: "testSpotlightFixtureGolden")
     }
 
-    @Test("draws nothing for a guide this SDK cannot show", .tags(.component), arguments: drawsNothing.sorted())
+    @Test("draws nothing for a guide this SDK cannot show", .tags(.component, .golden), arguments: drawsNothing.sorted())
     @MainActor
     func testGuideFixtureDrawsNothing(path: String) async throws {
         let parts = path.split(separator: "/").map(String.init)
@@ -63,8 +64,27 @@ struct GuideFixtureGoldenTests {
         try await Task.sleep(nanoseconds: 2_500_000_000)
         #expect(
             ComponentTestHost.renderImage(of: showing.window).pngData() == showing.hostOnly.pngData(),
-            "\(path) now draws; remove it from `drawsNothing` so it gets a golden"
+            "\(path) now draws; remove it from `drawsNothing` so the regular golden test covers it"
         )
+        // The bare host screen is the golden too: it proves nothing was drawn.
+        let settled = ComponentTestHost.settledImage(of: showing.window)
+        if parts[0] == "guide_tooltip" {
+            assertVisualGolden(
+                matching: settled,
+                precision: 1.0,
+                perceptualPrecision: 0.98,
+                named: parts[1],
+                function: "testTooltipFixtureGolden"
+            )
+        } else {
+            assertVisualGolden(
+                matching: settled,
+                precision: 1.0,
+                perceptualPrecision: 0.98,
+                named: parts[1],
+                function: "testSpotlightFixtureGolden"
+            )
+        }
     }
 
     /// Snapshot file: `de_workspace/goldens/ios/GuideFixtureGoldenTests/<test>.<fixture>.png`.
