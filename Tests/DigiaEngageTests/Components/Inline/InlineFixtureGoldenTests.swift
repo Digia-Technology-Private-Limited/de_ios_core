@@ -143,38 +143,24 @@ struct InlineFixtureGoldenTests {
     /// asked for it), so every image must take the asynchronous load, which does publish — without
     /// clearing the shared cache under the other suites. Returns the stand-in URLs to wait for.
     private func withLocalImages(_ json: [String: Any], fixture: String) -> (Any, [String]) {
-        guard !remoteImageURLs(in: json).isEmpty, let workspace = FixtureLoader.workspaceURL() else { return (json, []) }
+        guard let workspace = FixtureLoader.workspaceURL() else { return (json, []) }
         let file = workspace.appendingPathComponent("testkit/mock-server/assets/strawberry.jpg")
         // One stand-in per occurrence, not per distinct URL: two views of the same URL would share a
         // cache key, and the second takes the synchronous hit `WebImage` drops.
         var standIns: [String] = []
-        let replaced = replacingRemoteImages(json) { _ in
+        let replaced = replacingRemoteImages(json) {
             let url = "\(file.absoluteString)?standIn=\(fixture)-\(standIns.count)"
             standIns.append(url)
             return url
         }
+        guard !standIns.isEmpty else { return (json, []) }
         return (replaced, standIns)
     }
 
-    /// Remote URLs outside action objects: an action's URL is a link, not an image.
-    private func remoteImageURLs(in value: Any) -> [String] {
+    private func replacingRemoteImages(_ value: Any, with standIn: () -> String) -> Any {
         switch value {
         case let string as String:
-            return isRemote(string) ? [string] : []
-        case let dictionary as [String: Any]:
-            if isAction(dictionary) { return [] }
-            return dictionary.values.flatMap(remoteImageURLs)
-        case let array as [Any]:
-            return array.flatMap(remoteImageURLs)
-        default:
-            return []
-        }
-    }
-
-    private func replacingRemoteImages(_ value: Any, with standIn: (String) -> String) -> Any {
-        switch value {
-        case let string as String:
-            return isRemote(string) ? standIn(string) : string
+            return isRemote(string) ? standIn() : string
         case let dictionary as [String: Any]:
             if isAction(dictionary) { return dictionary }
             // Sorted keys keep the occurrence numbering stable between runs.
