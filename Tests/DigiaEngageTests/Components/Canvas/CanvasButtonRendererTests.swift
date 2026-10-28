@@ -144,7 +144,7 @@ struct CanvasButtonRendererTests {
             return
         }
 
-        #expect(style == .fill(fill: .none))
+        #expect(style == .fill(fill: .solid(.literal("#FF4945FF"))))
         #expect(cornerRadius == CampaignCanvasCornerRadius(topLeft: 8, topRight: 8, bottomRight: 8, bottomLeft: 8))
         #expect(shadow == nil)
         #expect(isPrimary == false)
