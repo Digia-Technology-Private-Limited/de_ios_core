@@ -3,7 +3,7 @@ import Testing
 import UIKit
 @testable import DigiaEngage
 
-/// The analytics chain a real surface sends, read off the wire (`/track`, recorded by `StubBackend`) after the
+/// The campaign behaviour suite's helpers: the analytics chain a real surface sends, read off the wire (`/track`, recorded by `StubBackend`) after the
 /// flush rather than off the emitter, beside what the CEP holding the same presentation sees. Helpers over
 /// `SdkHarness`, as Android's `support/AnalyticsChain.kt` is over its harness.
 ///

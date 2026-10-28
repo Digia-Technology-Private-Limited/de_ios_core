@@ -1,4 +1,4 @@
-// tags: widget inline analytics
+// tags: widget inline campaign_behaviour
 import SwiftUI
 import Testing
 import UIKit
@@ -11,8 +11,8 @@ import UIKit
 ///
 /// platform note: the Dart twin is `test/analytics_chain/inline_chain_test.dart`.
 @MainActor
-@Suite("Inline analytics chain", .serialized, .tags(.integration, .inline, .analytics))
-struct InlineAnalyticsChainTests {
+@Suite("Inline campaign behaviour", .serialized, .tags(.integration, .inline, .analytics))
+struct InlineCampaignBehaviourTests {
     private func canvasCta() -> WorkspaceFixtures.Campaign {
         WorkspaceFixtures.campaign("campaigns/inline_canvas/inline_canvas_interactive_cta.json")
     }

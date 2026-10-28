@@ -1,4 +1,4 @@
-// tags: widget survey analytics
+// tags: widget survey campaign_behaviour
 import SwiftUI
 import Testing
 import UIKit
@@ -12,8 +12,8 @@ import UIKit
 /// platform note: the Dart twin is `test/analytics_chain/survey_chain_test.dart`. Its system-back case has
 /// no iOS counterpart.
 @MainActor
-@Suite("Survey analytics chain", .serialized, .tags(.integration, .survey, .analytics))
-struct SurveyAnalyticsChainTests {
+@Suite("Survey campaign behaviour", .serialized, .tags(.integration, .survey, .analytics))
+struct SurveyCampaignBehaviourTests {
     private func survey(_ name: String) -> WorkspaceFixtures.Campaign {
         WorkspaceFixtures.campaign("campaigns/survey/\(name).json")
     }

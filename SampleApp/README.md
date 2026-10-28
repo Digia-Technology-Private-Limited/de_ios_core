@@ -19,8 +19,8 @@ The sample app now initializes the SDK from `DigiaSampleRootView`, so startup fa
 touch delivery live here: the package's own test bundle (`swift test` / `run-tests.sh`) has no
 `UIApplication`, so a synthesized touch never becomes a gesture there. `FloaterTapTests` taps the
 PiP and story floater through `TouchSynthesizer` and checks the production tap handlers ran.
-`FixtureBehaviour/*AnalyticsChainTests` drive every surface through `SdkHarness` and read the Digia
-`/track` chain off `StubBackend` beside the CEP's markings (`./run-sample-tests.sh analytics`); tests
+`CampaignBehaviour/*CampaignBehaviourTests` drive every surface through `SdkHarness` and read the Digia
+`/track` chain off `StubBackend` beside the CEP's markings (`./run-sample-tests.sh campaign_behaviour`); tests
 that hit a known bug run and fail, each with a `// Fails today:` comment.
 
 ```bash

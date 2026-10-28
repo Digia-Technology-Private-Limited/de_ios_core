@@ -1,4 +1,4 @@
-// tags: widget floater pip analytics
+// tags: widget floater pip campaign_behaviour
 import SwiftUI
 import Testing
 import UIKit
@@ -13,8 +13,8 @@ import UIKit
 ///
 /// platform note: the Dart twin is `test/analytics_chain/floating_chain_test.dart`.
 @MainActor
-@Suite("Floater analytics chain", .serialized, .tags(.integration, .floater, .pip, .analytics))
-struct FloaterAnalyticsChainTests {
+@Suite("Floater campaign behaviour", .serialized, .tags(.integration, .floater, .pip, .analytics))
+struct FloaterCampaignBehaviourTests {
     private func fixture(_ path: String) -> WorkspaceFixtures.Campaign { WorkspaceFixtures.campaign(path) }
 
     private func start(_ path: String) async throws -> SdkHarness {

@@ -1,4 +1,4 @@
-// tags: widget guide analytics
+// tags: widget guide campaign_behaviour
 import SwiftUI
 import Testing
 import UIKit
@@ -12,8 +12,8 @@ import UIKit
 /// platform note: the Dart twin is `test/analytics_chain/guide_chain_test.dart`. Its system-back case (back
 /// pops the host screen) has no iOS counterpart; the anchors-leaving case below covers the same end.
 @MainActor
-@Suite("Guide analytics chain", .serialized, .tags(.integration, .guide, .analytics))
-struct GuideAnalyticsChainTests {
+@Suite("Guide campaign behaviour", .serialized, .tags(.integration, .guide, .analytics))
+struct GuideCampaignBehaviourTests {
     private func guide(_ name: String) -> WorkspaceFixtures.Campaign {
         WorkspaceFixtures.campaign(
             "campaigns/\(name.hasPrefix("guide_spotlight") ? "guide_spotlight" : "guide_tooltip")/\(name).json")

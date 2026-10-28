@@ -1,4 +1,4 @@
-// tags: widget nudge analytics
+// tags: widget nudge campaign_behaviour
 import SwiftUI
 import Testing
 import UIKit
@@ -14,8 +14,8 @@ import UIKit
 /// platform note: the Dart twin is `test/analytics_chain/nudge_chain_test.dart`. Its system-back case has no
 /// iOS counterpart: an iOS nudge has no back gesture.
 @MainActor
-@Suite("Nudge analytics chain", .serialized, .tags(.integration, .nudge, .analytics))
-struct NudgeAnalyticsChainTests {
+@Suite("Nudge campaign behaviour", .serialized, .tags(.integration, .nudge, .analytics))
+struct NudgeCampaignBehaviourTests {
     private let shownThenClosed = [Chain.triggered, Chain.viewed, Chain.dismissed]
 
     private func fixture(_ name: String) -> WorkspaceFixtures.Campaign {
