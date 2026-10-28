@@ -234,6 +234,7 @@ public enum ComponentTestHost {
         targetWindow?.rootViewController = nil
         targetWindow?.isHidden = true
         targetWindow?.resignKey()
+        GoldenFonts.uninstall()
     }
 
     /// Renders a live overlay window (including any presented cover) to an image. Pass this to
@@ -451,6 +452,7 @@ public enum ComponentTestHost {
         window.isHidden = true
         window.resignKey()
         drainRunLoop(for: drainDuration)
+        GoldenFonts.uninstall()
     }
 
     /// Creates and mounts a UIHostingController inside a UIWindow at exact dimensions.

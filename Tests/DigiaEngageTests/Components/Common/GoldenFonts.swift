@@ -30,4 +30,10 @@ enum GoldenFonts {
         _ = registered
         SDKInstance.shared.font = DigiaFont(fontFamily: family)
     }
+
+    /// Restores the SDK's default font so tests mounted after a golden don't inherit Roboto.
+    @MainActor
+    static func uninstall() {
+        SDKInstance.shared.font = DigiaFont()
+    }
 }
