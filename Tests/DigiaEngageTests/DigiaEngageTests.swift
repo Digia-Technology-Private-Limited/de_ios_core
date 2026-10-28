@@ -249,7 +249,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.resetForTesting()
         let plugin = TestPlugin(identifier: "plugin")
         Digia.register(plugin)
-        let campaign = try #require(targetedGuideCampaign())
+        let campaign = try #require(targetedCanvasGuideCampaign())
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
         let accepted = SDKInstance.shared.onCampaignTriggered(
@@ -268,6 +268,8 @@ struct DigiaEngageTests {
     @Test("screen changes dismiss an accepted externally rendered guide")
     func screenChangesDismissExternalGuide() throws {
         SDKInstance.shared.resetForTesting()
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
         let plugin = TestPlugin(identifier: "plugin")
         var renderRequested = false
         Digia.register(plugin)
@@ -289,9 +291,68 @@ struct DigiaEngageTests {
         })
     }
 
+    @Test("an externally rendered guide with no target screens ends on navigation but not on a repeated screen")
+    func externalGuideWithNoTargetScreensEndsOnNavigation() throws {
+        SDKInstance.shared.resetForTesting()
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        SDKInstance.shared.onGuideRenderRequest = { _ in }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(anyScreenClassicGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Home")
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "guide-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        #expect(accepted)
+        func dismissed() -> Bool {
+            plugin.events.contains { event, payload in
+                event == .dismissed && payload.cepCampaignId == "guide-1"
+            }
+        }
+
+        SDKInstance.shared.setCurrentScreen("Home")
+        #expect(!dismissed())
+
+        SDKInstance.shared.setCurrentScreen("Cart")
+        #expect(dismissed())
+        #expect(!SDKInstance.shared.hasActiveExternalGuideForTesting)
+    }
+
+    @Test("a guide with no target screens ends on navigation but not on a repeated screen")
+    func guideWithNoTargetScreensEndsOnNavigation() throws {
+        SDKInstance.shared.resetForTesting()
+        let plugin = TestPlugin(identifier: "plugin")
+        Digia.register(plugin)
+        let campaign = try #require(anyScreenGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Home")
+        let accepted = SDKInstance.shared.onCampaignTriggered(
+            CEPTriggerPayload(
+                cepCampaignId: "guide-1", campaignKey: campaign.campaignKey, cepMetadata: [:]))
+        #expect(accepted)
+        func dismissed() -> Bool {
+            plugin.events.contains { event, payload in
+                event == .dismissed && payload.cepCampaignId == "guide-1"
+            }
+        }
+
+        SDKInstance.shared.setCurrentScreen("Home")
+        #expect(!dismissed())
+        #expect(SDKInstance.shared.guideOrchestrator.state != nil)
+
+        SDKInstance.shared.setCurrentScreen("Cart")
+        #expect(dismissed())
+        #expect(SDKInstance.shared.guideOrchestrator.state == nil)
+    }
+
     @Test("stale terminal event does not disarm a newer external guide")
     func staleTerminalEventKeepsNewExternalGuideActive() throws {
         SDKInstance.shared.resetForTesting()
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
         let plugin = TestPlugin(identifier: "plugin")
         Digia.register(plugin)
         SDKInstance.shared.onGuideRenderRequest = { _ in }
@@ -831,6 +892,84 @@ private func targetedGuideCampaign() -> CampaignModel? {
     ])
 }
 
+/// A canvas guide on a registered anchor with a screen allowlist: renders
+/// natively (classic guides render through the React Native bridge and are
+/// dropped without it).
+private func targetedCanvasGuideCampaign() -> CampaignModel? {
+    CampaignModel.fromJson([
+        "id": "help-canvas-guide-id",
+        "campaignKey": "help-canvas-guide",
+        "campaignType": "guide",
+        "targetScreenNames": ["names": ["Help"]],
+        "templateConfig": [
+            "templateType": "tooltip",
+            "steps": [[
+                "id": "step-1",
+                "anchorKey": "help-anchor",
+                "title": "Help",
+                "body": "Body",
+                "layoutMode": "canvas",
+                "canvas": [
+                    "version": 2,
+                    "canvasWidth": 240,
+                    "canvasHeight": 120,
+                    "children": [],
+                ],
+            ]],
+        ],
+    ])
+}
+
+/// A classic (non-canvas) guide with an empty allowlist: it renders through
+/// the React Native bridge and belongs to whatever screen it opened on.
+private func anyScreenClassicGuideCampaign() -> CampaignModel? {
+    CampaignModel.fromJson([
+        "id": "any-screen-classic-guide-id",
+        "campaignKey": "any-screen-classic-guide",
+        "campaignType": "guide",
+        "templateConfig": [
+            "templateType": "tooltip",
+            "steps": [[
+                "id": "step-1",
+                "anchorKey": "help-anchor",
+                "title": "Help",
+                "body": "Body",
+            ]],
+        ],
+    ])
+}
+
+/// A canvas guide with an empty allowlist: it renders natively and belongs to
+/// whatever screen it opened on.
+private func anyScreenGuideCampaign() -> CampaignModel? {
+    CampaignModel.fromJson([
+        "id": "any-screen-guide-id",
+        "campaignKey": "any-screen-guide",
+        "campaignType": "guide",
+        "templateConfig": [
+            "templateType": "spotlight",
+            "steps": [[
+                "stepId": "step-1",
+                "target": [
+                    "type": "anchorless",
+                    "version": 1,
+                    "pageKey": "home",
+                    "imageUrl": "https://example.com/spotlight.png",
+                    "horizontal": ["frame": "window", "rule": ["kind": "startFixed", "startOffset": 16, "width": 240]],
+                    "vertical": ["frame": "window", "rule": ["kind": "topFixed", "topOffset": 100, "height": 120]],
+                ],
+                "layoutMode": "canvas",
+                "canvas": [
+                    "version": 2,
+                    "canvasWidth": 240,
+                    "canvasHeight": 120,
+                    "children": [],
+                ],
+            ]],
+        ],
+    ])
+}
+
 private func anchorlessGuideCampaign() -> CampaignModel? {
     CampaignModel.fromJson([
         "id": "anchorless-guide-id",
@@ -841,7 +980,14 @@ private func anchorlessGuideCampaign() -> CampaignModel? {
             "steps": [1, 2].map { step in
                 [
                     "stepId": "step-\(step)",
-                    "target": ["type": "anchorless", "version": 1, "pageKey": "home"],
+                    "target": [
+                        "type": "anchorless",
+                        "version": 1,
+                        "pageKey": "home",
+                        "imageUrl": "https://example.com/spotlight.png",
+                        "horizontal": ["frame": "window", "rule": ["kind": "startFixed", "startOffset": 16, "width": 240]],
+                        "vertical": ["frame": "window", "rule": ["kind": "topFixed", "topOffset": 100, "height": 120]],
+                    ],
                     "layoutMode": "canvas",
                     "canvas": [
                         "version": 2,

@@ -45,6 +45,9 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
     internal var currentScreenForAnchorless: String? { _currentScreen }
     private(set) var lastCampaignDropReason: String?
     private var activeExternalGuide: ExternalGuide?
+    /// Test-only read of whether an externally rendered (React Native) guide is
+    /// active. A Bool (not the guide itself) so the private type stays private.
+    internal var hasActiveExternalGuideForTesting: Bool { activeExternalGuide != nil }
     private var screenUpdateRevision = 0
     private var captureInFlight = false
     private var guideCompletionFired = false
@@ -562,39 +565,22 @@ final class SDKInstance: ObservableObject, DigiaCEPDelegate {
             )
         }
 
+        // A guide ends on any real screen change, whatever its targetScreenNames: its steps point
+        // at widgets on the screen it opened on. An empty allowlist means "every screen" for a
+        // nudge, and read that way it kept a guide up over a screen it no longer belonged to.
+        // This only runs on a real change: `setCurrentScreen` skips it when the
+        // screen repeats, so re-setting the same screen leaves the guide up.
         if let guide = guideOrchestrator.state {
-            if let pageKey = guide.steps.first?.target.anchorlessTarget?.pageKey,
-               pageKey != _currentScreen {
-                liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
-                    .noMatchingScreen,
-                    message: "screen changed before the Guide was shown"
-                )
-                dismissGuide()
-            } else {
-                dismissForScreenChangeIfNeeded(
-                    campaignKey: guide.campaign.campaignKey,
-                    campaignType: "guide",
-                    campaign: guide.campaign,
-                    dismiss: {
-                        self.liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
-                            .noMatchingScreen,
-                            message: "screen changed before the Guide was shown"
-                        )
-                        self.dismissGuide()
-                    }
-                )
-            }
+            liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
+                .noMatchingScreen,
+                message: "screen changed before the Guide was shown"
+            )
+            dismissGuide()
         }
 
         if let guide = activeExternalGuide {
-            dismissForScreenChangeIfNeeded(
-                campaignKey: guide.campaign.campaignKey,
-                campaignType: "guide",
-                campaign: guide.campaign
-            ) {
-                activeExternalGuide = nil
-                events.toCep(.dismissed, payload: guide.payload)
-            }
+            activeExternalGuide = nil
+            events.toCep(.dismissed, payload: guide.payload)
         }
 
         // Not the shared `dismissForScreenChangeIfNeeded` helper above — a floater
