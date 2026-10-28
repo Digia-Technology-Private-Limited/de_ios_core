@@ -189,7 +189,8 @@ struct CampaignCanvasParser {
         let width = positive(propertyNumber(json["canvasWidth"]) ?? 360, fallback: 360)
         let height = positive(propertyNumber(json["canvasHeight"]) ?? 420, fallback: 420)
         var children: [CampaignCanvasChild] = []
-        for child in json["children"] as? [[String: Any]] ?? [] {
+        // Each child is skipped on its own: a non-object entry must not drop its valid siblings.
+        for case let child as [String: Any] in json["children"] as? [Any] ?? [] {
             guard let rectJSON = propertyObject(child["rect"]) else { continue }
             let rect = CampaignCanvasRect(
                 x: CGFloat(propertyNumber(rectJSON["x"]) ?? 0) * width,
