@@ -416,6 +416,13 @@ struct NudgeDialogContainer: View {
                                 .padding(.bottom, top ? 0 : extent)
                                 // Centre like the inside-close branch; scroll only on overflow.
                                 .frame(maxWidth: .infinity, minHeight: height)
+                                // The ScrollView covers the scrim and swallows its taps, so the
+                                // area around the card carries the backdrop dismiss itself.
+                                .background(
+                                    Color.clear
+                                        .contentShape(Rectangle())
+                                        .onTapGesture { if surface.backdropDismissible { dismiss() } }
+                                )
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
