@@ -172,7 +172,8 @@ public enum ComponentTestHost {
     public static func makeRealOverlayWindow(
         nudgeConfig: NudgeConfig,
         device: ViewImageConfig = .engageGolden,
-        style: BackgroundStyle = .striped
+        style: BackgroundStyle = .striped,
+        hostSafeArea: UIEdgeInsets = .zero
     ) -> UIWindow {
         guard let size = device.size else {
             fatalError("Device configuration must have a concrete size")
@@ -194,6 +195,12 @@ public enum ComponentTestHost {
             scrimColor: nil,
             showHomeIndicator: false
         )
+        // A real host controller sits under the notch and home indicator; the
+        // golden phone frame carries those as the ViewImageConfig safe area
+        // (47pt top, 34pt bottom). Hand them to the host so the SDK's own
+        // safe-area handling reads what a device gives it. The harness adds
+        // no padding of its own around the overlay.
+        rootVC.additionalSafeAreaInsets = hostSafeArea
 
         let overlayVC = UIHostingController(rootView: NudgeOverlayView())
         overlayVC.view.frame = CGRect(origin: .zero, size: size)

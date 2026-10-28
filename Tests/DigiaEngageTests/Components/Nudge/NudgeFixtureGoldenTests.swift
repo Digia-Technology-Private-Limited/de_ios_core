@@ -49,10 +49,19 @@ struct NudgeFixtureGoldenTests {
         let templateConfig = try #require(json["templateConfig"] as? [String: Any], "Missing templateConfig")
         let nudgeConfig = try #require(try NudgeConfig.fromJson(templateConfig, designTokens: fixtureTokens(json)), "Fixture must decode to a nudge")
 
+        // Full-screen and dialog nudges lay out against the host's safe area
+        // on a device, like every SlotHostScreen suite already assumes from
+        // the same ViewImageConfig (47pt notch, 34pt home indicator). Give the
+        // host controller those insets; the SDK's own safe-area handling is
+        // what is exercised, with no per-fixture adjustment.
+        let device = ViewImageConfig.engageGolden
+        let usesHostSafeArea =
+            nudgeConfig.surface.isFullScreen || nudgeConfig.surface.displayType == .dialog
         let hostView = ComponentTestHost.makeRealOverlayWindow(
             nudgeConfig: nudgeConfig,
-            device: .engageGolden,
-            style: .striped
+            device: device,
+            style: .striped,
+            hostSafeArea: usesHostSafeArea ? device.safeArea : .zero
         )
         defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
 
