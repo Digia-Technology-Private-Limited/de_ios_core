@@ -361,7 +361,7 @@ struct NudgeCampaignBehaviourTests {
 
     // The SDK knows no campaign yet, so a delivery in these states sends nothing to Digia: only the CEP hears.
 
-    @Test("D1 delivered before Digia.initialize: not_initialized, nothing sent")
+    @Test("not_initialized: a nudge delivered before Digia.initialize is dropped and nothing reaches Digia")
     func beforeInitialize() async throws {
         let sdk = try await SdkHarness.startUninitialized()
         defer { sdk.tearDown() }
@@ -373,7 +373,7 @@ struct NudgeCampaignBehaviourTests {
         #expect(d.dropDetail == "Digia.initialize() has not been called")
     }
 
-    @Test("D2 delivered while the campaign fetch is held open: not_ready, nothing sent, and not shown once it lands")
+    @Test("not_ready: a nudge delivered while the campaign fetch is open is dropped, nothing reaches Digia, and it is not shown once the fetch lands")
     func whileFetchHeld() async throws {
         let sdk = try await SdkHarness.startFetchHeld(fixture("nudge_dialog"))
         defer { sdk.tearDown() }
@@ -390,7 +390,7 @@ struct NudgeCampaignBehaviourTests {
         #expect(try await sdk.sentToScriptedNetwork("test_nudge_dialog").isEmpty)
     }
 
-    @Test("D3 delivered after the campaign fetch failed: initialization_failed, nothing sent")
+    @Test("initialization_failed: a nudge delivered after the campaign fetch failed is dropped and nothing reaches Digia")
     func afterFetchFailed() async throws {
         let sdk = try await SdkHarness.startFetchFailed(fixture("nudge_dialog"))
         defer { sdk.tearDown() }
@@ -402,12 +402,103 @@ struct NudgeCampaignBehaviourTests {
         #expect(d.dropDetail == "Campaign fetch failed; trigger dropped")
     }
 
+    // MARK: - A trigger the plugin held
+
+    /// A plugin as the shipped ones are: it buffers what its CEP fires before core is ready, flushes in
+    /// `onHostReady`, and settles what the buffer drops. The buffer runs on `clock`, not on wall time.
+    @MainActor
+    private final class BufferingCep: DigiaCEPPlugin {
+        let id = "buffering-cep"
+        private(set) var host: DigiaCEPHost?
+        private(set) var dropped: [(key: String, reason: DropReason, at: TimeInterval)] = []
+        private(set) var flushed: [CampaignPresentation] = []
+        private(set) var buffer: PendingPayloadBuffer!
+
+        init(clock: ManualClock) {
+            buffer = PendingPayloadBuffer(
+                onDrop: { [unowned self] trigger, reason in
+                    dropped.append((trigger.campaignKey, reason, clock.elapsed))
+                },
+                arrivalOrder: false, now: { clock.now }, createTimer: { clock.schedule(after: $0, $1) })
+        }
+
+        func attach(host: DigiaCEPHost) { self.host = host }
+        func detach() { host = nil }
+
+        func onHostReady() {
+            for trigger in buffer.takeAll() { flushed.append(host!.deliver(trigger)) }
+        }
+
+        func fire(_ campaignKey: String) {
+            buffer.add(CEPTriggerPayload(cepCampaignId: "cep-\(campaignKey)", campaignKey: campaignKey, cepMetadata: [:]))
+        }
+    }
+
+    /// Time the test moves by hand; timers fire when it reaches them.
+    @MainActor
+    private final class ManualClock {
+        private let start = Date()
+        private(set) var elapsed: TimeInterval = 0
+        private var timers: [(id: Int, due: TimeInterval, work: @MainActor () -> Void)] = []
+        private var nextId = 0
+        var now: Date { start.addingTimeInterval(elapsed) }
+
+        func schedule(after delay: TimeInterval, _ work: @escaping @MainActor () -> Void) -> () -> Void {
+            let id = nextId
+            nextId += 1
+            timers.append((id, elapsed + delay, work))
+            return { [weak self] in self?.timers.removeAll { $0.id == id } }
+        }
+
+        func advance(to seconds: TimeInterval) {
+            elapsed = seconds
+            for timer in timers.filter({ $0.due <= seconds }).sorted(by: { $0.due < $1.due }) {
+                timers.removeAll { $0.id == timer.id }
+                timer.work()
+            }
+        }
+    }
+
+    @Test("pending_expired: a trigger the plugin held for 5 minutes while core was not ready is dropped at exactly 5:00, and nothing reaches Digia")
+    func pendingExpired() async throws {
+        let key = "test_nudge_dialog"
+        let sdk = try await SdkHarness.startFetchHeld(fixture("nudge_dialog"))
+        defer { sdk.tearDown() }
+        let clock = ManualClock()
+        let plugin = BufferingCep(clock: clock)
+        Digia.register(plugin)
+        try await sdk.waitUntil("the plugin is attached") { plugin.host != nil }
+        #expect(plugin.host?.isReady == false)
+
+        plugin.fire(key)
+        clock.advance(to: 299)
+        #expect(plugin.buffer.length == 1, "still held at 4:59")
+        #expect(plugin.dropped.isEmpty)
+
+        clock.advance(to: 300)
+        #expect(plugin.dropped.count == 1)
+        #expect(plugin.dropped.first?.key == key)
+        #expect(plugin.dropped.first?.reason == .pendingExpired)
+        #expect(plugin.dropped.first?.at == 300, "dropped at exactly 5:00")
+        #expect(plugin.buffer.length == 0)
+        #expect(SDKInstance.shared.sdkState == .initializing, "core was still loading throughout")
+
+        // Core comes up and the plugin flushes: nothing is left to deliver.
+        try await sdk.releaseBundle()
+        try await sdk.waitUntil("the SDK is READY") { SDKInstance.shared.sdkState == .ready }
+        try await sdk.settle(0.5)
+        #expect(plugin.flushed.isEmpty)
+        #expect(SDKInstance.shared.coordinator.liveCount == 0)
+        #expect(!sdk.isShowing("Dialog Test Nudge"))
+        #expect(try await sdk.sentToScriptedNetwork(key).isEmpty, "nothing was sent to Digia")
+    }
+
     // MARK: - Dropped or ended by the plugin and the watchdog
 
     // As coded: the SDK has no check for a missing `DigiaHost` (`host_not_mounted` is only the React Native
     // guide renderer's), so a nudge with no host to draw it waits out the 15 s acceptance watchdog and drops
     // `timeout`. This is also the one `timeout` reachable through the CEP flow in real time.
-    @Test("D6 D7 no DigiaHost mounted: the nudge never shows and drops timeout after 15 s, as coded", .tags(.slow))
+    @Test("timeout: with no DigiaHost mounted a nudge never shows and drops as timeout after 15 s, never host_not_mounted (as coded)", .tags(.slow))
     func noHostMountedTimesOut() async throws {
         let campaign = fixture("nudge_dialog")
         let sdk = try await SdkHarness.startWithoutHost(campaign)
@@ -424,7 +515,7 @@ struct NudgeCampaignBehaviourTests {
 
     // As coded: the CEP's outcome is `dismissed(plugin_detached)`; Digia is told nothing and the nudge stays up
     // until the user closes it (the replaced plugin only loses its slot).
-    @Test("D16 the CEP plugin is replaced while a nudge shows: the CEP hears plugin_detached, as coded")
+    @Test("plugin_detached: replacing the CEP plugin while a nudge shows tells the CEP dismissed plugin_detached and leaves the nudge up (as coded)")
     func pluginDetachedWhileShowing() async throws {
         let campaign = fixture("nudge_dialog")
         let sdk = try await start([campaign])

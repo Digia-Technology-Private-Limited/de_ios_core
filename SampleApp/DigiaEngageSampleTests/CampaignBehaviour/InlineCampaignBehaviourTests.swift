@@ -596,7 +596,7 @@ struct InlineCampaignBehaviourTests {
     }
 
     // The slot has no view yet, so the first campaign has not displayed and the newer one takes its place.
-    @Test("D5 a newer campaign for a slot nothing has displayed in: the older one drops superseded")
+    @Test("superseded: a newer inline campaign for a slot nothing has displayed in drops the older one before it shows")
     func supersededBeforeDisplay() async throws {
         let first = canvasCta()
         let second = secondCanvas()
@@ -622,7 +622,7 @@ struct InlineCampaignBehaviourTests {
     }
 
     // Registering another plugin is how a CEP integration is unregistered: the SDK settles what the old one owns.
-    @Test("D8 the CEP plugin is replaced while its inline campaign waits for a slot: plugin_detached")
+    @Test("plugin_detached: replacing the CEP plugin drops its inline campaign that is still waiting for a slot")
     func pluginDetachedBeforeDisplay() async throws {
         let campaign = canvasCta()
         let slot = SlotSwitch()
@@ -641,7 +641,7 @@ struct InlineCampaignBehaviourTests {
 
     // As coded: inline campaigns are never frequency-capped (on every stack), so a cap of one does not stop the
     // same campaign showing again once its slot is cleared.
-    @Test("D11 inline: never frequency-capped, as coded")
+    @Test("inline: never frequency-capped, so a second delivery shows again despite a cap of one (as coded)")
     func neverCapped() async throws {
         let key = "test_inline_canvas_cta"
         let sdk = try await start([canvasCta().cappedAtOne()], slot: "home_banner")
@@ -660,7 +660,25 @@ struct InlineCampaignBehaviourTests {
         expectInlineChain(eventsOf(second, in: events), second, names: [Chain.triggered, Chain.viewed])
     }
 
-    @Test("D12 inline: CEP cancel before it shows: cancelled")
+    // CleverTap draws an inline by Native Display only; a `DigiaTemplate` in-app is the wrong channel for it.
+    @Test("invalid_config: an inline campaign delivered as a CleverTap custom template is dropped as channel_mismatch")
+    func channelMismatch() async throws {
+        let key = "test_inline_canvas_cta"
+        let campaign = canvasCta()
+        let sdk = try await start([campaign], slot: "home_banner")
+        defer { sdk.tearDown() }
+        let host = try #require(sdk.cep.host)
+        let d = Delivery(host.deliver(CEPTriggerPayload(
+            cepCampaignId: "cep-\(key)", campaignKey: key, cepMetadata: ["templateName": "DigiaTemplate"])))
+        try await sdk.settle(1)
+        #expect(!sdk.isShowing("Special Wellness Program"))
+
+        expectDroppedWire(
+            await sdk.sent(key), d, .invalidConfig, campaign, screen: nil, extras: ["cause": "channel_mismatch"],
+            detail: "inline campaign delivered as a CleverTap custom template")
+    }
+
+    @Test("inline: a CEP cancel before it shows drops it as cancelled")
     func cepCancelBeforeShowing() async throws {
         let key = "test_inline_canvas_cta"
         let campaign = canvasCta()
@@ -680,7 +698,7 @@ struct InlineCampaignBehaviourTests {
             detail: "ended before it displayed (cancelled)", timeline: ["hold early", "outcome"])
     }
 
-    @Test("D13 inline: off its target screen: screen_not_targeted")
+    @Test("inline: delivered off its target screen drops as screen_not_targeted")
     func offItsTargetScreen() async throws {
         let key = "test_inline_canvas_cta"
         let campaign = canvasCta().targeting(["home"])
