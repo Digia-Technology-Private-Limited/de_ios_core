@@ -234,7 +234,6 @@ enum GoldenHarness {
         let startsExpanded = fixture.json.deepString("initialState") == "expanded"
         let first = startsExpanded ? "expanded" : "collapsed"
         expect(sdk.window, surface: surface, name: "\(fixture.name)-\(first)", sourceLocation: sourceLocation)
-        guard WorkspaceFixtures.expandedGoldens.contains("\(surface)/\(fixture.name)") else { return }
         if startsExpanded {
             // A real tap on the collapse button: the first of the chrome's buttons, or the second when the close
             // button is on the left.
