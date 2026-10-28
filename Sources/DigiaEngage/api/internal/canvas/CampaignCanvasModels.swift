@@ -295,6 +295,7 @@ enum CampaignCanvasChild: Equatable, Identifiable, Sendable {
         if case .timer(_, let preset, _, _, _, _, _, _, _, let layout) = widget,
             preset != "text", layout.isCustomized { return false }
         if widget.box.shadow != nil { return false }
+        // Glyph ink, shadows and underlines overhang the authored rect; the stage clips overflow.
         if case .text = widget { return false }
         if case .button(_, _, _, _, let shadow, _, _, _, _, _) = widget { return shadow == nil }
         return true
