@@ -284,7 +284,7 @@ struct GuideCampaignBehaviourTests {
         expectDropped(await sdk.sent(key), d, .anchorNotRegistered)
     }
 
-    @Test("a nudge already up: surface_busy")
+    @Test("guide: a nudge already up: surface_busy")
     func nudgeAlreadyUp() async throws {
         let key = "test_guide_tooltip_single"
         let sdk = try await SdkHarness.startChain([
@@ -303,7 +303,7 @@ struct GuideCampaignBehaviourTests {
 
     // As coded: a classic guide (steps with no canvas) is parsed into the store, but this renderer shows canvas
     // steps only, so routing turns it away `invalid_config`, with nothing on screen.
-    @Test("D4 a guide with no canvas steps: invalid_config (as coded)")
+    @Test("a guide with no canvas steps: invalid_config (as coded)")
     func noCanvasSteps() async throws {
         let key = "test_guide_tooltip_classic_stack_push"
         let campaign = guide("guide_tooltip_classic_stack_push")
@@ -318,7 +318,7 @@ struct GuideCampaignBehaviourTests {
             extras: ["cause": "empty_content"], detail: "campaign has no valid Canvas guide content")
     }
 
-    @Test("D11 over its cap: frequency_capped, and the first chain intact")
+    @Test("guide: over its cap: frequency_capped, and the first chain intact")
     func overItsCap() async throws {
         let key = "test_guide_tooltip_single"
         let campaign = guide("guide_tooltip_single_step").cappedAtOne()
@@ -345,7 +345,7 @@ struct GuideCampaignBehaviourTests {
             extras: ["cap_rule": "max_total", "cap_limit": 1])
     }
 
-    @Test("D12 CEP cancel before it shows: cancelled")
+    @Test("guide: CEP cancel before it shows: cancelled")
     func cepCancelBeforeShowing() async throws {
         let key = "test_guide_tooltip_single"
         let campaign = guide("guide_tooltip_single_step")
@@ -361,7 +361,7 @@ struct GuideCampaignBehaviourTests {
             extras: ["cancel_cause": "cep_cancel"])
     }
 
-    @Test("D13 off its target screen: screen_not_targeted")
+    @Test("guide: off its target screen: screen_not_targeted")
     func offItsTargetScreen() async throws {
         let key = "test_guide_tooltip_screen_change_allowed"
         let campaign = guide("guide_tooltip_screen_change_allowed")

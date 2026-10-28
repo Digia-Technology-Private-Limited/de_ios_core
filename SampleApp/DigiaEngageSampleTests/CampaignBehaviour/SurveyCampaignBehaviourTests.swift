@@ -141,7 +141,7 @@ struct SurveyCampaignBehaviourTests {
 
     // MARK: - Dropped
 
-    @Test("a nudge already up: surface_busy")
+    @Test("survey: a nudge already up: surface_busy")
     func nudgeAlreadyUp() async throws {
         let key = "test_survey_stacked_cta"
         let sdk = try await start([
@@ -158,7 +158,7 @@ struct SurveyCampaignBehaviourTests {
         expectDropped(await sdk.sent(key), d, .surfaceBusy)
     }
 
-    @Test("D11 over its cap: frequency_capped, and the first chain intact")
+    @Test("survey: over its cap: frequency_capped, and the first chain intact")
     func overItsCap() async throws {
         let key = "test_survey_stacked_cta"
         let campaign = survey("survey_stacked_cta").cappedAtOne()
@@ -182,7 +182,7 @@ struct SurveyCampaignBehaviourTests {
             extras: ["cap_rule": "max_total", "cap_limit": 1])
     }
 
-    @Test("D12 CEP cancel before it shows: cancelled")
+    @Test("survey: CEP cancel before it shows: cancelled")
     func cepCancelBeforeShowing() async throws {
         let key = "test_survey_stacked_cta"
         let campaign = survey("survey_stacked_cta")
@@ -198,7 +198,7 @@ struct SurveyCampaignBehaviourTests {
             extras: ["cancel_cause": "cep_cancel"])
     }
 
-    @Test("D13 off its target screen: screen_not_targeted")
+    @Test("survey: off its target screen: screen_not_targeted")
     func offItsTargetScreen() async throws {
         let key = "test_survey_backdrop_locked"
         let campaign = survey("survey_backdrop_locked")

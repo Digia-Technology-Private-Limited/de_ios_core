@@ -236,7 +236,7 @@ struct FloaterCampaignBehaviourTests {
 
     // MARK: - Dropped
 
-    @Test("D11 pip: over its cap: frequency_capped, and the first chain intact")
+    @Test("pip: over its cap: frequency_capped, and the first chain intact")
     func pipOverItsCap() async throws {
         let key = "test_pip_close_dismiss"
         let campaign = fixture("campaigns/pip/pip_close_dismiss.json").cappedAtOne()
@@ -259,7 +259,7 @@ struct FloaterCampaignBehaviourTests {
             extras: ["cap_rule": "max_total", "cap_limit": 1])
     }
 
-    @Test("D11 story floater: over its cap: frequency_capped, and the first chain intact")
+    @Test("story floater: over its cap: frequency_capped, and the first chain intact")
     func storyOverItsCap() async throws {
         let key = "test_floater_close"
         let campaign = fixture("campaigns/floater/floater_close_button.json").cappedAtOne()
@@ -283,7 +283,7 @@ struct FloaterCampaignBehaviourTests {
             extras: ["cap_rule": "max_total", "cap_limit": 1])
     }
 
-    @Test("D12 pip: CEP cancel before it shows: cancelled")
+    @Test("pip: CEP cancel before it shows: cancelled")
     func pipCepCancelBeforeShowing() async throws {
         let key = "test_pip_close_dismiss"
         let campaign = fixture("campaigns/pip/pip_close_dismiss.json")
@@ -300,7 +300,7 @@ struct FloaterCampaignBehaviourTests {
             extras: ["cancel_cause": "cep_cancel"], detail: "ended before it displayed (cancelled)")
     }
 
-    @Test("D13 story floater: off its target screen: screen_not_targeted")
+    @Test("story floater: off its target screen: screen_not_targeted")
     func storyOffTargetScreen() async throws {
         let key = "test_floater_story_screen_change_home_only"
         let campaign = fixture("campaigns/floater/floater_story_screen_change_home_only.json")
@@ -317,7 +317,7 @@ struct FloaterCampaignBehaviourTests {
 
     // As coded: the image answers 404, so the PiP has no media to float; its window never opens, and the media
     // end it reports reaches the CEP as a cancel (`cancelled`), with the media end as the cause.
-    @Test("D14 pip: its image fails to load: dropped as cancelled, as coded")
+    @Test("pip: its image fails to load: dropped as cancelled, as coded")
     func pipMediaFailsToLoad() async throws {
         let key = "test_pip_close_dismiss"
         let base = fixture("campaigns/pip/pip_close_dismiss.json")
