@@ -41,7 +41,7 @@ struct SettingsToggleRow: View {
             Text(title)
             if let subtitle {
                 Text(subtitle)
-                    .font(.footnote)
+                    .font(digiaFont(size: 13))
                     .foregroundColor(.secondary)
             }
         }
