@@ -271,10 +271,10 @@ private struct NpsQuestion: View {
                         onAnswer(SurveyAnswer(values: ["\(i)"]))
                     } label: {
                         ZStack {
-                            RoundedRectangle(cornerRadius: radius)
+                            RoundedRectangle(cornerRadius: radius, style: .circular)
                                 .fill(fill)
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: radius)
+                                    RoundedRectangle(cornerRadius: radius, style: .circular)
                                         .stroke(borderColor, lineWidth: borderW)
                                 )
                             Text("\(i)")
@@ -350,9 +350,9 @@ private struct NpsFaceQuestion: View {
                         Text(face.emoji)
                             .font(surveyFont(size: faceSize))
                             .frame(width: 56, height: 56)
-                            .background(RoundedRectangle(cornerRadius: radius).fill(fill))
+                            .background(RoundedRectangle(cornerRadius: radius, style: .circular).fill(fill))
                             .overlay(
-                                RoundedRectangle(cornerRadius: radius).stroke(
+                                RoundedRectangle(cornerRadius: radius, style: .circular).stroke(
                                     borderColor, lineWidth: borderW)
                             )
                             .scaleEffect(isOn ? 1.1 : 1.0)
