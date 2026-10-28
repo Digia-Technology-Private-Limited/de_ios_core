@@ -2851,6 +2851,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     func reportCarouselStepViewed(
         payload: CEPTriggerPayload, itemIndex: Int, itemTotal: Int, auto: Bool
     ) {
+        // The slot's Viewed comes first. The step gate fires as soon as the slot is exposed, which can be
+        // before the slot's first-render report; the impression is sent once, so this only fixes the order (F13).
+        reportSlotFirstRender(payload)
         events.toDigia(
             CarouselEvent.StepViewed(itemIndex: itemIndex, itemTotal: itemTotal, auto: auto),
             payload: payload

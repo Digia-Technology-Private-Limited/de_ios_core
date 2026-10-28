@@ -124,7 +124,6 @@ struct InlineCampaignBehaviourTests {
         expectInlineChain(await sdk.sent("test_inline_canvas_cta"), incumbent, names: [Chain.triggered, Chain.viewed])
     }
 
-    // Fails today: the first slide's Digia Step Viewed is sent before Digia Experience Viewed (the carousel's step gate reports on exposure before the slot's first-render task sends the impression); Flutter sends Viewed first.
     @Test("carousel: one Clicked on the first item tap, a step per tap")
     func carouselItemTaps() async throws {
         let key = "test_inline_carousel"
@@ -148,7 +147,6 @@ struct InlineCampaignBehaviourTests {
             names: [Chain.triggered, Chain.viewed, Chain.stepViewed, Chain.clicked, Chain.stepClicked, Chain.stepClicked])
     }
 
-    // Fails today: opening a story sends its first page's Digia Step Viewed before the opening Digia Experience Clicked; Flutter sends the Clicked first.
     @Test("story: opening it is the Clicked, Digia only")
     func storyOpen() async throws {
         let key = "test_inline_story"
@@ -224,7 +222,6 @@ struct InlineCampaignBehaviourTests {
         return (sdk, d)
     }
 
-    // Fails today: the first slide's Digia Step Viewed is sent before Digia Experience Viewed (expected Viewed first, as on Flutter).
     @Test("carousel autoplay advances to slide 2 after its interval")
     func autoplayAdvances() async throws {
         let key = "test_inline_carousel_autoplay"
@@ -240,7 +237,6 @@ struct InlineCampaignBehaviourTests {
         #expect(stepsViewed(events) == ["(1, 2, 0)", "(2, 2, 1)"])
     }
 
-    // Fails today: the first slide's Digia Step Viewed is sent before Digia Experience Viewed (expected Viewed first, as on Flutter).
     @Test("carousel autoplay wraps from the last slide back to slide 1")
     func autoplayWraps() async throws {
         let key = "test_inline_carousel_autoplay"
@@ -256,7 +252,6 @@ struct InlineCampaignBehaviourTests {
         #expect(stepsViewed(events) == ["(1, 2, 0)", "(2, 2, 1)", "(1, 2, 1)"])
     }
 
-    // Fails today: the first slide's Digia Step Viewed is sent before Digia Experience Viewed (expected Viewed first, as on Flutter).
     @Test("carousel autoplay sends no Clicked and no Step Clicked")
     func autoplaySendsNoClicks() async throws {
         let key = "test_inline_carousel_autoplay"
@@ -275,7 +270,6 @@ struct InlineCampaignBehaviourTests {
         #expect(stepsViewed(events) == ["(1, 2, 0)", "(2, 2, 1)", "(1, 2, 1)", "(2, 2, 1)"])
     }
 
-    // Fails today: the first slide's Digia Step Viewed is sent before Digia Experience Viewed (expected Viewed first, as on Flutter).
     @Test("carousel: a swipe left goes to slide 2")
     func swipeLeft() async throws {
         let key = "test_inline_carousel_infinite"
@@ -291,7 +285,6 @@ struct InlineCampaignBehaviourTests {
         #expect(stepsViewed(events) == ["(1, 2, 0)", "(2, 2, 0)"])
     }
 
-    // Fails today: the first slide's Digia Step Viewed is sent before Digia Experience Viewed (expected Viewed first, as on Flutter).
     @Test("carousel: swiping past the last slide wraps to slide 1")
     func swipePastTheLast() async throws {
         let key = "test_inline_carousel_infinite"
@@ -308,7 +301,6 @@ struct InlineCampaignBehaviourTests {
         #expect(stepsViewed(events) == ["(1, 2, 0)", "(2, 2, 0)", "(1, 2, 0)"])
     }
 
-    // Fails today: the first slide's Digia Step Viewed is sent before Digia Experience Viewed (expected Viewed first, as on Flutter).
     @Test("carousel: a swipe right on the first slide wraps back to the last")
     func swipeRightOnTheFirst() async throws {
         let key = "test_inline_carousel_infinite"
