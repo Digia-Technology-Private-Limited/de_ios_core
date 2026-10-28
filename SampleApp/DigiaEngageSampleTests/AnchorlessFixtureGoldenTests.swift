@@ -19,7 +19,8 @@ extension HostedUITests {
 struct AnchorlessFixtureGoldenTests {
 
     /// Fixtures the SDK starts but never shows. Each is asserted to stay invisible, and fails once it
-    /// draws so it can get a golden instead.
+    /// draws; the bare host screen is also its golden, proving nothing was drawn, recorded as the
+    /// sibling fixture goldens are.
     ///   - a target captured on another page;
     ///   - a target placed off screen.
     private static let notShown: Set<String> = [
@@ -49,7 +50,7 @@ struct AnchorlessFixtureGoldenTests {
         )
     }
 
-    @Test("does not show a guide it cannot place", .tags(.component), arguments: fixtures.filter { notShown.contains($0) })
+    @Test("does not show a guide it cannot place", .tags(.component, .golden), arguments: fixtures.filter { notShown.contains($0) })
     @MainActor
     func testAnchorlessFixtureNotShown(fixture: String) async throws {
         let showing = try show(fixture)
@@ -59,9 +60,17 @@ struct AnchorlessFixtureGoldenTests {
         try await Task.sleep(nanoseconds: 2_000_000_000)
         #expect(
             ComponentTestHost.renderImage(of: showing.window).pngData() == showing.hostOnly.pngData(),
-            "\(fixture) now draws; remove it from `notShown` so it gets a golden"
+            "\(fixture) now draws; remove it from `notShown` so the regular golden test covers it"
         )
         #expect(SDKInstance.shared.guideOrchestrator.state == nil, "\(fixture) is still showing")
+        // The bare host screen is the golden too: it proves nothing was drawn.
+        assertVisualGolden(
+            matching: ComponentTestHost.settledImage(of: showing.window),
+            precision: 1.0,
+            perceptualPrecision: 0.98,
+            named: fixture,
+            function: "testAnchorlessFixtureGolden"
+        )
     }
 
     @MainActor
