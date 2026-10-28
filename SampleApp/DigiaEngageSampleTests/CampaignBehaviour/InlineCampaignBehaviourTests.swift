@@ -89,7 +89,6 @@ struct InlineCampaignBehaviourTests {
         #expect((events.dropFirst(2).first?["properties"] as? [String: Any])?["cta_role"] as? String == "primary")
     }
 
-    // Fails today: the CEP hears dismissed(user_close) for a slot the host cleared (clearInlineContent -> dismissCampaign); Flutter reports cancelled.
     @Test("canvas: the host clears its slot: the CEP hears cancelled, Digia none")
     func hostClearsItsSlot() async throws {
         let key = "test_inline_canvas_cta"
@@ -327,7 +326,7 @@ struct InlineCampaignBehaviourTests {
     ) async throws {
         let key = "test_canvas_overlapping_tap_targets"
         let sdk = try await start(
-            [WorkspaceFixtures.campaign("campaigns/canvas/canvas_overlapping_tap_targets.json")], slot: "home_banner")
+            [WorkspaceFixtures.campaign("campaigns/canvas_tap_targets/canvas_overlapping_tap_targets.json")], slot: "home_banner")
         defer { sdk.tearDown() }
         let d = try sdk.deliverChain(key)
         try await show(sdk, d)
