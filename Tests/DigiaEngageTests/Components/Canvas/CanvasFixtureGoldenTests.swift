@@ -107,6 +107,11 @@ struct CanvasFixtureGoldenTests {
         let host = SlotHostScreen(config: config, payload: payload, safeArea: device.safeArea)
             .environment(\.canvasVideoRuntime, Self.pausedVideo)
             .environment(\.canvasLottieRuntime, CanvasLottieRuntime(playbackMode: .frozen(progress: Self.lottieProgress)))
+            // Appear animations jump to their end state, so the golden shows the settled card.
+            .transaction { transaction in
+                transaction.animation = nil
+                transaction.disablesAnimations = true
+            }
         let controller = UIHostingController(rootView: host)
         if #available(iOS 16.4, *) {
             controller.safeAreaRegions = []

@@ -1777,12 +1777,13 @@ private struct CanvasProgressRenderer: View {
     var body: some View {
         CampaignCanvasBoxView(box: box, isDark: isDark) {
             GeometryReader { geometry in
+                let indicatorSize = CGSize(width: geometry.size.width * displayed, height: geometry.size.height)
                 ZStack(alignment: .leading) {
                     CampaignCanvasPaintView(paint: track, isDark: isDark)
                     CampaignCanvasPaintView(paint: indicator, isDark: isDark)
-                        .clipShape(CampaignCanvasRoundedShape(radius: cornerRadius))
-                        .frame(width: geometry.size.width * displayed)
-                }.clipShape(CampaignCanvasRoundedShape(radius: cornerRadius))
+                        .clipShape(CampaignCanvasRoundedShape(radius: capped(cornerRadius, to: indicatorSize)))
+                        .frame(width: indicatorSize.width)
+                }.clipShape(CampaignCanvasRoundedShape(radius: capped(cornerRadius, to: geometry.size)))
             }
         }
         .onAppear {
@@ -1802,6 +1803,17 @@ private struct CanvasProgressRenderer: View {
                 withTransaction(transaction) { displayed = value }
             }
         }
+    }
+
+    /// Each corner is capped at half the shorter side of the rect it rounds, so a large radius is a pill.
+    private func capped(_ radius: CampaignCanvasCornerRadius, to size: CGSize) -> CampaignCanvasCornerRadius {
+        let cap = max(0, min(size.width, size.height) / 2)
+        return CampaignCanvasCornerRadius(
+            topLeft: min(max(radius.topLeft, 0), cap),
+            topRight: min(max(radius.topRight, 0), cap),
+            bottomRight: min(max(radius.bottomRight, 0), cap),
+            bottomLeft: min(max(radius.bottomLeft, 0), cap)
+        )
     }
 }
 
