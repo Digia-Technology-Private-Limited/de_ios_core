@@ -49,21 +49,27 @@ struct NudgeFixtureGoldenTests {
         let templateConfig = try #require(json["templateConfig"] as? [String: Any], "Missing templateConfig")
         let nudgeConfig = try #require(try NudgeConfig.fromJson(templateConfig, designTokens: fixtureTokens(json)), "Fixture must decode to a nudge")
 
-        // Full-screen and dialog nudges lay out against the host's safe area
-        // on a device, like every SlotHostScreen suite already assumes from
-        // the same ViewImageConfig (47pt notch, 34pt home indicator). Give the
-        // host controller those insets; the SDK's own safe-area handling is
-        // what is exercised, with no per-fixture adjustment.
+        // The package's test bundle has no host app, so the SDK's window lookup finds no window
+        // and reads zero insets. Pin the golden device's screen and its notch / home-indicator
+        // insets (47pt top, 34pt bottom) for the full-screen and dialog nudges, which lay out
+        // against them on a device.
         let device = ViewImageConfig.engageGolden
-        let usesHostSafeArea =
-            nudgeConfig.surface.isFullScreen || nudgeConfig.surface.displayType == .dialog
+        if nudgeConfig.surface.isFullScreen || nudgeConfig.surface.displayType == .dialog {
+            let insets = device.safeArea
+            activeFloaterWindowGeometryOverride = (
+                CGRect(origin: .zero, size: device.size!),
+                EdgeInsets(top: insets.top, leading: insets.left, bottom: insets.bottom, trailing: insets.right)
+            )
+        }
         let hostView = ComponentTestHost.makeRealOverlayWindow(
             nudgeConfig: nudgeConfig,
             device: device,
-            style: .striped,
-            hostSafeArea: usesHostSafeArea ? device.safeArea : .zero
+            style: .striped
         )
-        defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
+        defer {
+            activeFloaterWindowGeometryOverride = nil
+            ComponentTestHost.cleanupOverlayWindow(hostView)
+        }
 
         // Every pixel must match within the perceptual tolerance: 0.999 (used by the
         // hand-written goldens) lets ~3,800 pixels differ, enough to hide a short text change.
