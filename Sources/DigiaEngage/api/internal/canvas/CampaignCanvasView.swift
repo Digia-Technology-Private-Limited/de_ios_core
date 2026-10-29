@@ -165,7 +165,8 @@ struct CampaignCanvasView: View {
                 ? 0 : surface.cornerRadius / max(designScale, 0.001),
             isDark: theme.isDark(colorScheme),
             showBackground: showBackground,
-            onAction: onAction
+            onAction: onAction,
+            squareBottomCorners: surface.isBottomSheet
         )
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
         .scaleEffect(fittedScale, anchor: surface.isFullScreen ? .center : .topLeading)
@@ -583,6 +584,9 @@ struct CampaignCanvasStage: View {
     /// touch.
     var backgroundTakesTouches = true
     var animateWidgetsOnAppear = true
+    /// A bottom sheet rounds only its top edge, as on Android and Flutter; its
+    /// bottom sits on the screen edge.
+    var squareBottomCorners = false
 
     /// Where a tap that carries `Action.showStory` is routed.
     ///
@@ -608,6 +612,14 @@ struct CampaignCanvasStage: View {
             guard case .widget(_, _, let widget) = child, case .story = widget else { return nil }
             return widget
         }.first
+    }
+
+    private var stageClipShape: CampaignCanvasRoundedShape {
+        let r = max(0, authoredCornerRadius)
+        let bottom = squareBottomCorners ? 0 : r
+        return CampaignCanvasRoundedShape(
+            radius: CampaignCanvasCornerRadius(
+                topLeft: r, topRight: r, bottomRight: bottom, bottomLeft: bottom))
     }
 
     var body: some View {
@@ -636,7 +648,7 @@ struct CampaignCanvasStage: View {
             }
         }
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
-        .clipShape(RoundedRectangle(cornerRadius: max(0, authoredCornerRadius)))
+        .clipShape(stageClipShape)
         .fullScreenCover(
             isPresented: Binding(
                 get: { storyOpenIndex != nil && story != nil },
