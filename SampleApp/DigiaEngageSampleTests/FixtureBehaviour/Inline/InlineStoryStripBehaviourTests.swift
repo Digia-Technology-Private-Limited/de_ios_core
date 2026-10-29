@@ -37,23 +37,19 @@ struct InlineStoryStripBehaviourTests {
     }
 
     /// Five items are authored: one with an empty URL, one with none, one whose URL is wrapped as
-    /// `{"value": …}` and two plain ones. Flutter reads the wrapped URL, so three stay. Known gap:
-    /// iOS reads a story item's `url` only as a plain string (`StoryItemConfig.fromJson`,
-    /// `json.nonBlankString("url")`), so it drops the wrapped one too and keeps two. That the items
-    /// without media are gone, and that a tap opens the item at its place among those that stayed,
-    /// holds either way and is asserted unwrapped.
-    // Fails if: Sources/DigiaEngage/api/internal/campaign/inline_story_config.swift:35
-    // `guard let url = json.nonBlankString("url") else { return nil }` -> `let url = json["url"] as? String ?? ""`
-    // (the items with no media stay in the rail, and the second card is the 2nd of five).
+    /// `{"value": …}` and two plain ones. The wrapped URL is read, as in Flutter, so three stay, and
+    /// a tap opens the item at its place among those that stayed.
+    // Fails if: Sources/DigiaEngage/api/internal/campaign/inline_story_config.swift:36
+    // `guard let url = storyLiteral(json["url"]) as? String, !url.isEmpty else { return nil }` ->
+    // `let url = json["url"] as? String ?? ""` (the items with no media stay in the rail, and the
+    // second card is the 2nd of five).
     @Test("items without media are dropped, and a tap opens the item at its place among the ones that stayed")
     func itemsWithoutMediaAreDropped() async throws {
         let (sdk, frame, config, key) = try await show("inline_story_strip_bad_items_and_card_guards")
         defer { sdk.tearDown() }
 
         #expect(config.items.allSatisfy { !$0.url.isEmpty })
-        withKnownIssue("iOS does not read a story item URL wrapped as {\"value\": …}") {
-            #expect(config.items.count == 3)
-        }
+        #expect(config.items.count == 3)
 
         try await sdk.tapStoryCard(1, in: frame, card: config.card)
         try await sdk.waitForStoryViewer()
