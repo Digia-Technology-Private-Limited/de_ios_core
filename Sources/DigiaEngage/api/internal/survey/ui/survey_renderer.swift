@@ -280,7 +280,6 @@ private struct SurveySheet<Content: View>: View {
     var designWidth: CGFloat = 360
     @ViewBuilder let content: () -> Content
     @StateObject private var keyboard = SurveyKeyboardObserver()
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     /// `heightMode` becomes the sheet's *cap*, not a fixed height: short content
     /// hugs (no dead space), taller content scrolls within this ceiling.
@@ -297,10 +296,7 @@ private struct SurveySheet<Content: View>: View {
     /// the full window. Phones keep today's full-width sheet.
     private func sheetMaxWidth(screenWidth: CGFloat) -> CGFloat? {
         let size = surveyWindowFrame.size
-        let largeScreen = isLargeScreen(
-            shortestSide: min(size.width, size.height),
-            horizontalSizeClass: horizontalSizeClass
-        )
+        let largeScreen = isLargeScreen(shortestSide: min(size.width, size.height))
         let sheetWidth = nudgeSheetWidth(
             screenWidth: screenWidth,
             designWidth: designWidth,
@@ -634,7 +630,7 @@ private struct CanvasSurveyScrollBounds: UIViewRepresentable {
     }
 }
 
-@MainActor private var surveyWindowFrame: CGRect {
+@MainActor var surveyWindowFrame: CGRect {
     guard let window = UIApplication.shared.connectedScenes
         .compactMap({ $0 as? UIWindowScene })
         .first(where: { $0.activationState == .foregroundActive })?
