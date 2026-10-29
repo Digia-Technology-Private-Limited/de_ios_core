@@ -829,7 +829,19 @@ struct CanvasStoryViewer: View {
 
                 // Both the overlay and the chrome are authored against the safe
                 // region, so both draw at the same scale and inside it.
-                let scale = page.canvas.width > 0 ? contentWidth / page.canvas.width : 1
+                let widthScale = page.canvas.width > 0 ? contentWidth / page.canvas.width : 1
+                // The authored portrait canvas (page + chrome) is taller than a
+                // tablet reader when scaled to its width, and the centred frame
+                // then pushes the top chrome — progress, close, mute — off the
+                // screen. Fit the whole authored height on a large screen.
+                // Phones keep the width scale.
+                let largeScreen = min(proxy.size.width, proxy.size.height) >= 600
+                let availableHeight = max(
+                    0, proxy.size.height - safeAreaInsets.top - safeAreaInsets.bottom
+                )
+                let authoredHeight = max(page.canvas.height, chrome.height)
+                let heightScale = authoredHeight > 0 ? availableHeight / authoredHeight : widthScale
+                let scale = largeScreen ? min(widthScale, heightScale) : widthScale
                 // The page an action came from travels with it, so a CTA inside story 3 reports as
                 // a step click on story 3 rather than as an anonymous click on the card.
                 let pageAction: (CampaignCanvasActionRequest) -> Void = { request in
