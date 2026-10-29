@@ -68,7 +68,7 @@ struct InlineStoryMediaSizingTests {
         #expect(StoryMediaFit.fill.stretchesImage)
         #expect(StoryMediaFit.cover.videoGravity == .resizeAspectFill)
         #expect(StoryMediaFit.contain.videoGravity == .resizeAspect)
-        #expect(StoryMediaFit.fill.videoGravity == .resizeAspectFill)
+        #expect(StoryMediaFit.fill.videoGravity == .resize)
     }
 
     private func item(

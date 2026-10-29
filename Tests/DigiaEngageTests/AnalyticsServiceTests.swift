@@ -174,9 +174,11 @@ struct AnalyticsServiceTests {
         #expect(entries[1].payload["event_name"] as? String == "Digia Experience Clicked")
         #expect(entries[2].payload["event_name"] as? String == "Digia Experience Dismissed")
 
-        // element_id is a hoisted top-level column, present only for Clicked.
-        #expect(entries[1].payload["element_id"] as? String == "cta-btn")
-        #expect(entries[0].payload["element_id"] == nil)
+        // element_id rides in properties (Android parity), present only for Clicked.
+        let clickProps = entries[1].payload["properties"] as? [String: Any]
+        #expect(clickProps?["element_id"] as? String == "cta-btn")
+        let viewedProps = entries[0].payload["properties"] as? [String: Any]
+        #expect(viewedProps?["element_id"] == nil)
     }
 
     @Test("click analytics preserve action URL")
