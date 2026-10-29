@@ -152,24 +152,5 @@ struct LegacySurveyScoresTests {
         #expect(presentation.dismissReason == .userClose)
     }
 
-    // Fails if `SurveyBody.startTimer` stops closing the survey at zero (`if remainingSecs == 0 {
-    // onClose() }`).
-    @Test("a timer that runs out closes the survey")
-    func timerRunsOut() async throws {
-        let campaign = try legacyFixture("legacy_survey/legacy_survey_scores_sheet") { config in
-            var settings = config["settings"] as? [String: Any] ?? [:]
-            settings["surveyTimer"] = ["timer": true, "timeLimit": 2, "pauseOnNonTimerBlock": false]
-            config["settings"] = settings
-        }
-        let (sdk, presentation) = try await open(campaign)
-        defer { sdk.tearDown() }
-
-        try await sdk.waitUntil("the timer closed the survey", timeout: 5) {
-            presentation.outcome.settledValue != nil
-        }
-        #expect(presentation.dismissReason == .userClose)
-        #expect(presentation.legacyCompleted == false)
-        #expect(try await sdk.legacySubmissions().isEmpty)
-    }
 }
 }

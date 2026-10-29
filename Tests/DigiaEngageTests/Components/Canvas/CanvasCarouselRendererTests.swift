@@ -249,97 +249,6 @@ struct CanvasCarouselRendererTests {
         #expect(CanvasCarouselRenderer.nextAutoPlayIndex(currentIndex: 2, displayCount: finiteDisplayCount, loopEnabled: false) == nil)
     }
 
-    // MARK: - 7. Visual Golden Tests
-
-    @Test("carousel renderer renders multi-slide strip and active dot indicators")
-    func carouselRendererVisualGolden() throws {
-        let canvas = try CampaignCanvasParser().parse([
-            "version": 2,
-            "canvasWidth": 360,
-            "canvasHeight": 220,
-            "background": ["type": "solid", "color": ["value": "#FFF8FAFC"]],
-            "children": [
-                [
-                    "kind": "widget",
-                    "id": "carousel-1",
-                    "rect": ["x": 0.0, "y": 0.05, "width": 1.0, "height": 0.9],
-                    "widget": [
-                        "type": "digia/canvasCarousel",
-                        "props": [
-                            "slides": [
-                                makeSlideJSON(title: "Welcome to Digia", subtitle: "Slide 1 of 3", colorHex: "#FF4F46E5"),
-                                makeSlideJSON(title: "Interactive Cards", subtitle: "Slide 2 of 3", colorHex: "#FF059669"),
-                                makeSlideJSON(title: "Seamless Motion", subtitle: "Slide 3 of 3", colorHex: "#FFD97706")
-                            ],
-                            "viewportFraction": 0.85,
-                            "itemSpacing": 12,
-                            "autoPlay": false,
-                            "infiniteScroll": false,
-                            "cornerRadius": 14,
-                            "showIndicator": true,
-                            "dotWidth": 16,
-                            "dotHeight": 6,
-                            "dotSpacing": 8,
-                            "dotColor": "#FFCBD5E1",
-                            "activeDotColor": "#FF4F46E5"
-                        ]
-                    ]
-                ]
-            ]
-        ])
-
-        let window = mount(canvas: canvas)
-        defer { unmount(window) }
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
-        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
-    }
-
-    @Test("carousel renderer adapts dot and slide styling to dark theme")
-    func carouselRendererDarkThemeVisualGolden() throws {
-        let canvas = try CampaignCanvasParser().parse([
-            "version": 2,
-            "canvasWidth": 360,
-            "canvasHeight": 220,
-            "background": ["type": "solid", "color": ["value": "#FF0F172A"]],
-            "children": [
-                [
-                    "kind": "widget",
-                    "id": "carousel-dark",
-                    "rect": ["x": 0.0, "y": 0.05, "width": 1.0, "height": 0.9],
-                    "widget": [
-                        "type": "digia/canvasCarousel",
-                        "props": [
-                            "slides": [
-                                makeSlideJSON(title: "Night Mode Experience", subtitle: "Curated for OLED", colorHex: "#FF1E1B4B"),
-                                makeSlideJSON(title: "Vibrant Accents", subtitle: "Neon highlights", colorHex: "#FF064E3B")
-                            ],
-                            "viewportFraction": 0.88,
-                            "itemSpacing": 14,
-                            "autoPlay": false,
-                            "infiniteScroll": false,
-                            "cornerRadius": 16,
-                            "showIndicator": true,
-                            "dotWidth": 14,
-                            "dotHeight": 6,
-                            "dotSpacing": 8,
-                            "dotColor": "#FF334155",
-                            "activeDotColor": "#FF818CF8"
-                        ]
-                    ]
-                ]
-            ]
-        ])
-
-        let window = mount(canvas: canvas, isDark: true)
-        defer { unmount(window) }
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
-        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
-    }
-
     // MARK: - 8. Autoplay Timer Behavioral Tests
 
     @Test("carousel autoplay advances to next slide automatically on timer")
@@ -533,21 +442,11 @@ struct CanvasCarouselRendererTests {
         ]
     }
 
-    private func mount(
-        canvas: CampaignCanvas,
-        isDark: Bool = false,
-        onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
-    ) -> UIWindow {
-        ComponentTestHost.mountCanvas(canvas, isDark: isDark, onAction: onAction).window
-    }
 
     @MainActor
     private func pumpRunLoop(_ seconds: TimeInterval = 0.05) {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
     }
 
-    private func unmount(_ window: UIWindow) {
-        ComponentTestHost.unmount(window)
-    }
 }
 }

@@ -16,6 +16,12 @@
 		D10000000000000000000003 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000002 /* SnapshotTesting */; };
 		F20000000000000000000100 /* MockNetworkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000100 /* MockNetworkClient.swift */; };
 		F20000000000000000000101 /* SdkHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000101 /* SdkHarness.swift */; };
+		F20000000000000000000105 /* FloaterBehaviourSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000105 /* FloaterBehaviourSupport.swift */; };
+		F20000000000000000000106 /* InlineBehaviourSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000106 /* InlineBehaviourSupport.swift */; };
+		F20000000000000000000107 /* LegacySupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000107 /* LegacySupport.swift */; };
+		F20000000000000000000108 /* GuideAnchorsScreenSG.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000108 /* GuideAnchorsScreenSG.swift */; };
+		F20000000000000000000109 /* SurveyGuideSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000109 /* SurveyGuideSupport.swift */; };
+		F20000000000000000000110 /* SurveyCanvasSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000110 /* SurveyCanvasSupport.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -38,6 +44,12 @@
 		D10000000000000000000015 /* GoldenFonts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Components/Common/GoldenFonts.swift; sourceTree = "<group>"; };
 		F10000000000000000000100 /* MockNetworkClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Network/MockNetworkClient.swift; sourceTree = "<group>"; };
 		F10000000000000000000101 /* SdkHarness.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/SdkHarness.swift; sourceTree = "<group>"; };
+		F10000000000000000000105 /* FloaterBehaviourSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/FloaterBehaviourSupport.swift; sourceTree = "<group>"; };
+		F10000000000000000000106 /* InlineBehaviourSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/InlineBehaviourSupport.swift; sourceTree = "<group>"; };
+		F10000000000000000000107 /* LegacySupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/LegacySupport.swift; sourceTree = "<group>"; };
+		F10000000000000000000108 /* GuideAnchorsScreenSG.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/GuideAnchorsScreenSG.swift; sourceTree = "<group>"; };
+		F10000000000000000000109 /* SurveyGuideSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/SurveyGuideSupport.swift; sourceTree = "<group>"; };
+		F10000000000000000000110 /* SurveyCanvasSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/SurveyCanvasSupport.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -111,6 +123,12 @@
 			children = (
 				F10000000000000000000100 /* MockNetworkClient.swift */,
 				F10000000000000000000101 /* SdkHarness.swift */,
+				F10000000000000000000105 /* FloaterBehaviourSupport.swift */,
+				F10000000000000000000106 /* InlineBehaviourSupport.swift */,
+				F10000000000000000000107 /* LegacySupport.swift */,
+				F10000000000000000000108 /* GuideAnchorsScreenSG.swift */,
+				F10000000000000000000109 /* SurveyGuideSupport.swift */,
+				F10000000000000000000110 /* SurveyCanvasSupport.swift */,
 				D10000000000000000000011 /* ComponentTestHost.swift */,
 				D10000000000000000000012 /* FixtureLoader.swift */,
 				D10000000000000000000013 /* SnapshotTestingExtensions.swift */,
@@ -247,6 +265,12 @@
 			files = (
 				F20000000000000000000100 /* MockNetworkClient.swift in Sources */,
 				F20000000000000000000101 /* SdkHarness.swift in Sources */,
+				F20000000000000000000105 /* FloaterBehaviourSupport.swift in Sources */,
+				F20000000000000000000106 /* InlineBehaviourSupport.swift in Sources */,
+				F20000000000000000000107 /* LegacySupport.swift in Sources */,
+				F20000000000000000000108 /* GuideAnchorsScreenSG.swift in Sources */,
+				F20000000000000000000109 /* SurveyGuideSupport.swift in Sources */,
+				F20000000000000000000110 /* SurveyCanvasSupport.swift in Sources */,
 				D10000000000000000000021 /* ComponentTestHost.swift in Sources */,
 				D10000000000000000000022 /* FixtureLoader.swift in Sources */,
 				D10000000000000000000023 /* SnapshotTestingExtensions.swift in Sources */,

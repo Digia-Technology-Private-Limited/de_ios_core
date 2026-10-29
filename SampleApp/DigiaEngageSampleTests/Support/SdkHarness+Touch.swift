@@ -25,18 +25,8 @@ extension SdkHarness {
     }
 
     /// As ``tap(id:)``, for the element that shows [text] (an option label has no id of its own).
-    ///
-    /// A harness started from workspace fixtures finds the text with `UIProbe` instead, and settles after.
-    func tap(text: String, sourceLocation: SourceLocation = #_sourceLocation) async throws {
-        guard servesWorkspaceFixtures else {
-            try await tap("text \(text)") { Self.shownText(of: $0)?.contains(text) == true }
-            return
-        }
-        let point = try #require(
-            UIProbe.center(ofText: text, in: window), "nothing on screen shows \"\(text)\"",
-            sourceLocation: sourceLocation)
-        try TouchSynthesizer.tap(at: point, in: window)
-        try await settle(0.5)
+    func tap(text: String) async throws {
+        try await tap("text \(text)") { Self.shownText(of: $0)?.contains(text) == true }
     }
 
     private func tap(_ what: String, where match: @escaping (NSObject) -> Bool) async throws {

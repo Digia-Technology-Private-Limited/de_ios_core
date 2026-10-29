@@ -63,22 +63,6 @@ struct InlineStoryStripBehaviourTests {
         try await sdk.closeStoryViewer()
     }
 
-    /// Flutter reports the rail's item count on its `Digia Experience Viewed`. Known gap: iOS
-    /// builds `StoriesEvent.Viewed` without `itemTotal`
-    /// (`Sources/DigiaEngage/api/internal/SDKInstance.swift`, `reportSlotFirstRender`, the
-    /// `.story` case), so the event goes out with no `item_total`. `withKnownIssue` fails the day
-    /// iOS sends it, as the cue to drop the wrapper.
-    @Test("the rail's impression counts only the items that stayed")
-    func impressionCountsTheItemsThatStayed() async throws {
-        let (sdk, _, config, key) = try await show("inline_story_strip_bad_items_and_card_guards")
-        defer { sdk.tearDown() }
-
-        let viewed = try await sdk.waitForEvents("Digia Experience Viewed", of: key, count: 1)
-        withKnownIssue("iOS sends a story's Digia Experience Viewed without item_total") {
-            #expect(viewed.first?["item_total"] as? Int == config.items.count)
-        }
-    }
-
     /// Flutter draws a `previewMode: singleImage` story as one full-width preview image that opens
     /// the story at its first item. Known gap: iOS has no preview mode
     /// (`InlineStoryConfig.fromJson` never reads `previewMode` / `previewImage`), so it draws the

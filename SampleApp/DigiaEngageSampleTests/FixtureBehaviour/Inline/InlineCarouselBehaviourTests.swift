@@ -4,9 +4,10 @@ import UIKit
 @testable import DigiaEngage
 
 extension HostedUITests {
-/// What an inline canvas carousel draws and how it is moved through, driven from the shared
-/// fixtures `inline_carousel/inline_carousel_unreadable_slide_drops_carousel` and
-/// `inline_carousel_indicators/inline_carousel_indicators_scrolling` and `_jumping`.
+/// How an inline canvas carousel is moved through, driven from the shared fixtures
+/// `inline_carousel_indicators/inline_carousel_indicators_scrolling` and `_jumping`. What it draws
+/// for a slide this build cannot read is the package's
+/// `Tests/DigiaEngageTests/FixtureBehaviour/InlineCarouselBehaviourTests.swift`.
 ///
 /// The fixture is served by the mocked bundle, delivered the way a CEP does and drawn by the app's
 /// own `DigiaSlot`; the carousel is swiped and tapped with real touches. Slide pictures are picsum
@@ -37,47 +38,6 @@ struct InlineCarouselBehaviourTests {
         return (sdk, frame)
     }
 
-    // MARK: - A slide this build cannot read
-
-    // Fails if: Sources/DigiaEngage/api/internal/canvas/CampaignCanvasParser.swift:52
-    // `guard let parsed = try? parse(slide) else { return nil }` -> `guard let parsed = try? parse(slide) else { continue }`
-    @Test("one slide from a newer schema drops the carousel and not the rest of the canvas")
-    func unreadableSlideDropsOnlyTheCarousel() async throws {
-        let (sdk, _) = try await showCarousel(
-            fixture("inline_carousel/inline_carousel_unreadable_slide_drops_carousel"))
-        defer { sdk.tearDown() }
-
-        try await sdk.waitUntil("the heading is on screen") {
-            sdk.isShowing("Featured offers (carousel below must not render)")
-        }
-        #expect(!sdk.isShowing("Slide 1"))
-    }
-
-    @Test("the same carousel renders once every slide is readable")
-    func readableSlidesRender() async throws {
-        var campaign = try fixture("inline_carousel/inline_carousel_unreadable_slide_drops_carousel")
-        campaign["templateConfig"] = Self.settingSlideVersion(campaign["templateConfig"], slide: 1, to: 2)
-        let (sdk, _) = try await showCarousel(campaign)
-        defer { sdk.tearDown() }
-
-        try await sdk.waitUntil("the first slide is on screen") { sdk.isShowing("Slide 1") }
-    }
-
-    /// [node] with the version of the [slide]th slide of the carousel inside it set to [version].
-    private static func settingSlideVersion(_ node: Any?, slide: Int, to version: Int) -> Any? {
-        if var map = node as? [String: Any] {
-            if var slides = map["slides"] as? [[String: Any]] {
-                slides[slide]["version"] = version
-                map["slides"] = slides
-                return map
-            }
-            for (key, value) in map { map[key] = settingSlideVersion(value, slide: slide, to: version) }
-            return map
-        }
-        if let list = node as? [Any] { return list.map { settingSlideVersion($0, slide: slide, to: version) } }
-        return node
-    }
-
     // MARK: - The indicator
 
     // Fails if: Sources/DigiaEngage/api/internal/canvas/CampaignCanvasStripViews.swift:391
@@ -91,11 +51,13 @@ struct InlineCarouselBehaviourTests {
         let window = try #require(sdk.window)
         _ = try await sdk.waitForEvents("Digia Step Viewed", of: keyOf(campaign), count: 1)
 
-        try InlineTouch.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: frame.frame.midX + 120, y: frame.frame.midY),
             by: CGVector(dx: -300, dy: 0),
             in: window,
-            duration: 0.2
+            duration: 0.2,
+            steps: 10,
+            pauseAfterDown: 0.02
         )
 
         let viewed = try await sdk.waitForEvents("Digia Step Viewed", of: keyOf(campaign), count: 2)

@@ -150,7 +150,7 @@ struct StoryViewerBehaviourTests {
         defer { sdk.tearDown() }
         let window = try #require(sdk.window)
 
-        try InlineTouch.press(at: CGPoint(x: window.bounds.midX, y: window.bounds.midY), in: window, for: 5)
+        try TouchSynthesizer.press(at: CGPoint(x: window.bounds.midX, y: window.bounds.midY), in: window, for: 5)
         let held = try await sdk.storyFramesShown(key)
         try await sdk.settle(3.1)
         let released = try await sdk.storyFramesShown(key)
@@ -172,10 +172,13 @@ struct StoryViewerBehaviourTests {
         let window = try #require(sdk.window)
         try sdk.tapStoryViewer(atFraction: Self.on)
 
-        try InlineTouch.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: window.bounds.midX, y: window.bounds.height * 0.35),
             by: CGVector(dx: 0, dy: 300),
-            in: window
+            in: window,
+            duration: 0.15,
+            steps: 10,
+            pauseAfterDown: 0.02
         )
 
         try await sdk.waitForStoryViewerClosed()

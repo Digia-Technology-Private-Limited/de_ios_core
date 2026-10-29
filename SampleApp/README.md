@@ -20,8 +20,10 @@ touch delivery live here: the package's own test bundle has no `UIApplication`, 
 touch never becomes a gesture there. The suites drive the real SDK through the shared `SdkHarness`
 (`../Tests/DigiaEngageTests/Support/SdkHarness.swift`, plus real touches from
 `Support/SdkHarness+Touch.swift` and `TouchSynthesizer`): `Actions/` (one suite per authored
-action), `FixtureBehaviour/` (ports of Flutter's fixture-behaviour tests), and the PiP, floater and
-anchorless fixture goldens. Fixtures come from `<workspace>/sdk_testing_fixtures/`.
+action), `FixtureBehaviour/` (ports of Flutter's fixture-behaviour tests that need real touches;
+the ones that do not are package tests in `../Tests/DigiaEngageTests/FixtureBehaviour/`), and the anchorless
+fixture goldens, whose geometry resolves only in the app's window scene. Every other golden is a
+package test. Fixtures come from `<workspace>/sdk_testing_fixtures/`.
 
 The test folder is a filesystem-synchronized group: a new `.swift` file is compiled with no project
 change (`Support/CropAssets/` is excluded from the bundle). Its goldens are recorded in

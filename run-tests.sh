@@ -134,8 +134,8 @@ TEST_RUNNER_RECORD_SNAPSHOTS="$RECORD" xcodebuild test \
   ${TAG_FLAGS[@]+"${TAG_FLAGS[@]}"} 2>&1 | tee "$LOG"
 STATUS=${PIPESTATUS[0]}
 
-# 4b. The suites that need real touches (actions, PiP, floaters, anchorless guides) run hosted by
-#     the sample app: the package bundle has no UIApplication. Same tags, same simulator. A tag no
+# 4b. The suites that need real touches (actions, fixture behaviour) or a window scene (the
+#     anchorless goldens) run hosted by the sample app: the package bundle has no UIApplication. Same tags, same simulator. A tag no
 #     hosted suite carries runs nothing there, which is fine. HOSTED=false skips them.
 HOSTED_DERIVED_DATA="$SCRIPT_DIR/.derivedData/hosted"
 HOSTED_RESULT_BUNDLE="$HOSTED_DERIVED_DATA/allure.xcresult"

@@ -92,7 +92,7 @@ flowchart TD
 2. **Native Canvas Campaigns (Nudges, BottomSheets, Fullscreen, Surveys)**:
    - Serialized in JS and passed across the bridge to `DigiaHostViewManager.swift` (`DigiaEngageReactNative` pod).
    - The native view that mounts and displays on the user's screen *is* `ios/core`'s `CampaignCanvasView`.
-   - **Visual golden tests in `ios/core/Tests/DigiaEngageTests/Components/` directly test the exact UI rendered in RN-iOS apps.**
+   - **Visual golden tests in `ios/core/Tests/DigiaEngageTests/VisualRegression/` directly test the exact UI rendered in RN-iOS apps.**
 3. **End-to-End Bridge Integration (T3)**:
    - 12 shared Maestro journeys run against `medihub_rn` (or `medihub_ios`) to verify the real touch dispatch, bridge event serialization, and app lifecycle together.
 
@@ -102,19 +102,20 @@ flowchart TD
 
 ```text
 DigiaEngageTests/
-├── Components/                             <-- [Tier 2] Visual Goldens & Contracts
+├── VisualRegression/                       <-- [Tier 2] Per-fixture pixel goldens, one file per surface
+│   ├── NudgeGoldenTests.swift              <-- goldens/ios/nudge_*/<fixture>.png
+│   ├── CanvasGoldenTests.swift, InlineGoldenTests.swift, SurveyGoldenTests.swift, ...
+│   └── LegacyGoldenTests.swift             <-- classic_nudge / legacy_nudge / legacy_survey
+│
+├── Components/                             <-- [Tier 2] Component & contract tests
 │   ├── Common/
-│   │   ├── SnapshotTestingExtensions.swift <-- Device profile & golden helpers
+│   │   ├── SnapshotTestingExtensions.swift <-- Golden viewport & `assertSurfaceGolden`
+│   │   ├── ComponentTestHost.swift         <-- Window mounting & 1x `renderImage` / `settledImage`
+│   │   ├── GoldenFonts.swift               <-- Registers the shared Roboto
 │   │   └── FixtureLoader.swift             <-- Loads <workspace>/sdk_testing_fixtures/... fixtures
 │   │
-│   ├── Nudge/
-│   │   ├── NudgeDialogComponentTests.swift
-│   │   └── NudgeBottomSheetComponentTests.swift
-│   │
-│   ├── Survey/                             <-- Canvas survey component tests
-│   ├── Guide/                              <-- Tooltip & spotlight native hosts
-│   ├── Floater/                            <-- Floating widgets & PIP
-│   └── Inline/                             <-- Banners, stories, carousels
+│   ├── Canvas/                             <-- Canvas renderer tests
+│   └── Nudge/                              <-- Nudge component, routing & overlay tests
 │
 ├── SessionIdentity/                        <-- [Tier 1 & 2] Session lifecycle, user ID rotation
 ├── Network/                                <-- [Tier 1 & 2] NetworkClient, retries, mock transports
@@ -179,10 +180,10 @@ xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iP
 
 ## 6. Updating Golden Snapshots
 
-The baselines are not in this repository: every snapshot is read from and recorded into
-`de_workspace/goldens/ios/<TestFile>/<test>.<name>.png` (`goldenDirectory(filePath:)` in
-`SnapshotTestingExtensions.swift`), beside the Flutter and Android goldens the goldens reviewer
-compares. Commit them in `de_workspace`.
+The baselines are not in this repository. The per-fixture goldens (`VisualRegression/`) are read
+from and recorded into `de_workspace/goldens/ios/<surface>/<name>.png` (`assertSurfaceGolden` in
+`SnapshotTestingExtensions.swift`), the same directory and file names as Flutter's and Android's.
+Every golden is a fixture golden, as on Flutter and Android. Commit them in `de_workspace`.
 
 When visual designs intentionally change, update the golden baselines using the `RECORD_SNAPSHOTS` environment variable:
 
@@ -201,33 +202,28 @@ git -C ../.. diff --stat goldens/ios
 
 ## 7. Inspecting Visual Regressions (When Snapshots Fail)
 
-When a visual golden fails, `SnapshotTesting` does not alter scripts or project files. Instead, it prints the exact file URLs of the reference baseline and the rendered failure to the console:
+When a visual golden fails, the test records an issue naming the surface and fixture, with SnapshotTesting's
+comparison message, and attaches `<surface>-<name>-actual`, `-reference` and `-difference.png` to the
+result bundle:
 
 ```text
-error: testNudgeBottomSheetVisualImageGolden() : failed - Snapshot does not match reference.
-
-@− (Baseline):
-"file:///Users/ram/.../de_workspace/goldens/ios/NudgeBottomSheetComponentTests/testNudgeBottomSheetVisualImageGolden.1.png"
-
-@+ (Failure):
-"file:///Users/ram/Library/.../CoreSimulator/Devices/.../testNudgeBottomSheetVisualImageGolden.1.png"
-
-The percentage of pixels that match 0.14013672 is less than required 0.99
+nudge_dialog/nudge_dialog_radius_28: The percentage of pixels that match 0.14013672 is less than required 0.99
 The lowest perceptual color precision 0.0 is less than required 0.98
 ```
 
+The reference is `de_workspace/goldens/ios/<surface>/<name>.png`.
+
 ### Viewing the Visual Difference:
 
-1. **Open both URLs in macOS Preview / Quick Look**:
-   Copy and run the two paths directly in Terminal:
+1. **Open the reference and the attached actual image in macOS Preview / Quick Look**:
    ```bash
-   open "<path_from_@−>" "<path_from_@+>"
+   open "<reference.png>" "<actual.png>"
    ```
 
 2. **Open with Diff Tools (e.g. Kaleidoscope)**:
    If you have Kaleidoscope or ImageMagick installed, diff them side-by-side:
    ```bash
-   ksdiff "<path_from_@−>" "<path_from_@+>"
+   ksdiff "<reference.png>" "<actual.png>"
    ```
 
 3. **Open Xcode Test Results (`.xcresult`)**:
