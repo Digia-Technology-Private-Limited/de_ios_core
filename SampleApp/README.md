@@ -32,6 +32,10 @@ change (`Support/CropAssets/` is excluded from the bundle). Its goldens are reco
 `../run-tests.sh` runs these suites after the package suites, with the same tag filter, and merges
 their coverage into `coverage/lcov.info`.
 
+`CampaignBehaviour/*CampaignBehaviourTests` drive every surface through `SdkHarness` and read the Digia
+`/track` chain off `StubBackend` beside the CEP's markings (`./run-sample-tests.sh campaign_behaviour`); tests
+that hit a known bug run and fail, each with a `// Fails today:` comment.
+
 ```bash
 xcodebuild test -project DigiaEngageSample.xcodeproj -scheme DigiaEngageSample \
   -destination 'platform=iOS Simulator,name=iPhone 18 Pro'
