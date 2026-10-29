@@ -354,17 +354,10 @@ struct CanvasCarouselRenderer: View {
     /// True while the last page change came from the autoplay timer rather than the user's finger,
     /// which is the distinction the legacy carousel's `auto` flag draws.
     @State private var advancedAutomatically = false
-    /// Display index a queued silent recenter is aiming at. The `onChange` the
-    /// recenter write triggers carries this exact value and is swallowed; any
-    /// other page arriving first is a real move — it is processed normally and
-    /// cancels the stale recenter, so the queued write cannot yank the strip
-    /// or swallow the user's page. A plain Bool could not tell the two apart:
-    /// a finger arriving between `isRecentering = true` and the async write
-    /// was swallowed, leaving the strip parked on a sentinel.
-    @State private var recenterTarget: Int?
     /// True while a finger is on the strip; resets itself if the touch is cancelled.
     @GestureState private var isTouching = false
-    @State private var lastReportedDisplayIndex: Int?
+    @State private var lastReportedIndex: Int?
+    @State private var motion = CarouselStripMotion()
     @Environment(\.canvasInteractions) private var reportInteraction
 
     private func realIndex(_ displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int {
@@ -409,6 +402,18 @@ struct CanvasCarouselRenderer: View {
 
                     VStack(spacing: 0) {
                         if #available(iOS 17, *) {
+                            let margin = max(0, (size.width - slideWidth) / 2)
+                            let settle: @MainActor () -> Void = {
+                                settleStrip(
+                                    autoPlay: autoPlay,
+                                    autoPlayInterval: autoPlayInterval,
+                                    animationDuration: animationDuration,
+                                    displayCount: displayCount,
+                                    slideCount: slides.count,
+                                    loopEnabled: loopEnabled
+                                )
+                            }
+                            ScrollViewReader { proxy in
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: itemSpacing) {
                                     ForEach(0 ..< displayCount, id: \.self) { displayIndex in
@@ -441,38 +446,52 @@ struct CanvasCarouselRenderer: View {
                                 }
                                 .scrollTargetLayout()
                             }
+                            // Where the strip really is, frame by frame. The
+                            // `scrollPosition` binding cannot be trusted for
+                            // this: a finger landing mid-animation stops the
+                            // strip between pages while the binding keeps the
+                            // page it was heading to.
+                            .onStripOffsetChange { offset in
+                                motion.moved(
+                                    to: offset,
+                                    stride: slideWidth + itemSpacing,
+                                    pageCount: displayCount,
+                                    onRest: settle
+                                )
+                            }
                             .contentMargins(
                                 .horizontal,
-                                max(0, (size.width - slideWidth) / 2),
+                                margin,
                                 for: .scrollContent
                             )
                             .scrollPosition(id: $scrollPosition)
                             .scrollTargetBehavior(.viewAligned)
                             .frame(height: stripHeight)
-                            // A finger down pauses autoplay and lifting it restarts a full
-                            // interval, so the strip never advances under a drag: a tick
-                            // landing mid-drag would otherwise cancel the gesture.
+                            // A finger down pauses autoplay; lifting it lets the strip
+                            // settle, and only a strip at rest on a page restarts a
+                            // full interval, so a tick never lands under a drag.
                             .simultaneousGesture(
                                 DragGesture(minimumDistance: 0)
                                     .updating($isTouching) { _, state, _ in state = true }
                             )
                             .onChange(of: isTouching) { _, touching in
+                                motion.fingerDown = touching
                                 if touching {
                                     stopAutoPlay()
+                                    // Whatever the strip does next is the finger's doing.
+                                    advancedAutomatically = false
                                 } else {
-                                    startAutoPlay(
-                                        autoPlay: autoPlay,
-                                        autoPlayInterval: autoPlayInterval,
-                                        animationDuration: animationDuration,
-                                        displayCount: displayCount,
-                                        slideCount: slides.count,
-                                        loopEnabled: loopEnabled
-                                    )
+                                    // A tap that stopped an autoplay slide mid-way moves
+                                    // nothing, so no scroll update would ever say the
+                                    // strip is at rest — check it now.
+                                    motion.scheduleRestCheck(onRest: settle)
                                 }
                             }
                             // A slide is viewed when it comes to rest. The first visible slide is
                             // reported on appear too, matching the legacy carousel.
                             .onAppear {
+                                motion.proxy = proxy
+                                motion.isVisible = true
                                 if scrollPosition == nil {
                                     scrollPosition = initialDisplayIndex
                                 }
@@ -491,62 +510,10 @@ struct CanvasCarouselRenderer: View {
                                     loopEnabled: loopEnabled
                                 )
                             }
-                            .onDisappear { stopAutoPlay() }
-                            .onChange(of: scrollPosition) { _, newValue in
-                                guard let displayIndex = newValue else { return }
-                                // A recenter write landing where it was aimed is
-                                // swallowed. Any other page — including a finger
-                                // arriving while a recenter was still queued — is
-                                // a real move: process it and drop the stale
-                                // recenter so its async write cannot fire late.
-                                if let target = recenterTarget {
-                                    if displayIndex == target {
-                                        recenterTarget = nil
-                                        return
-                                    }
-                                    recenterTarget = nil
-                                }
-
-                                reportSlide(
-                                    displayIndex: displayIndex,
-                                    slideCount: slides.count,
-                                    loopEnabled: loopEnabled,
-                                    auto: advancedAutomatically
-                                )
-                                advancedAutomatically = false
-
-                                if loopEnabled, displayIndex == 0 || displayIndex == displayCount - 1 {
-                                    let target = displayIndex == 0 ? displayCount - 2 : 1
-                                    recenterTarget = target
-                                    let source = displayIndex
-                                    DispatchQueue.main.async {
-                                        // The finger may have moved on while this
-                                        // was queued; only recenter when the
-                                        // strip is still on the sentinel.
-                                        guard recenterTarget == target, scrollPosition == source else { return }
-                                        var transaction = Transaction()
-                                        transaction.disablesAnimations = true
-                                        withTransaction(transaction) {
-                                            scrollPosition = target
-                                        }
-                                    }
-                                }
-
-                                // A stuck or swallowed timer must never leave
-                                // autoplay dead: every settled page restarts a
-                                // full interval. Not while a finger is down —
-                                // the touch pause owns the timer then, so a tick
-                                // cannot land mid-drag.
-                                if !isTouching {
-                                    startAutoPlay(
-                                        autoPlay: autoPlay,
-                                        autoPlayInterval: autoPlayInterval,
-                                        animationDuration: animationDuration,
-                                        displayCount: displayCount,
-                                        slideCount: slides.count,
-                                        loopEnabled: loopEnabled
-                                    )
-                                }
+                            .onDisappear {
+                                motion.isVisible = false
+                                stopAutoPlay()
+                            }
                             }
                         } else {
                             EmptyView()
@@ -580,15 +547,96 @@ struct CanvasCarouselRenderer: View {
         loopEnabled: Bool,
         auto: Bool
     ) {
-        guard lastReportedDisplayIndex != displayIndex else { return }
-        lastReportedDisplayIndex = displayIndex
+        // Keyed by the real slide, so hopping off a loop sentinel onto its twin
+        // does not report the same slide twice.
+        let index = realIndex(displayIndex, slideCount: slideCount, loopEnabled: loopEnabled)
+        guard lastReportedIndex != index else { return }
+        lastReportedIndex = index
         reportInteraction(
             .carouselSlideViewed(
-                index: realIndex(displayIndex, slideCount: slideCount, loopEnabled: loopEnabled),
+                index: index,
                 total: slideCount,
                 auto: auto
             )
         )
+    }
+
+    /// Runs once the strip has stopped with no finger on it: puts it squarely
+    /// on a page, records the view, hops off a loop sentinel and restarts
+    /// autoplay. Every step waits for rest, so none of them can fight a drag,
+    /// a fling or an animation still on its way.
+    @available(iOS 17, *)
+    private func settleStrip(
+        autoPlay: Bool,
+        autoPlayInterval: TimeInterval,
+        animationDuration: TimeInterval,
+        displayCount: Int,
+        slideCount: Int,
+        loopEnabled: Bool
+    ) {
+        guard motion.isVisible, !motion.fingerDown, let proxy = motion.proxy else { return }
+        let resting = motion.restingPage
+            ?? (page: scrollPosition ?? (loopEnabled ? 1 : 0), aligned: true)
+        let restart = {
+            startAutoPlay(
+                autoPlay: autoPlay,
+                autoPlayInterval: autoPlayInterval,
+                animationDuration: animationDuration,
+                displayCount: displayCount,
+                slideCount: slideCount,
+                loopEnabled: loopEnabled
+            )
+        }
+
+        if !resting.aligned {
+            // Stopped between two pages — a tap landed mid-slide. Finish the
+            // move onto the nearer page. If the strip refuses to move, give
+            // up after a few tries and let the next autoplay tick carry it.
+            guard motion.snapAttempts < 3 else {
+                motion.snapAttempts = 0
+                restart()
+                return
+            }
+            motion.snapAttempts += 1
+            withAnimation(.easeOut(duration: 0.25)) {
+                proxy.scrollTo(resting.page, anchor: .center)
+            }
+            motion.scheduleRestCheck(after: 0.4) {
+                settleStrip(
+                    autoPlay: autoPlay,
+                    autoPlayInterval: autoPlayInterval,
+                    animationDuration: animationDuration,
+                    displayCount: displayCount,
+                    slideCount: slideCount,
+                    loopEnabled: loopEnabled
+                )
+            }
+            return
+        }
+        motion.snapAttempts = 0
+        // `proxy.scrollTo` leaves the binding behind; the indicator reads it.
+        if scrollPosition != resting.page { scrollPosition = resting.page }
+
+        reportSlide(
+            displayIndex: resting.page,
+            slideCount: slideCount,
+            loopEnabled: loopEnabled,
+            auto: advancedAutomatically
+        )
+        advancedAutomatically = false
+
+        if loopEnabled, resting.page == 0 || resting.page == displayCount - 1 {
+            // On a sentinel: jump to its real twin. The jump moves the strip,
+            // which settles once more on the twin and reports nothing new.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            let twin = resting.page == 0 ? displayCount - 2 : 1
+            withTransaction(transaction) {
+                proxy.scrollTo(twin, anchor: .center)
+                scrollPosition = twin
+            }
+        }
+        restart()
     }
 
     private func startAutoPlay(
@@ -603,7 +651,12 @@ struct CanvasCarouselRenderer: View {
         guard autoPlay, slideCount > 1 else { return }
         let timer = Timer(timeInterval: autoPlayInterval, repeats: true) { _ in
             Task { @MainActor in
-                let current = scrollPosition ?? (loopEnabled ? 1 : 0)
+                // A finger holds the strip or it is still travelling: leave it.
+                // The settle that follows restarts a full interval.
+                guard !motion.fingerDown, motion.isAtRest else { return }
+                // Advance from where the strip really is, not from the
+                // binding, which keeps the target of an interrupted slide.
+                let current = motion.restingPage?.page ?? scrollPosition ?? (loopEnabled ? 1 : 0)
                 let next: Int
                 if loopEnabled {
                     // Wrap off the trailing sentinel onto the first real page.
@@ -614,11 +667,16 @@ struct CanvasCarouselRenderer: View {
                     if current >= displayCount - 1 { return }
                     next = min(current + 1, displayCount - 1)
                 }
-                // Flagged before the change, so the `onChange` it triggers knows
-                // the slide arrived on a timer rather than under a finger.
+                // Flagged before the move, so the settle it ends in knows the
+                // slide arrived on a timer rather than under a finger.
                 advancedAutomatically = true
                 withAnimation(.easeInOut(duration: animationDuration)) {
-                    scrollPosition = next
+                    if let proxy = motion.proxy {
+                        // Moves even when the binding already holds `next`.
+                        proxy.scrollTo(next, anchor: .center)
+                    } else {
+                        scrollPosition = next
+                    }
                 }
             }
         }
@@ -629,6 +687,97 @@ struct CanvasCarouselRenderer: View {
     private func stopAutoPlay() {
         timer?.invalidate()
         timer = nil
+    }
+}
+
+/// The page a strip scrolled `offset` along sits nearest, and whether it is
+/// squarely on it. Pages are `stride` apart; the ends are clamped so a strip
+/// pulled past its first or last page still reads as that page. Degenerate
+/// input reads as resting on the first page rather than trapping.
+internal func carouselRestingPage(
+    offset: CGFloat,
+    stride: CGFloat,
+    pageCount: Int
+) -> (page: Int, aligned: Bool) {
+    guard stride > 0, stride.isFinite, offset.isFinite, pageCount > 0 else { return (0, true) }
+    let page = min(max(Int((offset / stride).rounded()), 0), pageCount - 1)
+    return (page, abs(offset - CGFloat(page) * stride) < 1)
+}
+
+private extension View {
+    /// Reports how far the strip has scrolled from its first page. iOS 17 has
+    /// no way to observe a scroll offset, so there the strip is never measured
+    /// and settling falls back to the page the binding holds.
+    @ViewBuilder
+    func onStripOffsetChange(_ action: @escaping (CGFloat) -> Void) -> some View {
+        if #available(iOS 18, *) {
+            onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.x + geometry.contentInsets.leading
+            } action: { _, offset in
+                action(offset)
+            }
+        } else {
+            self
+        }
+    }
+}
+
+/// Where a carousel strip is and whether it has stopped. Kept out of SwiftUI
+/// state so the per-frame scroll updates do not re-render the carousel.
+@MainActor
+private final class CarouselStripMotion {
+    /// How long the strip must hold still to count as at rest. A drag, a fling
+    /// and an animation all report every frame, so a gap this long means it
+    /// has stopped.
+    static let restDelay: TimeInterval = 0.12
+
+    var proxy: ScrollViewProxy?
+    var isVisible = false
+    var fingerDown = false
+    var snapAttempts = 0
+
+    private var offset: CGFloat = 0
+    private var stride: CGFloat = 0
+    private var pageCount = 0
+    private var lastMove = Date.distantPast
+    private var generation = 0
+
+    /// Nil until the strip has been measured once.
+    var restingPage: (page: Int, aligned: Bool)? {
+        guard stride > 0 else { return nil }
+        return carouselRestingPage(offset: offset, stride: stride, pageCount: pageCount)
+    }
+
+    var isAtRest: Bool { Date().timeIntervalSince(lastMove) >= Self.restDelay }
+
+    func moved(
+        to offset: CGFloat,
+        stride: CGFloat,
+        pageCount: Int,
+        onRest: @escaping @MainActor () -> Void
+    ) {
+        let changed = abs(offset - self.offset) > 0.01 || stride != self.stride
+        self.offset = offset
+        self.stride = stride
+        self.pageCount = pageCount
+        guard changed else { return }
+        lastMove = Date()
+        scheduleRestCheck(onRest: onRest)
+    }
+
+    /// Calls `onRest` after `delay` unless the strip moves, or another check
+    /// is scheduled, first.
+    func scheduleRestCheck(
+        after delay: TimeInterval = restDelay,
+        onRest: @escaping @MainActor () -> Void
+    ) {
+        generation += 1
+        let expected = generation
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard let self, self.generation == expected else { return }
+            onRest()
+        }
     }
 }
 
