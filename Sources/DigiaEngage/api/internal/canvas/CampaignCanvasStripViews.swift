@@ -814,7 +814,9 @@ struct CanvasStoryRailRenderer: View {
 
 
         return AnyView(
-            GeometryReader { proxy in
+            // The rail is a scroll view, so it is hosted at its on-screen size;
+            // see UnscaledHostBox. Scaled, it would not scroll on a tablet.
+            UnscaledHostBox { size, scale in
                 // Nothing renders when the rail is off: the stories are opened by
                 // an `Action.showStory` elsewhere on the canvas. The widget still
                 // has to be here, because it carries the stories and the chrome.
@@ -822,14 +824,14 @@ struct CanvasStoryRailRenderer: View {
                     // A card is as tall as the rail's own box, so its width
                     // follows from the authored ratio. Nothing reads a card-height
                     // property, because there isn't one.
-                    let cardWidth = proxy.size.height * cardAspectRatio
+                    let cardWidth = size.height * cardAspectRatio
                     StoryThumbnailRailView(
                         items: pages.map(canvasStoryItem),
                         mode: thumbnailVideoPlayback.asInlineStoryMode,
                         cardWidth: cardWidth,
-                        cardHeight: proxy.size.height,
-                        cardCornerRadius: cardCornerRadius,
-                        cardSpacing: cardSpacing,
+                        cardHeight: size.height,
+                        cardCornerRadius: cardCornerRadius * scale,
+                        cardSpacing: cardSpacing * scale,
                         overlayOpen: openIndex != nil
                     ) { index in
                         openIndex = index
