@@ -357,7 +357,14 @@ struct CanvasCarouselRenderer: View {
     /// True while the last page change came from the autoplay timer rather than the user's finger,
     /// which is the distinction the legacy carousel's `auto` flag draws.
     @State private var advancedAutomatically = false
-    @State private var isRecentering = false
+    /// Display index a queued silent recenter is aiming at. The `onChange` the
+    /// recenter write triggers carries this exact value and is swallowed; any
+    /// other page arriving first is a real move — it is processed normally and
+    /// cancels the stale recenter, so the queued write cannot yank the strip
+    /// or swallow the user's page. A plain Bool could not tell the two apart:
+    /// a finger arriving between `isRecentering = true` and the async write
+    /// was swallowed, leaving the strip parked on a sentinel.
+    @State private var recenterTarget: Int?
     /// True while a finger is on the strip; resets itself if the touch is cancelled.
     @GestureState private var isTouching = false
     @State private var lastReportedDisplayIndex: Int?
@@ -505,9 +512,17 @@ struct CanvasCarouselRenderer: View {
                             .onDisappear { stopAutoPlay() }
                             .onChange(of: scrollPosition) { _, newValue in
                                 guard let displayIndex = newValue else { return }
-                                if isRecentering {
-                                    isRecentering = false
-                                    return
+                                // A recenter write landing where it was aimed is
+                                // swallowed. Any other page — including a finger
+                                // arriving while a recenter was still queued — is
+                                // a real move: process it and drop the stale
+                                // recenter so its async write cannot fire late.
+                                if let target = recenterTarget {
+                                    if displayIndex == target {
+                                        recenterTarget = nil
+                                        return
+                                    }
+                                    recenterTarget = nil
                                 }
 
                                 reportSlide(
@@ -518,15 +533,37 @@ struct CanvasCarouselRenderer: View {
                                 )
                                 advancedAutomatically = false
 
-                                if let target = Self.recenteringTarget(displayIndex: displayIndex, slideCount: slides.count, loopEnabled: loopEnabled) {
-                                    isRecentering = true
+                                if loopEnabled, displayIndex == 0 || displayIndex == displayCount - 1 {
+                                    let target = displayIndex == 0 ? displayCount - 2 : 1
+                                    recenterTarget = target
+                                    let source = displayIndex
                                     DispatchQueue.main.async {
+                                        // The finger may have moved on while this
+                                        // was queued; only recenter when the
+                                        // strip is still on the sentinel.
+                                        guard recenterTarget == target, scrollPosition == source else { return }
                                         var transaction = Transaction()
                                         transaction.disablesAnimations = true
                                         withTransaction(transaction) {
                                             scrollPosition = target
                                         }
                                     }
+                                }
+
+                                // A stuck or swallowed timer must never leave
+                                // autoplay dead: every settled page restarts a
+                                // full interval. Not while a finger is down —
+                                // the touch pause owns the timer then, so a tick
+                                // cannot land mid-drag.
+                                if !isTouching {
+                                    startAutoPlay(
+                                        autoPlay: autoPlay,
+                                        autoPlayInterval: autoPlayInterval,
+                                        animationDuration: animationDuration,
+                                        displayCount: displayCount,
+                                        slideCount: slides.count,
+                                        loopEnabled: loopEnabled
+                                    )
                                 }
                             }
                         } else {
@@ -598,11 +635,17 @@ struct CanvasCarouselRenderer: View {
         guard Self.shouldStartAutoPlay(autoPlay: autoPlay, slideCount: slideCount) else { return }
         let timer = Timer(timeInterval: autoPlayInterval, repeats: true) { _ in
             Task { @MainActor in
-                guard let next = Self.nextAutoPlayIndex(
-                    currentIndex: scrollPosition,
-                    displayCount: displayCount,
-                    loopEnabled: loopEnabled
-                ) else { return }
+                let current = scrollPosition ?? (loopEnabled ? 1 : 0)
+                let next: Int
+                if loopEnabled {
+                    // Wrap off the trailing sentinel onto the first real page.
+                    // Clamping here used to no-op at displayCount - 1, parking
+                    // the strip on the sentinel and killing autoplay.
+                    next = current >= displayCount - 1 ? 1 : current + 1
+                } else {
+                    if current >= displayCount - 1 { return }
+                    next = min(current + 1, displayCount - 1)
+                }
                 // Flagged before the change, so the `onChange` it triggers knows
                 // the slide arrived on a timer rather than under a finger.
                 advancedAutomatically = true
