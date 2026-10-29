@@ -941,11 +941,9 @@ private struct FloaterChromeView: View {
     @ViewBuilder
     private var closeButton: some View {
         if config.expanded.showCloseButton {
-            FloaterChromePill(size: expandedIconSize) {
-                FloaterChromeIcon(glyph: .close, size: expandedIconSize) {
-                    // No Clicked report — see FloaterEvent.Clicked's kdoc.
-                    SDKInstance.shared.endFloaterExpanded(config.expanded.onClose)
-                }
+            FloaterChromeCloseButton(size: expandedIconSize) {
+                // No Clicked report — see FloaterEvent.Clicked's kdoc.
+                SDKInstance.shared.endFloaterExpanded(config.expanded.onClose)
             }
         }
     }
@@ -1000,14 +998,12 @@ private struct FloaterChromeView: View {
             .allowsHitTesting(false)
             .overlay(alignment: .topTrailing) {
                 if config.controls.showClose {
-                    FloaterChromePill(size: collapsedIconSize) {
-                        FloaterChromeIcon(glyph: .close, size: collapsedIconSize) {
-                            // No Clicked report for the × — see FloaterEvent.Clicked's
-                            // kdoc; this bug (an instant close counted as a
-                            // conversion) already happened once and drove dismissal
-                            // rate to a permanent 0% before it was caught.
-                            SDKInstance.shared.dismissFloater(.userClose)
-                        }
+                    FloaterChromeCloseButton(size: collapsedIconSize) {
+                        // No Clicked report for the × — see FloaterEvent.Clicked's
+                        // kdoc; this bug (an instant close counted as a
+                        // conversion) already happened once and drove dismissal
+                        // rate to a permanent 0% before it was caught.
+                        SDKInstance.shared.dismissFloater(.userClose)
                     }
                     .padding(.top, collapsedMargin.top)
                     .padding(.trailing, collapsedMargin.right)
@@ -1321,6 +1317,20 @@ private struct FloaterChromePill<Content: View>: View {
         .padding(size * 0.3)
         .background(Color.black.opacity(0.55))
         .clipShape(Capsule())
+    }
+}
+
+/// A lone × whose whole circle takes the tap, like the story close, not just the glyph.
+private struct FloaterChromeCloseButton: View {
+    let size: CGFloat
+    let onTap: () -> Void
+
+    var body: some View {
+        FloaterChromePill(size: size) {
+            FloaterChromeIcon(glyph: .close, size: size, onTap: onTap)
+        }
+        .contentShape(Capsule())
+        .onTapGesture(perform: onTap)
     }
 }
 

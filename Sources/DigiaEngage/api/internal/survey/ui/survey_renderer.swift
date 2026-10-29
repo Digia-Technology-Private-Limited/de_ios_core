@@ -145,7 +145,8 @@ private struct SurveySession: View {
                 animateContentHeight: survey.canvasSurvey != nil,
                 keyboardScrollsContent: survey.canvasSurvey != nil,
                 separateClose: display.bottomSheet.showCloseButton ? survey.canvasSurvey?.closeButton : nil,
-                onDismiss: { finish(completed: false) }
+                onDismiss: { finish(completed: false) },
+                designWidth: survey.canvasSurvey?.designWidth ?? 360
             ) {
                 SurveyPanelContent(
                     vm: vm,
@@ -268,6 +269,9 @@ private struct SurveySheet<Content: View>: View {
     let keyboardScrollsContent: Bool
     let separateClose: NudgeCloseButtonConfig?
     let onDismiss: () -> Void
+    /// Authored design width for canvas surveys (360 default, mirroring
+    /// Android). Only used to cap the sheet on a large screen.
+    var designWidth: CGFloat = 360
     @ViewBuilder let content: () -> Content
     @StateObject private var keyboard = SurveyKeyboardObserver()
 
@@ -280,6 +284,19 @@ private struct SurveySheet<Content: View>: View {
         case .full:   return 0.98
         case .custom: return CGFloat(max(10, min(100, sheet.customHeight))) / 100.0
         }
+    }
+
+    /// Tablets cap the sheet at the dialog's width instead of stretching it to
+    /// the full window. Phones keep today's full-width sheet.
+    private func sheetMaxWidth(screenWidth: CGFloat) -> CGFloat? {
+        let size = surveyWindowFrame.size
+        let largeScreen = isLargeScreen(shortestSide: min(size.width, size.height))
+        let sheetWidth = nudgeSheetWidth(
+            screenWidth: screenWidth,
+            designWidth: designWidth,
+            largeScreen: largeScreen
+        )
+        return sheetWidth < screenWidth ? sheetWidth : nil
     }
 
     var body: some View {
@@ -306,7 +323,8 @@ private struct SurveySheet<Content: View>: View {
                     animateContentHeight: canvasBackground == nil && animateContentHeight,
                     prioritizesDragOverScrolling: keyboardScrollsContent,
                     scrollsEntireSurface: keyboardScrollsContent,
-                    entireSurfaceScrollingEnabled: keyboardInset > 0
+                    entireSurfaceScrollingEnabled: keyboardInset > 0,
+                    cardMaxWidth: sheetMaxWidth(screenWidth: geo.size.width)
                 ),
                 // Keep this wrapper mounted while the field is focused. Swapping
                 // it in when the keyboard appears recreates the TextField and
@@ -603,7 +621,7 @@ private struct CanvasSurveyScrollBounds: UIViewRepresentable {
     }
 }
 
-@MainActor private var surveyWindowFrame: CGRect {
+@MainActor var surveyWindowFrame: CGRect {
     guard let window = UIApplication.shared.connectedScenes
         .compactMap({ $0 as? UIWindowScene })
         .first(where: { $0.activationState == .foregroundActive })?
