@@ -7,12 +7,13 @@ import UIKit
 
 /// Every way a survey ends and the exact chain it sends: questions viewed, answered or skipped, Completed
 /// only at its authored end, and one Clicked — welcome Start, or the first question's CTA when there is no
-/// welcome screen, which stays Digia only. Real touches through `SdkHarness`.
+/// welcome screen, which stays Digia only. The cases that need a real touch; the rest run in the package, in
+/// `Tests/DigiaEngageTests/CampaignBehaviour/SurveyCampaignBehaviourTests.swift`. Real touches through `SdkHarness`.
 ///
 /// platform note: the Dart twin is `test/campaign_behaviour/survey_campaign_behaviour_test.dart`. Its system-back case has
 /// no iOS counterpart.
 @MainActor
-@Suite("Survey campaign behaviour", .serialized, .tags(.integration, .survey, .analytics))
+@Suite("Survey campaign behaviour: real touches", .serialized, .tags(.integration, .survey, .analytics))
 struct SurveyCampaignBehaviourTests {
     private func survey(_ name: String) -> WorkspaceFixtures.Campaign {
         WorkspaceFixtures.campaign("campaigns/survey/\(name).json")
@@ -141,23 +142,6 @@ struct SurveyCampaignBehaviourTests {
 
     // MARK: - Dropped
 
-    @Test("survey: a nudge already up: surface_busy")
-    func nudgeAlreadyUp() async throws {
-        let key = "test_survey_stacked_cta"
-        let sdk = try await start([
-            WorkspaceFixtures.campaign("campaigns/nudge_dialog/nudge_dialog.json"), survey("survey_stacked_cta"),
-        ])
-        defer { sdk.tearDown() }
-        _ = try sdk.deliverChain("test_nudge_dialog")
-        try await show(sdk, "Dialog Test Nudge")
-
-        let d = try sdk.deliverChain(key)
-        try await sdk.settle(1.2)
-        #expect(!sdk.isShowing("Option Alpha"))
-
-        expectDropped(await sdk.sent(key), d, .surfaceBusy)
-    }
-
     @Test("survey: over its cap: frequency_capped, and the first chain intact")
     func overItsCap() async throws {
         let key = "test_survey_stacked_cta"
@@ -180,38 +164,5 @@ struct SurveyCampaignBehaviourTests {
         expectDroppedWire(
             eventsOf(second, in: events), second, .frequencyCapped, campaign, screen: nil,
             extras: ["cap_rule": "max_total", "cap_limit": 1])
-    }
-
-    @Test("survey: CEP cancel before it shows: cancelled")
-    func cepCancelBeforeShowing() async throws {
-        let key = "test_survey_stacked_cta"
-        let campaign = survey("survey_stacked_cta")
-        let sdk = try await start([campaign])
-        defer { sdk.tearDown() }
-        let d = try sdk.deliverChain(key)
-        d.presentation.cancel()
-        try await sdk.settle(1.2)
-        #expect(!sdk.isShowing("Option Alpha"))
-
-        expectDroppedWire(
-            await sdk.sent(key), d, .cancelled, campaign, screen: nil,
-            extras: ["cancel_cause": "cep_cancel"])
-    }
-
-    @Test("survey: off its target screen: screen_not_targeted")
-    func offItsTargetScreen() async throws {
-        let key = "test_survey_backdrop_locked"
-        let campaign = survey("survey_backdrop_locked")
-        let sdk = try await start([campaign])
-        defer { sdk.tearDown() }
-        Digia.setCurrentScreen(name: "search")
-        let d = try sdk.deliverChain(key)
-        try await sdk.settle(1.2)
-        #expect(!sdk.isShowing("Option A"))
-
-        expectDroppedWire(
-            await sdk.sent(key), d, .screenNotTargeted, campaign, screen: "search",
-            extras: ["target_screens": ["home", "brands"]],
-            detail: "currentScreen=search targetScreenNames=[\"home\", \"brands\"]")
     }
 }

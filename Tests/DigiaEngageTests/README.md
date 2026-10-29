@@ -153,6 +153,12 @@ its diagnostic timeline. It is compiled into both test targets:
 comment, the production line whose change turns it red. Where iOS knowingly differs from Flutter the
 assertion is wrapped in `withKnownIssue`, so the test fails the day the gap closes.
 
+`CampaignBehaviour/` (here and in the sample app) asserts the exact Digia `/track` chain each surface
+sends, beside what the CEP sees. Its support in `CampaignBehaviour/Support/` boots the SDK over the
+workspace fixtures through `StubBackend` (a `URLProtocol`, so the real network client and image
+pipeline run) and is compiled into both test targets; the cases that need a real touch are in the
+sample app.
+
 ## 5. Running Tests by Tag
 
 Tagged Swift Testing suites use tags declared in [`TestingTags.swift`](TestingTags.swift): one **kind** (`unit`, `contract`, `component`, `golden`, `integration`), optional **gate** tags (`smoke`, `slow`), and one or more **areas** (`nudge`, `session`, `analytics`, ...). `xcodebuild` selects by tag natively, so no `.xctestplan` is needed.

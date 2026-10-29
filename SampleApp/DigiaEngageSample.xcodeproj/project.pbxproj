@@ -22,6 +22,11 @@
 		F20000000000000000000108 /* GuideAnchorsScreenSG.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000108 /* GuideAnchorsScreenSG.swift */; };
 		F20000000000000000000109 /* SurveyGuideSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000109 /* SurveyGuideSupport.swift */; };
 		F20000000000000000000110 /* SurveyCanvasSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000110 /* SurveyCanvasSupport.swift */; };
+		F20000000000000000000111 /* WorkspaceFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000111 /* WorkspaceFixtures.swift */; };
+		F20000000000000000000112 /* StubBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000112 /* StubBackend.swift */; };
+		F20000000000000000000113 /* SdkHarness+Fixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000113 /* SdkHarness+Fixtures.swift */; };
+		F20000000000000000000114 /* CampaignBehaviour.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000114 /* CampaignBehaviour.swift */; };
+		F20000000000000000000115 /* GuideHostScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000115 /* GuideHostScreen.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -50,6 +55,11 @@
 		F10000000000000000000108 /* GuideAnchorsScreenSG.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/GuideAnchorsScreenSG.swift; sourceTree = "<group>"; };
 		F10000000000000000000109 /* SurveyGuideSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/SurveyGuideSupport.swift; sourceTree = "<group>"; };
 		F10000000000000000000110 /* SurveyCanvasSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureBehaviour/SurveyCanvasSupport.swift; sourceTree = "<group>"; };
+		F10000000000000000000111 /* WorkspaceFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignBehaviour/Support/WorkspaceFixtures.swift; sourceTree = "<group>"; };
+		F10000000000000000000112 /* StubBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignBehaviour/Support/StubBackend.swift; sourceTree = "<group>"; };
+		F10000000000000000000113 /* SdkHarness+Fixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CampaignBehaviour/Support/SdkHarness+Fixtures.swift"; sourceTree = "<group>"; };
+		F10000000000000000000114 /* CampaignBehaviour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CampaignBehaviour/Support/CampaignBehaviour.swift; sourceTree = "<group>"; };
+		F10000000000000000000115 /* GuideHostScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Support/GuideHostScreen.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -129,6 +139,11 @@
 				F10000000000000000000108 /* GuideAnchorsScreenSG.swift */,
 				F10000000000000000000109 /* SurveyGuideSupport.swift */,
 				F10000000000000000000110 /* SurveyCanvasSupport.swift */,
+				F10000000000000000000111 /* WorkspaceFixtures.swift */,
+				F10000000000000000000112 /* StubBackend.swift */,
+				F10000000000000000000113 /* SdkHarness+Fixtures.swift */,
+				F10000000000000000000114 /* CampaignBehaviour.swift */,
+				F10000000000000000000115 /* GuideHostScreen.swift */,
 				D10000000000000000000011 /* ComponentTestHost.swift */,
 				D10000000000000000000012 /* FixtureLoader.swift */,
 				D10000000000000000000013 /* SnapshotTestingExtensions.swift */,
@@ -271,6 +286,11 @@
 				F20000000000000000000108 /* GuideAnchorsScreenSG.swift in Sources */,
 				F20000000000000000000109 /* SurveyGuideSupport.swift in Sources */,
 				F20000000000000000000110 /* SurveyCanvasSupport.swift in Sources */,
+				F20000000000000000000111 /* WorkspaceFixtures.swift in Sources */,
+				F20000000000000000000112 /* StubBackend.swift in Sources */,
+				F20000000000000000000113 /* SdkHarness+Fixtures.swift in Sources */,
+				F20000000000000000000114 /* CampaignBehaviour.swift in Sources */,
+				F20000000000000000000115 /* GuideHostScreen.swift in Sources */,
 				D10000000000000000000021 /* ComponentTestHost.swift in Sources */,
 				D10000000000000000000022 /* FixtureLoader.swift in Sources */,
 				D10000000000000000000023 /* SnapshotTestingExtensions.swift in Sources */,

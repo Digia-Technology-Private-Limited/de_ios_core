@@ -40,6 +40,9 @@ final class SdkHarness {
     var cep: FakeCep { plugin }
     var window: UIWindow!
 
+    /// Set by the workspace-fixture boot (`CampaignBehaviour/Support/SdkHarness+Fixtures.swift`): the app is
+    /// laid out full screen and the network is `StubBackend`, not `MockNetworkClient`.
+    var servesWorkspaceFixtures = false
     /// Run last by ``tearDown()``: what a boot outside this file installed and must undo.
     var tearDownHooks: [() -> Void] = []
 
@@ -381,7 +384,7 @@ final class SdkHarness {
         initialization = nil
         DigiaLogger.unregisterSink(recorder)
         if let window {
-            ComponentTestHost.cleanupOverlayWindow(window)
+            if servesWorkspaceFixtures { window.isHidden = true } else { ComponentTestHost.cleanupOverlayWindow(window) }
         }
         window = nil
         SDKInstance.shared.floaterOrchestrator.dismiss(.hostTeardown)

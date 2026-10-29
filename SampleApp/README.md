@@ -34,7 +34,9 @@ their coverage into `coverage/lcov.info`.
 
 `CampaignBehaviour/*CampaignBehaviourTests` drive every surface through `SdkHarness` and read the Digia
 `/track` chain off `StubBackend` beside the CEP's markings (`./run-sample-tests.sh campaign_behaviour`); tests
-that hit a known bug run and fail, each with a `// Fails today:` comment.
+that hit a known bug run and fail, each with a `// Fails today:` comment. Only the cases that need a real
+touch are here: the rest, and the shared support (`StubBackend`, `WorkspaceFixtures`, the chain assertions),
+are in `../Tests/DigiaEngageTests/CampaignBehaviour/`.
 
 ```bash
 xcodebuild test -project DigiaEngageSample.xcodeproj -scheme DigiaEngageSample \

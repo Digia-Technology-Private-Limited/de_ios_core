@@ -24,7 +24,7 @@ enum Chain {
 
     /// How many recorded requests came before this test's own: the analytics queue is a database file that
     /// outlives a test, so `initialize` may send an earlier test's leftovers.
-    fileprivate static var requestsBefore = 0
+    @MainActor fileprivate static var requestsBefore = 0
 }
 
 /// When a presentation hands the CEP's hold back (`PresentationKind`).
@@ -43,7 +43,8 @@ typealias WireEvent = [String: Any]
 /// What the owning CEP saw for one delivered campaign: its signals as they arrive, when its hold came back,
 /// and the outcome.
 ///
-/// platform note: the package tests' `PresentationRecorder` does the same; this target cannot see it.
+/// platform note: the package tests' `PresentationRecorder` does the same; the sample app's target, which also
+/// compiles this file, cannot see it.
 @MainActor
 final class Delivery {
     let presentation: CampaignPresentation
@@ -141,20 +142,6 @@ extension SdkHarness {
                 $0["campaign_key"] as? String == campaignKey
                     && ($0["event_name"] as? String)?.hasPrefix("Digia ") == true
             }
-    }
-
-    /// A real touch at `point`, in window coordinates: a scrim, or a control with nothing to find it by.
-    func touch(_ point: CGPoint) async throws {
-        try TouchSynthesizer.tap(at: point, in: try #require(window))
-        try await settle(0.5)
-    }
-
-    /// A real one-finger swipe from `start` to `end`, in window coordinates, then time for what it starts to settle.
-    func swipe(from start: CGPoint, to end: CGPoint) async throws {
-        try TouchSynthesizer.drag(
-            from: start, by: CGVector(dx: end.x - start.x, dy: end.y - start.y),
-            in: try #require(window), duration: 0.25)
-        try await settle(1)
     }
 }
 
