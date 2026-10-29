@@ -346,7 +346,6 @@ private struct CanvasSurveyScaledStage: View {
     let onValidationError: (String?) -> Void
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.canvasSurveyDialogPresentation) private var dialogPresentation
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     var body: some View {
         if let dialog = dialogPresentation {
@@ -370,18 +369,20 @@ private struct CanvasSurveyScaledStage: View {
                 .transaction { $0.disablesAnimations = false }
         } else {
             GeometryReader { geo in
-                let screen = UIScreen.main.bounds.size
+                // Window size, not the screen's: on iPad the key window can be
+                // narrower than the screen (multitasking), and the nudge path
+                // already gates on this same window frame.
+                let windowSize = surveyWindowFrame.size
                 let largeScreen = isLargeScreen(
-                    shortestSide: min(screen.width, screen.height),
-                    horizontalSizeClass: horizontalSizeClass
+                    shortestSide: min(windowSize.width, windowSize.height)
                 )
                 let scale = canvasSurveyFitScale(
                     designScale: canvasSurveyDesignScale(
-                        viewportWidth: UIScreen.main.bounds.width,
+                        viewportWidth: windowSize.width,
                         largeScreen: largeScreen
                     ),
                     availableWidth: geo.size.width,
-                    availableHeight: geo.size.height > 0 ? geo.size.height : UIScreen.main.bounds.height
+                    availableHeight: geo.size.height > 0 ? geo.size.height : windowSize.height
                 )
                 scaledStage(scale: scale)
             }

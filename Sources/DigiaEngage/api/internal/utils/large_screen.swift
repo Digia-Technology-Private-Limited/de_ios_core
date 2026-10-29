@@ -10,14 +10,12 @@ internal let maxLargeScreenUpscale: CGFloat = 1.15
 /// foldable on Android). Mirrors Material's compact-width breakpoint.
 internal let largeScreenMinShortestSide: CGFloat = 600
 
-/// Whether the window counts as a large screen: a regular horizontal size
-/// class (iPad full-width / Stage Manager) or a shortest side of at least
-/// 600pt. Pure so unit tests can pin it without hosting a view.
-internal func isLargeScreen(
-    shortestSide: CGFloat,
-    horizontalSizeClass: UserInterfaceSizeClass?
-) -> Bool {
-    if horizontalSizeClass == .regular { return true }
+/// Whether the window counts as a large screen: a shortest side of at least
+/// 600pt. Size class plays no part — an iPhone Pro Max in landscape reports a
+/// regular horizontal size class but at 430pt shortest side is still a phone,
+/// and promoting it would wrongly apply the tablet sheet/full-screen path.
+/// Pure so unit tests can pin it without hosting a view.
+internal func isLargeScreen(shortestSide: CGFloat) -> Bool {
     guard shortestSide.isFinite else { return false }
     return shortestSide >= largeScreenMinShortestSide
 }

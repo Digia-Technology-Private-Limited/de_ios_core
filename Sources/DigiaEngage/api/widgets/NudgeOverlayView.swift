@@ -120,7 +120,6 @@ private struct NudgeCoverPresenter: View {
 private struct NudgeFullScreenView: View {
     let presentation: DigiaNudgePresentation
     @Environment(\.layoutDirection) private var layoutDirection
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var surface: NudgeSurface { presentation.config.surface }
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
@@ -128,10 +127,7 @@ private struct NudgeFullScreenView: View {
     /// Tablets fit the whole canvas instead of covering the window with it.
     private var largeScreen: Bool {
         let size = activeWindowSize
-        return isLargeScreen(
-            shortestSide: min(size.width, size.height),
-            horizontalSizeClass: horizontalSizeClass
-        )
+        return isLargeScreen(shortestSide: min(size.width, size.height))
     }
 
     var body: some View {
@@ -236,7 +232,6 @@ private struct NudgeFullScreenView: View {
 @MainActor
 private struct NudgeSheetView: View {
     let presentation: DigiaNudgePresentation
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var authoredSurface: NudgeSurface { presentation.config.surface }
     private var canvas: CampaignCanvas? { presentation.config.canvas }
@@ -244,10 +239,7 @@ private struct NudgeSheetView: View {
     /// Tablets cap the sheet at the dialog's width instead of stretching it to
     /// the full window. Phones keep today's full-width sheet.
     private var largeScreen: Bool {
-        isLargeScreen(
-            shortestSide: min(runtimeSize.width, runtimeSize.height),
-            horizontalSizeClass: horizontalSizeClass
-        )
+        isLargeScreen(shortestSide: min(runtimeSize.width, runtimeSize.height))
     }
     private var sheetWidth: CGFloat {
         nudgeSheetWidth(

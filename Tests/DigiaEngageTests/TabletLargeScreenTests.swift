@@ -8,21 +8,24 @@ struct TabletLargeScreenTests {
 
     @Test("phones are not a large screen in either orientation")
     func phonesAreNotLargeScreen() {
-        #expect(!isLargeScreen(shortestSide: 390, horizontalSizeClass: .compact))
-        #expect(!isLargeScreen(shortestSide: 430, horizontalSizeClass: .compact))
-        #expect(!isLargeScreen(shortestSide: 430, horizontalSizeClass: nil))
+        #expect(!isLargeScreen(shortestSide: 390))
+        #expect(!isLargeScreen(shortestSide: 430))
+    }
+
+    @Test("a Pro Max in landscape is still a phone")
+    func phoneLandscapeIsNotLargeScreen() {
+        // 932x430 landscape: shortest side 430, below the breakpoint, even
+        // though the horizontal size class is regular there.
+        #expect(!isLargeScreen(shortestSide: min(932, 430)))
     }
 
     @Test("tablets reach the 600pt shortest-side breakpoint")
     func tabletsAreLargeScreen() {
-        #expect(isLargeScreen(shortestSide: 600, horizontalSizeClass: .compact))
-        #expect(isLargeScreen(shortestSide: 768, horizontalSizeClass: .compact))
-        #expect(!isLargeScreen(shortestSide: 599, horizontalSizeClass: .compact))
-    }
-
-    @Test("regular width counts as large even below the breakpoint")
-    func regularWidthIsLargeScreen() {
-        #expect(isLargeScreen(shortestSide: 400, horizontalSizeClass: .regular))
+        #expect(isLargeScreen(shortestSide: 600))
+        #expect(isLargeScreen(shortestSide: 768))
+        #expect(!isLargeScreen(shortestSide: 599))
+        // 1024x768 iPad in either orientation.
+        #expect(isLargeScreen(shortestSide: min(1024, 768)))
     }
 
     // MARK: - nudgeSheetWidth (pins large_screen.swift nudgeSheetWidth)
