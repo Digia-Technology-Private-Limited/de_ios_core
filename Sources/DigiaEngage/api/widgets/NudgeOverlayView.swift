@@ -83,8 +83,13 @@ struct NudgeOverlayView: View {
     }
 }
 
-func nudgeScrimColor(_ surface: NudgeSurface) -> Color {
-    surface.barrierColor ?? Color.black.opacity(0.4)
+@MainActor
+private func nudgeScrimColor(_ surface: NudgeSurface, _ scheme: ColorScheme) -> Color {
+    if let token = surface.barrierToken {
+        let theme = CampaignCanvasTheme.shared
+        return theme.color(token, isDark: theme.isDark(scheme))
+    }
+    return surface.barrierColor ?? Color.black.opacity(0.4)
 }
 
 /// Isolates the UIKit full-screen-cover transaction from the inline dialog
@@ -126,6 +131,7 @@ private struct NudgeCoverPresenter: View {
 struct NudgeFullScreenView: View {
     let presentation: DigiaNudgePresentation
     @Environment(\.layoutDirection) private var layoutDirection
+    @Environment(\.colorScheme) private var colorScheme
 
     private var surface: NudgeSurface { presentation.config.surface }
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
@@ -154,7 +160,7 @@ struct NudgeFullScreenView: View {
 
             ZStack {
                 if surface.safeAreaMode == .insetSurface {
-                    nudgeScrimColor(surface)
+                    nudgeScrimColor(surface, colorScheme)
                 }
                 if let canvas = presentation.config.canvas {
                     let canvasView = CampaignCanvasView(
@@ -241,6 +247,7 @@ struct NudgeFullScreenView: View {
 @MainActor
 struct NudgeSheetView: View {
     let presentation: DigiaNudgePresentation
+    @Environment(\.colorScheme) private var colorScheme
 
     private var authoredSurface: NudgeSurface { presentation.config.surface }
     private var canvas: CampaignCanvas? { presentation.config.canvas }
@@ -276,7 +283,7 @@ struct NudgeSheetView: View {
             config: DigiaBottomSheetConfig(
                 cornerRadius: surface.cornerRadius,
                 background: canvas == nil ? (surface.backgroundColor ?? .white) : .clear,
-                scrimColor: nudgeScrimColor(surface),
+                scrimColor: nudgeScrimColor(surface, colorScheme),
                 showHandle: surface.showHandle,
                 allowBackdropDismiss: surface.backdropDismissible,
                 allowDragDismiss: surface.draggable,
@@ -383,12 +390,13 @@ struct NudgeDialogContainer: View {
     let presentation: DigiaNudgePresentation
     let viewportSize: CGSize
     let safeAreaInsets: UIEdgeInsets
+    @Environment(\.colorScheme) private var colorScheme
 
     @State private var contentHeight: CGFloat = 0
 
     private var authoredSurface: NudgeSurface { presentation.config.surface }
     private var surface: NudgeSurface { authoredSurface }
-    private var scrimColor: Color { nudgeScrimColor(surface) }
+    private var scrimColor: Color { nudgeScrimColor(surface, colorScheme) }
     private var backgroundColor: Color { surface.backgroundColor ?? .white }
     private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
 
