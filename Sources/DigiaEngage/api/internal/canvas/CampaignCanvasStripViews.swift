@@ -943,23 +943,14 @@ struct CanvasStoryViewer: View {
 
                 // Both the overlay and the chrome are authored against the safe
                 // region, so both draw at the same scale and inside it.
-                let widthScale = page.canvas.width > 0 ? contentWidth / page.canvas.width : 1
-                // The authored portrait canvas (page + chrome) is taller than a
-                // tablet reader when scaled to its width, and the centred frame
-                // then pushes the top chrome — progress, close, mute — off the
-                // screen. Fit the whole authored height on a large screen.
-                // Phones keep the width scale.
-                let largeScreen = min(proxy.size.width, proxy.size.height) >= 600
-                let availableHeight = max(
+                let scale = page.canvas.width > 0 ? contentWidth / page.canvas.width : 1
+                // Each layer is pinned to the safe region, so neither can size the
+                // stack. On a tablet the width-scaled portrait page is taller than
+                // the reader; it bottom-anchors and loses its top, as the media
+                // does, and the chrome stays at the top edge. Phones draw as before.
+                let safeHeight = max(
                     0, proxy.size.height - safeAreaInsets.top - safeAreaInsets.bottom
                 )
-                let authoredHeight = max(page.canvas.height, chrome.height)
-                let heightScale = authoredHeight > 0 ? availableHeight / authoredHeight : widthScale
-                let scale = largeScreen ? min(widthScale, heightScale) : widthScale
-                // A stage scales by the width it is given, so a height-fitted
-                // scale has to narrow the stage too; otherwise the canvas draws
-                // at the width scale and the bottom of the page is clipped.
-                let stageWidth = widthScale > 0 ? contentWidth * (scale / widthScale) : contentWidth
                 // The page an action came from travels with it, so a CTA inside story 3 reports as
                 // a step click on story 3 rather than as an anonymous click on the card.
                 let pageAction: (CampaignCanvasActionRequest) -> Void = { request in
@@ -969,29 +960,30 @@ struct CanvasStoryViewer: View {
                     )
                     onAction(stamped)
                 }
-                VStack {
-                    Spacer(minLength: 0)
-                    ScaledCanvasStage(
-                        canvas: page.canvas,
-                        width: stageWidth,
-                        height: page.canvas.height * scale,
-                        cornerRadius: 0,
-                        isDark: isDark,
-                        onAction: pageAction
-                    )
-                }
+                ScaledCanvasStage(
+                    canvas: page.canvas,
+                    width: contentWidth,
+                    height: page.canvas.height * scale,
+                    cornerRadius: 0,
+                    isDark: isDark,
+                    onAction: pageAction
+                )
+                .frame(height: safeHeight, alignment: .bottom)
+                .clipped()
                 .opacity(showsOverlays ? 1 : 0)
                 .allowsHitTesting(showsOverlays)
                 .accessibilityHidden(!showsOverlays)
 
                 ScaledCanvasStage(
                     canvas: chrome,
-                    width: stageWidth,
+                    width: contentWidth,
                     height: chrome.height * scale,
                     cornerRadius: 0,
                     isDark: isDark,
                     onAction: pageAction
                 )
+                .frame(height: safeHeight, alignment: .top)
+                .clipped()
                 .environment(
                     \.canvasStoryViewer,
                     CanvasStoryViewerState(
