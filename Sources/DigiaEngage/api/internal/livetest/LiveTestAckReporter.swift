@@ -48,6 +48,11 @@ final class LiveTestAckReporter {
         self.config = config
     }
 
+    /// Back to unconfigured, so nothing posts until the next `configure`.
+    func resetForTesting() {
+        config = nil
+    }
+
     func postReceived(_ testInvocationId: String) {
         post(["testInvocationId": testInvocationId, "status": "received"])
     }

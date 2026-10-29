@@ -3516,6 +3516,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         currentSession.set(nil, requestHeaders: [:])
         campaignStore.clear()
         liveTestService.stop()
+        // Else a test that resets without initializing inherits the last config and ACKs past the cleared override.
+        liveTestService.ackReporter.resetForTesting()
         config = nil
         hostActionExecutor.clearHandlers()
         sdkState = .notInitialized
