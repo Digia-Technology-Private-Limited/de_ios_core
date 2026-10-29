@@ -141,6 +141,9 @@ struct NudgeSurface: Equatable {
     /// Full-screen system-area treatment, applied to all window edges.
     var safeAreaMode: BottomSafeAreaMode = .insetContent
     var autoDismissAfterMs: Int = 0
+    /// Canvas barrier as authored (`{ "value": … }` or a theme token); wins over
+    /// `barrierColor` and is resolved against the active theme at render time.
+    var barrierToken: CampaignColor? = nil
 
     var isBottomSheet: Bool { displayType == .bottomSheet }
     var isFullScreen: Bool { displayType == .fullScreen }
@@ -162,7 +165,8 @@ struct NudgeSurface: Equatable {
             useSafeArea: useSafeArea,
             bottomSafeAreaMode: bottomSafeAreaMode,
             safeAreaMode: safeAreaMode,
-            autoDismissAfterMs: autoDismissAfterMs
+            autoDismissAfterMs: autoDismissAfterMs,
+            barrierToken: barrierToken
         )
     }
 
@@ -199,7 +203,8 @@ struct NudgeSurface: Equatable {
             } ?? false,
             bottomSafeAreaMode: BottomSafeAreaMode.from(map["bottomSafeAreaMode"] as? String),
             safeAreaMode: BottomSafeAreaMode.from(map["safeAreaMode"] as? String),
-            autoDismissAfterMs: min(map.positiveInt("autoDismissAfterMs") ?? 0, Int(Int32.max))
+            autoDismissAfterMs: min(map.positiveInt("autoDismissAfterMs") ?? 0, Int(Int32.max)),
+            barrierToken: canvasMode ? (try? designTokens.resolveColor(map["barrierColor"])) ?? nil : nil
         )
     }
 
