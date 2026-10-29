@@ -5,6 +5,7 @@ import UIKit
 
 @testable import DigiaEngage
 
+extension RenderedUITests {
 /// Every way a PiP or story floater ends and the exact chain it sends. Both float over the app, so the CEP's
 /// hold comes back at the impression while they keep running. The cases that need a real touch run hosted, in
 /// `SampleApp/DigiaEngageSampleTests/CampaignBehaviour/FloaterCampaignBehaviourTests.swift`.
@@ -178,4 +179,5 @@ struct FloaterCampaignBehaviourTests {
             await sdk.sent(key), d, .cancelled, campaign, screen: nil, extras: ["cancel_cause": "auto_timeout"],
             detail: "ended before it displayed (auto_timeout)")
     }
+}
 }

@@ -5,6 +5,7 @@ import UIKit
 
 @testable import DigiaEngage
 
+extension RenderedUITests {
 /// Every way a nudge ends — closed, or dropped before it showed — and the exact chain each one sends, beside
 /// what the CEP holding it sees. The cases that need a real touch run hosted, in
 /// `SampleApp/DigiaEngageSampleTests/CampaignBehaviour/NudgeCampaignBehaviourTests.swift`.
@@ -332,4 +333,5 @@ struct NudgeCampaignBehaviourTests {
         #expect(names(await sdk.sent("test_nudge_dialog")) == [Chain.triggered, Chain.viewed])
         #expect(sdk.isShowing("Dialog Test Nudge"), "the nudge stays on screen")
     }
+}
 }

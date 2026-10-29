@@ -5,6 +5,7 @@ import UIKit
 
 @testable import DigiaEngage
 
+extension RenderedUITests {
 /// Every way a guide ends and the exact chain it sends: one Viewed, a Step Viewed per step shown, a Step
 /// Clicked per CTA, Completed only from the last step's CTA, and a Step Dismissed when it ends short of that.
 /// On the anchors of `GuideHostScreen`. The cases that need a real touch run hosted, in
@@ -155,6 +156,7 @@ struct GuideCampaignBehaviourTests {
             extras: ["target_screens": ["home", "search"]],
             detail: "currentScreen=cart targetScreenNames=[\"home\", \"search\"]")
     }
+}
 }
 
 @MainActor

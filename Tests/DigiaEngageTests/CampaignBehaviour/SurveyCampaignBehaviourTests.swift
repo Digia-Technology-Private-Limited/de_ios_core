@@ -5,6 +5,7 @@ import UIKit
 
 @testable import DigiaEngage
 
+extension RenderedUITests {
 /// Every way a survey ends and the exact chain it sends: questions viewed, answered or skipped, Completed
 /// only at its authored end, and one Clicked — welcome Start, or the first question's CTA when there is no
 /// welcome screen, which stays Digia only. The cases that need a real touch run hosted, in
@@ -80,4 +81,5 @@ struct SurveyCampaignBehaviourTests {
             extras: ["target_screens": ["home", "brands"]],
             detail: "currentScreen=search targetScreenNames=[\"home\", \"brands\"]")
     }
+}
 }

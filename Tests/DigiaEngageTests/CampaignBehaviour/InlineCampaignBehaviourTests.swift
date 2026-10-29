@@ -5,6 +5,7 @@ import UIKit
 
 @testable import DigiaEngage
 
+extension RenderedUITests {
 /// Inline content in its slot and the exact chain it sends. The CEP's hold comes back at acceptance, before
 /// any impression, and the content sends no Digia Dismissed: when its slot is cleared, only the CEP hears of
 /// it. The cases that need a real touch, and the carousel's (it pages only in a running app), run hosted, in
@@ -207,4 +208,5 @@ struct InlineCampaignBehaviourTests {
             await sdk.sent(key), d, .screenNotTargeted, campaign, screen: "search",
             extras: ["target_screens": ["home"]], detail: "currentScreen=search targetScreenNames=[\"home\"]")
     }
+}
 }
