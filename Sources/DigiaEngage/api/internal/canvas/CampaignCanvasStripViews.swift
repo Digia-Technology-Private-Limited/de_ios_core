@@ -363,24 +363,20 @@ struct CanvasCarouselRenderer: View {
     @State private var motion = CarouselStripMotion()
     @Environment(\.canvasInteractions) private var reportInteraction
 
-    static func realIndex(_ displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int {
-        guard loopEnabled else { return displayIndex }
-        return (((displayIndex - 1) % slideCount) + slideCount) % slideCount
-    }
-
-    static func recenteringTarget(displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int? {
-        guard loopEnabled, slideCount > 1 else { return nil }
-        let displayCount = slideCount + 2
-        if displayIndex == 0 {
-            return displayCount - 2
-        } else if displayIndex == displayCount - 1 {
-            return 1
-        }
-        return nil
+    /// Clones on each end of a looping strip. A strip parked on a clone,
+    /// before it hops to its twin, still shows its neighbours peeking in, so
+    /// there must be enough clones that those neighbours exist — one clone
+    /// left a blank gap beside the slide the loop had just wrapped onto.
+    private var loopClones: Int {
+        guard case .carousel(_, _, let viewportFraction, _, _, _, _, _, _, _, _, _, _, _, _, _) = widget,
+              viewportFraction > 0, viewportFraction.isFinite else { return 1 }
+        let peeking = ((1 - viewportFraction) / (2 * viewportFraction)).rounded(.up)
+        return Int(min(max(peeking, 0), 8)) + 1
     }
 
     private func realIndex(_ displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int {
-        Self.realIndex(displayIndex, slideCount: slideCount, loopEnabled: loopEnabled)
+        guard loopEnabled else { return displayIndex }
+        return (((displayIndex - loopClones) % slideCount) + slideCount) % slideCount
     }
 
     var body: some View {
@@ -410,8 +406,8 @@ struct CanvasCarouselRenderer: View {
 
                 if stripHeight > 0 && slideWidth > 0 {
                     let loopEnabled = infiniteScroll && slides.count > 1
-                    let displayCount = loopEnabled ? slides.count + 2 : slides.count
-                    let initialDisplayIndex = loopEnabled ? 1 : 0
+                    let displayCount = loopEnabled ? slides.count + 2 * loopClones : slides.count
+                    let initialDisplayIndex = loopEnabled ? loopClones : 0
                     let activeIndex = realIndex(
                         scrollPosition ?? initialDisplayIndex,
                         slideCount: slides.count,
@@ -594,7 +590,7 @@ struct CanvasCarouselRenderer: View {
     ) {
         guard motion.isVisible, !motion.fingerDown, let proxy = motion.proxy else { return }
         let resting = motion.restingPage
-            ?? (page: scrollPosition ?? (loopEnabled ? 1 : 0), aligned: true)
+            ?? (page: scrollPosition ?? (loopEnabled ? loopClones : 0), aligned: true)
         let restart = {
             startAutoPlay(
                 autoPlay: autoPlay,
@@ -643,12 +639,14 @@ struct CanvasCarouselRenderer: View {
         )
         advancedAutomatically = false
 
-        if loopEnabled, resting.page == 0 || resting.page == displayCount - 1 {
-            // On a sentinel: jump to its real twin. The jump moves the strip,
+        if loopEnabled, resting.page < loopClones || resting.page >= loopClones + slideCount {
+            // On a clone: jump to its real twin. The jump moves the strip,
             // which settles once more on the twin and reports nothing new.
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            let twin = resting.page == 0 ? displayCount - 2 : 1
+            let twin = resting.page < loopClones
+                ? resting.page + slideCount
+                : resting.page - slideCount
             withTransaction(transaction) {
                 proxy.scrollTo(twin, anchor: .center)
                 scrollPosition = twin
@@ -674,13 +672,13 @@ struct CanvasCarouselRenderer: View {
                 guard !motion.fingerDown, motion.isAtRest else { return }
                 // Advance from where the strip really is, not from the
                 // binding, which keeps the target of an interrupted slide.
-                let current = motion.restingPage?.page ?? scrollPosition ?? (loopEnabled ? 1 : 0)
+                let current = motion.restingPage?.page ?? scrollPosition ?? (loopEnabled ? loopClones : 0)
                 let next: Int
                 if loopEnabled {
                     // Wrap off the trailing sentinel onto the first real page.
                     // Clamping here used to no-op at displayCount - 1, parking
                     // the strip on the sentinel and killing autoplay.
-                    next = current >= displayCount - 1 ? 1 : current + 1
+                    next = current >= displayCount - 1 ? loopClones : current + 1
                 } else {
                     if current >= displayCount - 1 { return }
                     next = min(current + 1, displayCount - 1)
