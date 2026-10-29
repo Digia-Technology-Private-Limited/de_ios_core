@@ -39,10 +39,17 @@ extension SdkHarness {
             StubBackend.uninstall()
             Task { await SdkGate.shared.leave() }
         }
-        // First, so the SDK's network client is built on a configuration that carries the stub.
+        // First, so a session built from here on (the image pipeline's) carries the stub.
         StubBackend.install(campaigns: campaigns.map(\.json), options: backend)
         UserDefaults(suiteName: storageSuite)?.removePersistentDomain(forName: storageSuite)
         SDKInstance.shared.resetForTesting()
+        // `SDKInstance.shared` keeps the client it was built with, and an earlier suite in the process may have
+        // built it before `install`; route it through the stub explicitly. `resetForTesting` clears this.
+        let stubbed = URLSessionConfiguration.ephemeral
+        stubbed.protocolClasses = [StubBackend.self]
+        let client = try #require(SDKInstance.shared.networkClient as? URLSessionNetworkClient)
+        client.overrideForTesting = URLSessionNetworkClient(
+            session: URLSession(configuration: stubbed), sessionIdProvider: { nil }, headerProvider: { [:] })
         do {
             try await Digia.initialize(DigiaConfig(apiKey: "test-api-key", actionHandlers: actionHandlers))
             SDKInstance.shared.register(harness.cep)
