@@ -2,6 +2,21 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [3.14.4] - 2026-10-30
+
+### Bug Fixes
+- On iPad, bottom sheets and survey sheets are capped at 1.15× the design width and centred, and full-screen canvases fit the window instead of cropping; iPhone layouts are unchanged in every orientation.
+- Taps and swipes on canvas carousels land where the finger is on iPad; short swipes no longer snap back.
+- Canvas carousel autoplay pauses while a finger is on the strip, and the strip always settles on a page after being interrupted.
+- A looping canvas carousel no longer gets stuck when swiped during its wrap-around, and its neighbouring slides stay visible after wrapping.
+- A guide now ends when the user moves to a different screen.
+- Story progress bars, close and mute buttons stay inside the safe area on iPad.
+- A canvas barrier colour given as a theme token follows light and dark mode.
+- Canvas bottom sheets round only their top corners, matching Android and Flutter.
+- An inline placement with a whitespace-only slot key is rejected, matching Android.
+- The inline story rail scrolls horizontally on iPad.
+- The whole picture-in-picture close circle is tappable, not just the × glyph.
+
 ## [3.14.3] - 2026-10-28
 
 ### Bug Fixes
