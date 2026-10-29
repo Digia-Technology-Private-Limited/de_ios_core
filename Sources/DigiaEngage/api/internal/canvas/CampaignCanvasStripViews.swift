@@ -977,6 +977,10 @@ struct CanvasStoryViewer: View {
                 let authoredHeight = max(page.canvas.height, chrome.height)
                 let heightScale = authoredHeight > 0 ? availableHeight / authoredHeight : widthScale
                 let scale = largeScreen ? min(widthScale, heightScale) : widthScale
+                // A stage scales by the width it is given, so a height-fitted
+                // scale has to narrow the stage too; otherwise the canvas draws
+                // at the width scale and the bottom of the page is clipped.
+                let stageWidth = widthScale > 0 ? contentWidth * (scale / widthScale) : contentWidth
                 // The page an action came from travels with it, so a CTA inside story 3 reports as
                 // a step click on story 3 rather than as an anonymous click on the card.
                 let pageAction: (CampaignCanvasActionRequest) -> Void = { request in
@@ -990,7 +994,7 @@ struct CanvasStoryViewer: View {
                     Spacer(minLength: 0)
                     ScaledCanvasStage(
                         canvas: page.canvas,
-                        width: contentWidth,
+                        width: stageWidth,
                         height: page.canvas.height * scale,
                         cornerRadius: 0,
                         isDark: isDark,
@@ -1003,7 +1007,7 @@ struct CanvasStoryViewer: View {
 
                 ScaledCanvasStage(
                     canvas: chrome,
-                    width: contentWidth,
+                    width: stageWidth,
                     height: chrome.height * scale,
                     cornerRadius: 0,
                     isDark: isDark,
