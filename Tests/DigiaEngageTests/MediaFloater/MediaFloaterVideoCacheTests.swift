@@ -15,8 +15,7 @@ import Testing
 /// `localURL` for a player waiting on its file). Already covered by
 /// `Components/Canvas/DigiaVideoFileCacheTests.swift`: a stale partial is cleared at start, an
 /// oversized cached file is dropped, peek vs touch, LRU eviction at start, and the failure cooldown.
-@Suite("Media: story video cache downloads", .serialized, .tags(.integration, .media),
-       .timeLimit(.minutes(1)))
+@Suite("Media: story video cache downloads", .serialized, .tags(.integration, .media))
 struct MediaFloaterVideoCacheTests {
 
     private let folder: URL

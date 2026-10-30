@@ -26,14 +26,14 @@ Visual golden diffing (`.image`) requires a deterministic pixel grid, scale fact
 
 | Parameter | Pinned Value | Details / Verification |
 | :--- | :--- | :--- |
-| **Device Model** | `iPhone 17e` | The screen of the Flutter and Android goldens (390x844) |
-| **OS Version** | `iOS 26.0` (or `iOS 26.x`) | Target simulator runtime |
+| **Device Model** | `iPhone 17 Pro Max` | 440x956 pt, safe area 62/34; goldens do not use this screen (see below) |
+| **OS Version** | `iOS 26.5` | Target simulator runtime |
 | **Display Scale** | `@3x` (3.0 scale) | 3 physical pixels per point |
-| **Physical Resolution** | `1170 x 2532` px | |
-| **Logical Dimensions** | `390 x 844` pt | Fixed viewport bounds (`ViewImageConfig.engageGolden`) |
+| **Physical Resolution** | `1320 x 2868` px | |
+| **Golden Dimensions** | `390 x 844` pt | Set in code (`ViewImageConfig.engageGolden`), not taken from the simulator |
 | **UI Appearance** | `Light` | Standard light theme (no dark mode overrides) |
 | **Dynamic Type Size** | `large` | Standard iOS default font scale |
-| **Safe Area Insets** | Top: 47 pt, Bottom: 34 pt | Notch & Home Indicator, as Flutter's `_safeTop` / `_safeBottom` |
+| **Golden Safe Area Insets** | Top: 47 pt, Bottom: 34 pt | Set in code, as Flutter's `_safeTop` / `_safeBottom` |
 
 ---
 
@@ -43,22 +43,22 @@ Visual golden diffing (`.image`) requires a deterministic pixel grid, scale fact
 ```bash
 xcrun simctl list devices booted
 ```
-Verify that `iPhone 17e` is listed as `(Booted)`.
+Verify that `iPhone 17 Pro Max` (iOS 26.5) is listed as `(Booted)`.
 
 #### 2. Boot or switch to the pinned device:
 ```bash
 # Boot the pinned simulator
-xcrun simctl boot "iPhone 17e"
+xcrun simctl boot "iPhone 17 Pro Max"
 
 # Set UI appearance to Light mode
-xcrun simctl ui "iPhone 17e" appearance light
+xcrun simctl ui "iPhone 17 Pro Max" appearance light
 
 # Set Dynamic Type to standard default
-xcrun simctl ui "iPhone 17e" content_size large
+xcrun simctl ui "iPhone 17 Pro Max" content_size large
 ```
 
 #### 3. Automatic Device Enforcement:
-The [`./run-tests.sh`](../run-tests.sh) convenience runner automatically detects any booted `iPhone 17e`. If none is booted, it instructs `xcodebuild` to target the pinned `iPhone 17e` profile directly.
+The [`./run-tests.sh`](../run-tests.sh) convenience runner automatically detects a booted `iPhone 17 Pro Max` on iOS 26.5. If none is booted, it instructs `xcodebuild` to target that device and OS directly.
 
 ---
 
@@ -157,7 +157,7 @@ assertion is wrapped in `withKnownIssue`, so the test fails the day the gap clos
 Tagged Swift Testing suites use tags declared in [`TestingTags.swift`](TestingTags.swift): one **kind** (`unit`, `contract`, `component`, `golden`, `integration`), optional **gate** tags (`smoke`, `slow`), and one or more **areas** (`nudge`, `session`, `analytics`, ...). `xcodebuild` selects by tag natively, so no `.xctestplan` is needed.
 
 ### Using the Convenience Wrapper (`./run-tests.sh`)
-The wrapper pins the iPhone 17e simulator, enables code coverage, validates the tag against `TestingTags.swift`, and fails if a filter matched no tests (xcodebuild alone reports success on zero tests):
+The wrapper pins the iPhone 17 Pro Max (iOS 26.5) simulator, enables code coverage, validates the tag against `TestingTags.swift`, and fails if a filter matched no tests (xcodebuild alone reports success on zero tests):
 ```bash
 ./run-tests.sh            # everything under Tests/ (default; same as `all`)
 ./run-tests.sh golden     # pixel goldens only
@@ -168,10 +168,10 @@ The wrapper pins the iPhone 17e simulator, enables code coverage, validates the 
 
 ### Native Xcode commands
 ```bash
-xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17e" -enableCodeCoverage YES -only-testing-tags nudge
-xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17e" -enableCodeCoverage YES -skip-testing-tags slow
+xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max,OS=26.5" -enableCodeCoverage YES -only-testing-tags nudge
+xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max,OS=26.5" -enableCodeCoverage YES -skip-testing-tags slow
 # One nested suite, without tags:
-xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17e" -enableCodeCoverage YES -only-testing:DigiaEngageTests/NudgeComponentTests/Dialog
+xcodebuild test -scheme DigiaEngage -destination "platform=iOS Simulator,name=iPhone 17 Pro Max,OS=26.5" -enableCodeCoverage YES -only-testing:DigiaEngageTests/NudgeComponentTests/Dialog
 ```
 `XCTestCase` classes cannot carry tags; they run only under `all`/`quick` or `-only-testing:`.
 
