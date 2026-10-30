@@ -644,9 +644,7 @@ struct CanvasCarouselRenderer: View {
             // which settles once more on the twin and reports nothing new.
             var transaction = Transaction()
             transaction.disablesAnimations = true
-            let twin = resting.page < loopClones
-                ? resting.page + slideCount
-                : resting.page - slideCount
+            let twin = carouselLoopTwin(page: resting.page, slideCount: slideCount, loopClones: loopClones)
             withTransaction(transaction) {
                 proxy.scrollTo(twin, anchor: .center)
                 scrollPosition = twin
@@ -673,16 +671,12 @@ struct CanvasCarouselRenderer: View {
                 // Advance from where the strip really is, not from the
                 // binding, which keeps the target of an interrupted slide.
                 let current = motion.restingPage?.page ?? scrollPosition ?? (loopEnabled ? loopClones : 0)
-                let next: Int
-                if loopEnabled {
-                    // Wrap off the trailing sentinel onto the first real page.
-                    // Clamping here used to no-op at displayCount - 1, parking
-                    // the strip on the sentinel and killing autoplay.
-                    next = current >= displayCount - 1 ? loopClones : current + 1
-                } else {
-                    if current >= displayCount - 1 { return }
-                    next = min(current + 1, displayCount - 1)
-                }
+                guard let next = carouselAutoPlayNextPage(
+                    current: current,
+                    displayCount: displayCount,
+                    loopClones: loopClones,
+                    loopEnabled: loopEnabled
+                ) else { return }
                 // Flagged before the move, so the settle it ends in knows the
                 // slide arrived on a timer rather than under a finger.
                 advancedAutomatically = true
@@ -718,6 +712,31 @@ internal func carouselRestingPage(
     guard stride > 0, stride.isFinite, offset.isFinite, pageCount > 0 else { return (0, true) }
     let page = min(max(Int((offset / stride).rounded()), 0), pageCount - 1)
     return (page, abs(offset - CGFloat(page) * stride) < 1)
+}
+
+/// The page an autoplay tick moves a strip to from `current`, or nil when a
+/// finite strip has reached its last page. A looping strip wraps off the
+/// trailing clone onto the first real page: clamping there used to no-op at
+/// `displayCount - 1`, parking the strip on the clone and killing autoplay.
+internal func carouselAutoPlayNextPage(
+    current: Int,
+    displayCount: Int,
+    loopClones: Int,
+    loopEnabled: Bool
+) -> Int? {
+    if loopEnabled {
+        return current >= displayCount - 1 ? loopClones : current + 1
+    }
+    if current >= displayCount - 1 { return nil }
+    return min(current + 1, displayCount - 1)
+}
+
+/// The real page a loop clone stands in for. The strip holds `loopClones`
+/// copies at each end of its `slideCount` real pages, so a leading clone's
+/// twin is a lap ahead and a trailing clone's a lap behind. Only called on a
+/// clone page.
+internal func carouselLoopTwin(page: Int, slideCount: Int, loopClones: Int) -> Int {
+    page < loopClones ? page + slideCount : page - slideCount
 }
 
 private extension View {

@@ -45,4 +45,25 @@ struct CarouselRestingPageTests {
             #expect(resting.aligned)
         }
     }
+    // Three slides with two clones a side: [c c s0 s1 s2 c c], pages 0...6.
+
+    @Test("autoplay on a looping strip steps onto the trailing clone, then wraps to the first real page")
+    func autoPlayWrapsOffTrailingClone() {
+        #expect(carouselAutoPlayNextPage(current: 4, displayCount: 7, loopClones: 2, loopEnabled: true) == 5)
+        #expect(carouselAutoPlayNextPage(current: 6, displayCount: 7, loopClones: 2, loopEnabled: true) == 2)
+    }
+
+    @Test("autoplay on a finite strip stops on its last page")
+    func autoPlayStopsAtFiniteEnd() {
+        #expect(carouselAutoPlayNextPage(current: 1, displayCount: 3, loopClones: 0, loopEnabled: false) == 2)
+        #expect(carouselAutoPlayNextPage(current: 2, displayCount: 3, loopClones: 0, loopEnabled: false) == nil)
+    }
+
+    @Test("a clone's twin is the same slide one lap away")
+    func loopTwin() {
+        #expect(carouselLoopTwin(page: 0, slideCount: 3, loopClones: 2) == 3)
+        #expect(carouselLoopTwin(page: 1, slideCount: 3, loopClones: 2) == 4)
+        #expect(carouselLoopTwin(page: 5, slideCount: 3, loopClones: 2) == 2)
+        #expect(carouselLoopTwin(page: 6, slideCount: 3, loopClones: 2) == 3)
+    }
 }
