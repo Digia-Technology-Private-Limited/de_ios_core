@@ -106,23 +106,21 @@ struct InlineTimerBehaviourTests {
     /// string, the formats the dashboard writes; the clock reads 2029-12-30 10:00 UTC, so 1 d 3 h
     /// are left. Ignoring the offset would leave 8 h.
     ///
-    /// Flutter reads both from the variables' authored `fallbackValue`s when the trigger sends
-    /// none. Known gap: iOS resolves timer instants from the trigger's variables only
-    /// (`TimerInstantSource.resolve` reads `payload.variables`, never the schema fallbacks), and
-    /// keeps the fixture's `"  sale_ends  "` token untrimmed, so the slot stays empty. The second
-    /// half sends the same instants from the trigger, under the token exactly as authored; it is the offset
-    /// parsing this test is for, and it holds on iOS.
+    /// Both are read from the variables' authored `fallbackValue`s when the trigger sends none,
+    /// under the fixture's `"  sale_ends  "` token trimmed, as on Android and Flutter. The second
+    /// half sends the same instants from the trigger.
     // Fails if: Sources/DigiaEngage/api/internal/campaign/inline_canvas_config.swift:224
     // `let offsetSeconds = (hours * 3_600 + minutes * 60) * (offset.first == "-" ? -1 : 1)` -> `let offsetSeconds = 0`
-    @Test("dashboard date formats are read, offset and all, from the trigger variables")
+    // The first half also fails if `StatefulTimerConfig.resolve` drops `variableDefaults`, or
+    // `parseSource` stops trimming the `fromVariable` token.
+    @Test("dashboard date formats are read, offset and all, from fallbacks and trigger variables")
     func dashboardDateFormatsAreRead() async throws {
         let clock = inlineUTC("2029-12-30T10:00:00Z")
         do {
             let sdk = try await showTimer("inline_timer_variable_instant_formats", clockAt: clock)
             defer { sdk.tearDown() }
-            try await sdk.settle(0.5)
-            withKnownIssue("iOS does not fall back to a timer variable's fallbackValue, nor trim its token") {
-                #expect(sdk.isShowing("Variable deadline: 1 day left, not 2"))
+            try await sdk.waitUntil("the running rule is on screen from the fallbacks") {
+                sdk.isShowing("Variable deadline: 1 day left, not 2")
             }
         }
 
@@ -130,7 +128,7 @@ struct InlineTimerBehaviourTests {
             "inline_timer_variable_instant_formats",
             clockAt: clock,
             variables: [
-                "  sale_ends  ": "2029-12-31 18:30:00.123456+05:30",
+                "sale_ends": "2029-12-31 18:30:00.123456+05:30",
                 "sale_starts": "Sat Dec 01 2029 10:00:00 GMT+0000 (Coordinated Universal Time)",
             ])
         defer { sdk.tearDown() }
