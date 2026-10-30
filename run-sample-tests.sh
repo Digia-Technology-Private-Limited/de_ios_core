@@ -40,9 +40,9 @@ cd "$(dirname "$0")"
 VALID_TAGS="golden action widget campaign_behaviour nudge canvas floater survey pip guide inline"
 
 # One pinned device and OS: goldens are rasterised by the simulator's own pipeline. Override with
-# SIMULATOR_NAME / SIMULATOR_OS (e.g. SIMULATOR_NAME="iPhone 17 Pro Max" SIMULATOR_OS=26.5).
-SIMULATOR_NAME="${SIMULATOR_NAME:-iPhone 18 Pro}"
-SIMULATOR_OS="${SIMULATOR_OS:-27.0}"
+# SIMULATOR_NAME / SIMULATOR_OS (e.g. SIMULATOR_NAME="iPhone 17e" SIMULATOR_OS=26.5).
+SIMULATOR_NAME="${SIMULATOR_NAME:-iPhone 17 Pro Max}"
+SIMULATOR_OS="${SIMULATOR_OS:-26.5}"
 
 tests_dir=SampleApp/DigiaEngageSampleTests
 derived_data=.derivedData/tests

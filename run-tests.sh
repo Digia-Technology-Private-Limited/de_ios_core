@@ -3,7 +3,8 @@
 # Digia Engage iOS Test Runner
 #
 # Runs Swift Testing suites by tag on the pinned reference simulator
-# (iPhone 17e: 390x844 points, the screen of the Flutter and Android goldens) using xcodebuild's -only-testing-tags / -skip-testing-tags.
+# (iPhone 17 Pro Max, iOS 26.5) using xcodebuild's -only-testing-tags / -skip-testing-tags. Goldens
+# set the 390x844 screen and 47/34 safe area of the Flutter and Android goldens in code.
 # No .xctestplan is involved; tags are declared in Tests/DigiaEngageTests/TestingTags.swift.
 #
 # Usage: ./run-tests.sh [tag|all|quick] [record]
@@ -73,11 +74,12 @@ else
   RECORD="false"
 fi
 
-PINNED_DEVICE_NAME="iPhone 17e"
+PINNED_DEVICE_NAME="iPhone 17 Pro Max"
+PINNED_DEVICE_OS="26.5"
 
 # 1. Resolve Pinned Simulator
-BOOTED_PINNED_ID=$(xcrun simctl list devices booted | grep "$PINNED_DEVICE_NAME" | grep -E -o '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}' | head -n 1 || true)
-DESTINATION="platform=iOS Simulator,name=$PINNED_DEVICE_NAME"
+BOOTED_PINNED_ID=$(xcrun simctl list devices booted | awk -v os="-- iOS $PINNED_DEVICE_OS --" '/^-- /{on=($0==os); next} on' | grep "$PINNED_DEVICE_NAME (" | grep -E -o '[0-9A-F]{8}-([0-9A-F]{4}-){3}[0-9A-F]{12}' | head -n 1 || true)
+DESTINATION="platform=iOS Simulator,name=$PINNED_DEVICE_NAME,OS=$PINNED_DEVICE_OS"
 [[ -n "$BOOTED_PINNED_ID" ]] && DESTINATION="platform=iOS Simulator,id=$BOOTED_PINNED_ID"
 
 # 2. Normalize tag to lowercase and validate it against TestingTags.swift so a typo
