@@ -290,11 +290,13 @@ enum GoldenHarness {
         })
     }
 
-    static func expect(_ window: UIWindow, surface: String, name: String, sourceLocation: SourceLocation = #_sourceLocation) {
+    /// `recordable: false` always compares, even in a recording run: for a frame that must match a baseline
+    /// another test owns, so the variant can never overwrite it.
+    static func expect(_ window: UIWindow, surface: String, name: String, recordable: Bool = true, sourceLocation: SourceLocation = #_sourceLocation) {
         let image = render(window)
         let baseline = snapshots.appendingPathComponent(surface).appendingPathComponent("\(name).png")
 
-        if isRecording {
+        if isRecording && recordable {
             do {
                 try FileManager.default.createDirectory(at: baseline.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try image.pngData()!.write(to: baseline)

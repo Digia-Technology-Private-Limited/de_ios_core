@@ -24,6 +24,14 @@ extension SdkHarness {
         try await tap("element \(id)") { Self.identifier(of: $0) == id }
     }
 
+    /// As ``tap(id:)``, at [offset] points from the element's top-left instead of its centre, for an element
+    /// whose parts differ by place (a text line, a span).
+    func tap(id: String, at offset: CGPoint) async throws {
+        try await tap("element \(id)", at: { CGPoint(x: $0.minX + offset.x, y: $0.minY + offset.y) }) {
+            Self.identifier(of: $0) == id
+        }
+    }
+
     /// As ``tap(id:)``, for the element that shows [text] (an option label has no id of its own).
     ///
     /// A harness started from workspace fixtures finds the text with `UIProbe` instead, and settles after.
@@ -46,7 +54,10 @@ extension SdkHarness {
         try await settle(0.5)
     }
 
-    private func tap(_ what: String, where match: @escaping (NSObject) -> Bool) async throws {
+    private func tap(
+        _ what: String, at point: (CGRect) -> CGPoint = { CGPoint(x: $0.midX, y: $0.midY) },
+        where match: @escaping (NSObject) -> Bool
+    ) async throws {
         let window = try #require(window)
         var last: CGRect?
         var steadyReads = 0
@@ -58,6 +69,6 @@ extension SdkHarness {
             return steadyReads >= 8 // 8 reads, 50 ms apart
         }
         let frame = window.convert(try #require(last), from: window.screen.coordinateSpace)
-        try TouchSynthesizer.tap(at: CGPoint(x: frame.midX, y: frame.midY), in: window)
+        try TouchSynthesizer.tap(at: point(frame), in: window)
     }
 }

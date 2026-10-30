@@ -44,8 +44,9 @@ extension SdkHarness {
         StubBackend.install(campaigns: campaigns.map(\.json), options: backend)
         UserDefaults(suiteName: storageSuite)?.removePersistentDomain(forName: storageSuite)
         SDKInstance.shared.resetForTesting()
+        GoldenFonts.install()  // registers the shared Roboto; `initialize` then names it via DigiaConfig
         do {
-            try await Digia.initialize(DigiaConfig(apiKey: "test-api-key", actionHandlers: actionHandlers))
+            try await Digia.initialize(DigiaConfig(apiKey: "test-api-key", fontFamily: GoldenFonts.family, actionHandlers: actionHandlers))
             SDKInstance.shared.register(harness.cep)
         } catch {
             harness.tearDown()
