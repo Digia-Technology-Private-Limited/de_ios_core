@@ -9,20 +9,24 @@ import UIKit
 @testable import DigiaEngage
 
 extension RenderedUITests {
-/// Pixel goldens for every Test Kit PiP fixture, collapsed and expanded.
+/// Pixel goldens for every Test Kit PiP fixture: one each, of the collapsed window.
 ///
 /// The arguments are read from `sdk_testing_fixtures/campaigns/pip/`, so a fixture added to the Test
 /// Kit is covered with no code change (record it with `./run-tests.sh pip record`). Each fixture is
 /// decoded by `CampaignModel.fromJson`, started on the SDK's floater orchestrator, and drawn by the
 /// production `FloaterOverlayView` — the layer `DigiaHost` mounts — over a host screen. Nothing on
 /// screen may move with wall-clock time: auto-dismiss is held off, the video never plays and the
-/// Lottie is pinned to one frame, so a slow machine captures the same pixels as a fast one. The
-/// second state is reached through the orchestrator, as a tap reaches it; the tap itself is covered
-/// by the sample app's PiP behaviour tests.
+/// Lottie is pinned to one frame, so a slow machine captures the same pixels as a fast one. A
+/// fixture that opens expanded is collapsed first, and only `pip_expanded` is expanded instead;
+/// either is reached through the orchestrator, as a tap reaches it, and the tap itself is covered by
+/// the sample app's PiP behaviour tests.
 @Suite("Test Kit PiP fixture goldens", .serialized, .tags(.pip))
 struct PipGoldenTests {
 
     private static let fixtures = FixtureLoader.fixtureNames(campaignType: "pip")
+
+    /// The one fixture whose golden is full screen; every other one's is the collapsed window.
+    private static let expandedFixture = "pip_expanded"
 
     /// The Lottie is held at this point of its timeline: its first frame is not representative.
     private static let lottieProgress: AnimationProgressTime = 0.5
@@ -76,21 +80,16 @@ struct PipGoldenTests {
         default: break
         }
 
-        // What a tap does, minus the click analytics. A campaign that opens expanded is captured
-        // that way first, then collapsed; every other one the other way round.
-        let startsExpanded = config.behavior.startExpanded
-        try await assertState(
-            startsExpanded ? "expanded" : "collapsed", fixture: fixture, window: window)
-        if startsExpanded {
-            orchestrator.collapse()
-        } else if config.behavior.tapExpands {
+        // What a tap does, minus the click analytics.
+        let expands = fixture == Self.expandedFixture
+        if expands {
             orchestrator.expand()
+            try await awaitTransition(config)
+        } else if config.behavior.startExpanded {
+            orchestrator.collapse()
+            try await awaitTransition(config)
         }
-        // Authored `onTap: none`: a tap leaves the window as it is, so its `expanded` golden is the
-        // collapsed window it stays as.
-        try await awaitTransition(config)
-        try await assertState(
-            startsExpanded ? "collapsed" : "expanded", fixture: fixture, window: window)
+        try await assertState(expands ? "expanded" : "collapsed", fixture: fixture, window: window)
     }
 
     @MainActor

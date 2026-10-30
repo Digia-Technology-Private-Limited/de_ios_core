@@ -12,12 +12,16 @@ extension RenderedUITests {
 /// Test Kit is covered with no code change (record it with `./run-tests.sh floater record`). Each
 /// fixture is decoded by `CampaignModel.fromJson`, started on the SDK's story-floater orchestrator,
 /// and drawn by the production `FloaterStoryOverlayView` — the layer `DigiaHost` mounts — over a
-/// host screen. The story is opened through the orchestrator, as a tap on the window opens it; the
-/// tap itself is covered by the sample app's floater behaviour tests.
+/// host screen. Each fixture has one golden, of its collapsed window, except `floater_expanded`, whose
+/// story is opened through the orchestrator, as a tap on the window opens it; the tap itself is
+/// covered by the sample app's floater behaviour tests.
 @Suite("Test Kit floater fixture goldens", .serialized, .tags(.floater))
 struct FloaterGoldenTests {
 
     private static let fixtures = FixtureLoader.fixtureNames(campaignType: "floater")
+
+    /// The one fixture whose golden is the story viewer; every other one's is the collapsed window.
+    private static let expandedFixture = "floater_expanded"
 
     @Test("matches the floater fixture golden", .tags(.golden), arguments: fixtures)
     @MainActor
@@ -55,24 +59,24 @@ struct FloaterGoldenTests {
             ComponentTestHost.cleanupOverlayWindow(window)
         }
 
+        // One golden per fixture, of its collapsed window: a campaign authored to open expanded is
+        // collapsed first, and only `floater_expanded` is opened instead, as a tap on the window
+        // opens it (minus the click analytics). The hero runs as a SwiftUI animation and the story
+        // chrome is revealed by a main-queue callback after it; awaiting (not spinning the run loop)
+        // lets the viewer's main-actor work run as well.
+        let expands = fixture == Self.expandedFixture
+        if expands {
+            orchestrator.openStory()
+            try await Task.sleep(nanoseconds: 800_000_000)
+        } else if orchestrator.storyOpen {
+            orchestrator.closeStory()
+            try await Task.sleep(nanoseconds: 800_000_000)
+        }
         // Exact within the perceptual tolerance, as the nudge fixture goldens.
         assertSurfaceGolden(
             ComponentTestHost.settledImage(of: window),
             surface: "floater",
-            named: "\(fixture)-collapsed",
-            precision: 1.0,
-            perceptualPrecision: 0.98
-        )
-
-        // What a tap on the window does, minus the click analytics. The hero runs as a SwiftUI
-        // animation and the story chrome is revealed by a main-queue callback after it; awaiting
-        // (not spinning the run loop) lets the viewer's main-actor work run as well.
-        orchestrator.openStory()
-        try await Task.sleep(nanoseconds: 800_000_000)
-        assertSurfaceGolden(
-            ComponentTestHost.settledImage(of: window),
-            surface: "floater",
-            named: "\(fixture)-expanded",
+            named: "\(fixture)-\(expands ? "expanded" : "collapsed")",
             precision: 1.0,
             perceptualPrecision: 0.98
         )
