@@ -71,8 +71,13 @@ struct StatefulTimerConfig: Equatable {
     let deadline: TimerInstantSource
     let urgentBelowSeconds: Int64?
     let rules: [StatefulTimerRule]
+    /// The dashboard's `fallbackValue` of each variable, used when the trigger sends no value for it.
+    var variableDefaults: [String: String] = [:]
 
-    func resolve(_ variables: [String: String]?) -> ResolvedTimerCanvas? {
+    func resolve(_ triggerVariables: [String: String]?) -> ResolvedTimerCanvas? {
+        let variables = variableDefaults.merging(
+            (triggerVariables ?? [:]).filter { !$0.value.isEmpty }
+        ) { _, trigger in trigger }
         guard let deadlineMs = deadline.resolve(variables) else { return nil }
         let startsAtMs = startsAt?.resolve(variables)
         if startsAt != nil && (startsAtMs == nil || startsAtMs! >= deadlineMs) { return nil }
@@ -105,7 +110,8 @@ struct StatefulTimerConfig: Equatable {
     static func fromJson(
         _ json: [String: Any],
         designTokens: DesignTokenCatalog,
-        timeAnchor: TrustedTimeAnchor?
+        timeAnchor: TrustedTimeAnchor?,
+        variableDefaults: [String: String] = [:]
     ) throws -> StatefulTimerConfig? {
         guard let timeAnchor,
               let stateful = json.object("stateful"),
@@ -173,7 +179,8 @@ struct StatefulTimerConfig: Equatable {
             startsAt: startsAt,
             deadline: deadline,
             urgentBelowSeconds: urgent,
-            rules: rules
+            rules: rules,
+            variableDefaults: variableDefaults
         )
     }
 
@@ -184,7 +191,8 @@ struct StatefulTimerConfig: Equatable {
             guard let at = json["at"] as? String, let value = parseOffsetInstantMs(at) else { return nil }
             return .fixed(value)
         case "fromVariable":
-            guard let token = json.nonBlankString("token") else { return nil }
+            guard let token = (json["token"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !token.isEmpty else { return nil }
             return .fromVariable(token)
         default: return nil
         }
