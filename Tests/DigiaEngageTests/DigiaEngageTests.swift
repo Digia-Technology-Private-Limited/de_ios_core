@@ -376,7 +376,7 @@ struct DigiaEngageTests {
         ]))
         SDKInstance.shared.setCampaignsForTesting([campaign])
         SDKInstance.shared.setCurrentScreen("Help")
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let window = ComponentTestHost.makeWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.isHidden = false
         let anchor = DigiaAnchorView(frame: CGRect(x: 10, y: 10, width: 100, height: 40))
         anchor.anchorKey = "help-anchor"

@@ -118,10 +118,7 @@ struct InlineFixtureGoldenTests {
     @MainActor
     private func makeSlotWindow(content: AnyView, device: ViewImageConfig) -> UIWindow {
         let size = device.size!
-        let window =
-            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
-            .map { UIWindow(windowScene: $0) } ?? UIWindow(frame: CGRect(origin: .zero, size: size))
-        window.frame = CGRect(origin: .zero, size: size)
+        let window = ComponentTestHost.makeWindow(frame: CGRect(origin: .zero, size: size))
 
         let controller = UIHostingController(rootView: InlineHostScreen(content: content, safeArea: device.safeArea))
         if #available(iOS 16.4, *) {

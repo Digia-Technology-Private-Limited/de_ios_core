@@ -285,9 +285,9 @@ enum GoldenHarness {
     static func render(_ window: UIWindow) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = scale
-        return UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
+        return GoldenScreen.shadeSafeArea(of: UIGraphicsImageRenderer(size: window.bounds.size, format: format).image { _ in
             window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
-        }
+        })
     }
 
     static func expect(_ window: UIWindow, surface: String, name: String, sourceLocation: SourceLocation = #_sourceLocation) {

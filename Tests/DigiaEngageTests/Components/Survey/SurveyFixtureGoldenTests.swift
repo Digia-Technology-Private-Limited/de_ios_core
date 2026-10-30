@@ -56,12 +56,12 @@ struct SurveyFixtureGoldenTests {
 
     /// A key window with the survey layer over a plain host, as `DigiaHost` stacks them.
     ///
-    /// Sized to the simulator's screen: the test bundle has no window scene, so the survey falls
-    /// back to `UIScreen.main.bounds` for its window frame, and the two must agree.
+    /// Sized to the screen (`GoldenScreen`'s): the test bundle has no window scene, so
+    /// the survey falls back to `UIScreen.main.bounds` for its window frame, and the two must agree.
     @MainActor
     private func makeSurveyWindow() -> UIWindow {
-        let bounds = UIScreen.main.bounds
-        let window = UIWindow(frame: bounds)
+        let window = ComponentTestHost.makeWindow()
+        let bounds = window.bounds
 
         let rootVC = UIViewController()
         rootVC.view.frame = bounds
