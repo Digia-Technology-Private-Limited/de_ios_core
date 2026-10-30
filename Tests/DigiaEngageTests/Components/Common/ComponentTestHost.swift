@@ -41,6 +41,7 @@ public enum ComponentTestHost {
         size: CGSize,
         backgroundColor: UIColor = .white
     ) -> UIHostingController<Content> {
+        GoldenScreen.pin()
         GoldenFonts.install()
         let controller = UIHostingController(rootView: rootView)
         controller.view.bounds = CGRect(origin: .zero, size: size)
@@ -62,6 +63,7 @@ public enum ComponentTestHost {
         scrimColor: UIColor? = UIColor.black.withAlphaComponent(0.4),
         showHomeIndicator: Bool = false
     ) -> UIViewController {
+        GoldenScreen.pin()
         guard let size = device.size else {
             fatalError("Device configuration must have a concrete size")
         }
@@ -158,6 +160,20 @@ public enum ComponentTestHost {
         return dialogVC
     }
 
+    /// A window for SDK UI at [frame] (the whole screen when `nil`), in the app's window scene when
+    /// there is one. Every test window comes from here, so it pins the reference phone (`GoldenScreen`)
+    /// before anything is laid out, whatever simulator runs the test.
+    @MainActor
+    public static func makeWindow(frame: CGRect? = nil) -> UIWindow {
+        GoldenScreen.pin()
+        let frame = frame ?? UIScreen.main.bounds
+        let window =
+            UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+            .map { UIWindow(windowScene: $0) } ?? UIWindow(frame: frame)
+        window.frame = frame
+        return window
+    }
+
     /// Creates a full-screen device host rendering the REAL production Nudge Bottom Sheet (`NudgeSheetView` wrapping `DigiaBottomSheet`).
     ///
     /// This includes the full production hierarchy:
@@ -178,15 +194,7 @@ public enum ComponentTestHost {
             fatalError("Device configuration must have a concrete size")
         }
 
-        let window: UIWindow
-        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
-            .first
-        {
-            window = UIWindow(windowScene: scene)
-        } else {
-            window = UIWindow(frame: CGRect(origin: .zero, size: size))
-        }
-        window.frame = CGRect(origin: .zero, size: size)
+        let window = makeWindow(frame: CGRect(origin: .zero, size: size))
 
         let rootVC = makeDeviceHost(
             device: device,
@@ -247,12 +255,14 @@ public enum ComponentTestHost {
         format.preferredRange = .standard
         // 1x, as the Flutter and Android goldens: a pixel in the PNG is a point.
         format.scale = 1
-        return UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { context in
+        let image = UIGraphicsImageRenderer(bounds: view.bounds, format: format).image { context in
             // Render the presentation tree: it is what the user sees. Animations that are paused or
             // time-offset (Lottie's Core Animation engine freezes a frame this way) exist only there;
             // the model tree and `drawHierarchy` of an off-screen window both show them blank.
             (view.layer.presentation() ?? view.layer).render(in: context.cgContext)
         }
+        // A window is the phone's screen; a component rendered on its own has no safe area to shade.
+        return view is UIWindow ? GoldenScreen.shadeSafeArea(of: image) : image
     }
 
     /// Renders until two frames 0.1s apart are identical (at most 2s), so entry animations and
@@ -335,6 +345,7 @@ public enum ComponentTestHost {
         drainDuration: TimeInterval = 0.2,
         rendersLoadedMedia: Bool = false
     ) -> UIView {
+        GoldenScreen.pin()
         let payload = CEPTriggerPayload(
             cepCampaignId: "test_inline_canvas_\(config.slotKey)",
             campaignKey: "test_inline_canvas_key",
@@ -357,15 +368,7 @@ public enum ComponentTestHost {
         let frame = CGRect(origin: .zero, size: fittingSize)
         hostingController.view.frame = frame
 
-        let window: UIWindow
-        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
-            .first
-        {
-            window = UIWindow(windowScene: scene)
-        } else {
-            window = UIWindow(frame: frame)
-        }
-        window.frame = frame
+        let window = makeWindow(frame: frame)
         window.rootViewController = hostingController
         window.makeKeyAndVisible()
         hostingController.view.layoutIfNeeded()
@@ -409,13 +412,7 @@ public enum ComponentTestHost {
         if #available(iOS 16.4, *) {
             controller.safeAreaRegions = []
         }
-        let window: UIWindow
-        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
-            window = UIWindow(windowScene: scene)
-        } else {
-            window = UIWindow(frame: controller.view.bounds)
-        }
-        window.frame = controller.view.bounds
+        let window = makeWindow(frame: controller.view.bounds)
         window.rootViewController = controller
         window.makeKeyAndVisible()
         controller.beginAppearanceTransition(true, animated: false)

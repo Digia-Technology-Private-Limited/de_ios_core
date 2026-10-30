@@ -136,11 +136,11 @@ struct LegacyGoldenTests {
     }
 
     /// A key window with the survey layer over a plain host, as `DigiaHost` stacks them. Sized to
-    /// the simulator's screen, which the survey falls back to for its window frame.
+    /// the screen (`GoldenScreen`'s), which the survey falls back to for its window frame.
     @MainActor
     private static func makeSurveyWindow() -> UIWindow {
-        let bounds = UIScreen.main.bounds
-        let window = UIWindow(frame: bounds)
+        let window = ComponentTestHost.makeWindow()
+        let bounds = window.bounds
         let rootVC = UIViewController()
         rootVC.view.frame = bounds
         // Not white: the survey's light surfaces would blend into a white host.

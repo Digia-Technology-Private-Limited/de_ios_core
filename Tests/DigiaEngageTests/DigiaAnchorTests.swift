@@ -386,9 +386,7 @@ private struct AnchoredScrollContent: View {
 
 @MainActor
 private func makeWindow() -> UIWindow {
-    let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene
-    let window = scene.map { UIWindow(windowScene: $0) } ?? UIWindow()
-    window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+    let window = ComponentTestHost.makeWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
     window.isHidden = false
     return window
 }

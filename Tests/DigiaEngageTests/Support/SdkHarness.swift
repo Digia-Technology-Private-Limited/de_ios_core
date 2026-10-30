@@ -195,14 +195,8 @@ final class SdkHarness {
     /// Mounts the app the way the integration guide tells customers to: `DigiaHost` around the
     /// app's own content, in a key window (of the host app's scene when there is one).
     func mount<Content: View>(@ViewBuilder _ content: () -> Content) throws {
-        let window: UIWindow
-        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
-            window = UIWindow(windowScene: scene)
-        } else {
-            window = UIWindow(frame: .zero)
-        }
         // The same logical screen as the Flutter and Android harnesses, whatever simulator runs.
-        window.frame = CGRect(origin: .zero, size: Self.screen)
+        let window = ComponentTestHost.makeWindow(frame: CGRect(origin: .zero, size: Self.screen))
         let host = UIHostingController(rootView: DigiaHost(content: content))
         window.rootViewController = host
         window.makeKeyAndVisible()

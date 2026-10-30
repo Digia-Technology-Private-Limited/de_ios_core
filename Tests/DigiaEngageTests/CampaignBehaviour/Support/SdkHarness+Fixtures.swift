@@ -1,3 +1,4 @@
+import SnapshotTesting
 import SwiftUI
 import Testing
 import UIKit
@@ -61,20 +62,35 @@ extension SdkHarness {
         return harness
     }
 
+    /// Mounts [content] as the golden's screen (`ViewImageConfig.engageGolden`: 390x844, safe area 47/34)
+    /// whatever simulator runs the test, so the goldens match Flutter's and Android's. The window takes the
+    /// size; the hosting controller's insets are corrected to the golden's; and the SDK's lookups of the
+    /// screen and key window (`GoldenScreen`, and the floater's `activeFloaterWindowGeometryOverride`) see
+    /// the same pair.
     private func mountFullScreen<Content: View>(_ content: Content) {
-        // Full screen, like the app's own window: the floater and PiP take the screen box and safe area from
-        // the app's window, so a smaller test window would be laid out for a screen it is not. The package
-        // bundle has no host app and so no scene; there the window is the screen's size.
+        let device = ViewImageConfig.engageGolden
+        let bounds = CGRect(origin: .zero, size: device.size!)
+        let insets = device.safeArea
+        activeFloaterWindowGeometryOverride = (
+            bounds,
+            EdgeInsets(top: insets.top, leading: insets.left, bottom: insets.bottom, trailing: insets.right)
+        )
+        tearDownHooks.append { activeFloaterWindowGeometryOverride = nil }
+
+        // The package bundle has no host app and so no scene; there the window stands alone.
         let window: UIWindow
         if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
             window = UIWindow(windowScene: scene)
-            window.frame = scene.coordinateSpace.bounds
+            window.frame = bounds
         } else {
-            window = UIWindow(frame: UIScreen.main.bounds)
+            window = UIWindow(frame: bounds)
         }
-        window.rootViewController = UIHostingController(rootView: DigiaHost { content })
+        let host = UIHostingController(rootView: DigiaHost { content })
+        window.rootViewController = host
         window.makeKeyAndVisible()
         window.layoutIfNeeded()
+        GoldenScreen.pinSafeArea(of: host)
+        #expect(host.view.safeAreaInsets == insets, "the host's safe area is not the golden's 47/34")
         self.window = window
     }
 }

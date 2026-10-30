@@ -37,9 +37,9 @@ cd "$(dirname "$0")"
 VALID_TAGS=" $(grep -E '@Tag static var' Tests/DigiaEngageTests/TestingTags.swift | awk '{print $4}' | tr -d ':' | tr '\n' ' ')"
 
 # One pinned device and OS: goldens are rasterised by the simulator's own pipeline. Override with
-# SIMULATOR_NAME / SIMULATOR_OS (e.g. SIMULATOR_NAME="iPhone 17 Pro Max" SIMULATOR_OS=26.5).
-SIMULATOR_NAME="${SIMULATOR_NAME:-iPhone 18 Pro}"
-SIMULATOR_OS="${SIMULATOR_OS:-27.0}"
+# SIMULATOR_NAME / SIMULATOR_OS (e.g. SIMULATOR_NAME="iPhone 17e" SIMULATOR_OS=26.5).
+SIMULATOR_NAME="${SIMULATOR_NAME:-iPhone 17 Pro Max}"
+SIMULATOR_OS="${SIMULATOR_OS:-26.5}"
 
 derived_data=.derivedData/tests
 result_bundle=.derivedData/tests.xcresult

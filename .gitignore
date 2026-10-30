@@ -7,6 +7,7 @@
 # Xcode user-specific data
 *.xcworkspace/xcuserdata/
 *.xcworkspace/xcshareddata/swiftpm/Package.resolved
+/SampleApp/DigiaEngageSample.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 *.xcodeproj/xcuserdata/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 

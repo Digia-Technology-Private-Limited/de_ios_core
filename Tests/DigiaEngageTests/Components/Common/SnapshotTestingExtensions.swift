@@ -7,8 +7,8 @@ import UIKit
 extension ViewImageConfig {
     /// The visual-golden viewport: the screen of the Flutter and Android goldens (`_screen`,
     /// `_safeTop` / `_safeBottom` in `flutter/core/test/support/sdk_harness.dart`, Android's
-    /// `w390dp-h844dp`). `run-tests.sh` pins a simulator of this size (iPhone 17e), so a view that
-    /// falls back to `UIScreen.main` agrees with the golden's window.
+    /// `w390dp-h844dp`). The pinned simulator (iPhone 17 Pro Max) is a different size, so a golden that
+    /// shows SDK code reading `UIScreen.main` or the key window pins them with `GoldenScreen`.
     public static let engageGolden = ViewImageConfig(
         safeArea: UIEdgeInsets(top: 47, left: 0, bottom: 34, right: 0),
         size: CGSize(width: 390, height: 844),

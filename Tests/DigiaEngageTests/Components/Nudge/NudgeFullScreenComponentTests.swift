@@ -46,7 +46,7 @@ struct NudgeFullScreenComponentTests {
         )
         let view = NudgeFullScreenView(presentation: presentation)
         let hosting = UIHostingController(rootView: AnyView(view))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 375, height: 812))
+        let window = ComponentTestHost.makeWindow(frame: CGRect(x: 0, y: 0, width: 375, height: 812))
         window.rootViewController = hosting
         window.makeKeyAndVisible()
         ComponentTestHost.drainRunLoop(for: 0.1)
@@ -66,7 +66,7 @@ struct NudgeFullScreenComponentTests {
         )
         let view = NudgeFullScreenView(presentation: presentation)
         let hosting = UIHostingController(rootView: AnyView(view))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 375, height: 812))
+        let window = ComponentTestHost.makeWindow(frame: CGRect(x: 0, y: 0, width: 375, height: 812))
         window.rootViewController = hosting
         window.makeKeyAndVisible()
         ComponentTestHost.drainRunLoop(for: 0.1)
@@ -95,7 +95,7 @@ struct NudgeFullScreenComponentTests {
         )
         let view = NudgeFullScreenView(presentation: presentation)
         let hosting = UIHostingController(rootView: AnyView(view))
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 375, height: 812))
+        let window = ComponentTestHost.makeWindow(frame: CGRect(x: 0, y: 0, width: 375, height: 812))
         window.rootViewController = hosting
         window.makeKeyAndVisible()
         ComponentTestHost.drainRunLoop(for: 0.1)
