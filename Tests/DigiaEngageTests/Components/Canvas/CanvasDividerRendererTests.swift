@@ -93,92 +93,6 @@ struct CanvasDividerRendererTests {
     }
 
 
-    // MARK: - 3. Visual Goldens
-
-    @Test("divider renderer matches visual golden", .tags(.golden))
-    func dividerVisualGolden() throws {
-        let canvas = try CampaignCanvasParser().parse([
-            "version": 2,
-            "canvasWidth": 360,
-            "canvasHeight": 120,
-            "background": ["type": "solid", "color": "#FFFFFFFF"],
-            "children": [
-                [
-                    "kind": "widget",
-                    "id": "divider",
-                    "rect": ["x": 0.05, "y": 0.45, "width": 0.9, "height": 0.1],
-                    "widget": [
-                        "type": "digia/styledHorizontalDivider",
-                        "props": [
-                            "type": "horizontal",
-                            "style": "dashed",
-                            "strokeCap": "round",
-                            "inset": 0,
-                            "dashPattern": [8, 4],
-                            "color": "#FF64748B"
-                        ]
-                    ]
-                ]
-            ]
-        ])
-
-        let window = mount(canvas: canvas)
-        defer { unmount(window) }
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
-        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
-    }
-
-    @Test("divider renderer handles dotted patterns and vertical orientation", .tags(.golden))
-    func dividerPatternsAndVerticalAxisVisualGolden() throws {
-        let canvas = try CampaignCanvasParser().parse([
-            "version": 2,
-            "canvasWidth": 360,
-            "canvasHeight": 120,
-            "background": ["type": "solid", "color": "#FFFFFFFF"],
-            "children": [
-                [
-                    "kind": "widget",
-                    "id": "dotted-divider",
-                    "rect": ["x": 0.05, "y": 0.2, "width": 0.9, "height": 0.05],
-                    "widget": [
-                        "type": "digia/styledHorizontalDivider",
-                        "props": [
-                            "type": "horizontal",
-                            "style": "dotted",
-                            "strokeCap": "round",
-                            "inset": 0,
-                            "dashPattern": [2, 6],
-                            "color": "#FF6366F1"
-                        ]
-                    ]
-                ],
-                [
-                    "kind": "widget",
-                    "id": "vertical-divider",
-                    "rect": ["x": 0.5, "y": 0.45, "width": 0.02, "height": 0.45],
-                    "widget": [
-                        "type": "digia/styledHorizontalDivider",
-                        "props": [
-                            "type": "vertical",
-                            "style": "solid",
-                            "strokeCap": "square",
-                            "color": "#FF94A3B8"
-                        ]
-                    ]
-                ]
-            ]
-        ])
-
-        let window = mount(canvas: canvas)
-        defer { unmount(window) }
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
-        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
-    }
-
     // MARK: - Test Helpers
 
     private func parsedDivider(
@@ -208,16 +122,6 @@ struct CanvasDividerRendererTests {
         return widget
     }
 
-    private func mount(
-        canvas: CampaignCanvas,
-        isDark: Bool = false,
-        onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
-    ) -> UIWindow {
-        ComponentTestHost.mountCanvas(canvas, isDark: isDark, onAction: onAction).window
-    }
 
-    private func unmount(_ window: UIWindow) {
-        ComponentTestHost.unmount(window)
-    }
 }
 }

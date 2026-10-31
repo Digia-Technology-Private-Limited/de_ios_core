@@ -116,12 +116,8 @@ struct HideActionTests {
         try await sdk.tap(id: "story_hide_button")
 
         try await sdk.waitUntil("the story is gone") { !sdk.isShowing("Weekend Health Drop") }
-        // Known gap: the story closes, but the floater window it grew out of stays up — `closeStory`
-        // collapses back to the window unless the campaign authors `onStoryEnd: dismiss`, which this
-        // fixture does not. Flutter ends the window too. `withKnownIssue` fails the day iOS does.
-        try await withKnownIssue("iOS collapses a story floater to its window on a CTA's dismiss") {
-            try await sdk.waitUntil("the window is gone", timeout: 2) { orchestrator.state == nil }
-        }
+        // The window the story grew out of ends with it, as in Flutter.
+        try await sdk.waitUntil("the window is gone", timeout: 2) { orchestrator.state == nil }
         #expect(sdk.isShowing("App home"))
     }
 }

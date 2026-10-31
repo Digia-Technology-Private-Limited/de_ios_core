@@ -40,8 +40,8 @@ final class SdkHarness {
     var cep: FakeCep { plugin }
     var window: UIWindow!
 
-    /// Set by the sample app's workspace-fixture boot (`SdkHarness+Fixtures.swift`): the app is laid
-    /// out full screen and the network is `StubBackend`, not `MockNetworkClient`.
+    /// Set by the workspace-fixture boot (`CampaignBehaviour/Support/SdkHarness+Fixtures.swift`): the app is
+    /// laid out full screen and the network is `StubBackend`, not `MockNetworkClient`.
     var servesWorkspaceFixtures = false
     /// Run last by ``tearDown()``: what a boot outside this file installed and must undo.
     var tearDownHooks: [() -> Void] = []

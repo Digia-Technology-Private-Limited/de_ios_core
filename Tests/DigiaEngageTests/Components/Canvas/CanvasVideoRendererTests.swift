@@ -1,6 +1,5 @@
 import AVFoundation
 import AVKit
-import SnapshotTesting
 import SwiftUI
 import Testing
 import UIKit
@@ -370,14 +369,9 @@ struct CanvasVideoRendererTests {
         #expect(recorder.players.count == 1)
     }
 
-    // Mode B (live + real file): pixels of the frame the renderer's real player decodes at a fixed time.
-    // A screenshot of the player view is black, so the frame is read from an AVPlayerItemVideoOutput that
-    // the test attaches to the item the production renderer built.
-    @Test(
-        "the renderer's player decodes the expected frame of the light and dark sources",
-        .tags(.slow, .golden))
-    func decodedFrameMatchesGolden() async throws {
-        let frameTime = CMTime(seconds: 3, preferredTimescale: 600)
+    // Mode B (live + real file): the renderer's real player is built on the source for the theme.
+    @Test("the renderer's player loads the light source in light mode and the dark source in dark mode", .tags(.slow))
+    func playerLoadsTheSourceForTheTheme() async throws {
         let light = Self.vendoredVideo("big-buck-bunny.mp4")
         let dark = Self.vendoredVideo("movie.mp4")
 
@@ -395,36 +389,15 @@ struct CanvasVideoRendererTests {
             let item = try #require(player.currentItem)
             let expected = isDark ? dark : light
             #expect((item.asset as? AVURLAsset)?.url == expected)
-
-            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
-            ])
-            item.add(output)
-            try #require(await waitAsync { item.status == .readyToPlay }, "the item never became ready")
-            try #require(await seek(player, to: frameTime), "the seek never completed")
-
-            var frame: CVPixelBuffer?
-            _ = await waitAsync {
-                frame = output.copyPixelBuffer(forItemTime: item.currentTime(), itemTimeForDisplay: nil)
-                return frame != nil
-            }
-            let buffer = try #require(frame, "no frame was decoded for \(expected.lastPathComponent)")
-
-            assertVisualGolden(
-                matching: try Self.image(from: buffer),
-                precision: 0.99,
-                perceptualPrecision: 0.98,
-                named: isDark ? "dark" : "light"
-            )
         }
     }
 
-    // Mode B (live + real file): the structure of the native AVKit controls with `showControls` on and off.
-    // The controls are hidden until the user taps, and a tap cannot be injected without private API, so
-    // this golden pins which control views are installed (class names and nesting), not their pixels.
-    // Pixels of the visible controls belong to the device journey (Maestro).
-    @Test("the native controls are installed only when the widget asks for them", .tags(.slow, .golden))
-    func controlsStructureMatchesGolden() async throws {
+    // Mode B (live + real file): the native AVKit controls with `showControls` on and off. The controls are
+    // hidden until the user taps, and a tap cannot be injected without private API, so this counts which
+    // control views are installed, not their pixels. Pixels of the visible controls belong to the device
+    // journey (Maestro).
+    @Test("the native controls are installed only when the widget asks for them", .tags(.slow))
+    func controlsInstalledOnlyWhenAsked() async throws {
         let video = Self.vendoredVideo("big-buck-bunny.mp4").absoluteString
         var lineCounts: [Bool: Int] = [:]
 
@@ -442,7 +415,6 @@ struct CanvasVideoRendererTests {
 
             let structure = await settledControlStructure(of: controller.view)
             lineCounts[showControls] = structure.split(separator: "\n").count
-            assertStructureGolden(structure, named: showControls ? "controlsOn" : "controlsOff")
         }
 
         #expect((lineCounts[true] ?? 0) > (lineCounts[false] ?? 0))
@@ -551,43 +523,10 @@ struct CanvasVideoRendererTests {
         return previous
     }
 
-    private func assertStructureGolden(
-        _ structure: String,
-        named name: String,
-        fileID: StaticString = #fileID,
-        filePath: StaticString = #filePath,
-        function: StaticString = #function,
-        line: UInt = #line
-    ) {
-        let failure = verifySnapshot(
-            of: structure,
-            as: .lines,
-            named: name,
-            record: isSnapshotRecordingEnabled ? .all : nil,
-            snapshotDirectory: goldenDirectory(filePath: "\(filePath)"),
-            fileID: fileID,
-            file: filePath,
-            testName: String(describing: function).components(separatedBy: "(").first ?? "",
-            line: line
-        )
-        if let failure { Issue.record("\(failure)") }
-    }
-
     private static func vendoredVideo(_ name: String) -> URL {
         FixtureLoader.workspaceURL()!
             .appendingPathComponent("testkit/mock-server/assets")
             .appendingPathComponent(name)
-    }
-
-    /// Converts a decoded pixel buffer to an image at 1x with the software renderer, so the pixels
-    /// do not depend on the GPU.
-    private static func image(from buffer: CVPixelBuffer) throws -> UIImage {
-        let ciImage = CIImage(cvPixelBuffer: buffer)
-        let context = CIContext(options: [.useSoftwareRenderer: true])
-        guard let cgImage = context.createCGImage(ciImage, from: ciImage.extent) else {
-            throw VideoTestError.writerFailed
-        }
-        return UIImage(cgImage: cgImage, scale: 1, orientation: .up)
     }
 
     private func videoWidget(

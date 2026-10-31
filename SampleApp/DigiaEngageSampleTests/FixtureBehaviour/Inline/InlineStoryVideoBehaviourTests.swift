@@ -236,7 +236,7 @@ struct InlineStoryVideoBehaviourTests {
 
         // Holding the frame pauses the video, letting go plays it again.
         var rateWhileHeld: Float = -1
-        try InlineTouch.press(at: CGPoint(x: window.bounds.midX, y: window.bounds.midY), in: window, for: 0.7) {
+        try TouchSynthesizer.press(at: CGPoint(x: window.bounds.midX, y: window.bounds.midY), in: window, for: 0.7) {
             rateWhileHeld = viewer()?.rate ?? -1
         }
         withKnownIssue("iOS has no hold-to-pause on the story viewer") {

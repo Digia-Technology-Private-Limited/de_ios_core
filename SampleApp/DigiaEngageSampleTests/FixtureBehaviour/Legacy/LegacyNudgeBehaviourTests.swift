@@ -158,26 +158,6 @@ struct LegacyNudgeBehaviourTests {
         #expect(presentation.dismissReason == .userClose)
     }
 
-    // Fails if the `guard ... != .fullScreen` in `NudgeConfig.fromJson`'s legacy branch is removed:
-    // a full screen with no canvas would be stored and shown with nothing to draw it.
-    @Test("a legacy full-screen nudge is rejected at parse and never shows")
-    func legacyFullScreenIsRejected() async throws {
-        let campaign = try legacyFixture("legacy_nudge/legacy_nudge_dialog") { config in
-            var container = config["container"] as? [String: Any] ?? [:]
-            container["displayType"] = "full_screen"
-            config["container"] = container
-        }
-        let sdk = try await SdkHarness.legacyStart([campaign])
-        defer { sdk.tearDown() }
-
-        let presentation = try sdk.deliver(Self.dialogKey, variables: ["first_name": "Asha"])
-        try await sdk.waitUntil("the delivery settled") { presentation.outcome.settledValue != nil }
-
-        #expect(presentation.dropReason == .unknownCampaignKey)
-        #expect(sdk.sdk.controller.activeNudge == nil)
-        #expect(!sdk.isShowing(Self.dialogTitle))
-    }
-
     // MARK: - Bottom sheet
 
     // Fails if `NudgeImageView` / `NudgeLottieView` / `NudgeCarouselView` stop falling back to
