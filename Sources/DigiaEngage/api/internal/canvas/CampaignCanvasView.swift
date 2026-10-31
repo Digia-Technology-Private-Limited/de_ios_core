@@ -542,12 +542,9 @@ struct CampaignCanvasStage: View {
         }.first
     }
 
-    private var stageClipShape: CampaignCanvasRoundedShape {
-        let r = max(0, authoredCornerRadius)
-        let bottom = squareBottomCorners ? 0 : r
-        return CampaignCanvasRoundedShape(
-            radius: CampaignCanvasCornerRadius(
-                topLeft: r, topRight: r, bottomRight: bottom, bottomLeft: bottom))
+    private var stageClipShape: CampaignCanvasStageClip {
+        CampaignCanvasStageClip(
+            radius: max(0, authoredCornerRadius), squareBottomCorners: squareBottomCorners)
     }
 
     var body: some View {
@@ -2156,6 +2153,24 @@ private struct CanvasImageFit: ViewModifier {
         case "fill": content
         default: content.scaledToFill()
         }
+    }
+}
+
+/// A canvas stage's clip. Every canvas but a bottom sheet keeps the `RoundedRectangle`
+/// it always had, so its corner curve is unchanged on phones; a bottom sheet rounds
+/// only its top edge.
+struct CampaignCanvasStageClip: Shape {
+    let radius: CGFloat
+    let squareBottomCorners: Bool
+
+    func path(in rect: CGRect) -> Path {
+        guard squareBottomCorners else {
+            return RoundedRectangle(cornerRadius: radius).path(in: rect)
+        }
+        return CampaignCanvasRoundedShape(
+            radius: CampaignCanvasCornerRadius(
+                topLeft: radius, topRight: radius, bottomRight: 0, bottomLeft: 0)
+        ).path(in: rect)
     }
 }
 
