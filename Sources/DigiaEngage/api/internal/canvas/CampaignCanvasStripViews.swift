@@ -280,6 +280,64 @@ struct ScaledCanvasStage: View {
     }
 }
 
+/// The scale the host draws a box at, read back from the screen.
+private struct HostScaleKey: PreferenceKey {
+    static let defaultValue: CGFloat = 1
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// The scale a box is drawn at, read back from its global vs local width.
+/// Pure so unit tests can pin it without hosting a view. Degrades to 1
+/// (the unscaled layout) for degenerate inputs rather than vanishing.
+internal func unscaledHostScale(globalWidth: CGFloat, localWidth: CGFloat) -> CGFloat {
+    guard localWidth > 0, globalWidth > 0 else { return 1 }
+    let scale = globalWidth / localWidth
+    guard scale.isFinite, scale > 0 else { return 1 }
+    return scale
+}
+
+/// Hosts a UIKit-backed scroll view at its on-screen size inside a scaled canvas.
+///
+/// Canvas hosts draw the whole canvas through a SwiftUI `scaleEffect`. A scroll
+/// view inside that scale sees every finger distance and velocity divided by the
+/// scale, so on a tablet short swipes snap back and taps with a little finger
+/// movement turn into drags. This measures the scale the box is actually drawn
+/// at, lays `content` out that many times larger and draws it back at 1/scale,
+/// so the scroll view sees no scale at all. `content` receives the scaled size
+/// and the scale, and must size anything it reads in authored units with it.
+/// Until the scale is measured it falls back to 1, the unscaled layout.
+struct UnscaledHostBox<Content: View>: View {
+    @ViewBuilder let content: (_ size: CGSize, _ scale: CGFloat) -> Content
+
+    @State private var hostScale: CGFloat = 1
+
+    var body: some View {
+        GeometryReader { proxy in
+            let scale = hostScale
+            let scaled = CGSize(width: proxy.size.width * scale, height: proxy.size.height * scale)
+            content(scaled, scale)
+                .frame(width: scaled.width, height: scaled.height, alignment: .topLeading)
+                .scaleEffect(1 / scale, anchor: .topLeading)
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .topLeading)
+                .background(
+                    GeometryReader { measured in
+                        let width = measured.size.width
+                        Color.clear.preference(
+                            key: HostScaleKey.self,
+                            value: unscaledHostScale(
+                                globalWidth: measured.frame(in: .global).width,
+                                localWidth: width
+                            )
+                        )
+                    }
+                )
+        }
+        .onPreferenceChange(HostScaleKey.self) { measured in
+            if measured > 0, abs(measured - hostScale) > 0.001 { hostScale = measured }
+        }
+    }
+}
+
 /// Draws a carousel: the current slide, the peek of the next, and the dot row.
 ///
 /// Everything is measured from the widget's own box rather than from the slot,
@@ -299,28 +357,26 @@ struct CanvasCarouselRenderer: View {
     /// True while the last page change came from the autoplay timer rather than the user's finger,
     /// which is the distinction the legacy carousel's `auto` flag draws.
     @State private var advancedAutomatically = false
-    @State private var isRecentering = false
-    @State private var lastReportedDisplayIndex: Int?
+    /// True while a finger is on the strip; resets itself if the touch is cancelled.
+    @GestureState private var isTouching = false
+    @State private var lastReportedIndex: Int?
+    @State private var motion = CarouselStripMotion()
     @Environment(\.canvasInteractions) private var reportInteraction
 
-    static func realIndex(_ displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int {
-        guard loopEnabled else { return displayIndex }
-        return (((displayIndex - 1) % slideCount) + slideCount) % slideCount
-    }
-
-    static func recenteringTarget(displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int? {
-        guard loopEnabled, slideCount > 1 else { return nil }
-        let displayCount = slideCount + 2
-        if displayIndex == 0 {
-            return displayCount - 2
-        } else if displayIndex == displayCount - 1 {
-            return 1
-        }
-        return nil
+    /// Clones on each end of a looping strip. A strip parked on a clone,
+    /// before it hops to its twin, still shows its neighbours peeking in, so
+    /// there must be enough clones that those neighbours exist — one clone
+    /// left a blank gap beside the slide the loop had just wrapped onto.
+    private var loopClones: Int {
+        guard case .carousel(_, _, let viewportFraction, _, _, _, _, _, _, _, _, _, _, _, _, _) = widget,
+              viewportFraction > 0, viewportFraction.isFinite else { return 1 }
+        let peeking = ((1 - viewportFraction) / (2 * viewportFraction)).rounded(.up)
+        return Int(min(max(peeking, 0), 8)) + 1
     }
 
     private func realIndex(_ displayIndex: Int, slideCount: Int, loopEnabled: Bool) -> Int {
-        Self.realIndex(displayIndex, slideCount: slideCount, loopEnabled: loopEnabled)
+        guard loopEnabled else { return displayIndex }
+        return (((displayIndex - loopClones) % slideCount) + slideCount) % slideCount
     }
 
     var body: some View {
@@ -333,17 +389,25 @@ struct CanvasCarouselRenderer: View {
         ) = widget, !slides.isEmpty else { return AnyView(EmptyView()) }
 
         return AnyView(
-            GeometryReader { proxy in
+            UnscaledHostBox { size, scale in
+                // `size` is on-screen; authored sizes are multiplied by `scale` to match.
+                let itemSpacing = itemSpacing * scale
+                let cornerRadius = cornerRadius * scale
+                let dotWidth = dotWidth * scale
+                let dotHeight = dotHeight * scale
+                let dotSpacing = dotSpacing * scale
+                let indicatorGap = indicatorGap * scale
+                let indicatorBottom = indicatorBottom * scale
                 let indicatorHeight = showIndicator ? indicatorGap + dotHeight + indicatorBottom : 0
-                let stripHeight = proxy.size.height - indicatorHeight
+                let stripHeight = size.height - indicatorHeight
                 // The spacing is inset around each slide, taking it out of the
                 // slide's own width — the same arithmetic the dashboard runs.
-                let slideWidth = proxy.size.width * viewportFraction - itemSpacing
+                let slideWidth = size.width * viewportFraction - itemSpacing
 
                 if stripHeight > 0 && slideWidth > 0 {
                     let loopEnabled = infiniteScroll && slides.count > 1
-                    let displayCount = loopEnabled ? slides.count + 2 : slides.count
-                    let initialDisplayIndex = loopEnabled ? 1 : 0
+                    let displayCount = loopEnabled ? slides.count + 2 * loopClones : slides.count
+                    let initialDisplayIndex = loopEnabled ? loopClones : 0
                     let activeIndex = realIndex(
                         scrollPosition ?? initialDisplayIndex,
                         slideCount: slides.count,
@@ -352,6 +416,18 @@ struct CanvasCarouselRenderer: View {
 
                     VStack(spacing: 0) {
                         if #available(iOS 17, *) {
+                            let margin = max(0, (size.width - slideWidth) / 2)
+                            let settle: @MainActor () -> Void = {
+                                settleStrip(
+                                    autoPlay: autoPlay,
+                                    autoPlayInterval: autoPlayInterval,
+                                    animationDuration: animationDuration,
+                                    displayCount: displayCount,
+                                    slideCount: slides.count,
+                                    loopEnabled: loopEnabled
+                                )
+                            }
+                            ScrollViewReader { proxy in
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: itemSpacing) {
                                     ForEach(0 ..< displayCount, id: \.self) { displayIndex in
@@ -384,17 +460,52 @@ struct CanvasCarouselRenderer: View {
                                 }
                                 .scrollTargetLayout()
                             }
+                            // Where the strip really is, frame by frame. The
+                            // `scrollPosition` binding cannot be trusted for
+                            // this: a finger landing mid-animation stops the
+                            // strip between pages while the binding keeps the
+                            // page it was heading to.
+                            .onStripOffsetChange { offset in
+                                motion.moved(
+                                    to: offset,
+                                    stride: slideWidth + itemSpacing,
+                                    pageCount: displayCount,
+                                    onRest: settle
+                                )
+                            }
                             .contentMargins(
                                 .horizontal,
-                                max(0, (proxy.size.width - slideWidth) / 2),
+                                margin,
                                 for: .scrollContent
                             )
                             .scrollPosition(id: $scrollPosition)
                             .scrollTargetBehavior(.viewAligned)
                             .frame(height: stripHeight)
+                            // A finger down pauses autoplay; lifting it lets the strip
+                            // settle, and only a strip at rest on a page restarts a
+                            // full interval, so a tick never lands under a drag.
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 0)
+                                    .updating($isTouching) { _, state, _ in state = true }
+                            )
+                            .onChange(of: isTouching) { _, touching in
+                                motion.fingerDown = touching
+                                if touching {
+                                    stopAutoPlay()
+                                    // Whatever the strip does next is the finger's doing.
+                                    advancedAutomatically = false
+                                } else {
+                                    // A tap that stopped an autoplay slide mid-way moves
+                                    // nothing, so no scroll update would ever say the
+                                    // strip is at rest — check it now.
+                                    motion.scheduleRestCheck(onRest: settle)
+                                }
+                            }
                             // A slide is viewed when it comes to rest. The first visible slide is
                             // reported on appear too, matching the legacy carousel.
                             .onAppear {
+                                motion.proxy = proxy
+                                motion.isVisible = true
                                 if scrollPosition == nil {
                                     scrollPosition = initialDisplayIndex
                                 }
@@ -413,32 +524,10 @@ struct CanvasCarouselRenderer: View {
                                     loopEnabled: loopEnabled
                                 )
                             }
-                            .onDisappear { stopAutoPlay() }
-                            .onChange(of: scrollPosition) { _, newValue in
-                                guard let displayIndex = newValue else { return }
-                                if isRecentering {
-                                    isRecentering = false
-                                    return
-                                }
-
-                                reportSlide(
-                                    displayIndex: displayIndex,
-                                    slideCount: slides.count,
-                                    loopEnabled: loopEnabled,
-                                    auto: advancedAutomatically
-                                )
-                                advancedAutomatically = false
-
-                                if let target = Self.recenteringTarget(displayIndex: displayIndex, slideCount: slides.count, loopEnabled: loopEnabled) {
-                                    isRecentering = true
-                                    DispatchQueue.main.async {
-                                        var transaction = Transaction()
-                                        transaction.disablesAnimations = true
-                                        withTransaction(transaction) {
-                                            scrollPosition = target
-                                        }
-                                    }
-                                }
+                            .onDisappear {
+                                motion.isVisible = false
+                                stopAutoPlay()
+                            }
                             }
                         } else {
                             EmptyView()
@@ -472,29 +561,96 @@ struct CanvasCarouselRenderer: View {
         loopEnabled: Bool,
         auto: Bool
     ) {
-        guard lastReportedDisplayIndex != displayIndex else { return }
-        lastReportedDisplayIndex = displayIndex
+        // Keyed by the real slide, so hopping off a loop sentinel onto its twin
+        // does not report the same slide twice.
+        let index = realIndex(displayIndex, slideCount: slideCount, loopEnabled: loopEnabled)
+        guard lastReportedIndex != index else { return }
+        lastReportedIndex = index
         reportInteraction(
             .carouselSlideViewed(
-                index: realIndex(displayIndex, slideCount: slideCount, loopEnabled: loopEnabled),
+                index: index,
                 total: slideCount,
                 auto: auto
             )
         )
     }
 
-    static func shouldStartAutoPlay(autoPlay: Bool, slideCount: Int) -> Bool {
-        autoPlay && slideCount > 1
-    }
-
-    static func nextAutoPlayIndex(
-        currentIndex: Int?,
+    /// Runs once the strip has stopped with no finger on it: puts it squarely
+    /// on a page, records the view, hops off a loop sentinel and restarts
+    /// autoplay. Every step waits for rest, so none of them can fight a drag,
+    /// a fling or an animation still on its way.
+    @available(iOS 17, *)
+    private func settleStrip(
+        autoPlay: Bool,
+        autoPlayInterval: TimeInterval,
+        animationDuration: TimeInterval,
         displayCount: Int,
+        slideCount: Int,
         loopEnabled: Bool
-    ) -> Int? {
-        let current = currentIndex ?? (loopEnabled ? 1 : 0)
-        if !loopEnabled && current >= displayCount - 1 { return nil }
-        return min(current + 1, displayCount - 1)
+    ) {
+        guard motion.isVisible, !motion.fingerDown, let proxy = motion.proxy else { return }
+        let resting = motion.restingPage
+            ?? (page: scrollPosition ?? (loopEnabled ? loopClones : 0), aligned: true)
+        let restart = {
+            startAutoPlay(
+                autoPlay: autoPlay,
+                autoPlayInterval: autoPlayInterval,
+                animationDuration: animationDuration,
+                displayCount: displayCount,
+                slideCount: slideCount,
+                loopEnabled: loopEnabled
+            )
+        }
+
+        if !resting.aligned {
+            // Stopped between two pages — a tap landed mid-slide. Finish the
+            // move onto the nearer page. If the strip refuses to move, give
+            // up after a few tries and let the next autoplay tick carry it.
+            guard motion.snapAttempts < 3 else {
+                motion.snapAttempts = 0
+                restart()
+                return
+            }
+            motion.snapAttempts += 1
+            withAnimation(.easeOut(duration: 0.25)) {
+                proxy.scrollTo(resting.page, anchor: .center)
+            }
+            motion.scheduleRestCheck(after: 0.4) {
+                settleStrip(
+                    autoPlay: autoPlay,
+                    autoPlayInterval: autoPlayInterval,
+                    animationDuration: animationDuration,
+                    displayCount: displayCount,
+                    slideCount: slideCount,
+                    loopEnabled: loopEnabled
+                )
+            }
+            return
+        }
+        motion.snapAttempts = 0
+        // `proxy.scrollTo` leaves the binding behind; the indicator reads it.
+        if scrollPosition != resting.page { scrollPosition = resting.page }
+
+        reportSlide(
+            displayIndex: resting.page,
+            slideCount: slideCount,
+            loopEnabled: loopEnabled,
+            auto: advancedAutomatically
+        )
+        advancedAutomatically = false
+
+        if loopEnabled, resting.page < loopClones || resting.page >= loopClones + slideCount {
+            // On a clone: jump to its real twin. The jump moves the strip,
+            // which settles once more on the twin and reports nothing new.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            let twin = carouselLoopTwin(page: resting.page, slideCount: slideCount, loopClones: loopClones)
+            withTransaction(transaction) {
+                proxy.scrollTo(twin, anchor: .center)
+                scrollPosition = twin
+            }
+        }
+        restart()
     }
 
     private func startAutoPlay(
@@ -506,19 +662,31 @@ struct CanvasCarouselRenderer: View {
         loopEnabled: Bool
     ) {
         stopAutoPlay()
-        guard Self.shouldStartAutoPlay(autoPlay: autoPlay, slideCount: slideCount) else { return }
+        guard autoPlay, slideCount > 1 else { return }
         let timer = Timer(timeInterval: autoPlayInterval, repeats: true) { _ in
             Task { @MainActor in
-                guard let next = Self.nextAutoPlayIndex(
-                    currentIndex: scrollPosition,
+                // A finger holds the strip or it is still travelling: leave it.
+                // The settle that follows restarts a full interval.
+                guard !motion.fingerDown, motion.isAtRest else { return }
+                // Advance from where the strip really is, not from the
+                // binding, which keeps the target of an interrupted slide.
+                let current = motion.restingPage?.page ?? scrollPosition ?? (loopEnabled ? loopClones : 0)
+                guard let next = carouselAutoPlayNextPage(
+                    current: current,
                     displayCount: displayCount,
+                    loopClones: loopClones,
                     loopEnabled: loopEnabled
                 ) else { return }
-                // Flagged before the change, so the `onChange` it triggers knows
-                // the slide arrived on a timer rather than under a finger.
+                // Flagged before the move, so the settle it ends in knows the
+                // slide arrived on a timer rather than under a finger.
                 advancedAutomatically = true
                 withAnimation(.easeInOut(duration: animationDuration)) {
-                    scrollPosition = next
+                    if let proxy = motion.proxy {
+                        // Moves even when the binding already holds `next`.
+                        proxy.scrollTo(next, anchor: .center)
+                    } else {
+                        scrollPosition = next
+                    }
                 }
             }
         }
@@ -529,6 +697,122 @@ struct CanvasCarouselRenderer: View {
     private func stopAutoPlay() {
         timer?.invalidate()
         timer = nil
+    }
+}
+
+/// The page a strip scrolled `offset` along sits nearest, and whether it is
+/// squarely on it. Pages are `stride` apart; the ends are clamped so a strip
+/// pulled past its first or last page still reads as that page. Degenerate
+/// input reads as resting on the first page rather than trapping.
+internal func carouselRestingPage(
+    offset: CGFloat,
+    stride: CGFloat,
+    pageCount: Int
+) -> (page: Int, aligned: Bool) {
+    guard stride > 0, stride.isFinite, offset.isFinite, pageCount > 0 else { return (0, true) }
+    let page = min(max(Int((offset / stride).rounded()), 0), pageCount - 1)
+    return (page, abs(offset - CGFloat(page) * stride) < 1)
+}
+
+/// The page an autoplay tick moves a strip to from `current`, or nil when a
+/// finite strip has reached its last page. A looping strip wraps off the
+/// trailing clone onto the first real page: clamping there used to no-op at
+/// `displayCount - 1`, parking the strip on the clone and killing autoplay.
+internal func carouselAutoPlayNextPage(
+    current: Int,
+    displayCount: Int,
+    loopClones: Int,
+    loopEnabled: Bool
+) -> Int? {
+    if loopEnabled {
+        return current >= displayCount - 1 ? loopClones : current + 1
+    }
+    if current >= displayCount - 1 { return nil }
+    return min(current + 1, displayCount - 1)
+}
+
+/// The real page a loop clone stands in for. The strip holds `loopClones`
+/// copies at each end of its `slideCount` real pages, so a leading clone's
+/// twin is a lap ahead and a trailing clone's a lap behind. Only called on a
+/// clone page.
+internal func carouselLoopTwin(page: Int, slideCount: Int, loopClones: Int) -> Int {
+    page < loopClones ? page + slideCount : page - slideCount
+}
+
+private extension View {
+    /// Reports how far the strip has scrolled from its first page. iOS 17 has
+    /// no way to observe a scroll offset, so there the strip is never measured
+    /// and settling falls back to the page the binding holds.
+    @ViewBuilder
+    func onStripOffsetChange(_ action: @escaping (CGFloat) -> Void) -> some View {
+        if #available(iOS 18, *) {
+            onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.x + geometry.contentInsets.leading
+            } action: { _, offset in
+                action(offset)
+            }
+        } else {
+            self
+        }
+    }
+}
+
+/// Where a carousel strip is and whether it has stopped. Kept out of SwiftUI
+/// state so the per-frame scroll updates do not re-render the carousel.
+@MainActor
+private final class CarouselStripMotion {
+    /// How long the strip must hold still to count as at rest. A drag, a fling
+    /// and an animation all report every frame, so a gap this long means it
+    /// has stopped.
+    static let restDelay: TimeInterval = 0.12
+
+    var proxy: ScrollViewProxy?
+    var isVisible = false
+    var fingerDown = false
+    var snapAttempts = 0
+
+    private var offset: CGFloat = 0
+    private var stride: CGFloat = 0
+    private var pageCount = 0
+    private var lastMove = Date.distantPast
+    private var generation = 0
+
+    /// Nil until the strip has been measured once.
+    var restingPage: (page: Int, aligned: Bool)? {
+        guard stride > 0 else { return nil }
+        return carouselRestingPage(offset: offset, stride: stride, pageCount: pageCount)
+    }
+
+    var isAtRest: Bool { Date().timeIntervalSince(lastMove) >= Self.restDelay }
+
+    func moved(
+        to offset: CGFloat,
+        stride: CGFloat,
+        pageCount: Int,
+        onRest: @escaping @MainActor () -> Void
+    ) {
+        let changed = abs(offset - self.offset) > 0.01 || stride != self.stride
+        self.offset = offset
+        self.stride = stride
+        self.pageCount = pageCount
+        guard changed else { return }
+        lastMove = Date()
+        scheduleRestCheck(onRest: onRest)
+    }
+
+    /// Calls `onRest` after `delay` unless the strip moves, or another check
+    /// is scheduled, first.
+    func scheduleRestCheck(
+        after delay: TimeInterval = restDelay,
+        onRest: @escaping @MainActor () -> Void
+    ) {
+        generation += 1
+        let expected = generation
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard let self, self.generation == expected else { return }
+            onRest()
+        }
     }
 }
 
@@ -556,7 +840,9 @@ struct CanvasStoryRailRenderer: View {
 
 
         return AnyView(
-            GeometryReader { proxy in
+            // The rail is a scroll view, so it is hosted at its on-screen size;
+            // see UnscaledHostBox. Scaled, it would not scroll on a tablet.
+            UnscaledHostBox { size, scale in
                 // Nothing renders when the rail is off: the stories are opened by
                 // an `Action.showStory` elsewhere on the canvas. The widget still
                 // has to be here, because it carries the stories and the chrome.
@@ -564,14 +850,14 @@ struct CanvasStoryRailRenderer: View {
                     // A card is as tall as the rail's own box, so its width
                     // follows from the authored ratio. Nothing reads a card-height
                     // property, because there isn't one.
-                    let cardWidth = Self.cardWidth(railHeight: proxy.size.height, cardAspectRatio: cardAspectRatio)
+                    let cardWidth = Self.cardWidth(railHeight: size.height, cardAspectRatio: cardAspectRatio)
                     StoryThumbnailRailView(
                         items: pages.map(canvasStoryItem),
                         mode: thumbnailVideoPlayback.asInlineStoryMode,
                         cardWidth: cardWidth,
-                        cardHeight: proxy.size.height,
-                        cardCornerRadius: cardCornerRadius,
-                        cardSpacing: cardSpacing,
+                        cardHeight: size.height,
+                        cardCornerRadius: cardCornerRadius * scale,
+                        cardSpacing: cardSpacing * scale,
                         overlayOpen: openIndex != nil
                     ) { index in
                         // Reported at the tap, not in the viewer's onAppear: the viewer's own onAppear
@@ -698,6 +984,13 @@ struct CanvasStoryViewer: View {
                 // Both the overlay and the chrome are authored against the safe
                 // region, so both draw at the same scale and inside it.
                 let scale = page.canvas.width > 0 ? contentWidth / page.canvas.width : 1
+                // Each layer is pinned to the safe region, so neither can size the
+                // stack. On a tablet the width-scaled portrait page is taller than
+                // the reader; it bottom-anchors and loses its top, as the media
+                // does, and the chrome stays at the top edge. Phones draw as before.
+                let safeHeight = max(
+                    0, proxy.size.height - safeAreaInsets.top - safeAreaInsets.bottom
+                )
                 // The page an action came from travels with it, so a CTA inside story 3 reports as
                 // a step click on story 3 rather than as an anonymous click on the card.
                 let pageAction: (CampaignCanvasActionRequest) -> Void = { request in
@@ -707,17 +1000,16 @@ struct CanvasStoryViewer: View {
                     )
                     onAction(stamped)
                 }
-                VStack {
-                    Spacer(minLength: 0)
-                    ScaledCanvasStage(
-                        canvas: page.canvas,
-                        width: contentWidth,
-                        height: page.canvas.height * scale,
-                        cornerRadius: 0,
-                        isDark: isDark,
-                        onAction: pageAction
-                    )
-                }
+                ScaledCanvasStage(
+                    canvas: page.canvas,
+                    width: contentWidth,
+                    height: page.canvas.height * scale,
+                    cornerRadius: 0,
+                    isDark: isDark,
+                    onAction: pageAction
+                )
+                .frame(height: safeHeight, alignment: .bottom)
+                .clipped()
                 .opacity(showsOverlays ? 1 : 0)
                 .allowsHitTesting(showsOverlays)
                 .accessibilityHidden(!showsOverlays)
@@ -732,6 +1024,8 @@ struct CanvasStoryViewer: View {
                     // Transparent by design — the page shows through, as on Flutter.
                     showBackground: false
                 )
+                .frame(height: safeHeight, alignment: .top)
+                .clipped()
                 .environment(
                     \.canvasStoryViewer,
                     CanvasStoryViewerState(
