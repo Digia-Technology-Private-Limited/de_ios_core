@@ -421,6 +421,76 @@ struct DigiaEngageTests {
         #expect(recorder.isHoldReleased)
     }
 
+    @Test("a guide with no target screens ends on navigation but not on a repeated screen")
+    func guideWithNoTargetScreensEndsOnNavigation() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        Digia.register(TestPlugin(id: "plugin"))
+        let campaign = try #require(anchorlessGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("home")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "guide-1", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+        #expect(SDKInstance.shared.guideOrchestrator.state != nil)
+
+        SDKInstance.shared.setCurrentScreen("home")
+        #expect(SDKInstance.shared.guideOrchestrator.state != nil)
+        #expect(!recorder.isSettled)
+
+        SDKInstance.shared.setCurrentScreen("Cart")
+        #expect(SDKInstance.shared.guideOrchestrator.state == nil)
+        #expect(recorder.isSettled)
+    }
+
+    @Test("an anchorless guide ends on a screen change even onto its own page")
+    func anchorlessGuideEndsOnChangeOntoItsPage() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        Digia.register(TestPlugin(id: "plugin"))
+        let campaign = try #require(anchorlessGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Cart")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "guide-1", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+        try #require(SDKInstance.shared.guideOrchestrator.state != nil)
+
+        SDKInstance.shared.setCurrentScreen("home")
+
+        #expect(SDKInstance.shared.guideOrchestrator.state == nil)
+        #expect(recorder.isSettled)
+    }
+
+    @Test("an externally rendered guide with no target screens ends on navigation but not on a repeated screen")
+    func externalGuideWithNoTargetScreensEndsOnNavigation() throws {
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        Digia.register(TestPlugin(id: "plugin"))
+        SDKInstance.shared.onGuideRenderRequest = { _ in }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(anyScreenClassicGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Home")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-1", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+
+        SDKInstance.shared.setCurrentScreen("Home")
+        #expect(!recorder.isSettled)
+
+        SDKInstance.shared.setCurrentScreen("Cart")
+        #expect(recorder.isSettled)
+    }
+
     @Test("stale terminal event does not disarm a newer external guide")
     func staleTerminalEventKeepsNewExternalGuideActive() throws {
         SDKInstance.shared.resetForTesting()
@@ -1211,6 +1281,25 @@ private func targetedGuideCampaign() -> CampaignModel? {
         "campaignKey": "help-guide",
         "campaignType": "guide",
         "targetScreenNames": ["names": ["Help"]],
+        "templateConfig": [
+            "templateType": "tooltip",
+            "steps": [[
+                "id": "step-1",
+                "anchorKey": "help-anchor",
+                "title": "Help",
+                "body": "Body",
+            ]],
+        ],
+    ])
+}
+
+/// A classic (non-canvas) guide with an empty allowlist: it renders through
+/// the React Native bridge and belongs to whatever screen it opened on.
+private func anyScreenClassicGuideCampaign() -> CampaignModel? {
+    try? CampaignModel.fromJson([
+        "id": "any-screen-classic-guide-id",
+        "campaignKey": "any-screen-classic-guide",
+        "campaignType": "guide",
         "templateConfig": [
             "templateType": "tooltip",
             "steps": [[
