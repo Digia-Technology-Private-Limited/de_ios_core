@@ -105,7 +105,8 @@ func stageOf(_ reason: DropReason) -> TimelineStage {
     switch reason {
     case .notInitialized, .notReady, .initializationFailed, .pendingExpired, .unknownCampaignKey:
         return .trigger
-    case .frequencyCapped, .screenNotTargeted, .surfaceBusy, .superseded:
+    case .frequencyCapped, .screenNotTargeted, .surfaceBusy, .superseded,
+        .hostSuppressed:
         return .gating
     case .invalidConfig, .anchorNotRegistered, .hostNotMounted, .timeout,
         .cancelled, .pluginDetached, .error:
