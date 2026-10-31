@@ -10,16 +10,10 @@ private func object(_ json: String) -> [String: Any] {
 @Suite("SdkConfig resolve")
 struct SdkConfigResolveTests {
 
-    @Test("built-in defaults match the shared fixture")
-    func defaultsMatchFixture() throws {
-        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("Contracts/sdk-config-defaults.json")
-        let fixture = try #require(
-            try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
-        let health = try #require(fixture["sdkHealth"] as? [String: Any])
-
-        #expect(SdkConfig.defaults.healthEnabled == (health["enabled"] as? Bool))
-        #expect(SdkConfig.defaults.healthSessionCap == (health["sessionCap"] as? Int))
+    @Test("built-in defaults are health on, 20 events per session")
+    func builtInDefaults() {
+        #expect(SdkConfig.defaults.healthEnabled == true)
+        #expect(SdkConfig.defaults.healthSessionCap == 20)
     }
 
     @Test("the switch is off only for an explicit false")
