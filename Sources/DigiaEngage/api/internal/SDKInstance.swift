@@ -96,6 +96,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private var _currentScreen: String?
     internal var currentScreenForAnchorless: String? { _currentScreen }
     private(set) var lastCampaignDropReason: String?
+    /// Whether the host app asked campaign overlays to stay off screen
+    /// (`Digia.setCampaignsSuppressed`). In memory only and `false` on cold
+    /// start; settable before `initialize()` and untouched by
+    /// `setUserId`/`clearUserId`. While set, overlay deliveries (nudge, guide,
+    /// floater, survey) drop as `host_suppressed` — inline keeps rendering and
+    /// anything already showing is left alone.
+    private(set) var campaignsSuppressed = false
     private var activeExternalGuide: ExternalGuide?
     private var screenUpdateRevision = 0
     private var captureInFlight = false
@@ -1629,6 +1636,20 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             context.onDropped(DropReason.invalidConfig, message: reason)
             return .dropped(reason: .invalidConfig, detail: reason, cause: "channel_mismatch")
         }
+        // Contract `campaign-suppression` step 3: while the host suppresses
+        // overlays, an overlay delivery drops here — after key lookup and the
+        // config check above, so those reasons stay visible, and before caps,
+        // targeting and the surface rule, so a suppressed trigger never consumes
+        // a frequency cap. Inline is never suppressed. The drop settles through
+        // `routeNow`, whose `settle` releases the CEP hold with it (G8), and it
+        // carries no health extras — a host choice, not an SDK fault.
+        if campaignsSuppressed, !Self.isInlineKind(campaign) {
+            let detail = "campaign overlays suppressed by host"
+            lastCampaignDropReason = detail
+            log.d("Dropped — \(detail)", campaign: key)
+            context.onDropped(DropReason.hostSuppressed, message: detail)
+            return .dropped(reason: .hostSuppressed, detail: detail)
+        }
         if !campaign.targetScreenNames.isEmpty
             && !campaign.targetScreenNames.contains(_currentScreen ?? "")
         {
@@ -2391,6 +2412,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             return
         }
         services.identityManager.clearUserId()
+    }
+
+    /// Suppresses campaign overlays while the host app shows its own UI (e.g. a
+    /// modal), and restores them when it closes. See
+    /// `Digia.setCampaignsSuppressed`.
+    func setCampaignsSuppressed(_ suppressed: Bool) {
+        guard campaignsSuppressed != suppressed else { return }
+        campaignsSuppressed = suppressed
+        log.d("Campaign overlays \(suppressed ? "suppressed" : "restored") by host")
     }
 
     /// Removes inline content (carousel/story/payload) for each key in `placementKeys`.
@@ -3500,6 +3530,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         activePlugin = nil
         pendingAttach = nil
         _currentScreen = nil
+        campaignsSuppressed = false
         initGeneration &+= 1
         fetchTask?.cancel()
         fetchTask = nil
