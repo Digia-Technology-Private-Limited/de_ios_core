@@ -131,8 +131,7 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         var shouldRegister = false
         lock.lock()
         if !registered, !killed {
-            registered = true
-            buildMode = DigiaDebugDetection.isDebugBuild() ? "debug" : "release"
+            markRegistered()
             shouldRegister = true
         }
         lock.unlock()
@@ -153,8 +152,7 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
             return
         }
         if !registered {
-            registered = true
-            buildMode = DigiaDebugDetection.isDebugBuild() ? "debug" : "release"
+            markRegistered()
             shouldRegister = true
         }
         let pending = queued
@@ -168,12 +166,8 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         }
     }
 
-    /// Applies the SDK config's switch and cap: the cached one at init, and the
-    /// fetched one when it arrives, in either direction. `nil` arguments mean the
-    /// config said nothing usable, which is "leave it alone", never "reset to default".
-    ///
-    /// Off deregisters the sink and drops its queue. On after off registers it again,
-    /// once ``activate(_:)`` has given it something to send through.
+    /// Applies the SDK config's switch and cap, in either direction. `nil` leaves a field alone.
+    /// Off deregisters the sink and drops its queue; on after off registers it again.
     func applyConfig(enabled: Bool?, sessionCap: Int?) {
         var shouldDeactivate = false
         var shouldRegister = false
@@ -185,14 +179,19 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         } else if enabled == true, killed {
             killed = false
             if report != nil, !registered {
-                registered = true
-                buildMode = DigiaDebugDetection.isDebugBuild() ? "debug" : "release"
+                markRegistered()
                 shouldRegister = true
             }
         }
         lock.unlock()
         if shouldDeactivate { deactivate() }
         if shouldRegister { DigiaLogger.registerSink(self) }
+    }
+
+    /// Call with the lock held.
+    private func markRegistered() {
+        registered = true
+        buildMode = DigiaDebugDetection.isDebugBuild() ? "debug" : "release"
     }
 
     /// Unregisters the sink and discards anything queued.

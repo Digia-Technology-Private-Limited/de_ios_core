@@ -128,6 +128,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     // storage or builds a collaborator. The services themselves take storage
     // as given and have no fallbacks (D6).
     private let storage: LocalStorage
+    private let healthSink: HealthSink
     /// Owns the analytics database file for the life of the process. Lives
     /// here rather than in ``SDKServices`` so a retried `initialize()` reuses
     /// it: a second queue on the same file would interleave with the first.
@@ -467,8 +468,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Increments on reset so a fetch started before it cannot land after it.
     private var initGeneration = 0
     private var fetchTask: Task<Void, Never>?
+    /// Exposed for tests to await.
     private(set) var sdkConfigFetchTask: Task<Void, Never>?
-    private let healthSink: HealthSink
 
     /// Not awaited. A failed call changes nothing, except that a first install with no
     /// cached config runs on the defaults from here, which also sends the held health events.
@@ -477,7 +478,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         sdkConfigFetchTask = Task { @MainActor [weak self, networkClient] in
             let fetched = await store.fetch(using: networkClient)
             guard let self, self.initGeneration == generation else { return }
-            guard let config = fetched ?? (store.cached == nil ? SdkConfig.defaults : nil) else { return }
+            let firstInstall = store.cached == nil
+            guard let config = fetched ?? (firstInstall ? SdkConfig.defaults : nil) else { return }
             self.applySdkConfig(config)
             self.activateHealthSink()
         }

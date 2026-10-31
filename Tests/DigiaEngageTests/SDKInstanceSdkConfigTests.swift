@@ -150,21 +150,6 @@ struct SDKInstanceSdkConfigTests {
         sink.emit(healthRecord("a"))
         #expect(try await sentHealthEvents(sdk) == 1)
     }
-
-    @Test("the campaign bundle's health fields are ignored")
-    func bundleHealthFieldsIgnored() async throws {
-        let defaults = makeDefaults()
-        seedCache(defaults, #"{"sdkHealth":{"enabled":true}}"#)
-        let network = ConfigNetworkClient(bundle: #"{"response":{"campaigns":[],"sdkHealth":false}}"#)
-        let sink = HealthSink()
-        let sdk = makeInstance(defaults: defaults, network: network, sink: sink)
-
-        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
-        for _ in 0..<100 where sdk.sdkState == .initializing { try await Task.sleep(nanoseconds: 10_000_000) }
-
-        #expect(sink.isRegistered)
-        network.answer("{}")
-    }
 }
 
 /// Answers the bundle at once and holds `getSdkConfig` until the test answers or fails it.

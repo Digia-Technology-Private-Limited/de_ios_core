@@ -3,10 +3,7 @@ import Foundation
 private let log = DigiaLogger()
 
 /// The flags and limits the backend can change without an SDK release.
-///
-/// Only the `sdkHealth` part is read here: this SDK has no app-events pipeline.
-/// The saved response is kept whole, so a later release can read `appEvents`
-/// from what an earlier one saved.
+/// Only `sdkHealth` is read here; the saved response is kept whole.
 struct SdkConfig: Equatable, Sendable {
     let healthEnabled: Bool
     let healthSessionCap: Int
@@ -14,19 +11,14 @@ struct SdkConfig: Equatable, Sendable {
     /// What the SDK runs on with no cache and no answer. A test pins it to the shared fixture.
     static let defaults = SdkConfig(healthEnabled: true, healthSessionCap: HealthSink.defaultSessionCap)
 
-    /// Reads each field on its own, so one bad field never costs its neighbours.
-    ///
-    /// `fetched` is this launch's response and `cached` the one saved earlier, both as
-    /// received: they are checked on every read.
-    /// - The session cap takes the first valid value of fetched, cached, then the default.
-    ///   A cap of 0 is honoured.
-    /// - The switch is off only for an explicit `false`, whatever the cache says.
+    /// Reads each field on its own. The cap takes the first valid value of fetched, cached,
+    /// then the default; the switch comes from the fetched response alone when there is one.
     static func resolve(fetched: [String: Any]? = nil, cached: [String: Any]? = nil) -> SdkConfig {
-        let health = [fetched, cached].map { $0?["sdkHealth"] as? [String: Any] }
-        let primary = (fetched ?? cached)?["sdkHealth"] as? [String: Any]
+        let sections = [fetched, cached].map { $0?["sdkHealth"] as? [String: Any] }
+        let switchSection = (fetched ?? cached)?["sdkHealth"] as? [String: Any]
         return SdkConfig(
-            healthEnabled: (primary?["enabled"] as? NSNumber).flatMap(boolean) ?? true,
-            healthSessionCap: health.lazy.compactMap { count($0?["sessionCap"], atLeast: 0) }.first
+            healthEnabled: (switchSection?["enabled"] as? NSNumber).flatMap(boolean) ?? true,
+            healthSessionCap: sections.lazy.compactMap { count($0?["sessionCap"]) }.first
                 ?? HealthSink.defaultSessionCap
         )
     }
@@ -35,9 +27,9 @@ struct SdkConfig: Equatable, Sendable {
         CFGetTypeID(number) == CFBooleanGetTypeID() ? number.boolValue : nil
     }
 
-    private static func count(_ raw: Any?, atLeast minimum: Int) -> Int? {
+    private static func count(_ raw: Any?) -> Int? {
         guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
-              number.doubleValue.isFinite, number.doubleValue >= Double(minimum)
+              (0...Double(Int32.max)).contains(number.doubleValue)
         else { return nil }
         return number.intValue
     }

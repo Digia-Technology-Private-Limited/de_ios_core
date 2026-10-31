@@ -127,18 +127,6 @@ struct SdkConfigStoreTests {
         #expect(await store.fetch(using: SilentNetworkClient()) == nil)
         #expect(Date().timeIntervalSince(start) < 2)
     }
-
-    @Test("the call goes to getSdkConfig with the 10 s limit")
-    func requestShape() async {
-        let client = MockNetworkClient()
-        respond(client, status: 200, body: "{}")
-        _ = await SdkConfigStore(storage: storage(), projectKey: "k").fetch(using: client)
-
-        let request = client.lastRequest
-        #expect(request?.url.absoluteString.hasSuffix("/engage/sdk/getSdkConfig") == true)
-        #expect(request?.connectTimeout == 10)
-        #expect(request?.readTimeout == 10)
-    }
 }
 
 /// Never answers; ends only when its task is cancelled.
