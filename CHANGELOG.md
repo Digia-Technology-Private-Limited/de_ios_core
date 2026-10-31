@@ -2,11 +2,6 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
-## [Unreleased]
-
-### Improvements
-- The SDK now reads its health-reporting switch and session cap from a new `getSdkConfig` call instead of the campaign bundle. The last valid answer is cached per project and applied at launch; a failed call changes nothing, and a first install holds health events until the call answers.
-
 ## [4.2.0] - 2026-10-29
 
 ### Bug Fixes

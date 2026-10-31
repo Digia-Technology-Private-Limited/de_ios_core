@@ -37,8 +37,7 @@ let package = Package(
                 "DigiaEngage",
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ],
-            path: "Tests/DigiaEngageTests",
-            resources: [.copy("Contracts/sdk-config-defaults.json")]
+            path: "Tests/DigiaEngageTests"
         ),
     ]
 )

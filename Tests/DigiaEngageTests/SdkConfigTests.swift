@@ -12,7 +12,8 @@ struct SdkConfigResolveTests {
 
     @Test("built-in defaults match the shared fixture")
     func defaultsMatchFixture() throws {
-        let url = try #require(Bundle.module.url(forResource: "sdk-config-defaults", withExtension: "json"))
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Contracts/sdk-config-defaults.json")
         let fixture = try #require(
             try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
         let health = try #require(fixture["sdkHealth"] as? [String: Any])
