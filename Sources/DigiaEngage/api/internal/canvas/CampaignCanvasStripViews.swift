@@ -501,6 +501,17 @@ struct CanvasCarouselRenderer: View {
                                     motion.scheduleRestCheck(onRest: settle)
                                 }
                             }
+                            // iOS 17 cannot observe the scroll offset, so the binding
+                            // is the only sign the strip moved: settle once the move
+                            // has had time to finish.
+                            .onChange(of: scrollPosition) { _, _ in
+                                if #unavailable(iOS 18) {
+                                    motion.scheduleRestCheck(
+                                        after: animationDuration + CarouselStripMotion.restDelay,
+                                        onRest: settle
+                                    )
+                                }
+                            }
                             // A slide is viewed when it comes to rest. The first visible slide is
                             // reported on appear too, matching the legacy carousel.
                             .onAppear {
@@ -681,10 +692,11 @@ struct CanvasCarouselRenderer: View {
                 // slide arrived on a timer rather than under a finger.
                 advancedAutomatically = true
                 withAnimation(.easeInOut(duration: animationDuration)) {
-                    if let proxy = motion.proxy {
+                    if #available(iOS 18, *), let proxy = motion.proxy {
                         // Moves even when the binding already holds `next`.
                         proxy.scrollTo(next, anchor: .center)
                     } else {
+                        // iOS 17 settles from the binding, so the move goes through it.
                         scrollPosition = next
                     }
                 }
@@ -742,7 +754,7 @@ internal func carouselLoopTwin(page: Int, slideCount: Int, loopClones: Int) -> I
 private extension View {
     /// Reports how far the strip has scrolled from its first page. iOS 17 has
     /// no way to observe a scroll offset, so there the strip is never measured
-    /// and settling falls back to the page the binding holds.
+    /// and settles from changes to the page the binding holds.
     @ViewBuilder
     func onStripOffsetChange(_ action: @escaping (CGFloat) -> Void) -> some View {
         if #available(iOS 18, *) {
