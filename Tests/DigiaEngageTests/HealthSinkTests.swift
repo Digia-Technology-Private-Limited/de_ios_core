@@ -187,7 +187,7 @@ struct HealthSinkTests {
         let sink = HealthSink()
         let recorder = Recorder()
         sink.activate(recorder.capture)
-        sink.applyBundleConfig(enabled: nil, sessionCap: 2)
+        sink.applyConfig(enabled: nil, sessionCap: 2)
 
         for index in 0..<5 {
             let r = record(TimelineReason.malformedCampaignSkipped, campaignKey: "cmp_\(index)")
@@ -198,7 +198,7 @@ struct HealthSinkTests {
         #expect(sink.sentCount == 2)
     }
 
-    @Test("defaults the cap to 20 when the bundle names none")
+    @Test("defaults the cap to 20 when the config names none")
     func defaultCap() {
         let sink = HealthSink()
         #expect(HealthSink.defaultSessionCap == 20)
@@ -210,11 +210,11 @@ struct HealthSinkTests {
         #expect(sink.sentCount == 20)
     }
 
-    @Test("a negative or garbage session cap from the bundle is ignored")
+    @Test("a negative session cap is ignored")
     func garbageCapIgnored() {
         let sink = HealthSink()
         sink.activate { _ in }
-        sink.applyBundleConfig(enabled: nil, sessionCap: -5)
+        sink.applyConfig(enabled: nil, sessionCap: -5)
         for index in 0..<25 {
             let r = record(TimelineReason.malformedCampaignSkipped, campaignKey: "cmp_\(index)")
             if sink.accepts(r) { sink.emit(r) }
@@ -230,7 +230,7 @@ struct HealthSinkTests {
         let sink = HealthSink()
         let recorder = Recorder()
         sink.activate(recorder.capture)
-        sink.applyBundleConfig(enabled: nil, sessionCap: 2)
+        sink.applyConfig(enabled: nil, sessionCap: 2)
 
         let a = record(TimelineReason.malformedCampaignSkipped, campaignKey: "cmp_a")
         #expect(sink.accepts(a))
@@ -258,17 +258,44 @@ struct HealthSinkTests {
         let sink = HealthSink()
         sink.activate { _ in }
         #expect(sink.isRegistered)
-        sink.applyBundleConfig(enabled: false, sessionCap: nil)
+        sink.applyConfig(enabled: false, sessionCap: nil)
         #expect(!sink.isRegistered)
     }
 
-    @Test("absent, null or non-boolean bundle values leave the switch on")
+    @Test("a nil switch leaves the sink on")
     func killSwitchDefaultsOn() {
         let sink = HealthSink()
         sink.activate { _ in }
-        sink.applyBundleConfig(enabled: nil, sessionCap: nil)
+        sink.applyConfig(enabled: nil, sessionCap: nil)
         #expect(sink.isRegistered)
-        sink.applyBundleConfig(enabled: true, sessionCap: nil)
+        sink.applyConfig(enabled: true, sessionCap: nil)
+        #expect(sink.isRegistered)
+    }
+
+    @Test("turning the switch back on registers the sink again and sends through the kept reporter")
+    func switchBackOnRegistersAgain() {
+        let sink = HealthSink()
+        let recorder = Recorder()
+        sink.activate(recorder.capture)
+        sink.applyConfig(enabled: false, sessionCap: nil)
+        #expect(!sink.isRegistered)
+
+        sink.applyConfig(enabled: true, sessionCap: nil)
+        #expect(sink.isRegistered)
+
+        let r = record(TimelineReason.malformedCampaignSkipped, campaignKey: "cmp_a")
+        sink.emit(r)
+        #expect(recorder.payloads.count == 1)
+    }
+
+    @Test("a sink killed before it was activated stays off, then registers when switched on")
+    func killedBeforeActivation() {
+        let sink = HealthSink()
+        sink.applyConfig(enabled: false, sessionCap: nil)
+        sink.activate { _ in }
+        #expect(!sink.isRegistered)
+
+        sink.applyConfig(enabled: true, sessionCap: nil)
         #expect(sink.isRegistered)
     }
 

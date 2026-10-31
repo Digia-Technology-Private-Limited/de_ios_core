@@ -33,6 +33,7 @@ enum DigiaEndpoints {
     static var baseUrl: String { _testRoot ?? _environmentRoot }
 
     static var campaignBundle: String { "\(baseUrl)/api/v1/engage/sdk/getCampaignBundle" }
+    static var sdkConfig: String { "\(baseUrl)/api/v1/engage/sdk/getSdkConfig" }
     static var track: String { "\(baseUrl)/api/v1/engage/sdk/track" }
     static var session: String { "\(baseUrl)/api/v1/engage/sdk/session" }
     static var submission: String { "\(baseUrl)/api/v1/engage/sdk/recordSubmission" }

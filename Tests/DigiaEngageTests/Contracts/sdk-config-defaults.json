@@ -1,0 +1,16 @@
+{
+  "sdkHealth": { "enabled": true, "sessionCap": 20 },
+  "appEvents": {
+    "upload": true,
+    "ratePerMinute": 0,
+    "burst": 0,
+    "blockedNames": [],
+    "limits": {
+      "nameMaxLength": 120,
+      "maxProperties": 100,
+      "propertyKeyMaxLength": 120,
+      "stringMaxLength": 512,
+      "listMaxItems": 100
+    }
+  }
+}
