@@ -1638,9 +1638,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         // Contract `campaign-suppression` step 3: while the host suppresses
         // overlays, an overlay delivery drops here — after key lookup and the
-        // config check above, so those reasons stay visible, and before caps,
-        // targeting and the surface rule, so a suppressed trigger never consumes
-        // a frequency cap. Inline is never suppressed. The drop settles through
+        // channel-mismatch check above, so those reasons stay visible, and before
+        // targeting, caps and the surface rule, so a suppressed trigger never
+        // consumes a frequency cap. Inline is never suppressed. The drop settles through
         // `routeNow`, whose `settle` releases the CEP hold with it (G8), and it
         // carries no health extras — a host choice, not an SDK fault.
         if campaignsSuppressed, !Self.isInlineKind(campaign) {

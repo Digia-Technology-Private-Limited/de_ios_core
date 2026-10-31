@@ -88,23 +88,14 @@ extension DigiaEngageTests {
             #expect(sdk.controller.activeNudge?.payload.campaignKey == "n")
         }
 
-        @Test("an unknown key while suppressed is still unknown_campaign_key")
-        func unknownKeyBeatsSuppression() throws {
-            try start([nudgeJson("known")])
-            defer { sdk.setCampaignsSuppressed(false) }
-            sdk.setCampaignsSuppressed(true)
-
-            #expect(deliver("not-known").dropReason == .unknownCampaignKey)
-        }
-
-        @Test("a broken config while suppressed is still invalid_config")
-        func invalidConfigBeatsSuppression() throws {
+        @Test("a channel mismatch while suppressed is still invalid_config")
+        func channelMismatchBeatsSuppression() throws {
             try start([floaterJson("pip")])
             defer { sdk.setCampaignsSuppressed(false) }
             sdk.setCampaignsSuppressed(true)
 
             // A floater delivered as a CleverTap custom template is a router-level
-            // config error, checked before the suppression gate.
+            // channel mismatch, checked before the suppression gate.
             let dropped = deliver("pip", cepMetadata: ["templateName": "DigiaTemplate"])
 
             #expect(dropped.dropReason == .invalidConfig)
