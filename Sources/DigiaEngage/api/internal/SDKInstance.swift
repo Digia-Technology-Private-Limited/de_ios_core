@@ -1636,13 +1636,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             context.onDropped(DropReason.invalidConfig, message: reason)
             return .dropped(reason: .invalidConfig, detail: reason, cause: "channel_mismatch")
         }
-        // Contract `campaign-suppression` step 3: while the host suppresses
-        // overlays, an overlay delivery drops here — after key lookup and the
-        // channel-mismatch check above, so those reasons stay visible, and before
-        // targeting, caps and the surface rule, so a suppressed trigger never
-        // consumes a frequency cap. Inline is never suppressed. The drop settles through
-        // `routeNow`, whose `settle` releases the CEP hold with it (G8), and it
-        // carries no health extras — a host choice, not an SDK fault.
+        // While the host suppresses overlays, an overlay delivery drops here —
+        // after key lookup and the channel-mismatch check above, so those reasons
+        // stay visible, and before targeting, caps and the surface rule, so a
+        // suppressed trigger never consumes a frequency cap. Inline is never
+        // suppressed. The drop settles through `routeNow`, which releases the CEP
+        // hold, and it carries no health extras — a host choice, not an SDK fault.
         if campaignsSuppressed, !Self.isInlineKind(campaign) {
             let detail = "campaign overlays suppressed by host"
             lastCampaignDropReason = detail
