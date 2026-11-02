@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 internal import SDWebImageSVGCoder
+internal import SDWebImageSwiftUI
 
 enum DigiaImagePipeline {
     private static let configureOnce: Void = {
@@ -12,14 +13,18 @@ enum DigiaImagePipeline {
     }
 }
 
-/// Thin forwarder to `MediaImage` until W3/W4 move its callers (T6): same interface, the
-/// caller's placeholder stays the bottom layer, `fit: .fill` keeps sizing outside as before.
+/// Pre-T6 render body kept byte-identical until W3/W4 move its callers onto
+/// `MediaImage` directly (forwarder removed in T17): bare `WebImage` with the
+/// caller's placeholder in its slot, so inline stills/thumbnails/banners
+/// render exactly as before. `fit: .fill` keeps sizing outside as before.
 struct DigiaCachedImageView: View {
     let url: URL
     let tintColor: Color?
     let placeholder: AnyView
     let onSuccess: ((UIImage) -> Void)?
     let onFailure: (() -> Void)?
+
+    @Environment(\.digiaCampaignKey) private var campaignKey
 
     init(
         url: URL,
@@ -28,6 +33,7 @@ struct DigiaCachedImageView: View {
         onSuccess: ((UIImage) -> Void)? = nil,
         onFailure: (() -> Void)? = nil
     ) {
+        DigiaImagePipeline.configureIfNeeded()
         self.url = url
         self.tintColor = tintColor
         self.placeholder = placeholder
@@ -36,14 +42,29 @@ struct DigiaCachedImageView: View {
     }
 
     var body: some View {
-        ZStack {
+        WebImage(url: url, options: [.retryFailed, .scaleDownLargeImages]) { image in
+            configuredImage(image)
+        } placeholder: {
             placeholder
-            MediaImage(
-                spec: MediaSpec(url: url.absoluteString, fit: .fill),
-                tintColor: tintColor,
-                onSuccess: onSuccess,
-                onFailure: { _ in onFailure?() }
-            )
+        }
+        .onSuccess { image, _, _ in
+            onSuccess?(image)
+        }
+        .onFailure { error in
+            reportMediaLoadFailed(.image, cause: mediaFailureCause(imageError: error), campaignKey: campaignKey)
+            onFailure?()
+        }
+    }
+
+    @ViewBuilder
+    private func configuredImage(_ image: Image) -> some View {
+        if let tintColor {
+            image
+                .resizable()
+                .renderingMode(.template)
+                .foregroundStyle(tintColor)
+        } else {
+            image.resizable()
         }
     }
 }

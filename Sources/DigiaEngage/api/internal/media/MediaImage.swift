@@ -120,7 +120,6 @@ struct MediaImage: View {
                 }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: spec.url) {
             // The spinner arm: cancelled on disappear or URL change, and disarmed by `finished`.
             // A still-less load that resolves in time never flashes it.
