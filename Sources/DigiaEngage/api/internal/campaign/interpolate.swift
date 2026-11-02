@@ -1,8 +1,13 @@
 import Foundation
 
-// MARK: - Identifier grammar (D22′: lowercase only)
+// MARK: - Identifier grammar
+//
+// A custom variable (`coupon`) or a context variable (`user.age`). Custom names are
+// lowercase with no dot, so the two never collide.
 
-private let identifierPattern = try! NSRegularExpression(pattern: #"^[a-z][a-z0-9_]*$"#)
+private let identifierPattern = try! NSRegularExpression(
+    pattern: #"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?$"#
+)
 
 private func isIdentifier(_ s: String) -> Bool {
     let r = NSRange(s.startIndex..., in: s)

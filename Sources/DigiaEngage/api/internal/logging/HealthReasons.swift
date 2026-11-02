@@ -62,6 +62,15 @@ enum HealthReasons {
         "survey_submission_failed",
         "media_load_failed",
         "cep_bridge_unavailable",
+        "internal_error",
+        "user_hash_unverified",
+        "unsupported_feature",
+        "malformed_rule",
+        "app_event_invalid",
+        "app_event_rate_limited",
+        "app_event_blocked",
+        "app_event_queue_full",
+        "digia_managed",
     ]
 
     /// Which `extras` keys each reason may send as `detail` — and nothing else.
@@ -108,6 +117,15 @@ enum HealthReasons {
         "survey_submission_failed": ["http_status"],
         "media_load_failed": ["media_kind", "cause"],
         "cep_bridge_unavailable": ["selector"],
+        "internal_error": ["exception_class"],
+        "user_hash_unverified": [],
+        "unsupported_feature": ["feature"],
+        "malformed_rule": ["exception_class"],
+        "app_event_invalid": ["event_name"],
+        "app_event_rate_limited": [],
+        "app_event_blocked": [],
+        "app_event_queue_full": [],
+        "digia_managed": [],
     ]
 
     /// Reasons that identify *no* campaign, and so dedup on the symbol alone.
@@ -120,6 +138,11 @@ enum HealthReasons {
         "fetch_failed_auth",
         "fetch_failed_response",
         "plugin_not_registered",
+        "user_hash_unverified",
+        "app_event_invalid",
+        "app_event_rate_limited",
+        "app_event_blocked",
+        "app_event_queue_full",
     ]
 
     /// The extra that makes one campaign's several instances of a reason
@@ -143,6 +166,7 @@ enum HealthReasons {
         "action_handler_missing": ["action_type"],
         "cep_bridge_unavailable": ["selector"],
         "media_load_failed": ["media_kind", "cause"],
+        "internal_error": ["exception_class"],
     ]
 
     /// Extra marking a record whose blocker is a live test. Such a record stays

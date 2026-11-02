@@ -28,7 +28,7 @@ struct DigiaInlineCanvasView: View {
             cepVars: payload.variables
         )
         let timerRuntime = config.statefulTimer
-        let resolved = timerRuntime?.resolve(payload.variables)
+        let resolved = timerRuntime?.resolve(schemas: config.variableSchemas, cepVars: payload.variables)
         Group {
             if timerRuntime == nil {
                 canvas(config.canvas, remainingSeconds: nil, variables: variables, timerContext: nil)
