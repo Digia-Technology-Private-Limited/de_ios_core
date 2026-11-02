@@ -22,6 +22,10 @@ enum CampaignConfigModel: Equatable {
     /// The floater family's second member: a small floating **canvas** window that opens
     /// a full-screen story on tap. Shares the PiP's window vocabulary and none of its media.
     case floaterStory(FloaterStoryConfig)
+    /// A campaign whose `campaignType` this build does not understand. Kept in the
+    /// store for diagnostics (Android `CampaignConfigModel.Unsupported`); it never
+    /// renders and routing drops it as `invalid_config`.
+    case unsupported
 }
 
 struct CampaignModel: Equatable {
@@ -182,11 +186,19 @@ struct CampaignModel: Equatable {
                 config = .floater(floaterConfig)
             }
         default:
-            throw CampaignParseScope.report(
-                "Campaign skipped — unknown campaign type (type=\(campaignType))",
+            // An unknown campaign type is server data this build does not understand, not a
+            // programmer error: a dashboard that ships a new type must degrade to one kept
+            // campaign that routing drops as `invalid_config` on older SDKs, never to a
+            // throw out of the bundle parse that loses the key entirely. As Android
+            // (`CampaignModel.kt` else-branch) and Flutter (`UnsupportedCampaignConfig`).
+            log.e(
+                "Kept as unsupported — unknown campaign type (type=\(campaignType))",
+                campaign: campaignKey,
+                stage: .parse,
                 reason: TimelineReason.campaignUnsupported,
                 extras: ["type": campaignType]
             )
+            config = .unsupported
         }
 
         return CampaignModel(

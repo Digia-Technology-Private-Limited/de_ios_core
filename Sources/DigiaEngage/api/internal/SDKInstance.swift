@@ -927,7 +927,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .guide: return "guide"
         case .floater, .floaterStory:
             return campaign.floaterStoryConfig != nil ? "story_floater" : "pip"
-        case .inline, .banner, .inlineCanvas, .story: return nil
+        case .inline, .banner, .inlineCanvas, .story, .unsupported: return nil
         }
     }
 
@@ -1665,9 +1665,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // after key lookup and the channel-mismatch check above, so those reasons
         // stay visible, and before targeting, caps and the surface rule, so a
         // suppressed trigger never consumes a frequency cap. Inline is never
-        // suppressed. The drop settles through `routeNow`, which releases the CEP
+        // suppressed, and an unsupported type is exempt so it falls through to
+        // the config dispatch below and stays `invalid_config`. The drop
+        // settles through `routeNow`, which releases the CEP
         // hold, and it carries no health extras — a host choice, not an SDK fault.
-        if campaignsSuppressed, !Self.isInlineKind(campaign) {
+        if campaignsSuppressed, !Self.isInlineKind(campaign), campaign.config != .unsupported {
             let detail = "campaign overlays suppressed by host"
             lastCampaignDropReason = detail
             log.d("Dropped — \(detail)", campaign: key)
@@ -1935,6 +1937,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     cause: "start_failed")
             }
             return .accepted(payload: payload, kind: .floating)
+        case .unsupported:
+            // Server data this build does not understand: the parse kept it so the
+            // key resolves, and routing drops it here — after key lookup and the
+            // channel-mismatch check, exempt from suppression above — as Android's
+            // `else` arm does (`cause: "unknown_type"`).
+            let reason = "unknown campaign type '\(campaign.campaignType)'"
+            lastCampaignDropReason = reason
+            log.e("Dropped — \(reason)", campaign: key)
+            context.onDropped(DropReason.invalidConfig, message: reason)
+            return .dropped(reason: .invalidConfig, detail: reason, cause: "unknown_type")
         }
     }
 
@@ -2009,7 +2021,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         switch campaign.config {
         case .guide, .floater, .floaterStory: supportsLiveTest = true
         case .nudge, .survey, .inline, .inlineCanvas: supportsLiveTest = true
-        case .banner, .story: supportsLiveTest = false
+        case .banner, .story, .unsupported: supportsLiveTest = false
         }
         guard supportsLiveTest else {
             reporter.postFailed(

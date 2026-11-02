@@ -10,8 +10,9 @@ extension RenderedUITests {
 /// Port of `flutter/core/test/fixture_behaviour/degradation_bundle_test.dart`.
 ///
 /// platform note: the rule fixtures (`degrade_engine_rule_*`) are not ported — this SDK has no
-/// rule engine; a campaign is shown only by a CEP trigger. An unknown campaign type is dropped at
-/// parse (Flutter keeps it as unsupported), so it is asserted as dropped here.
+/// rule engine; a campaign is shown only by a CEP trigger. An unknown campaign type is kept
+/// as `.unsupported` (Android/Flutter parity) and asserted separately below — it is not in
+/// `dropped`.
 @Suite("Degradation: campaign bundle", .serialized, .tags(.integration, .behaviour, .contract))
 @MainActor
 struct DegradationBundleTests {
@@ -27,7 +28,6 @@ struct DegradationBundleTests {
         "degrade_engine_missing_id",
         "degrade_engine_missing_key",
         "degrade_engine_missing_type",
-        "degrade_engine_unknown_type_alt_id",
         "degrade_nudge_canvas_version_older",
         "degrade_nudge_canvas_version_newer",
         "degrade_guide_removed_outside_tap_value",
@@ -47,6 +47,26 @@ struct DegradationBundleTests {
             let lost = try sdk.deliver(badKey)
             #expect(lost.dropReason == .unknownCampaignKey)
         }
+        try sdk.deliver(keyOf(neighbour))
+        try await sdk.waitUntil("the neighbour is up") { sdk.isShowing(Self.neighbourTitle) }
+    }
+
+    // Fails if an unknown campaign type stops being kept: it must reach the store as
+    // `.unsupported` (Android/Flutter parity), so the key resolves and the delivery drops as
+    // `invalid_config` — never `unknown_campaign_key` — while the neighbour still shows.
+    @Test("an unknown campaign type is kept as unsupported and drops as invalid_config")
+    func unknownTypeIsKeptAsUnsupported() async throws {
+        let unknown = try fixture("degradation/degrade_engine_unknown_type_alt_id")
+        let neighbour = try fixture("engine/engine_surface_busy_first")
+        let sdk = try await SdkHarness.start(campaigns: [unknown, neighbour])
+        defer { sdk.tearDown() }
+        try sdk.mount { Text("host app") }
+
+        #expect(sdk.sdk.campaignStore.keys.sorted() == [keyOf(unknown), keyOf(neighbour)].sorted())
+        let kept = try #require(sdk.sdk.campaignStore.find(keyOf(unknown)))
+        #expect(kept.config == .unsupported)
+        let dropped = try sdk.deliver(keyOf(unknown))
+        #expect(dropped.dropReason == .invalidConfig)
         try sdk.deliver(keyOf(neighbour))
         try await sdk.waitUntil("the neighbour is up") { sdk.isShowing(Self.neighbourTitle) }
     }
