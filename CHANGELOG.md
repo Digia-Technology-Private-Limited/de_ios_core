@@ -2,6 +2,17 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [4.3.0] - 2026-11-03
+
+### New Features
+
+- `Digia.setCampaignsSuppressed(_:)` stops overlay campaigns (nudge/modal, bottom sheet, guide, PiP/floater, survey) from showing while set; inline placements keep rendering.
+- The SDK now fetches SDK config from `getSdkConfig` at startup and applies it to SDK health reporting; when the backend is unreachable it keeps working with safe defaults.
+
+### Privacy
+
+- Survey free-text answers are no longer sent in `Digia Question Answered` analytics: open-ended questions (short/long text, number, email, date) omit all answer fields, and choice questions drop the typed `comment`, keeping only the selected option. Full responses still reach `/recordSubmission`.
+
 ## [4.2.0] - 2026-10-29
 
 ### Bug Fixes
