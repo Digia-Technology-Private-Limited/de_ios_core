@@ -74,13 +74,14 @@ for fw in "$DEVICE_FW" "$SIM_FW"; do
   rm -rf "$fw/Frameworks"
 done
 
-# Embed DigiaEngage's own consolidated privacy manifest (deps ship their own).
-PRIVACY="$BUILDDIR/PrivacyInfo.xcprivacy"
-if [ -f "$PRIVACY" ]; then
-  echo "==> Embedding PrivacyInfo.xcprivacy"
-  cp "$PRIVACY" "$DEVICE_FW/PrivacyInfo.xcprivacy"
-  cp "$PRIVACY" "$SIM_FW/PrivacyInfo.xcprivacy"
-fi
+# Embed DigiaEngage's privacy manifest (deps ship their own). The single source
+# of truth is Sources/DigiaEngage/Resources/PrivacyInfo.xcprivacy, shared with
+# the fat build, SwiftPM and the source podspec.
+PRIVACY="$ROOT/Sources/DigiaEngage/Resources/PrivacyInfo.xcprivacy"
+[ -f "$PRIVACY" ] || { echo "ERROR: missing $PRIVACY"; exit 1; }
+echo "==> Embedding PrivacyInfo.xcprivacy"
+cp "$PRIVACY" "$DEVICE_FW/PrivacyInfo.xcprivacy"
+cp "$PRIVACY" "$SIM_FW/PrivacyInfo.xcprivacy"
 
 echo "==> Creating DigiaEngage.xcframework"
 DSYM_DEV="$ARCHIVES/ios.xcarchive/dSYMs/DigiaEngage.framework.dSYM"
