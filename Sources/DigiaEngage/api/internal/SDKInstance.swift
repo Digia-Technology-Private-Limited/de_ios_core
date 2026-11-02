@@ -2235,7 +2235,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         questionViewedAt.removeValue(forKey: viewedKey)
         let scaleBounds = block.flatMap(Self.scaleBounds)
         let typeWire = block?.type.rawValue
-        // Free text never leaves the device in an analytics event.
         let openEnded = block.map { Self.openEndedQuestionTypes.contains($0.type) } ?? false
         var sanitizedAnswer = answer
         sanitizedAnswer.removeValue(forKey: "comment")
@@ -3545,9 +3544,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
-    /// Open-ended block types whose answers are free text: analytics omits them.
-    /// Matched on the enum so a wire-spelling change cannot silently re-leak
-    /// free text.
     private static let openEndedQuestionTypes: Set<SurveyBlockType> = [
         .shortText, .longText, .number, .email, .date
     ]
