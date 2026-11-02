@@ -28,8 +28,10 @@ struct SdkConfig: Equatable, Sendable {
     }
 
     private static func count(_ raw: Any?) -> Int? {
-        guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
-              (0...Double(Int32.max)).contains(number.doubleValue)
+        guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let value = number.doubleValue
+        guard value.isFinite, value == floor(value),
+              (0...Double(Int32.max)).contains(value)
         else { return nil }
         return number.intValue
     }
@@ -96,8 +98,16 @@ final class SdkConfigStore {
     /// other SDK endpoints use when it has one.
     private static func payload(_ body: Data) -> [String: Any]? {
         guard let root = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else { return nil }
-        if let data = root["data"] as? [String: Any], let response = data["response"] { return response as? [String: Any] }
-        if let response = root["response"] { return response as? [String: Any] }
+        let data = root["data"] as? [String: Any]
+        if data?["response"] != nil {
+            return data?["response"] as? [String: Any]
+        }
+        if root["response"] != nil {
+            return root["response"] as? [String: Any]
+        }
+        if data != nil || root["error"] != nil {
+            return nil
+        }
         return root
     }
 

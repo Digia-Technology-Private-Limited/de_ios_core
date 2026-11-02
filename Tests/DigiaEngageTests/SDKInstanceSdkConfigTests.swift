@@ -44,7 +44,19 @@ struct SDKInstanceSdkConfigTests {
             .filter { ($0.payload["event_name"] as? String) == HealthSink.eventName }.count
     }
 
-    @Test("a cached switch-off applies before the fetch answers")
+    @Test("the config call runs on every initialize, even with a cache")
+    func callsEveryInitialize() async throws {
+        let defaults = makeDefaults()
+        seedCache(defaults, #"{"sdkHealth":{"enabled":false}}"#)
+        let network = ConfigNetworkClient()
+        let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
+
+        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
+        #expect(network.configCalls == 1)
+        network.answer("{}")
+    }
+
+    @Test("a cached switch-off applies before the call answers")
     func cachedSwitchOffAppliesAtInit() async throws {
         let defaults = makeDefaults()
         seedCache(defaults, #"{"sdkHealth":{"enabled":false}}"#)
@@ -58,7 +70,7 @@ struct SDKInstanceSdkConfigTests {
         network.answer(#"{"sdkHealth":{"enabled":false}}"#)
     }
 
-    @Test("a cached config lets health events through without waiting for the call")
+    @Test("a cached config sends health at once without waiting for the call")
     func cachedConfigSendsAtOnce() async throws {
         let defaults = makeDefaults()
         seedCache(defaults, #"{"sdkHealth":{"enabled":true,"sessionCap":5}}"#)
@@ -73,7 +85,7 @@ struct SDKInstanceSdkConfigTests {
         network.answer("{}")
     }
 
-    @Test("first install holds health events until the config call answers")
+    @Test("first install holds health until the call answers")
     func firstInstallHoldsEvents() async throws {
         let network = ConfigNetworkClient()
         let sink = HealthSink()
@@ -88,7 +100,7 @@ struct SDKInstanceSdkConfigTests {
         #expect(try await sentHealthEvents(sdk) == 1)
     }
 
-    @Test("first install drops held events when the answer switches health off")
+    @Test("first install with switch-off in the answer drops the held health")
     func firstInstallSwitchedOff() async throws {
         let network = ConfigNetworkClient()
         let sink = HealthSink()
@@ -103,7 +115,7 @@ struct SDKInstanceSdkConfigTests {
         #expect(try await sentHealthEvents(sdk) == 0)
     }
 
-    @Test("first install with a failed call runs on the defaults and sends the held events")
+    @Test("first install with a failed call runs on defaults and sends the held health")
     func firstInstallFailureUsesDefaults() async throws {
         let network = ConfigNetworkClient()
         let sink = HealthSink()
@@ -150,6 +162,23 @@ struct SDKInstanceSdkConfigTests {
         sink.emit(healthRecord("a"))
         #expect(try await sentHealthEvents(sdk) == 1)
     }
+
+    @Test("a fetched config replaces the cache for the next launch")
+    func fetchedReplacesCache() async throws {
+        let defaults = makeDefaults()
+        seedCache(defaults, #"{"sdkHealth":{"enabled":false}}"#)
+        let network = ConfigNetworkClient()
+        let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
+
+        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
+        network.answer(#"{"sdkHealth":{"enabled":true,"sessionCap":5}}"#)
+        await sdk.sdkConfigFetchTask?.value
+
+        let next = SdkConfigStore(
+            storage: UserDefaultsLocalStorage(defaults: defaults).scoped("sdk_config"),
+            projectKey: apiKey)
+        #expect(next.cached == SdkConfig(healthEnabled: true, healthSessionCap: 5))
+    }
 }
 
 /// Answers the bundle at once and holds `getSdkConfig` until the test answers or fails it.
@@ -158,10 +187,15 @@ final class ConfigNetworkClient: NetworkClient, @unchecked Sendable {
     private let lock = NSLock()
     private var waiter: CheckedContinuation<NetworkResponse, Error>?
     private var early: Result<NetworkResponse, Error>?
+    private var calls = 0
     private let bundle: String
 
     init(bundle: String = #"{"response":{"campaigns":[]}}"#) {
         self.bundle = bundle
+    }
+
+    var configCalls: Int {
+        lock.withLock { calls }
     }
 
     func answer(_ body: String) {
@@ -173,11 +207,12 @@ final class ConfigNetworkClient: NetworkClient, @unchecked Sendable {
     }
 
     private func resume(_ result: Result<NetworkResponse, Error>) {
-        lock.lock()
-        let waiter = self.waiter
-        self.waiter = nil
-        if waiter == nil { early = result }
-        lock.unlock()
+        let waiter: CheckedContinuation<NetworkResponse, Error>? = lock.withLock {
+            let waiter = self.waiter
+            self.waiter = nil
+            if waiter == nil { early = result }
+            return waiter
+        }
         waiter?.resume(with: result)
     }
 
@@ -189,14 +224,18 @@ final class ConfigNetworkClient: NetworkClient, @unchecked Sendable {
         guard url.hasSuffix("/getSdkConfig") else {
             return NetworkResponse(statusCode: 200, headers: [:], body: Data("{}".utf8), isSuccessful: true)
         }
+        lock.withLock { calls += 1 }
         return try await withCheckedThrowingContinuation { continuation in
-            lock.lock()
-            if let early {
-                lock.unlock()
-                continuation.resume(with: early)
-            } else {
-                waiter = continuation
-                lock.unlock()
+            let earlyResult: Result<NetworkResponse, Error>? = lock.withLock {
+                if let early {
+                    return early
+                } else {
+                    waiter = continuation
+                    return nil
+                }
+            }
+            if let earlyResult {
+                continuation.resume(with: earlyResult)
             }
         }
     }
