@@ -66,6 +66,10 @@ final class StoryVideoPlayback: ObservableObject {
     private let urlString: String
     private let purpose: StoryVideoPlaybackPurpose
     private let posterIdentity: StoryVideoPosterIdentity?
+    /// The D2 range-cache loader the asset and player item read through (one download serves
+    /// playback and caching, D2). Tests inject a loader backed by a fake store; production
+    /// uses the process-wide shared loader.
+    private let resourceLoader: MediaResourceLoader
     private var applicationActive: Bool
     private var lifecycleSubscriptions = Set<AnyCancellable>()
     private var state = StoryVideoPlaybackState(
@@ -77,9 +81,6 @@ final class StoryVideoPlayback: ObservableObject {
     )
     private var events = StoryVideoPlaybackEvents()
     private var localAsset: AVURLAsset?
-    private var loadTask: Task<Void, Never>?
-    private var requestedPriority: StoryVideoCachePriority?
-    private var loadGeneration: UInt = 0
 
     private var statusObserver: NSKeyValueObservation?
     private var durationObserver: NSKeyValueObservation?
@@ -99,11 +100,15 @@ final class StoryVideoPlayback: ObservableObject {
 
     private var imageGenerator: AVAssetImageGenerator?
     private var imageGenerationID: UUID?
-    private var cachedPosterLookupTask: Task<Void, Never>?
 
-    init(urlString: String, purpose: StoryVideoPlaybackPurpose) {
+    init(
+        urlString: String,
+        purpose: StoryVideoPlaybackPurpose,
+        resourceLoader: MediaResourceLoader? = nil
+    ) {
         self.urlString = urlString
         self.purpose = purpose
+        self.resourceLoader = resourceLoader ?? SharedMediaResourceLoader.shared
         posterIdentity = Self.posterFrameMs(for: purpose).map {
             StoryVideoPosterIdentity(url: urlString, frameMs: $0)
         }
@@ -127,7 +132,7 @@ final class StoryVideoPlayback: ObservableObject {
                 Task { @MainActor in self?.setApplicationActive(true) }
             }
             .store(in: &lifecycleSubscriptions)
-        preparePosterFromCachedFileIfAvailable()
+        preparePosterIfAvailable()
     }
 
     func update(
@@ -141,13 +146,9 @@ final class StoryVideoPlayback: ObservableObject {
 
         guard !terminalFailureReported else { return }
         if nextState.demand == .none {
-            loadGeneration &+= 1
-            loadTask?.cancel()
-            loadTask = nil
-            requestedPriority = nil
             releasePlayer()
             if applicationActive {
-                preparePosterFromCachedFileIfAvailable()
+                preparePosterIfAvailable()
             } else {
                 cancelPosterWork()
             }
@@ -155,10 +156,7 @@ final class StoryVideoPlayback: ObservableObject {
         }
 
         let restartRequested = previous.restartGeneration != nextState.restartGeneration
-        ensureAsset(
-            priority: nextState.demand.priority ?? .eligible,
-            needsPlayer: nextState.demand.needsPlayer
-        )
+        ensureAsset(needsPlayer: nextState.demand.needsPlayer)
 
         guard let player else { return }
         if !nextState.demand.needsPlayer {
@@ -185,95 +183,46 @@ final class StoryVideoPlayback: ObservableObject {
     }
 
     func tearDown() {
-        loadGeneration &+= 1
-        loadTask?.cancel()
-        loadTask = nil
-        requestedPriority = nil
         cancelPosterWork()
         releasePlayer()
         localAsset = nil
     }
 
-    private func ensureAsset(priority: StoryVideoCachePriority, needsPlayer: Bool) {
-        cachedPosterLookupTask?.cancel()
-        cachedPosterLookupTask = nil
-        if let localAsset {
-            preparePoster(from: localAsset)
-            if needsPlayer, player == nil { installPlayer(asset: localAsset) }
-            return
+    /// Resolves the playable asset for `remoteURL`: range-cache-backed for remote URLs (the
+    /// player reads through the store and every fetched range is saved as it plays — one
+    /// download serves playback and caching, so the old stream-plus-separate-download is
+    /// gone), direct for `file://` and for URLs the private scheme cannot represent.
+    private func d2Asset(for remoteURL: URL) -> AVURLAsset {
+        if remoteURL.isFileURL {
+            return AVURLAsset(url: remoteURL)
         }
-        if let requestedPriority, loadTask != nil, requestedPriority >= priority {
-            return
+        // `playerItem(for:)` wires the loader on its own delegate queue and wraps the item's
+        // asset; reusing that asset keeps this file off the loader's threading contract.
+        if let item = resourceLoader.playerItem(for: remoteURL),
+           let asset = item.asset as? AVURLAsset
+        {
+            return asset
         }
-        guard let remoteURL = URL(string: urlString) else {
+        return AVURLAsset(url: remoteURL)
+    }
+
+    private func ensureAsset(needsPlayer: Bool) {
+        guard let remoteURL = mediaUsableURL(urlString) else {
             handleTerminalFailure(cause: "invalid_url")
             return
         }
-
-        loadGeneration &+= 1
-        let generation = loadGeneration
-        loadTask?.cancel()
-        requestedPriority = priority
-        loadTask = Task { @MainActor [weak self] in
-            do {
-                let assetURL: URL
-                if needsPlayer,
-                   let cachedURL = await DigiaVideoFileCache.shared.cachedURL(for: remoteURL) {
-                    assetURL = cachedURL
-                } else if needsPlayer {
-                    assetURL = remoteURL
-                    Task {
-                        _ = try? await DigiaVideoFileCache.shared.localURL(
-                            for: remoteURL,
-                            priority: priority
-                        )
-                    }
-                } else {
-                    assetURL = try await DigiaVideoFileCache.shared.localURL(
-                        for: remoteURL,
-                        priority: priority
-                    )
-                }
-                guard let self,
-                      !Task.isCancelled,
-                      self.loadGeneration == generation else { return }
-                self.loadTask = nil
-                self.requestedPriority = nil
-                let asset = AVURLAsset(url: assetURL)
-                self.localAsset = asset
-                self.preparePoster(from: asset)
-                if self.state.demand.needsPlayer {
-                    self.installPlayer(asset: asset)
-                }
-            } catch {
-                guard let self,
-                      !Task.isCancelled,
-                      self.loadGeneration == generation else { return }
-                self.loadTask = nil
-                self.requestedPriority = nil
-                if needsPlayer {
-                    let asset = AVURLAsset(url: remoteURL)
-                    self.localAsset = asset
-                    self.preparePoster(from: asset)
-                    if self.state.demand.needsPlayer {
-                        self.installPlayer(asset: asset)
-                    }
-                    Task {
-                        _ = try? await DigiaVideoFileCache.shared.localURL(
-                            for: remoteURL,
-                            priority: priority
-                        )
-                    }
-                    return
-                }
-                self.handleTerminalFailure()
-            }
+        if localAsset == nil {
+            localAsset = d2Asset(for: remoteURL)
+        }
+        guard let localAsset else { return }
+        preparePoster(from: localAsset)
+        if needsPlayer, player == nil {
+            installPlayer(item: AVPlayerItem(asset: localAsset))
         }
     }
 
-    private func installPlayer(asset: AVURLAsset) {
+    private func installPlayer(item: AVPlayerItem) {
         guard player == nil else { return }
-        let item = AVPlayerItem(asset: asset)
         let player = AVPlayer(playerItem: item)
         player.isMuted = state.muted
         self.player = player
@@ -284,7 +233,7 @@ final class StoryVideoPlayback: ObservableObject {
                 guard let self else { return }
                 switch item.status {
                 case .readyToPlay: self.prepareStart()
-                case .failed: self.handleTerminalFailure(cause: mediaFailureCause(playerItem: item))
+                case .failed: self.handleTerminalFailure(cause: mediaVideoFailureCause(item: item))
                 default: break
                 }
             }
@@ -470,6 +419,10 @@ final class StoryVideoPlayback: ObservableObject {
     private func handleTerminalFailure(cause: String? = nil) {
         guard !terminalFailureReported else { return }
         terminalFailureReported = true
+        // Every failure carries a non-nil cause (D5, iOS-wide rule): item failures are mapped
+        // by the caller through `mediaVideoFailureCause`, anything else is delivery, not an
+        // author fault, and reports as network.
+        let cause = cause ?? "network"
         reportMediaLoadFailed(.video, cause: cause, campaignKey: campaignKey)
         player?.pause()
         showPlayerLayer = false
@@ -510,7 +463,7 @@ final class StoryVideoPlayback: ObservableObject {
             cancelPosterWork()
             return
         }
-        preparePosterFromCachedFileIfAvailable()
+        preparePosterIfAvailable()
         guard state.active, state.demand.needsPlayer, startPrepared else { return }
 
         if isThumbnail {
@@ -569,24 +522,15 @@ final class StoryVideoPlayback: ObservableObject {
         )
     }
 
-    private func preparePosterFromCachedFileIfAvailable() {
+    /// The poster path, repointed at the D2 asset (Q1): the frame is generated from the same
+    /// range-cached asset the player reads, so only the requested first range is fetched —
+    /// no whole-file download just to show a still.
+    private func preparePosterIfAvailable() {
         guard applicationActive,
               poster == nil,
               posterIdentity != nil else { return }
         if let localAsset {
             preparePoster(from: localAsset)
-            return
-        }
-        guard cachedPosterLookupTask == nil,
-              let remoteURL = URL(string: urlString) else { return }
-        cachedPosterLookupTask = Task { @MainActor [weak self] in
-            let cachedURL = await DigiaVideoFileCache.shared.cachedURL(for: remoteURL)
-            guard let self, !Task.isCancelled else { return }
-            self.cachedPosterLookupTask = nil
-            guard let cachedURL, self.localAsset == nil else { return }
-            let asset = AVURLAsset(url: cachedURL)
-            self.localAsset = asset
-            self.preparePoster(from: asset)
         }
     }
 
@@ -630,8 +574,6 @@ final class StoryVideoPlayback: ObservableObject {
     }
 
     private func cancelPosterWork() {
-        cachedPosterLookupTask?.cancel()
-        cachedPosterLookupTask = nil
         cancelPosterGeneration()
     }
 
