@@ -36,18 +36,6 @@ struct FloaterStoryOverlayView: View {
     }
 }
 
-/// The PiP's settle spring, in the same physical units.
-private let storySettleSpring = Animation.interpolatingSpring(mass: 1, stiffness: 210, damping: 24)
-
-private func storyEaseOutBack(duration: Double) -> Animation {
-    .timingCurve(0.34, 1.56, 0.64, 1, duration: duration)
-}
-private func storyEaseOutCubic(duration: Double) -> Animation {
-    .timingCurve(0.215, 0.61, 0.355, 1, duration: duration)
-}
-private func storyEaseIn(duration: Double) -> Animation {
-    .timingCurve(0.42, 0, 1, 1, duration: duration)
-}
 /// Flutter's `Curves.easeInOutQuart`, the curve `pip_renderer.dart` grows and collapses on — and
 /// the one the PiP's own expand already uses here. The story floater's hero shares it so the two
 /// floaters expand identically.
@@ -62,11 +50,7 @@ private struct FloaterStorySessionView: View {
     @ObservedObject private var canvasTheme = CampaignCanvasTheme.shared
     @Environment(\.colorScheme) private var colorScheme
 
-    @State private var dragTranslation: CGSize = .zero
-    @State private var isDragging = false
-    @State private var settleResidual: CGSize = .zero
-    @State private var flyOffsetFraction: CGSize = .zero
-    @State private var alpha: Double = 1
+    @StateObject private var window = FloatingWindow()
     /// 0 is "still the window", 1 is "full screen". One value for both directions, because the two
     /// are the same journey — a collapse interrupted by a re-open resumes from where it had got to
     /// rather than snapping back to the window first.
@@ -93,11 +77,18 @@ private struct FloaterStorySessionView: View {
             let safe = deviceGeometry.safeArea
             // In the device's own coordinates, so it means the same thing wherever the host app
             // put `DigiaHost`.
-            let resting = storyWindowRect(
-                config: config, screenSize: screenSize, safeInsets: safe,
+            let resting = floatingRestingRect(
+                size: .configured(
+                    widthFraction: config.window.widthFraction,
+                    aspectRatio: config.window.aspectRatio
+                ),
+                screenSize: screenSize,
+                safeInsets: FloatingWindowInsets(safe),
+                margin: config.window.margin,
+                position: config.window.position,
                 dragFraction: orchestrator.dragFraction
             )
-            let delta = isDragging ? dragTranslation : settleResidual
+            let delta = window.restingDelta
             // This reader's offset within the screen. Zero in the ordinary case — the view above
             // is full-bleed — but subtracted rather than assumed, so a host that nests `DigiaHost`
             // somewhere smaller still draws the window where the screen coordinates say it is
@@ -105,11 +96,11 @@ private struct FloaterStorySessionView: View {
             let globalOrigin = geo.frame(in: .global).origin
             // Deliberately unclamped during an active drag — a fast flick can carry the
             // box past the safe area while the finger is still moving, the same
-            // rubber-band feel the PiP has. `commitDrag` is what snaps it back.
+            // rubber-band feel the PiP has. `window.dragEnded` is what snaps it back.
             let left = resting.minX - globalOrigin.x
-                + delta.width + flyOffsetFraction.width * resting.width
+                + delta.width + window.flyOffsetFraction.width * resting.width
             let top = resting.minY - globalOrigin.y
-                + delta.height + flyOffsetFraction.height * resting.height
+                + delta.height + window.flyOffsetFraction.height * resting.height
             let activeTransition = orchestrator.storyOpen
                 ? config.behavior.expandTransition
                 : config.behavior.collapseTransition
@@ -175,12 +166,7 @@ private struct FloaterStorySessionView: View {
                     windowBox(width: resting.width)
                         .frame(width: resting.width, height: resting.height, alignment: .topLeading)
                         .clipShape(ClampedRoundedRectangle(cornerRadius: config.window.cornerRadiusDp))
-                        .shadow(
-                            color: config.window.shadow ? Color.black.opacity(0.45) : .clear,
-                            radius: config.window.shadow ? 12 : 0,
-                            x: 0,
-                            y: config.window.shadow ? 8 : 0
-                        )
+                        .floatingWindowShadow(applied: config.window.shadow)
                         .overlay(
                             ClampedRoundedRectangle(cornerRadius: config.window.cornerRadiusDp)
                                 .stroke(
@@ -203,7 +189,7 @@ private struct FloaterStorySessionView: View {
                         // it. Keyed on the phase rather than on `storyOpen` because a hero grows
                         // *out of* this box: cutting it the instant the flag flips would leave the
                         // story rising from a hole.
-                        .opacity(alpha * windowAlpha)
+                        .opacity(window.alpha * windowAlpha)
                 }
 
                 if viewerMounted {
@@ -491,14 +477,7 @@ private struct FloaterStorySessionView: View {
     private func handleDragChanged(_ translation: CGSize) {
         guard config.controls.draggable, !orchestrator.closing, !orchestrator.storyOpen
         else { return }
-        if !isDragging {
-            guard hypot(translation.width, translation.height) > 6 else { return }
-            // A new touch beats an in-flight spring: grabbing the window mid-bounce must
-            // take control immediately, not fight it.
-            isDragging = true
-            settleResidual = .zero
-        }
-        dragTranslation = translation
+        window.dragChanged(translation)
     }
 
     private func handleDragEnded(
@@ -509,92 +488,27 @@ private struct FloaterStorySessionView: View {
         safe: EdgeInsets
     ) {
         guard !orchestrator.closing else { return }
-        guard isDragging, hypot(translation.width, translation.height) > 6,
-              config.controls.draggable
-        else {
-            isDragging = false
-            dragTranslation = .zero
-            return
-        }
-
-        let margin = config.window.margin
-        let minX = safe.leading + margin.left
-        let maxX = screenSize.width - safe.trailing - margin.right - resting.width
-        let minY = safe.top + margin.top
-        let maxY = screenSize.height - safe.bottom - margin.bottom - resting.height
-        let spanX = maxX - minX
-        let spanY = maxY - minY
-
-        let visualLeft = resting.minX + translation.width
-        let visualTop = resting.minY + translation.height
-
-        var fx: CGFloat = spanX <= 0 ? 0 : ((visualLeft - minX) / spanX).clampedToStoryRange(0, 1)
-        var fy: CGFloat = spanY <= 0 ? 0 : ((visualTop - minY) / spanY).clampedToStoryRange(0, 1)
-        if config.controls.snapToCorner {
-            // The *projected* end of the flick, not where the finger left off — a quick
-            // flick often releases before the window visually crosses the half-way line.
-            let projectedLeft = resting.minX + predictedEndTranslation.width
-            let projectedTop = resting.minY + predictedEndTranslation.height
-            let projectedFx: CGFloat =
-                spanX <= 0 ? 0 : ((projectedLeft - minX) / spanX).clampedToStoryRange(0, 1)
-            let projectedFy: CGFloat =
-                spanY <= 0 ? 0 : ((projectedTop - minY) / spanY).clampedToStoryRange(0, 1)
-            fx = projectedFx >= 0.5 ? 1 : 0
-            fy = projectedFy >= 0.5 ? 1 : 0
-        }
-        let landingX = spanX <= 0 ? minX : minX + spanX * fx
-        let landingY = spanY <= 0 ? minY : minY + spanY * fy
-
-        orchestrator.moveTo(FloaterFraction(x: fx, y: fy))
-        isDragging = false
-        dragTranslation = .zero
-        // The resting rect has just jumped to the corner, so carry the visual position
-        // across as a residual and let the spring pull it in — otherwise the window
-        // teleports and only then animates.
-        settleResidual = CGSize(width: visualLeft - landingX, height: visualTop - landingY)
-        withAnimation(storySettleSpring) { settleResidual = .zero }
+        window.dragEnded(
+            translation: translation,
+            predictedEndTranslation: predictedEndTranslation,
+            resting: resting,
+            screenSize: screenSize,
+            safeInsets: FloatingWindowInsets(safe),
+            margin: config.window.margin,
+            draggable: config.controls.draggable,
+            snapToCorner: config.controls.snapToCorner,
+            onCommit: { orchestrator.moveTo($0) }
+        )
     }
 
     // MARK: - Entry/exit
 
     private func runEntryAnimation() {
-        let entry = config.window.entryAnimation
-        guard entry.type != .appear else {
-            alpha = 1
-            return
-        }
-        alpha = 0
-        let flies = entry.type == .flyIn
-        flyOffsetFraction = flies ? storyFlyOffset(entry.from) : .zero
-        let duration = Double(entry.durationMs) / 1000
-        // Arriving overshoots and settles, matching how releasing a drag feels.
-        withAnimation(flies ? storyEaseOutBack(duration: duration) : storyEaseOutCubic(duration: duration)) {
-            alpha = 1
-            flyOffsetFraction = .zero
-        }
+        window.runEntryAnimation(entry: config.window.entryAnimation, alreadyVisible: false)
     }
 
     private func runExitAnimation() {
-        let exit = config.window.exitAnimation
-        guard exit.type != .none else { return }
-        let flies = exit.type == .flyOut
-        let duration = Double(exit.durationMs) / 1000
-        // Leaving accelerates away: an overshoot on exit reads as a glitch, since there
-        // is nothing left on screen for it to settle against.
-        withAnimation(flies ? storyEaseOutCubic(duration: duration) : storyEaseIn(duration: duration)) {
-            alpha = 0
-            if flies { flyOffsetFraction = storyFlyOffset(exit.to) }
-        }
-    }
-
-    /// One window-length in the given direction, as a fraction of the window's own size.
-    private func storyFlyOffset(_ direction: FloaterFlyDirection) -> CGSize {
-        switch direction {
-        case .left: return CGSize(width: -1.4, height: 0)
-        case .right: return CGSize(width: 1.4, height: 0)
-        case .top: return CGSize(width: 0, height: -1.4)
-        case .bottom: return CGSize(width: 0, height: 1.4)
-        }
+        window.runExitAnimation(exit: config.window.exitAnimation, skipWhenCovered: false)
     }
 
     /// The × button's box, so the shield's tap does not also fire when the × is tapped.
@@ -608,46 +522,5 @@ private struct FloaterStorySessionView: View {
                 width: size, height: size
             )
         ]
-    }
-}
-
-/// The window's rect for the given screen size.
-///
-/// Width is a fraction of the screen and height follows the authored aspect ratio — which
-/// the dashboard derives from the window canvas's own shape, so the box is always the box
-/// the author drew. Margins apply inside the safe area, so a top-corner window clears the
-/// status bar and notch and a bottom one clears the home indicator.
-private func storyWindowRect(
-    config: FloaterStoryConfig, screenSize: CGSize, safeInsets: EdgeInsets,
-    dragFraction: FloaterFraction?
-) -> CGRect {
-    let width = screenSize.width * config.window.widthFraction
-    let height = width / config.window.aspectRatio
-    let margin = config.window.margin
-
-    let minX = safeInsets.leading + margin.left
-    let maxX = screenSize.width - safeInsets.trailing - margin.right - width
-    let minY = safeInsets.top + margin.top
-    let maxY = screenSize.height - safeInsets.bottom - margin.bottom - height
-
-    let left: CGFloat
-    let top: CGFloat
-    if let drag = dragFraction {
-        left = minX + (maxX - minX) * drag.x
-        top = minY + (maxY - minY) * drag.y
-    } else {
-        left = config.window.position.isRight ? maxX : minX
-        top = config.window.position.isBottom ? maxY : minY
-    }
-    return CGRect(
-        x: left.clampedToStoryRange(minX, maxX < minX ? minX : maxX),
-        y: top.clampedToStoryRange(minY, maxY < minY ? minY : maxY),
-        width: width, height: height
-    )
-}
-
-extension Comparable {
-    fileprivate func clampedToStoryRange(_ lower: Self, _ upper: Self) -> Self {
-        min(max(self, lower), upper)
     }
 }
