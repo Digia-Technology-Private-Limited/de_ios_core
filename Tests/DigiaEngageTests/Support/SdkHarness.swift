@@ -205,11 +205,16 @@ final class SdkHarness {
     }
 
     /// What the CEP does when its campaign fires. The handle reports how the showing ended.
+    /// [metadata] is the CEP payload's metadata, e.g. a channel's template name.
     @discardableResult
-    func deliver(_ campaignKey: String, variables: [String: String]? = nil) throws -> CampaignPresentation {
+    func deliver(
+        _ campaignKey: String,
+        variables: [String: String]? = nil,
+        metadata: [String: String] = [:]
+    ) throws -> CampaignPresentation {
         let host = try #require(plugin.host, "No CEP plugin attached")
         return host.deliver(CEPTriggerPayload(
-            cepCampaignId: "cep-\(campaignKey)", campaignKey: campaignKey, cepMetadata: [:],
+            cepCampaignId: "cep-\(campaignKey)", campaignKey: campaignKey, cepMetadata: metadata,
             variables: variables))
     }
 
