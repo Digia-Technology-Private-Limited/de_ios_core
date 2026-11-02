@@ -2235,21 +2235,25 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         questionViewedAt.removeValue(forKey: viewedKey)
         let scaleBounds = block.flatMap(Self.scaleBounds)
         let typeWire = block?.type.rawValue
-        // Free text never leaves the device in an analytics event (161).
-        let openEnded = Self.openEndedQuestionTypes.contains(typeWire ?? "")
+        // Free text never leaves the device in an analytics event.
+        let openEnded = block.map { Self.openEndedQuestionTypes.contains($0.type) } ?? false
         var sanitizedAnswer = answer
         sanitizedAnswer.removeValue(forKey: "comment")
+        let answerValue: String? = openEnded ? nil : values.first
+        let answerText: String? = openEnded ? nil : (values.isEmpty ? nil : values.joined(separator: ", "))
+        let answerLabel: String? = openEnded ? nil : block.flatMap { Self.answerLabel(block: $0, values: values) }
+        let answerOptions: [String]? = openEnded ? nil : (values.count > 1 ? values : nil)
         events.toDigia(
             SurveyEvent.QuestionAnswered(
                 questionId: stepId,
                 questionTitle: block.flatMap(Self.questionTitle),
                 questionType: typeWire,
-                answerValue: openEnded ? nil : values.first,
-                answerText: openEnded ? nil : (values.isEmpty ? nil : values.joined(separator: ", ")),
+                answerValue: answerValue,
+                answerText: answerText,
                 blockType: typeWire,
                 blockId: block?.id,
-                answerLabel: openEnded ? nil : block.flatMap { Self.answerLabel(block: $0, values: values) },
-                answerOptions: openEnded ? nil : (values.count > 1 ? values : nil),
+                answerLabel: answerLabel,
+                answerOptions: answerOptions,
                 scaleMin: scaleBounds?.min,
                 scaleMax: scaleBounds?.max,
                 timeToAnswerMs: timeToAnswerMs,
@@ -3541,9 +3545,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
-    /// Open-ended wire types whose answers are free text: analytics omits them (161).
-    private static let openEndedQuestionTypes: Set<String> = [
-        "short_text", "long_text", "number", "email", "date"
+    /// Open-ended block types whose answers are free text: analytics omits them.
+    /// Matched on the enum so a wire-spelling change cannot silently re-leak
+    /// free text.
+    private static let openEndedQuestionTypes: Set<SurveyBlockType> = [
+        .shortText, .longText, .number, .email, .date
     ]
 
     /// Stable per-question key for `questionViewedAt`. Scoped by survey token
