@@ -114,10 +114,8 @@ done
 # --- 2b. embed consolidated privacy manifest -------------------------------
 # Statically merging the deps drops their individual PrivacyInfo.xcprivacy
 # bundles, so ship ONE consolidated manifest at each framework root (Apple's
-# expectation for a merged binary SDK). The single source of truth is
-# Sources/DigiaEngage/Resources/PrivacyInfo.xcprivacy; its FileTimestamp entry
-# also covers the merged SDWebImage and Lottie, which declare only C617.1.
-PRIVACY="$ROOT/Sources/DigiaEngage/Resources/PrivacyInfo.xcprivacy"
+# expectation for a merged binary SDK). See FatBuild/PrivacyInfo.xcprivacy.
+PRIVACY="$FATDIR/PrivacyInfo.xcprivacy"
 [ -f "$PRIVACY" ] || { echo "ERROR: missing $PRIVACY"; exit 1; }
 echo "==> Embedding consolidated PrivacyInfo.xcprivacy"
 cp "$PRIVACY" "$DEVICE_FW/PrivacyInfo.xcprivacy"

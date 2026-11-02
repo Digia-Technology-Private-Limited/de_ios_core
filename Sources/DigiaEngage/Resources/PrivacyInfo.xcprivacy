@@ -1,31 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Privacy manifest for DigiaEngage. This is the single source of truth for every
-  distribution channel:
-    - SwiftPM and DigiaEngage-source.podspec bundle it from this Resources folder.
-    - Scripts/build-shared-xcframework.sh (slim) and Scripts/build-fat-xcframework.sh
-      (fat) copy it to the root of each framework slice.
-
-  Collected data (not used for tracking; linked to the user once the app calls
-  setUserId; purposes App Functionality and Analytics):
-    - Device ID              : IDFV, or a random UUID fallback (IdentityManager.swift)
-    - User ID                : the app's own ID passed to setUserId
-    - Product Interaction    : campaign interaction events and sessions
-    - Other Diagnostic Data  : sdk_health events
-    - Other User Content     : survey answers
-  Attributes and events the app passes (setUserAttributes, trackEvent) are chosen
-  by the app, so the app declares them.
-
-  Required-reason APIs:
-    - UserDefaults  (CA92.1) : DigiaEngage's own app-local defaults
-                               (storage/UserDefaultsLocalStorage.swift)
-    - FileTimestamp (C617.1) : DigiaEngage's video cache (utils/digia_video_streaming.swift).
-                               In the fat build it also covers the statically merged
-                               SDWebImage and Lottie disk caches, which declare only C617.1.
-  If you add code that touches another required-reason API (disk space, system boot
-  time, active keyboard) or collects another data type, add it here and keep the
-  data types aligned with the Flutter manifest (de_flutter_core ios/PrivacyInfo.xcprivacy).
+  Privacy manifest bundled by SwiftPM and DigiaEngage-source.podspec.
+  FileTimestamp (C617.1): DigiaEngage's video cache.
+  DigiaEngage does not track users. Collected data (linked to the user once the
+  app calls setUserId; used for App Functionality and Analytics): device ID,
+  user ID, campaign interactions, SDK health diagnostics and survey answers.
+  UserDefaults (CA92.1): DigiaEngage's own app-local state.
+  Keep this file identical in Sources/DigiaEngage/Resources, SharedBuild and FatBuild.
 -->
 <plist version="1.0">
 <dict>
@@ -105,18 +87,18 @@
 	<array>
 		<dict>
 			<key>NSPrivacyAccessedAPIType</key>
-			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
-			<key>NSPrivacyAccessedAPITypeReasons</key>
-			<array>
-				<string>CA92.1</string>
-			</array>
-		</dict>
-		<dict>
-			<key>NSPrivacyAccessedAPIType</key>
 			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
 				<string>C617.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
 			</array>
 		</dict>
 	</array>
