@@ -130,8 +130,8 @@ internal actor MediaRangeCacheStore {
     /// Serves a range progressively: stored bytes are emitted from disk and
     /// missing bytes are fetched and written as they arrive. `onData` receives
     /// exactly the requested window, in order. Cancelling the caller's task
-    /// stops a fetch this call started; a fetch shared with another reader
-    /// keeps running for that reader.
+    /// cancels a fetch this call started; co-waiters sharing that fetch also
+    /// observe cancellation.
     internal func serve(
         url: URL,
         offset: Int64,
@@ -247,7 +247,8 @@ internal actor MediaRangeCacheStore {
     }
 
     /// Fetches one missing range. Concurrent readers of the same range share a
-    /// single fetch; only the reader that started it cancels it. Returns the
+    /// single fetch; if the reader that started it is cancelled, the shared
+    /// fetch is cancelled and co-waiters observe cancellation. Returns the
     /// number of requested-window bytes emitted via `onData`.
     private func fetchRemote(
         url: URL,
