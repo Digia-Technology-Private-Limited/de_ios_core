@@ -387,6 +387,67 @@ struct MediaVideoBorrowTests {
         #expect(pool.heldKeys().isEmpty)
     }
 
+    // Fails if disappear never resets degrade state: without `degraded=false` a re-appear
+    // that re-obtains keeps rendering the still while invisibly holding the pool slot.
+    @Test("re-appear after eviction-degrade re-obtains and renders video")
+    func reappearAfterEvictionDegradeReobtains() async {
+        let factory = MediaVideoFakeFactory()
+        let pool = mediaVideoTestPool(factory: factory)
+        let borrower = coordinator(pool: pool)
+        let url = mediaTestFileURL("clip.mp4").absoluteString
+        borrower.appear(spec: spec(url: url), playing: false, campaignKey: nil)
+        #expect(borrower.showPlayer)
+
+        pool.release()
+
+        #expect(await waitUntilMedia { borrower.degraded })
+        #expect(borrower.activePlayer == nil)
+        borrower.disappear()
+        #expect(pool.heldKeys().isEmpty)
+
+        borrower.appear(spec: spec(url: url), playing: false, campaignKey: nil)
+
+        #expect(borrower.activePlayer != nil)
+        #expect(borrower.showPlayer)
+        #expect(!borrower.gaveUp)
+        #expect(factory.creates == 2)
+        #expect(pool.heldKeys() == ["story-7"])
+        borrower.disappear()
+        #expect(pool.heldKeys().isEmpty)
+    }
+
+    // Fails if degradeToStill never frees the hold: without the giveBack an invalid URL
+    // take-over after a hold keeps a pool slot while only showing the still.
+    @Test("an invalid url after a hold shows the still and frees the pool slot")
+    func invalidURLAfterHoldFreesPoolSlot() {
+        let factory = MediaVideoFakeFactory()
+        let pool = mediaVideoTestPool(factory: factory)
+        let borrower = coordinator(pool: pool)
+        var causes: [String] = []
+        borrower.appear(
+            spec: spec(url: mediaTestFileURL("clip.mp4").absoluteString),
+            playing: false,
+            campaignKey: nil,
+            onError: { causes.append($0) }
+        )
+        #expect(pool.heldKeys() == ["story-7"])
+
+        borrower.appear(
+            spec: spec(url: "{{campaign.video}}"),
+            playing: false,
+            campaignKey: nil,
+            onError: { causes.append($0) }
+        )
+
+        #expect(borrower.activePlayer == nil)
+        #expect(borrower.showPlayer == false)
+        #expect(borrower.gaveUp)
+        #expect(causes == ["invalid_url"])
+        #expect(pool.heldKeys().isEmpty)
+        borrower.disappear()
+        #expect(pool.heldKeys().isEmpty)
+    }
+
     // Fails if a same-key re-appear re-points: without the pool handover + take-over skip the
     // borrowed frame is lost on every re-show (rotation, PIP drag).
     @Test("the same key and url hands over the same player without re-pointing")

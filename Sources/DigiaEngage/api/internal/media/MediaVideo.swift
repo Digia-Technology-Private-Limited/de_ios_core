@@ -261,6 +261,8 @@ internal final class MediaVideoCoordinator: ObservableObject {
     func disappear() {
         spinnerTask?.cancel()
         spinnerTask = nil
+        degraded = false
+        gaveUpFired = false
         if let key = holdingKey {
             pool?.giveBack(key: key)
             holdingKey = nil
@@ -412,6 +414,10 @@ internal final class MediaVideoCoordinator: ObservableObject {
     }
 
     private func degradeToStill(cause: String) {
+        if let key = holdingKey {
+            pool?.giveBack(key: key)
+            holdingKey = nil
+        }
         failed = true
         showSpinner = false
         spinnerTask?.cancel()
