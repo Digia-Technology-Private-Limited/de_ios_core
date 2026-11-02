@@ -296,9 +296,13 @@ struct AnalyticsServiceTests {
         #expect(entries[1].payload["event_name"] as? String == "Digia Experience Clicked")
         #expect(entries[2].payload["event_name"] as? String == "Digia Experience Dismissed")
 
-        // element_id is a hoisted top-level column, present only for Clicked.
-        #expect(entries[1].payload["element_id"] as? String == "cta-btn")
+        // element_id stays inside properties only — never hoisted top-level
+        // (parity with android/flutter, which never send the top-level key).
+        #expect(entries[1].payload["element_id"] == nil)
         #expect(entries[0].payload["element_id"] == nil)
+        #expect(
+            (entries[1].payload["properties"] as? [String: Any])?["element_id"] as? String
+                == "cta-btn")
     }
 
     @Test("impression_id groups the events of one showing, and is absent when there is none")
