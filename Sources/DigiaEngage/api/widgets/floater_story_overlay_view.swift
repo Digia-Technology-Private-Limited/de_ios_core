@@ -387,6 +387,7 @@ private struct FloaterStorySessionView: View {
             // open. So this adds granularity rather than replacing a signal.
             .environment(\.canvasInteractions, CanvasInteractionReporter { interaction in
                 let payload = state.payload
+                // `.storyPageDismissed`/`.storyCompleted` are retained defensively — the session reporter owns dismiss/completion.
                 switch interaction {
                 case let .storyPageViewed(index, total):
                     SDKInstance.shared.reportStoryStepViewed(
@@ -956,13 +957,8 @@ private struct FloaterStoryContentViewer: View {
 
     private func next() {
         resetTiming()
-        if currentIndex < pages.count - 1 {
-            session.showPage(index: currentIndex + 1)
-        } else if restartOnCompleted {
-            session.showPage(index: 0)
-        } else {
-            session.advance()
-        }
+        // Completion (once-only) + restart/dismiss live in `session.advance()` — never bypass it.
+        session.advance()
     }
 
     private func previous() {
