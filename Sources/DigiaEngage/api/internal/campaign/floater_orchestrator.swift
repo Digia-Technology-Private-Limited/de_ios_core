@@ -9,15 +9,16 @@ private let log = DigiaLogger()
 
 // Ported from Flutter's `pip_orchestrator.dart` / Android's `FloaterOrchestrator.kt` —
 // method names and semantics mirror both 1:1 so all three SDKs stay in parity. Owns
-// the active floater — at most one at a time — and, critically, its media player.
+// the active floater — at most one at a time — and, critically, its media lease.
 //
-// **Why the player lives here and not in the view.** The floater grows from a small
+// **Why the lease lives here and not in the view.** The floater grows from a small
 // corner window into full screen. If the `AVPlayer` were created by the renderer
 // (`@State`, as `NudgeVideoView` does), that transition would risk disposing and
 // rebuilding it across a collapsed↔expanded view-identity change, restarting
-// playback. Hoisting it to the orchestrator means the view subtree may redraw freely
-// while the media surface is created once and released once — the "never
-// re-parented" rule the whole design rests on.
+// playback. Hoisting the lease to the orchestrator means the view subtree may redraw freely
+// while the media surface is borrowed once (under `pip-<campaignKey>`) and released once —
+// the "never re-parented" rule the whole design rests on. The window draws the same
+// leased instance, so a rotation remount resumes it instead of restarting.
 //
 // This orchestrator deliberately does **not** take a display lock while collapsed: a
 // floater can sit on a screen for minutes, and blocking every other campaign for
@@ -27,6 +28,12 @@ private let log = DigiaLogger()
 enum FloaterSurface: Equatable {
     case collapsed, expanded
 }
+
+/// The pool key a PiP showing borrows under: `pip-<campaignKey>`. The orchestrator
+/// obtains the lease before the window shows and the window draws the same leased
+/// instance, so every remount (drag, rotation, collapse/expand) resumes it instead of
+/// restarting. Mirrors Android's `pipKeepAliveKey` exactly (same prefix, same input).
+func pipKeepAliveKey(_ campaignKey: String) -> String { "pip-\(campaignKey)" }
 
 /// Why a floater ended. Extends the shared dismiss vocabulary with the reasons only a
 /// screen-scoped floating surface can have. The iOS SDK has no existing
@@ -146,7 +153,15 @@ final class FloaterOrchestrator: ObservableObject {
     /// `badgeFrame`.
     @Published var activeRect: CGRect?
 
-    private(set) var player: AVPlayer?
+    /// The leased player the window draws: the `pip-<campaignKey>` borrow the
+    /// video showing holds, or `nil` for image/Lottie showings and once the showing
+    /// is torn down. Same instance from prefetch-warm through first-frame wait to
+    /// window render — the window never re-seeks, re-prepares or restarts it.
+    var player: AVPlayer? { videoState?.activePlayer }
+    /// The video showing's state (R2-FLOAT): the lease lives here, never in a bare
+    /// `AVPlayer` the orchestrator builds. Borrowed on appear (SDK pool, or the
+    /// `playerFactory` test pool), released on disappear/teardown.
+    private var videoState: MediaVideoState?
     /// The image `MediaPrefetch.warmImage` decoded, drawn by the window on its first frame.
     /// Warming (not rendering) through the shared image cache means the window's `MediaImage`
     /// shows it with no second fetch and no placeholder flash. `nil` for an animated image,
@@ -179,7 +194,6 @@ final class FloaterOrchestrator: ObservableObject {
     private(set) var lastStartFailureReason: String?
     /// `true` when the last start failed only because a floater already shows.
     private(set) var lastStartFailedBusy = false
-    private var statusObservation: NSKeyValueObservation?
     /// `addObserver(forName:object:queue:using:)` returns an opaque token that is
     /// *not* removable via `removeObserver(self, ...)` — that selector-based overload
     /// only matches observers registered the old way. The token itself must be
@@ -187,12 +201,28 @@ final class FloaterOrchestrator: ObservableObject {
     /// identical `loopObserver` pattern.
     private var endTimeObserverToken: NSObjectProtocol?
 
-    /// Overridable so tests can drive playback without a real `AVPlayer`/network: the
-    /// factory builds the player, which the orchestrator then points at a range-cache
-    /// item. `nil` (production) vends a bare pooled-style player from lane B's
-    /// `DefaultPlayerFactory` — `PlayerFactory` is the only place that creates an
-    /// `AVPlayer`, so canvas, floater and pool players all come from the one seam.
-    var playerFactory: (any PlayerFactory)?
+    /// Overridable so tests can drive playback without a real `AVPlayer`/network:
+    /// when set, the video showing borrows from a single-slot pool built with this
+    /// factory (under the same `pip-<campaignKey>`), so the leased player is still
+    /// the factory's — leases, never direct builds. `nil` (production) borrows
+    /// from the SDK pool through `mediaServices`. `PlayerFactory` stays the only
+    /// place that creates an `AVPlayer`.
+    var playerFactory: (any PlayerFactory)? {
+        didSet {
+            if let factory = playerFactory {
+                seamPool = VideoPlayerPool(factory: factory, maxPlayers: 1)
+            } else {
+                seamPool = nil
+            }
+        }
+    }
+    /// The pool a test showing borrows from while `playerFactory` is set. Internal
+    /// (not private) so lease tests can assert the borrow key and release pairing.
+    private(set) var seamPool: VideoPlayerPool?
+    /// The media services the video showing borrows through (D17: non-view code
+    /// receives its services directly). `sdkDefault` fronts the SDK pool, the shared
+    /// range-cache store and the health sink; tests override to observe or isolate.
+    var mediaServices = MediaServices.sdkDefault()
     /// Overridable so tests can warm media without the network: the real
     /// `DefaultMediaPrefetch` (warming the same stores the wrappers render through).
     /// `nil` (production) warms with the showing's campaign key for health attribution.
@@ -373,67 +403,77 @@ final class FloaterOrchestrator: ObservableObject {
         }
     }
 
+    /// Borrows the showing's player under `pip-<campaignKey>` and prepares it
+    /// (paused/muted at the authored level) before the window shows — the holder the
+    /// window then draws, so the handover never seeks, re-prepares or restarts.
+    /// The full spec lives in `Playback.volume`/mute/loop/autoplay (never in an
+    /// orchestrator write), matching Android's `preparePlayer` take-over.
     private func preparePlayer(_ active: ActiveFloaterState, url: String, token: Int64) {
-        guard let parsed = mediaUsableURL(url) else {
+        guard mediaUsableURL(url) != nil else {
             abandonMedia(token: token, reason: "invalid media url", cause: "invalid_url")
             return
         }
         let config = active.config
-        let p = (playerFactory ?? DefaultPlayerFactory()).makePlayer()
-        p.isMuted = muted
-        p.volume = config.media.volume
-        // The same item `MediaVideo` plays: range-cache-backed for remote URLs (one
-        // download serves playback and caching, D2), direct for `file://`.
-        p.replaceCurrentItem(with: Self.cachedItem(for: parsed))
-        player = p
+        // `fit` is view-applied (the layer gravity the window sets per state), so the
+        // spec carries a placeholder: the take-over never reads it.
+        let spec = VideoSpec(
+            url: url,
+            fit: .cover,
+            playback: Playback(
+                loop: config.media.loop,
+                autoplay: config.media.autoplay,
+                muted: muted,
+                volume: config.media.volume
+            )
+        )
+        let leaseKey = pipKeepAliveKey(active.campaign.campaignKey)
+        let showing = MediaVideoState(
+            spec: spec,
+            playing: config.media.autoplay,
+            keepAliveKey: leaseKey,
+            poolPriority: .onScreen,
+            pool: seamPool,
+            factory: playerFactory,
+            onReady: { [weak self] _ in self?.markVisible(token: token) },
+            // The state already reported the fault with the campaign key through
+            // `mediaServices`; the drop itself stays silent (nil cause = no-op),
+            // the same split the image/Lottie warms use.
+            onError: { [weak self] _ in
+                self?.abandonMedia(token: token, reason: "video failed to load")
+            },
+            // A refused borrow (demand exceeds supply) reports nothing by itself —
+            // the floater has no still to degrade to, so the campaign drops with
+            // the same decode-family cause Android reports for this path.
+            onGiveUp: { [weak self] in
+                self?.abandonMedia(
+                    token: token, reason: "player could not be obtained", cause: "decode")
+            }
+        )
+        videoState = showing
+        showing.appear(campaignKey: active.campaign.campaignKey, services: mediaServices)
+        // `appear` can abandon synchronously (refused borrow): a stale showing must
+        // not keep a state the teardown already released.
+        guard self.state?.token == token else { return }
 
-        // Attach the observer BEFORE anything else can race it — mirrors
-        // NudgeVideoView's identical comment on the same ordering. KVO fires on an
-        // arbitrary AVFoundation-owned thread, never guaranteed main, so every
-        // mutation of this @MainActor-isolated orchestrator must hop explicitly.
-        if let item = p.currentItem {
-            statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
-                Task { @MainActor in
-                    guard let self, self.state?.token == token else { return }
-                    switch item.status {
-                    case .readyToPlay:
-                        self.markVisible(token: token)
-                        if config.media.autoplay { self.player?.play() }
-                    case .failed:
-                        self.abandonMedia(
-                            token: token, reason: "video failed to load", cause: mediaFailureCause(playerItem: item)
-                        )
-                    default:
-                        break
+        // Mirrors the player's actual playing state, for the play/pause chrome button.
+        if let current = showing.activePlayer {
+            current.publisher(for: \.rate)
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] rate in self?.isPlaying = rate > 0 }
+                .store(in: &playingCancellables)
+            // Looping lives in the pool entry now (`setLooping` at take-over, cleared
+            // on giveBack): only a non-looping item needs its own end observer.
+            if !config.media.loop {
+                endTimeObserverToken = NotificationCenter.default.addObserver(
+                    forName: .AVPlayerItemDidPlayToEndTime, object: current.currentItem,
+                    queue: .main
+                ) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        self?.onVideoEnded(token: token)
                     }
                 }
             }
         }
-
-        if config.media.loop {
-            endTimeObserverToken = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self, self.state?.token == token else { return }
-                    self.player?.seek(to: .zero)
-                    self.player?.play()
-                }
-            }
-        } else {
-            endTimeObserverToken = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.onVideoEnded(token: token)
-                }
-            }
-        }
-
-        p.publisher(for: \.rate)
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] rate in self?.isPlaying = rate > 0 }
-            .store(in: &playingCancellables)
     }
 
     private var playingCancellables = Set<AnyCancellable>()
@@ -469,18 +509,6 @@ final class FloaterOrchestrator: ObservableObject {
                 self.abandonMedia(token: token, reason: "lottie failed to load")
             }
         }
-    }
-
-    /// The item a floater plays: range-cache-backed for remote URLs (one download serves
-    /// playback and caching, D2 — the same item `MediaVideo` builds), direct for `file://`.
-    private static func cachedItem(for url: URL) -> AVPlayerItem {
-        if url.isFileURL {
-            return AVPlayerItem(url: url)
-        }
-        if let item = SharedMediaResourceLoader.shared.playerItem(for: url) {
-            return item
-        }
-        return AVPlayerItem(url: url)
     }
 
     /// Watches for playback reaching the end so `onMediaEnd` can act on it. `loop`
@@ -686,13 +714,13 @@ final class FloaterOrchestrator: ObservableObject {
         everExpanded = false
         completed = false
         isPlaying = false
-        statusObservation?.invalidate()
-        statusObservation = nil
         playingCancellables.removeAll()
         if let endTimeObserverToken { NotificationCenter.default.removeObserver(endTimeObserverToken) }
         endTimeObserverToken = nil
-        player?.pause()
-        player = nil
+        // Releases the `pip-<campaignKey>` lease (idempotent: a post-eviction or
+        // already-released key is a silent no-op inside the lease).
+        videoState?.disappear()
+        videoState = nil
         preloadedImage = nil
     }
 
@@ -748,13 +776,11 @@ final class FloaterOrchestrator: ObservableObject {
         autoDismissTask = nil
         exitTask = nil
         mediaReadyTask = nil
-        statusObservation?.invalidate()
-        statusObservation = nil
         playingCancellables.removeAll()
         if let endTimeObserverToken { NotificationCenter.default.removeObserver(endTimeObserverToken) }
         endTimeObserverToken = nil
-        player?.pause()
-        player = nil
+        videoState?.disappear()
+        videoState = nil
         preloadedImage = nil
         state = nil
         surface = .collapsed
