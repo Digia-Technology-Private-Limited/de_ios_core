@@ -3,9 +3,9 @@ import SwiftUI
 // The story floater's showing, from routing to teardown.
 //
 // Deliberately much smaller than `FloaterOrchestrator`, and the reason is worth stating:
-// a PiP's whole design rests on owning an `AVPlayer` that outlives its view, because the
-// window grows into full screen without re-parenting the media. A story floater uses the
-// same visual idea for a different payload: its story viewer is mounted inside an
+// a PiP's whole design rests on holding a `pip-<campaignKey>` lease that outlives its view,
+// because the window grows into full screen without re-parenting the media. A story floater
+// uses the same visual idea for a different payload: its story viewer is mounted inside an
 // aperture that grows out of the floating canvas window, then shrinks back on close.
 //
 // Like the PiP's, it never takes the display lock: the window can sit on a screen for

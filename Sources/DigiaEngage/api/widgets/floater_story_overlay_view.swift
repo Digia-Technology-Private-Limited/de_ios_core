@@ -566,7 +566,7 @@ private struct FloaterStoryViewerReporter: StoryViewerReporter {
 /// `StoryItemConfig` (`canvasStoryItem`, the same mapping the rails read) and lets the viewer
 /// own timing, mute, borrowing and the download plan. Intended iOS differences: the viewer is
 /// a SwiftUI view over `StoryViewerSession` (Android's is a composable over its session); the
-/// mute toggle reaches the live player at once through `MediaVideo.setMuted` (the pre-T15
+/// mute toggle reaches the live player at once through `MediaVideoState.setMuted` (the pre-T15
 /// viewer dropped it — the hosted mute test now asserts the live mute); a pool re-borrow after
 /// a restart may hand back the same player object (the restart test asserts replay, not
 /// identity).
