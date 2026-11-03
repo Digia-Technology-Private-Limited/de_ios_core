@@ -18,8 +18,8 @@ extension HostedUITests {
 ///
 /// Flutter runs these on a fake clock; here page lengths and timeouts are measured on the wall
 /// clock and asserted inside a band. The bands are wider above than below: the viewer advances a
-/// page by counting 30 Hz timer ticks (`CanvasStoryViewer.startAuthoredTimer`), so a page runs
-/// long, never short, on a loaded machine. Flutter's fake player ends a clip on demand; here the
+/// page by counting 20 Hz timer ticks (`FloaterStoryContentViewer`'s 0.05 s timer, like F's inline
+/// viewer), so a page runs long, never short, on a loaded machine. Flutter's fake player ends a clip on demand; here the
 /// real player plays the Test Kit's `movie.mp4` and the test seeks it to its end.
 ///
 /// Port of `flutter/core/test/fixture_behaviour/surface_floater_test.dart`.
@@ -92,20 +92,21 @@ struct StoryFloaterBehaviourTests {
 
     // MARK: - floater_story_video_pages_mute_restart
 
-    /// Known gap, not a test problem: the story chrome's mute flips the viewer's state — its glyph
-    /// turns to "Mute" — but the video that is playing keeps its sound. The viewer hands the new
-    /// state to `InlineStoryVideoView(muted:)` (`CampaignCanvasStripViews.swift`), whose
-    /// `.onChange(of: muted)` should reach `StoryVideoPlayback.update`
-    /// (`inline_story_video_playback.swift`, `player?.isMuted = nextState.muted`); the live
-    /// `AVPlayer` drawn on screen still reports `isMuted == false`. Flutter mutes the live player.
-    /// The next video a page opens does start muted, so the choice still outlives the page. Marked
-    /// with `withKnownIssue`, so it fails the day the live player mutes, as the cue to drop it.
-    // Fails if: Sources/DigiaEngage/api/internal/canvas/CampaignCanvasStripViews.swift
-    // `CanvasStoryViewer.toggleMute` `muted.toggle()` is deleted.
-    // Fails if: CampaignCanvasStripViews.swift `CanvasStoryViewer` video `onFailed`
-    // `startAuthoredTimer()` is deleted (the unplayable page then never ends).
-    // Fails if: CampaignCanvasStripViews.swift `CanvasStoryViewer.step`
-    // `if loopToStart { index = 0; start() } else { onDismiss() }` -> `onDismiss()` only.
+    /// Mute follows the viewer session to the next video, and — since the T15 rewire onto the
+    /// shared viewer — reaches the live player at once: the toggle flows into
+    /// `MediaVideo.setMuted`, so the playing video goes quiet with the glyph. (The pre-rewire
+    /// viewer flipped only the glyph and dropped the state before the player; that gap is gone
+    /// since the rewire.) An unplayable page runs its authored 3 s, and the story starts over
+    /// once it has ended.
+    // Fails if: Sources/DigiaEngage/api/widgets/floater_story_overlay_view.swift
+    // `FloaterStoryContentViewer` `canvasStoryToggleMute` `session.muted.toggle()` is deleted.
+    // Fails if: Sources/DigiaEngage/api/internal/media/MediaVideo.swift `onChange(of: spec.muted)`
+    // `coordinator.setMuted(spec.muted)` is deleted (the glyph flips but the live player keeps sound).
+    // Fails if: floater_story_overlay_view.swift `FloaterStoryContentViewer` video `onFailed`
+    // `videoFailed = true` is deleted (the unplayable page then advances at once instead of
+    // running its authored 3 s).
+    // Fails if: floater_story_overlay_view.swift `FloaterStoryContentViewer.next`
+    // `session.showPage(index: 0)` -> `session.advance()` (the story ends instead of restarting).
     @Test("floater_story_video_pages_mute_restart: mute follows the viewer to the next video, an unplayable one runs its authored 3 s, and the story starts over once it has ended")
     func videoPagesMuteAndRestart() async throws {
         let (sdk, _) = try await boot("floater_story_video_pages_mute_restart")
@@ -127,9 +128,7 @@ struct StoryFloaterBehaviourTests {
         try await sdk.tap(id: "mute")
 
         try await sdk.waitUntil("the mute glyph flips") { sdk.floaterLabels(underId: "mute").contains("Mute") }
-        await withKnownIssue("iOS's story mute flips its glyph but not the playing video's sound") {
-            try await sdk.waitUntil("the live player is muted", timeout: 1.5) { first.isMuted }
-        }
+        try await sdk.waitUntil("the live player is muted", timeout: 1.5) { first.isMuted }
 
         // The clip plays to its end (seeked there): the page ends with it.
         let duration = try #require(first.currentItem?.duration.seconds)
@@ -148,10 +147,14 @@ struct StoryFloaterBehaviourTests {
         let third = floaterElapsed(since: thirdStart)
         #expect(third > 3.6 && third < 4.8, "the last page lasted \(third) s, authored 4 s")
         #expect(sdk.storyFloater.storyOpen, "restartOnCompleted: the story starts over")
+        // The last page (4 s, no video) ends the story, which restarts at page 0. The restart
+        // re-borrows page 0's pool player under its key (same key + same URL hands back the same
+        // object, seeked to 0), so the assertion is replay + the surviving mute, not identity —
+        // the old viewer built a fresh player per mount, the viewer builds none.
         try await sdk.waitUntil("page 0 plays again", timeout: 5) {
-            sdk.floaterPlayers(playing: "movie.mp4").contains { $0 !== first }
+            (sdk.floaterPlayers(playing: "movie.mp4").first?.rate ?? 0) > 0
         }
-        let again = try #require(sdk.floaterPlayers(playing: "movie.mp4").first { $0 !== first })
+        let again = try #require(sdk.floaterPlayers(playing: "movie.mp4").first)
         #expect(again.isMuted, "the choice outlives the page")
     }
 
