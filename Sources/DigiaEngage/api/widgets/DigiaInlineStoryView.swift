@@ -158,10 +158,8 @@ struct StoryThumbnailRailView: View {
                                 onFailed: { rail = rail.fail(index: index) },
                                 onOpen: open
                             )
-                        } else if item.type == .video {
-                            StoryThumbnailStill(item: item)
                         } else {
-                            StoryRemoteImage(urlString: item.url, fit: item.thumbnailBoxFit)
+                            StoryThumbnailStill(item: item)
                         }
                     }
                     .frame(width: cardWidth, height: cardHeight)
