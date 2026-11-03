@@ -147,14 +147,23 @@ let storyFirstBytes = 512 * 1_024
 /// Executes the byte half of a `StoryDownloadPlan`: video first-bytes/whole-file warming and
 /// image enqueueing, all through the `MediaPrefetch` protocol (lane H owns the implementation;
 /// until then the no-op stub keeps every call site compiling and every test deterministic).
-/// Player actions are NOT byte work — playback through the pool serves them.
+/// Player actions are pool leases when the caller wires `pool` + `keyOf` (R2-STORY): the
+/// driver holds a lease for every `.player` action under the same campaign-namespaced keys
+/// the pages borrow under, so a swipe hands over the same instance; callers that pass
+/// neither keep today's byte-only behavior.
 ///
 /// Stateful: `update` cancels in-flight work for indices the new plan no longer warms (bytes
 /// already on disk stay there) and starts work for newly wanted indices; already-running
-/// indices are left alone. Mirrors Android `StoryPlanDriver`.
+/// indices are left alone. Leases work the same way: indices that left the window are
+/// released (their bytes stay on disk — only the holder goes back), still-wanted indices
+/// keep their holder, and a re-obtain under a held key is the pool's share (same instance,
+/// raised priority). Mirrors Android `StoryPlanDriver`.
 final class StoryPlanDriver: @unchecked Sendable {
     private let lock = NSLock()
     private var tasks: [Int: Task<Void, Never>] = [:]
+    /// Neighbour pool leases by story index: the `.player` half of the plan. The mounted page
+    /// owns its own borrow; these keep the neighbours' holders warm.
+    private var leases: [Int: PlayerLease] = [:]
     private let prefetch: any MediaPrefetch
 
     init(prefetch: any MediaPrefetch = NoopMediaPrefetch()) {
@@ -164,7 +173,9 @@ final class StoryPlanDriver: @unchecked Sendable {
     func update(
         actions: [StoryDownloadPlan.Action],
         urlOf: @Sendable (Int) -> String,
-        isVideoOf: @Sendable (Int) -> Bool
+        isVideoOf: @Sendable (Int) -> Bool,
+        keyOf: (@Sendable (Int) -> String?)? = nil,
+        pool: VideoPlayerPool? = nil
     ) {
         lock.withLock { tasks = tasks.filter { !$0.value.isCancelled } }
         var wanted: [Int: @Sendable () async -> Void] = [:]
@@ -200,6 +211,50 @@ final class StoryPlanDriver: @unchecked Sendable {
             }
             lock.withLock { tasks[index] = task }
         }
+        updatePlayerLeases(actions: actions, urlOf: urlOf, keyOf: keyOf, pool: pool)
+    }
+
+    /// Holds one lease per `.player` action in plan (serving) order, releasing the indices
+    /// that left the window. A re-obtain under a held key is the pool's share — the fresh
+    /// share is dropped and the committed holder stays. A changed holder (eviction,
+    /// re-point) replaces the stale lease through the pool's identity check. A refused
+    /// borrow holds nothing: the page renders its still (D3) and the driver moves on.
+    /// Nil pool/keyOf keeps the byte-only behavior.
+    private func updatePlayerLeases(
+        actions: [StoryDownloadPlan.Action],
+        urlOf: (Int) -> String,
+        keyOf: ((Int) -> String?)?,
+        pool: VideoPlayerPool?
+    ) {
+        guard let pool, let keyOf else { return }
+        var wanted: [(index: Int, key: String, url: String, priority: PoolPriority)] = []
+        for action in actions {
+            guard case let .player(index, priority) = action else { continue }
+            guard let key = keyOf(index) else { continue }
+            wanted.append((index, key, urlOf(index), priority))
+        }
+        let wantedIndices = Set(wanted.map(\.index))
+        let stale: [PlayerLease] = lock.withLock {
+            var dropped: [PlayerLease] = []
+            for index in leases.keys where !wantedIndices.contains(index) {
+                if let lease = leases.removeValue(forKey: index) { dropped.append(lease) }
+            }
+            return dropped
+        }
+        stale.forEach { $0.release() }
+        for want in wanted {
+            guard let fresh = pool.obtainLease(
+                key: want.key, url: want.url, priority: want.priority
+            ) else { continue }
+            lock.withLock {
+                if let current = leases[want.index], current.player === fresh.player {
+                    fresh.release()
+                } else {
+                    leases[want.index]?.release()
+                    leases[want.index] = fresh
+                }
+            }
+        }
     }
 
     private func remove(index: Int) {
@@ -212,5 +267,10 @@ final class StoryPlanDriver: @unchecked Sendable {
             return Array(tasks.values)
         }
         running.forEach { $0.cancel() }
+        let held: [PlayerLease] = lock.withLock {
+            defer { leases.removeAll() }
+            return Array(leases.values)
+        }
+        held.forEach { $0.release() }
     }
 }
