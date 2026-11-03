@@ -815,7 +815,6 @@ private struct VideoThemeHarness: View {
     }
 }
 
-@MainActor
 private final class CanvasBorrowFakeFactory: PlayerFactory {
     func makePlayer() -> AVQueuePlayer { AVQueuePlayer() }
 }
