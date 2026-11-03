@@ -902,8 +902,8 @@ struct CanvasStoryRailRenderer: View {
                     isDark: isDark,
                     onAction: onAction,
                     onDismiss: { openIndex = nil },
-                    handoffKey: openHandoffKey,
-                    safeAreaInsets: activeFloaterWindowSafeAreaInsets
+                    safeAreaInsets: activeFloaterWindowSafeAreaInsets,
+                    handoffKey: openHandoffKey
                 )
                 .ignoresSafeArea()
             }
