@@ -96,6 +96,13 @@ struct StoryThumbnailStill: View {
 
 /// A playing rail video: a pool-borrowed `MediaVideo` plus its take-turns window driver.
 /// The still below covers every frame until the first one lands (never an empty layer).
+///
+/// Progress, play/pause and completion all read the owned `MediaVideoState` — never the raw
+/// player: the window driver polls `positionMs`/`durationMs`, play/pause flows through
+/// `playing`, and only the stall liveness check (`rate`, `waitingToPlay`) still reads the
+/// borrowed instance, which has no state equivalent. Window-start seeks go to the borrowed
+/// instance directly — `seekToStart` always targets zero, but a thumbnail window may start
+/// into the clip.
 @MainActor
 private struct StoryThumbnailVideo: View {
     let item: StoryItemConfig
@@ -112,7 +119,7 @@ private struct StoryThumbnailVideo: View {
     /// through `onError` first and keep routing to `onFailed`.
     let onEvicted: @MainActor @Sendable () -> Void
 
-    @State private var player: AVPlayer?
+    @StateObject private var video: MediaVideoState
     @State private var backgrounded = false
     @State private var driverTask: Task<Void, Never>?
     @State private var completed = false
@@ -130,13 +137,40 @@ private struct StoryThumbnailVideo: View {
     /// on the content. Reset on every new borrow.
     @State private var errored = false
 
+    init(
+        item: StoryItemConfig,
+        keepAliveKey: String,
+        playing: Bool,
+        repeatWindow: Bool,
+        reappearGeneration: Int,
+        onWindowCompleted: @escaping @MainActor @Sendable () -> Void,
+        onFailed: @escaping @MainActor @Sendable () -> Void,
+        onEvicted: @escaping @MainActor @Sendable () -> Void
+    ) {
+        self.item = item
+        self.keepAliveKey = keepAliveKey
+        self.playing = playing
+        self.repeatWindow = repeatWindow
+        self.reappearGeneration = reappearGeneration
+        self.onWindowCompleted = onWindowCompleted
+        self.onFailed = onFailed
+        self.onEvicted = onEvicted
+        _video = StateObject(wrappedValue: MediaVideoState(
+            spec: Self.spec(item: item, repeatWindow: repeatWindow),
+            playing: playing,
+            keepAliveKey: keepAliveKey,
+            poolPriority: .railThumb
+        ))
+    }
+
     private var startMs: Int64 { max(item.thumbnailPlayback.startTimeMs, 0) }
     private var windowMs: Int64? {
         item.thumbnailPlayback.durationMode == .fixed ? item.thumbnailPlayback.durationMs : nil
     }
 
-    private var spec: VideoSpec {
-        VideoSpec(
+    private static func spec(item: StoryItemConfig, repeatWindow: Bool) -> VideoSpec {
+        let startMs = max(item.thumbnailPlayback.startTimeMs, 0)
+        return VideoSpec(
             url: item.url,
             fit: item.thumbnailBoxFit.toMediaFit,
             playback: Playback(
@@ -150,6 +184,10 @@ private struct StoryThumbnailVideo: View {
         )
     }
 
+    private var spec: VideoSpec {
+        Self.spec(item: item, repeatWindow: repeatWindow)
+    }
+
     var body: some View {
         ZStack {
             // Q1 poster path, untouched: the generated frame (D2 asset) below the player.
@@ -159,26 +197,32 @@ private struct StoryThumbnailVideo: View {
             ) {
                 StoryPosterImage(image: poster, fit: item.thumbnailBoxFit)
             }
-            MediaVideo(
-                spec: spec,
-                keepAliveKey: keepAliveKey,
-                poolPriority: .railThumb,
-                playing: playing && !backgrounded,
-                onReady: { ready in
-                    player = ready
-                    errored = false
-                    startDriver(player: ready)
-                },
-                onError: { _ in errored = true },
-                onGiveUp: {
-                    stopDriver()
-                    if !gone {
-                        if errored { onFailed() } else { onEvicted() }
-                    }
-                }
-            )
+            MediaVideo(state: video)
         }
         .id(reappearGeneration)
+        .onAppear {
+            video.spec = spec
+            video.playing = playing && !backgrounded
+            video.onReady = { _ in
+                errored = false
+                startDriver()
+            }
+            video.onError = { _ in errored = true }
+            video.onGiveUp = {
+                stopDriver()
+                if !gone {
+                    if errored { onFailed() } else { onEvicted() }
+                }
+            }
+        }
+        .onChange(of: playing) { _ in video.playing = playing && !backgrounded }
+        .onChange(of: backgrounded) { _ in video.playing = playing && !backgrounded }
+        .onChange(of: video.firstFrameShown) { shown in
+            if shown {
+                errored = false
+                startDriver()
+            }
+        }
         .onDisappear {
             gone = true
             stopDriver()
@@ -193,37 +237,40 @@ private struct StoryThumbnailVideo: View {
 
     /// A remount (viewer close, config change) re-borrows under the same key: take-over seeks
     /// back to the window start and replays, so the rail resumes instead of freezing.
-    private func startDriver(player: AVPlayer) {
+    ///
+    /// Reads the state's playhead publishers, never the raw player: `positionMs`/`durationMs`
+    /// drive the window math; only the stall liveness check (`rate`, `waitingToPlay`) reads
+    /// the borrowed instance, which has no state equivalent. Window-start seeks go to the
+    /// borrowed instance directly — `seekToStart` always targets zero, but a thumbnail window
+    /// may start into the clip.
+    private func startDriver() {
         stopDriver()
         driverTask = Task { @MainActor in
-            var lastPosition = CMTime.zero
+            var lastPosition: Int64 = 0
             var lastProgressAt = Date()
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 100_000_000)
                 guard !Task.isCancelled else { return }
-                let position = player.currentTime()
-                let duration = player.currentItem?.duration ?? .indefinite
-                let durationMs = duration.isNumeric && duration.seconds.isFinite
-                    ? Int64(duration.seconds * 1_000) : 0
-                let positionMs = position.isNumeric && position.seconds.isFinite
-                    ? Int64(position.seconds * 1_000) : 0
+                let durationMs = video.durationMs
+                let positionMs = video.positionMs
                 if !startRevalidated, durationMs > 0 {
                     startRevalidated = true
                     if startMs > 0, startMs >= durationMs, !retriedAtZero {
                         retriedAtZero = true
-                        await player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+                        await seekActivePlayer(to: 0)
                         guard !Task.isCancelled else { return }
                     }
                 }
-                if position != lastPosition {
-                    lastPosition = position
+                if positionMs != lastPosition {
+                    lastPosition = positionMs
                     lastProgressAt = Date()
-                } else if player.timeControlStatus == .waitingToPlayAtSpecifiedRate {
+                } else if video.activePlayer?.timeControlStatus == .waitingToPlayAtSpecifiedRate {
                     lastProgressAt = Date()
-                } else if player.rate > 0, Date().timeIntervalSince(lastProgressAt) >= 10 {
+                } else if (video.activePlayer?.rate ?? 0) > 0,
+                          Date().timeIntervalSince(lastProgressAt) >= 10 {
                     if !retriedAtZero, startMs > 0 {
                         retriedAtZero = true
-                        await player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+                        await seekActivePlayer(to: 0)
                         guard !Task.isCancelled else { return }
                         lastProgressAt = Date()
                         continue
@@ -235,17 +282,15 @@ private struct StoryThumbnailVideo: View {
                 let effectiveStart = retriedAtZero ? 0 : startMs
                 let windowOver = windowMs.map { positionMs - effectiveStart >= $0 } ?? false
                 let streamEnded = durationMs > 0 && positionMs >= durationMs
-                    && player.timeControlStatus != .waitingToPlayAtSpecifiedRate
+                    && video.activePlayer?.timeControlStatus != .waitingToPlayAtSpecifiedRate
                 let reachedStart = effectiveStart == 0 || positionMs + 250 >= effectiveStart
                 if reachedStart, windowOver || streamEnded {
                     if !completed {
                         completed = true
                         if repeatWindow {
-                            await player.seek(to: CMTime(
-                                value: effectiveStart * 1_000, timescale: 1_000_000),
-                            toleranceBefore: .zero, toleranceAfter: .zero)
+                            await seekActivePlayer(to: effectiveStart)
                             guard !Task.isCancelled else { return }
-                            player.play()
+                            video.play()
                             completed = false
                         } else {
                             stopDriver()
@@ -256,6 +301,19 @@ private struct StoryThumbnailVideo: View {
                 }
             }
         }
+    }
+
+    /// Seeks the borrowed instance to a window-start millisecond offset. `MediaVideoState`
+    /// only offers `seekToStart` (zero), but a thumbnail window may start into the clip, so
+    /// the window math seeks here directly. Reads/writes nothing the state's take-over did
+    /// not already apply.
+    private func seekActivePlayer(to ms: Int64) async {
+        guard let player = video.activePlayer else { return }
+        await player.seek(
+            to: CMTime(value: ms * 1_000, timescale: 1_000_000),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
     }
 
     private func stopDriver() {
