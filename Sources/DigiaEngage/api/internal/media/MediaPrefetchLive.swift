@@ -28,10 +28,19 @@ struct DefaultMediaPrefetch: MediaPrefetch {
     /// The range cache video warms land in. Production leaves nil for the process-wide
     /// shared store; tests inject a store backed by a fake fetch client.
     var store: MediaRangeCacheStore?
+    /// Ambient services a surface hands down (D17). When set, the store and the
+    /// health hook come from here; when nil the two fields above behave exactly
+    /// as before. Non-view drivers receive their services directly instead.
+    var services: MediaServices? = nil
 
-    init(campaignKey: String? = nil, store: MediaRangeCacheStore? = nil) {
+    init(
+        campaignKey: String? = nil,
+        store: MediaRangeCacheStore? = nil,
+        services: MediaServices? = nil
+    ) {
         self.campaignKey = campaignKey
         self.store = store
+        self.services = services
     }
 
     func warmImage(_ url: String) async -> UIImage? {
@@ -61,10 +70,9 @@ struct DefaultMediaPrefetch: MediaPrefetch {
                                 finish(image)
                             } else {
                                 if let error {
-                                    reportMediaLoadFailed(
+                                    self.report(
                                         .image,
-                                        cause: mediaFailureCause(imageError: error) ?? "network",
-                                        campaignKey: self.campaignKey)
+                                        cause: mediaFailureCause(imageError: error) ?? "network")
                                 }
                                 finish(nil)
                             }
@@ -92,7 +100,7 @@ struct DefaultMediaPrefetch: MediaPrefetch {
         } catch is CancellationError {
             return 0
         } catch {
-            reportMediaLoadFailed(.video, cause: "network", campaignKey: campaignKey)
+            report(.video, cause: "network")
             return 0
         }
         if Task.isCancelled { return 0 }
@@ -111,7 +119,7 @@ struct DefaultMediaPrefetch: MediaPrefetch {
         } catch is CancellationError {
             return 0
         } catch {
-            reportMediaLoadFailed(.video, cause: "network", campaignKey: campaignKey)
+            report(.video, cause: "network")
             return 0
         }
         if Task.isCancelled { return 0 }
@@ -128,13 +136,20 @@ struct DefaultMediaPrefetch: MediaPrefetch {
         let loaded = await loadLottieSource(parsed)
         if Task.isCancelled { return false }
         if loaded.source != nil { return true }
-        reportMediaLoadFailed(
-            .lottie, cause: loaded.failureCause ?? "network", campaignKey: campaignKey)
+        report(.lottie, cause: loaded.failureCause ?? "network")
         return false
     }
 
     private var storeOrShared: MediaRangeCacheStore {
-        store ?? MediaRangeCacheStore.shared()
+        services?.store() ?? store ?? MediaRangeCacheStore.shared()
+    }
+
+    private func report(_ kind: HealthMediaKind, cause: String) {
+        if let services {
+            services.reportHealth(campaignKey, kind, cause)
+        } else {
+            reportMediaLoadFailed(kind, cause: cause, campaignKey: campaignKey)
+        }
     }
 
     /// The manager image warms go through: the shared cache, loaded through the shared

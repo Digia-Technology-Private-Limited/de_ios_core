@@ -123,3 +123,23 @@ final class SDKServices {
         analyticsService?.clear()
     }
 }
+
+/// The SDK wiring for the media layer's ambient services (D17): the default
+/// `MediaServices` fronts this container's pool plus the process-wide shared
+/// store, image stack and health sink, so hosts that provide nothing explicit
+/// behave exactly as before. The closures read `SDKInstance.shared` lazily —
+/// at borrow time, not at construction — so the environment default never
+/// captures a torn-down graph. `internal/media/` never names `SDKInstance`;
+/// this extension is the only place the two meet.
+extension MediaServices {
+    static func sdkDefault() -> MediaServices {
+        MediaServices(
+            pool: { MainActor.assumeIsolated { SDKInstance.shared.services?.videoPlayerPool } },
+            store: { MediaRangeCacheStore.shared() },
+            imageLoader: nil,
+            reportHealth: { campaignKey, kind, cause in
+                reportMediaLoadFailed(kind, cause: cause, campaignKey: campaignKey)
+            }
+        )
+    }
+}

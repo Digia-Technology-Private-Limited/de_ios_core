@@ -60,7 +60,7 @@ internal func deviceClassOf(processInfo: ProcessInfo = .processInfo) -> DeviceCl
     deviceClassFor(physicalMemoryBytes: processInfo.physicalMemory)
 }
 
-/// The one player pool per `SDKInstance` (D3): constructor-injected (`factory`,
+/// The one player pool per SDK initialization (D3): constructor-injected (`factory`,
 /// `maxPlayers`, `onEvict`), never global. Lazy: no player exists until the
 /// first `obtain`.
 ///

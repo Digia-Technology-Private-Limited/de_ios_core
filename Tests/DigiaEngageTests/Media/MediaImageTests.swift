@@ -25,13 +25,15 @@ struct MediaImageComponentTests {
     }()
 
     private func mount(_ spec: MediaSpec, box: CauseBox? = nil) -> UIWindow {
-        mountMedia(
+        var services = MediaServices.unconfigured
+        services.imageLoader = FakeImageLoader.shared
+        return mountMedia(
             MediaImage(
                 spec: spec,
                 onFailure: box.map { capture in { capture.record($0) } }
             )
             .environment(\.digiaCampaignKey, "test-campaign")
-            .environment(\.mediaImageLoader, FakeImageLoader.shared)
+            .environment(\.mediaServices, services)
             .frame(width: 200, height: 200)
         )
     }

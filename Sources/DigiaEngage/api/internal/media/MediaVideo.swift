@@ -144,6 +144,7 @@ internal final class MediaVideoCoordinator: ObservableObject {
     private let loader: MediaResourceLoader
     private let factory: any PlayerFactory
     private var pool: VideoPlayerPool?
+    private var services = MediaServices.unconfigured
     private var usesPool = false
     private var externalPlayer: AVPlayer?
     private var holdingKey: String?
@@ -191,15 +192,17 @@ internal final class MediaVideoCoordinator: ObservableObject {
         spec: MediaSpec,
         playing: Bool,
         campaignKey: String?,
+        services: MediaServices = .unconfigured,
         onReady: ((AVPlayer) -> Void)? = nil,
         onError: ((String) -> Void)? = nil,
         onGiveUp: (() -> Void)? = nil
     ) {
         self.campaignKey = campaignKey
+        self.services = services
         self.onReady = onReady
         self.onError = onError
         self.onGiveUp = onGiveUp
-        pool = poolOverride ?? SDKInstance.shared.services?.videoPlayerPool
+        pool = poolOverride ?? services.pool()
         usesPool = key != nil && externalPlayer == nil && pool != nil
         let urlChanged = lastURL != nil && lastURL != spec.url
         lastURL = spec.url
@@ -406,7 +409,7 @@ internal final class MediaVideoCoordinator: ObservableObject {
         showSpinner = false
         spinnerTask?.cancel()
         let cause = mediaVideoFailureCause(item: item)
-        reportMediaLoadFailed(.video, cause: cause, campaignKey: campaignKey)
+        services.reportHealth(campaignKey, .video, cause)
         if let cause {
             onError?(cause)
         }
@@ -422,7 +425,7 @@ internal final class MediaVideoCoordinator: ObservableObject {
         showSpinner = false
         spinnerTask?.cancel()
         activePlayer = nil
-        reportMediaLoadFailed(.video, cause: cause, campaignKey: campaignKey)
+        services.reportHealth(campaignKey, .video, cause)
         onError?(cause)
         noteGaveUp()
     }
@@ -508,6 +511,7 @@ internal struct MediaVideo: View {
     var onGiveUp: (() -> Void)? = nil
 
     @Environment(\.digiaCampaignKey) private var campaignKey
+    @Environment(\.mediaServices) private var mediaServices
     @StateObject private var coordinator: MediaVideoCoordinator
     private let blurStill: UIImage?
 
@@ -574,6 +578,7 @@ internal struct MediaVideo: View {
                 spec: spec,
                 playing: playing,
                 campaignKey: campaignKey,
+                services: mediaServices,
                 onReady: onReady,
                 onError: onError,
                 onGiveUp: onGiveUp
@@ -587,6 +592,7 @@ internal struct MediaVideo: View {
                 spec: spec,
                 playing: playing,
                 campaignKey: campaignKey,
+                services: mediaServices,
                 onReady: onReady,
                 onError: onError,
                 onGiveUp: onGiveUp

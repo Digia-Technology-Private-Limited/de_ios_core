@@ -387,6 +387,26 @@ struct MediaVideoBorrowTests {
         #expect(pool.heldKeys().isEmpty)
     }
 
+    // Fails if appear ignores the ambient services pool: without `services.pool()` a
+    // coordinator built with no override (the production view shape) never borrows
+    // and always falls back to an owned player.
+    @Test("appear borrows from the services pool when no override is set")
+    func appearBorrowsFromServicesPool() {
+        let factory = MediaVideoFakeFactory()
+        let pool = mediaVideoTestPool(factory: factory)
+        var services = MediaServices.unconfigured
+        services.pool = { pool }
+        let borrower = coordinator()
+        let spec = self.spec(url: mediaTestFileURL("clip.mp4").absoluteString)
+
+        borrower.appear(spec: spec, playing: false, campaignKey: nil, services: services)
+
+        #expect(borrower.activePlayer != nil)
+        #expect(pool.heldKeys() == ["story-7"])
+        borrower.disappear()
+        #expect(pool.heldKeys().isEmpty)
+    }
+
     // Fails if disappear never resets degrade state: without `degraded=false` a re-appear
     // that re-obtains keeps rendering the still while invisibly holding the pool slot.
     @Test("re-appear after eviction-degrade re-obtains and renders video")
@@ -572,10 +592,12 @@ struct MediaVideoComponentTests {
         pool: VideoPlayerPool? = nil,
         loader: MediaResourceLoader? = nil
     ) -> UIWindow {
-        mountMedia(
+        var services = MediaServices.unconfigured
+        services.imageLoader = FakeImageLoader.shared
+        return mountMedia(
             MediaVideo(spec: spec, keepAliveKey: key, playing: false, pool: pool, resourceLoader: loader)
                 .environment(\.digiaCampaignKey, "test-campaign")
-                .environment(\.mediaImageLoader, FakeImageLoader.shared)
+                .environment(\.mediaServices, services)
                 .frame(width: 200, height: 200)
         )
     }

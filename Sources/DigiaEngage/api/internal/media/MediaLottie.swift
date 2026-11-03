@@ -19,6 +19,7 @@ struct MediaLottie: View {
     var onFailure: ((String) -> Void)? = nil
 
     @Environment(\.digiaCampaignKey) private var campaignKey
+    @Environment(\.mediaServices) private var services
     @State private var source: LottieAnimationSource?
 
     private let blurStill: UIImage?
@@ -73,7 +74,7 @@ struct MediaLottie: View {
             // D5: every failure, network ones included, reports with a non-nil cause (see
             // MediaImage's onFailure for why the fallback is "network").
             let cause = loaded.failureCause ?? "network"
-            reportMediaLoadFailed(.lottie, cause: cause, campaignKey: campaignKey)
+            services.reportHealth(campaignKey, .lottie, cause)
             onFailure?(cause)
         }
     }
