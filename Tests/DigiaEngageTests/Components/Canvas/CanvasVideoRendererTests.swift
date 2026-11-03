@@ -73,7 +73,7 @@ struct CanvasVideoRendererTests {
             let probe = VideoRuntimeProbe()
             let window = mount(video: videoWidget(muted: muted), runtime: probe.runtime)
 
-            #expect(probe.madeURLs == [URL(string: "https://example.invalid/video.mp4")!])
+            #expect(probe.madeURLs == [MediaResourceLoader.assetURL(for: URL(string: "https://example.invalid/video.mp4")!)!])
             #expect(probe.players.count == 1)
             #expect(probe.players.first?.isMuted == muted)
             unmount(window)
@@ -189,8 +189,11 @@ struct CanvasVideoRendererTests {
 
             #expect(
                 probe.madeURLs.first?.absoluteString
-                    == (isDark
-                        ? "https://example.invalid/dark.mp4" : "https://example.invalid/light.mp4")
+                    == MediaResourceLoader.assetURL(
+                        for: URL(
+                            string: isDark
+                                ? "https://example.invalid/dark.mp4"
+                                : "https://example.invalid/light.mp4")!)!.absoluteString
             )
             unmount(window)
         }
@@ -201,7 +204,7 @@ struct CanvasVideoRendererTests {
             isDark: true,
             runtime: probe.runtime
         )
-        #expect(probe.madeURLs.first?.absoluteString == "https://example.invalid/light.mp4")
+        #expect(probe.madeURLs.first?.absoluteString == MediaResourceLoader.assetURL(for: URL(string: "https://example.invalid/light.mp4")!)!.absoluteString)
         unmount(window)
     }
 
@@ -224,15 +227,17 @@ struct CanvasVideoRendererTests {
         )
         let window = mount(controller)
 
-        #expect(probe.madeURLs.map(\.absoluteString) == ["https://example.invalid/light.mp4"])
+        #expect(probe.madeURLs.map(\.absoluteString) == [MediaResourceLoader.assetURL(for: URL(string: "https://example.invalid/light.mp4")!)!.absoluteString])
         #expect(probe.playCount == 1)
         theme.isDark = true
         ComponentTestHost.drainRunLoop(for: 0.3)
 
         #expect(
             probe.madeURLs.map(\.absoluteString) == [
-                "https://example.invalid/light.mp4",
-                "https://example.invalid/dark.mp4",
+                MediaResourceLoader.assetURL(
+                    for: URL(string: "https://example.invalid/light.mp4")!)!.absoluteString,
+                MediaResourceLoader.assetURL(
+                    for: URL(string: "https://example.invalid/dark.mp4")!)!.absoluteString,
             ])
         #expect(probe.pauseCount == 1)
         #expect(probe.playCount == 2)
@@ -254,7 +259,11 @@ struct CanvasVideoRendererTests {
         )
         defer { unmount(window) }
 
-        #expect(probe.madeURLs.first?.absoluteString == "https://example.invalid/welcome.mp4")
+        #expect(
+            probe.madeURLs.first?.absoluteString
+                == MediaResourceLoader.assetURL(for: URL(string: "https://example.invalid/welcome.mp4")!)!
+                    .absoluteString
+        )
     }
 
     // Mode A (spy): the spy must see no direct player, because the story engine takes over.

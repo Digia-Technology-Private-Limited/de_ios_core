@@ -1,9 +1,7 @@
 import AVFoundation
 internal import Lottie
-internal import SDWebImageSVGCoder
 import Foundation
 import Combine
-import ImageIO
 import UIKit
 
 /// The SDK's one logging style — see ``DigiaLogger``.
@@ -149,10 +147,10 @@ final class FloaterOrchestrator: ObservableObject {
     @Published var activeRect: CGRect?
 
     private(set) var player: AVPlayer?
-    /// The image `preloadImage` decoded, drawn by the window on its first frame. A second
-    /// load through `WebImage` showed its black placeholder and could drop the update that
-    /// swaps the image in, leaving the window black. `nil` for every other kind, and for an
-    /// SVG or animated image, which `WebImage` still loads so it renders and animates.
+    /// The image `MediaPrefetch.warmImage` decoded, drawn by the window on its first frame.
+    /// Warming (not rendering) through the shared image cache means the window's `MediaImage`
+    /// shows it with no second fetch and no placeholder flash. `nil` for an animated image,
+    /// which the view draws through the wrapper so it animates.
     @Published private(set) var preloadedImage: UIImage?
 
     /// `true` while another campaign or a host modal covers the window. Playback
@@ -189,8 +187,16 @@ final class FloaterOrchestrator: ObservableObject {
     /// identical `loopObserver` pattern.
     private var endTimeObserverToken: NSObjectProtocol?
 
-    /// Overridable so tests can drive playback without a real `AVPlayer`/network.
-    var playerFactory: ((String) -> AVPlayer)?
+    /// Overridable so tests can drive playback without a real `AVPlayer`/network: the
+    /// factory builds the player, which the orchestrator then points at a range-cache
+    /// item. `nil` (production) vends a bare pooled-style player from lane B's
+    /// `DefaultPlayerFactory` — `PlayerFactory` is the only place that creates an
+    /// `AVPlayer`, so canvas, floater and pool players all come from the one seam.
+    var playerFactory: (any PlayerFactory)?
+    /// Overridable so tests can warm media without the network: the real
+    /// `DefaultMediaPrefetch` (warming the same stores the wrappers render through).
+    /// `nil` (production) warms with the showing's campaign key for health attribution.
+    var prefetch: (any MediaPrefetch)?
     var now: () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }
 
     private static let mediaTimeoutMs: Int64 = 10_000
@@ -362,19 +368,23 @@ final class FloaterOrchestrator: ObservableObject {
         switch config.media.kind {
         case .video: preparePlayer(active, url: url, token: token)
         case .lottie: preloadLottie(url: url, token: token)
-        case .image, .gif: preloadImage(url: url, token: token)
+        case .image: preloadImage(url: url, token: token, animated: false)
+        case .gif: preloadImage(url: url, token: token, animated: true)
         }
     }
 
     private func preparePlayer(_ active: ActiveFloaterState, url: String, token: Int64) {
-        guard let parsed = URL(string: url) else {
+        guard let parsed = mediaUsableURL(url) else {
             abandonMedia(token: token, reason: "invalid media url", cause: "invalid_url")
             return
         }
         let config = active.config
-        let p = playerFactory?(url) ?? AVPlayer(playerItem: AVPlayerItem(url: parsed))
+        let p = (playerFactory ?? DefaultPlayerFactory()).makePlayer()
         p.isMuted = muted
         p.volume = config.media.volume
+        // The same item `MediaVideo` plays: range-cache-backed for remote URLs (one
+        // download serves playback and caching, D2), direct for `file://`.
+        p.replaceCurrentItem(with: Self.cachedItem(for: parsed))
         player = p
 
         // Attach the observer BEFORE anything else can race it — mirrors
@@ -428,51 +438,49 @@ final class FloaterOrchestrator: ObservableObject {
 
     private var playingCancellables = Set<AnyCancellable>()
 
-    private func preloadImage(url: String, token: Int64) {
-        DigiaImagePipeline.configureIfNeeded()
-        guard let parsed = URL(string: url) else {
-            abandonMedia(token: token, reason: "invalid media url", cause: "invalid_url")
-            return
-        }
-        // Plain URLSession, not SDWebImage's imperative loader — the latter's core
-        // (non-SwiftUI) module isn't an explicit Package.swift product dependency
-        // today, only SDWebImageSwiftUI is, and importing it unverified risks a
-        // build break with no way to catch it before a device build. The decoded
-        // image is kept in `preloadedImage` for the window to draw; only an SVG or
-        // animated image is fetched again by the renderer's `WebImage`.
-        let task = URLSession.shared.dataTask(with: parsed) { [weak self] data, response, _ in
-            let status = (response as? HTTPURLResponse)?.statusCode
-            Task { @MainActor in
-                guard let self, self.state?.token == token else { return }
-                if let data, let image = UIImage(data: data) {
-                    if !isAnimatedImage(data) { self.preloadedImage = image }
-                    self.markVisible(token: token)
-                } else if let data, SDImageSVGCoder.shared.decodedImage(with: data, options: nil) != nil {
-                    self.markVisible(token: token)
-                } else {
-                    self.abandonMedia(
-                        token: token, reason: "image failed to load", cause: mediaFailureCause(httpStatus: status)
-                    )
-                }
+    private func preloadImage(url: String, token: Int64, animated: Bool) {
+        let campaignKey = state?.campaign.campaignKey
+        Task { [weak self] in
+            let image = await (self?.prefetch ?? DefaultMediaPrefetch(campaignKey: campaignKey))
+                .warmImage(url)
+            guard let self, self.state?.token == token else { return }
+            if image != nil {
+                // An animated image has no single still: the view draws it through the
+                // wrapper (warmed above, so its first render is a cache hit) instead.
+                if !animated { self.preloadedImage = image }
+                self.markVisible(token: token)
+            } else {
+                // Health already carries the prefetch's report (with this campaign's key);
+                // the drop itself is only a log.
+                self.abandonMedia(token: token, reason: "image failed to load")
             }
         }
-        task.resume()
     }
 
     private func preloadLottie(url: String, token: Int64) {
-        guard let parsed = URL(string: url) else {
-            abandonMedia(token: token, reason: "invalid media url", cause: "invalid_url")
-            return
-        }
+        let campaignKey = state?.campaign.campaignKey
         Task { [weak self] in
-            let loaded = await loadLottieSource(parsed)
+            let ok = await (self?.prefetch ?? DefaultMediaPrefetch(campaignKey: campaignKey))
+                .warmLottie(url)
             guard let self, self.state?.token == token else { return }
-            if loaded.source != nil {
+            if ok {
                 self.markVisible(token: token)
             } else {
-                self.abandonMedia(token: token, reason: "lottie failed to load", cause: loaded.failureCause)
+                self.abandonMedia(token: token, reason: "lottie failed to load")
             }
         }
+    }
+
+    /// The item a floater plays: range-cache-backed for remote URLs (one download serves
+    /// playback and caching, D2 — the same item `MediaVideo` builds), direct for `file://`.
+    private static func cachedItem(for url: URL) -> AVPlayerItem {
+        if url.isFileURL {
+            return AVPlayerItem(url: url)
+        }
+        if let item = SharedMediaResourceLoader.shared.playerItem(for: url) {
+            return item
+        }
+        return AVPlayerItem(url: url)
     }
 
     /// Watches for playback reaching the end so `onMediaEnd` can act on it. `loop`
@@ -761,11 +769,4 @@ final class FloaterOrchestrator: ObservableObject {
         completed = false
         isPlaying = false
     }
-}
-
-/// Whether `data` holds more than one frame (an animated GIF, APNG or WebP). `UIImage(data:)`
-/// keeps only the first, so such an image is left to `WebImage`, which animates it.
-private func isAnimatedImage(_ data: Data) -> Bool {
-    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return false }
-    return CGImageSourceGetCount(source) > 1
 }
