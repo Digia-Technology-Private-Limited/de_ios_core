@@ -75,6 +75,7 @@ struct DefaultMediaPrefetch: MediaPrefetch {
                 if Task.isCancelled { gate.cancel() }
             }
         } onCancel: {
+            gate.cancel()
         }
     }
 
