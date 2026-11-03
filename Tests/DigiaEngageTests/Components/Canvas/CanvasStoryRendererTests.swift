@@ -271,79 +271,10 @@ struct CanvasStoryRendererTests {
     }
 
     // MARK: - 7. Navigation & Interaction Mechanics
-
-    @Test("story navigation outcome on CanvasStoryViewer models tap back, advance, and completion bounds")
-    func storyStepNavigationOutcome() {
-        let totalPages = 3
-
-        // 1. Tapping left at page 0: delta -1 -> restarts current page
-        #expect(CanvasStoryViewer.navigationOutcome(
-            currentIndex: 0,
-            delta: -1,
-            pageCount: totalPages,
-            restartOnCompleted: false
-        ) == .restartCurrent)
-
-        // 2. Tapping right at page 0 -> advances to page 1
-        #expect(CanvasStoryViewer.navigationOutcome(
-            currentIndex: 0,
-            delta: 1,
-            pageCount: totalPages,
-            restartOnCompleted: false
-        ) == .advance(to: 1))
-
-        // 3. Tapping left at page 1 -> moves back to page 0
-        #expect(CanvasStoryViewer.navigationOutcome(
-            currentIndex: 1,
-            delta: -1,
-            pageCount: totalPages,
-            restartOnCompleted: false
-        ) == .advance(to: 0))
-
-        // 4. Tapping right at page 1 -> advances to page 2 (last page)
-        #expect(CanvasStoryViewer.navigationOutcome(
-            currentIndex: 1,
-            delta: 1,
-            pageCount: totalPages,
-            restartOnCompleted: false
-        ) == .advance(to: 2))
-
-        // 5. Tapping right at page 2 (last page, restartOnCompleted = false) -> completes and signals dismiss
-        #expect(CanvasStoryViewer.navigationOutcome(
-            currentIndex: 2,
-            delta: 1,
-            pageCount: totalPages,
-            restartOnCompleted: false
-        ) == .complete(loopToStart: false))
-
-        // 6. Tapping right at page 2 (last page, restartOnCompleted = true) -> completes and loops to page 0
-        #expect(CanvasStoryViewer.navigationOutcome(
-            currentIndex: 2,
-            delta: 1,
-            pageCount: totalPages,
-            restartOnCompleted: true
-        ) == .complete(loopToStart: true))
-    }
-
-
-    @Test("story viewer distinguishes dismissal from completion analytics")
-    func storyViewerAnalyticsAndDismissal() {
-        // Scenario 1: Early dismissal on page 1 of 3
-        let earlyDismiss = CanvasStoryViewer.dismissalInteraction(currentIndex: 1, pageCount: 3, completedReported: false)
-        #expect(earlyDismiss == .storyPageDismissed(index: 1, total: 3))
-
-        // Scenario 2: Close after already completed does not double-report
-        let completedDismiss = CanvasStoryViewer.dismissalInteraction(currentIndex: 2, pageCount: 3, completedReported: true)
-        #expect(completedDismiss == nil)
-
-        // Scenario 3: First completion reports storyCompleted
-        let completion = CanvasStoryViewer.completionInteraction(pageCount: 3, timeToCompleteMs: 4200, completedReported: false)
-        #expect(completion == .storyCompleted(total: 3, timeToCompleteMs: 4200))
-
-        // Scenario 4: Subsequent completion does not double-report
-        let repeatedCompletion = CanvasStoryViewer.completionInteraction(pageCount: 3, timeToCompleteMs: 8400, completedReported: true)
-        #expect(repeatedCompletion == nil)
-    }
+    // (Navigation now lives in F's StoryViewerSession: the canvas viewer calls showPage /
+    // advance / goBack on it. The hosted tests under MARK: 8 pin the resulting auto-advance,
+    // completion, looping, and CTA step-stamping end to end; the canvas-owned session →
+    // analytics mapping is pinned in CanvasStoryViewerReporterTests at the end of this file.)
 
     // MARK: - 8. Story Viewer Behavioral Tests
 
@@ -653,6 +584,30 @@ struct CanvasStoryRendererTests {
     @MainActor
     private func pumpRunLoop(_ seconds: TimeInterval = 0.04) {
         RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    }
+}
+
+// MARK: - Session → analytics mapping (the seam this lane owns)
+
+@MainActor
+@Suite("Canvas story viewer reporter", .tags(.media, .canvas))
+struct CanvasStoryViewerReporterTests {
+    @Test("session completion maps to storyCompleted with total and millis")
+    func completionMapsToStoryCompleted() {
+        var received: [CanvasInteraction] = []
+        let reporter = CanvasStoryViewerReporter(total: 3)
+        reporter.report = { received.append($0) }
+        reporter.onCompleted(total: 3, timeToCompleteMs: 4200)
+        #expect(received == [.storyCompleted(total: 3, timeToCompleteMs: 4200)])
+    }
+
+    @Test("session dismissal maps to storyPageDismissed with index")
+    func dismissalMapsToStoryPageDismissed() {
+        var received: [CanvasInteraction] = []
+        let reporter = CanvasStoryViewerReporter(total: 3)
+        reporter.report = { received.append($0) }
+        reporter.onDismissed(index: 1)
+        #expect(received == [.storyPageDismissed(index: 1, total: 3)])
     }
 }
 }
