@@ -141,8 +141,41 @@ internal final class VideoPlayerPool: @unchecked Sendable {
     /// when full, only by releasing a holder ranked strictly below `priority`
     /// (reported to `onEvict`). A newcomer that outranks nothing gets nil.
     func obtain(key: String, url: URL, priority: PoolPriority) -> AVPlayer? {
+        borrow(key: key, url: url, priority: priority)?.player
+    }
+
+    /// Borrows under a lease (D12): the same path every keyed showing uses,
+    /// with the share rule travelling on the lease — a second obtain of an
+    /// already-held key shares the committed holder's instance (re-pointed when
+    /// the URL changed), and only the committed holder's `release()` frees.
+    ///
+    /// Never traps or throws: an unusable URL reports `invalid_url` through
+    /// `onFailure` and answers nil; a refused borrow (demand exceeds supply)
+    /// answers nil with no report — the requester renders its still (D3).
+    /// Creation itself is infallible (a bare `AVQueuePlayer`, no I/O), so a
+    /// failure return never leaves a half-registered holder behind: nothing
+    /// was created, nothing is registered.
+    func obtainLease(
+        key: String,
+        url: String,
+        priority: PoolPriority,
+        onFailure: ((String) -> Void)? = nil
+    ) -> PlayerLease? {
+        guard let parsed = mediaUsableURL(url) else {
+            onFailure?("invalid_url")
+            return nil
+        }
+        guard let borrowed = borrow(key: key, url: parsed, priority: priority) else {
+            return nil
+        }
+        return PlayerLease(pool: self, key: key, player: borrowed.player, shared: borrowed.shared)
+    }
+
+    private func borrow(
+        key: String, url: URL, priority: PoolPriority
+    ) -> (player: AVPlayer, shared: Bool)? {
         var evictedKey: String?
-        let player: AVPlayer? = lock.withLock {
+        let borrowed: (player: AVPlayer, shared: Bool)? = lock.withLock {
             if var existing = holders[key] {
                 if existing.url != url {
                     existing.url = url
@@ -152,7 +185,7 @@ internal final class VideoPlayerPool: @unchecked Sendable {
                 seq &+= 1
                 existing.seq = seq
                 holders[key] = existing
-                return existing.player
+                return (existing.player, true)
             }
             if let reused = free.popLast() {
                 // A freed player always returns with looping cleared
@@ -165,7 +198,7 @@ internal final class VideoPlayerPool: @unchecked Sendable {
                     key: key, url: url, priority: priority,
                     player: reused, looper: nil, looping: false, seq: seq
                 )
-                return reused
+                return (reused, false)
             }
             if holders.count >= max(1, maxPlayers) {
                 guard let tail = evictableTailLocked(), tail.priority > priority else {
@@ -186,12 +219,12 @@ internal final class VideoPlayerPool: @unchecked Sendable {
                 key: key, url: url, priority: priority,
                 player: created, looper: nil, looping: false, seq: seq
             )
-            return created
+            return (created, false)
         }
         if let evictedKey {
             onEvict?(evictedKey)
         }
-        return player
+        return borrowed
     }
 
     /// Frees `key`'s player for reuse: stops any looping, pauses, keeps the
@@ -204,6 +237,23 @@ internal final class VideoPlayerPool: @unchecked Sendable {
             holder.looping = false
             holder.player.pause()
             free.append(holder.player)
+        }
+    }
+
+    /// Frees `key` only while it still holds exactly `player` (D12: the lease
+    /// release path). A post-eviction release finds no key; a stale release
+    /// after a later re-borrow finds a different player — both are silent
+    /// no-ops, never a throw, and a live holder is never freed by a stale
+    /// lease. A missing or mismatched key registers nothing.
+    func giveBackIfHeldBy(key: String, player: AVPlayer) {
+        lock.withLock {
+            guard let holder = holders[key], holder.player === player,
+                var freed = holders.removeValue(forKey: key)
+            else { return }
+            freed.looper = nil
+            freed.looping = false
+            freed.player.pause()
+            free.append(freed.player)
         }
     }
 
