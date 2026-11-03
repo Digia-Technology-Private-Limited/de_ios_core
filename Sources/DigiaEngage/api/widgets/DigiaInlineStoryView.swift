@@ -159,7 +159,7 @@ struct StoryThumbnailRailView: View {
                                 onOpen: open
                             )
                         } else {
-                            StoryThumbnailStill(item: item)
+                            StoryStillCard(item: item, index: index, onOpen: open)
                         }
                     }
                     .frame(width: cardWidth, height: cardHeight)
@@ -312,6 +312,22 @@ private extension StoryRailVisibility {
         return !changed.allSatisfy { index in
             eligibleIndices.contains(index) && cardFractions[index] == nil
         }
+    }
+}
+
+/// A non-playing rail card: its still, tappable to open with no handoff (the viewer
+/// builds fresh). The tap lives here — not on the card container — so a playing video
+/// keeps its single handoff tap inside `StoryThumbnail` and never opens twice.
+@MainActor
+private struct StoryStillCard: View {
+    let item: StoryItemConfig
+    let index: Int
+    let onOpen: @MainActor @Sendable (Int, String?) -> Void
+
+    var body: some View {
+        StoryThumbnailStill(item: item)
+            .contentShape(Rectangle())
+            .onTapGesture { onOpen(index, nil) }
     }
 }
 
