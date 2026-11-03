@@ -1,7 +1,6 @@
 import AVFoundation
 import AVKit
 internal import Lottie
-internal import SDWebImageSwiftUI
 import SwiftUI
 import UIKit
 
@@ -29,6 +28,11 @@ private struct CanvasVideoUsesStoryPlaybackKey: EnvironmentKey {
 /// The renderer, layout and `AVPlayerViewController` stay real in component tests. Only these
 /// process-bound effects are replaceable so autoplay, looping and teardown can be asserted without
 /// waiting for a remote stream or inferring behavior from a black video surface.
+///
+/// Player creation itself is NOT replaceable: the live adapter builds through lane B's
+/// `DefaultPlayerFactory` — `PlayerFactory` is the only place that creates an `AVPlayer`, so
+/// canvas, floater and pool players all come from the one seam. Spies wrap the built player
+/// instead (see `VideoRuntimeProbe`).
 struct CanvasVideoRuntime: @unchecked Sendable {
     var makePlayer: @MainActor (AVPlayerItem) -> AVPlayer
     var play: @MainActor (AVPlayer) -> Void
@@ -36,7 +40,11 @@ struct CanvasVideoRuntime: @unchecked Sendable {
     var restart: @MainActor (AVPlayer) -> Void
 
     static let live = CanvasVideoRuntime(
-        makePlayer: { AVPlayer(playerItem: $0) },
+        makePlayer: {
+            let player = DefaultPlayerFactory().makePlayer()
+            player.replaceCurrentItem(with: $0)
+            return player
+        },
         play: { $0.play() },
         pause: { $0.pause() },
         restart: {
@@ -2005,7 +2013,12 @@ private struct CanvasVideoRenderer: View {
     private func setup(url: String) {
         guard !usesStoryPlayback else { return }
         guard player == nil, let parsed = URL(string: url), !url.isEmpty else { return }
-        let item = AVPlayerItem(url: parsed)
+        // The same item `MediaVideo` plays: range-cache-backed for remote URLs (one
+        // download serves playback and caching, D2), direct for `file://`. The canvas
+        // keeps its own renderer (frozen-frame goldens + native controls need the
+        // runtime seam `MediaVideo` has no room for — `media/` is frozen), but the
+        // bytes it plays travel the shared path.
+        let item = Self.cachedItem(for: parsed)
         let value = runtime.makePlayer(item)
         value.isMuted = muted
         player = value
@@ -2028,6 +2041,16 @@ private struct CanvasVideoRenderer: View {
         }
         if autoplay { runtime.play(value) }
     }
+    private static func cachedItem(for url: URL) -> AVPlayerItem {
+        if url.isFileURL {
+            return AVPlayerItem(url: url)
+        }
+        if let item = SharedMediaResourceLoader.shared.playerItem(for: url) {
+            return item
+        }
+        return AVPlayerItem(url: url)
+    }
+
     private func teardown() {
         if let player { runtime.pause(player) }
         player = nil
@@ -2336,7 +2359,6 @@ private struct FocalCanvasImage: View {
     var tint: CampaignColor? = nil
     var failureLabel: String? = nil
     @Environment(\.digiaVariables) private var variables
-    @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var failedURL: String?
 
     init(
@@ -2369,21 +2391,19 @@ private struct FocalCanvasImage: View {
             if let failureLabel { CanvasPlaceholder(label: failureLabel) }
         } else {
             GeometryReader { geometry in
-                WebImage(url: URL(string: resolved)) { image in
-                    image.resizable().renderingMode(tint == nil ? .original : .template)
-                } placeholder: {
-                    BlurHashPlaceholderView(placeholder: source.placeholder, fit: fit)
-                }
-                .onFailure { error in
-                    failedURL = resolved
-                    reportMediaLoadFailed(
-                        .image, cause: mediaFailureCause(imageError: error),
-                        campaignKey: campaignKey)
-                }
-                .modifier(CanvasImageFit(fit: fit))
-                .foregroundStyle(
-                    tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) } ?? .clear
+                // The wrapper owns fetch, BlurHash still, tint and health (with this
+                // canvas's campaign key, as before); the focal crop and scale stay here —
+                // they are canvas-authored layout, not media loading.
+                MediaImage(
+                    spec: MediaSpec(
+                        url: resolved,
+                        fit: canvasMediaFit(fit),
+                        blurHash: source.placeholder?.blurHash
+                    ),
+                    tintColor: tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) },
+                    onFailure: { _ in failedURL = resolved }
                 )
+                .modifier(CanvasImageFit(fit: fit))
                 .frame(
                     width: geometry.size.width, height: geometry.size.height,
                     alignment: focalAlignment(x: x, y: y)
@@ -2395,6 +2415,16 @@ private struct FocalCanvasImage: View {
             }
             .onChange(of: resolved) { _ in failedURL = nil }
         }
+    }
+}
+
+/// The wrapper-local fit for a canvas-authored fit value: `contain` letterboxes, `fill`
+/// stretches, anything else covers. The same mapping Android's canvas uses.
+private func canvasMediaFit(_ fit: String) -> MediaFit {
+    switch fit {
+    case "contain": .contain
+    case "fill": .fill
+    default: .cover
     }
 }
 
