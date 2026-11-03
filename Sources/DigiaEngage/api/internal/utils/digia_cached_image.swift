@@ -39,7 +39,7 @@ struct DigiaCachedImageView: View {
         ZStack {
             placeholder
             MediaImage(
-                spec: MediaSpec(url: url.absoluteString, fit: .fill),
+                spec: ImageSpec(url: url.absoluteString, fit: .fill),
                 tintColor: tintColor,
                 onSuccess: onSuccess,
                 onFailure: { _ in onFailure?() }

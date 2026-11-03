@@ -61,7 +61,7 @@ extension AVPlayer {
     /// through `onInvalidStart` (the caller degrades + reports `invalid_url`) and leaves the
     /// current item alone.
     internal func takeOver(
-        spec: MediaSpec,
+        spec: VideoSpec,
         resourceLoader: MediaResourceLoader,
         setLooping: (Bool) -> Void,
         onInvalidStart: () -> Void
@@ -73,14 +73,15 @@ extension AVPlayer {
         if !holdsOrigin(url) {
             replaceCurrentItem(with: Self.cachedItem(for: url, via: resourceLoader))
         }
-        setLooping(spec.loop)
-        isMuted = spec.muted
+        setLooping(spec.playback.loop)
+        volume = spec.playback.volume
+        isMuted = spec.playback.muted
         seek(
-            to: CMTime(value: Int64(max(spec.startMs, 0)), timescale: 1_000),
+            to: CMTime(value: Int64(max(spec.playback.startMs, 0)), timescale: 1_000),
             toleranceBefore: .zero,
             toleranceAfter: .zero
         )
-        if spec.autoplay {
+        if spec.playback.autoplay {
             play()
         } else {
             pause()
@@ -189,7 +190,7 @@ internal final class MediaVideoCoordinator: ObservableObject {
     /// A spec change while visible re-takes-over (the same player for a borrowed handover, a
     /// fresh player for an owned URL change — a released player is never reused).
     func appear(
-        spec: MediaSpec,
+        spec: VideoSpec,
         playing: Bool,
         campaignKey: String?,
         services: MediaServices = .unconfigured,
@@ -206,7 +207,7 @@ internal final class MediaVideoCoordinator: ObservableObject {
         usesPool = key != nil && externalPlayer == nil && pool != nil
         let urlChanged = lastURL != nil && lastURL != spec.url
         lastURL = spec.url
-        startMs = spec.startMs
+        startMs = spec.playback.startMs
         if let externalPlayer {
             attach(externalPlayer, spec: spec)
             setPlaying(playing)
@@ -280,7 +281,7 @@ internal final class MediaVideoCoordinator: ObservableObject {
 
     private func attach(
         _ player: AVPlayer,
-        spec: MediaSpec,
+        spec: VideoSpec,
         pool: VideoPlayerPool? = nil,
         poolKey: String? = nil,
         owned: AVQueuePlayer? = nil
@@ -437,7 +438,7 @@ internal final class MediaVideoCoordinator: ObservableObject {
         onGiveUp?()
     }
 
-    private func armSpinner(spec: MediaSpec) {
+    private func armSpinner(spec: VideoSpec) {
         spinnerTask?.cancel()
         showSpinner = false
         let nothingBetter = spec.posterURL == nil && spec.blurHash == nil
@@ -496,7 +497,7 @@ internal final class MediaVideoCoordinator: ObservableObject {
 /// `MediaImage` does: the wrapper knows nothing about campaigns (R-C), it only passes the
 /// key to health reporting.
 internal struct MediaVideo: View {
-    let spec: MediaSpec
+    let spec: VideoSpec
     var keepAliveKey: String? = nil
     var poolPriority: PoolPriority = .onScreen
     var playing: Bool = true
@@ -516,7 +517,7 @@ internal struct MediaVideo: View {
     private let blurStill: UIImage?
 
     init(
-        spec: MediaSpec,
+        spec: VideoSpec,
         keepAliveKey: String? = nil,
         poolPriority: PoolPriority = .onScreen,
         playing: Bool = true,
@@ -562,7 +563,7 @@ internal struct MediaVideo: View {
             if !coordinator.firstFrame, !coordinator.failed,
                let posterURL = spec.posterURL, !posterURL.isEmpty
             {
-                MediaImage(spec: MediaSpec(url: posterURL, fit: spec.fit))
+                MediaImage(spec: ImageSpec(url: posterURL, fit: spec.fit))
             }
             if coordinator.showPlayer, let active = coordinator.activePlayer {
                 MediaPlayerLayerView(player: active, gravity: spec.fit.videoGravity)
@@ -598,8 +599,8 @@ internal struct MediaVideo: View {
                 onGiveUp: onGiveUp
             )
         }
-        .onChange(of: spec.muted) { _ in
-            coordinator.setMuted(spec.muted)
+        .onChange(of: spec.playback.muted) { _ in
+            coordinator.setMuted(spec.playback.muted)
         }
         .onChange(of: playing) { _ in
             coordinator.setPlaying(playing)

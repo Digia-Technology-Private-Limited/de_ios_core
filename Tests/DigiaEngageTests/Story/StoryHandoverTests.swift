@@ -41,7 +41,7 @@ private func handoverCoordinator(
         resourceLoader: MediaResourceLoader()
     )
     coordinator.appear(
-        spec: MediaSpec(url: url.absoluteString, autoplay: true, muted: muted, startMs: startMs),
+        spec: VideoSpec(url: url.absoluteString, playback: Playback(autoplay: true, muted: muted, startMs: startMs)),
         playing: true,
         campaignKey: nil
     )

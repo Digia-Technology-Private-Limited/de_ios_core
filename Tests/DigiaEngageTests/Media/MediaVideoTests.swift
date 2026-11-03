@@ -150,7 +150,7 @@ struct MediaVideoTakeOverTests {
         var invalid = 0
 
         player.takeOver(
-            spec: MediaSpec(url: first.assetURLString, fit: .cover),
+            spec: VideoSpec(url: first.assetURLString, fit: .cover),
             resourceLoader: loader(),
             setLooping: { looped.append($0) },
             onInvalidStart: { invalid += 1 }
@@ -172,7 +172,7 @@ struct MediaVideoTakeOverTests {
         let secondURL = mediaTestFileURL("two.mp4")
 
         player.takeOver(
-            spec: MediaSpec(url: secondURL.absoluteString, fit: .cover),
+            spec: VideoSpec(url: secondURL.absoluteString, fit: .cover),
             resourceLoader: loader(),
             setLooping: { _ in },
             onInvalidStart: {}
@@ -190,7 +190,7 @@ struct MediaVideoTakeOverTests {
         player.isMuted = true
 
         player.takeOver(
-            spec: MediaSpec(url: mediaTestFileURL("v.mp4").absoluteString, muted: false),
+            spec: VideoSpec(url: mediaTestFileURL("v.mp4").absoluteString, playback: Playback(muted: false)),
             resourceLoader: loader(),
             setLooping: { _ in },
             onInvalidStart: {}
@@ -207,7 +207,7 @@ struct MediaVideoTakeOverTests {
         var looped: [Bool] = []
 
         player.takeOver(
-            spec: MediaSpec(url: mediaTestFileURL("v.mp4").absoluteString, loop: true),
+            spec: VideoSpec(url: mediaTestFileURL("v.mp4").absoluteString, playback: Playback(loop: true)),
             resourceLoader: loader(),
             setLooping: { looped.append($0) },
             onInvalidStart: {}
@@ -228,7 +228,7 @@ struct MediaVideoTakeOverTests {
         let player = AVPlayer()
 
         player.takeOver(
-            spec: MediaSpec(url: file.absoluteString, startMs: 500),
+            spec: VideoSpec(url: file.absoluteString, playback: Playback(startMs: 500)),
             resourceLoader: loader(),
             setLooping: { _ in },
             onInvalidStart: {}
@@ -250,7 +250,7 @@ struct MediaVideoTakeOverTests {
         var invalid = 0
 
         player.takeOver(
-            spec: MediaSpec(url: file.absoluteString, autoplay: false, startMs: -500),
+            spec: VideoSpec(url: file.absoluteString, playback: Playback(autoplay: false, startMs: -500)),
             resourceLoader: loader(),
             setLooping: { _ in },
             onInvalidStart: { invalid += 1 }
@@ -270,7 +270,7 @@ struct MediaVideoTakeOverTests {
         var invalid = 0
 
         player.takeOver(
-            spec: MediaSpec(url: "{{campaign.video}}"),
+            spec: VideoSpec(url: "{{campaign.video}}"),
             resourceLoader: loader(),
             setLooping: { _ in },
             onInvalidStart: { invalid += 1; causes.append("invalid_url") }
@@ -303,8 +303,8 @@ struct MediaVideoBorrowTests {
         )
     }
 
-    private func spec(url: String, loop: Bool = false) -> MediaSpec {
-        MediaSpec(url: url, loop: loop, autoplay: false)
+    private func spec(url: String, loop: Bool = false) -> VideoSpec {
+        VideoSpec(url: url, playback: Playback(loop: loop, autoplay: false))
     }
 
     // Fails if the owned path reuses the released player: without the fresh
@@ -587,7 +587,7 @@ struct MediaVideoComponentTests {
     }()
 
     private func mount(
-        _ spec: MediaSpec,
+        _ spec: VideoSpec,
         key: String? = "story-7",
         pool: VideoPlayerPool? = nil,
         loader: MediaResourceLoader? = nil
@@ -635,7 +635,7 @@ struct MediaVideoComponentTests {
         let pool = mediaVideoTestPool(factory: factory)
 
         let window = mount(
-            MediaSpec(url: url.absoluteString, posterURL: poster.absoluteString),
+            VideoSpec(url: url.absoluteString, posterURL: poster.absoluteString),
             pool: pool,
             loader: loader
         )
@@ -667,7 +667,7 @@ struct MediaVideoComponentTests {
         let loader = MediaResourceLoader(store: store)
 
         let window = mount(
-            MediaSpec(url: mediaTestRemoteURL("thumb.mp4").absoluteString),
+            VideoSpec(url: mediaTestRemoteURL("thumb.mp4").absoluteString),
             key: "rail-1",
             pool: pool,
             loader: loader
@@ -695,7 +695,7 @@ struct MediaVideoComponentTests {
         let pool = mediaVideoTestPool(factory: factory)
 
         let window = mount(
-            MediaSpec(url: mediaTestRemoteURL("slow.mp4").absoluteString),
+            VideoSpec(url: mediaTestRemoteURL("slow.mp4").absoluteString),
             pool: pool,
             loader: loader
         )

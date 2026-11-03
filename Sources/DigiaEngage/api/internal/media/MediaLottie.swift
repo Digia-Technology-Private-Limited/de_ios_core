@@ -14,7 +14,7 @@ internal import Lottie
 /// Never throws from the render path: a blank, templated or otherwise unusable URL degrades to
 /// the still without fetching and without reporting.
 struct MediaLottie: View {
-    let spec: MediaSpec
+    let spec: LottieSpec
     /// The fetch or parse failed. The argument is the same non-nil cause sent to health.
     var onFailure: ((String) -> Void)? = nil
 
@@ -24,7 +24,7 @@ struct MediaLottie: View {
 
     private let blurStill: UIImage?
 
-    init(spec: MediaSpec, onFailure: ((String) -> Void)? = nil) {
+    init(spec: LottieSpec, onFailure: ((String) -> Void)? = nil) {
         self.spec = spec
         self.onFailure = onFailure
         self.blurStill = spec.blurHash.flatMap { BlurHashDecoder.decode($0, width: 32, height: 32) }

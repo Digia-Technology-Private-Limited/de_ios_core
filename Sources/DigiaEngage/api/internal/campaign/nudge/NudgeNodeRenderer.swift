@@ -156,7 +156,7 @@ private struct NudgeImageView: View {
     // with the surface's campaign key (read from the environment by MediaImage).
     private var image: some View {
         MediaImage(
-            spec: MediaSpec(
+            spec: ImageSpec(
                 url: url,
                 fit: MediaFit(rawValue: node.fit.rawValue) ?? .cover,
                 blurHash: node.placeholder?.blurHash
@@ -391,7 +391,7 @@ private struct NudgeLottieView: View {
             // The wire carries no placeholder for Lottie, so the still below the
             // animation is empty — same as before, just owned by the wrapper.
             MediaLottie(
-                spec: MediaSpec(
+                spec: LottieSpec(
                     url: resolved,
                     fit: MediaFit(rawValue: node.fit.rawValue) ?? .cover,
                     loop: node.loop,
@@ -430,7 +430,7 @@ private struct NudgeCarouselView: View {
                     ForEach(0..<pageCount, id: \.self) { index in
                         // The carousel wire carries no per-image placeholder; the
                         // still below each page is empty — same as before.
-                        MediaImage(spec: MediaSpec(
+                        MediaImage(spec: ImageSpec(
                             url: images[index % images.count],
                             fit: .cover
                         ))
@@ -490,13 +490,11 @@ private struct NudgeVideoView: View {
     @State private var readyPlayer: AVPlayer? = nil
 
     private var url: String { interpolate(node.url, context: variables) }
-    private var spec: MediaSpec {
-        MediaSpec(
+    private var spec: VideoSpec {
+        VideoSpec(
             url: url,
             fit: node.boxFit.mediaFit,
-            loop: node.loop,
-            autoplay: node.autoplay,
-            muted: node.muted
+            playback: Playback(loop: node.loop, autoplay: node.autoplay, muted: node.muted)
         )
     }
 

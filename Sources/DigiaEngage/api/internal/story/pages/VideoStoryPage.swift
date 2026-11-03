@@ -26,15 +26,13 @@ struct VideoStoryPage: View {
     @State private var ended = false
     @State private var buffering = false
 
-    private var spec: MediaSpec {
-        MediaSpec(
+    private var spec: VideoSpec {
+        VideoSpec(
             url: item.url,
             fit: item.boxFit.toMediaFit,
             blurHash: item.thumbnailBlurHash,
             posterURL: item.thumbnailImageSource,
-            autoplay: true,
-            muted: muted,
-            startMs: 0
+            playback: Playback(autoplay: true, muted: muted, startMs: 0)
         )
     }
 
