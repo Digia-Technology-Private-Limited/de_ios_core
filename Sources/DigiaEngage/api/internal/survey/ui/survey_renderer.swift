@@ -1122,7 +1122,7 @@ private struct BlockMediaImage: View {
             // of an empty gap. The wrapper reports the failure with the survey's
             // campaign key (set on the environment by `SurveyRenderer`) — this
             // resolves the P0a survey-image silence.
-            MediaImage(spec: MediaSpec(
+            MediaImage(spec: ImageSpec(
                 url: media.url,
                 fit: fit,
                 blurHash: media.placeholder?.blurHash

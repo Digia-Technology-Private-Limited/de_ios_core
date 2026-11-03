@@ -11,7 +11,7 @@ struct ImageStoryPage: View {
     var body: some View {
         ZStack {
             Color.black
-            MediaImage(spec: MediaSpec(url: item.url, fit: item.boxFit.toMediaFit))
+            MediaImage(spec: ImageSpec(url: item.url, fit: item.boxFit.toMediaFit))
         }
         .onAppear { onReady() }
     }

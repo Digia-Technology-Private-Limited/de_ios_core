@@ -740,7 +740,7 @@ private struct ChoiceCardRow: View {
                         // The D5 still on error: a failed thumbnail keeps its
                         // BlurHash. The wrapper reports with the survey's campaign
                         // key from the environment.
-                        MediaImage(spec: MediaSpec(
+                        MediaImage(spec: ImageSpec(
                             url: media.url,
                             fit: .cover,
                             blurHash: media.placeholder?.blurHash

@@ -79,14 +79,14 @@ struct StoryThumbnailStill: View {
             case let .color(value):
                 Color(hex: value) ?? Color.mediaBackdrop
             case let .image(source, fit, placeholder):
-                MediaImage(spec: MediaSpec(
+                MediaImage(spec: ImageSpec(
                     url: source,
                     fit: fit.toMediaFit,
                     blurHash: placeholder?.type == .blurhash ? placeholder?.blurHash : nil
                 ))
             case nil:
                 if item.type != .video {
-                    MediaImage(spec: MediaSpec(url: item.url, fit: item.thumbnailBoxFit.toMediaFit))
+                    MediaImage(spec: ImageSpec(url: item.url, fit: item.thumbnailBoxFit.toMediaFit))
                 }
             }
         }
@@ -135,16 +135,18 @@ private struct StoryThumbnailVideo: View {
         item.thumbnailPlayback.durationMode == .fixed ? item.thumbnailPlayback.durationMs : nil
     }
 
-    private var spec: MediaSpec {
-        MediaSpec(
+    private var spec: VideoSpec {
+        VideoSpec(
             url: item.url,
             fit: item.thumbnailBoxFit.toMediaFit,
-            loop: repeatWindow
-                && item.thumbnailPlayback.durationMode == .full
-                && startMs == 0,
-            autoplay: true,
-            muted: true,
-            startMs: Int(startMs)
+            playback: Playback(
+                loop: repeatWindow
+                    && item.thumbnailPlayback.durationMode == .full
+                    && startMs == 0,
+                autoplay: true,
+                muted: true,
+                startMs: Int(startMs)
+            )
         )
     }
 

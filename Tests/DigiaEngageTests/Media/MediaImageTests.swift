@@ -24,14 +24,16 @@ struct MediaImageComponentTests {
         }
     }()
 
-    private func mount(_ spec: MediaSpec, box: CauseBox? = nil) -> UIWindow {
-        mountMedia(
+    private func mount(_ spec: ImageSpec, box: CauseBox? = nil) -> UIWindow {
+        var services = MediaServices.unconfigured
+        services.imageLoader = FakeImageLoader.shared
+        return mountMedia(
             MediaImage(
                 spec: spec,
                 onFailure: box.map { capture in { capture.record($0) } }
             )
             .environment(\.digiaCampaignKey, "test-campaign")
-            .environment(\.mediaImageLoader, FakeImageLoader.shared)
+            .environment(\.mediaServices, services)
             .frame(width: 200, height: 200)
         )
     }
@@ -50,7 +52,7 @@ struct MediaImageComponentTests {
         FakeImageLoader.set(.hang, for: target)
         let box = CauseBox()
 
-        let window = mount(MediaSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
+        let window = mount(ImageSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
         defer { ComponentTestHost.unmount(window) }
 
         #expect(await waitUntilMedia { FakeImageLoader.requestCount(for: target) > 0 })
@@ -72,7 +74,7 @@ struct MediaImageComponentTests {
         FakeImageLoader.set(.error(FakeImageLoader.httpError(status: 404)), for: target)
         let box = CauseBox()
 
-        let window = mount(MediaSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
+        let window = mount(ImageSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
         defer { ComponentTestHost.unmount(window) }
 
         #expect(await waitUntilMedia { !box.all.isEmpty })
@@ -93,7 +95,7 @@ struct MediaImageComponentTests {
         FakeImageLoader.set(.error(URLError(.notConnectedToInternet) as NSError), for: target)
         let box = CauseBox()
 
-        let window = mount(MediaSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
+        let window = mount(ImageSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
         defer { ComponentTestHost.unmount(window) }
 
         #expect(await waitUntilMedia { !box.all.isEmpty })
@@ -115,14 +117,14 @@ struct MediaImageComponentTests {
         FakeImageLoader.set(.image(Self.redDot), for: target)
         let red = RGB(r: 1, g: 0, b: 0)
 
-        let first = mount(MediaSpec(url: target.absoluteString))
+        let first = mount(ImageSpec(url: target.absoluteString))
         #expect(await waitUntilMedia {
             renderedCenter(first).map { pixelsNearly($0, red) } ?? false
         })
         #expect(FakeImageLoader.requestCount(for: target) == 1)
         ComponentTestHost.unmount(first)
 
-        let second = mount(MediaSpec(url: target.absoluteString))
+        let second = mount(ImageSpec(url: target.absoluteString))
         defer { ComponentTestHost.unmount(second) }
         #expect(await waitUntilMedia {
             renderedCenter(second).map { pixelsNearly($0, red) } ?? false
@@ -139,7 +141,7 @@ struct MediaImageComponentTests {
         let target = FakeImageLoader.url("slow.png")
         FakeImageLoader.set(.hang, for: target)
 
-        let window = mount(MediaSpec(url: target.absoluteString))
+        let window = mount(ImageSpec(url: target.absoluteString))
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { FakeImageLoader.requestCount(for: target) > 0 })
 

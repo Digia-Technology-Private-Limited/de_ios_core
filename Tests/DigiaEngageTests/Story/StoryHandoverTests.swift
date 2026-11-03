@@ -6,7 +6,7 @@ import Testing
 
 // The rail-to-viewer handover (T10): tapping a playing thumbnail reuses the SAME pool player in
 // the viewer (same key + same URL), reset to the start and unmuted, with no frame gap. Driven
-// through `MediaVideoCoordinator` (the same borrow both views use) with the real pool and a fake
+// through `MediaVideoState` (the same borrow both views use) with the real pool and a fake
 // factory — no network, no render host.
 
 private final class HandoverFakeFactory: PlayerFactory {
@@ -33,19 +33,20 @@ private func handoverCoordinator(
     url: URL,
     muted: Bool,
     startMs: Int = 0
-) -> MediaVideoCoordinator {
-    let coordinator = MediaVideoCoordinator(
+) -> MediaVideoState {
+    let state = MediaVideoState(
+        spec: VideoSpec(
+            url: url.absoluteString,
+            playback: Playback(autoplay: true, muted: muted, startMs: startMs)
+        ),
+        playing: true,
         keepAliveKey: key,
         poolPriority: priority,
         pool: pool,
         resourceLoader: MediaResourceLoader()
     )
-    coordinator.appear(
-        spec: MediaSpec(url: url.absoluteString, autoplay: true, muted: muted, startMs: startMs),
-        playing: true,
-        campaignKey: nil
-    )
-    return coordinator
+    state.appear(campaignKey: nil)
+    return state
 }
 
 @Suite("StoryHandover", .tags(.media, .unit, .inline))

@@ -96,7 +96,7 @@ struct FloaterMediaView: View {
                 .aspectRatio(contentMode: cover ? .fill : .fit)
         } else if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{") {
             MediaImage(
-                spec: MediaSpec(url: resolvedUrl, fit: cover ? .cover : .contain),
+                spec: ImageSpec(url: resolvedUrl, fit: cover ? .cover : .contain),
                 // An animated image has no single still: the wrapper draws it from
                 // the warmed cache so it animates instead of freezing.
                 preloaded: media.kind == .gif ? nil : preloadedImage

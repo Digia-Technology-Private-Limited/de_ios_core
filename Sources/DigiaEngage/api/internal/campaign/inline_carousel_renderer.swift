@@ -234,7 +234,7 @@ private struct InlineCarouselItemImage: View {
         // The D5 still on error: a failed page keeps its BlurHash instead of an
         // empty gap. The wrapper reports the failure with the payload's campaign
         // key (set on the environment by `makeView` above).
-        MediaImage(spec: MediaSpec(
+        MediaImage(spec: ImageSpec(
             url: item.imageUrl,
             fit: MediaFit(rawValue: item.fit.rawValue) ?? .cover,
             blurHash: item.placeholder?.blurHash

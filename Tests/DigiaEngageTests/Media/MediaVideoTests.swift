@@ -150,7 +150,7 @@ struct MediaVideoTakeOverTests {
         var invalid = 0
 
         player.takeOver(
-            spec: MediaSpec(url: first.assetURLString, fit: .cover),
+            spec: VideoSpec(url: first.assetURLString, fit: .cover),
             resourceLoader: loader(),
             setLooping: { looped.append($0) },
             onInvalidStart: { invalid += 1 }
@@ -172,7 +172,7 @@ struct MediaVideoTakeOverTests {
         let secondURL = mediaTestFileURL("two.mp4")
 
         player.takeOver(
-            spec: MediaSpec(url: secondURL.absoluteString, fit: .cover),
+            spec: VideoSpec(url: secondURL.absoluteString, fit: .cover),
             resourceLoader: loader(),
             setLooping: { _ in },
             onInvalidStart: {}
@@ -190,7 +190,7 @@ struct MediaVideoTakeOverTests {
         player.isMuted = true
 
         player.takeOver(
-            spec: MediaSpec(url: mediaTestFileURL("v.mp4").absoluteString, muted: false),
+            spec: VideoSpec(url: mediaTestFileURL("v.mp4").absoluteString, playback: Playback(muted: false)),
             resourceLoader: loader(),
             setLooping: { _ in },
             onInvalidStart: {}
@@ -207,7 +207,7 @@ struct MediaVideoTakeOverTests {
         var looped: [Bool] = []
 
         player.takeOver(
-            spec: MediaSpec(url: mediaTestFileURL("v.mp4").absoluteString, loop: true),
+            spec: VideoSpec(url: mediaTestFileURL("v.mp4").absoluteString, playback: Playback(loop: true)),
             resourceLoader: loader(),
             setLooping: { looped.append($0) },
             onInvalidStart: {}
@@ -228,7 +228,7 @@ struct MediaVideoTakeOverTests {
         let player = AVPlayer()
 
         player.takeOver(
-            spec: MediaSpec(url: file.absoluteString, startMs: 500),
+            spec: VideoSpec(url: file.absoluteString, playback: Playback(startMs: 500)),
             resourceLoader: loader(),
             setLooping: { _ in },
             onInvalidStart: {}
@@ -250,7 +250,7 @@ struct MediaVideoTakeOverTests {
         var invalid = 0
 
         player.takeOver(
-            spec: MediaSpec(url: file.absoluteString, autoplay: false, startMs: -500),
+            spec: VideoSpec(url: file.absoluteString, playback: Playback(autoplay: false, startMs: -500)),
             resourceLoader: loader(),
             setLooping: { _ in },
             onInvalidStart: { invalid += 1 }
@@ -270,7 +270,7 @@ struct MediaVideoTakeOverTests {
         var invalid = 0
 
         player.takeOver(
-            spec: MediaSpec(url: "{{campaign.video}}"),
+            spec: VideoSpec(url: "{{campaign.video}}"),
             resourceLoader: loader(),
             setLooping: { _ in },
             onInvalidStart: { invalid += 1; causes.append("invalid_url") }
@@ -291,35 +291,39 @@ private extension AVPlayerItem {
 @MainActor
 @Suite("MediaVideo borrow lifecycle", .tags(.media, .unit))
 struct MediaVideoBorrowTests {
-    private func coordinator(
+    private func state(
         key: String? = "story-7",
         pool: VideoPlayerPool? = nil,
         loader: MediaResourceLoader? = nil
-    ) -> MediaVideoCoordinator {
-        MediaVideoCoordinator(
+    ) -> MediaVideoState {
+        MediaVideoState(
+            spec: VideoSpec(url: ""),
+            playing: false,
             keepAliveKey: key,
             pool: pool,
             resourceLoader: loader ?? MediaResourceLoader()
         )
     }
 
-    private func spec(url: String, loop: Bool = false) -> MediaSpec {
-        MediaSpec(url: url, loop: loop, autoplay: false)
+    private func spec(url: String, loop: Bool = false) -> VideoSpec {
+        VideoSpec(url: url, playback: Playback(loop: loop, autoplay: false))
     }
 
     // Fails if the owned path reuses the released player: without the fresh
     // `factory.makePlayer()` on URL change the old (detached) item keeps showing.
     @Test("an owned url change never reuses the released player")
     func ownedURLChangeBuildsAFreshPlayer() {
-        let owner = coordinator(key: nil)
+        let owner = state(key: nil)
         let first = mediaTestFileURL("one.mp4").absoluteString
         let second = mediaTestFileURL("two.mp4").absoluteString
 
-        owner.appear(spec: spec(url: first), playing: false, campaignKey: nil)
+        owner.spec = spec(url: first)
+        owner.appear(campaignKey: nil)
         let released = owner.activePlayer
         #expect(released != nil)
 
-        owner.appear(spec: spec(url: second), playing: false, campaignKey: nil)
+        owner.spec = spec(url: second)
+        owner.appear(campaignKey: nil)
 
         #expect(owner.activePlayer !== released)
         #expect(released?.currentItem == nil)
@@ -336,11 +340,12 @@ struct MediaVideoBorrowTests {
             key: "screen", url: mediaTestFileURL("screen.mp4"), priority: .onScreen)
         #expect(held != nil)
         var gaveUp = 0
-        let rail = coordinator(pool: pool)
+        let rail = state(pool: pool)
         let spec = self.spec(url: mediaTestRemoteURL("thumb.mp4").absoluteString)
 
-        rail.appear(
-            spec: spec, playing: false, campaignKey: nil, onGiveUp: { gaveUp += 1 })
+        rail.onGiveUp = { gaveUp += 1 }
+        rail.spec = spec
+        rail.appear(campaignKey: nil)
 
         #expect(rail.activePlayer == nil)
         #expect(rail.gaveUp)
@@ -357,9 +362,10 @@ struct MediaVideoBorrowTests {
     func detachedBorrowDegradesToStill() async {
         let factory = MediaVideoFakeFactory()
         let pool = mediaVideoTestPool(factory: factory)
-        let borrower = coordinator(pool: pool)
+        let borrower = state(pool: pool)
         let spec = self.spec(url: mediaTestFileURL("clip.mp4").absoluteString)
-        borrower.appear(spec: spec, playing: false, campaignKey: nil)
+        borrower.spec = spec
+        borrower.appear(campaignKey: nil)
         #expect(borrower.activePlayer != nil)
 
         pool.release()
@@ -376,14 +382,36 @@ struct MediaVideoBorrowTests {
     func disappearGivesTheBorrowBack() {
         let factory = MediaVideoFakeFactory()
         let pool = mediaVideoTestPool(factory: factory)
-        let borrower = coordinator(pool: pool)
+        let borrower = state(pool: pool)
         let spec = self.spec(url: mediaTestFileURL("clip.mp4").absoluteString)
 
-        borrower.appear(spec: spec, playing: false, campaignKey: nil)
+        borrower.spec = spec
+        borrower.appear(campaignKey: nil)
         #expect(pool.heldKeys() == ["story-7"])
 
         borrower.disappear()
 
+        #expect(pool.heldKeys().isEmpty)
+    }
+
+    // Fails if appear ignores the ambient services pool: without `services.pool()` a
+    // coordinator built with no override (the production view shape) never borrows
+    // and always falls back to an owned player.
+    @Test("appear borrows from the services pool when no override is set")
+    func appearBorrowsFromServicesPool() {
+        let factory = MediaVideoFakeFactory()
+        let pool = mediaVideoTestPool(factory: factory)
+        var services = MediaServices.unconfigured
+        services.pool = { pool }
+        let borrower = state()
+        let spec = self.spec(url: mediaTestFileURL("clip.mp4").absoluteString)
+
+        borrower.spec = spec
+        borrower.appear(campaignKey: nil, services: services)
+
+        #expect(borrower.activePlayer != nil)
+        #expect(pool.heldKeys() == ["story-7"])
+        borrower.disappear()
         #expect(pool.heldKeys().isEmpty)
     }
 
@@ -393,9 +421,10 @@ struct MediaVideoBorrowTests {
     func reappearAfterEvictionDegradeReobtains() async {
         let factory = MediaVideoFakeFactory()
         let pool = mediaVideoTestPool(factory: factory)
-        let borrower = coordinator(pool: pool)
+        let borrower = state(pool: pool)
         let url = mediaTestFileURL("clip.mp4").absoluteString
-        borrower.appear(spec: spec(url: url), playing: false, campaignKey: nil)
+        borrower.spec = spec(url: url)
+        borrower.appear(campaignKey: nil)
         #expect(borrower.showPlayer)
 
         pool.release()
@@ -405,7 +434,8 @@ struct MediaVideoBorrowTests {
         borrower.disappear()
         #expect(pool.heldKeys().isEmpty)
 
-        borrower.appear(spec: spec(url: url), playing: false, campaignKey: nil)
+        borrower.spec = spec(url: url)
+        borrower.appear(campaignKey: nil)
 
         #expect(borrower.activePlayer != nil)
         #expect(borrower.showPlayer)
@@ -422,22 +452,16 @@ struct MediaVideoBorrowTests {
     func invalidURLAfterHoldFreesPoolSlot() {
         let factory = MediaVideoFakeFactory()
         let pool = mediaVideoTestPool(factory: factory)
-        let borrower = coordinator(pool: pool)
+        let borrower = state(pool: pool)
         var causes: [String] = []
-        borrower.appear(
-            spec: spec(url: mediaTestFileURL("clip.mp4").absoluteString),
-            playing: false,
-            campaignKey: nil,
-            onError: { causes.append($0) }
-        )
+        borrower.onError = { causes.append($0) }
+        borrower.spec = spec(url: mediaTestFileURL("clip.mp4").absoluteString)
+        borrower.appear(campaignKey: nil)
         #expect(pool.heldKeys() == ["story-7"])
 
-        borrower.appear(
-            spec: spec(url: "{{campaign.video}}"),
-            playing: false,
-            campaignKey: nil,
-            onError: { causes.append($0) }
-        )
+        borrower.onError = { causes.append($0) }
+        borrower.spec = spec(url: "{{campaign.video}}")
+        borrower.appear(campaignKey: nil)
 
         #expect(borrower.activePlayer == nil)
         #expect(borrower.showPlayer == false)
@@ -454,14 +478,16 @@ struct MediaVideoBorrowTests {
     func sameKeyAndURLHandsOver() {
         let factory = MediaVideoFakeFactory()
         let pool = mediaVideoTestPool(factory: factory)
-        let borrower = coordinator(pool: pool)
+        let borrower = state(pool: pool)
         let url = mediaTestFileURL("clip.mp4").absoluteString
-        borrower.appear(spec: spec(url: url), playing: false, campaignKey: nil)
+        borrower.spec = spec(url: url)
+        borrower.appear(campaignKey: nil)
         let first = borrower.activePlayer
         let firstItem = first?.currentItem
         #expect(first != nil)
 
-        borrower.appear(spec: spec(url: url), playing: false, campaignKey: nil)
+        borrower.spec = spec(url: url)
+        borrower.appear(campaignKey: nil)
 
         #expect(borrower.activePlayer === first)
         #expect(borrower.activePlayer?.currentItem === firstItem)
@@ -475,10 +501,11 @@ struct MediaVideoBorrowTests {
     func loopFlagReachesThePoolEntry() {
         let factory = MediaVideoFakeFactory()
         let pool = mediaVideoTestPool(factory: factory)
-        let borrower = coordinator(pool: pool)
+        let borrower = state(pool: pool)
         let spec = self.spec(url: mediaTestFileURL("clip.mp4").absoluteString, loop: true)
 
-        borrower.appear(spec: spec, playing: false, campaignKey: nil)
+        borrower.spec = spec
+        borrower.appear(campaignKey: nil)
 
         #expect(pool.isLooping(key: "story-7"))
         borrower.disappear()
@@ -510,14 +537,12 @@ struct MediaVideoBorrowTests {
         await fake.enableFailAllCalls()
         let url = mediaTestRemoteURL("gone.mp4")
         let (store, _) = mediaVideoTestStore(client: fake)
-        let owner = coordinator(pool: pool, loader: MediaResourceLoader(store: store))
+        let owner = state(pool: pool, loader: MediaResourceLoader(store: store))
         var causes: [String] = []
-        owner.appear(
-            spec: spec(url: url.absoluteString),
-            playing: true,
-            campaignKey: "test-campaign",
-            onError: { causes.append($0) }
-        )
+        owner.onError = { causes.append($0) }
+        owner.playing = true
+        owner.spec = spec(url: url.absoluteString)
+        owner.appear(campaignKey: "test-campaign")
 
         #expect(await waitUntilMedia(timeout: 10) { owner.failed })
         #expect(owner.showPlayer == false)
@@ -535,20 +560,132 @@ struct MediaVideoBorrowTests {
         let fake = FakeRangeFetchClient()
         let (store, _) = mediaVideoTestStore(client: fake)
         let loader = MediaResourceLoader(store: store)
-        let borrower = coordinator(pool: pool, loader: loader)
+        let borrower = state(pool: pool, loader: loader)
         let url = mediaTestRemoteURL("clip.mp4").absoluteString
 
-        borrower.appear(spec: spec(url: url), playing: false, campaignKey: nil)
+        borrower.spec = spec(url: url)
+        borrower.appear(campaignKey: nil)
         let first = borrower.activePlayer
         #expect(first != nil)
         let assetURL = (first?.currentItem?.asset as? AVURLAsset)?.url
         #expect(assetURL?.scheme == MediaResourceLoader.scheme)
         #expect(MediaResourceLoader.originURL(from: assetURL!) == URL(string: url))
 
-        borrower.appear(spec: spec(url: url), playing: false, campaignKey: nil)
+        borrower.spec = spec(url: url)
+        borrower.appear(campaignKey: nil)
 
         #expect(borrower.activePlayer === first)
         borrower.disappear()
+    }
+}
+
+@MainActor
+@Suite("MediaVideoState", .tags(.media, .unit))
+struct MediaVideoStateTests {
+    // Fails if two states under one key do not share: without the lease share
+    // rule the second appear would evict or rebuild instead of joining the
+    // committed holder's instance — and without the share-never-frees rule
+    // the share's release would free the committed holder's key.
+    @Test("two states under the same key share one leased player")
+    func twoStatesShareOneLeasedPlayer() {
+        let factory = MediaVideoFakeFactory()
+        let pool = mediaVideoTestPool(factory: factory)
+        let url = mediaTestFileURL("clip.mp4").absoluteString
+        let first = MediaVideoState(
+            spec: VideoSpec(url: url), playing: false,
+            keepAliveKey: "story-7", pool: pool,
+            resourceLoader: MediaResourceLoader())
+        first.appear(campaignKey: nil)
+        let second = MediaVideoState(
+            spec: VideoSpec(url: url), playing: false,
+            keepAliveKey: "story-7", pool: pool,
+            resourceLoader: MediaResourceLoader())
+        second.appear(campaignKey: nil)
+
+        #expect(first.activePlayer != nil)
+        #expect(second.activePlayer === first.activePlayer)
+        #expect(factory.creates == 1)
+
+        // A share's release never frees: the committed holder still owns the
+        // key after the share lets go.
+        second.disappear()
+        #expect(pool.heldKeys() == ["story-7"])
+
+        first.disappear()
+        #expect(pool.heldKeys().isEmpty)
+    }
+
+    // Fails if anything but the state drives playback: without the
+    // play/pause/setMuted writes here, the player never starts, never stops
+    // and never mutes through this seam.
+    @Test("play pause and mute drive the player")
+    func playPauseAndMuteDriveThePlayer() {
+        let owner = MediaVideoState(
+            spec: VideoSpec(url: mediaTestFileURL("v.mp4").absoluteString),
+            playing: false,
+            resourceLoader: MediaResourceLoader())
+        owner.appear(campaignKey: nil)
+
+        #expect(owner.activePlayer?.rate == 0)
+        owner.play()
+        #expect(owner.activePlayer?.rate == 1)
+        owner.pause()
+        #expect(owner.activePlayer?.rate == 0)
+        owner.setMuted(true)
+        #expect(owner.activePlayer?.isMuted == true)
+        owner.setMuted(false)
+        #expect(owner.activePlayer?.isMuted == false)
+        owner.disappear()
+    }
+
+    // Fails if a keyed showing with no SDK pool owns a player: without the
+    // `NoSdkVideoPool` fallback the state builds an unpooled player instead of
+    // borrowing through the same lease path.
+    @Test("a keyed appear with no sdk pool borrows from the no-sdk pool")
+    func keyedAppearWithNoSdkPoolBorrowsNoSdk() {
+        NoSdkVideoPool.resetForTesting()
+        defer { NoSdkVideoPool.resetForTesting() }
+        let keyed = MediaVideoState(
+            spec: VideoSpec(url: mediaTestFileURL("clip.mp4").absoluteString),
+            playing: false,
+            keepAliveKey: "story-7",
+            resourceLoader: MediaResourceLoader())
+
+        keyed.appear(campaignKey: nil)
+
+        #expect(keyed.activePlayer != nil)
+        #expect(NoSdkVideoPool.shared().heldKeys() == ["story-7"])
+        keyed.disappear()
+        #expect(NoSdkVideoPool.shared().heldKeys().isEmpty)
+    }
+
+    // Fails if the playhead publishers never advance: without the periodic
+    // observer writes durationMs stays 0, ended never becomes true and
+    // seekToStart leaves a finished showing finished.
+    @Test("ended publishes when the playhead reaches the end", .tags(.slow))
+    func endedPublishesAtEnd() async throws {
+        let data = try await makeTinyMP4()
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("digia-state-ended-\(UUID().uuidString).mp4")
+        try data.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let owner = MediaVideoState(
+            spec: VideoSpec(
+                url: file.absoluteString,
+                playback: Playback(autoplay: true, muted: true)),
+            playing: true,
+            resourceLoader: MediaResourceLoader())
+
+        owner.appear(campaignKey: nil)
+        #expect(await waitUntilMedia(timeout: 10) { owner.firstFrameShown })
+        #expect(await waitUntilMedia(timeout: 10) { owner.durationMs > 0 })
+        #expect(owner.durationMs >= 900 && owner.durationMs <= 1_100)
+        #expect(await waitUntilMedia(timeout: 15) { owner.ended })
+        #expect(owner.positionMs >= owner.durationMs)
+
+        owner.seekToStart()
+        #expect(owner.ended == false)
+        owner.disappear()
     }
 }
 
@@ -567,15 +704,20 @@ struct MediaVideoComponentTests {
     }()
 
     private func mount(
-        _ spec: MediaSpec,
+        _ spec: VideoSpec,
         key: String? = "story-7",
         pool: VideoPlayerPool? = nil,
         loader: MediaResourceLoader? = nil
     ) -> UIWindow {
-        mountMedia(
-            MediaVideo(spec: spec, keepAliveKey: key, playing: false, pool: pool, resourceLoader: loader)
+        var services = MediaServices.unconfigured
+        services.imageLoader = FakeImageLoader.shared
+        let state = MediaVideoState(
+            spec: spec, playing: false, keepAliveKey: key,
+            pool: pool, resourceLoader: loader)
+        return mountMedia(
+            MediaVideo(state: state)
                 .environment(\.digiaCampaignKey, "test-campaign")
-                .environment(\.mediaImageLoader, FakeImageLoader.shared)
+                .environment(\.mediaServices, services)
                 .frame(width: 200, height: 200)
         )
     }
@@ -613,7 +755,7 @@ struct MediaVideoComponentTests {
         let pool = mediaVideoTestPool(factory: factory)
 
         let window = mount(
-            MediaSpec(url: url.absoluteString, posterURL: poster.absoluteString),
+            VideoSpec(url: url.absoluteString, posterURL: poster.absoluteString),
             pool: pool,
             loader: loader
         )
@@ -645,7 +787,7 @@ struct MediaVideoComponentTests {
         let loader = MediaResourceLoader(store: store)
 
         let window = mount(
-            MediaSpec(url: mediaTestRemoteURL("thumb.mp4").absoluteString),
+            VideoSpec(url: mediaTestRemoteURL("thumb.mp4").absoluteString),
             key: "rail-1",
             pool: pool,
             loader: loader
@@ -673,7 +815,7 @@ struct MediaVideoComponentTests {
         let pool = mediaVideoTestPool(factory: factory)
 
         let window = mount(
-            MediaSpec(url: mediaTestRemoteURL("slow.mp4").absoluteString),
+            VideoSpec(url: mediaTestRemoteURL("slow.mp4").absoluteString),
             pool: pool,
             loader: loader
         )

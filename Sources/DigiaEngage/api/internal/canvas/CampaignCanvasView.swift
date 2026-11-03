@@ -2395,7 +2395,7 @@ private struct FocalCanvasImage: View {
                 // canvas's campaign key, as before); the focal crop and scale stay here —
                 // they are canvas-authored layout, not media loading.
                 MediaImage(
-                    spec: MediaSpec(
+                    spec: ImageSpec(
                         url: resolved,
                         fit: canvasMediaFit(fit),
                         blurHash: source.placeholder?.blurHash

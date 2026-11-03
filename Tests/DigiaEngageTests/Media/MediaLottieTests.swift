@@ -20,7 +20,7 @@ struct MediaLottieComponentTests {
     {"v":"5.7.4","fr":30,"ip":0,"op":30,"w":100,"h":100,"nm":"t","ddd":0,"assets":[],"layers":[]}
     """#.utf8)
 
-    private func mount(_ spec: MediaSpec, box: CauseBox? = nil) -> UIWindow {
+    private func mount(_ spec: LottieSpec, box: CauseBox? = nil) -> UIWindow {
         mountMedia(
             MediaLottie(
                 spec: spec,
@@ -61,7 +61,7 @@ struct MediaLottieComponentTests {
             FakeMediaOrigin.reset()
         }
 
-        let window = mount(MediaSpec(url: url, blurHash: Self.blurHash))
+        let window = mount(LottieSpec(url: url, blurHash: Self.blurHash))
         defer { ComponentTestHost.unmount(window) }
         _ = await waitUntilMedia(timeout: 1.0) { false }
 
@@ -87,7 +87,7 @@ struct MediaLottieComponentTests {
         FakeMediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
         let box = CauseBox()
 
-        let window = mount(MediaSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
+        let window = mount(LottieSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
         defer { ComponentTestHost.unmount(window) }
 
         #expect(await waitUntilMedia { !box.all.isEmpty })
@@ -112,7 +112,7 @@ struct MediaLottieComponentTests {
         FakeMediaOrigin.set(.fail(.notConnectedToInternet), for: target)
         let box = CauseBox()
 
-        let window = mount(MediaSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
+        let window = mount(LottieSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
         defer { ComponentTestHost.unmount(window) }
 
         #expect(await waitUntilMedia { !box.all.isEmpty })
@@ -131,7 +131,7 @@ struct MediaLottieComponentTests {
         let target = FakeMediaOrigin.url("ok.json")
         FakeMediaOrigin.set(.status(200, Self.animation), for: target)
 
-        let window = mount(MediaSpec(url: target.absoluteString, loop: true))
+        let window = mount(LottieSpec(url: target.absoluteString, loop: true))
         defer { ComponentTestHost.unmount(window) }
 
         let view = await waitForAnimation(in: window)
@@ -150,7 +150,7 @@ struct MediaLottieComponentTests {
             FakeMediaOrigin.reset()
         }
 
-        let window = mount(MediaSpec(url: ""))
+        let window = mount(LottieSpec(url: ""))
         defer { ComponentTestHost.unmount(window) }
         _ = await waitUntilMedia(timeout: 1.0) { false }
 
