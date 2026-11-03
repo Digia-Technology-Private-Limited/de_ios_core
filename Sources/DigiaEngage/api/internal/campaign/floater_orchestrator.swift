@@ -571,18 +571,22 @@ final class FloaterOrchestrator: ObservableObject {
         onStepDismissed(active)
     }
 
+    /// Flips the showing's mute state. The level itself is the state's business:
+    /// the spec's mute-only change applies through `MediaVideoState` (isMuted,
+    /// no re-seek) while `Playback.volume` keeps carrying the configured level, so
+    /// an unmute restores exactly it — the same coupling as the old direct write,
+    /// now owned by the state. `expand` (unmute-on-expand) routes through here.
     func setMuted(_ value: Bool) {
-        guard let active = state, muted != value else { return }
+        guard state != nil, muted != value else { return }
         muted = value
-        player?.volume = value ? 0 : active.config.media.volume
-        player?.isMuted = value
+        videoState?.spec.playback.muted = value
     }
 
     /// Play/pause, for the optional playback-controls chrome button. No-op for
-    /// non-playable media (image/GIF have no `player` to toggle).
+    /// non-playable media (image/GIF have no showing state to drive).
     func togglePlayback() {
-        guard let player else { return }
-        if player.rate > 0 { player.pause() } else { player.play() }
+        guard let showing = videoState, let current = showing.activePlayer else { return }
+        if current.rate > 0 { showing.pause() } else { showing.play() }
     }
 
     /// Records where the user left the window. Called once per drag release, not per
@@ -609,9 +613,9 @@ final class FloaterOrchestrator: ObservableObject {
         // playing behind the modal, so audio and progress continue uninterrupted.
         guard active.config.behavior.pauseWhenObscured else { return }
         if value {
-            player?.pause()
+            videoState?.pause()
         } else if active.config.media.autoplay {
-            player?.play()
+            videoState?.play()
         }
     }
 
@@ -620,12 +624,12 @@ final class FloaterOrchestrator: ObservableObject {
         guard let active = state else { return }
         if !foregrounded {
             if surface == .expanded { accumulateExpandedMs() }
-            player?.pause()
+            videoState?.pause()
             return
         }
         guard !obscured else { return }
         if surface == .expanded { expandedStartedAtMs = expandedStartedAtMs ?? now() }
-        if active.config.media.autoplay { player?.play() }
+        if active.config.media.autoplay { videoState?.play() }
     }
 
     /// The corner the window is resting in, for the `last_position` property.
@@ -644,7 +648,7 @@ final class FloaterOrchestrator: ObservableObject {
         }
     }
 
-    /// Ends the floater and releases the player. Idempotent. When the campaign has
+    /// Ends the floater and releases the lease. Idempotent. When the campaign has
     /// an exit animation, the state is kept alive for its duration so the window can
     /// animate out — `closing` is `true` throughout, and every mutator above is a
     /// no-op during it. Teardown then runs exactly as it does in the instant path.
@@ -685,7 +689,7 @@ final class FloaterOrchestrator: ObservableObject {
         }
 
         closing = true
-        player?.pause()
+        videoState?.pause()
         exitTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(exit.durationMs) * 1_000_000)
             guard !Task.isCancelled else { return }
