@@ -484,6 +484,50 @@ struct CanvasVideoRendererTests {
         #expect(player.currentItem === item)
     }
 
+    // R2 (helper): the borrow helper pairs every lease with a release, and a
+    // re-borrowed player restarts at full volume (a freed pool player keeps its
+    // last borrower's level; canvas authors no volume).
+    // Break-once: `lease?.release()` in `CanvasPoolBorrow.release` removed.
+    @Test("borrowed canvas players are released and restart at full volume")
+    func borrowPairsLeaseAndResetsVolume() throws {
+        let pool = VideoPlayerPool(factory: CanvasBorrowFakeFactory(), maxPlayers: 1)
+        let item = AVPlayerItem(url: URL(string: "https://example.invalid/v.mp4")!)
+
+        let first = try #require(CanvasPoolBorrow.borrowPlayer(for: item, from: pool))
+        #expect(pool.heldKeys().count == 1)
+        first.volume = 0.2
+        CanvasPoolBorrow.release(player: first)
+        #expect(pool.heldKeys().isEmpty)
+
+        let second = try #require(CanvasPoolBorrow.borrowPlayer(for: item, from: pool))
+        #expect(second === first)
+        #expect(second.volume == 1)
+        CanvasPoolBorrow.release(player: second)
+        #expect(pool.heldKeys().isEmpty)
+    }
+
+    // R2 (view): the real renderer on a borrowing runtime holds one pool key
+    // while mounted and frees it on dismiss. The spy probe never borrows, so
+    // this drives a borrowing runtime through the production setup/teardown.
+    // Break-once: `runtime.releasePlayer(player)` in teardown removed.
+    @Test("dismissing the canvas frees its borrowed pool key")
+    func dismissReleasesBorrowedKey() {
+        let pool = VideoPlayerPool(factory: CanvasBorrowFakeFactory(), maxPlayers: 2)
+        let runtime = CanvasVideoRuntime(
+            makePlayer: { CanvasPoolBorrow.borrowPlayer(for: $0, from: pool) ?? AVPlayer() },
+            play: { _ in },
+            pause: { _ in },
+            restart: { _ in },
+            releasePlayer: { CanvasPoolBorrow.release(player: $0) }
+        )
+        let window = mount(video: videoWidget(), runtime: runtime)
+
+        #expect(pool.heldKeys().count == 1)
+        unmount(window)
+
+        #expect(pool.heldKeys().isEmpty)
+    }
+
     private func parsedVideo(_ props: [String: Any]) throws -> CampaignCanvasWidget {
         let canvas = try CampaignCanvasParser().parse([
             "version": 2,
@@ -769,6 +813,11 @@ private struct VideoThemeHarness: View {
         stage.animateWidgetsOnAppear = false
         return stage.environment(\.canvasVideoRuntime, runtime)
     }
+}
+
+@MainActor
+private final class CanvasBorrowFakeFactory: PlayerFactory {
+    func makePlayer() -> AVQueuePlayer { AVQueuePlayer() }
 }
 
 @MainActor

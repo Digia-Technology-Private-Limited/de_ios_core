@@ -38,9 +38,19 @@ struct CanvasVideoRuntime: @unchecked Sendable {
     var play: @MainActor (AVPlayer) -> Void
     var pause: @MainActor (AVPlayer) -> Void
     var restart: @MainActor (AVPlayer) -> Void
+    /// Frees the pool lease backing a borrowed direct-path player, if any. A
+    /// no-op for owned players and for runtimes that never borrow (the spy
+    /// probe). Called from teardown next to `pause`, so every borrow has its
+    /// release on the same path.
+    var releasePlayer: @MainActor (AVPlayer) -> Void = { _ in }
 
     static let live = CanvasVideoRuntime(
         makePlayer: {
+            if let pool = MediaServices.sdkDefault().pool(),
+               let borrowed = CanvasPoolBorrow.borrowPlayer(for: $0, from: pool)
+            {
+                return borrowed
+            }
             let player = DefaultPlayerFactory().makePlayer()
             player.replaceCurrentItem(with: $0)
             return player
@@ -50,7 +60,8 @@ struct CanvasVideoRuntime: @unchecked Sendable {
         restart: {
             $0.seek(to: .zero)
             $0.play()
-        }
+        },
+        releasePlayer: { CanvasPoolBorrow.release(player: $0) }
     )
 }
 
@@ -104,6 +115,60 @@ extension EnvironmentValues {
     var canvasLottieRuntime: CanvasLottieRuntime {
         get { self[CanvasLottieRuntimeKey.self] }
         set { self[CanvasLottieRuntimeKey.self] = newValue }
+    }
+}
+
+/// Pool participation for the direct-path canvas player (R2): the renderer keeps
+/// its runtime seam and controller branching, but the live factory borrows the
+/// player from the SDK pool under a fresh per-mount key instead of owning it
+/// outright, so canvas video shares the decoder bound (D3). A refused borrow —
+/// or no SDK pool (host never initialized) — answers nil and the caller builds
+/// owned, so the canvas always plays, exactly as before. No poster and no start
+/// offset ride along (both are story-viewer-only rulings; the direct path keeps
+/// neither).
+///
+/// Every borrow has its release on teardown's path: the lease is stashed per
+/// player and `release(player:)` drops it through the idempotent lease release
+/// (a post-eviction release is a silent no-op; an owned player was never
+/// stashed). Canvas never outranks itself out of the pool: it borrows at
+/// onScreen, the top rank, so nothing evicts it mid-show.
+enum CanvasPoolBorrow {
+    private static let lock = NSLock()
+    private nonisolated(unsafe) static var leases: [ObjectIdentifier: PlayerLease] = [:]
+
+    /// Borrows a pool player for `item` (fresh key per call — the widget carries
+    /// no stable identity at the renderer), re-pointed at the item the caller
+    /// built (the D2 range-cache asset, so bytes stay shared). Answers nil when
+    /// there is no pool or the pool refuses: the caller builds owned. Resets
+    /// volume to 1: a freed pool player keeps its last borrower's level, and
+    /// canvas authors no volume (before R2 every canvas played a fresh player).
+    static func borrowPlayer(for item: AVPlayerItem, from pool: VideoPlayerPool?) -> AVPlayer? {
+        guard let pool,
+              let origin = Self.originURL(of: item),
+              let lease = pool.obtainLease(
+                  key: "canvas-video-\(UUID().uuidString)",
+                  url: origin.absoluteString,
+                  priority: .onScreen
+              )
+        else { return nil }
+        lease.player.replaceCurrentItem(with: item)
+        lease.player.volume = 1
+        lock.withLock { leases[ObjectIdentifier(lease.player)] = lease }
+        return lease.player
+    }
+
+    /// Releases the lease held for `player`, if any. A no-op for owned players.
+    static func release(player: AVPlayer) {
+        let lease = lock.withLock { leases.removeValue(forKey: ObjectIdentifier(player)) }
+        lease?.release()
+    }
+
+    private static func originURL(of item: AVPlayerItem) -> URL? {
+        guard let assetURL = (item.asset as? AVURLAsset)?.url else { return nil }
+        if assetURL.scheme == MediaResourceLoader.scheme {
+            return MediaResourceLoader.originURL(from: assetURL) ?? assetURL
+        }
+        return assetURL
     }
 }
 
@@ -2052,7 +2117,10 @@ private struct CanvasVideoRenderer: View {
     }
 
     private func teardown() {
-        if let player { runtime.pause(player) }
+        if let player {
+            runtime.pause(player)
+            runtime.releasePlayer(player)
+        }
         player = nil
         statusObservation = nil
         if let observer { NotificationCenter.default.removeObserver(observer) }
