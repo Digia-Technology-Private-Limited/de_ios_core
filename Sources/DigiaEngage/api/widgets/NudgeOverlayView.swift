@@ -406,15 +406,14 @@ struct NudgeDialogContainer: View {
                             height: max(1, height)
                         )
                     )
-                    if let placement = closeButton.placement, placement.mode == .outside {
-                        let top = placement.vertical == .top
-                        let extent = placement.margin.top + closeButton.diameter
-                            + placement.margin.bottom
+                    if closeButton.placement?.mode == .outside {
                         ScrollView(.vertical, showsIndicators: false) {
                             panel
-                                .padding(.top, top ? extent : 0)
-                                .padding(.bottom, top ? 0 : extent)
                                 // Centre like the inside-close branch; scroll only on overflow.
+                                // The outside × is an overlay anchored to the panel and reserves
+                                // no space — Android and Flutter centre the card in the window
+                                // and draw the × over it. Reserving its extent here pushed the
+                                // whole card off-centre by half the extent.
                                 .frame(maxWidth: .infinity, minHeight: height)
                                 // The ScrollView covers the scrim and swallows its taps, so the
                                 // area around the card carries the backdrop dismiss itself.
