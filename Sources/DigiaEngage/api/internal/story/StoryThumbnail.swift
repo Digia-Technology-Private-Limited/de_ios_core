@@ -45,6 +45,7 @@ struct StoryThumbnail: View {
                     item: item,
                     keepAliveKey: keepAliveKey,
                     playing: playing || handedOver,
+                    handedOver: handedOver,
                     repeatWindow: repeatWindow,
                     reappearGeneration: reappearGeneration,
                     onWindowCompleted: onWindowCompleted,
@@ -108,6 +109,11 @@ private struct StoryThumbnailVideo: View {
     let item: StoryItemConfig
     let keepAliveKey: String
     let playing: Bool
+    /// The rail handed this borrow to the viewer on tap: the viewer's lease under the same
+    /// key now owns the holder, so this showing's dispose must not free it (R2-STORY wiring
+    /// for the `borrowHandedOver` default the reviewer flagged). Read fresh at dispose time
+    /// — synced into the state below on every change.
+    let handedOver: Bool
     let repeatWindow: Bool
     let reappearGeneration: Int
     let onWindowCompleted: @MainActor @Sendable () -> Void
@@ -141,6 +147,7 @@ private struct StoryThumbnailVideo: View {
         item: StoryItemConfig,
         keepAliveKey: String,
         playing: Bool,
+        handedOver: Bool,
         repeatWindow: Bool,
         reappearGeneration: Int,
         onWindowCompleted: @escaping @MainActor @Sendable () -> Void,
@@ -150,6 +157,7 @@ private struct StoryThumbnailVideo: View {
         self.item = item
         self.keepAliveKey = keepAliveKey
         self.playing = playing
+        self.handedOver = handedOver
         self.repeatWindow = repeatWindow
         self.reappearGeneration = reappearGeneration
         self.onWindowCompleted = onWindowCompleted
@@ -159,7 +167,8 @@ private struct StoryThumbnailVideo: View {
             spec: Self.spec(item: item, repeatWindow: repeatWindow),
             playing: playing,
             keepAliveKey: keepAliveKey,
-            poolPriority: .railThumb
+            poolPriority: .railThumb,
+            borrowHandedOver: { handedOver }
         ))
     }
 
@@ -217,6 +226,9 @@ private struct StoryThumbnailVideo: View {
         }
         .onChange(of: playing) { _ in video.playing = playing && !backgrounded }
         .onChange(of: backgrounded) { _ in video.playing = playing && !backgrounded }
+        // The tap lands in the same pass as a potential unmount: keep the handover read
+        // fresh so a dispose while handed over never frees the viewer's holder.
+        .onChange(of: handedOver) { _ in video.borrowHandedOver = { handedOver } }
         .onChange(of: video.firstFrameShown) { shown in
             if shown {
                 errored = false

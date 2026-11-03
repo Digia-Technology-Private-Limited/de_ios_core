@@ -108,4 +108,80 @@ struct StoryHandoverTests {
         first.disappear()
         second.disappear()
     }
+
+    // Fails if a second borrower under the same key gets a different instance: the PIP-style
+    // takeover (same key + same URL, its own priority) must share the committed holder and
+    // re-apply its spec on it — unmuted here. Driven entirely through `MediaVideoState`
+    // (the same borrow every story view uses), with the real pool and a fake factory.
+    // Break-once: the pool's existing-key branch (`borrow(key:url:priority:)` returning the
+    // committed instance) or the take-over's mute line.
+    @Test("a PIP takeover shares the viewer instance through state")
+    func pipTakeoverSharesTheViewerInstance() {
+        let factory = HandoverFakeFactory()
+        let pool = handoverPool(factory: factory)
+        let url = handoverFileURL("clip.mp4")
+        let key = "test/story-0"
+
+        let thumb = handoverCoordinator(
+            pool: pool, key: key, priority: .railThumb, url: url, muted: true, startMs: 5_000)
+        let thumbPlayer = thumb.activePlayer
+        #expect(thumbPlayer != nil)
+
+        let viewer = handoverCoordinator(
+            pool: pool, key: key, priority: .onScreen, url: url, muted: false)
+        let viewerPlayer = viewer.activePlayer
+        #expect(viewerPlayer === thumbPlayer)
+        #expect(viewerPlayer?.isMuted == false)
+
+        // The PIP takeover: same key + same URL at its own priority — the same instance,
+        // with its own spec re-applied on it.
+        let pip = handoverCoordinator(
+            pool: pool, key: key, priority: .viewerNext, url: url, muted: false)
+        #expect(pip.activePlayer === viewerPlayer)
+        #expect(pip.activePlayer?.isMuted == false)
+        #expect(factory.creates == 1)
+
+        thumb.disappear()
+        viewer.disappear()
+        pip.disappear()
+        #expect(pool.heldKeys().isEmpty)
+    }
+
+    // Fails if a handed-over borrow is freed by its own dispose: without the
+    // `borrowHandedOver` guard in `disappear()` the rail card freeing its committed lease
+    // pauses the viewer mid-frame. The key stays held after both disposes — the rail's
+    // remount re-takes ownership under the same key (same instance, window re-applied);
+    // pool eviction bounds the holder meanwhile. Break-once: the `if !borrowHandedOver()`
+    // guard in `MediaVideoState.disappear()`.
+    @Test("a handed-over borrow survives its own dispose")
+    func handedOverBorrowSurvivesItsOwnDispose() {
+        let factory = HandoverFakeFactory()
+        let pool = handoverPool(factory: factory)
+        let url = handoverFileURL("clip.mp4")
+        let key = "test/story-0"
+
+        let rail = MediaVideoState(
+            spec: VideoSpec(url: url.absoluteString, playback: Playback(autoplay: true, muted: true)),
+            playing: true,
+            keepAliveKey: key,
+            poolPriority: .railThumb,
+            pool: pool,
+            resourceLoader: MediaResourceLoader(),
+            borrowHandedOver: { true }
+        )
+        rail.appear(campaignKey: nil)
+        let railPlayer = rail.activePlayer
+        #expect(railPlayer != nil)
+
+        let viewer = handoverCoordinator(
+            pool: pool, key: key, priority: .onScreen, url: url, muted: false)
+        #expect(viewer.activePlayer === railPlayer)
+
+        rail.disappear()
+        #expect(pool.heldKeys() == [key])
+        #expect(viewer.activePlayer === railPlayer)
+
+        viewer.disappear()
+        #expect(pool.heldKeys() == [key])
+    }
 }
