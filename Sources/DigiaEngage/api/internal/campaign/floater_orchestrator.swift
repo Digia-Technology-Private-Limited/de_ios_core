@@ -444,6 +444,13 @@ final class FloaterOrchestrator: ObservableObject {
             // A refused borrow (demand exceeds supply) reports nothing by itself —
             // the floater has no still to degrade to, so the campaign drops with
             // the same decode-family cause Android reports for this path.
+            // Post-first-frame the same callback is a deliberate no-op
+            // (`abandonMedia` only drops an awaiting showing): the state already
+            // degraded to its still, and the floater — which has no still by
+            // design — never unpaints a drawn window for a lost borrow. A release
+            // arriving after teardown finds no state and is likewise silent: the
+            // lease is idempotent and a post-eviction release never frees another
+            // showing's player.
             onGiveUp: { [weak self] in
                 self?.abandonMedia(
                     token: token, reason: "player could not be obtained", cause: "decode")
