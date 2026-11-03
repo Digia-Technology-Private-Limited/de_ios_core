@@ -1,7 +1,5 @@
 import AVFoundation
 import AVKit
-internal import Lottie
-internal import SDWebImageSwiftUI
 import SwiftUI
 import UIKit
 
@@ -151,20 +149,19 @@ private struct NudgeImageView: View {
     let canvasMode: Bool
     @Environment(\.digiaVariables) private var variables
 
-    init(node: NudgeImage, canvasMode: Bool) {
-        DigiaImagePipeline.configureIfNeeded()
-        self.node = node
-        self.canvasMode = canvasMode
-    }
-
     private var url: String { interpolate(node.url, context: variables) }
     private var maxWidth: CGFloat? { node.box.fillWidth ? .infinity : nil }
-    // Placeholder slot shows the payload's blurhash (auto-computed by the
-    // dashboard) while the image downloads; empty when the payload has none.
+    // The D5 still on error, not a labelled stand-in: a failed picture keeps its
+    // BlurHash instead of an "Image failed" box. The wrapper reports the failure
+    // with the surface's campaign key (read from the environment by MediaImage).
     private var image: some View {
-        WebImage(url: URL(string: url)) { $0.resizable() } placeholder: {
-            BlurHashPlaceholderView(placeholder: node.placeholder, fit: node.fit.rawValue)
-        }
+        MediaImage(
+            spec: MediaSpec(
+                url: url,
+                fit: MediaFit(rawValue: node.fit.rawValue) ?? .cover,
+                blurHash: node.placeholder?.blurHash
+            )
+        )
     }
 
     var body: some View {
@@ -390,33 +387,23 @@ private struct NudgeLottieView: View {
         let resolved = interpolate(node.url, context: variables)
         if resolved.isEmpty {
             nudgePlaceholder(label: "Lottie", height: node.height)
-        } else if let url = URL(string: resolved) {
-            Group {
-                if node.autoplay {
-                    lottie(url: url)
-                        .playing(loopMode: node.loop ? .loop : .playOnce)
-                } else {
-                    lottie(url: url)
-                }
-            }
+        } else {
+            // The wire carries no placeholder for Lottie, so the still below the
+            // animation is empty — same as before, just owned by the wrapper.
+            MediaLottie(
+                spec: MediaSpec(
+                    url: resolved,
+                    fit: MediaFit(rawValue: node.fit.rawValue) ?? .cover,
+                    loop: node.loop,
+                    autoplay: node.autoplay
+                )
+            )
             .modifier(CanvasMediaFrame(
                 canvasMode: canvasMode,
                 aspectRatio: node.aspectRatio,
                 height: node.height
             ))
         }
-    }
-
-    // `.resizable()` lets the animation fill the frame; `contentMode` then applies the fit.
-    private func lottie(url: URL) -> LottieView<EmptyView> {
-        LottieView {
-            if url.pathExtension.lowercased() == "lottie" {
-                return try await DotLottieFile.loadedFrom(url: url).animationSource
-            }
-            return await LottieAnimation.loadedFrom(url: url)?.animationSource
-        }
-            .resizable()
-            .configure(\.contentMode, to: node.fit.uiContentMode)
     }
 }
 
@@ -425,11 +412,6 @@ private struct NudgeLottieView: View {
 private struct NudgeCarouselView: View {
     let node: NudgeCarousel
     @Environment(\.digiaVariables) private var variables
-
-    init(node: NudgeCarousel) {
-        DigiaImagePipeline.configureIfNeeded()
-        self.node = node
-    }
     @State private var currentIndex = 0
     @State private var autoPlayTimer: Timer? = nil
 
@@ -446,9 +428,12 @@ private struct NudgeCarouselView: View {
             VStack(spacing: 0) {
                 TabView(selection: $currentIndex) {
                     ForEach(0..<pageCount, id: \.self) { index in
-                        WebImage(url: URL(string: images[index % images.count]))
-                            .resizable()
-                            .scaledToFill()
+                        // The carousel wire carries no per-image placeholder; the
+                        // still below each page is empty — same as before.
+                        MediaImage(spec: MediaSpec(
+                            url: images[index % images.count],
+                            fit: .cover
+                        ))
                             .frame(maxWidth: .infinity)
                             .frame(height: node.height)
                             .clipped()
@@ -494,22 +479,26 @@ private struct NudgeCarouselView: View {
 
 // MARK: - Video
 
-private enum VideoLoadState {
-    case loading
-    case ready
-    case failed
-}
-
 private struct NudgeVideoView: View {
     let node: NudgeVideo
     let canvasMode: Bool
     @Environment(\.digiaVariables) private var variables
-    @State private var player: AVPlayer? = nil
-    @State private var state: VideoLoadState = .loading
-    @State private var statusObserver: NSKeyValueObservation? = nil
-    @State private var loopObserver: NSObjectProtocol? = nil
+    /// The player borrowed by the wrapper below, handed out through `onReady`. The
+    /// native controls attach to this same player when the campaign asks for them —
+    /// never a second player (mirrors Android's `showControls` MediaVideo option,
+    /// which the frozen iOS wrapper does not carry; see report).
+    @State private var readyPlayer: AVPlayer? = nil
 
     private var url: String { interpolate(node.url, context: variables) }
+    private var spec: MediaSpec {
+        MediaSpec(
+            url: url,
+            fit: node.boxFit.mediaFit,
+            loop: node.loop,
+            autoplay: node.autoplay,
+            muted: node.muted
+        )
+    }
 
     var body: some View {
         Group {
@@ -517,35 +506,22 @@ private struct NudgeVideoView: View {
                 EmptyView()
             } else {
                 ZStack {
-                    Color.black
-
-                    if let player, state != .failed {
+                    // The D5 still on error, not the "Video failed" box: a failed
+                    // video keeps its dark still. Health reports with the surface's
+                    // campaign key (read from the environment by MediaVideo) — this
+                    // resolves the P0a nudge-video silence.
+                    MediaVideo(
+                        spec: spec,
+                        playing: node.autoplay,
+                        onReady: { readyPlayer = $0 },
+                        onError: { _ in readyPlayer = nil }
+                    )
+                    if node.showControls, let readyPlayer {
                         PlayerViewController(
-                            player: player,
-                            showsPlaybackControls: node.showControls,
-                            videoGravity: node.boxFit.videoGravity
+                            player: readyPlayer,
+                            showsPlaybackControls: true,
+                            videoGravity: spec.fit.videoGravity
                         )
-                    }
-
-                    switch state {
-                    case .loading:
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .tint(.white)
-                    case .failed:
-                        VStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.system(size: 28))
-                            Text("Video failed")
-                                .font(
-                                    Font(SDKInstance.shared.font.resolve(
-                                        size: 13, weight: 400, italic: false
-                                    ))
-                                )
-                        }
-                        .foregroundStyle(.white)
-                    case .ready:
-                        EmptyView()
                     }
                 }
                 .modifier(CanvasMediaFrame(
@@ -555,52 +531,6 @@ private struct NudgeVideoView: View {
                 ))
             }
         }
-        .onAppear { setupPlayer() }
-        .onDisappear { teardown() }
-    }
-
-    private func setupPlayer() {
-        guard player == nil, !url.isEmpty, let parsed = URL(string: url) else { return }
-        let item = AVPlayerItem(url: parsed)
-        let p = AVPlayer(playerItem: item)
-        p.isMuted = node.muted
-
-        statusObserver = item.observe(\.status, options: [.initial, .new]) { item, _ in
-            DispatchQueue.main.async {
-                switch item.status {
-                case .readyToPlay:
-                    state = .ready
-                    if node.autoplay { p.play() }
-                case .failed:
-                    state = .failed
-                default:
-                    state = .loading
-                }
-            }
-        }
-
-        if node.loop {
-            loopObserver = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-            ) { _ in
-                MainActor.assumeIsolated {
-                    p.seek(to: .zero)
-                    p.play()
-                }
-            }
-        }
-
-        player = p
-    }
-
-    private func teardown() {
-        player?.pause()
-        statusObserver?.invalidate()
-        statusObserver = nil
-        if let loopObserver { NotificationCenter.default.removeObserver(loopObserver) }
-        loopObserver = nil
-        player = nil
-        state = .loading
     }
 }
 
@@ -643,13 +573,14 @@ private struct PlayerViewController: UIViewControllerRepresentable {
 }
 
 extension NudgeVideoFit {
-    var videoGravity: AVLayerVideoGravity {
+    /// The wrapper-level fit for this authored value — the single decision point the
+    /// video renderer maps through (`MediaFit.videoGravity` then drives the layer).
+    var mediaFit: MediaFit {
         switch self {
-        case .cover: .resizeAspectFill
-        case .contain: .resizeAspect
+        case .cover: .cover
+        case .contain: .contain
         }
     }
-
 }
 
 // MARK: - Placeholder
@@ -723,18 +654,6 @@ extension View {
 }
 
 // MARK: - Media (image / Lottie) helpers
-
-extension NudgeContentFit {
-    /// Lottie scales via its underlying `LottieAnimationView` (a UIView), so each fit
-    /// maps to a UIView content mode.
-    fileprivate var uiContentMode: UIView.ContentMode {
-        switch self {
-        case .cover: return .scaleAspectFill
-        case .contain: return .scaleAspectFit
-        case .fill: return .scaleToFill
-        }
-    }
-}
 
 extension View {
     /// Sizes a full-width media view: aspect ratio (when set) drives the height,

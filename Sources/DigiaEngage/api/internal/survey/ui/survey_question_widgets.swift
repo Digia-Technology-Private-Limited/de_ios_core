@@ -1,5 +1,4 @@
 import SwiftUI
-internal import SDWebImageSwiftUI
 
 /// Synthetic option id for a choice question's "Other" entry.
 let OTHER_CHOICE_ID = "__other__"
@@ -737,20 +736,15 @@ private struct ChoiceCardRow: View {
                     }
                     .frame(width: 20, height: 20)
 
-                    if showMedia, let media = option.media, media.hasUrl,
-                        let url = URL(string: media.url)
-                    {
-                        WebImage(url: url) { image in
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        } placeholder: {
-                            ZStack {
-                                SurveyTokens.surfaceSunken
-                                BlurHashPlaceholderView(placeholder: media.placeholder)
-                            }
-                        }
-                        .onAppear {
-                            DigiaImagePipeline.configureIfNeeded()
-                        }
+                    if showMedia, let media = option.media, media.hasUrl {
+                        // The D5 still on error: a failed thumbnail keeps its
+                        // BlurHash. The wrapper reports with the survey's campaign
+                        // key from the environment.
+                        MediaImage(spec: MediaSpec(
+                            url: media.url,
+                            fit: .cover,
+                            blurHash: media.placeholder?.blurHash
+                        ))
                         .frame(width: 36, height: 36)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
