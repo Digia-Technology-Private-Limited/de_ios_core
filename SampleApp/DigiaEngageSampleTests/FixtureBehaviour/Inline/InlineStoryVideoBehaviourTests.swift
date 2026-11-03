@@ -10,8 +10,8 @@ extension HostedUITests {
 ///
 /// The fixture is served by the mocked bundle, delivered the way a CEP does and drawn by the app's
 /// own `DigiaSlot`. Nothing is faked below the SDK: its videos are the Test Kit's `movie.mp4`
-/// (12.6 s) on disk, played by real `AVPlayer`s, which the tests find on screen in the SDK's
-/// `InlineStoryPlayerContainer`s. Where the Flutter tests move a fake player's playhead, these seek
+/// (12.6 s) on disk, played by real `AVPlayer`s, which the tests find on screen by
+/// walking for `AVPlayerLayer`-backed views holding a player. Where the Flutter tests move a fake player's playhead, these seek
 /// the real one (`inlineRunOut`).
 ///
 /// The fixture's rail is sequential and has three video items, in this order: the whole video from

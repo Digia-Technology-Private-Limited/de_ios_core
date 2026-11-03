@@ -31,6 +31,7 @@ struct StoryThumbnail: View {
     let namespace: String?
     let onWindowCompleted: @MainActor @Sendable () -> Void
     let onFailed: @MainActor @Sendable () -> Void
+    let onEvicted: @MainActor @Sendable () -> Void
     let onOpen: @MainActor @Sendable (Int, String?) -> Void
 
     private var keepAliveKey: String { storyPoolKey(namespace: namespace, index: index) }
@@ -47,7 +48,8 @@ struct StoryThumbnail: View {
                     repeatWindow: repeatWindow,
                     reappearGeneration: reappearGeneration,
                     onWindowCompleted: onWindowCompleted,
-                    onFailed: onFailed
+                    onFailed: onFailed,
+                    onEvicted: onEvicted
                 )
             }
         }
@@ -103,6 +105,12 @@ private struct StoryThumbnailVideo: View {
     let reappearGeneration: Int
     let onWindowCompleted: @MainActor @Sendable () -> Void
     let onFailed: @MainActor @Sendable () -> Void
+    /// The borrow was lost without a failure cause (pool eviction or a causeless give-up):
+    /// advance past the card like a completion, but keep it eligible — unlike a genuine
+    /// failure, a lost borrow says nothing about the content, so the rotation must not
+    /// drop the card. Genuine failures (bad URL, decode, network) always carry a cause
+    /// through `onError` first and keep routing to `onFailed`.
+    let onEvicted: @MainActor @Sendable () -> Void
 
     @State private var player: AVPlayer?
     @State private var backgrounded = false
@@ -110,6 +118,17 @@ private struct StoryThumbnailVideo: View {
     @State private var completed = false
     @State private var startRevalidated = false
     @State private var retriedAtZero = false
+    /// Set when the card unmounts. A completion or failure observed after this point belongs
+    /// to a torn-down showing (the pool hands the freed player to the next card while the
+    /// old driver's last poll is still in flight): reporting it would mark a healthy,
+    /// already-completed card as failed and drop it from the rotation. The rail moved on via
+    /// the live showing; the dead one stays silent.
+    @State private var gone = false
+    /// Whether this showing already reported a caused failure through `onError`. Genuine
+    /// failures (bad URL, decode, network) always carry a cause first; a give-up with no
+    /// preceding cause is a lost borrow (pool eviction or the silent path), not a verdict
+    /// on the content. Reset on every new borrow.
+    @State private var errored = false
 
     private var startMs: Int64 { max(item.thumbnailPlayback.startTimeMs, 0) }
     private var windowMs: Int64? {
@@ -145,16 +164,23 @@ private struct StoryThumbnailVideo: View {
                 playing: playing && !backgrounded,
                 onReady: { ready in
                     player = ready
+                    errored = false
                     startDriver(player: ready)
                 },
+                onError: { _ in errored = true },
                 onGiveUp: {
                     stopDriver()
-                    onFailed()
+                    if !gone {
+                        if errored { onFailed() } else { onEvicted() }
+                    }
                 }
             )
         }
         .id(reappearGeneration)
-        .onDisappear { stopDriver() }
+        .onDisappear {
+            gone = true
+            stopDriver()
+        }
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.willResignActiveNotification
         )) { _ in backgrounded = true }
@@ -184,6 +210,7 @@ private struct StoryThumbnailVideo: View {
                     if startMs > 0, startMs >= durationMs, !retriedAtZero {
                         retriedAtZero = true
                         await player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+                        guard !Task.isCancelled else { return }
                     }
                 }
                 if position != lastPosition {
@@ -195,11 +222,12 @@ private struct StoryThumbnailVideo: View {
                     if !retriedAtZero, startMs > 0 {
                         retriedAtZero = true
                         await player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+                        guard !Task.isCancelled else { return }
                         lastProgressAt = Date()
                         continue
                     }
                     stopDriver()
-                    onFailed()
+                    if !gone { onFailed() }
                     return
                 }
                 let effectiveStart = retriedAtZero ? 0 : startMs
@@ -214,11 +242,12 @@ private struct StoryThumbnailVideo: View {
                             await player.seek(to: CMTime(
                                 value: effectiveStart * 1_000, timescale: 1_000_000),
                             toleranceBefore: .zero, toleranceAfter: .zero)
+                            guard !Task.isCancelled else { return }
                             player.play()
                             completed = false
                         } else {
                             stopDriver()
-                            onWindowCompleted()
+                            if !gone { onWindowCompleted() }
                             return
                         }
                     }
