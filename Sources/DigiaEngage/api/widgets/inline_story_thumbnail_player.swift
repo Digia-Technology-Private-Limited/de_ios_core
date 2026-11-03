@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 import UIKit
 
@@ -18,13 +19,9 @@ struct StoryRailGeometryPreference: PreferenceKey {
     }
 }
 
-func shouldComposeThumbnailPlayer(
-    hasExplicitThumbnail: Bool,
-    scheduled: Bool
-) -> Bool {
-    !hasExplicitThumbnail || scheduled
-}
-
+/// The dark tile a rail card shows under its media. Q1 still open: a video story with no
+/// thumbnail image keeps this backdrop (plus the generated-frame poster below the player, kept
+/// working and repointed at the D2 asset) until its first frame.
 struct StoryThumbnailPlaceholderView: View {
     let thumbnail: StoryThumbnailConfig?
     var fitOverride: StoryMediaFit? = nil
@@ -86,90 +83,108 @@ struct StoryPosterImage: View {
     }
 }
 
-@MainActor
-struct StoryThumbnailVideoView: View {
-    let index: Int
-    let item: StoryItemConfig
-    @ObservedObject var playbackStore: InlineStoryRailPlaybackStore
-    let onWindowCompleted: @MainActor @Sendable () -> Void
-    let onFailed: @MainActor @Sendable () -> Void
+/// The raw video rendering surface shared by the story rail and the floater/PIP media view:
+/// a transparent `AVPlayerLayer` that shows through to the still below until the first frame.
+struct InlineStoryPlayerLayer: UIViewRepresentable {
+    let player: AVPlayer
+    var gravity: AVLayerVideoGravity = .resizeAspectFill
+    var onReadyForDisplay: (() -> Void)?
 
-    @StateObject private var playback: StoryVideoPlayback
-    @Environment(\.digiaCampaignKey) private var campaignKey
-
-    init(
-        index: Int,
-        item: StoryItemConfig,
-        playbackStore: InlineStoryRailPlaybackStore,
-        onWindowCompleted: @escaping @MainActor @Sendable () -> Void,
-        onFailed: @escaping @MainActor @Sendable () -> Void
-    ) {
-        self.index = index
-        self.item = item
-        self.playbackStore = playbackStore
-        self.onWindowCompleted = onWindowCompleted
-        self.onFailed = onFailed
-        _playback = StateObject(wrappedValue: StoryVideoPlayback(
-            urlString: item.url,
-            purpose: .thumbnail(item)
-        ))
+    func makeUIView(context _: Context) -> InlineStoryPlayerContainer {
+        let view = InlineStoryPlayerContainer()
+        view.configure(
+            player: player,
+            gravity: gravity,
+            onReadyForDisplay: onReadyForDisplay
+        )
+        return view
     }
 
-    var body: some View {
-        ZStack {
-            Color.black
-            StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
-            if item.thumbnail == nil, let poster = playback.poster {
-                StoryPosterImage(image: poster, fit: item.thumbnailBoxFit)
-            }
-            if let player = playback.player {
-                InlineStoryPlayerLayer(
-                    player: player,
-                    gravity: item.thumbnailBoxFit.videoGravity,
-                    onReadyForDisplay: playback.playerLayerDidBecomeReady
-                )
-                .opacity(playback.showPlayerLayer ? 1 : 0)
-            }
-        }
-        .onAppear(perform: updatePlayback)
-        .onReceive(playbackStore.$coordinator) { coordinator in
-            updatePlayback(state: coordinator.playbackState(for: index))
-        }
-        .onDisappear { playback.tearDown() }
-    }
-
-    private func updatePlayback() {
-        updatePlayback(state: playbackStore.coordinator.playbackState(for: index))
-    }
-
-    private func updatePlayback(state: ThumbnailPlaybackViewState) {
-        playback.campaignKey = campaignKey
-        playback.update(
-            state: StoryVideoPlaybackState(
-                demand: loadDemand(for: state),
-                active: state.shouldPlay,
-                muted: true,
-                repeatWindow: shouldRepeatThumbnailPlaybackWindow(
-                    mode: state.mode,
-                    eligibleVideoCount: state.playableIndices.count
-                ),
-                restartGeneration: state.restartGeneration
-            ),
-            events: StoryVideoPlaybackEvents(
-                onEnded: onWindowCompleted,
-                onFailed: onFailed
-            )
+    func updateUIView(_ uiView: InlineStoryPlayerContainer, context _: Context) {
+        uiView.configure(
+            player: player,
+            gravity: gravity,
+            onReadyForDisplay: onReadyForDisplay
         )
     }
 
-    private func loadDemand(for state: ThumbnailPlaybackViewState) -> StoryVideoLoadDemand {
-        guard state.canLoad else { return .none }
-        if state.scheduled {
-            return .playback(state.cachePriority ?? .scheduled)
+    static func dismantleUIView(_ uiView: InlineStoryPlayerContainer, coordinator _: Void) {
+        uiView.tearDown()
+    }
+}
+
+final class InlineStoryPlayerContainer: UIView {
+    private var readyObservation: NSKeyValueObservation?
+    private var observedPlayer: AVPlayer?
+    private var didReportReady = false
+    private var onReadyForDisplay: (() -> Void)?
+
+    override class var layerClass: AnyClass {
+        AVPlayerLayer.self
+    }
+
+    // A raw video rendering surface, never itself interactive in either consumer
+    // (inline story or floater/PIP) — both render separate SwiftUI content above it
+    // for actual interaction. Set explicitly rather than relying on the SwiftUI
+    // `.allowsHitTesting(false)` modifier callers apply: that modifier's propagation
+    // across a `UIViewRepresentable` boundary proved unreliable elsewhere in this
+    // hosting stack (see `floater_overlay_view.swift`'s `FloaterSessionView` — the
+    // floater's own drag/tap gesture and its chrome buttons stopped receiving touches
+    // wherever this view's real, UIKit-default-`true` `isUserInteractionEnabled` won
+    // hit-testing priority over them instead).
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    var playerLayer: AVPlayerLayer {
+        layer as! AVPlayerLayer
+    }
+
+    func configure(
+        player: AVPlayer,
+        gravity: AVLayerVideoGravity,
+        onReadyForDisplay: (() -> Void)?
+    ) {
+        self.onReadyForDisplay = onReadyForDisplay
+        playerLayer.videoGravity = gravity
+        guard observedPlayer !== player else {
+            revealIfReady()
+            return
         }
-        if item.thumbnail == nil, let priority = state.cachePriority {
-            return .poster(priority)
+        readyObservation?.invalidate()
+        observedPlayer = player
+        didReportReady = false
+        playerLayer.opacity = 0
+        playerLayer.player = player
+        readyObservation = playerLayer.observe(
+            \.isReadyForDisplay,
+            options: [.initial, .new]
+        ) { [weak self] _, _ in
+            Task { @MainActor in self?.revealIfReady() }
         }
-        return .none
+    }
+
+    func tearDown() {
+        readyObservation?.invalidate()
+        readyObservation = nil
+        observedPlayer = nil
+        onReadyForDisplay = nil
+        didReportReady = false
+        playerLayer.opacity = 0
+        playerLayer.player = nil
+    }
+
+    private func revealIfReady() {
+        guard playerLayer.isReadyForDisplay else { return }
+        playerLayer.opacity = 1
+        guard !didReportReady else { return }
+        didReportReady = true
+        onReadyForDisplay?()
     }
 }
