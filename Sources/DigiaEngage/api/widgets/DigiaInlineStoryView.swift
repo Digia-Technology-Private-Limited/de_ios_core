@@ -156,6 +156,7 @@ struct StoryThumbnailRailView: View {
                                 namespace: campaignKey,
                                 onWindowCompleted: { rail = rail.complete(index: index) },
                                 onFailed: { rail = rail.fail(index: index) },
+                                onEvicted: { rail = rail.complete(index: index) },
                                 onOpen: open
                             )
                         } else {

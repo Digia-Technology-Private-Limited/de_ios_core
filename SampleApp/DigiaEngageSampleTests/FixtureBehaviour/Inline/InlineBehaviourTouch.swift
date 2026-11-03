@@ -11,8 +11,10 @@ import UIKit
 @MainActor
 final class InlineSeenPlayer {
     let player: AVPlayer
-    /// Index of the rail card it sits on, or nil when it fills the screen (the viewer's).
-    let card: Int?
+    /// The rail card it currently sits on, or nil when it fills the screen (the viewer).
+    /// Re-attributed as the pooled player moves: a handover promotes a rail entry to the
+    /// viewer without minting a new showing.
+    var card: Int?
     /// Playhead, in seconds, the first time it was seen playing; nil while it never played.
     var firstPlayingAt: Double?
 
@@ -102,14 +104,17 @@ extension SdkHarness {
         try TouchSynthesizer.tap(at: point, in: window)
     }
 
-    /// The video players on screen now: each `InlineStoryPlayerContainer` holding a player, with
+    /// The video players on screen now: every `AVPlayerLayer`-backed view holding a
+    /// player (post-T10 the rail and viewer render `MediaVideo`'s private
+    /// `PlayerBackedView`, not the pre-rewire `InlineStoryPlayerContainer`; both are
+    /// `AVPlayerLayer`-backed, so the seam is the layer, never the view class), with
     /// the rail card it sits on (by its frame inside [slot]).
     func storyPlayers(in slot: InlineSlotFrame, card: StoryCardConfig) -> [(card: Int?, player: AVPlayer)] {
         guard let window else { return [] }
         var found: [(Int?, AVPlayer)] = []
         func walk(_ view: UIView) {
-            if let container = view as? InlineStoryPlayerContainer, let player = container.playerLayer.player {
-                let frame = container.convert(container.bounds, to: window)
+            if let playerLayer = view.layer as? AVPlayerLayer, let player = playerLayer.player {
+                let frame = view.convert(view.bounds, to: window)
                 let stride = CGFloat(card.width + Double(card.spacing))
                 let index = frame.width < window.bounds.width * 0.9
                     ? Int(((frame.midX - slot.frame.minX - CGFloat(card.spacing)) / stride).rounded(.down))
@@ -126,11 +131,22 @@ extension SdkHarness {
 /// Watches the story players for as long as a test runs, keeping every player it saw in the order
 /// it first saw each, with where its playhead was when it started playing.
 ///
+/// The pool reuses player objects across cards, laps and the viewer handover (a freed player
+/// is re-pointed at the next URL), so object identity no longer counts showings. A showing is
+/// a playhead epoch instead: a backward jump of more than a second (a take-over seeking back
+/// to the window start) opens a new entry for the same player, and a rail card reporting from
+/// the full screen (or back) re-attributes the live entry. Forward seeks never open entries.
+///
+/// "Playing" means actually rendering (`timeControlStatus == .playing`), not merely told to
+/// play: the pooled player reports `rate > 0` from the `play()` call even for a doomed item
+/// that never renders a frame, so `rate` alone would count failures as showings.
+///
 /// Players are held strongly: an `ObjectIdentifier` of a released player could otherwise be
 /// reused by the next one.
 @MainActor
 final class InlinePlayerWatch {
     private(set) var seen: [InlineSeenPlayer] = []
+    private var lastPosition: [ObjectIdentifier: Double] = [:]
     private var task: Task<Void, Never>?
 
     init(_ sdk: SdkHarness, slot: InlineSlotFrame, card: StoryCardConfig) {
@@ -146,17 +162,50 @@ final class InlinePlayerWatch {
 
     func stop() { task?.cancel() }
 
+    private static func positionSeconds(of player: AVPlayer) -> Double? {
+        let position = player.currentTime()
+        guard position.isNumeric, position.seconds.isFinite else { return nil }
+        return position.seconds
+    }
+
     private func sample(_ players: [(card: Int?, player: AVPlayer)]) {
         for (card, player) in players {
-            let entry: InlineSeenPlayer
-            if let known = seen.first(where: { $0.player === player }) {
-                entry = known
+            let id = ObjectIdentifier(player)
+            let position = Self.positionSeconds(of: player)
+            // The latest entry wins: the pool hands the same object to successive cards,
+            // so an earlier entry for this player is history — the live showing is the
+            // last one. (Matching the first entry would mature replays into the stale
+            // entry and the replay would never count.)
+            if let index = seen.lastIndex(where: { $0.player === player }) {
+                let known = seen[index]
+                // A rail card reporting from the full screen (the viewer handover), or back,
+                // is the same showing under the viewer: re-attribute, don't recount.
+                if known.card != card, card == nil || known.card == nil {
+                    known.card = card
+                }
+                // A backward jump is a restart (a take-over seeking back to the window start):
+                // a new showing of the same player, counted like a fresh one.
+                if let last = lastPosition[id], let now = position, now < last - 1.0 {
+                    let entry = InlineSeenPlayer(player: player, card: card)
+                    seen.append(entry)
+                    lastPosition[id] = now
+                    if player.timeControlStatus == .playing {
+                        entry.firstPlayingAt = now
+                    }
+                } else {
+                    if let now = position { lastPosition[id] = now }
+                    if known.firstPlayingAt == nil,
+                       player.timeControlStatus == .playing, let now = position {
+                        known.firstPlayingAt = now
+                    }
+                }
             } else {
-                entry = InlineSeenPlayer(player: player, card: card)
+                let entry = InlineSeenPlayer(player: player, card: card)
                 seen.append(entry)
-            }
-            if entry.firstPlayingAt == nil, player.rate > 0 {
-                entry.firstPlayingAt = player.currentTime().seconds
+                if let now = position { lastPosition[id] = now }
+                if player.timeControlStatus == .playing, let now = position {
+                    entry.firstPlayingAt = now
+                }
             }
         }
     }
@@ -184,8 +233,19 @@ final class InlinePlayerWatch {
 
 /// Moves a player's playhead to just before the end of its video, so it runs out the way it would
 /// after playing through (the Flutter tests move the fake player's playhead the same way).
+///
+/// Waits for the item's duration first: the rewired player is attached (and already told to
+/// play) before the range-cache asset reports metadata, so seeking immediately would silently
+/// no-op on an indefinite duration and the video would play through instead of running out.
 @MainActor
 func inlineRunOut(_ player: AVPlayer) async {
+    for _ in 0..<100 {
+        if let duration = player.currentItem?.duration,
+           duration.isNumeric, duration.seconds.isFinite, duration.seconds > 0 {
+            break
+        }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+    }
     guard let duration = player.currentItem?.duration, duration.isNumeric else { return }
     let target = CMTimeSubtract(duration, CMTime(value: 150, timescale: 1_000))
     await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
