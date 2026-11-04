@@ -115,10 +115,10 @@ final class GuideOrchestrator: ObservableObject {
 // `GuideOrchestrator`/`GuideShowcaseManager` split has no iOS equivalent.
 
 extension GuideOrchestrator {
-    private var ctx: SurfaceContext {
-        guard let surfaceContext else {
-            preconditionFailure("GuideOrchestrator.reporting used before surfaceContext was set")
-        }
+    /// The SDK always sets this at init. A missing one is a programmer error:
+    /// loud in debug, and in release the call degrades to a silent no-op.
+    private func reportingContext() -> SurfaceContext? {
+        assert(surfaceContext != nil, "GuideOrchestrator reporting used before surfaceContext was set")
         return surfaceContext
     }
 
@@ -133,6 +133,10 @@ extension GuideOrchestrator {
     /// follows whether the guide reported a completion.
     func dismissGuide(reason: DismissReason = .userClose, completed: Bool? = nil) {
         guard let state else { return }
+        guard let ctx = reportingContext() else {
+            dismiss()
+            return
+        }
         let payload = state.payload
         let total = state.steps.count
         let elapsed = ctx.dwell.consumeDwellMs(payload.cepCampaignId)
@@ -163,6 +167,7 @@ extension GuideOrchestrator {
     }
 
     func reportGuideShown() {
+        guard let ctx = reportingContext() else { return }
         guard let state else { return }
         // Snapshot for a later anchor loss, as Flutter's `_screenAtStep`.
         screenAtGuideStep = ctx.currentScreen
@@ -225,6 +230,7 @@ extension GuideOrchestrator {
               (guideToken == nil || guideToken == state.token),
               (stepIndex == nil || stepIndex == state.stepIndex)
         else { return }
+        guard let ctx = reportingContext() else { return }
         if state.currentStep?.target.anchorKey != nil {
             ctx.sdk.logNativeGuideStage(
                 "render",
@@ -271,6 +277,7 @@ extension GuideOrchestrator {
         elementId: String? = nil
     ) {
         guard let state, let step = state.currentStep else { return }
+        guard let ctx = reportingContext() else { return }
         ctx.events.toDigia(
             GuideEvent.StepClicked(
                 itemIndex: state.stepIndex + 1,
@@ -290,6 +297,7 @@ extension GuideOrchestrator {
     /// `anchorLeft`: the last step's anchor left while it showed. Flutter then
     /// sends the dwell as `timeToCompleteMs` and records no frequency completion.
     func reportGuideCompletedIfNeeded(_ state: ActiveGuideState, anchorLeft: Bool = false) {
+        guard let ctx = reportingContext() else { return }
         guard !guideCompletionFired else { return }
         guideCompletionFired = true
         if !anchorLeft, !isLiveTestCepId(state.payload.cepCampaignId) {

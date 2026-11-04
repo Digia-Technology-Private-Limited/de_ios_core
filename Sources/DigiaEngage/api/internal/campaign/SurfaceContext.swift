@@ -31,8 +31,8 @@ final class SurfaceContext {
         campaignKey: String,
         viewed: EngageAnalyticsEvent
     ) {
-        recordShow(campaignKey: campaignKey, cepCampaignId: payload.cepCampaignId)
         dwell.markViewed(payload.cepCampaignId)
+        recordShow(campaignKey: campaignKey, cepCampaignId: payload.cepCampaignId)
         events.toBoth(.impressed, viewed, payload: payload)
     }
 
