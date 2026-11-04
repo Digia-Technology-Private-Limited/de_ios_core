@@ -53,11 +53,11 @@ struct StoryViewerBehaviourTests {
     // MARK: - Moving between frames
 
     /// Known gap: going back from the first frame stays on it without telling the backend it was
-    /// shown again (`previous()` moves to index 0, the index does not change, and the
-    /// `StoryStepViewedReporter` in `DigiaInlineStoryView.swift` reports only a change), where
+    /// shown again (`previous()` calls `session.goBack()`, which replays the page, the index does
+    /// not change, and `pageShown` in `StoryViewerView.swift` reports only a change), where
     /// Flutter reports the first frame a second time.
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:780
-    // `.onTapGesture { next() }` -> `.onTapGesture { previous() }`
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewerView.swift:298
+    // the right edge strip's `.onTapGesture { next() }` -> `.onTapGesture { previous() }`
     @Test("the right edge goes on, the left edge goes back, and going back from the first frame shows it again")
     func edgesMoveBetweenFrames() async throws {
         let (sdk, key) = try await openViewer("inline_story_swipe_next")
@@ -76,8 +76,8 @@ struct StoryViewerBehaviourTests {
         try await sdk.closeStoryViewer()
     }
 
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:821
-    // `completed = true` -> `(deleted)` (the close is then reported as a dismissal too).
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewerView.swift:204 (`onDisappear`)
+    // `!session.isCompleted` -> `true` (the close is then reported as a dismissal too).
     @Test("going on from the last frame completes the story once and closes the viewer, without reporting it as dismissed")
     func lastFrameCompletesAndCloses() async throws {
         let (sdk, key) = try await openViewer("inline_story_swipe_next")
@@ -97,10 +97,12 @@ struct StoryViewerBehaviourTests {
     }
 
     /// Known gap: a story set to restart goes round again without ever reporting completion
-    /// (`next()` in `DigiaInlineStoryView.swift` takes the `restartOnCompleted` branch before the
-    /// one that reports `Completed`), where Flutter reports it the first time round.
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:818
-    // `} else if state.config.restartOnCompleted {` -> `} else if false {` (it closes instead).
+    /// (`next()` in `StoryViewerView.swift` takes the `restartOnCompleted, !reportsCompletionOnLoop`
+    /// branch, which only inline sets, before `session.advance()` reports `Completed`), where
+    /// Flutter reports it the first time round.
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewerView.swift:322
+    // `} else if entry.restartOnCompleted, !entry.reportsCompletionOnLoop {` -> `} else if false {`
+    // (it closes instead).
     @Test("a story set to restart starts again after its last frame, and reports completion only the first time round")
     func restartingStoryGoesRoundAgain() async throws {
         let (sdk, key) = try await openViewer("inline_story_swipe_next") { $0["restartOnCompleted"] = true }
@@ -122,8 +124,8 @@ struct StoryViewerBehaviourTests {
         try await sdk.closeStoryViewer()
     }
 
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:800
-    // `if elapsed >= currentDuration {` -> `if false {`
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewerView.swift:377
+    // `if pageTimer.elapsed >= duration {` -> `if false {`
     @Test("a frame moves on by itself when its time is up, and the last one closes the viewer")
     func framesAdvanceOnTheirOwn() async throws {
         let (sdk, key) = try await openViewer("inline_story_auto_advance")
@@ -141,9 +143,8 @@ struct StoryViewerBehaviourTests {
 
     // MARK: - Holding and leaving
 
-    /// Known gap: iOS has no hold-to-pause. The viewer's only touch handlers are the edge tap zones
-    /// and a drag to dismiss (`InlineStoryOverlayContent` in `DigiaInlineStoryView.swift`), and
-    /// `tick()` runs the frame's timer under a finger, so a held frame moves on after 3 s.
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewerView.swift:191
+    // `.onChange(of: holding) { paused = $0 }` -> `{ _ in }` (the held frame then moves on after 3 s).
     @Test("holding a frame freezes its timer, and letting go carries on")
     func holdingFreezesTheFrame() async throws {
         let (sdk, key) = try await openViewer("inline_story_auto_advance")
@@ -155,15 +156,13 @@ struct StoryViewerBehaviourTests {
         try await sdk.settle(3.1)
         let released = try await sdk.storyFramesShown(key)
 
-        withKnownIssue("iOS has no hold-to-pause on the story viewer") {
-            #expect(held == [InlineStoryFrame(1, 2)], "five seconds held, still on the first frame")
-            #expect(released == [InlineStoryFrame(1, 2), InlineStoryFrame(2, 2)])
-            #expect(sdk.storyViewerIsOpen, "the second frame has run 3 s of its 3 s at most")
-        }
+        #expect(held == [InlineStoryFrame(1, 2)], "five seconds held, still on the first frame")
+        #expect(released == [InlineStoryFrame(1, 2), InlineStoryFrame(2, 2)])
+        #expect(sdk.storyViewerIsOpen, "the second frame has run 3 s of its 3 s at most")
         try await sdk.closeStoryViewer()
     }
 
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:685
+    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:596
     // `let swipeDown = dy > 48 && dy > abs(dx)` -> `let swipeDown = false`
     @Test("swiping down closes the viewer and reports the frame it was left on as dismissed")
     func swipeDownDismisses() async throws {
@@ -189,8 +188,8 @@ struct StoryViewerBehaviourTests {
         try await sdk.closeStoryViewer()
     }
 
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:653
-    // `action: { SDKInstance.shared.controller.dismissStoryOverlay() }` -> `action: {}`
+    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:652
+    // `onClose: { SDKInstance.shared.controller.dismissStoryOverlay() }` -> `onClose: {}`
     @Test("the close button closes the viewer when the story shows one")
     func closeButtonCloses() async throws {
         let (sdk, _) = try await openViewer("inline_story_close_button") {
@@ -212,7 +211,7 @@ struct StoryViewerBehaviourTests {
     /// same link into the item's `onClick` steps. Known gap: iOS does not read a story item's
     /// `onClick` (`StoryItemConfig.fromJson` reads action steps only from `ctaAction.steps`), so the
     /// button just closes the story. The click report, which iOS sends, is asserted unwrapped.
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:850
+    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:685
     // `SDKInstance.shared.reportStoryStepClicked(` -> `(deleted)`
     @Test("runs the action the story authored and reports the click on the frame it was on")
     func ctaRunsItsActionAndReportsTheClick() async throws {

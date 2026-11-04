@@ -87,8 +87,8 @@ struct InlineStoryVideoBehaviourTests {
 
     // MARK: - The rail's thumbnails
 
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:114
-    // `onWindowCompleted: { playbackStore.send(.windowCompleted(index)) },` -> `onWindowCompleted: {},`
+    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:159
+    // `onWindowCompleted: { rail = rail.complete(index: index) },` -> `onWindowCompleted: {},`
     @Test("the videos take turns, each from its authored start, and the rotation wraps past the last one")
     func videosTakeTurns() async throws {
         let strip = try await show()
@@ -120,8 +120,8 @@ struct InlineStoryVideoBehaviourTests {
         try await strip.finish()
     }
 
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:116
-    // `playbackStore.send(.failed(index: index, identity: playerIdentity))` -> `(deleted)`
+    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:160
+    // `onFailed: { rail = rail.fail(index: index) },` -> `onFailed: {},`
     @Test("a video that fails is skipped for the rest of the rotation")
     func failedVideoIsSkipped() async throws {
         // The first video cannot be opened, so the rail moves on to the second.
@@ -192,15 +192,15 @@ struct InlineStoryVideoBehaviourTests {
 
     // MARK: - The viewer's video
 
-    /// Two known gaps. The mute button flips its label at once, but the player follows one press
-    /// late: muted after "Unmute", with sound after "Mute". `InlineStoryVideoView`
-    /// (`DigiaInlineStoryView.swift:988`, `.onChange(of: muted) { _ in updatePlayback() }`) seems to read
-    /// `muted` off a stale view value (most likely the one from before the change).
-    /// And iOS has no hold-to-pause (see `StoryViewerBehaviourTests`), so holding the frame leaves
-    /// the video playing. Everything else here holds on iOS and is asserted unwrapped.
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:644
-    // `action: { muteOverride = !muted }` -> `action: {}`
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:141-148
+    /// The mute button reaches the viewer's player at once, a hold pauses the video, and leaving
+    /// the app pauses it and coming back resumes it. All of it holds on iOS and is asserted
+    /// unwrapped.
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewerView.swift:168
+    // `toggleMute: { session.muted.toggle() }` -> `toggleMute: {}`
+    // Fails if: Sources/DigiaEngage/api/internal/story/pages/VideoStoryPage.swift:110-111
+    // `video.playing = $0` / `Self.spec(item: item, muted: $0)` read `self.playing` / `self.muted`
+    // instead of the new value (the hold and the mute then act one change late).
+    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:143-145
     // `handedOver` stops keeping the rail card mounted while the viewer is open
     // (the handed-over player is then full-screen only, never on card 0).
     @Test("plays with sound, and the person can mute it, hold it, leave the app and let it run out")
@@ -238,43 +238,24 @@ struct InlineStoryVideoBehaviourTests {
         try await sdk.waitUntil("the button offers to mute again") { sdk.isShowing("Mute story") }
         try await sdk.settle(0.3)
         let mutedAfterUnmute = viewer()?.isMuted
-        withKnownIssue("iOS applies the mute button to the viewer's player one press late") {
-            #expect(mutedAfterMute == true)
-            #expect(mutedAfterUnmute == false)
-        }
+        #expect(mutedAfterMute == true)
+        #expect(mutedAfterUnmute == false)
 
         // Holding the frame pauses the video, letting go plays it again.
         var rateWhileHeld: Float = -1
         try TouchSynthesizer.press(at: CGPoint(x: window.bounds.midX, y: window.bounds.midY), in: window, for: 0.7) {
             rateWhileHeld = viewer()?.rate ?? -1
         }
-        withKnownIssue("iOS has no hold-to-pause on the story viewer") {
-            #expect(rateWhileHeld == 0)
-        }
+        #expect(rateWhileHeld == 0)
         try await sdk.waitUntil("the video plays after the hold") { (viewer()?.rate ?? 0) > 0 }
 
         // Leaving the app stops it, and coming back plays it again.
-        // Known gap: in the keep-mounted handover the viewer never pauses on
-        // resign — the shared player keeps rate 1.0 while away (the rail-only
-        // rotation pauses by unmounting, but the handed-over card stays mounted
-        // and neither pause path fires) — and the missed pause lands after the
-        // return instead, freezing the video instead of resuming it. Production
-        // fix needed; these stay as tripwires (they fail if the gap is fixed).
         InlineAppLifecycle.resignActive()
         try await sdk.settle(1.0)
-        withKnownIssue("the viewer does not pause on resign in the keep-mounted handover") {
-            #expect(viewer()?.rate == 0, "the video stops while away")
-        }
+        #expect(viewer()?.rate == 0, "the video stops while away")
         InlineAppLifecycle.becomeActive()
         try await sdk.settle(1.0)
-        withKnownIssue("the viewer does not resume on return in the keep-mounted handover") {
-            #expect((viewer()?.rate ?? 0) > 0, "the video plays again")
-        }
-        // The broken resume above leaves the player frozen, so the run-out tail
-        // below would stall on a seeked-but-paused player. Drive playback from the
-        // harness (as the seeks above do) to exercise the real run-out path —
-        // page driver sees the end, advances, reports — not the resume itself.
-        viewer()?.play()
+        #expect((viewer()?.rate ?? 0) > 0, "the video plays again")
         try await sdk.waitUntil("the video plays for its run-out") { (viewer()?.rate ?? 0) > 0 }
 
         // The video runs to its end, so the story moves on to the next frame.
@@ -285,13 +266,12 @@ struct InlineStoryVideoBehaviourTests {
         try await strip.finish()
     }
 
-    /// Flutter times a frame whose video cannot be fetched like a picture — its 8 s — and then
-    /// moves on. Known gap: iOS moves on the moment the player fails (`InlineStoryVideoView` falls
-    /// back to `onEnded` when no `onFailed` is given), so the frame is not shown for its time.
-    /// That the story does not stall on it holds on iOS and is asserted unwrapped.
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:1009
-    // `if let onFailed { onFailed() } else { onEnded?() }` -> `if let onFailed { onFailed() }`
-    // (the story then stalls: its watchdog only runs once a first video frame was shown).
+    /// A frame whose video cannot be fetched shows its still for the frame's time, like a picture
+    /// (its 8 s), and then the story moves on.
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewerView.swift:387
+    // `giveUpOnVideo`'s `pageTimer.reset()` -> `next()` (the frame is then skipped at once).
+    // Fails if: Sources/DigiaEngage/api/internal/story/pages/VideoStoryPage.swift:105
+    // `if video.gaveUp { onFailed() }` is deleted (the story then stalls on the dead video).
     @Test("a video that cannot be fetched does not stall the story, which moves on")
     func unfetchableViewerVideoMovesOn() async throws {
         let strip = try await show { $0[0]["url"] = Self.missing }
@@ -302,15 +282,11 @@ struct InlineStoryVideoBehaviourTests {
         try await sdk.waitForStoryViewer()
         try await sdk.settle(1)
         let early = try await sdk.storyFramesShown(strip.key)
-        withKnownIssue("iOS skips a failed video frame at once instead of timing it like a picture") {
-            #expect(early == [InlineStoryFrame(1, 4)], "the first video item lasts 8 s")
-        }
+        #expect(early == [InlineStoryFrame(1, 4)], "the first video item lasts 8 s")
 
         let frames = try await sdk.waitForEvents("Digia Step Viewed", of: strip.key, count: 2, timeout: 10)
             .map { InlineStoryFrame($0["item_index"] as? Int ?? -1, $0["item_total"] as? Int) }
-        // Both frames were shown. Their order and count on the wire are not asserted: when the
-        // first video fails as the viewer opens, iOS reports the first frame twice and, at times,
-        // the second one before them.
+        // Both frames were shown. Their order and count on the wire are not asserted here.
         #expect(Set(frames.map(\.description)) == ["(1, 4)", "(2, 4)"])
         try await strip.finish()
     }

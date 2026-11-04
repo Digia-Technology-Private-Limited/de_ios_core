@@ -18,7 +18,7 @@ extension HostedUITests {
 ///
 /// Flutter runs these on a fake clock; here page lengths and timeouts are measured on the wall
 /// clock and asserted inside a band. The bands are wider above than below: the viewer advances a
-/// page by counting 20 Hz timer ticks (`FloaterStoryContentViewer`'s 0.05 s timer, like F's inline
+/// page by counting 20 Hz timer ticks (the shared `StoryViewer`'s timer, as on the inline
 /// viewer), so a page runs long, never short, on a loaded machine. Flutter's fake player ends a clip on demand; here the
 /// real player plays the Test Kit's `movie.mp4` and the test seeks it to its end.
 ///
@@ -98,15 +98,15 @@ struct StoryFloaterBehaviourTests {
     /// viewer flipped only the glyph and dropped the state before the player; that gap is gone
     /// since the rewire.) An unplayable page runs its authored 3 s, and the story starts over
     /// once it has ended.
-    // Fails if: Sources/DigiaEngage/api/widgets/floater_story_overlay_view.swift
-    // `FloaterStoryContentViewer` `canvasStoryToggleMute` `session.muted.toggle()` is deleted.
-    // Fails if: Sources/DigiaEngage/api/internal/media/MediaVideo.swift `onChange(of: spec.muted)`
-    // `coordinator.setMuted(spec.muted)` is deleted (the glyph flips but the live player keeps sound).
-    // Fails if: floater_story_overlay_view.swift `FloaterStoryContentViewer` video `onFailed`
-    // `videoFailed = true` is deleted (the unplayable page then advances at once instead of
-    // running its authored 3 s).
-    // Fails if: floater_story_overlay_view.swift `FloaterStoryContentViewer.next`
-    // `session.showPage(index: 0)` -> `session.advance()` (the story ends instead of restarting).
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewerView.swift:168
+    // `toggleMute: { session.muted.toggle() }` -> `toggleMute: {}` (the glyph and the player keep their state).
+    // Fails if: Sources/DigiaEngage/api/internal/story/pages/VideoStoryPage.swift:111
+    // `.onChange(of: muted) { video.spec = ... }` is deleted (the glyph flips but the live player keeps sound).
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewerView.swift:387
+    // `giveUpOnVideo`'s `pageTimer.reset()` -> `next()` (the unplayable page then advances at once
+    // instead of running its authored 3 s).
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewer.swift:107
+    // `if restartOnCompleted {` -> `if false {` in `advance` (the story ends instead of restarting).
     @Test("floater_story_video_pages_mute_restart: mute follows the viewer to the next video, an unplayable one runs its authored 3 s, and the story starts over once it has ended")
     func videoPagesMuteAndRestart() async throws {
         let (sdk, _) = try await boot("floater_story_video_pages_mute_restart")

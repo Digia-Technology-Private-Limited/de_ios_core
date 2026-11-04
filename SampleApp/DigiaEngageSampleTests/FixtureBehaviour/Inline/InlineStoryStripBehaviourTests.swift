@@ -64,8 +64,8 @@ struct InlineStoryStripBehaviourTests {
     /// (`InlineStoryConfig.fromJson` never reads `previewMode` / `previewImage`), so it draws the
     /// usual rail of cards. The person can still open the story from it, which is asserted
     /// unwrapped; that it is one preview spanning the slot is the known issue.
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:129
-    // `.onTapGesture { onOpen(index) }` -> `.onTapGesture {}`
+    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:335
+    // `.onTapGesture { onOpen(index, nil) }` -> `.onTapGesture {}`
     @Test("a preview image opens the story at its first item")
     func previewImageOpensTheFirstItem() async throws {
         let (sdk, frame, config, key) = try await show("inline_story_single_image_guarded_styling")
@@ -84,7 +84,7 @@ struct InlineStoryStripBehaviourTests {
         try await sdk.closeStoryViewer()
     }
 
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:48
+    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift:36
     // `initialIndex: index,` -> `initialIndex: 0,` (the second card opens the first item).
     @Test("a preview with no usable URL falls back to the strip of its items")
     func previewWithoutUrlFallsBackToTheStrip() async throws {
