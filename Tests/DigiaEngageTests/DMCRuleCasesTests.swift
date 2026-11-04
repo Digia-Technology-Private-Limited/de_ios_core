@@ -70,7 +70,10 @@ private enum RuleCaseFiles {
         files.sort { $0.path < $1.path }
         var seen: [String: String] = [:]
         for file in files {
-            let relative = file.path.replacingOccurrences(of: root.path + "/", with: "")
+            // Suffix after `rule-cases/`, robust to symlinked prefixes
+            // (the simulator may report a resolved path).
+            guard let marker = file.path.range(of: "rule-cases/") else { continue }
+            let relative = String(file.path[marker.upperBound...])
             let parts = relative.split(separator: "/").map(String.init)
             if parts.first == "scheduling" { continue }
             let name = String(file.deletingPathExtension().lastPathComponent)
@@ -119,8 +122,24 @@ final class DMCRuleCasesTests: XCTestCase {
     /// suite stays green; the honest reasons live in
     /// `testkit/.../evidence/c-ios-missing.md` §2.
     private let knownRed: Set<String> = [
-        // Filled after the first simulator run (before 05:00 IST only the
-        // build may run, so no red is known yet).
+        "identified_condition_follows_login_and_logout",
+        "inline_exhausted_history_does_not_block",
+        "inline_ignores_screens",
+        "inline_total_cap_is_ignored",
+        "inline_window_cap_is_ignored",
+        "max_per_window_zero_never_shows",
+        "max_total_zero_never_shows",
+        "newline_inside_braces_is_whitespace",
+        "screens_checked_again_when_the_wait_ends",
+        "screens_pick_the_offer_for_this_screen",
+        "screens_shape",
+        "unknown_window_name_is_unsupported",
+        "wait_not_on_target_screen_cancels_and_does_not_compete",
+        "wait_not_on_target_screen_survives_leave_and_return",
+        "wait_with_screens_starts_only_on_a_listed_screen",
+        "waits_end_together_dropped_lead_falls_through",
+        "waits_end_together_lead_routes",
+        "zero_never_prints_a_sign",
     ]
 
     func testCatalogIsValidAndIdsAreUnique() throws {
@@ -139,6 +158,9 @@ final class DMCRuleCasesTests: XCTestCase {
             "Test Kit rule cases not found; run `bash clone.sh` in de_workspace")
         var passed = 0
         var failed: [String] = []
+        XCTAssertFalse(
+            RuleCaseFiles.loaded.cases.isEmpty,
+            "no rule cases loaded from \(RuleCaseFiles.root?.path ?? "?")")
         for (file, json) in RuleCaseFiles.loaded.cases {
             let id = json["id"] as? String ?? file
             let problems = World(file: file, json: json).run()
@@ -345,14 +367,18 @@ private final class World: DecisionFacts {
             }
         }
 
-        let heldWires: Set<String> = [
-            "lower_priority", "capped", "not_in_audience", "not_on_target_screen",
+        // The corpus speaks enum case names (`lowerPriority`), the spelling
+        // Flutter and Android compare against, not wire strings. iOS reasons
+        // carry both; match on the case name so the same behavior compares
+        // equal on all three stacks.
+        let heldCases: Set<String> = [
+            "lowerPriority", "capped", "notInAudience", "notOnTargetScreen",
         ]
         if let want = expect["heldBack"] as? [String: String] {
             var got: [String: String] = [:]
             for record in recordsNow where record.campaignKey != nil {
-                let wire = record.reason?.wire ?? ""
-                if heldWires.contains(wire) { got[record.campaignKey!] = wire }
+                let name = reasonName(record.reason)
+                if heldCases.contains(name) { got[record.campaignKey!] = name }
             }
             if got != want {
                 problems.append("heldBack: expected \(want), got \(got)")
@@ -536,6 +562,14 @@ private final class World: DecisionFacts {
     var currentScreen: String { screen }
 
     func slotCampaignKey(_ slot: String) -> String? { slots[slot] }
+}
+
+/// An emitted reason's enum case name (`lowerPriority`), the spelling the
+/// shared corpus compares against. Verdict `reason` fields and wait-cancel
+/// `cause` extras stay on wire strings, which the corpus already uses.
+private func reasonName(_ reason: (any DiagnosticReason)?) -> String {
+    guard let reason else { return "" }
+    return "\(reason)"
 }
 
 /// A campaign as the bundle sends it: the case's `rule`, `frequency`,
