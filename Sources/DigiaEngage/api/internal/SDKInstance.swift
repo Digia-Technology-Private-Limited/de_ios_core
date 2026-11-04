@@ -164,9 +164,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// `events`'s identical implicitly-unwrapped-var pattern below.
     var floaterOrchestrator: FloaterOrchestrator!
     /// Holds the single active story floater. Its own orchestrator rather than a mode of
-    /// `floaterOrchestrator`: a PiP's whole design rests on owning an `AVPlayer` that
-    /// outlives its view, and a story floater has no media surface at all — its window is
-    /// a canvas and its story is mounted by `FloaterStoryOverlayView`.
+    /// `floaterOrchestrator`: a PiP's whole design rests on a player leased via
+    /// `MediaServices` that outlives its view, and a story floater has no media surface
+    /// at all — its window is a canvas and its story is mounted by `FloaterStoryOverlayView`.
     var floaterStoryOrchestrator: FloaterStoryOrchestrator!
     /// Wired to `floaterOrchestrator.setAppForegrounded` in `init()` — matches
     /// Android's `DigiaInstance.kt` `ProcessLifecycleOwner` `ON_START`/`ON_STOP`

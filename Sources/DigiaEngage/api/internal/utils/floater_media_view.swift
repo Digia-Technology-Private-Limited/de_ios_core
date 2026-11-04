@@ -1,15 +1,28 @@
 import AVFoundation
 internal import Lottie
-internal import SDWebImageSwiftUI
 import SwiftUI
 
-/// The media surface, shared by both states. Reads the orchestrator's own `player` —
-/// created once by `FloaterOrchestrator`, never by this view — so playback is
-/// continuous across the collapsed/expanded grow transition. This view is only ever
-/// a child of the one container in `FloaterSessionView` that animates size/position;
-/// it must never itself be swapped for a different view identity between states (see
-/// that file's top comment) — the media never re-appears here as an `if expanded`
-/// branch for exactly that reason.
+/// The media surface, shared by both states. Reads the orchestrator's `pip-<campaignKey>`
+/// lease — borrowed once by `FloaterOrchestrator` through a `MediaVideoState` before the
+/// first frame, released on teardown — never by this view, so playback is continuous
+/// across the collapsed/expanded grow transition and rotation remounts resume the same
+/// instance. This view is only ever a child of the one container
+/// in `FloaterSessionView` that animates size/position; it must never itself be swapped for
+/// a different view identity between states (see that file's top comment) — the media never
+/// re-appears here as an `if expanded` branch for exactly that reason.
+///
+/// Images render through the shared `MediaImage` wrapper (D1), drawing the orchestrator's
+/// warmed image with no second fetch, or animating from the warmed cache. Video and Lottie
+/// keep their dedicated shells: `MediaVideo`'s take-over unconditionally re-seeks an
+/// already-ready external player (dropping the decoded frame the window revealed on), and
+/// both wrappers paint their own dark backdrop under transparent regions — either shifts
+/// the pinned fixture pixels. Wiring those two kinds through the wrappers needs `bare` /
+/// no-take-over options on the frozen wrappers (Android's `FloaterMediaSurface` has both:
+/// `bare = true`, `drivePlayback = false`); see the lane report. Their bytes still travel
+/// the shared path — the player reads through the range cache, Lottie through the shared
+/// `loadLottieSource`, gated by `MediaPrefetch` before the window reveals.
+///
+/// Attribution (`digiaCampaignKey`) is set by the hosting overlay; the wrappers read it.
 ///
 /// Video reuses `InlineStoryPlayerLayer` (`DigiaInlineStoryView.swift`) — the
 /// existing raw `AVPlayerLayer`/`layerClass` shim, chosen over `NudgeVideoView`'s
@@ -21,14 +34,13 @@ struct FloaterMediaView: View {
     let player: AVPlayer?
     let cover: Bool
     let resolvedUrl: String
-    /// The orchestrator's already-decoded image, drawn in place of a `WebImage` load.
+    /// The orchestrator's already-decoded image, drawn in place of a fetch.
     let preloadedImage: UIImage?
 
     init(
         media: FloaterMediaConfig, player: AVPlayer?, cover: Bool, resolvedUrl: String,
         preloadedImage: UIImage?
     ) {
-        DigiaImagePipeline.configureIfNeeded()
         self.media = media
         self.player = player
         self.cover = cover
@@ -75,18 +87,21 @@ struct FloaterMediaView: View {
 
     @ViewBuilder
     private var imageView: some View {
-        // Nothing here handles a load failure, by design. The orchestrator only
-        // reveals the window once its media is decoded, and drops the campaign
-        // outright when it is not — so by the time this composes, the asset is
-        // already fetchable (though not necessarily SDWebImage-cache-warm; see
-        // FloaterOrchestrator.preloadImage's kdoc on the plain-URLSession trade-off).
-        if let preloadedImage {
+        // Nothing here handles a load failure, by design. The orchestrator warms through
+        // `MediaPrefetch` and only reveals the window once its media is decoded, and drops
+        // the campaign outright when it is not — so by the time this composes, the asset
+        // is already warm in the same shared cache the wrapper reads from.
+        if let preloadedImage, media.kind != .gif {
             Image(uiImage: preloadedImage)
                 .resizable()
                 .aspectRatio(contentMode: cover ? .fill : .fit)
-        } else if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{"), let url = URL(string: resolvedUrl) {
-            WebImage(url: url) { $0.resizable() } placeholder: { Color.black }
-                .aspectRatio(contentMode: cover ? .fill : .fit)
+        } else if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{") {
+            MediaImage(
+                spec: ImageSpec(url: resolvedUrl, fit: cover ? .cover : .contain),
+                // An animated image has no single still: the wrapper draws it from
+                // the warmed cache so it animates instead of freezing.
+                preloaded: media.kind == .gif ? nil : preloadedImage
+            )
         }
     }
 }

@@ -52,9 +52,16 @@ struct StoryVideoPosterIdentity: Hashable {
     }
 }
 
-/// Owns local-file resolution and the complete AVPlayer lifecycle for both story surfaces.
-/// Thumbnail and full-screen views provide policy through `StoryVideoPlaybackState`; observer,
-/// seek, readiness, failure, and teardown behavior lives only here.
+/// Owns the complete video lifecycle for the canvas story surfaces (R2-STORY): the player is
+/// borrowed through an owned `MediaVideoState` — keyless, so the state owns its player
+/// outright via the factory — instead of a directly built `AVPlayer`. The item still reads
+/// through the D2 range-cache asset (one download serves playback and caching, D2), and the
+/// first-frame reveal, poster generation, seek, readiness, failure, and teardown behavior
+/// below is unchanged: only the player source moved, from `AVPlayer(playerItem:)` to the
+/// state. Thumbnail and full-screen views provide policy through `StoryVideoPlaybackState`.
+///
+/// `player` mirrors the state's borrowed instance for the layer hosts; `poster` and
+/// `showPlayerLayer` behave exactly as before.
 @MainActor
 final class StoryVideoPlayback: ObservableObject {
     @Published private(set) var player: AVPlayer?
@@ -66,6 +73,16 @@ final class StoryVideoPlayback: ObservableObject {
     private let urlString: String
     private let purpose: StoryVideoPlaybackPurpose
     private let posterIdentity: StoryVideoPosterIdentity?
+    /// The D2 range-cache loader the poster asset and the state's player item read through
+    /// (one download serves playback and caching, D2). Tests inject a loader backed by a
+    /// fake store; production uses the process-wide shared loader.
+    private let resourceLoader: MediaResourceLoader
+    /// The state's borrow: keyless (each card owns its player, as before — the pool is for
+    /// rail/viewer showings under keep-alive keys), driven by `playing`/spec below. Health
+    /// stays reported directly through `reportMediaLoadFailed` (the state runs with default
+    /// services, so it reports nothing itself — one report per fault, as before).
+    private let videoState: MediaVideoState
+    private var videoAppeared = false
     private var applicationActive: Bool
     private var lifecycleSubscriptions = Set<AnyCancellable>()
     private var state = StoryVideoPlaybackState(
@@ -77,16 +94,9 @@ final class StoryVideoPlayback: ObservableObject {
     )
     private var events = StoryVideoPlaybackEvents()
     private var localAsset: AVURLAsset?
-    private var loadTask: Task<Void, Never>?
-    private var requestedPriority: StoryVideoCachePriority?
-    private var loadGeneration: UInt = 0
 
-    private var statusObserver: NSKeyValueObservation?
-    private var durationObserver: NSKeyValueObservation?
-    private var bufferingObserver: NSKeyValueObservation?
-    private var timeObserver: Any?
-    private var endObserver: NSObjectProtocol?
-    private var failObserver: NSObjectProtocol?
+    private var driverTask: Task<Void, Never>?
+    private var lastWaiting: Bool?
 
     private var effectiveStartMs: Int64 = 0
     private var startPrepared = false
@@ -99,11 +109,22 @@ final class StoryVideoPlayback: ObservableObject {
 
     private var imageGenerator: AVAssetImageGenerator?
     private var imageGenerationID: UUID?
-    private var cachedPosterLookupTask: Task<Void, Never>?
 
-    init(urlString: String, purpose: StoryVideoPlaybackPurpose) {
+    init(
+        urlString: String,
+        purpose: StoryVideoPlaybackPurpose,
+        resourceLoader: MediaResourceLoader? = nil
+    ) {
         self.urlString = urlString
         self.purpose = purpose
+        let loader = resourceLoader ?? SharedMediaResourceLoader.shared
+        self.resourceLoader = loader
+        let videoState = MediaVideoState(
+            spec: Self.stateSpec(urlString: urlString, purpose: purpose, muted: true),
+            playing: false,
+            resourceLoader: loader
+        )
+        self.videoState = videoState
         posterIdentity = Self.posterFrameMs(for: purpose).map {
             StoryVideoPosterIdentity(url: urlString, frameMs: $0)
         }
@@ -116,6 +137,30 @@ final class StoryVideoPlayback: ObservableObject {
                 }
                 .store(in: &lifecycleSubscriptions)
         }
+        // The state's borrow, mirrored for the layer hosts (the state's own take-over,
+        // observers and health stay inside the state — this class only mirrors and drives
+        // the window policy below).
+        videoState.$activePlayer
+            .sink { [weak self] in self?.player = $0 }
+            .store(in: &lifecycleSubscriptions)
+        // The ready signal the old item-status observer provided: the state's first frame.
+        videoState.$firstFrameShown
+            .sink { [weak self] shown in
+                guard shown else { return }
+                self?.prepareStart()
+            }
+            .store(in: &lifecycleSubscriptions)
+        // The duration revalidation the old duration observer provided.
+        videoState.$durationMs
+            .sink { [weak self] _ in self?.revalidateStartAgainstKnownDuration() }
+            .store(in: &lifecycleSubscriptions)
+        videoState.onError = { [weak self] cause in
+            self?.handleTerminalFailure(cause: cause)
+        }
+        videoState.onGiveUp = { [weak self] in
+            guard let self, !self.terminalFailureReported else { return }
+            self.handleTerminalFailure()
+        }
 
         NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)
             .sink { [weak self] _ in
@@ -127,7 +172,32 @@ final class StoryVideoPlayback: ObservableObject {
                 Task { @MainActor in self?.setApplicationActive(true) }
             }
             .store(in: &lifecycleSubscriptions)
-        preparePosterFromCachedFileIfAvailable()
+        preparePosterIfAvailable()
+    }
+
+    /// The state's spec for this purpose: the window start up front (the take-over seeks
+    /// there at attach, exactly where the old `prepareStart` sought), never autoplay (the
+    /// old engine only played once ready and active — `playing` below drives), never loop
+    /// (window repeat stays in `completeWindow`, as before).
+    private static func stateSpec(
+        urlString: String, purpose: StoryVideoPlaybackPurpose, muted: Bool
+    ) -> VideoSpec {
+        switch purpose {
+        case let .thumbnail(item):
+            let startMs = max(item.thumbnailPlayback.startTimeMs, 0)
+            return VideoSpec(
+                url: urlString,
+                fit: item.thumbnailBoxFit.toMediaFit,
+                playback: Playback(
+                    loop: false, autoplay: false, muted: muted, startMs: Int(startMs))
+            )
+        case let .fullScreen(item):
+            return VideoSpec(
+                url: urlString,
+                fit: item.boxFit.toMediaFit,
+                playback: Playback(loop: false, autoplay: false, muted: muted, startMs: 0)
+            )
+        }
     }
 
     func update(
@@ -137,45 +207,43 @@ final class StoryVideoPlayback: ObservableObject {
         let previous = state
         state = nextState
         self.events = events
-        player?.isMuted = nextState.muted
 
         guard !terminalFailureReported else { return }
         if nextState.demand == .none {
-            loadGeneration &+= 1
-            loadTask?.cancel()
-            loadTask = nil
-            requestedPriority = nil
-            releasePlayer()
+            disappearVideo()
             if applicationActive {
-                preparePosterFromCachedFileIfAvailable()
+                preparePosterIfAvailable()
             } else {
                 cancelPosterWork()
             }
             return
         }
-
-        let restartRequested = previous.restartGeneration != nextState.restartGeneration
-        ensureAsset(
-            priority: nextState.demand.priority ?? .eligible,
-            needsPlayer: nextState.demand.needsPlayer
-        )
-
-        guard let player else { return }
-        if !nextState.demand.needsPlayer {
-            releasePlayer()
+        // An unusable URL reports `invalid_url` with no fetch, as before — before any poster
+        // or player work starts.
+        guard mediaUsableURL(urlString) != nil else {
+            handleTerminalFailure(cause: "invalid_url")
             return
         }
+        ensurePosterAsset()
+
+        guard nextState.demand.needsPlayer else {
+            disappearVideo()
+            return
+        }
+        appearVideo()
+
+        let restartRequested = previous.restartGeneration != nextState.restartGeneration
         if restartRequested, startPrepared {
             completionHandled = false
-            player.pause()
+            videoState.pause()
             seekToStart(retryAtZero: true, hideCurrentFrame: false) { [weak self] in
                 guard let self, self.state.active, self.applicationActive else { return }
-                self.player?.play()
+                self.videoState.play()
             }
         } else if nextState.active, applicationActive {
-            if startPrepared { player.play() }
+            if startPrepared { videoState.play() }
         } else {
-            player.pause()
+            videoState.pause()
         }
     }
 
@@ -185,193 +253,152 @@ final class StoryVideoPlayback: ObservableObject {
     }
 
     func tearDown() {
-        loadGeneration &+= 1
-        loadTask?.cancel()
-        loadTask = nil
-        requestedPriority = nil
         cancelPosterWork()
-        releasePlayer()
+        disappearVideo()
         localAsset = nil
     }
 
-    private func ensureAsset(priority: StoryVideoCachePriority, needsPlayer: Bool) {
-        cachedPosterLookupTask?.cancel()
-        cachedPosterLookupTask = nil
-        if let localAsset {
-            preparePoster(from: localAsset)
-            if needsPlayer, player == nil { installPlayer(asset: localAsset) }
-            return
+    /// Borrows (or reuses) the state's player for the current spec and applies the window
+    /// policy: a mute-only change applies without re-seeking (the state's `applyMuted`
+    /// arm), play/pause follows `active` without unmounting.
+    private func appearVideo() {
+        videoState.spec = Self.stateSpec(
+            urlString: urlString, purpose: purpose, muted: state.muted)
+        if !videoAppeared {
+            videoAppeared = true
+            videoState.appear(campaignKey: campaignKey)
         }
-        if let requestedPriority, loadTask != nil, requestedPriority >= priority {
-            return
-        }
-        guard let remoteURL = URL(string: urlString) else {
-            handleTerminalFailure(cause: "invalid_url")
-            return
-        }
+        videoState.playing = state.active && applicationActive
+        // Synchronous, like the old install: the hosts read `player` in the same pass.
+        player = videoState.activePlayer
+        startDriver()
+    }
 
-        loadGeneration &+= 1
-        let generation = loadGeneration
-        loadTask?.cancel()
-        requestedPriority = priority
-        loadTask = Task { @MainActor [weak self] in
-            do {
-                let assetURL: URL
-                if needsPlayer,
-                   let cachedURL = await DigiaVideoFileCache.shared.cachedURL(for: remoteURL) {
-                    assetURL = cachedURL
-                } else if needsPlayer {
-                    assetURL = remoteURL
-                    Task {
-                        _ = try? await DigiaVideoFileCache.shared.localURL(
-                            for: remoteURL,
-                            priority: priority
-                        )
-                    }
-                } else {
-                    assetURL = try await DigiaVideoFileCache.shared.localURL(
-                        for: remoteURL,
-                        priority: priority
-                    )
-                }
-                guard let self,
-                      !Task.isCancelled,
-                      self.loadGeneration == generation else { return }
-                self.loadTask = nil
-                self.requestedPriority = nil
-                let asset = AVURLAsset(url: assetURL)
-                self.localAsset = asset
-                self.preparePoster(from: asset)
-                if self.state.demand.needsPlayer {
-                    self.installPlayer(asset: asset)
-                }
-            } catch {
-                guard let self,
-                      !Task.isCancelled,
-                      self.loadGeneration == generation else { return }
-                self.loadTask = nil
-                self.requestedPriority = nil
-                if needsPlayer {
-                    let asset = AVURLAsset(url: remoteURL)
-                    self.localAsset = asset
-                    self.preparePoster(from: asset)
-                    if self.state.demand.needsPlayer {
-                        self.installPlayer(asset: asset)
-                    }
-                    Task {
-                        _ = try? await DigiaVideoFileCache.shared.localURL(
-                            for: remoteURL,
-                            priority: priority
-                        )
-                    }
-                    return
-                }
-                self.handleTerminalFailure()
+    /// Releases the borrow and stops the window driver. The poster's cached frame and the
+    /// on-disk bytes stay — only the holder goes.
+    private func disappearVideo() {
+        stopDriver()
+        seekGeneration &+= 1
+        videoAppeared = false
+        videoState.disappear()
+        // Synchronous, like the old release: the hosts drop the layer in the same pass.
+        player = videoState.activePlayer
+        startPrepared = false
+        seekInProgress = false
+        completionHandled = false
+        readyReported = false
+        playerLayerReady = false
+        showPlayerLayer = false
+    }
+
+    /// The window driver (was the item time + status + end observers): progress and the end
+    /// from the state's playhead publishers, the stall signal from the borrowed instance
+    /// (no state equivalent), all at the old 50 ms cadence. Runs once per appear — an update
+    /// while appeared keeps the running task (no buffering refire, as with the old observers).
+    private func startDriver() {
+        guard driverTask == nil else { return }
+        driverTask = Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                guard !Task.isCancelled else { return }
+                handleDriverTick()
             }
         }
     }
 
-    private func installPlayer(asset: AVURLAsset) {
-        guard player == nil else { return }
-        let item = AVPlayerItem(asset: asset)
-        let player = AVPlayer(playerItem: item)
-        player.isMuted = state.muted
-        self.player = player
+    private func stopDriver() {
+        driverTask?.cancel()
+        driverTask = nil
+        lastWaiting = nil
+    }
 
-        statusObserver = item.observe(\.status, options: [.initial, .new]) {
-            [weak self] item, _ in
-            Task { @MainActor in
-                guard let self else { return }
-                switch item.status {
-                case .readyToPlay: self.prepareStart()
-                case .failed: self.handleTerminalFailure(cause: mediaFailureCause(playerItem: item))
-                default: break
-                }
+    private func handleDriverTick() {
+        guard applicationActive, let active = videoState.activePlayer else { return }
+        // The stall signal, like the old buffering observer: ungated, fires on change.
+        let waiting = active.timeControlStatus == .waitingToPlayAtSpecifiedRate
+        if waiting != lastWaiting {
+            lastWaiting = waiting
+            events.onBuffering(waiting)
+        }
+        let positionMs = videoState.positionMs
+        let durationMs = videoState.durationMs
+        if state.active {
+            revealPlayerIfReady(positionMs: positionMs)
+            if durationMs > 0 {
+                events.onProgress(min(max(
+                    Double(positionMs) / Double(durationMs), 0), 1))
+            }
+            if case let .thumbnail(item) = purpose,
+               thumbnailPlaybackWindowEnded(
+                   item: item,
+                   currentPositionMs: positionMs,
+                   effectiveStartMs: effectiveStartMs
+               ) {
+                completeWindow()
+                return
             }
         }
-        durationObserver = item.observe(\.duration, options: [.initial, .new]) {
-            [weak self] item, _ in
-            Task { @MainActor in
-                self?.revalidateStartAgainstKnownDuration(item.duration)
+        // The end, like the old end notification: fires whenever the playhead reaches the
+        // end, even if policy has since paused the showing — `completeWindow` decides.
+        if durationMs > 0, positionMs >= durationMs, !waiting {
+            completeWindow()
+        }
+    }
+
+    /// Resolves the poster asset for `urlString`: range-cache-backed for remote URLs (the
+    /// player reads through the store and every fetched range is saved as it plays — one
+    /// download serves playback and caching, so the old stream-plus-separate-download is
+    /// gone), direct for `file://` and for URLs the private scheme cannot represent.
+    /// Poster generation only — the player item comes from the state's take-over now.
+    private func ensurePosterAsset() {
+        guard let remoteURL = mediaUsableURL(urlString) else { return }
+        if localAsset == nil {
+            if remoteURL.isFileURL {
+                localAsset = AVURLAsset(url: remoteURL)
+            } else if let item = resourceLoader.playerItem(for: remoteURL),
+                      let asset = item.asset as? AVURLAsset
+            {
+                // `playerItem(for:)` wires the loader on its own delegate queue and wraps the
+                // item's asset; reusing that asset keeps this file off the loader's threading
+                // contract.
+                localAsset = asset
+            } else {
+                localAsset = AVURLAsset(url: remoteURL)
             }
         }
-        bufferingObserver = player.observe(\.timeControlStatus, options: [.initial, .new]) {
-            [weak self] player, _ in
-            Task { @MainActor in
-                guard let self else { return }
-                self.events.onBuffering(
-                    player.timeControlStatus == .waitingToPlayAtSpecifiedRate
-                )
-            }
-        }
-        endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime,
-            object: item,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.completeWindow() }
-        }
-        failObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemFailedToPlayToEndTime,
-            object: item,
-            queue: .main
-        ) { [weak self] _ in
-            Task { @MainActor in self?.handleTerminalFailure() }
-        }
-        let interval = CMTime(seconds: 0.05, preferredTimescale: 600)
-        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) {
-            [weak self] time in
-            Task { @MainActor in self?.handleTimeUpdate(time) }
-        }
+        guard let localAsset else { return }
+        preparePoster(from: localAsset)
     }
 
     private func prepareStart() {
-        guard !startPrepared, let player, let item = player.currentItem else { return }
+        guard !startPrepared, let item = videoState.activePlayer?.currentItem else { return }
         effectiveStartMs = configuredStartMs(for: item.duration)
         startPrepared = true
         seekToStart(retryAtZero: isThumbnail) { [weak self] in
             guard let self, self.state.active, self.applicationActive else { return }
-            self.player?.play()
+            self.videoState.play()
         }
     }
 
-    private func revalidateStartAgainstKnownDuration(_ duration: CMTime) {
+    private func revalidateStartAgainstKnownDuration() {
         guard isThumbnail, startPrepared else { return }
-        let durationMs = milliseconds(duration)
+        let durationMs = milliseconds(videoState.activePlayer?.currentItem?.duration ?? .indefinite)
         guard shouldFallbackToZeroThumbnailStart(
             effectiveStartMs: effectiveStartMs,
             naturalDurationMs: durationMs
         ) else { return }
         effectiveStartMs = 0
-        player?.pause()
+        videoState.pause()
         seekToStart { [weak self] in
             guard let self, self.state.active, self.applicationActive else { return }
-            self.player?.play()
-        }
-    }
-
-    private func handleTimeUpdate(_ time: CMTime) {
-        guard let player, state.active, applicationActive else { return }
-        let positionMs = milliseconds(time)
-        revealPlayerIfReady(positionMs: positionMs)
-        let duration = player.currentItem?.duration.seconds ?? 0
-        if duration.isFinite, duration > 0 {
-            events.onProgress(min(max(time.seconds / duration, 0), 1))
-        }
-        if case let .thumbnail(item) = purpose,
-           thumbnailPlaybackWindowEnded(
-               item: item,
-               currentPositionMs: positionMs,
-               effectiveStartMs: effectiveStartMs
-           ) {
-            completeWindow()
+            self.videoState.play()
         }
     }
 
     private func completeWindow() {
-        guard applicationActive, !completionHandled, let player else { return }
+        guard applicationActive, !completionHandled else { return }
         completionHandled = true
-        player.pause()
+        videoState.pause()
 
         guard isThumbnail else {
             events.onEnded()
@@ -383,7 +410,7 @@ final class StoryVideoPlayback: ObservableObject {
                       self.state.active || self.state.repeatWhenInactive,
                       self.applicationActive else { return }
                 self.completionHandled = false
-                self.player?.play()
+                self.videoState.play()
             }
         } else {
             // Sequential handoff must not wait for a platform seek callback.
@@ -403,19 +430,18 @@ final class StoryVideoPlayback: ObservableObject {
         seekInProgress = true
         seekGeneration &+= 1
         let generation = seekGeneration
-        guard let player else {
+        guard let active = videoState.activePlayer else {
             seekInProgress = false
             completion?()
             return
         }
-        let expectedPlayer = player
         let time = CMTime(value: effectiveStartMs, timescale: 1_000)
-        player.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) {
+        active.seek(to: time, toleranceBefore: .zero, toleranceAfter: .zero) {
             [weak self] succeeded in
             Task { @MainActor in
                 self?.finishSeek(
                     generation: generation,
-                    expectedPlayer: expectedPlayer,
+                    expectedPlayer: active,
                     succeeded: succeeded,
                     retryAtZero: retryAtZero,
                     hideCurrentFrame: hideCurrentFrame,
@@ -433,7 +459,7 @@ final class StoryVideoPlayback: ObservableObject {
         hideCurrentFrame: Bool,
         completion: (@MainActor () -> Void)?
     ) {
-        guard seekGeneration == generation, player === expectedPlayer else { return }
+        guard seekGeneration == generation, videoState.activePlayer === expectedPlayer else { return }
         seekGeneration &+= 1
         switch thumbnailSeekRecoveryAction(
             succeeded: succeeded,
@@ -470,60 +496,39 @@ final class StoryVideoPlayback: ObservableObject {
     private func handleTerminalFailure(cause: String? = nil) {
         guard !terminalFailureReported else { return }
         terminalFailureReported = true
+        // Every failure carries a non-nil cause (D5, iOS-wide rule): item failures are mapped
+        // by the state through `mediaVideoFailureCause`, anything else is delivery, not an
+        // author fault, and reports as network.
+        let cause = cause ?? "network"
         reportMediaLoadFailed(.video, cause: cause, campaignKey: campaignKey)
-        player?.pause()
+        videoState.pause()
         showPlayerLayer = false
         cancelPosterWork()
         events.onFailed()
-    }
-
-    private func releasePlayer() {
-        seekGeneration &+= 1
-        statusObserver?.invalidate()
-        durationObserver?.invalidate()
-        bufferingObserver?.invalidate()
-        if let timeObserver, let player { player.removeTimeObserver(timeObserver) }
-        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-        if let failObserver { NotificationCenter.default.removeObserver(failObserver) }
-        statusObserver = nil
-        durationObserver = nil
-        bufferingObserver = nil
-        timeObserver = nil
-        endObserver = nil
-        failObserver = nil
-        player?.pause()
-        player?.replaceCurrentItem(with: nil)
-        player = nil
-        showPlayerLayer = false
-        playerLayerReady = false
-        startPrepared = false
-        seekInProgress = false
-        completionHandled = false
-        readyReported = false
     }
 
     private func setApplicationActive(_ active: Bool) {
         guard applicationActive != active else { return }
         applicationActive = active
         guard active else {
-            player?.pause()
+            videoState.pause()
             cancelPosterWork()
             return
         }
-        preparePosterFromCachedFileIfAvailable()
+        preparePosterIfAvailable()
         guard state.active, state.demand.needsPlayer, startPrepared else { return }
 
         if isThumbnail {
             // Thumbnail sessions always restart from their configured beginning.
             completionHandled = false
-            player?.pause()
+            videoState.pause()
             seekToStart(retryAtZero: true, hideCurrentFrame: false) { [weak self] in
                 guard let self, self.state.active, self.applicationActive else { return }
-                self.player?.play()
+                self.videoState.play()
             }
         } else {
             // A full-screen story resumes where the app was interrupted.
-            player?.play()
+            videoState.play()
         }
     }
 
@@ -546,8 +551,7 @@ final class StoryVideoPlayback: ObservableObject {
     }
 
     private func currentPositionMs() -> Int64 {
-        guard let player else { return 0 }
-        return milliseconds(player.currentTime())
+        videoState.positionMs
     }
 
     private func preparePoster(from asset: AVAsset) {
@@ -569,24 +573,15 @@ final class StoryVideoPlayback: ObservableObject {
         )
     }
 
-    private func preparePosterFromCachedFileIfAvailable() {
+    /// The poster path, repointed at the D2 asset (Q1): the frame is generated from the same
+    /// range-cached asset the player reads, so only the requested first range is fetched —
+    /// no whole-file download just to show a still.
+    private func preparePosterIfAvailable() {
         guard applicationActive,
               poster == nil,
               posterIdentity != nil else { return }
         if let localAsset {
             preparePoster(from: localAsset)
-            return
-        }
-        guard cachedPosterLookupTask == nil,
-              let remoteURL = URL(string: urlString) else { return }
-        cachedPosterLookupTask = Task { @MainActor [weak self] in
-            let cachedURL = await DigiaVideoFileCache.shared.cachedURL(for: remoteURL)
-            guard let self, !Task.isCancelled else { return }
-            self.cachedPosterLookupTask = nil
-            guard let cachedURL, self.localAsset == nil else { return }
-            let asset = AVURLAsset(url: cachedURL)
-            self.localAsset = asset
-            self.preparePoster(from: asset)
         }
     }
 
@@ -630,8 +625,6 @@ final class StoryVideoPlayback: ObservableObject {
     }
 
     private func cancelPosterWork() {
-        cachedPosterLookupTask?.cancel()
-        cachedPosterLookupTask = nil
         cancelPosterGeneration()
     }
 

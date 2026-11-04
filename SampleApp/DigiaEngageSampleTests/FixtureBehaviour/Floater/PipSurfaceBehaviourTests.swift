@@ -87,9 +87,10 @@ struct PipSurfaceBehaviourTests {
 
     // MARK: - pip_mute_toggle
 
-    // Fails if: floater_orchestrator.swift `setMuted` `player?.isMuted = value` ->
-    // `player?.isMuted = true`, or `player?.volume = value ? 0 : active.config.media.volume` ->
-    // `player?.volume = 0`.
+    // Fails if: floater_orchestrator.swift `setMuted` stops routing through the
+    // showing's state, or MediaVideo.swift `setMuted` stops applying
+    // `spec.playback.muted` to `activePlayer.isMuted` (D13: mute rides `isMuted`;
+    // `volume` is never written after take-over, so unmuting restores the level).
     @Test("pip_mute_toggle: the mute button flips the sound of the playing video")
     func muteFlipsTheSound() async throws {
         let (sdk, _) = try await boot(try fixture("pip/pip_mute_toggle"))
@@ -112,7 +113,11 @@ struct PipSurfaceBehaviourTests {
 
         #expect(sdk.pip.muted)
         #expect(player.isMuted)
-        #expect(player.volume == 0)
+        // Fails if: MediaVideo.swift `setMuted` `activePlayer?.isMuted = muted` ->
+        // `activePlayer?.volume = 0` (or the take-over starts writing `volume`
+        // per mute): R2-FLOAT preserves the authored level and mutes via
+        // `isMuted`, so muting must not zero the level an unmute restores.
+        #expect(player.volume > 0, "muting preserves the authored level")
     }
 
     // MARK: - pip_media_expand

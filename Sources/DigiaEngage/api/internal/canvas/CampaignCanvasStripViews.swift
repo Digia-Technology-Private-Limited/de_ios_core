@@ -246,11 +246,6 @@ func storyFit(_ contentMode: ContentMode) -> StoryMediaFit {
     contentMode == .fit ? .contain : .cover
 }
 
-/// Maps the wire's fit vocabulary onto SwiftUI's.
-func canvasContentMode(_ fit: String) -> ContentMode {
-    fit == "contain" ? .fit : .fill
-}
-
 /// Draws a nested canvas at its authored size, scaled uniformly into a box.
 ///
 /// One factor across children, background and typography alike — the same
@@ -838,6 +833,10 @@ struct CanvasStoryRailRenderer: View {
     let onAction: (CampaignCanvasActionRequest) -> Void
 
     @State private var openIndex: Int?
+    /// The rail's transfer token when the open came from tapping a playing thumbnail (else
+    /// nil). The viewer reuses the same pool player under it — same key + same URL, so the
+    /// frame stays on screen instead of flashing black.
+    @State private var openHandoffKey: String?
     @Environment(\.canvasInteractions) private var reportInteraction
 
     static func cardWidth(railHeight: CGFloat, cardAspectRatio: CGFloat) -> CGFloat {
@@ -870,14 +869,24 @@ struct CanvasStoryRailRenderer: View {
                         cardHeight: size.height,
                         cardCornerRadius: cardCornerRadius * scale,
                         cardSpacing: cardSpacing * scale,
-                        overlayOpen: openIndex != nil
-                    ) { index in
-                        // Reported at the tap, not in the viewer's onAppear: the viewer's own onAppear
-                        // reports its first page, and a child appears before its parent, so the page's
-                        // Step Viewed went out ahead of the open (F13).
-                        reportInteraction(.storyOpened(index: index, total: pages.count))
-                        openIndex = index
-                    }
+                        overlayOpen: openIndex != nil,
+                        // The handoff token travels to the viewer: a playing thumbnail hands over
+                        // its pool player, so the full-screen page starts from the frame already
+                        // on screen. A still opens with no handoff and builds fresh.
+                        onOpenWithHandoff: { index, handoffKey in
+                            // Reported at the tap, not in the viewer's onAppear: the viewer's own onAppear
+                            // reports its first page, and a child appears before its parent, so the page's
+                            // Step Viewed went out ahead of the open (F13).
+                            reportInteraction(.storyOpened(index: index, total: pages.count))
+                            openHandoffKey = handoffKey
+                            openIndex = index
+                        },
+                        onOpen: { index in
+                            reportInteraction(.storyOpened(index: index, total: pages.count))
+                            openHandoffKey = nil
+                            openIndex = index
+                        }
+                    )
                 }
             }
             .fullScreenCover(isPresented: Binding(
@@ -893,7 +902,8 @@ struct CanvasStoryRailRenderer: View {
                     isDark: isDark,
                     onAction: onAction,
                     onDismiss: { openIndex = nil },
-                    safeAreaInsets: activeFloaterWindowSafeAreaInsets
+                    safeAreaInsets: activeFloaterWindowSafeAreaInsets,
+                    handoffKey: openHandoffKey
                 )
                 .ignoresSafeArea()
             }
@@ -910,19 +920,44 @@ private extension CampaignCanvasStoryThumbnailPlaybackMode {
     }
 }
 
+/// The canvas entry's `StoryViewerReporter`: maps the shared viewer's completion/dismissal
+/// onto canvas analytics. A class (not a struct) so the session built in the viewer's `init`
+/// and the `onAppear` that hands it the environment reporter share the same instance: the
+/// report closure arrives from the `canvasInteractions` environment, which does not exist yet
+/// at init time, and is set before any report can fire.
+///
+/// Closing before the end is a dismissal; closing *at* the end is the completion the session
+/// already reported. Distinguishing them is what makes drop-off measurable — a viewer that
+/// always reported a dismissal would show 100% abandonment.
+@MainActor
+final class CanvasStoryViewerReporter: StoryViewerReporter {
+    private let total: Int
+    var report: ((CanvasInteraction) -> Void)?
+
+    init(total: Int) {
+        self.total = total
+    }
+
+    func onCompleted(total: Int, timeToCompleteMs: Int64) {
+        report?(.storyCompleted(total: total, timeToCompleteMs: Int(timeToCompleteMs)))
+    }
+
+    func onDismissed(index: Int) {
+        report?(.storyPageDismissed(index: index, total: total))
+    }
+}
+
 /// Full-screen canvas story player: the story's media, the authored overlay, the
 /// chrome the author arranged, tap-to-navigate, hold-to-pause and auto-advance.
 ///
-/// The playback engine mirrors the media story's: a video drives its own
-/// progress and duration, a long press pauses it, and muting changes the live
-/// player's volume rather than rebuilding it. The first version ran a single
-/// timer regardless of the media, so a 30-second clip was cut off after the
-/// story's authored 5 and a hold did nothing.
-private struct CanvasStoryMediaKey: Hashable {
-    let index: Int
-    let generation: Int
-}
-
+/// The mechanics live in F's shared viewer (T10): mute and the session in
+/// `StoryViewerSession` (one mute state per session, reset to the campaign default on every
+/// open), the byte half of the download plan in `StoryPlanDriver`, and the media in
+/// `VideoStoryPage`/`ImageStoryPage` (pool borrow under the rail's handoff key, a still below
+/// every frame). This entry supplies only the canvas pieces: the stories with their authored
+/// overlays, the authored chrome, and the canvas analytics mapping. Mirrors Android's
+/// `CanvasStoryViewer` (T10).
+@MainActor
 struct CanvasStoryViewer: View {
     let pages: [CampaignCanvasStoryPage]
     let chrome: CampaignCanvas
@@ -938,33 +973,101 @@ struct CanvasStoryViewer: View {
     /// Physical safe-area insets supplied by the full-bleed host. Media fills
     /// the screen while authored page and chrome content stay inside these margins.
     var safeAreaInsets = EdgeInsets()
+    /// The rail's transfer token when a playing thumbnail was tapped, else nil. The start page
+    /// borrows its pool player under it (same key + same URL, so the frame stays on screen);
+    /// every other page borrows under its own namespaced key.
+    var handoffKey: String? = nil
 
-    @State private var index = 0
+    @StateObject private var session: StoryViewerSession
+    @State private var viewerReporter: CanvasStoryViewerReporter
+    /// The byte half of the download plan (players borrow through `MediaVideo`).
+    @State private var planDriver = StoryPlanDriver()
+    @State private var slowSource = PathSlowNetworkSource()
+
+    @State private var displayedIndex: Int
     @State private var progress: CGFloat = 0
-    @State private var muted = true
+    @State private var videoProgress = 0.0
+    @State private var lastVideoProgress = 0.0
+    @State private var videoStalled = 0.0
+    @State private var videoReady = false
+    @State private var videoBuffering = false
     @State private var paused = false
-    @State private var ticker: Timer?
-    @State private var playbackGeneration = 0
-    @State private var displayedMediaKey = CanvasStoryMediaKey(index: 0, generation: 0)
+    @State private var applicationActive = UIApplication.shared.applicationState == .active
+    /// Set when the story runs to its last frame, so the teardown reports
+    /// `Completed` rather than `StepDismissed`.
+    @State private var completed = false
+    @State private var firstFrameShown: Bool
 
     // ── analytics ──
     //
     // Reported from the viewer rather than the rail, because the rail cannot see any of it: a page
     // advances on a timer, a tap or a video ending, and only this view knows which page is showing.
     @Environment(\.canvasInteractions) private var reportInteraction
-    @State private var openedAt = Date()
-    @State private var completedReported = false
+    @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var lastReportedIndex: Int?
 
-    private var page: CampaignCanvasStoryPage { pages[min(max(0, index), pages.count - 1)] }
-    private var currentMediaKey: CanvasStoryMediaKey {
-        CanvasStoryMediaKey(index: index, generation: playbackGeneration)
+    init(
+        pages: [CampaignCanvasStoryPage],
+        chrome: CampaignCanvas,
+        initialIndex: Int,
+        restartOnCompleted: Bool,
+        startMuted: Bool,
+        isDark: Bool,
+        onAction: @escaping (CampaignCanvasActionRequest) -> Void,
+        onDismiss: @escaping () -> Void,
+        showsOverlays: Bool = true,
+        safeAreaInsets: EdgeInsets = EdgeInsets(),
+        handoffKey: String? = nil
+    ) {
+        self.pages = pages
+        self.chrome = chrome
+        self.initialIndex = initialIndex
+        self.restartOnCompleted = restartOnCompleted
+        self.startMuted = startMuted
+        self.isDark = isDark
+        self.onAction = onAction
+        self.onDismiss = onDismiss
+        self.showsOverlays = showsOverlays
+        self.safeAreaInsets = safeAreaInsets
+        self.handoffKey = handoffKey
+
+        let stories = pages.map(canvasStoryItem)
+        let clamped = min(max(initialIndex, 0), max(stories.count - 1, 0))
+        // The session (and the reporter it reports through) is first-wins state: the instance
+        // built here is the one the mounted view keeps, so the relay the session holds is the
+        // same one `onAppear` hands the environment reporter to.
+        let reporter = CanvasStoryViewerReporter(total: stories.count)
+        _viewerReporter = State(initialValue: reporter)
+        // The host's dismiss through a Sendable box: the session's `onDismiss` runs on the main
+        // actor, like every other report path here.
+        let dismissBox = CanvasStoryCallback(run: onDismiss)
+        _session = StateObject(wrappedValue: StoryViewerSession(
+            stories: stories,
+            startIndex: clamped,
+            handoffKey: handoffKey,
+            restartOnCompleted: restartOnCompleted,
+            startMuted: startMuted,
+            reporter: reporter,
+            onDismiss: { dismissBox.run() }
+        ))
+        _displayedIndex = State(initialValue: clamped)
+        _firstFrameShown = State(initialValue:
+            stories.indices.contains(clamped) ? stories[clamped].type != .video : true)
     }
 
-    private var renderedMediaKeys: [CanvasStoryMediaKey] {
-        displayedMediaKey == currentMediaKey
-            ? [currentMediaKey]
-            : [displayedMediaKey, currentMediaKey]
+    private var page: CampaignCanvasStoryPage { pages[min(max(0, session.currentIndex), pages.count - 1)] }
+
+    private var currentProgress: CGFloat {
+        if page.thumbnailIsVideo {
+            return CGFloat(min(max(videoProgress, 0), 1))
+        }
+        return progress
+    }
+
+    private var renderedIndices: [Int] {
+        displayedIndex == session.currentIndex
+            ? [session.currentIndex]
+            : [displayedIndex, session.currentIndex]
     }
 
     var body: some View {
@@ -982,8 +1085,8 @@ struct CanvasStoryViewer: View {
                 // Navigation sits under the chrome and over the page, so a
                 // button the author placed on a page still wins the tap.
                 HStack(spacing: 0) {
-                    Color.clear.contentShape(Rectangle()).onTapGesture { step(-1) }
-                    Color.clear.contentShape(Rectangle()).onTapGesture { step(1) }
+                    Color.clear.contentShape(Rectangle()).onTapGesture { previous() }
+                    Color.clear.contentShape(Rectangle()).onTapGesture { next() }
                 }
                 .simultaneousGesture(
                     LongPressGesture(minimumDuration: 0.2)
@@ -1008,7 +1111,7 @@ struct CanvasStoryViewer: View {
                 let pageAction: (CampaignCanvasActionRequest) -> Void = { request in
                     var stamped = request
                     stamped.step = CanvasStep(
-                        kind: .storyPage, index: index, total: pages.count
+                        kind: .storyPage, index: session.currentIndex, total: pages.count
                     )
                     onAction(stamped)
                 }
@@ -1041,16 +1144,16 @@ struct CanvasStoryViewer: View {
                 .environment(
                     \.canvasStoryViewer,
                     CanvasStoryViewerState(
-                        index: index,
+                        index: session.currentIndex,
                         pageCount: pages.count,
-                        progress: progress,
-                        muted: muted
+                        progress: currentProgress,
+                        muted: session.muted
                     )
                 )
-                .environment(\.canvasStoryClose, CanvasStoryCallback(run: dismissWithReport))
+                .environment(\.canvasStoryClose, CanvasStoryCallback(run: { session.dismiss() }))
                 .environment(
                     \.canvasStoryToggleMute,
-                    CanvasStoryCallback(run: { toggleMute() })
+                    CanvasStoryCallback(run: { session.muted.toggle() })
                 )
                 .opacity(showsOverlays ? 1 : 0)
                 .allowsHitTesting(showsOverlays)
@@ -1076,40 +1179,15 @@ struct CanvasStoryViewer: View {
             .background {
                 CanvasStoryMediaBackdrop {
                     ZStack {
-                        ForEach(renderedMediaKeys, id: \.self) { mediaKey in
-                            let mediaPage = pages[mediaKey.index]
-                            if mediaPage.thumbnailIsVideo, !mediaPage.thumbnailUrl.isEmpty {
-                                InlineStoryVideoView(
-                                    item: canvasStoryItem(mediaPage),
-                                    active: mediaKey == currentMediaKey && !paused,
-                                    muted: muted,
-                                    onReadyForDisplay: {
-                                        guard mediaKey == currentMediaKey else { return }
-                                        displayedMediaKey = mediaKey
-                                    },
-                                    onProgress: {
-                                        guard mediaKey == currentMediaKey,
-                                              mediaKey == displayedMediaKey else { return }
-                                        progress = CGFloat($0)
-                                    },
-                                    onEnded: {
-                                        guard mediaKey == currentMediaKey else { return }
-                                        step(1)
-                                    },
-                                    onFailed: {
-                                        guard mediaKey == currentMediaKey else { return }
-                                        displayedMediaKey = mediaKey
-                                        startAuthoredTimer()
-                                    }
+                        ForEach(renderedIndices, id: \.self) { mediaIndex in
+                            if session.stories.indices.contains(mediaIndex) {
+                                storyMedia(
+                                    story: session.stories[mediaIndex],
+                                    index: mediaIndex,
+                                    active: mediaIndex == session.currentIndex,
+                                    muted: session.muted
                                 )
-                                .id(mediaKey)
-                                .opacity(mediaKey == displayedMediaKey ? 1 : 0)
-                            } else if !mediaPage.thumbnailUrl.isEmpty {
-                                CampaignCanvasRemoteMedia(
-                                    url: mediaPage.thumbnailUrl,
-                                    contentMode: canvasContentMode(mediaPage.pageFit)
-                                )
-                                .opacity(mediaKey == displayedMediaKey ? 1 : 0)
+                                .opacity(mediaIndex == displayedIndex ? 1 : 0)
                             }
                         }
                     }
@@ -1118,18 +1196,44 @@ struct CanvasStoryViewer: View {
             }
         }
         .onAppear {
-            index = min(max(0, initialIndex), pages.count - 1)
-            muted = startMuted
-            openedAt = Date()
-            reportPageViewed(index)
-            start(retainingDisplayedMedia: false)
+            // The environment reporter lands here, before any report can fire: the session is
+            // built in `init`, where the environment does not exist yet.
+            viewerReporter.report = reportInteraction.report
+            reportPageViewed(session.currentIndex)
         }
-        .onChange(of: index) { newIndex in
-            reportPageViewed(newIndex)
+        .onChange(of: session.currentIndex) { _ in
+            reportPageViewed(session.currentIndex)
+            resetTiming()
+            firstFrameShown = !(currentItem?.type == .video)
+            drivePlan()
+        }
+        // Step Viewed fires for each frame that becomes visible (including the
+        // first), mirroring the media story's viewer.
+        .onReceive(Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()) { _ in
+            tick()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.willResignActiveNotification
+        )) { _ in
+            applicationActive = false
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didBecomeActiveNotification
+        )) { _ in
+            applicationActive = true
         }
         .onDisappear {
-            lastReportedIndex = nil
-            stop()
+            planDriver.cancelAll()
+            if !completed {
+                session.dismiss()
+            }
+            // After every holder is given back, rails remount and resume.
+            Task { @MainActor in
+                NotificationCenter.default.post(name: .storyViewerDidClose, object: nil)
+            }
+        }
+        .task(id: planInput) {
+            drivePlan()
         }
     }
 
@@ -1139,85 +1243,114 @@ struct CanvasStoryViewer: View {
         reportInteraction(.storyPageViewed(index: pageIndex, total: pages.count))
     }
 
-    enum NavigationOutcome: Equatable {
-        case restartCurrent
-        case advance(to: Int)
-        case complete(loopToStart: Bool)
+    private var currentItem: StoryItemConfig? {
+        session.stories.indices.contains(session.currentIndex)
+            ? session.stories[session.currentIndex] : nil
     }
 
-    static func navigationOutcome(
-        currentIndex: Int,
-        delta: Int,
-        pageCount: Int,
-        restartOnCompleted: Bool
-    ) -> NavigationOutcome {
-        let next = currentIndex + delta
-        if next < 0 { return .restartCurrent }
-        if next >= pageCount { return .complete(loopToStart: restartOnCompleted) }
-        return .advance(to: next)
+    private var planInput: String {
+        "\(session.currentIndex)-\(firstFrameShown)-\(session.replayTick)"
     }
 
-    /// Advances or rewinds, restarting the elapsed bar either way.
-    private func step(_ delta: Int) {
-        switch Self.navigationOutcome(
-            currentIndex: index,
-            delta: delta,
-            pageCount: pages.count,
-            restartOnCompleted: restartOnCompleted
-        ) {
-        case .restartCurrent:
-            start()
-        case .advance(let next):
-            index = next
-            start()
-        case .complete(let loopToStart):
-            if let interaction = Self.completionInteraction(
-                pageCount: pages.count,
-                timeToCompleteMs: Int(Date().timeIntervalSince(openedAt) * 1000),
-                completedReported: completedReported
-            ) {
-                completedReported = true
-                reportInteraction(interaction)
+    private func drivePlan() {
+        // Snapshots: the plan driver's closures are Sendable, so they take the plain values,
+        // not the MainActor-bound session.
+        let urls = session.stories.map(\.url)
+        let kinds = session.stories.map { $0.type == .video }
+        planDriver.update(
+            actions: StoryDownloadPlan.plan(
+                stories: session.stories.map {
+                    StoryDownloadPlan.Item(isVideo: $0.type == .video)
+                },
+                currentIndex: session.currentIndex,
+                firstFrameShown: firstFrameShown,
+                slowNetwork: slowSource.isSlow
+            ),
+            urlOf: { urls[$0] },
+            isVideoOf: { kinds[$0] }
+        )
+    }
+
+    @ViewBuilder
+    private func storyMedia(story: StoryItemConfig, index: Int, active: Bool, muted: Bool) -> some View {
+        // A replay remounts the current page so its video restarts from 0.
+        let pageID = index == session.currentIndex
+            ? "\(index)-\(session.replayTick)"
+            : "\(index)"
+        if story.type == .video {
+            VideoStoryPage(
+                item: story,
+                pageKey: session.pageKey(index: index, namespace: campaignKey),
+                muted: muted,
+                playing: active && applicationActive && !paused,
+                onReady: { _ in
+                    guard index == session.currentIndex else { return }
+                    videoReady = true
+                    displayedIndex = index
+                    firstFrameShown = true
+                    drivePlan()
+                },
+                onProgress: {
+                    guard index == session.currentIndex else { return }
+                    videoProgress = $0
+                },
+                onEnded: {
+                    guard index == session.currentIndex else { return }
+                    next()
+                },
+                onBuffering: {
+                    guard index == session.currentIndex else { return }
+                    videoBuffering = $0
+                },
+                onFailed: {
+                    // A broken full-screen item advances, as before.
+                    guard index == session.currentIndex else { return }
+                    next()
+                }
+            )
+            .id(pageID)
+        } else {
+            ImageStoryPage(item: story) {
+                guard index == session.currentIndex else { return }
+                videoReady = true
+                displayedIndex = index
+                firstFrameShown = true
+                drivePlan()
             }
-            if loopToStart {
-                index = 0
-                start()
-            } else {
-                onDismiss()
-            }
+            .id(pageID)
         }
     }
 
-    static func dismissalInteraction(
-        currentIndex: Int,
-        pageCount: Int,
-        completedReported: Bool
-    ) -> CanvasInteraction? {
-        guard !completedReported else { return nil }
-        return .storyPageDismissed(index: currentIndex, total: pageCount)
-    }
-
-    static func completionInteraction(
-        pageCount: Int,
-        timeToCompleteMs: Int,
-        completedReported: Bool
-    ) -> CanvasInteraction? {
-        guard !completedReported else { return nil }
-        return .storyCompleted(total: pageCount, timeToCompleteMs: timeToCompleteMs)
-    }
-
-    /// Closing before the end is a dismissal; closing *at* the end is the completion already
-    /// reported by `step`. Distinguishing them is what makes drop-off measurable — a viewer that
-    /// always reported a dismissal would show 100% abandonment.
-    private func dismissWithReport() {
-        if let interaction = Self.dismissalInteraction(
-            currentIndex: index,
-            pageCount: pages.count,
-            completedReported: completedReported
-        ) {
-            reportInteraction(interaction)
+    private func next() {
+        if session.currentIndex < session.stories.count - 1 {
+            resetTiming()
+            move(to: session.currentIndex + 1)
+        } else {
+            // The end is the completion — reported at most once per showing, then the story
+            // loops or the viewer closes. Unlike the inline entry this reports even when
+            // restarting: the floater's `stopOn: experienceCompleted` rule retires on it.
+            completed = true
+            resetTiming()
+            session.advance()
+            displayedIndex = session.currentIndex
         }
-        onDismiss()
+    }
+
+    private func previous() {
+        resetTiming()
+        if session.currentIndex == 0 {
+            // Re-show the first story from the top (replayTick remounts its page).
+            session.goBack()
+        } else {
+            move(to: session.currentIndex - 1)
+        }
+    }
+
+    private func move(to index: Int) {
+        session.showPage(index: index)
+        // Navigation must be visible on the tap that changes it. The target video already
+        // draws its still until the player is ready, so switch the visible page at once.
+        displayedIndex = index
     }
 
     private func pause() {
@@ -1230,28 +1363,13 @@ struct CanvasStoryViewer: View {
         paused = false
     }
 
-    private func toggleMute() {
-        muted.toggle()
-    }
-
-    private func stop() {
-        ticker?.invalidate()
-        ticker = nil
-    }
-
-    private func start(retainingDisplayedMedia: Bool = true) {
-        stop()
+    private func resetTiming() {
         progress = 0
-        paused = false
-        playbackGeneration += 1
-
-        let current = page
-        if !retainingDisplayedMedia || !current.thumbnailIsVideo || current.thumbnailUrl.isEmpty {
-            displayedMediaKey = currentMediaKey
-        }
-        if current.thumbnailIsVideo, !current.thumbnailUrl.isEmpty { return }
-
-        startAuthoredTimer()
+        videoProgress = 0
+        lastVideoProgress = 0
+        videoStalled = 0
+        videoBuffering = false
+        videoReady = false
     }
 
     static func progressIncrement(
@@ -1263,23 +1381,29 @@ struct CanvasStoryViewer: View {
         return CGFloat(interval / max(0.1, duration))
     }
 
-    private func startAuthoredTimer() {
-        ticker?.invalidate()
-        let current = page
-        let mediaKey = currentMediaKey
-
-        let interval = 1.0 / 30.0
-        ticker = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { _ in
-            Task { @MainActor in
-                guard mediaKey == currentMediaKey else { return }
-                progress += Self.progressIncrement(
-                    interval: interval,
-                    duration: current.duration,
-                    isPaused: paused
-                )
-                if progress >= 1 { step(1) }
+    private func tick() {
+        guard applicationActive, let item = currentItem else { return }
+        if item.type == .video {
+            // File download and buffering are legitimate loading. Start the
+            // watchdog only after the player has displayed its first frame.
+            if !videoReady || videoBuffering { return }
+            if videoProgress > lastVideoProgress + 0.0001 {
+                lastVideoProgress = videoProgress
+                videoStalled = 0
+            } else {
+                videoStalled += 0.05
+                if videoStalled >= 10 { next() }
             }
+            return
         }
+        // A zero-duration image degrades forward instead of stalling: the frame is skipped
+        // at once, never waited on.
+        guard let duration = storyPageDurationSeconds(item: currentItem, defaultMs: 0) else {
+            next()
+            return
+        }
+        progress += Self.progressIncrement(interval: 0.05, duration: duration, isPaused: paused)
+        if progress >= 1 { next() }
     }
 }
 

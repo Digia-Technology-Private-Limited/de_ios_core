@@ -19,6 +19,14 @@ final class SDKServices {
     let frequencyManager: FrequencyManager
     let submissionReporter: SubmissionReporter
     let requestHeaders: [String: String]
+    /// The one video player pool for this SDK instance (D3): every `MediaVideo`
+    /// with a keep-alive key borrows from here. Released in `tearDown`, which
+    /// also covers SDK re-init — `initialize()` never replaces a live
+    /// `SDKServices`, it early-returns when one exists, so there is no
+    /// reassign-without-release path.
+    let videoPlayerPool: VideoPlayerPool
+    /// Where the story viewer reads the D10 slow-network flag from.
+    let slowNetworkSource: any SlowNetworkSource
 
     init(
         config: DigiaConfig,
@@ -26,7 +34,10 @@ final class SDKServices {
         networkClient: any NetworkClient,
         clock: @escaping () -> Int64 = SessionManager.systemClock,
         analyticsQueue: any AnalyticsQueueProtocol,
-        networkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor()
+        networkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor(),
+        playerFactory: any PlayerFactory = DefaultPlayerFactory(),
+        maxPoolSize: Int? = nil,
+        slowNetworkSource: (any SlowNetworkSource)? = nil
     ) {
         let identityManager = IdentityManager(
             storage: storage.scoped("identity"),
@@ -98,10 +109,37 @@ final class SDKServices {
             sessionIdProvider: { [weak sessionManager] in sessionManager?.sessionId },
             networkClient: networkClient
         )
+        let deviceClass = deviceClassOf()
+        self.videoPlayerPool = VideoPlayerPool(
+            factory: playerFactory,
+            maxPlayers: maxPoolSize ?? maxPoolPlayers(deviceClass: deviceClass)
+        )
+        self.slowNetworkSource = slowNetworkSource ?? PathSlowNetworkSource()
     }
 
     /// Stops everything this container started. Called before it is dropped.
     func tearDown() {
+        videoPlayerPool.release()
         analyticsService?.clear()
+    }
+}
+
+/// The SDK wiring for the media layer's ambient services (D17): the default
+/// `MediaServices` fronts this container's pool plus the process-wide shared
+/// store, image stack and health sink, so hosts that provide nothing explicit
+/// behave exactly as before. The closures read `SDKInstance.shared` lazily —
+/// at borrow time, not at construction — so the environment default never
+/// captures a torn-down graph. `internal/media/` never names `SDKInstance`;
+/// this extension is the only place the two meet.
+extension MediaServices {
+    static func sdkDefault() -> MediaServices {
+        MediaServices(
+            pool: { MainActor.assumeIsolated { SDKInstance.shared.services?.videoPlayerPool } },
+            store: { MediaRangeCacheStore.shared() },
+            imageLoader: nil,
+            reportHealth: { campaignKey, kind, cause in
+                reportMediaLoadFailed(kind, cause: cause, campaignKey: campaignKey)
+            }
+        )
     }
 }

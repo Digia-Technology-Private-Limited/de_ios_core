@@ -14,16 +14,17 @@ internal import Lottie
 /// Never throws from the render path: a blank, templated or otherwise unusable URL degrades to
 /// the still without fetching and without reporting.
 struct MediaLottie: View {
-    let spec: MediaSpec
+    let spec: LottieSpec
     /// The fetch or parse failed. The argument is the same non-nil cause sent to health.
     var onFailure: ((String) -> Void)? = nil
 
     @Environment(\.digiaCampaignKey) private var campaignKey
+    @Environment(\.mediaServices) private var services
     @State private var source: LottieAnimationSource?
 
     private let blurStill: UIImage?
 
-    init(spec: MediaSpec, onFailure: ((String) -> Void)? = nil) {
+    init(spec: LottieSpec, onFailure: ((String) -> Void)? = nil) {
         self.spec = spec
         self.onFailure = onFailure
         self.blurStill = spec.blurHash.flatMap { BlurHashDecoder.decode($0, width: 32, height: 32) }
@@ -73,7 +74,7 @@ struct MediaLottie: View {
             // D5: every failure, network ones included, reports with a non-nil cause (see
             // MediaImage's onFailure for why the fallback is "network").
             let cause = loaded.failureCause ?? "network"
-            reportMediaLoadFailed(.lottie, cause: cause, campaignKey: campaignKey)
+            services.reportHealth(campaignKey, .lottie, cause)
             onFailure?(cause)
         }
     }

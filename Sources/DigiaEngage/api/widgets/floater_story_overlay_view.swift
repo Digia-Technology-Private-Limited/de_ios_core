@@ -36,18 +36,6 @@ struct FloaterStoryOverlayView: View {
     }
 }
 
-/// The PiP's settle spring, in the same physical units.
-private let storySettleSpring = Animation.interpolatingSpring(mass: 1, stiffness: 210, damping: 24)
-
-private func storyEaseOutBack(duration: Double) -> Animation {
-    .timingCurve(0.34, 1.56, 0.64, 1, duration: duration)
-}
-private func storyEaseOutCubic(duration: Double) -> Animation {
-    .timingCurve(0.215, 0.61, 0.355, 1, duration: duration)
-}
-private func storyEaseIn(duration: Double) -> Animation {
-    .timingCurve(0.42, 0, 1, 1, duration: duration)
-}
 /// Flutter's `Curves.easeInOutQuart`, the curve `pip_renderer.dart` grows and collapses on — and
 /// the one the PiP's own expand already uses here. The story floater's hero shares it so the two
 /// floaters expand identically.
@@ -62,11 +50,7 @@ private struct FloaterStorySessionView: View {
     @ObservedObject private var canvasTheme = CampaignCanvasTheme.shared
     @Environment(\.colorScheme) private var colorScheme
 
-    @State private var dragTranslation: CGSize = .zero
-    @State private var isDragging = false
-    @State private var settleResidual: CGSize = .zero
-    @State private var flyOffsetFraction: CGSize = .zero
-    @State private var alpha: Double = 1
+    @StateObject private var window = FloatingWindow()
     /// 0 is "still the window", 1 is "full screen". One value for both directions, because the two
     /// are the same journey — a collapse interrupted by a re-open resumes from where it had got to
     /// rather than snapping back to the window first.
@@ -93,11 +77,18 @@ private struct FloaterStorySessionView: View {
             let safe = deviceGeometry.safeArea
             // In the device's own coordinates, so it means the same thing wherever the host app
             // put `DigiaHost`.
-            let resting = storyWindowRect(
-                config: config, screenSize: screenSize, safeInsets: safe,
+            let resting = floatingRestingRect(
+                size: .configured(
+                    widthFraction: config.window.widthFraction,
+                    aspectRatio: config.window.aspectRatio
+                ),
+                screenSize: screenSize,
+                safeInsets: FloatingWindowInsets(safe),
+                margin: config.window.margin,
+                position: config.window.position,
                 dragFraction: orchestrator.dragFraction
             )
-            let delta = isDragging ? dragTranslation : settleResidual
+            let delta = window.restingDelta
             // This reader's offset within the screen. Zero in the ordinary case — the view above
             // is full-bleed — but subtracted rather than assumed, so a host that nests `DigiaHost`
             // somewhere smaller still draws the window where the screen coordinates say it is
@@ -105,11 +96,11 @@ private struct FloaterStorySessionView: View {
             let globalOrigin = geo.frame(in: .global).origin
             // Deliberately unclamped during an active drag — a fast flick can carry the
             // box past the safe area while the finger is still moving, the same
-            // rubber-band feel the PiP has. `commitDrag` is what snaps it back.
+            // rubber-band feel the PiP has. `window.dragEnded` is what snaps it back.
             let left = resting.minX - globalOrigin.x
-                + delta.width + flyOffsetFraction.width * resting.width
+                + delta.width + window.flyOffsetFraction.width * resting.width
             let top = resting.minY - globalOrigin.y
-                + delta.height + flyOffsetFraction.height * resting.height
+                + delta.height + window.flyOffsetFraction.height * resting.height
             let activeTransition = orchestrator.storyOpen
                 ? config.behavior.expandTransition
                 : config.behavior.collapseTransition
@@ -175,12 +166,7 @@ private struct FloaterStorySessionView: View {
                     windowBox(width: resting.width)
                         .frame(width: resting.width, height: resting.height, alignment: .topLeading)
                         .clipShape(ClampedRoundedRectangle(cornerRadius: config.window.cornerRadiusDp))
-                        .shadow(
-                            color: config.window.shadow ? Color.black.opacity(0.45) : .clear,
-                            radius: config.window.shadow ? 12 : 0,
-                            x: 0,
-                            y: config.window.shadow ? 8 : 0
-                        )
+                        .floatingWindowShadow(applied: config.window.shadow)
                         .overlay(
                             ClampedRoundedRectangle(cornerRadius: config.window.cornerRadiusDp)
                                 .stroke(
@@ -203,7 +189,7 @@ private struct FloaterStorySessionView: View {
                         // it. Keyed on the phase rather than on `storyOpen` because a hero grows
                         // *out of* this box: cutting it the instant the flag flips would leave the
                         // story rising from a hole.
-                        .opacity(alpha * windowAlpha)
+                        .opacity(window.alpha * windowAlpha)
                 }
 
                 if viewerMounted {
@@ -354,25 +340,33 @@ private struct FloaterStorySessionView: View {
         .environment(\.canvasVideoUsesStoryPlayback, true)
     }
 
-    /// The story itself.
+    /// The story itself, presented through F's `StoryViewer` building blocks (T15).
     ///
-    /// Every story host uses full-bleed bounds and supplies the device insets so media can cover
-    /// the screen while authored chrome and page content remain inside the safe area.
+    /// The window parts (drag shield, hero aperture, entry/exit) stay on lane D's
+    /// `FloatingWindow` API, untouched above; this is only the content: a `StoryViewerSession`
+    /// (one mute state per showing, reset to the campaign default on every open) driving the
+    /// story's pages through `story/pages/*` — `CanvasStoryPage`, the borrowed pool player or
+    /// the still below with the authored overlay above — and the authored chrome over all of
+    /// it. Mute, session and plan-driver behavior comes from the viewer; the floater only
+    /// supplies the inputs (stories, start index, reporter — no rail, so no handoff key) and
+    /// maps analytics into its own vocabulary, exactly as before.
+    ///
+    /// Q1 stays as-is: with no thumbnail image the mapped item carries no poster, so the page
+    /// keeps its still/backdrop until the first frame.
     @ViewBuilder
     private func storyViewer(safeAreaInsets: EdgeInsets, showsOverlays: Bool) -> some View {
         if case .story(
             _, let pages, _, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
         ) = config.story {
-            // The floater keeps its own `FloaterEvent` vocabulary rather than the inline story's,
-            // so it maps only the one interaction that has no equivalent there: reaching the end.
-            // Everything else it already reports from the orchestrator.
-            CanvasStoryViewer(
+            FloaterStoryContentViewer(
                 pages: pages,
                 chrome: chrome,
+                payload: state.payload,
                 initialIndex: orchestrator.storyInitialIndex,
                 restartOnCompleted: restartOnCompleted,
                 startMuted: startMuted,
                 isDark: isDark,
+                namespace: state.payload.campaignKey,
                 onAction: runCanvasAction,
                 onDismiss: { orchestrator.closeStory() },
                 showsOverlays: showsOverlays,
@@ -393,6 +387,7 @@ private struct FloaterStorySessionView: View {
             // open. So this adds granularity rather than replacing a signal.
             .environment(\.canvasInteractions, CanvasInteractionReporter { interaction in
                 let payload = state.payload
+                // `.storyPageDismissed`/`.storyCompleted` are retained defensively — the session reporter owns dismiss/completion.
                 switch interaction {
                 case let .storyPageViewed(index, total):
                     SDKInstance.shared.reportStoryStepViewed(
@@ -491,14 +486,7 @@ private struct FloaterStorySessionView: View {
     private func handleDragChanged(_ translation: CGSize) {
         guard config.controls.draggable, !orchestrator.closing, !orchestrator.storyOpen
         else { return }
-        if !isDragging {
-            guard hypot(translation.width, translation.height) > 6 else { return }
-            // A new touch beats an in-flight spring: grabbing the window mid-bounce must
-            // take control immediately, not fight it.
-            isDragging = true
-            settleResidual = .zero
-        }
-        dragTranslation = translation
+        window.dragChanged(translation)
     }
 
     private func handleDragEnded(
@@ -509,92 +497,27 @@ private struct FloaterStorySessionView: View {
         safe: EdgeInsets
     ) {
         guard !orchestrator.closing else { return }
-        guard isDragging, hypot(translation.width, translation.height) > 6,
-              config.controls.draggable
-        else {
-            isDragging = false
-            dragTranslation = .zero
-            return
-        }
-
-        let margin = config.window.margin
-        let minX = safe.leading + margin.left
-        let maxX = screenSize.width - safe.trailing - margin.right - resting.width
-        let minY = safe.top + margin.top
-        let maxY = screenSize.height - safe.bottom - margin.bottom - resting.height
-        let spanX = maxX - minX
-        let spanY = maxY - minY
-
-        let visualLeft = resting.minX + translation.width
-        let visualTop = resting.minY + translation.height
-
-        var fx: CGFloat = spanX <= 0 ? 0 : ((visualLeft - minX) / spanX).clampedToStoryRange(0, 1)
-        var fy: CGFloat = spanY <= 0 ? 0 : ((visualTop - minY) / spanY).clampedToStoryRange(0, 1)
-        if config.controls.snapToCorner {
-            // The *projected* end of the flick, not where the finger left off — a quick
-            // flick often releases before the window visually crosses the half-way line.
-            let projectedLeft = resting.minX + predictedEndTranslation.width
-            let projectedTop = resting.minY + predictedEndTranslation.height
-            let projectedFx: CGFloat =
-                spanX <= 0 ? 0 : ((projectedLeft - minX) / spanX).clampedToStoryRange(0, 1)
-            let projectedFy: CGFloat =
-                spanY <= 0 ? 0 : ((projectedTop - minY) / spanY).clampedToStoryRange(0, 1)
-            fx = projectedFx >= 0.5 ? 1 : 0
-            fy = projectedFy >= 0.5 ? 1 : 0
-        }
-        let landingX = spanX <= 0 ? minX : minX + spanX * fx
-        let landingY = spanY <= 0 ? minY : minY + spanY * fy
-
-        orchestrator.moveTo(FloaterFraction(x: fx, y: fy))
-        isDragging = false
-        dragTranslation = .zero
-        // The resting rect has just jumped to the corner, so carry the visual position
-        // across as a residual and let the spring pull it in — otherwise the window
-        // teleports and only then animates.
-        settleResidual = CGSize(width: visualLeft - landingX, height: visualTop - landingY)
-        withAnimation(storySettleSpring) { settleResidual = .zero }
+        window.dragEnded(
+            translation: translation,
+            predictedEndTranslation: predictedEndTranslation,
+            resting: resting,
+            screenSize: screenSize,
+            safeInsets: FloatingWindowInsets(safe),
+            margin: config.window.margin,
+            draggable: config.controls.draggable,
+            snapToCorner: config.controls.snapToCorner,
+            onCommit: { orchestrator.moveTo($0) }
+        )
     }
 
     // MARK: - Entry/exit
 
     private func runEntryAnimation() {
-        let entry = config.window.entryAnimation
-        guard entry.type != .appear else {
-            alpha = 1
-            return
-        }
-        alpha = 0
-        let flies = entry.type == .flyIn
-        flyOffsetFraction = flies ? storyFlyOffset(entry.from) : .zero
-        let duration = Double(entry.durationMs) / 1000
-        // Arriving overshoots and settles, matching how releasing a drag feels.
-        withAnimation(flies ? storyEaseOutBack(duration: duration) : storyEaseOutCubic(duration: duration)) {
-            alpha = 1
-            flyOffsetFraction = .zero
-        }
+        window.runEntryAnimation(entry: config.window.entryAnimation, alreadyVisible: false)
     }
 
     private func runExitAnimation() {
-        let exit = config.window.exitAnimation
-        guard exit.type != .none else { return }
-        let flies = exit.type == .flyOut
-        let duration = Double(exit.durationMs) / 1000
-        // Leaving accelerates away: an overshoot on exit reads as a glitch, since there
-        // is nothing left on screen for it to settle against.
-        withAnimation(flies ? storyEaseOutCubic(duration: duration) : storyEaseIn(duration: duration)) {
-            alpha = 0
-            if flies { flyOffsetFraction = storyFlyOffset(exit.to) }
-        }
-    }
-
-    /// One window-length in the given direction, as a fraction of the window's own size.
-    private func storyFlyOffset(_ direction: FloaterFlyDirection) -> CGSize {
-        switch direction {
-        case .left: return CGSize(width: -1.4, height: 0)
-        case .right: return CGSize(width: 1.4, height: 0)
-        case .top: return CGSize(width: 0, height: -1.4)
-        case .bottom: return CGSize(width: 0, height: 1.4)
-        }
+        window.runExitAnimation(exit: config.window.exitAnimation, skipWhenCovered: false)
     }
 
     /// The × button's box, so the shield's tap does not also fire when the × is tapped.
@@ -611,43 +534,450 @@ private struct FloaterStorySessionView: View {
     }
 }
 
-/// The window's rect for the given screen size.
-///
-/// Width is a fraction of the screen and height follows the authored aspect ratio — which
-/// the dashboard derives from the window canvas's own shape, so the box is always the box
-/// the author drew. Margins apply inside the safe area, so a top-corner window clears the
-/// status bar and notch and a bottom one clears the home indicator.
-private func storyWindowRect(
-    config: FloaterStoryConfig, screenSize: CGSize, safeInsets: EdgeInsets,
-    dragFraction: FloaterFraction?
-) -> CGRect {
-    let width = screenSize.width * config.window.widthFraction
-    let height = width / config.window.aspectRatio
-    let margin = config.window.margin
+/// The floater story's viewer session, reported the way the canvas rail reports its own story:
+/// completion once with its time, dismissal on close before the end. The payload's own mapping
+/// (step viewed per page, completion retiring the showing) lives in the `canvasInteractions`
+/// closure the content viewer installs; this reporter carries the same two wire calls for the
+/// session-driven paths (`advance`/`dismiss`), so the funnel is identical either way.
+@MainActor
+private struct FloaterStoryViewerReporter: StoryViewerReporter {
+    let payload: CEPTriggerPayload
 
-    let minX = safeInsets.leading + margin.left
-    let maxX = screenSize.width - safeInsets.trailing - margin.right - width
-    let minY = safeInsets.top + margin.top
-    let maxY = screenSize.height - safeInsets.bottom - margin.bottom - height
-
-    let left: CGFloat
-    let top: CGFloat
-    if let drag = dragFraction {
-        left = minX + (maxX - minX) * drag.x
-        top = minY + (maxY - minY) * drag.y
-    } else {
-        left = config.window.position.isRight ? maxX : minX
-        top = config.window.position.isBottom ? maxY : minY
+    func onCompleted(total: Int, timeToCompleteMs: Int64) {
+        SDKInstance.shared.reportStoryCompleted(
+            payload, itemTotal: total, timeToCompleteMs: timeToCompleteMs
+        )
+        // And the floater's own serving signal, which is what a
+        // `stopOn: experienceCompleted` frequency rule retires on.
+        SDKInstance.shared.floaterStoryOrchestrator.complete()
     }
-    return CGRect(
-        x: left.clampedToStoryRange(minX, maxX < minX ? minX : maxX),
-        y: top.clampedToStoryRange(minY, maxY < minY ? minY : maxY),
-        width: width, height: height
-    )
+
+    func onDismissed(index: Int) {
+        SDKInstance.shared.reportStoryStepDismissed(payload, itemIndex: index + 1)
+    }
 }
 
-extension Comparable {
-    fileprivate func clampedToStoryRange(_ lower: Self, _ upper: Self) -> Self {
-        min(max(self, lower), upper)
+/// The floater story's content on the shared story viewer (T15): one `StoryViewerSession`
+/// (mute + progress + completion guard keyed on the open, reset to the campaign default every
+/// time the story opens) driving the pages through `story/pages/*`, with the authored page
+/// overlay and chrome drawn over them exactly as before.
+///
+/// Mirrors Android's `CanvasStoryViewer`-on-`StoryViewer`: the canvas story maps each page to a
+/// `StoryItemConfig` (`canvasStoryItem`, the same mapping the rails read) and lets the viewer
+/// own timing, mute, borrowing and the download plan. Intended iOS differences: the viewer is
+/// a SwiftUI view over `StoryViewerSession` (Android's is a composable over its session); the
+/// mute toggle reaches the live player at once through `MediaVideoState.setMuted` (the pre-T15
+/// viewer dropped it — the hosted mute test now asserts the live mute); a pool re-borrow after
+/// a restart may hand back the same player object (the restart test asserts replay, not
+/// identity).
+@MainActor
+private struct FloaterStoryContentViewer: View {
+    let pages: [CampaignCanvasStoryPage]
+    let chrome: CampaignCanvas
+    let payload: CEPTriggerPayload
+    let initialIndex: Int
+    let restartOnCompleted: Bool
+    let startMuted: Bool
+    let isDark: Bool
+    let namespace: String?
+    let onAction: (CampaignCanvasActionRequest) -> Void
+    let onDismiss: () -> Void
+    var showsOverlays = true
+    var safeAreaInsets = EdgeInsets()
+
+    /// The canvas story's own default when a page sets no duration, resolved the same way the
+    /// parser resolves it (`CampaignCanvasParser.parseStory`, `?? 5`).
+    private static let defaultDurationMs = 5000
+
+    @StateObject private var session: StoryViewerSession
+    @Environment(\.canvasInteractions) private var reportInteraction
+
+    @State private var elapsed = 0.0
+    @State private var videoProgress = 0.0
+    @State private var videoStalled = 0.0
+    @State private var lastVideoProgress = 0.0
+    @State private var videoReady = false
+    @State private var videoBuffering = false
+    /// A video page whose player gave up: its authored duration runs instead. Advancing at once
+    /// would skip the page; stalling would hang the story — the pre-T15 viewer ran the authored
+    /// timer here, so this keeps doing that.
+    @State private var videoFailed = false
+    @State private var paused = false
+    @State private var applicationActive = UIApplication.shared.applicationState == .active
+    @State private var lastReportedIndex: Int?
+    /// The byte half of the download plan (players borrow through `MediaVideo`). The plan
+    /// driver, like the mute state, belongs to the viewer session's lifetime.
+    @State private var planDriver = StoryPlanDriver()
+    @State private var firstFrameShown: Bool
+    @State private var slowSource = PathSlowNetworkSource()
+
+    private let stories: [StoryItemConfig]
+
+    init(
+        pages: [CampaignCanvasStoryPage],
+        chrome: CampaignCanvas,
+        payload: CEPTriggerPayload,
+        initialIndex: Int,
+        restartOnCompleted: Bool,
+        startMuted: Bool,
+        isDark: Bool,
+        namespace: String?,
+        onAction: @escaping (CampaignCanvasActionRequest) -> Void,
+        onDismiss: @escaping @MainActor @Sendable () -> Void,
+        showsOverlays: Bool = true,
+        safeAreaInsets: EdgeInsets = EdgeInsets()
+    ) {
+        self.pages = pages
+        self.chrome = chrome
+        self.payload = payload
+        self.initialIndex = initialIndex
+        self.restartOnCompleted = restartOnCompleted
+        self.startMuted = startMuted
+        self.isDark = isDark
+        self.namespace = namespace
+        self.onAction = onAction
+        self.onDismiss = onDismiss
+        self.showsOverlays = showsOverlays
+        self.safeAreaInsets = safeAreaInsets
+        let items = pages.map(canvasStoryItem)
+        self.stories = items
+        let clamped = min(max(0, initialIndex), max(items.count - 1, 0))
+        _session = StateObject(wrappedValue: StoryViewerSession(
+            stories: items,
+            startIndex: clamped,
+            handoffKey: nil,
+            restartOnCompleted: restartOnCompleted,
+            startMuted: startMuted,
+            reporter: FloaterStoryViewerReporter(payload: payload),
+            onDismiss: onDismiss
+        ))
+        _firstFrameShown = State(initialValue:
+            items.indices.contains(clamped) ? items[clamped].type != .video : true)
+    }
+
+    private var currentIndex: Int { session.currentIndex }
+
+    private var currentItem: StoryItemConfig? {
+        stories.indices.contains(currentIndex) ? stories[currentIndex] : nil
+    }
+
+    private var currentPage: CampaignCanvasStoryPage? {
+        pages.indices.contains(currentIndex) ? pages[currentIndex] : nil
+    }
+
+    private var currentDuration: Double {
+        storyPageDurationSeconds(item: currentItem, defaultMs: Self.defaultDurationMs) ?? 0
+    }
+
+    private var progress: Double {
+        if currentItem?.type == .video, !videoFailed {
+            return min(max(videoProgress, 0), 1)
+        }
+        return min(max(elapsed / max(currentDuration, 0.1), 0), 1)
+    }
+
+    private var planInput: String {
+        "\(currentIndex)-\(firstFrameShown)-\(session.replayTick)"
+    }
+
+    var body: some View {
+        GeometryReader { proxy in
+            // The width the chrome and page are scaled against: the full-bleed
+            // reader minus the device's unsafe margins.
+            let contentWidth = max(
+                0, proxy.size.width - safeAreaInsets.leading - safeAreaInsets.trailing
+            )
+            // Each layer is pinned to the safe region, so neither can size the
+            // stack. On a tablet the width-scaled portrait page is taller than
+            // the reader; it bottom-anchors and loses its top, as the media
+            // does, and the chrome stays at the top edge. Phones draw as before.
+            let safeHeight = max(
+                0, proxy.size.height - safeAreaInsets.top - safeAreaInsets.bottom
+            )
+            // The page an action came from travels with it, so a CTA inside story 3 reports as a
+            // step click on story 3 rather than as an anonymous click on the card.
+            let pageAction: (CampaignCanvasActionRequest) -> Void = { request in
+                var stamped = request
+                stamped.step = CanvasStep(
+                    kind: .storyPage, index: session.currentIndex, total: pages.count
+                )
+                onAction(stamped)
+            }
+            ZStack(alignment: .top) {
+                // Navigation sits under the chrome and over the page, so a
+                // button the author placed on a page still wins the tap.
+                HStack(spacing: 0) {
+                    Color.clear.contentShape(Rectangle()).onTapGesture { previous() }
+                    Color.clear.contentShape(Rectangle()).onTapGesture { next() }
+                }
+                .simultaneousGesture(
+                    LongPressGesture(minimumDuration: 0.2)
+                        .onChanged { _ in pause() }
+                        .onEnded { _ in resume() }
+                )
+                .allowsHitTesting(showsOverlays)
+                .accessibilityHidden(!showsOverlays)
+
+                if let page = currentPage {
+                    // Both the overlay and the chrome are authored against the safe
+                    // region, so both draw at the same scale and inside it.
+                    let scale = page.canvas.width > 0 ? contentWidth / page.canvas.width : 1
+                    pageOverlay(
+                        page: page, scale: scale, contentWidth: contentWidth,
+                        safeHeight: safeHeight, pageAction: pageAction
+                    )
+
+                    ScaledCanvasStage(
+                        canvas: chrome,
+                        width: contentWidth,
+                        height: chrome.height * scale,
+                        cornerRadius: 0,
+                        isDark: isDark,
+                        onAction: pageAction,
+                        // Transparent by design — the page shows through, as on Flutter.
+                        showBackground: false
+                    )
+                    .frame(height: safeHeight, alignment: .top)
+                    .clipped()
+                    .environment(
+                        \.canvasStoryViewer,
+                        CanvasStoryViewerState(
+                            index: session.currentIndex,
+                            pageCount: pages.count,
+                            progress: progress,
+                            muted: session.muted
+                        )
+                    )
+                    .environment(\.canvasStoryClose, CanvasStoryCallback(run: dismissWithReport))
+                    .environment(
+                        \.canvasStoryToggleMute,
+                        CanvasStoryCallback(run: { session.muted.toggle() })
+                    )
+                    .opacity(showsOverlays ? 1 : 0)
+                    .allowsHitTesting(showsOverlays)
+                    .accessibilityHidden(!showsOverlays)
+                }
+            }
+            // Inside the safe region, and the backdrop below outside it. The
+            // padding is *inside* the frame that follows, so the stack is offered
+            // the reader minus these insets while the frame — and so the media
+            // behind it — still covers the whole reader.
+            .padding(safeAreaInsets)
+            // The screen, and only the screen. Without this the stack takes its
+            // size from its largest child, and a story's media is routinely
+            // larger than the screen — a filling image reports an ideal size in
+            // the image's own pixels. That grew the stack, which carried the
+            // top-aligned chrome above the top edge and the bottom-anchored page
+            // canvas below the bottom one.
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            // The media goes here rather than in the stack for the same reason:
+            // a background is measured against its parent and can never resize
+            // it, however large the image inside turns out to be. It still
+            // bleeds under the status bar and the home indicator, because a
+            // story's media is the screen.
+            .background {
+                floaterStoryMedia()
+                    .ignoresSafeArea()
+            }
+        }
+        // Full-bleed: the reader reports the device's screen, not the safe-area-carved box,
+        // so the safe-region math above matches the pre-T15 viewer exactly.
+        .ignoresSafeArea()
+        .onAppear {
+            reportPageViewed(session.currentIndex)
+        }
+        .onChange(of: session.currentIndex) { _ in
+            resetTiming()
+            let isVideo = currentItem?.type == .video
+            firstFrameShown = !(isVideo ?? false)
+            drivePlan()
+            reportPageViewed(session.currentIndex)
+        }
+        .onReceive(Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()) { _ in
+            tick()
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.willResignActiveNotification
+        )) { _ in
+            applicationActive = false
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: UIApplication.didBecomeActiveNotification
+        )) { _ in
+            applicationActive = true
+        }
+        .onDisappear {
+            planDriver.cancelAll()
+        }
+        .task(id: planInput) {
+            drivePlan()
+        }
+    }
+
+    /// The story's media, through the shared viewer pages: the borrowed pool player (video)
+    /// or still (image) below, never an empty box. A page with no media URL draws nothing —
+    /// the pre-T15 viewer skipped those too (no spinner, no fetch), so the golden of an
+    /// expanded story with imageless pages is unchanged. The authored overlay lives in the
+    /// main stack above (not here), exactly as before.
+    @ViewBuilder
+    private func floaterStoryMedia() -> some View {
+        ZStack {
+            Color.black
+            if let item = currentItem, !item.url.isEmpty {
+                let pageIndex = currentIndex
+                if item.type == .video {
+                    VideoStoryPage(
+                        item: item,
+                        pageKey: session.pageKey(index: pageIndex, namespace: namespace),
+                        muted: session.muted,
+                        playing: !paused && applicationActive,
+                        onReady: { _ in
+                            guard session.currentIndex == pageIndex else { return }
+                            videoReady = true
+                            firstFrameShown = true
+                            drivePlan()
+                        },
+                        onProgress: {
+                            guard session.currentIndex == pageIndex else { return }
+                            videoProgress = $0
+                        },
+                        onEnded: {
+                            guard session.currentIndex == pageIndex else { return }
+                            next()
+                        },
+                        onBuffering: {
+                            guard session.currentIndex == pageIndex else { return }
+                            videoBuffering = $0
+                        },
+                        onFailed: {
+                            // A broken full-screen item runs its authored duration, as before.
+                            guard session.currentIndex == pageIndex else { return }
+                            videoFailed = true
+                        }
+                    )
+                    .id("\(pageIndex)-\(session.replayTick)")
+                } else {
+                    ImageStoryPage(item: item) {
+                        guard session.currentIndex == pageIndex else { return }
+                        videoReady = true
+                        firstFrameShown = true
+                        drivePlan()
+                    }
+                    .id("\(pageIndex)-\(session.replayTick)")
+                }
+            }
+        }
+    }
+
+    /// The authored page drawn over the media, at the safe-region scale.
+    @ViewBuilder
+    private func pageOverlay(
+        page: CampaignCanvasStoryPage, scale: CGFloat, contentWidth: CGFloat,
+        safeHeight: CGFloat, pageAction: @escaping (CampaignCanvasActionRequest) -> Void
+    ) -> some View {
+        ScaledCanvasStage(
+            canvas: page.canvas,
+            width: contentWidth,
+            height: page.canvas.height * scale,
+            cornerRadius: 0,
+            isDark: isDark,
+            onAction: pageAction
+        )
+        .frame(height: safeHeight, alignment: .bottom)
+        .clipped()
+        .opacity(showsOverlays ? 1 : 0)
+        .allowsHitTesting(showsOverlays)
+        .accessibilityHidden(!showsOverlays)
+    }
+
+    private func drivePlan() {
+        let index = currentIndex
+        planDriver.update(
+            actions: StoryDownloadPlan.plan(
+                stories: stories.map { StoryDownloadPlan.Item(isVideo: $0.type == .video) },
+                currentIndex: index,
+                firstFrameShown: firstFrameShown,
+                slowNetwork: slowSource.isSlow
+            ),
+            urlOf: { stories[$0].url },
+            isVideoOf: { stories[$0].type == .video }
+        )
+    }
+
+    private func reportPageViewed(_ pageIndex: Int) {
+        guard lastReportedIndex != pageIndex else { return }
+        lastReportedIndex = pageIndex
+        reportInteraction(.storyPageViewed(index: pageIndex, total: pages.count))
+    }
+
+    /// Closing before the end is a dismissal; closing *at* the end is the completion already
+    /// reported by `next`. Distinguishing them is what makes drop-off measurable — a viewer that
+    /// always reported a dismissal would show 100% abandonment.
+    private func dismissWithReport() {
+        session.dismiss()
+    }
+
+    private func tick() {
+        guard applicationActive, !paused, let item = currentItem else { return }
+        if item.type == .video, !videoFailed {
+            // File download and buffering are legitimate loading. Start the
+            // watchdog only after the player has displayed its first frame.
+            if !videoReady || videoBuffering { return }
+            if videoProgress > lastVideoProgress + 0.0001 {
+                lastVideoProgress = videoProgress
+                videoStalled = 0
+            } else {
+                videoStalled += 0.05
+                if videoStalled >= 10 { next() }
+            }
+            return
+        }
+        // A zero-duration image degrades forward instead of stalling: the frame is skipped
+        // at once, never waited on.
+        guard let duration = storyPageDurationSeconds(
+            item: item, defaultMs: Self.defaultDurationMs) else {
+            next()
+            return
+        }
+        elapsed += 0.05
+        if elapsed >= duration {
+            next()
+        }
+    }
+
+    private func resetTiming() {
+        elapsed = 0
+        videoProgress = 0
+        lastVideoProgress = 0
+        videoStalled = 0
+        videoBuffering = false
+        videoReady = false
+        videoFailed = false
+    }
+
+    private func next() {
+        resetTiming()
+        // Completion (once-only) + restart/dismiss live in `session.advance()` — never bypass it.
+        session.advance()
+    }
+
+    private func previous() {
+        resetTiming()
+        if currentIndex == 0 {
+            // Re-show the first story from the top (replayTick remounts its page).
+            session.goBack()
+        } else {
+            session.showPage(index: currentIndex - 1)
+        }
+    }
+
+    private func pause() {
+        guard !paused else { return }
+        paused = true
+    }
+
+    private func resume() {
+        guard paused else { return }
+        paused = false
     }
 }

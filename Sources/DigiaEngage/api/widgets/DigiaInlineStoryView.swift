@@ -5,21 +5,6 @@ import UIKit
 private let storyRailCoordinateSpace = "DigiaInlineStoryRail"
 
 @MainActor
-final class InlineStoryRailPlaybackStore: ObservableObject {
-    @Published private(set) var coordinator: InlineStoryRailPlaybackCoordinator
-
-    init(items: [StoryItemConfig], mode: ThumbnailVideoPlaybackMode) {
-        coordinator = InlineStoryRailPlaybackCoordinator(items: items, mode: mode)
-    }
-
-    func send(_ event: InlineStoryRailPlaybackEvent) {
-        var next = coordinator
-        next.send(event)
-        coordinator = next
-    }
-}
-
-@MainActor
 struct DigiaInlineStoryView: View {
     let config: InlineStoryConfig
     let payload: CEPTriggerPayload
@@ -33,16 +18,19 @@ struct DigiaInlineStoryView: View {
 
     var body: some View {
         if let image = config.previewImage {
-            SingleImageStoryPreview(image: image) { openStory(at: 0) }
+            SingleImageStoryPreview(image: image) { openStory(at: 0, handoffKey: nil) }
                 .environment(\.digiaCampaignKey, payload.campaignKey)
         } else {
             rail
         }
     }
 
-    private func openStory(at index: Int) {
+    private func openStory(at index: Int, handoffKey: String?) {
         SDKInstance.shared.reportStoryOpened(payload)
         SDKInstance.shared.reportClassicStoryOpened(payload, index: index)
+        // The overlay state (not mine to change) carries no handoff: stash it on the presenter
+        // the overlay reads at init, on the same MainActor turn — deterministic.
+        DigiaStoryPresenter.shared.pendingHandoffKey = handoffKey
         SDKInstance.shared.controller.showStoryOverlay(
             config: config,
             initialIndex: index,
@@ -58,8 +46,10 @@ struct DigiaInlineStoryView: View {
             cardHeight: CGFloat(config.card.height),
             cardCornerRadius: CGFloat(config.card.borderRadius),
             cardSpacing: CGFloat(config.card.spacing),
-            overlayOpen: overlayController.activeStoryOverlay != nil
-        ) { openStory(at: $0) }
+            overlayOpen: overlayController.activeStoryOverlay != nil,
+            onOpenWithHandoff: { openStory(at: $0, handoffKey: $1) },
+            onOpen: { openStory(at: $0, handoffKey: nil) }
+        )
         .environment(\.digiaCampaignKey, payload.campaignKey)
     }
 }
@@ -89,23 +79,35 @@ private struct SingleImageStoryPreview: View {
     }
 }
 
+/// The inline rail: one `StoryRail` shared by inline, canvas and floater entry points (canvas
+/// hosts this same view). Owns the 75%/25% visibility rule and take-turns through
+/// `StoryRailState`; each card only obeys play/pause. A received `simultaneous` mode parses
+/// (wire compat) but schedules as sequential (D7).
 @MainActor
 struct StoryThumbnailRailView: View {
     let items: [StoryItemConfig]
+    /// Accepted for wire compat; scheduling always takes turns (D7).
     let mode: ThumbnailVideoPlaybackMode
     let cardWidth: CGFloat
     let cardHeight: CGFloat
     let cardCornerRadius: CGFloat
     let cardSpacing: CGFloat
     let overlayOpen: Bool
+    let prefetch: any MediaPrefetch
+    let onOpenWithHandoff: ((Int, String?) -> Void)?
     let onOpen: @MainActor (Int) -> Void
 
-    @StateObject private var playbackStore: InlineStoryRailPlaybackStore
+    @Environment(\.digiaCampaignKey) private var campaignKey
+    @State private var rail = StoryRailState()
     @State private var latestGeometry = StoryRailGeometry()
     @State private var viewportBounds = CGRect.null
     @State private var scrollSettleTask: Task<Void, Never>?
     @State private var lastSettledVisibility: StoryRailVisibility?
-    @State private var cacheDemandOwner = UUID()
+    @State private var handedOverKey: String?
+    /// Bumps only after the viewer fully closed (post-teardown), never on the overlay flag
+    /// flip: the handed-over holder is shared, so a remount while the viewer is alive would
+    /// free it from under the viewer.
+    @State private var reappearGeneration = 0
 
     init(
         items: [StoryItemConfig],
@@ -115,6 +117,8 @@ struct StoryThumbnailRailView: View {
         cardCornerRadius: CGFloat,
         cardSpacing: CGFloat,
         overlayOpen: Bool,
+        prefetch: any MediaPrefetch = NoopMediaPrefetch(),
+        onOpenWithHandoff: ((Int, String?) -> Void)? = nil,
         onOpen: @escaping @MainActor (Int) -> Void
     ) {
         self.items = items
@@ -124,47 +128,55 @@ struct StoryThumbnailRailView: View {
         self.cardCornerRadius = cardCornerRadius
         self.cardSpacing = cardSpacing
         self.overlayOpen = overlayOpen
+        self.prefetch = prefetch
+        self.onOpenWithHandoff = onOpenWithHandoff
         self.onOpen = onOpen
-        _playbackStore = StateObject(wrappedValue: InlineStoryRailPlaybackStore(
-            items: items,
-            mode: mode
-        ))
-    }
-
-    private var playback: InlineStoryRailPlaybackCoordinator {
-        playbackStore.coordinator
     }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: cardSpacing) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                    let playerIdentity = thumbnailPlayerIdentity(item)
-                    StoryThumbnailCard(
-                        index: index,
-                        item: item,
-                        width: cardWidth,
-                        height: cardHeight,
-                        cornerRadius: cardCornerRadius,
-                        playbackStore: playbackStore,
-                        onWindowCompleted: { playbackStore.send(.windowCompleted(index)) },
-                        onFailed: {
-                            playbackStore.send(.failed(index: index, identity: playerIdentity))
+                    let decision = rail.decision(index: index)
+                    let handedOver = handedOverKey == storyPoolKey(
+                        namespace: campaignKey, index: index)
+                    let playing = decision.play || handedOver
+                    ZStack {
+                        // Contained media leaves letterbox space. Keep that surface
+                        // opaque black across iOS, Android, and Flutter.
+                        Color.black
+                        if item.type == .video, decision.play || handedOver {
+                            StoryThumbnail(
+                                item: item,
+                                index: index,
+                                playing: playing,
+                                handedOver: handedOver,
+                                repeatWindow: decision.repeatWindow,
+                                reappearGeneration: reappearGeneration,
+                                namespace: campaignKey,
+                                onWindowCompleted: { rail = rail.complete(index: index) },
+                                onFailed: { rail = rail.fail(index: index) },
+                                onEvicted: { rail = rail.complete(index: index) },
+                                onOpen: open
+                            )
+                        } else {
+                            StoryStillCard(item: item, index: index, onOpen: open)
                         }
-                    )
-                        .background {
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: StoryRailGeometryPreference.self,
-                                    value: StoryRailGeometry(cards: [
-                                        index: proxy.frame(in: .named(storyRailCoordinateSpace))
-                                    ])
-                                )
-                            }
+                    }
+                    .frame(width: cardWidth, height: cardHeight)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: cardCornerRadius, style: .continuous))
+                    .contentShape(Rectangle())
+                    .background {
+                        GeometryReader { proxy in
+                            Color.clear.preference(
+                                key: StoryRailGeometryPreference.self,
+                                value: StoryRailGeometry(cards: [
+                                    index: proxy.frame(in: .named(storyRailCoordinateSpace))
+                                ])
+                            )
                         }
-                        .onTapGesture {
-                            onOpen(index)
-                        }
+                    }
                 }
             }
             .padding(.horizontal, cardSpacing)
@@ -192,73 +204,86 @@ struct StoryThumbnailRailView: View {
             scheduleEligibilityAfterScroll(geometry)
         }
         .onAppear {
-            playbackStore.send(.configuration(
-                items: items,
-                mode: mode
-            ))
-            playbackStore.send(.overlayChanged(overlayOpen))
-            playbackStore.send(.applicationActive(
-                UIApplication.shared.applicationState == .active
-            ))
+            rail = rail
+                .lifecycleChanged(active: UIApplication.shared.applicationState == .active)
+                .overlayChanged(visible: overlayOpen)
             Task { @MainActor in
                 await Task.yield()
                 settleVisibility(latestGeometry)
             }
         }
-        .onDisappear {
-            scrollSettleTask?.cancel()
-            scrollSettleTask = nil
-            let owner = cacheDemandOwner
-            Task { await DigiaVideoFileCache.shared.clearDemand(owner: owner) }
+        .task(id: rail.activeIndex) {
+            guard let active = rail.activeIndex,
+                  items.indices.contains(active),
+                  items[active].type == .video
+            else { return }
+            _ = await prefetch.warmVideoBytes(url: items[active].url, lengthBytes: storyFirstBytes)
         }
-        .task(id: playback.videoDemands) {
-            await DigiaVideoFileCache.shared.prepare(
-                playback.videoDemands,
-                owner: cacheDemandOwner
-            )
-        }
-        .onChange(of: StoryRailConfigurationIdentity(items: items, mode: mode)) { _ in
-            playbackStore.send(.configuration(
-                items: items,
-                mode: mode
-            ))
+        .onChange(of: items) { _ in
+            rail = StoryRailState()
+                .lifecycleChanged(active: UIApplication.shared.applicationState == .active)
+                .overlayChanged(visible: overlayOpen)
+            handedOverKey = nil
             lastSettledVisibility = nil
+            reappearGeneration &+= 1
             scheduleEligibilityAfterScroll(latestGeometry)
         }
         .onChange(of: overlayOpen) { open in
-            playbackStore.send(.overlayChanged(open))
+            rail = rail.overlayChanged(visible: open)
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.didBecomeActiveNotification
         )) { _ in
-            playbackStore.send(.applicationActive(true))
+            rail = rail.lifecycleChanged(active: true)
         }
         .onReceive(NotificationCenter.default.publisher(
             for: UIApplication.willResignActiveNotification
         )) { _ in
-            playbackStore.send(.applicationActive(false))
+            rail = rail.lifecycleChanged(active: false)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .storyViewerDidClose)) { _ in
+            // The viewer gave back every holder by now: remount videos so the rail re-borrows
+            // and resumes instead of showing a freed (paused) player.
+            handedOverKey = nil
+            reappearGeneration &+= 1
         }
         .frame(height: cardHeight)
     }
 
+    private func open(index: Int, handoffKey: String?) {
+        if handoffKey != nil {
+            handedOverKey = handoffKey
+        }
+        if let onOpenWithHandoff {
+            onOpenWithHandoff(index, handoffKey)
+        } else {
+            onOpen(index)
+        }
+    }
+
     private func settleVisibility(_ geometry: StoryRailGeometry) {
-        guard let rail = geometry.rail,
-              !rail.isNull,
-              !rail.isEmpty,
+        guard let railFrame = geometry.rail,
+              !railFrame.isNull,
+              !railFrame.isEmpty,
               !geometry.cards.isEmpty,
               !viewportBounds.isNull,
               !viewportBounds.isEmpty else { return }
         let visibility = storyRailVisibility(
-            rail: rail,
+            rail: railFrame,
             cards: geometry.cards,
             viewport: viewportBounds
         )
         guard visibility.isMateriallyDifferent(
             from: lastSettledVisibility,
-            retaining: playback.state.eligibleIndices
+            retaining: rail.eligible
         ) else { return }
         lastSettledVisibility = visibility
-        playbackStore.send(.scrollSettled(visibility))
+        rail = rail.visibilityChanged(
+            items: items,
+            slotVisible: visibility.slotVisible,
+            visibleFractions: visibility.cardFractions,
+            settled: true
+        )
     }
 
     private func scheduleEligibilityAfterScroll(_ geometry: StoryRailGeometry) {
@@ -269,7 +294,6 @@ struct StoryThumbnailRailView: View {
             settleVisibility(geometry)
         }
     }
-
 }
 
 private extension StoryRailVisibility {
@@ -289,6 +313,22 @@ private extension StoryRailVisibility {
         return !changed.allSatisfy { index in
             eligibleIndices.contains(index) && cardFractions[index] == nil
         }
+    }
+}
+
+/// A non-playing rail card: its still, tappable to open with no handoff (the viewer
+/// builds fresh). The tap lives here — not on the card container — so a playing video
+/// keeps its single handoff tap inside `StoryThumbnail` and never opens twice.
+@MainActor
+private struct StoryStillCard: View {
+    let item: StoryItemConfig
+    let index: Int
+    let onOpen: @MainActor @Sendable (Int, String?) -> Void
+
+    var body: some View {
+        StoryThumbnailStill(item: item)
+            .contentShape(Rectangle())
+            .onTapGesture { onOpen(index, nil) }
     }
 }
 
@@ -380,87 +420,12 @@ private final class StoryViewportUIView: UIView {
         tolerance: CGFloat = 0.5
     ) -> Bool {
         if lhs.isNull || rhs.isNull {
-            return lhs.isNull && rhs.isNull
+            return lhs.isNull && rhs.isEmpty
         }
         return abs(lhs.minX - rhs.minX) <= tolerance
             && abs(lhs.minY - rhs.minY) <= tolerance
             && abs(lhs.width - rhs.width) <= tolerance
             && abs(lhs.height - rhs.height) <= tolerance
-    }
-}
-
-@MainActor
-private struct StoryThumbnailCard: View {
-    let index: Int
-    let item: StoryItemConfig
-    let width: CGFloat
-    let height: CGFloat
-    let cornerRadius: CGFloat
-    @ObservedObject var playbackStore: InlineStoryRailPlaybackStore
-    let onWindowCompleted: @MainActor @Sendable () -> Void
-    let onFailed: @MainActor @Sendable () -> Void
-
-    private var playbackState: ThumbnailPlaybackViewState {
-        playbackStore.coordinator.playbackState(for: index)
-    }
-
-    private var failed: Bool {
-        playbackStore.coordinator.state.failedPlayerIdentities[index]
-            == thumbnailPlayerIdentity(item)
-    }
-
-    var body: some View {
-        ZStack {
-            // Contained media leaves letterbox space. Keep that surface
-            // opaque black across iOS, Android, and Flutter.
-            Color.black
-            if item.type == .video,
-               !failed,
-               shouldComposeThumbnailPlayer(
-                   hasExplicitThumbnail: item.thumbnail != nil,
-                   scheduled: playbackState.scheduled
-               )
-            {
-                StoryThumbnailVideoView(
-                    index: index,
-                    item: item,
-                    playbackStore: playbackStore,
-                    onWindowCompleted: onWindowCompleted,
-                    onFailed: onFailed
-                )
-                .id(StoryThumbnailViewIdentity(
-                    index: index,
-                    player: thumbnailPlayerIdentity(item)
-                ))
-            } else if item.type == .video {
-                StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
-            } else {
-                StoryRemoteImage(urlString: item.url, fit: item.thumbnailBoxFit)
-            }
-        }
-        .frame(width: width, height: height)
-        .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .contentShape(Rectangle())
-    }
-}
-
-private struct StoryThumbnailViewIdentity: Hashable {
-    let index: Int
-    let player: StoryThumbnailPlayerIdentity
-}
-
-private struct StoryRailConfigurationIdentity: Equatable {
-    let players: [StoryThumbnailPlayerIdentity]
-    let mode: ThumbnailVideoPlaybackMode
-
-    init(items: [StoryItemConfig], mode: ThumbnailVideoPlaybackMode) {
-        players = items.map(thumbnailPlayerIdentity)
-        self.mode = mode
-    }
-
-    init(config: InlineStoryConfig) {
-        self.init(items: config.items, mode: config.thumbnailVideoPlayback)
     }
 }
 
@@ -486,6 +451,12 @@ final class DigiaStoryPresenter {
     /// The currently-presented story controller. Weak because UIKit retains a
     /// presented controller for us; we only need it to drive dismissal.
     private weak var presented: UIViewController?
+
+    /// Handoff for the viewer the next `present` builds: the rail's transfer token when a
+    /// playing thumbnail was tapped, else nil. `InlineStoryOverlayState` carries no handoff,
+    /// so the opener stashes it here on the same MainActor turn; the overlay reads (and
+    /// clears) it at init.
+    var pendingHandoffKey: String?
 
     private init() {}
 
@@ -522,8 +493,8 @@ final class DigiaStoryPresenter {
 private final class DigiaStoryHostingController<Content: View>: UIHostingController<Content> {
     // The interactive "back" (left-edge swipe) and swipe-down dismissals are
     // handled inside the SwiftUI DragGesture in InlineStoryOverlayContent, not
-    // by a UIKit gesture recognizer here — a separate UIScreenEdgePanGesture on
-    // this view would be starved by SwiftUI's own pan recognizer. This
+    // by a UIKit gesture recognizer on this view — a separate UIScreenEdgePan
+    // gesture on this view would be starved by SwiftUI's own pan recognizer. This
     // controller only adds hardware-keyboard ESC dismissal (e.g. simulator).
     override var canBecomeFirstResponder: Bool {
         true
@@ -568,10 +539,29 @@ private struct StoryStepViewedReporter: ViewModifier {
 }
 
 @MainActor
+private struct InlineStoryViewerReporter: StoryViewerReporter {
+    let payload: CEPTriggerPayload
+
+    func onCompleted(total: Int, timeToCompleteMs: Int64) {
+        SDKInstance.shared.reportStoryCompleted(
+            payload,
+            itemTotal: total,
+            timeToCompleteMs: timeToCompleteMs
+        )
+    }
+
+    func onDismissed(index: Int) {
+        SDKInstance.shared.reportStoryStepDismissed(payload, itemIndex: index + 1)
+    }
+}
+
+@MainActor
 private struct InlineStoryOverlayContent: View {
     let state: InlineStoryOverlayState
 
-    @State private var currentIndex: Int
+    @StateObject private var session: StoryViewerSession
+    @Environment(\.digiaCampaignKey) private var campaignKey
+
     @State private var displayedIndex: Int
     @State private var elapsed: Double = 0
     @State private var videoProgress: Double = 0
@@ -586,21 +576,39 @@ private struct InlineStoryOverlayContent: View {
     /// Set when the story runs to its last frame, so the teardown reports
     /// `Completed` rather than `StepDismissed`.
     @State private var completed = false
-    @State private var openedAt = Date()
-    /// Nil until the viewer changes the audio state. Before that, the story's
-    /// authored `startMuted` applies; afterwards the viewer's choice persists.
-    @State private var muteOverride: Bool?
+    /// The byte half of the download plan (players borrow through `MediaVideo`). No-op until
+    /// lane H lands the real `MediaPrefetch`; the protocol stays the seam either way.
+    @State private var planDriver = StoryPlanDriver()
+    @State private var firstFrameShown: Bool
+    @State private var slowSource = PathSlowNetworkSource()
+    @Environment(\.mediaServices) private var mediaServices
 
     init(state: InlineStoryOverlayState) {
         self.state = state
         let initialIndex = min(max(state.initialIndex, 0), max(state.config.items.count - 1, 0))
-        _currentIndex = State(initialValue: initialIndex)
+        let handoffKey = DigiaStoryPresenter.shared.pendingHandoffKey
+        DigiaStoryPresenter.shared.pendingHandoffKey = nil
+        _session = StateObject(wrappedValue: StoryViewerSession(
+            stories: state.config.items,
+            startIndex: initialIndex,
+            handoffKey: handoffKey,
+            restartOnCompleted: state.config.restartOnCompleted,
+            startMuted: state.config.startMuted,
+            reporter: InlineStoryViewerReporter(payload: state.payload),
+            onDismiss: { SDKInstance.shared.controller.dismissStoryOverlay() }
+        ))
         _displayedIndex = State(initialValue: initialIndex)
+        _firstFrameShown = State(initialValue:
+            state.config.items.indices.contains(initialIndex)
+                ? state.config.items[initialIndex].type != .video
+                : true)
     }
 
     private var variables: VariableContext {
         buildVariableContext(schemas: state.config.variableSchemas, cepVars: state.payload.variables)
     }
+
+    private var currentIndex: Int { session.currentIndex }
 
     var body: some View {
         GeometryReader { proxy in
@@ -609,32 +617,15 @@ private struct InlineStoryOverlayContent: View {
                     .ignoresSafeArea()
 
                 if let item = currentItem {
-                    let muted = muteOverride ?? state.config.startMuted
+                    let muted = session.muted
                     ForEach(renderedIndices, id: \.self) { index in
                         if state.config.items.indices.contains(index) {
-                            FullScreenStoryItem(
+                            storyPage(
                                 item: state.config.items[index],
+                                index: index,
                                 active: index == currentIndex,
-                                muted: muted,
-                                onVideoReady: {
-                                    guard index == currentIndex else { return }
-                                    videoReady = true
-                                    displayedIndex = index
-                                },
-                                onVideoProgress: {
-                                    guard index == currentIndex else { return }
-                                    videoProgress = $0
-                                },
-                                onVideoEnded: {
-                                    guard index == currentIndex else { return }
-                                    next()
-                                },
-                                onVideoBuffering: {
-                                    guard index == currentIndex else { return }
-                                    videoBuffering = $0
-                                }
+                                muted: muted
                             )
-                            .id(index)
                             .frame(width: proxy.size.width, height: proxy.size.height)
                             .clipped()
                             .opacity(index == displayedIndex ? 1 : 0)
@@ -644,7 +635,7 @@ private struct InlineStoryOverlayContent: View {
                     tapZones
 
                     VStack(spacing: 0) {
-                        StoryProgressIndicator(
+                        StoryProgressBar(
                             totalItems: state.config.items.count,
                             currentIndex: currentIndex,
                             progress: progress,
@@ -669,27 +660,14 @@ private struct InlineStoryOverlayContent: View {
                     }
 
                     VStack(spacing: 0) {
-                        HStack(spacing: 8) {
-                            Spacer(minLength: 0)
-
-                            if item.type == .video, state.config.muteButton.visible {
-                                StoryOverlayButton(
-                                    config: state.config.muteButton,
-                                    systemImage: muted ? "speaker.slash.fill" : "speaker.wave.2.fill",
-                                    accessibilityLabel: muted ? "Unmute story" : "Mute story",
-                                    action: { muteOverride = !muted }
-                                )
-                            }
-
-                            if state.config.closeButton.visible {
-                                StoryOverlayButton(
-                                    config: state.config.closeButton,
-                                    systemImage: "xmark",
-                                    accessibilityLabel: "Close story",
-                                    action: { SDKInstance.shared.controller.dismissStoryOverlay() }
-                                )
-                            }
-                        }
+                        StoryChrome(
+                            closeButton: state.config.closeButton,
+                            muteButton: state.config.muteButton,
+                            showMute: item.type == .video,
+                            muted: muted,
+                            onClose: { SDKInstance.shared.controller.dismissStoryOverlay() },
+                            onToggleMute: { session.muted.toggle() }
+                        )
                         .padding(
                             .top,
                             safeAreaInsets.top
@@ -759,9 +737,23 @@ private struct InlineStoryOverlayContent: View {
         // Any teardown before the last frame is a user dismissal (swipe / edge /
         // ESC). Completion sets `completed` first, so it reports only once there.
         .onDisappear {
+            planDriver.cancelAll()
             if !completed {
-                SDKInstance.shared.reportStoryStepDismissed(state.payload, itemIndex: currentIndex + 1)
+                session.dismiss()
             }
+            // After every holder is given back, the rail remounts and resumes.
+            Task { @MainActor in
+                NotificationCenter.default.post(name: .storyViewerDidClose, object: nil)
+            }
+        }
+        .task(id: planInput) {
+            drivePlan()
+        }
+        .onChange(of: currentIndex) { _ in
+            resetTiming()
+            let isVideo = currentItem?.type == .video
+            firstFrameShown = !(isVideo ?? false)
+            drivePlan()
         }
     }
 
@@ -788,15 +780,102 @@ private struct InlineStoryOverlayContent: View {
     }
 
     private var currentDuration: Double {
-        let ms = currentItem?.duration ?? state.config.defaultDuration
-        return max(Double(ms) / 1000.0, 0.1)
+        storyPageDurationSeconds(item: currentItem, defaultMs: state.config.defaultDuration) ?? 0
     }
 
     private var progress: Double {
         if currentItem?.type == .video {
             return min(max(videoProgress, 0), 1)
         }
-        return min(max(elapsed / currentDuration, 0), 1)
+        return min(max(elapsed / max(currentDuration, 0.1), 0), 1)
+    }
+
+    private var planInput: String {
+        "\(currentIndex)-\(firstFrameShown)-\(session.replayTick)"
+    }
+
+    private func drivePlan() {
+        let stories = state.config.items.map {
+            StoryDownloadPlan.Item(isVideo: $0.type == .video)
+        }
+        let index = currentIndex
+        // The pool-lease half of the plan (R2-STORY): neighbour holders stay warm under the
+        // same campaign-namespaced keys the pages borrow under, so a swipe hands over the
+        // same instance. Values are snapshotted — `session` is MainActor-bound and the
+        // driver's `keyOf` must stay a capture-free Sendable closure.
+        let start = session.startIndex
+        let handoff = session.handoffKey
+        let namespace = campaignKey
+        planDriver.update(
+            actions: StoryDownloadPlan.plan(
+                stories: stories,
+                currentIndex: index,
+                firstFrameShown: firstFrameShown,
+                slowNetwork: slowSource.isSlow
+            ),
+            urlOf: { state.config.items[$0].url },
+            isVideoOf: { state.config.items[$0].type == .video },
+            keyOf: { page in
+                if page == index, let handoff, page == start { return handoff }
+                return storyPoolKey(namespace: namespace, index: page)
+            },
+            pool: mediaServices.pool()
+        )
+    }
+
+    @ViewBuilder
+    private func storyPage(
+        item: StoryItemConfig,
+        index: Int,
+        active: Bool,
+        muted: Bool
+    ) -> some View {
+        // A replay remounts the current page so its video restarts from 0.
+        let pageID = index == currentIndex
+            ? "\(index)-\(session.replayTick)"
+            : "\(index)"
+        if item.type == .video {
+            VideoStoryPage(
+                item: item,
+                pageKey: session.pageKey(index: index, namespace: campaignKey),
+                muted: muted,
+                playing: active && applicationActive,
+                onReady: { _ in
+                    guard index == currentIndex else { return }
+                    videoReady = true
+                    displayedIndex = index
+                    firstFrameShown = true
+                    drivePlan()
+                },
+                onProgress: {
+                    guard index == currentIndex else { return }
+                    videoProgress = $0
+                },
+                onEnded: {
+                    guard index == currentIndex else { return }
+                    next()
+                },
+                onBuffering: {
+                    guard index == currentIndex else { return }
+                    videoBuffering = $0
+                },
+                onFailed: {
+                    // A broken full-screen item advances, as before.
+                    guard index == currentIndex else { return }
+                    next()
+                }
+            )
+            .id(pageID)
+        } else {
+            ImageStoryPage(item: item) {
+                guard index == currentIndex else { return }
+                videoReady = true
+                displayedIndex = index
+                firstFrameShown = true
+                drivePlan()
+            }
+            .id(pageID)
+        }
     }
 
     private var tapZones: some View {
@@ -821,7 +900,7 @@ private struct InlineStoryOverlayContent: View {
         guard applicationActive, let item = currentItem else { return }
         if item.type == .video {
             // File download and buffering are legitimate loading. Start the
-            // watchdog only after AVPlayer has displayed its first frame.
+            // watchdog only after the player has displayed its first frame.
             if !videoReady || videoBuffering { return }
             if videoProgress > lastVideoProgress + 0.0001 {
                 lastVideoProgress = videoProgress
@@ -832,8 +911,15 @@ private struct InlineStoryOverlayContent: View {
             }
             return
         }
+        // A zero-duration image degrades forward instead of stalling: the frame is skipped
+        // at once, never waited on.
+        guard let duration = storyPageDurationSeconds(
+            item: currentItem, defaultMs: state.config.defaultDuration) else {
+            next()
+            return
+        }
         elapsed += 0.05
-        if elapsed >= currentDuration {
+        if elapsed >= duration {
             next()
         }
     }
@@ -855,22 +941,22 @@ private struct InlineStoryOverlayContent: View {
             move(to: 0)
         } else {
             completed = true
-            SDKInstance.shared.reportStoryCompleted(
-                state.payload,
-                itemTotal: state.config.items.count,
-                timeToCompleteMs: Int64(Date().timeIntervalSince(openedAt) * 1000)
-            )
-            SDKInstance.shared.controller.dismissStoryOverlay()
+            session.advance()
         }
     }
 
     private func previous() {
         resetTiming()
-        move(to: max(currentIndex - 1, 0))
+        if currentIndex == 0 {
+            // Re-show the first story from the top (replayTick remounts its page).
+            session.goBack()
+        } else {
+            move(to: currentIndex - 1)
+        }
     }
 
     private func move(to index: Int) {
-        currentIndex = index
+        session.showPage(index: index)
         // Navigation must be visible on the tap that changes it. Previously video pages waited
         // for the new player's first frame before updating `displayedIndex`; when going back from
         // page i to i-1 that left page i visible with reset timing, which looked like the current
@@ -899,40 +985,6 @@ private struct InlineStoryOverlayContent: View {
                     dismiss: { SDKInstance.shared.controller.dismissStoryOverlay() }
                 )
             )
-        }
-    }
-}
-
-@MainActor
-private struct FullScreenStoryItem: View {
-    let item: StoryItemConfig
-    let active: Bool
-    let muted: Bool
-    let onVideoReady: @MainActor @Sendable () -> Void
-    let onVideoProgress: @MainActor @Sendable (Double) -> Void
-    let onVideoEnded: @MainActor @Sendable () -> Void
-    let onVideoBuffering: @MainActor @Sendable (Bool) -> Void
-
-    var body: some View {
-        ZStack {
-            Color.black
-            if item.type == .video {
-                StoryThumbnailPlaceholderView(
-                    thumbnail: item.thumbnail,
-                    fitOverride: item.boxFit
-                )
-                InlineStoryVideoView(
-                    item: item,
-                    active: active,
-                    muted: muted,
-                    onReadyForDisplay: onVideoReady,
-                    onProgress: onVideoProgress,
-                    onEnded: onVideoEnded,
-                    onBuffering: onVideoBuffering
-                )
-            } else {
-                StoryRemoteImage(urlString: item.url, fit: item.boxFit)
-            }
         }
     }
 }
@@ -967,6 +1019,9 @@ struct StoryRemoteImage: View {
     }
 }
 
+/// Compat shim for the canvas story viewer (`CampaignCanvasStripViews`, lane I): the pre-T10
+/// full-screen video view, behavior-identical. Lane I rewires canvas onto `VideoStoryPage` /
+/// `StoryViewer` in W4 (T14); until then this keeps canvas compiling and pixel-identical.
 @MainActor
 struct InlineStoryVideoView: View {
     let item: StoryItemConfig
@@ -1060,171 +1115,6 @@ extension StoryMediaFit {
         case .contain: .resizeAspect
         case .fill: .resize
         }
-    }
-}
-
-private struct StoryOverlayButton: View {
-    let config: StoryOverlayButtonConfig
-    let systemImage: String
-    let accessibilityLabel: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: CGFloat(config.size) * 0.5, weight: .regular))
-                .foregroundStyle(Color(hex: config.iconColor) ?? .white)
-                .frame(width: CGFloat(config.size), height: CGFloat(config.size))
-                .background(Color(hex: config.backgroundColor) ?? .black)
-                .clipShape(Circle())
-        }
-        .buttonStyle(.plain)
-        .frame(
-            width: max(CGFloat(config.size), 48),
-            height: max(CGFloat(config.size), 48)
-        )
-        .accessibilityLabel(accessibilityLabel)
-    }
-}
-
-struct InlineStoryPlayerLayer: UIViewRepresentable {
-    let player: AVPlayer
-    var gravity: AVLayerVideoGravity = .resizeAspectFill
-    var onReadyForDisplay: (() -> Void)?
-
-    func makeUIView(context _: Context) -> InlineStoryPlayerContainer {
-        let view = InlineStoryPlayerContainer()
-        view.configure(
-            player: player,
-            gravity: gravity,
-            onReadyForDisplay: onReadyForDisplay
-        )
-        return view
-    }
-
-    func updateUIView(_ uiView: InlineStoryPlayerContainer, context _: Context) {
-        uiView.configure(
-            player: player,
-            gravity: gravity,
-            onReadyForDisplay: onReadyForDisplay
-        )
-    }
-
-    static func dismantleUIView(_ uiView: InlineStoryPlayerContainer, coordinator _: Void) {
-        uiView.tearDown()
-    }
-}
-
-final class InlineStoryPlayerContainer: UIView {
-    private var readyObservation: NSKeyValueObservation?
-    private var observedPlayer: AVPlayer?
-    private var didReportReady = false
-    private var onReadyForDisplay: (() -> Void)?
-
-    override class var layerClass: AnyClass {
-        AVPlayerLayer.self
-    }
-
-    // A raw video rendering surface, never itself interactive in either consumer
-    // (inline story or floater/PIP) — both render separate SwiftUI content above it
-    // for actual interaction. Set explicitly rather than relying on the SwiftUI
-    // `.allowsHitTesting(false)` modifier callers apply: that modifier's propagation
-    // across a `UIViewRepresentable` boundary proved unreliable elsewhere in this
-    // hosting stack (see `floater_overlay_view.swift`'s `FloaterSessionView` — the
-    // floater's own drag/tap gesture and its chrome buttons stopped receiving touches
-    // wherever this view's real, UIKit-default-`true` `isUserInteractionEnabled` won
-    // hit-testing priority over them instead).
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    var playerLayer: AVPlayerLayer {
-        layer as! AVPlayerLayer
-    }
-
-    func configure(
-        player: AVPlayer,
-        gravity: AVLayerVideoGravity,
-        onReadyForDisplay: (() -> Void)?
-    ) {
-        self.onReadyForDisplay = onReadyForDisplay
-        playerLayer.videoGravity = gravity
-        guard observedPlayer !== player else {
-            revealIfReady()
-            return
-        }
-        readyObservation?.invalidate()
-        observedPlayer = player
-        didReportReady = false
-        playerLayer.opacity = 0
-        playerLayer.player = player
-        readyObservation = playerLayer.observe(
-            \.isReadyForDisplay,
-            options: [.initial, .new]
-        ) { [weak self] _, _ in
-            Task { @MainActor in self?.revealIfReady() }
-        }
-    }
-
-    func tearDown() {
-        readyObservation?.invalidate()
-        readyObservation = nil
-        observedPlayer = nil
-        onReadyForDisplay = nil
-        didReportReady = false
-        playerLayer.opacity = 0
-        playerLayer.player = nil
-    }
-
-    private func revealIfReady() {
-        guard playerLayer.isReadyForDisplay else { return }
-        playerLayer.opacity = 1
-        guard !didReportReady else { return }
-        didReportReady = true
-        onReadyForDisplay?()
-    }
-}
-
-private struct StoryProgressIndicator: View {
-    let totalItems: Int
-    let currentIndex: Int
-    let progress: Double
-    let config: StoryIndicatorDisplayConfig
-
-    var body: some View {
-        HStack(spacing: CGFloat(config.horizontalGap)) {
-            ForEach(0..<max(totalItems, 0), id: \.self) { index in
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: CGFloat(config.borderRadius), style: .continuous)
-                            .fill(backgroundColor(for: index))
-                        RoundedRectangle(cornerRadius: CGFloat(config.borderRadius), style: .continuous)
-                            .fill(Color(hex: config.activeColor) ?? .white)
-                            .frame(width: proxy.size.width * CGFloat(fillAmount(for: index)))
-                    }
-                }
-                .frame(height: CGFloat(config.height))
-            }
-        }
-    }
-
-    private func fillAmount(for index: Int) -> Double {
-        if index < currentIndex { return 0 }
-        if index == currentIndex { return min(max(progress, 0), 1) }
-        return 0
-    }
-
-    private func backgroundColor(for index: Int) -> Color {
-        if index < currentIndex {
-            return Color(hex: config.activeColor) ?? Color.white.opacity(0.67)
-        }
-        return Color(hex: config.disabledColor) ?? Color.white.opacity(0.34)
     }
 }
 

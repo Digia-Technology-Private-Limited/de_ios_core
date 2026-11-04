@@ -1,4 +1,3 @@
-import AVFoundation
 import Testing
 @testable import DigiaEngage
 
@@ -17,10 +16,10 @@ struct NudgeVideoFitTests {
         #expect(try video("future-fit").boxFit == .cover)
     }
 
-    @Test("maps fits to player video gravity")
-    func mapsVideoGravity() {
-        #expect(NudgeVideoFit.cover.videoGravity == .resizeAspectFill)
-        #expect(NudgeVideoFit.contain.videoGravity == .resizeAspect)
+    @Test("maps fits to the wrapper fit")
+    func mapsMediaFit() {
+        #expect(NudgeVideoFit.cover.mediaFit == .cover)
+        #expect(NudgeVideoFit.contain.mediaFit == .contain)
     }
 
     private func video(_ boxFit: String? = nil) throws -> NudgeVideo {

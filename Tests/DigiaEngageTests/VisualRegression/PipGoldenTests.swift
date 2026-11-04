@@ -38,8 +38,9 @@ struct PipGoldenTests {
         let config = try #require(campaign.floaterConfig, "Fixture must decode to a PiP")
         let orchestrator = SDKInstance.shared.floaterOrchestrator!
         // A player that stays paused at zero on the local file: it reaches `readyToPlay` (which is
-        // what reveals the window) without the network, and autoplay cannot move it.
-        orchestrator.playerFactory = { url in NeverPlayingPlayer(url: URL(string: url)!) }
+        // what reveals the window) without the network, and autoplay cannot move it. Built
+        // through lane B's `PlayerFactory` — the only seam that creates players.
+        orchestrator.playerFactory = NeverPlayingFactory()
         // Each cleanup is registered as soon as its state is set, so a failed `#require` below
         // cannot leave it for the next test, of this suite or another.
         defer { orchestrator.playerFactory = nil }
@@ -204,8 +205,14 @@ struct PipGoldenTests {
 }
 }
 
-/// An `AVPlayer` that never starts: autoplay calls `play()` on `readyToPlay`, and a playing video
-/// would put its progress and its play/pause glyph at a different point in every run.
-private final class NeverPlayingPlayer: AVPlayer {
+/// An `AVQueuePlayer` that never starts: autoplay calls `play()` on `readyToPlay`, and a
+/// playing video would put its progress and its play/pause glyph at a different point in
+/// every run. Vended through `PlayerFactory` so the orchestrator's one creation seam stays
+/// the only place a test player comes from.
+private struct NeverPlayingFactory: PlayerFactory {
+    func makePlayer() -> AVQueuePlayer { NeverPlayingPlayer() }
+}
+
+private final class NeverPlayingPlayer: AVQueuePlayer {
     override func play() {}
 }

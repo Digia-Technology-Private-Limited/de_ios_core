@@ -2,6 +2,11 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [Unreleased]
+
+### Added
+- Internal range-caching media store (`api/internal/media/cache/`): AVAsset reads stream through a per-folder disk cache with HTTP Range fetch, partial entries, 256 MB LRU, and a fake-fetch contract suite. No surface rewired; `DigiaVideoFileCache` untouched.
+
 ## [4.2.0] - 2026-10-29
 
 ### Bug Fixes

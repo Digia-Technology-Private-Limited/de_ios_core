@@ -3,22 +3,9 @@ import UIKit
 
 internal import SDWebImageSwiftUI
 
-/// Transport seam for `MediaImage` tests: the loader WebImage uses instead of the shared
-/// downloader when set (via `.environment(\.mediaImageLoader, …)`). Production never sets it.
-struct MediaImageTransport: @unchecked Sendable {
-    var loader: (any SDImageLoader)?
-}
-
-struct MediaImageLoaderKey: EnvironmentKey {
-    static let defaultValue = MediaImageTransport()
-}
-
-extension EnvironmentValues {
-    var mediaImageLoader: (any SDImageLoader)? {
-        get { self[MediaImageLoaderKey.self].loader }
-        set { self[MediaImageLoaderKey.self].loader = newValue }
-    }
-}
+/// Reads its image transport, campaign attribution and health hook from
+/// `MediaServices` (D17): production renders through the shared SDWebImage
+/// stack, tests inject a fake loader through `.environment(\.mediaServices)`.
 
 /// The one image wrapper every surface renders through (D1): SDWebImage via the shared cache
 /// (D6 — GIF/SVG decoding unchanged from `DigiaCachedImageView`), with the authored BlurHash as
@@ -35,7 +22,7 @@ struct MediaImage: View {
     /// trailing tests can pin the exact production line (meaningful-tests rule 2).
     static let spinnerDelaySeconds: TimeInterval = 0.4
 
-    let spec: MediaSpec
+    let spec: ImageSpec
     var tintColor: Color? = nil
     /// An already-decoded image (e.g. handed back by `MediaPrefetch.warmImage`): drawn instead
     /// of fetching, so a surface that reveals only when loaded never flashes (US50).
@@ -44,11 +31,12 @@ struct MediaImage: View {
     /// The fetch failed. The argument is the same non-nil cause sent to health.
     var onFailure: ((String) -> Void)? = nil
 
-    /// Transport seam for tests: when set (via `.environment(\.mediaImageLoader, …)`), WebImage
-    /// loads through this loader instead of the shared downloader. Production leaves it nil, so
-    /// the path is the shared manager + downloader exactly as before. The manager still consults
-    /// the shared image cache first either way, so cache behaviour is real under test.
-    @Environment(\.mediaImageLoader) private var imageLoader
+    /// Transport seam for tests: when the ambient `MediaServices` carries an
+    /// image loader, WebImage loads through it instead of the shared
+    /// downloader. Production leaves it nil, so the path is the shared manager
+    /// + downloader exactly as before. The manager still consults the shared
+    /// image cache first either way, so cache behaviour is real under test.
+    @Environment(\.mediaServices) private var services
     @Environment(\.digiaCampaignKey) private var campaignKey
     @State private var finished = false
     @State private var showSpinner = false
@@ -56,7 +44,7 @@ struct MediaImage: View {
     private let blurStill: UIImage?
 
     init(
-        spec: MediaSpec,
+        spec: ImageSpec,
         tintColor: Color? = nil,
         preloaded: UIImage? = nil,
         onSuccess: ((UIImage) -> Void)? = nil,
@@ -115,11 +103,12 @@ struct MediaImage: View {
                     // The shared mapper returns nil for transport failures (no status to blame),
                     // which are delivery faults, not silent holes, so they report as "network".
                     let cause = mediaFailureCause(imageError: error) ?? "network"
-                    reportMediaLoadFailed(.image, cause: cause, campaignKey: campaignKey)
+                    services.reportHealth(campaignKey, .image, cause)
                     onFailure?(cause)
                 }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: spec.url) {
             // The spinner arm: cancelled on disappear or URL change, and disarmed by `finished`.
             // A still-less load that resolves in time never flashes it.
@@ -132,7 +121,7 @@ struct MediaImage: View {
     }
 
     private var loaderContext: [SDWebImageContextOption: Any]? {
-        imageLoader.map { [SDWebImageContextOption.imageLoader: $0] }
+        services.imageLoader.map { [SDWebImageContextOption.imageLoader: $0] }
     }
 
     @ViewBuilder

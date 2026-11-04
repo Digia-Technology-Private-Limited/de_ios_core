@@ -1,7 +1,6 @@
 import SwiftUI
 import UIKit
 import Combine
-internal import SDWebImageSwiftUI
 
 /// Frame-settling buffer added before the survey is shown.
 private let RENDER_DELAY_MS: Int = 150
@@ -1109,32 +1108,25 @@ private struct BlockTitleView: View {
 private struct BlockMediaImage: View {
     let media: BlockMedia
 
-    init(media: BlockMedia) {
-        DigiaImagePipeline.configureIfNeeded()
-        self.media = media
-    }
-
-    private var contentMode: ContentMode {
+    private var fit: MediaFit {
         switch media.boxFit {
-        case "contain": return .fit
-        default: return .fill
+        case "contain": return .contain
+        case "fill": return .fill
+        default: return .cover
         }
     }
 
     var body: some View {
-        if media.hasUrl, let url = URL(string: media.url) {
-            WebImage(url: url) { image in
-                if media.boxFit == "fill" {
-                    image.resizable()
-                } else {
-                    image.resizable().aspectRatio(contentMode: contentMode)
-                }
-            } placeholder: {
-                ZStack {
-                    SurveyTokens.surfaceSunken
-                    BlurHashPlaceholderView(placeholder: media.placeholder, fit: media.boxFit)
-                }
-            }
+        if media.hasUrl {
+            // The D5 still on error: a failed picture keeps its BlurHash instead
+            // of an empty gap. The wrapper reports the failure with the survey's
+            // campaign key (set on the environment by `SurveyRenderer`) — this
+            // resolves the P0a survey-image silence.
+            MediaImage(spec: ImageSpec(
+                url: media.url,
+                fit: fit,
+                blurHash: media.placeholder?.blurHash
+            ))
             .frame(height: 176)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 10))

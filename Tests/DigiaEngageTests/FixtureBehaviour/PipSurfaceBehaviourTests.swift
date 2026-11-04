@@ -53,9 +53,9 @@ struct PipSurfaceBehaviourTests {
         #expect(presentation.dismissReason == .autoTimeout)
     }
 
-    // Fails if: floater_overlay_view.swift `collapsedRect`
-    // `let height = config.collapsed.hasFixedHeight ? config.collapsed.heightDp : width / ratio` ->
-    // `let height = false ? config.collapsed.heightDp : width / ratio`.
+    // Fails if: floating/FloatingWindow.swift `FloatingWindowSize.videoAspect`
+    // `if let fixedHeightDp { return fixedHeightDp }` ->
+    // `if let fixedHeightDp { return width / ratio }` (or the height branch deleted).
     @Test("pip_video_chrome_pinned_height: the window is the pinned 240 pt high, not its ratio")
     func pinnedHeight() async throws {
         let (sdk, _) = try await bootPinned()
