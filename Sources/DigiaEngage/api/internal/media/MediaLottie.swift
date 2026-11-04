@@ -3,51 +3,37 @@ import UIKit
 
 internal import Lottie
 
-/// The one Lottie wrapper every surface renders through (D1): the platform composition loaded
-/// through Lottie's own cache (`loadLottieSource` — Lottie bytes are never routed through the
-/// image cache, D6), over the shared dark backdrop with the authored BlurHash as the still (D5),
-/// so a missing or broken file leaves the still instead of an empty box.
+/// The one Lottie wrapper the non-story surfaces render through: the platform composition
+/// loaded through Lottie's own cache (Lottie bytes are never routed through the image cache),
+/// with the authored BlurHash as the still while there is no animation (loading or failed) and
+/// no backdrop of its own, so a transparent animation stays transparent over the page.
 ///
-/// A load failure — network ones included — is reported through the media health hook with a
-/// non-nil cause (D5), and the still stays regardless.
+/// `errorContent` is drawn over the still when the load fails and when the URL is unusable.
+/// `freezeAt` draws one frame at that progress instead of playing, for deterministic snapshots.
 ///
-/// Never throws from the render path: a blank, templated or otherwise unusable URL degrades to
-/// the still without fetching and without reporting.
+/// Health is reported once per failure, for the campaign in the environment: `invalid_url` for an
+/// unusable URL (blank, an unresolved `{{variable}}`, no scheme), `http_4xx`, `decode`. A network
+/// failure, a timeout or a 5xx reports nothing.
+///
+/// Never throws from the render path: an unusable URL shows the still without fetching.
 struct MediaLottie: View {
     let spec: LottieSpec
-    /// The fetch or parse failed. The argument is the same non-nil cause sent to health.
-    var onFailure: ((String) -> Void)? = nil
+    var errorContent: AnyView? = nil
+    var freezeAt: CGFloat? = nil
 
     @Environment(\.digiaCampaignKey) private var campaignKey
     @Environment(\.mediaServices) private var services
     @State private var source: LottieAnimationSource?
-
-    private let blurStill: UIImage?
-
-    init(spec: LottieSpec, onFailure: ((String) -> Void)? = nil) {
-        self.spec = spec
-        self.onFailure = onFailure
-        self.blurStill = spec.blurHash.flatMap { BlurHashDecoder.decode($0, width: 32, height: 32) }
-    }
+    @State private var failed = false
 
     var body: some View {
         ZStack {
-            Color.mediaBackdrop
-            if let blurStill {
-                if let mode = spec.fit.contentMode {
-                    Image(uiImage: blurStill)
-                        .resizable()
-                        .aspectRatio(contentMode: mode)
-                } else {
-                    Image(uiImage: blurStill)
-                        .resizable()
-                }
-            }
             if let source {
-                if spec.autoplay {
-                    lottie(source).playing(loopMode: spec.loop ? .loop : .playOnce)
-                } else {
-                    lottie(source)
+                animation(source)
+            } else {
+                MediaStill(spec: .lottie(spec))
+                if failed, let errorContent {
+                    errorContent
                 }
             }
         }
@@ -57,25 +43,39 @@ struct MediaLottie: View {
         }
     }
 
-    private func lottie(_ source: LottieAnimationSource) -> LottieView<EmptyView> {
-        // The closure form below takes an already-loaded source, so a composition that parsed
-        // once is never re-fetched on re-render; loading happens once per URL in `load()`.
-        LottieView { source }
+    @ViewBuilder
+    private func animation(_ source: LottieAnimationSource) -> some View {
+        // The closure form takes an already-loaded source, so a composition that parsed once is
+        // never re-fetched on re-render; loading happens once per URL in `load()`.
+        let view = LottieView { source }
             .resizable()
             .configure(\.contentMode, to: spec.fit.viewContentMode)
+        if let freezeAt {
+            view.paused(at: .progress(freezeAt))
+        } else if spec.autoplay {
+            view.playing(loopMode: spec.loop ? .loop : .playOnce)
+        } else {
+            view
+        }
     }
 
     private func load() async {
-        guard let url = mediaUsableURL(spec.url) else { return }
-        let loaded = await loadLottieSource(url)
-        if loaded.source != nil {
-            source = loaded.source
+        source = nil
+        failed = false
+        guard let url = mediaUsableURL(spec.url) else {
+            failed = true
+            services.reportHealth(campaignKey, .lottie, "invalid_url")
+            return
+        }
+        let loaded = await services.loadLottie(url)
+        guard !Task.isCancelled else { return }
+        if let loadedSource = loaded.source {
+            source = loadedSource
         } else {
-            // D5: every failure, network ones included, reports with a non-nil cause (see
-            // MediaImage's onFailure for why the fallback is "network").
-            let cause = loaded.failureCause ?? "network"
-            services.reportHealth(campaignKey, .lottie, cause)
-            onFailure?(cause)
+            failed = true
+            if let cause = loaded.failureCause {
+                services.reportHealth(campaignKey, .lottie, cause)
+            }
         }
     }
 }

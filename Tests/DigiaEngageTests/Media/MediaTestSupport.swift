@@ -155,9 +155,11 @@ final class HealthRecorder: @unchecked Sendable {
     var all: [Record] { lock.withLock { records } }
 
     var services: MediaServices {
-        MediaServices { [self] key, kind, cause in
+        var services = MediaServices.sdk
+        services.reportHealth = { [self] key, kind, cause in
             lock.withLock { records.append(Record(campaignKey: key, kind: kind, cause: cause)) }
         }
+        return services
     }
 }
 

@@ -69,13 +69,6 @@ enum MediaSpec: Sendable, Equatable, Hashable {
     }
 }
 
-extension Color {
-    /// The shared dark backdrop drawn under media that has no still yet (D5): video before its
-    /// first frame, Lottie while loading or failed. Surfaces with their own backdrop keep it;
-    /// this is the wrapper default, so every tile degrades to the same dark box.
-    static var mediaBackdrop: Color { Color(red: 0.10, green: 0.10, blue: 0.10) }
-}
-
 /// URLs a wrapper may fetch: non-blank, fully resolved (no `{{variable}}` template tokens left),
 /// parseable and with a scheme. Anything else is an unusable URL: the wrapper draws its still
 /// without fetching and reports `invalid_url`.
