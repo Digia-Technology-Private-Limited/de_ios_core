@@ -93,11 +93,13 @@ struct StoryThumbnailRailView: View {
     let cardCornerRadius: CGFloat
     let cardSpacing: CGFloat
     let overlayOpen: Bool
-    let prefetch: any MediaPrefetch
+    /// Overrides the real prefetch (tests); nil warms through `DefaultMediaPrefetch`.
+    let prefetch: (any MediaPrefetch)?
     let onOpenWithHandoff: ((Int, String?) -> Void)?
     let onOpen: @MainActor (Int) -> Void
 
     @Environment(\.digiaCampaignKey) private var campaignKey
+    @Environment(\.mediaServices) private var mediaServices
     @State private var rail = StoryRailState()
     @State private var latestGeometry = StoryRailGeometry()
     @State private var viewportBounds = CGRect.null
@@ -117,7 +119,7 @@ struct StoryThumbnailRailView: View {
         cardCornerRadius: CGFloat,
         cardSpacing: CGFloat,
         overlayOpen: Bool,
-        prefetch: any MediaPrefetch = NoopMediaPrefetch(),
+        prefetch: (any MediaPrefetch)? = nil,
         onOpenWithHandoff: ((Int, String?) -> Void)? = nil,
         onOpen: @escaping @MainActor (Int) -> Void
     ) {
@@ -217,7 +219,9 @@ struct StoryThumbnailRailView: View {
                   items.indices.contains(active),
                   items[active].type == .video
             else { return }
-            _ = await prefetch.warmVideoBytes(url: items[active].url, lengthBytes: storyFirstBytes)
+            let warm = prefetch
+                ?? DefaultMediaPrefetch(campaignKey: campaignKey, services: mediaServices)
+            _ = await warm.warmVideoBytes(url: items[active].url, lengthBytes: storyFirstBytes)
         }
         .onChange(of: items) { _ in
             rail = StoryRailState()

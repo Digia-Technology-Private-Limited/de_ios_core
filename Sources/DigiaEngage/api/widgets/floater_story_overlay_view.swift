@@ -586,8 +586,7 @@ private struct FloaterStoryContentViewer: View {
     private static let defaultDurationMs = 5000
 
     @Environment(\.canvasInteractions) private var reportInteraction
-
-    private let stories: [StoryItemConfig]
+    @Environment(\.digiaVariables) private var variables
 
     init(
         pages: [CampaignCanvasStoryPage],
@@ -613,11 +612,12 @@ private struct FloaterStoryContentViewer: View {
         self.onDismiss = onDismiss
         self.showsOverlays = showsOverlays
         self.safeAreaInsets = safeAreaInsets
-        self.stories = pages.map(canvasStoryItem)
     }
 
     var body: some View {
-        StoryViewer(
+        // Read here, not in `init`: the variables arrive from the environment.
+        let stories = pages.map { canvasStoryItem($0, variables: variables) }
+        return StoryViewer(
             entry: StoryViewerEntry(
                 stories: stories,
                 startIndex: min(max(0, initialIndex), max(stories.count - 1, 0)),

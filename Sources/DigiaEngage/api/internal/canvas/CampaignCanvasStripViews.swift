@@ -219,7 +219,12 @@ func canvasStoryItem(
     )
 }
 
-func canvasStoryItem(_ page: CampaignCanvasStoryPage) -> StoryItemConfig {
+/// `variables` resolves a `{{var}}` in the page's media URL: the rail and the viewer read the
+/// resolved URL, because a still-templated one warms and plays nothing.
+func canvasStoryItem(
+    _ page: CampaignCanvasStoryPage,
+    variables: VariableContext? = nil
+) -> StoryItemConfig {
     let mediaType: StoryMediaType = page.thumbnailIsVideo ? .video : .image
     let boxFit: StoryMediaFit = page.pageFit == "fill"
         ? .fill
@@ -227,7 +232,7 @@ func canvasStoryItem(_ page: CampaignCanvasStoryPage) -> StoryItemConfig {
     let thumbnailBoxFit = StoryMediaFit.fromWireValue(page.thumbnailFit, mediaType: mediaType)
     return StoryItemConfig(
         type: mediaType,
-        url: page.thumbnailUrl,
+        url: interpolate(page.thumbnailUrl, context: variables),
         duration: Int(max(page.duration, 0) * 1000),
         thumbnailPlayback: StoryThumbnailPlaybackConfig(
             startTimeMs: Int64(page.thumbnailPlayback.startTime * 1000),
@@ -838,6 +843,7 @@ struct CanvasStoryRailRenderer: View {
     /// frame stays on screen instead of flashing black.
     @State private var openHandoffKey: String?
     @Environment(\.canvasInteractions) private var reportInteraction
+    @Environment(\.digiaVariables) private var variables
 
     static func cardWidth(railHeight: CGFloat, cardAspectRatio: CGFloat) -> CGFloat {
         railHeight * cardAspectRatio
@@ -863,7 +869,7 @@ struct CanvasStoryRailRenderer: View {
                     // property, because there isn't one.
                     let cardWidth = Self.cardWidth(railHeight: size.height, cardAspectRatio: cardAspectRatio)
                     StoryThumbnailRailView(
-                        items: pages.map(canvasStoryItem),
+                        items: pages.map { canvasStoryItem($0, variables: variables) },
                         mode: thumbnailVideoPlayback.asInlineStoryMode,
                         cardWidth: cardWidth,
                         cardHeight: size.height,
@@ -1076,8 +1082,7 @@ struct CanvasStoryViewer: View {
     /// page advances on a timer, a tap or a video ending, and only the viewer knows which page
     /// is showing.
     @Environment(\.canvasInteractions) private var reportInteraction
-
-    private let stories: [StoryItemConfig]
+    @Environment(\.digiaVariables) private var variables
 
     init(
         pages: [CampaignCanvasStoryPage],
@@ -1103,7 +1108,6 @@ struct CanvasStoryViewer: View {
         self.showsOverlays = showsOverlays
         self.safeAreaInsets = safeAreaInsets
         self.handoffKey = handoffKey
-        self.stories = pages.map(canvasStoryItem)
         // The reporter is first-wins state shared with the session the viewer builds from it:
         // the relay arrives from the `canvasInteractions` environment, which does not exist yet
         // at init time, and is set before any report can fire.
@@ -1111,7 +1115,9 @@ struct CanvasStoryViewer: View {
     }
 
     var body: some View {
-        StoryViewer(
+        // Read here, not in `init`: the variables arrive from the environment.
+        let stories = pages.map { canvasStoryItem($0, variables: variables) }
+        return StoryViewer(
             entry: StoryViewerEntry(
                 stories: stories,
                 startIndex: min(max(initialIndex, 0), max(stories.count - 1, 0)),

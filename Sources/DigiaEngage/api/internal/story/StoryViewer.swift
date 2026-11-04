@@ -1,4 +1,5 @@
 import AVFoundation
+import DigiaMediaCache
 import Foundation
 import SwiftUI
 
@@ -148,8 +149,8 @@ func storyPageDurationSeconds(item: StoryItemConfig?, defaultMs: Int) -> Double?
 let storyFirstBytes = 512 * 1_024
 
 /// Executes the byte half of a `StoryDownloadPlan`: video first-bytes/whole-file warming and
-/// image enqueueing, all through the `MediaPrefetch` protocol (lane H owns the implementation;
-/// until then the no-op stub keeps every call site compiling and every test deterministic).
+/// image enqueueing, all through the `MediaPrefetch` protocol (the viewer passes the real
+/// `DefaultMediaPrefetch`; the no-op stub keeps tests deterministic).
 /// Player actions are pool leases when the caller wires `pool` + `keyOf` (R2-STORY): the
 /// driver holds a lease for every `.player` action under the same campaign-namespaced keys
 /// the pages borrow under, so a swipe hands over the same instance; callers that pass
@@ -160,7 +161,9 @@ let storyFirstBytes = 512 * 1_024
 /// indices are left alone. Leases work the same way: indices that left the window are
 /// released (their bytes stay on disk — only the holder goes back), still-wanted indices
 /// keep their holder, and a re-obtain under a held key is the pool's share (same instance,
-/// raised priority). Mirrors Android `StoryPlanDriver`.
+/// raised priority). A neighbour's player is taken over paused and muted on the range-cache
+/// item (`prepareNeighbour`), so what it buffers is what the page then plays and what a
+/// later session finds on disk. Mirrors Android `StoryPlanDriver`.
 final class StoryPlanDriver: @unchecked Sendable {
     private let lock = NSLock()
     private var tasks: [Int: Task<Void, Never>] = [:]
@@ -168,9 +171,16 @@ final class StoryPlanDriver: @unchecked Sendable {
     /// owns its own borrow; these keep the neighbours' holders warm.
     private var leases: [Int: PlayerLease] = [:]
     private let prefetch: any MediaPrefetch
+    /// The loader a neighbour's player item reads through (the range cache), so its bytes are
+    /// cached and the page that takes it over keeps the item.
+    private let resourceLoader: MediaResourceLoader
 
-    init(prefetch: any MediaPrefetch = NoopMediaPrefetch()) {
+    init(
+        prefetch: any MediaPrefetch = NoopMediaPrefetch(),
+        resourceLoader: MediaResourceLoader = SharedMediaResourceLoader.shared
+    ) {
         self.prefetch = prefetch
+        self.resourceLoader = resourceLoader
     }
 
     func update(
@@ -254,15 +264,37 @@ final class StoryPlanDriver: @unchecked Sendable {
             guard let fresh = pool.obtainLease(
                 key: want.key, url: want.url, priority: want.priority
             ) else { continue }
-            lock.withLock {
+            let committed: Bool = lock.withLock {
                 if let current = leases[want.index], current.player === fresh.player {
                     fresh.release()
-                } else {
-                    leases[want.index]?.release()
-                    leases[want.index] = fresh
+                    return false
                 }
+                leases[want.index]?.release()
+                leases[want.index] = fresh
+                return true
+            }
+            // A neighbour the driver just took ownership of waits paused and muted on the
+            // cached item. The on-screen page takes its own player over; a shared holder
+            // belongs to whoever committed it.
+            if committed, !fresh.shared, want.priority != .onScreen {
+                prepareNeighbour(fresh, url: want.url, pool: pool)
             }
         }
+    }
+
+    /// Points a neighbour's player at the range-cache item, paused and muted at the start
+    /// (Android `prepareNeighbourPlayer`). The page that borrows it later finds the origin
+    /// already held (same URL) and keeps the item, so nothing is fetched twice.
+    private func prepareNeighbour(_ lease: PlayerLease, url: String, pool: VideoPlayerPool) {
+        lease.player.takeOver(
+            spec: VideoSpec(
+                url: url,
+                playback: Playback(autoplay: false, muted: true, startMs: 0)
+            ),
+            resourceLoader: resourceLoader,
+            setLooping: { pool.setLooping($0, forKey: lease.key) },
+            onInvalidStart: {}
+        )
     }
 
     private func remove(index: Int) {

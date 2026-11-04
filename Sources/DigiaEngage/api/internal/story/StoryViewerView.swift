@@ -429,7 +429,9 @@ struct StoryViewer<Chrome: View>: View {
 
     private func driver() -> StoryPlanDriver {
         if let planDriver { return planDriver }
-        let created = StoryPlanDriver()
+        let created = StoryPlanDriver(
+            prefetch: DefaultMediaPrefetch(campaignKey: campaignKey, services: mediaServices)
+        )
         planDriver = created
         return created
     }
