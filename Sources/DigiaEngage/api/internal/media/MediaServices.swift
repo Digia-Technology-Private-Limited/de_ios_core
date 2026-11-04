@@ -1,9 +1,10 @@
 import SwiftUI
 
+internal import DigiaMediaCache
 internal import Lottie
 
-/// The media layer's process-wide services: the health reporter and the Lottie loader every media
-/// path reads, so one override reaches all of them. The widgets read them from the SwiftUI
+/// The media layer's process-wide services: the health reporter, the Lottie loader and the video
+/// range-cache loader every media path reads, so one override reaches all of them. The widgets read them from the SwiftUI
 /// environment, whose default is `current`; the floater's Lottie warm-up and the anchorless
 /// guide's health report, which have no view, read `current` directly. The defaults front the
 /// SDK's own `reportMediaLoadFailed` and `loadLottieSource`; tests replace them with `override`
@@ -14,12 +15,19 @@ struct MediaServices: Sendable {
     var reportHealth: @Sendable (String?, HealthMediaKind, String) -> Void
     /// Loads a Lottie animation; on failure, the health cause when the author can fix it.
     var loadLottie: @Sendable (URL) async -> (source: LottieAnimationSource?, failureCause: String?)
+    /// The range-cache loader every remote video item reads through. One for the process:
+    /// `AVURLAsset` holds its delegate weakly, so it must outlive any view.
+    var videoLoader: MediaResourceLoader
+    /// The range cache behind `videoLoader`, which `MediaPrefetch` warms.
+    var videoStore: MediaRangeCacheStore
 
     static let sdk = MediaServices(
         reportHealth: { campaignKey, kind, cause in
             reportMediaLoadFailed(kind, cause: cause, campaignKey: campaignKey)
         },
-        loadLottie: { await loadLottieSource($0) }
+        loadLottie: { await loadLottieSource($0) },
+        videoLoader: MediaResourceLoader(store: MediaRangeCacheStore.shared()),
+        videoStore: MediaRangeCacheStore.shared()
     )
 
     /// The services in force: the SDK's, unless a test overrode them.
@@ -28,11 +36,23 @@ struct MediaServices: Sendable {
     /// Replaces the given services for the rest of the process, until `reset()`. Test only.
     static func override(
         reportHealth: (@Sendable (String?, HealthMediaKind, String) -> Void)? = nil,
-        loadLottie: (@Sendable (URL) async -> (source: LottieAnimationSource?, failureCause: String?))? = nil
+        loadLottie: (@Sendable (URL) async -> (source: LottieAnimationSource?, failureCause: String?))? = nil,
+        videoSession: URLSession? = nil
     ) {
+        // A fresh cache folder per override, so no test reads another's bytes.
+        let videoStore = videoSession.map { session in
+            MediaRangeCacheStore(
+                folder: FileManager.default.temporaryDirectory
+                    .appendingPathComponent("digia-media-video-test-\(UUID().uuidString)", isDirectory: true),
+                client: URLSessionRangeFetchClient(session: session))
+        }
         store.update { services in
             if let reportHealth { services.reportHealth = reportHealth }
             if let loadLottie { services.loadLottie = loadLottie }
+            if let videoStore {
+                services.videoStore = videoStore
+                services.videoLoader = MediaResourceLoader(store: videoStore)
+            }
         }
     }
 

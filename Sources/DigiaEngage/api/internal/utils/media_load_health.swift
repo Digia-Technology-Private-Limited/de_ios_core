@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 
+internal import DigiaMediaCache
 internal import Lottie
 internal import SDWebImageSwiftUI
 
@@ -51,10 +52,27 @@ func mediaFailureCause(playerItem: AVPlayerItem) -> String? {
     if let status = playerItem.errorLog()?.events.last?.errorStatusCode, (400..<500).contains(status) {
         return "http_4xx"
     }
+    // Through the range cache the HTTP status arrives as an underlying error of the item's.
+    if let status = mediaCacheHTTPStatus(in: playerItem.error) {
+        return mediaFailureCause(httpStatus: status) == "http_4xx" ? "http_4xx" : nil
+    }
     switch (playerItem.error as? AVError)?.code {
     case .decodeFailed?, .fileFormatNotRecognized?, .failedToParse?: return "decode"
     default: return nil
     }
+}
+
+/// The HTTP status the range cache failed a loading request with, searched through the
+/// error's underlying errors. AVFoundation keeps the code but re-wraps it as an OSStatus, so a
+/// positive OSStatus in the HTTP range counts too (real OSStatus errors are negative).
+func mediaCacheHTTPStatus(in error: Error?) -> Int? {
+    var current = error.map { $0 as NSError }
+    while let nsError = current {
+        if nsError.domain == MediaResourceLoader.httpStatusErrorDomain { return nsError.code }
+        if nsError.domain == NSOSStatusErrorDomain, (100..<600).contains(nsError.code) { return nsError.code }
+        current = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
+    }
+    return nil
 }
 
 /// Loads a remote Lottie or dotLottie file through Lottie's own cache.
