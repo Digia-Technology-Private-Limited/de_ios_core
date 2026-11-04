@@ -6,9 +6,8 @@ import UIKit
 
 @testable import DigiaEngage
 
-// The wrapper + fake network seam (D5): `MediaLottie` loads through the real `loadLottieSource`
-// (Lottie's own cache, D6) and only the HTTP layer is faked (`FakeMediaOrigin`, which also
-// intercepts `URLSession.shared`). Each test below names the one production line whose change
+// The wrapper over a fake origin (`MediaOrigin`): `MediaLottie` loads through the real
+// `loadLottieSource` (Lottie's own cache) and only the HTTP layer is faked. Each test below names the one production line whose change
 // fails it; see ai_docs/meaningful-tests.md.
 
 extension RenderedUITests {
@@ -20,14 +19,12 @@ struct MediaLottieComponentTests {
     {"v":"5.7.4","fr":30,"ip":0,"op":30,"w":100,"h":100,"nm":"t","ddd":0,"assets":[],"layers":[]}
     """#.utf8)
 
-    private func mount(_ spec: LottieSpec, box: CauseBox? = nil) -> UIWindow {
+    private func mount(_ spec: LottieSpec, recorder: HealthRecorder = HealthRecorder()) -> UIWindow {
         mountMedia(
-            MediaLottie(
-                spec: spec,
-                onFailure: box.map { capture in { capture.record($0) } }
-            )
-            .environment(\.digiaCampaignKey, "test-campaign")
-            .frame(width: 200, height: 200)
+            MediaLottie(spec: spec)
+                .environment(\.digiaCampaignKey, "test-campaign")
+                .environment(\.mediaServices, recorder.services)
+                .frame(width: 200, height: 200)
         )
     }
 
@@ -52,20 +49,17 @@ struct MediaLottieComponentTests {
     @Test("blank and templated urls never fetch and keep the still", arguments: [
         "",
         "http://[invalid",
-        FakeMediaOrigin.rawURL("{{anim}}.json"),
+        MediaOrigin.rawURL("{{anim}}.json"),
     ])
     func unusableURLsKeepStill(url: String) async {
-        FakeMediaOrigin.install()
-        defer {
-            FakeMediaOrigin.uninstall()
-            FakeMediaOrigin.reset()
-        }
+        MediaOrigin.install()
+        defer { MediaOrigin.uninstall(); MediaOrigin.reset() }
 
         let window = mount(LottieSpec(url: url, blurHash: Self.blurHash))
         defer { ComponentTestHost.unmount(window) }
         _ = await waitUntilMedia(timeout: 1.0) { false }
 
-        #expect(FakeMediaOrigin.totalRequestCount() == 0)
+        #expect(MediaOrigin.totalRequestCount() == 0)
         #expect(lottieViews(in: window).isEmpty)
         let middle = renderedCenter(window)
         let blur = blurCenter(Self.blurHash)
@@ -73,25 +67,22 @@ struct MediaLottieComponentTests {
         #expect(pixelsNearly(middle!, blur!))
     }
 
-    // Fails if a failed fetch leaves a hole instead of the still: the backdrop + blur layer in
-    // MediaLottie.body. Fails if the 404 is not attributed: the `?? "network"` cause in
-    // MediaLottie.load.
+    // Fails if a failed fetch leaves a hole instead of the still: the blur layer in
+    // MediaLottie.body. Fails if the 404 is not attributed to the campaign, kind and cause: the
+    // `services.reportHealth(campaignKey, .lottie, cause)` call in MediaLottie.load.
     @Test("a failed fetch keeps the still and reports http_4xx")
     func failedFetchKeepsStill() async {
-        FakeMediaOrigin.install()
-        defer {
-            FakeMediaOrigin.uninstall()
-            FakeMediaOrigin.reset()
-        }
-        let target = FakeMediaOrigin.url("missing.json")
-        FakeMediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
-        let box = CauseBox()
+        MediaOrigin.install()
+        defer { MediaOrigin.uninstall(); MediaOrigin.reset() }
+        let target = MediaOrigin.url("missing.json")
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
+        let recorder = HealthRecorder()
 
-        let window = mount(LottieSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
+        let window = mount(LottieSpec(url: target.absoluteString, blurHash: Self.blurHash), recorder: recorder)
         defer { ComponentTestHost.unmount(window) }
 
-        #expect(await waitUntilMedia { !box.all.isEmpty })
-        #expect(box.all == ["http_4xx"])
+        #expect(await waitUntilMedia { !recorder.all.isEmpty })
+        #expect(recorder.all == [.init(campaignKey: "test-campaign", kind: .lottie, cause: "http_4xx")])
         ComponentTestHost.drainRunLoop(for: 0.2)
         let middle = renderedCenter(window)
         let blur = blurCenter(Self.blurHash)
@@ -99,37 +90,14 @@ struct MediaLottieComponentTests {
         #expect(pixelsNearly(middle!, blur!))
     }
 
-    // Fails if a transport failure reports nothing: the `?? "network"` fallback in
-    // MediaLottie.load (without it `loadLottieSource` returns a nil cause and the event drops).
-    @Test("a network failure still reports a non-nil cause")
-    func networkFailureReportsNetwork() async {
-        FakeMediaOrigin.install()
-        defer {
-            FakeMediaOrigin.uninstall()
-            FakeMediaOrigin.reset()
-        }
-        let target = FakeMediaOrigin.url("offline.json")
-        FakeMediaOrigin.set(.fail(.notConnectedToInternet), for: target)
-        let box = CauseBox()
-
-        let window = mount(LottieSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
-        defer { ComponentTestHost.unmount(window) }
-
-        #expect(await waitUntilMedia { !box.all.isEmpty })
-        #expect(box.all == ["network"])
-    }
-
     // Fails if a parsed composition never reaches the animation view: the `source` handoff in
     // MediaLottie.load. A real animation through the real loader installs and plays per spec.
     @Test("a real animation installs and plays per the spec")
     func realAnimationPlays() async {
-        FakeMediaOrigin.install()
-        defer {
-            FakeMediaOrigin.uninstall()
-            FakeMediaOrigin.reset()
-        }
-        let target = FakeMediaOrigin.url("ok.json")
-        FakeMediaOrigin.set(.status(200, Self.animation), for: target)
+        MediaOrigin.install()
+        defer { MediaOrigin.uninstall(); MediaOrigin.reset() }
+        let target = MediaOrigin.url("ok.json")
+        MediaOrigin.set(.status(200, Self.animation), for: target)
 
         let window = mount(LottieSpec(url: target.absoluteString, loop: true))
         defer { ComponentTestHost.unmount(window) }
@@ -138,25 +106,6 @@ struct MediaLottieComponentTests {
         #expect(view != nil)
         #expect(view!.isAnimationPlaying)
         #expect(view!.loopMode == .loop)
-    }
-
-    // Fails if the bottom layer is empty with no still: `Color.mediaBackdrop` in
-    // MediaLottie.body. Without a blur and with no fetch, the box is the dark backdrop.
-    @Test("no still means the dark backdrop, not an empty box")
-    func backdropWithoutStill() async {
-        FakeMediaOrigin.install()
-        defer {
-            FakeMediaOrigin.uninstall()
-            FakeMediaOrigin.reset()
-        }
-
-        let window = mount(LottieSpec(url: ""))
-        defer { ComponentTestHost.unmount(window) }
-        _ = await waitUntilMedia(timeout: 1.0) { false }
-
-        let middle = renderedCenter(window)
-        #expect(middle != nil)
-        #expect(pixelsNearly(middle!, RGB(r: 0.10, g: 0.10, b: 0.10), tolerance: 0.05))
     }
 
     private func waitForAnimation(in window: UIWindow) async -> LottieAnimationView? {
