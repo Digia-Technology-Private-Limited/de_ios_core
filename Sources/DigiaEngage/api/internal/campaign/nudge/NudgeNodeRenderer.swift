@@ -567,6 +567,12 @@ private struct NudgeVideoPlayer: View {
             aspectRatio: node.aspectRatio,
             height: node.height
         ))
+        // Rare path (an interpolated URL resolving mid-show): the owner drives
+        // the state's live-set contract (a URL change re-opens, playing drives
+        // play/pause) — the view only opens/closes it. Rebuilt from the current
+        // node so fit/loop/muted stay in step with the new URL.
+        .onChange(of: url) { _ in videoState.spec = Self.makeSpec(node: node, url: url) }
+        .onChange(of: node.autoplay) { _ in videoState.playing = node.autoplay }
     }
 }
 
