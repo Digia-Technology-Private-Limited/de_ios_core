@@ -175,12 +175,18 @@ final class StoryPlanDriver: @unchecked Sendable {
     /// cached and the page that takes it over keeps the item.
     private let resourceLoader: MediaResourceLoader
 
+    /// Told how long each first-bytes warm took (bytes, seconds): the measured half of the
+    /// slow-network signal.
+    private let onWarm: (@Sendable (Int, TimeInterval) -> Void)?
+
     init(
         prefetch: any MediaPrefetch = NoopMediaPrefetch(),
-        resourceLoader: MediaResourceLoader = SharedMediaResourceLoader.shared
+        resourceLoader: MediaResourceLoader = SharedMediaResourceLoader.shared,
+        onWarm: (@Sendable (Int, TimeInterval) -> Void)? = nil
     ) {
         self.prefetch = prefetch
         self.resourceLoader = resourceLoader
+        self.onWarm = onWarm
     }
 
     func update(
@@ -197,8 +203,12 @@ final class StoryPlanDriver: @unchecked Sendable {
             switch action {
             case let .firstBytes(index):
                 let url = urlOf(index)
-                wanted[index] = { [prefetch] in _ = await prefetch.warmVideoBytes(
-                    url: url, lengthBytes: storyFirstBytes) }
+                wanted[index] = { [prefetch, onWarm] in
+                    let began = ProcessInfo.processInfo.systemUptime
+                    let bytes = await prefetch.warmVideoBytes(
+                        url: url, lengthBytes: storyFirstBytes)
+                    onWarm?(bytes, ProcessInfo.processInfo.systemUptime - began)
+                }
             case let .wholeFile(index):
                 let url = urlOf(index)
                 if isVideoOf(index) {

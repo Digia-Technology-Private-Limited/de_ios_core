@@ -91,11 +91,13 @@ struct StoryViewer<Chrome: View>: View {
     @State private var planDriver: StoryPlanDriver?
     @State private var firstFrameShown: Bool
     @State private var lastShownIndex: Int?
-    @State private var slowSource = PathSlowNetworkSource()
+    /// The slow verdict the current plan was computed with: a flip recomputes the plan.
+    @State private var plannedSlow = false
     @GestureState private var holding = false
 
     @Environment(\.mediaServices) private var mediaServices
     @Environment(\.digiaCampaignKey) private var campaignKey
+    @Environment(\.storySlowNetwork) private var slowOverride
 
     init(
         entry: StoryViewerEntry,
@@ -343,6 +345,8 @@ struct StoryViewer<Chrome: View>: View {
     private static var stallLimit: TimeInterval { 10 }
 
     private func tick() {
+        // The network got slower or faster (or a warm measured it): re-plan the window.
+        if slowSource().isSlow != plannedSlow { drivePlan() }
         guard let item = currentItem else { return }
         let now = StoryPageTimer.clock
         // Held or backgrounded, the timers stand still and the stretch is not counted.
@@ -404,12 +408,14 @@ struct StoryViewer<Chrome: View>: View {
         let start = session.startIndex
         let handoff = session.handoffKey
         let namespace = campaignKey
+        let slow = slowSource().isSlow
+        plannedSlow = slow
         driver().update(
             actions: StoryDownloadPlan.plan(
                 stories: kinds.map { StoryDownloadPlan.Item(isVideo: $0) },
                 currentIndex: index,
                 firstFrameShown: firstFrameShown,
-                slowNetwork: slowSource.isSlow
+                slowNetwork: slow
             ),
             urlOf: { urls[$0] },
             isVideoOf: { kinds[$0] },
@@ -429,10 +435,16 @@ struct StoryViewer<Chrome: View>: View {
 
     private func driver() -> StoryPlanDriver {
         if let planDriver { return planDriver }
+        let source = slowSource()
         let created = StoryPlanDriver(
-            prefetch: DefaultMediaPrefetch(campaignKey: campaignKey, services: mediaServices)
+            prefetch: DefaultMediaPrefetch(campaignKey: campaignKey, services: mediaServices),
+            onWarm: { bytes, elapsed in source.noteWarm(bytes: bytes, elapsed: elapsed) }
         )
         planDriver = created
         return created
+    }
+
+    private func slowSource() -> any SlowNetworkSource {
+        StorySlowNetwork.source(override: slowOverride)
     }
 }

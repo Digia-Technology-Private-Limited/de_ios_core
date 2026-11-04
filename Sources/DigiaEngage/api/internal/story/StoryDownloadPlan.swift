@@ -141,48 +141,102 @@ internal enum StoryDownloadPlan {
 
 // MARK: - Slow-network signal (D10)
 
+/// Below this downstream rate — kilobits per second — a warmed range counts as slow. Same value
+/// and rationale as Android `SlowNetwork.SLOW_DOWNSTREAM_KBPS`: the plan's first-bytes warm is
+/// 512 KiB (~4.2 Mb), so under ~1.5 Mbps one warm takes longer than the story step it
+/// precedes and neighbour prefetch would contend with the current page's playback.
+internal let slowDownstreamKbps: Double = 1_500
+
 /// Where the viewer reads `slowNetwork` from. A closure-shaped protocol (not a
 /// bare Bool) so tests inject a fixed value and the plan shapes stay
 /// deterministic, while production reads the live path.
 internal protocol SlowNetworkSource: Sendable {
     var isSlow: Bool { get }
+
+    /// A first-bytes warm moved `bytes` in `elapsed` seconds. Sources that measure fold it
+    /// into their verdict; the default ignores it.
+    func noteWarm(bytes: Int, elapsed: TimeInterval)
 }
 
-/// Pure mapping from an `NWPath` to the slow flag: a constrained or expensive
-/// (e.g. cellular-hotspot / low-data) path counts as slow. Kept free of
-/// `NWPath` itself so tests pin the mapping without constructing a path
-/// (`NWPath` has no public initializer).
-internal func slowNetworkFor(isExpensive: Bool, isConstrained: Bool) -> Bool {
-    isExpensive || isConstrained
+extension SlowNetworkSource {
+    func noteWarm(bytes: Int, elapsed: TimeInterval) {}
 }
 
-/// The live `SlowNetworkSource`: follows the device's network through
-/// `NWPathMonitor` and reports slow while the path is expensive or
-/// constrained. Starts satisfied-fast (not slow) until the first update, so a
-/// slow first report never holds back neighbour work; an unreadable path
-/// degrades to not-slow, never throws.
-///
-/// Recorded non-deferral (unlike Android's R-P3-02, which hardcoded
-/// `slowNetwork = false` with only online/offline available): iOS has a real
-/// per-path signal in `isExpensive`/`isConstrained`, so the viewer (lane F)
-/// reads this source. Measured first-range throughput is left for a later
-/// tuning pass once the range cache (lane A) exposes timings.
+/// The one slow rule: slow = metered (expensive or constrained) OR the last measured warm
+/// throughput below `slowDownstreamKbps`; an unknown signal votes nothing. Android adds the OS
+/// link rate; iOS exposes none (platform limit), so that vote does not exist here. Kept free of
+/// `NWPath` itself so tests pin the rule without constructing a path (`NWPath` has no public
+/// initializer).
+internal func slowNetworkFor(
+    isExpensive: Bool,
+    isConstrained: Bool,
+    measuredKbps: Double? = nil
+) -> Bool {
+    if isExpensive || isConstrained { return true }
+    if let measuredKbps, measuredKbps.isFinite, measuredKbps >= 0,
+       measuredKbps < slowDownstreamKbps
+    {
+        return true
+    }
+    return false
+}
+
+/// Remembers the last warmed range as kilobits/second (bytes over wall time): the driver times
+/// the `warmVideoBytes` call it already makes and notes the result here. One sample is only a
+/// hint — a stale fast sample can never force the slow branch and a stale slow one clears on
+/// the next warm. Mirrors Android `SlowNetworkThroughput`.
+internal final class SlowNetworkThroughput: @unchecked Sendable {
+    /// A warm that finished faster than this was served from the cache (512 KiB in under 20 ms
+    /// is over 200 Mbps, more than any link), so it measures nothing: it must not vote, and it
+    /// must not overwrite a real slow sample.
+    static let minimumElapsed: TimeInterval = 0.02
+
+    private let lock = NSLock()
+    private var last: Double?
+
+    var lastKbps: Double? { lock.withLock { last } }
+
+    func note(bytes: Int, elapsed: TimeInterval) {
+        guard bytes > 0, elapsed >= Self.minimumElapsed else { return }
+        let kbps = Double(bytes) * 8 / 1_000 / elapsed
+        lock.withLock { last = kbps }
+    }
+}
+
+/// The live `SlowNetworkSource`: follows the device's network through `NWPathMonitor` and
+/// reports slow while the path is expensive or constrained, or while the last measured warm
+/// was slow. Starts satisfied-fast (not slow) until the first update and the first sample, so a
+/// cold start never holds back neighbour work; an unreadable path degrades to not-slow, never
+/// throws. One instance per SDK (`SDKServices.slowNetworkSource`), shared by every viewer, so a
+/// measurement taken by one story helps the next.
 internal final class PathSlowNetworkSource: SlowNetworkSource, @unchecked Sendable {
     private let monitor: NWPathMonitor
+    private let throughput = SlowNetworkThroughput()
     private let lock = NSLock()
-    private var slow = false
+    private var expensive = false
+    private var constrained = false
 
     init(monitor: NWPathMonitor = NWPathMonitor()) {
         self.monitor = monitor
         monitor.pathUpdateHandler = { [weak self] path in
             guard let self else { return }
-            let slow = slowNetworkFor(isExpensive: path.isExpensive, isConstrained: path.isConstrained)
-            lock.withLock { self.slow = slow }
+            lock.withLock {
+                self.expensive = path.isExpensive
+                self.constrained = path.isConstrained
+            }
         }
         monitor.start(queue: DispatchQueue(label: "tech.digia.engage.slow-network", qos: .utility))
     }
 
-    var isSlow: Bool { lock.withLock { slow } }
+    var isSlow: Bool {
+        let flags = lock.withLock { (expensive, constrained) }
+        return slowNetworkFor(
+            isExpensive: flags.0, isConstrained: flags.1, measuredKbps: throughput.lastKbps)
+    }
+
+    func noteWarm(bytes: Int, elapsed: TimeInterval) {
+        throughput.note(bytes: bytes, elapsed: elapsed)
+    }
 
     deinit { monitor.cancel() }
 }
