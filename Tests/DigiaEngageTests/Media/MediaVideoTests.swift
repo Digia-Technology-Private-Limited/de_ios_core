@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import Foundation
 import SwiftUI
 import Testing
@@ -12,12 +13,19 @@ import UIKit
 
 @Suite("MediaVideo rules", .tags(.media, .unit))
 struct MediaVideoRuleTests {
-    // Guards the branch order in `MediaVideoStill.init` (Q1).
+    // Guards the branch order in `MediaVideoStill.init` (Q1) and `MediaVideoStill.canShow`,
+    // which decides the spinner (R1-17: the same rule on every stack).
     @Test("the still is the thumbnail, else the BlurHash, else the dark backdrop")
     func stillOrder() {
         #expect(MediaVideoStill(thumbnailUrl: "https://a.test/t.jpg", blurHash: "LEHV") == .thumbnail("https://a.test/t.jpg"))
-        #expect(MediaVideoStill(thumbnailUrl: "{{thumb}}", blurHash: "LEHV") == .blurHash("LEHV"))
+        #expect(MediaVideoStill(thumbnailUrl: "  ", blurHash: "LEHV") == .blurHash("LEHV"))
         #expect(MediaVideoStill(thumbnailUrl: nil, blurHash: "") == .backdrop)
+        // An unusable thumbnail still goes to MediaImage (which reports it); only the BlurHash
+        // can show, so with none the spinner is allowed.
+        #expect(MediaVideoStill(thumbnailUrl: "{{thumb}}", blurHash: nil) == .thumbnail("{{thumb}}"))
+        #expect(!MediaVideoStill.canShow(thumbnailUrl: "{{thumb}}", blurHash: nil))
+        #expect(MediaVideoStill.canShow(thumbnailUrl: "{{thumb}}", blurHash: "LEHV"))
+        #expect(MediaVideoStill.canShow(thumbnailUrl: "https://a.test/t.jpg", blurHash: nil))
     }
 
     // N1: the layer fits relative to its own bounds; guards `MediaFit.videoGravity`.
@@ -34,13 +42,14 @@ extension RenderedUITests {
 @Suite("MediaVideo wrapper", .serialized, .tags(.media, .component))
 struct MediaVideoComponentTests {
     private static let blurHash = "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
+    private static let backdrop = UIColor(red: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 255, alpha: 1)
 
     private func install() {
         MediaOrigin.install()
         MediaServices.override(videoSession: MediaOrigin.session())
     }
 
-    @Test("shows the thumbnail until the first frame", .tags(.golden))
+    @Test("the thumbnail shows until the first frame", .tags(.golden))
     func thumbnailWhileLoading() async {
         install()
         defer { MediaOrigin.end() }
@@ -56,11 +65,11 @@ struct MediaVideoComponentTests {
         // The thumbnail decodes after its request; give it time to draw.
         _ = await waitUntilMedia(timeout: 0.3) { false }
 
-        MediaStage.assertGolden(window, named: "video_thumbnail_loading")
+        MediaStage.assertGolden(window, named: "video_thumbnail")
         MediaOrigin.release(video)
     }
 
-    @Test("shows the BlurHash and no spinner until the first frame", .tags(.golden))
+    @Test("without a thumbnail the BlurHash shows, and never a spinner", .tags(.golden))
     func blurHashWhileLoading() async {
         install()
         defer { MediaOrigin.end() }
@@ -72,11 +81,11 @@ struct MediaVideoComponentTests {
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: video).isEmpty })
         _ = await waitUntilMedia(timeout: MediaVideo.defaultSpinnerDelay + 0.3) { false }
 
-        MediaStage.assertGolden(window, named: "video_blur_loading")
+        MediaStage.assertGolden(window, named: "video_blur")
         MediaOrigin.release(video)
     }
 
-    @Test("shows the dark backdrop before the spinner delay", .tags(.golden))
+    @Test("the dark backdrop shows before the spinner delay", .tags(.golden))
     func darkBeforeSpinner() async {
         install()
         defer { MediaOrigin.end() }
@@ -87,11 +96,11 @@ struct MediaVideoComponentTests {
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: video).isEmpty })
 
-        MediaStage.assertGolden(window, named: "video_dark_loading")
+        MediaStage.assertGolden(window, named: "video_dark")
         MediaOrigin.release(video)
     }
 
-    @Test("shows a spinner over the backdrop once the delay passes with no first frame")
+    @Test("the spinner appears only after 400 ms with nothing to show")
     func spinnerAfterDelay() async {
         install()
         defer { MediaOrigin.end() }
@@ -104,7 +113,7 @@ struct MediaVideoComponentTests {
         _ = await waitUntilMedia(timeout: MediaVideo.defaultSpinnerDelay + 0.3) { false }
 
         // The spinner animates, so its frame can't be a golden: the proof is that something
-        // lighter than the backdrop is drawn in the box (the dark test proves the box is black).
+        // lighter than the backdrop is drawn in the box (the dark test proves the box is the backdrop).
         let image = ComponentTestHost.settledImage(of: window)
         let scale = image.scale
         let box = CGRect(
@@ -112,14 +121,14 @@ struct MediaVideoComponentTests {
             width: MediaStage.size.width, height: MediaStage.size.height)
         let lit = stride(from: box.minX + 4, to: box.maxX - 4, by: 2).contains { x in
             stride(from: box.minY + 4, to: box.maxY - 4, by: 2).contains { y in
-                pixelColor(of: image, atX: Int(x * scale), y: Int(y * scale)).map { !colorsNearly($0, .black, tolerance: 0.2) } ?? false
+                pixelColor(of: image, atX: Int(x * scale), y: Int(y * scale)).map { !colorsNearly($0, Self.backdrop, tolerance: 0.2) } ?? false
             }
         }
         #expect(lit)
         MediaOrigin.release(video)
     }
 
-    @Test("a video that was never uploaded shows the failed box and reports http_4xx", .tags(.golden))
+    @Test("a 404 shows the failed box and reports http_4xx once", .tags(.golden))
     func notFoundReportsHttp4xx() async {
         install()
         defer { MediaOrigin.end() }
@@ -152,19 +161,76 @@ struct MediaVideoComponentTests {
         #expect(recorder.all.isEmpty)
     }
 
-    @Test("an unresolved URL reports invalid_url without fetching")
-    func unresolvedURLReportsInvalidURL() async {
+    @Test("a blank url shows the failed box and reports invalid_url")
+    func blankURLReportsInvalidURL() async {
         install()
         defer { MediaOrigin.end() }
         let recorder = HealthRecorder()
         let failures = CallCount()
 
-        let window = MediaStage.mount(MediaVideo(url: MediaOrigin.rawURL("{{video}}.mp4"), onFailure: { failures.value += 1 }))
+        let window = MediaStage.mount(MediaVideo(url: "", onFailure: { failures.value += 1 }))
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { failures.value > 0 })
 
         #expect(recorder.all == [.init(campaignKey: MediaStage.campaign, kind: .video, cause: "invalid_url")])
         #expect(MediaOrigin.totalRequestCount() == 0)
+    }
+
+    // Guards the `MediaImage` branch for a non-blank thumbnail and `canShow` in `MediaVideo.open`.
+    @Test("an unusable thumbnail reports invalid_url and the spinner still appears")
+    func unusableThumbnailReportsAndAllowsSpinner() async {
+        install()
+        defer { MediaOrigin.end() }
+        let video = MediaOrigin.url("held-bad-thumb.mp4")
+        MediaOrigin.set(.status(200, Data()), for: video, held: true)
+        let recorder = HealthRecorder()
+
+        let window = MediaStage.mount(MediaVideo(url: video.absoluteString, thumbnailUrl: "{{thumb}}"))
+        defer { ComponentTestHost.unmount(window) }
+        _ = await waitUntilMedia(timeout: MediaVideo.defaultSpinnerDelay + 0.3) { false }
+
+        #expect(recorder.all == [.init(campaignKey: MediaStage.campaign, kind: .image, cause: "invalid_url")])
+        #expect(Self.lit(ComponentTestHost.settledImage(of: window)))
+        MediaOrigin.release(video)
+    }
+
+    // Guards the `showControls` branch in `MediaVideo.playerView` (OD-6).
+    @Test("controls show only when showControls is on")
+    func controlsOnlyWhenOn() async {
+        install()
+        defer { MediaOrigin.end() }
+        let video = MediaOrigin.url("held-controls.mp4")
+        MediaOrigin.set(.status(200, Data()), for: video, held: true)
+
+        let plain = MediaStage.mount(MediaVideo(url: video.absoluteString))
+        #expect(await waitUntilMedia { !MediaOrigin.requests(for: video).isEmpty })
+        #expect(Self.playerControllers(in: plain.rootViewController).isEmpty)
+        ComponentTestHost.unmount(plain)
+
+        let controlled = MediaStage.mount(MediaVideo(url: video.absoluteString, showControls: true))
+        defer { ComponentTestHost.unmount(controlled) }
+        #expect(await waitUntilMedia { !Self.playerControllers(in: controlled.rootViewController).isEmpty })
+        #expect(Self.playerControllers(in: controlled.rootViewController).allSatisfy { $0.showsPlaybackControls })
+        MediaOrigin.release(video)
+    }
+
+    private static func playerControllers(in controller: UIViewController?) -> [AVPlayerViewController] {
+        guard let controller else { return [] }
+        let own = (controller as? AVPlayerViewController).map { [$0] } ?? []
+        return own + controller.children.flatMap { playerControllers(in: $0) }
+    }
+
+    /// Whether something lighter than the backdrop is drawn in the stage box.
+    private static func lit(_ image: UIImage) -> Bool {
+        let scale = image.scale
+        let box = CGRect(
+            x: (image.size.width - MediaStage.size.width) / 2, y: (image.size.height - MediaStage.size.height) / 2,
+            width: MediaStage.size.width, height: MediaStage.size.height)
+        return stride(from: box.minX + 4, to: box.maxX - 4, by: 2).contains { x in
+            stride(from: box.minY + 4, to: box.maxY - 4, by: 2).contains { y in
+                pixelColor(of: image, atX: Int(x * scale), y: Int(y * scale)).map { !colorsNearly($0, backdrop, tolerance: 0.2) } ?? false
+            }
+        }
     }
 }
 }
