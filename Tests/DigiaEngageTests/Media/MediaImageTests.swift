@@ -17,17 +17,27 @@ struct MediaImageComponentTests {
     private static let blurHash = "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
     private static let campaign = "test-campaign"
 
-    private func mount(_ spec: ImageSpec, recorder: HealthRecorder = HealthRecorder()) -> UIWindow {
+    /// The marker `errorContent` draws: a green square in the middle of the box.
+    private static let marker = AnyView(Color(red: 0, green: 0.5, blue: 0).frame(width: 40, height: 40))
+    private static let green = RGB(r: 0, g: 0.5, b: 0)
+
+    private func mount(
+        _ spec: ImageSpec, recorder: HealthRecorder = HealthRecorder(), errorContent: AnyView? = nil
+    ) -> UIWindow {
         mountMedia(
-            MediaImage(spec: spec)
+            MediaImage(spec: spec, errorContent: errorContent)
                 .environment(\.digiaCampaignKey, Self.campaign)
                 .environment(\.mediaServices, recorder.services)
                 .frame(width: 200, height: 200)
         )
     }
 
+    private func rendered(_ window: UIWindow) -> UIImage {
+        ComponentTestHost.renderImage(of: window.rootViewController!.view)
+    }
+
     private func renderedCenter(_ window: UIWindow) -> RGB? {
-        centerPixel(of: ComponentTestHost.renderImage(of: window.rootViewController!.view))
+        centerPixel(of: rendered(window))
     }
 
     // Fails if the blur is not drawn while the fetch is in flight: the placeholder slot of the
@@ -58,9 +68,10 @@ struct MediaImageComponentTests {
     }
 
     // Fails if a 404 leaves a hole instead of the still: the placeholder slot of the WebImage in
-    // MediaImage.body. Fails if the failure is not attributed to the campaign, kind and cause:
-    // the `services.reportHealth(campaignKey, .image, cause)` call in MediaImage.onFailure.
-    @Test("a picture the server 404s keeps the still and reports one http_4xx for the campaign")
+    // MediaImage.body. Fails if the label is not drawn over the still: the `errorContent` line in
+    // MediaImage.still. Fails if the failure is not attributed to the campaign, kind and cause:
+    // the `services.reportHealth(campaignKey, .image, ...)` call in MediaImage.onFailure.
+    @Test("a picture the server 404s keeps the still under errorContent and reports one http_4xx for the campaign")
     func notFoundKeepsStillAndReports() async {
         MediaOrigin.install()
         defer { MediaOrigin.uninstall(); MediaOrigin.reset() }
@@ -68,16 +79,101 @@ struct MediaImageComponentTests {
         MediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
         let recorder = HealthRecorder()
 
-        let window = mount(ImageSpec(url: target.absoluteString, blurHash: Self.blurHash), recorder: recorder)
+        let window = mount(
+            ImageSpec(url: target.absoluteString, blurHash: Self.blurHash), recorder: recorder,
+            errorContent: Self.marker)
         defer { ComponentTestHost.unmount(window) }
 
         #expect(await waitUntilMedia { !recorder.all.isEmpty })
         ComponentTestHost.drainRunLoop(for: 0.3)
         #expect(recorder.all == [.init(campaignKey: Self.campaign, kind: .image, cause: "http_4xx")])
-        let middle = renderedCenter(window)
-        let blur = blurCenter(Self.blurHash)
-        #expect(middle != nil && blur != nil)
-        #expect(pixelsNearly(middle!, blur!))
+        expectStillUnderMarker(window)
+    }
+
+    // Fails if a 5xx or a transport failure is reported: the `default: nil` of
+    // `mediaFailureCause(httpStatus:)` and the nil cause `mediaFailureCause(imageError:)` returns
+    // for a non-HTTP error. The still stays either way.
+    @Test("a server error or a lost connection reports nothing and keeps the still", arguments: [
+        MediaOrigin.Reply.status(503, Data("busy".utf8)),
+        MediaOrigin.Reply.fail(.notConnectedToInternet),
+    ])
+    func serverAndNetworkFailuresReportNothing(reply: MediaOrigin.Reply) async {
+        MediaOrigin.install()
+        defer { MediaOrigin.uninstall(); MediaOrigin.reset() }
+        let target = MediaOrigin.url("flaky.png")
+        MediaOrigin.set(reply, for: target)
+        let recorder = HealthRecorder()
+
+        let window = mount(
+            ImageSpec(url: target.absoluteString, blurHash: Self.blurHash), recorder: recorder,
+            errorContent: Self.marker)
+        defer { ComponentTestHost.unmount(window) }
+
+        #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
+        ComponentTestHost.drainRunLoop(for: 0.5)
+        #expect(recorder.all.isEmpty)
+        expectStillUnderMarker(window)
+    }
+
+    // Fails if the blur survives behind a loaded picture: the BlurHash is drawn from the WebImage
+    // placeholder slot in MediaImage.body, so moving `MediaStill` out of it (a sibling under the
+    // WebImage) leaves it showing through the transparent half.
+    @Test("the blur is gone once the picture draws, so a transparent area shows what is behind")
+    func blurIsGoneAfterSuccess() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.uninstall(); MediaOrigin.reset() }
+        let target = MediaOrigin.url("half.png")
+        MediaOrigin.set(.status(200, halfTransparentPNG()), for: target, held: true)
+
+        let window = mount(ImageSpec(url: target.absoluteString, blurHash: Self.blurHash))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
+
+        MediaOrigin.release(target)
+        let red = RGB(r: 1, g: 0, b: 0)
+        let white = RGB(r: 1, g: 1, b: 1)
+        #expect(await waitUntilMedia {
+            pixel(of: rendered(window), atX: 0.25, y: 0.5).map { pixelsNearly($0, red) } ?? false
+        })
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        let transparent = pixel(of: rendered(window), atX: 0.75, y: 0.5)
+        #expect(transparent != nil && pixelsNearly(transparent!, white, tolerance: 0.02))
+    }
+
+    // Fails if an unusable URL reaches the downloader or goes unreported: the `mediaUsableURL`
+    // guard in MediaImage.body. Fails if the label is dropped for it: `still(failed: true)`.
+    @Test("a blank, unresolved or schemeless url never fetches, keeps the still under errorContent, and reports invalid_url once", arguments: [
+        "",
+        "   ",
+        MediaOrigin.rawURL("{{asset}}.png"),
+        "cdn.example.com/a.png",
+    ])
+    func unusableURLReportsInvalidURL(url: String) async {
+        MediaOrigin.install()
+        defer { MediaOrigin.uninstall(); MediaOrigin.reset() }
+        let recorder = HealthRecorder()
+
+        let window = mount(
+            ImageSpec(url: url, blurHash: Self.blurHash), recorder: recorder, errorContent: Self.marker)
+        defer { ComponentTestHost.unmount(window) }
+
+        #expect(await waitUntilMedia { !recorder.all.isEmpty })
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        #expect(recorder.all == [.init(campaignKey: Self.campaign, kind: .image, cause: "invalid_url")])
+        #expect(MediaOrigin.totalRequestCount() == 0)
+        expectStillUnderMarker(window)
+    }
+
+    /// The still's color shows at the corner and `errorContent` over it at the center.
+    private func expectStillUnderMarker(_ window: UIWindow) {
+        let image = rendered(window)
+        let corner = pixel(of: image, atX: 0.05, y: 0.05)
+        let still = BlurHashDecoder.decode(Self.blurHash, width: 32, height: 32)
+            .flatMap { pixel(of: $0, atX: 0.05, y: 0.05) }
+        #expect(corner != nil && still != nil)
+        #expect(pixelsNearly(corner!, still!))
+        let middle = centerPixel(of: image)
+        #expect(middle != nil && pixelsNearly(middle!, Self.green, tolerance: 0.2))
     }
 
     // Fails if the SDK's image fetches stop sending the Digia User-Agent: the
@@ -135,6 +231,17 @@ struct MediaImageDecisionTests {
         #expect(mediaUsableURL("   ") == nil)
         #expect(mediaUsableURL("https://cdn.example.com/{{asset}}.png") == nil)
         #expect(mediaUsableURL("http://[invalid") == nil)
+        #expect(mediaUsableURL("cdn.example.com/a.png") == nil)
         #expect(mediaUsableURL("https://cdn.example.com/a.png") != nil)
+    }
+
+    // Fails if the blur is decoded on every render instead of once per hash: the
+    // `cache.setObject` in BlurHashCache.image.
+    @Test("a blurhash decodes once")
+    func blurHashDecodesOnce() {
+        let hash = "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
+        let first = BlurHashCache.image(for: hash, size: BlurHashPlaceholderView.decodeSize)
+        let second = BlurHashCache.image(for: hash, size: BlurHashPlaceholderView.decodeSize)
+        #expect(first != nil && first === second)
     }
 }

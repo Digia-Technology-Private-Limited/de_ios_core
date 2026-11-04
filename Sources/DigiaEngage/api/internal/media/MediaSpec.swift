@@ -77,10 +77,12 @@ extension Color {
 }
 
 /// URLs a wrapper may fetch: non-blank, fully resolved (no `{{variable}}` template tokens left),
-/// and parseable. Anything else renders the still below without fetching and without reporting —
-/// absent content is not a failure (D5 reports failures; empty optionals stay silent).
+/// parseable and with a scheme. Anything else is an unusable URL: the wrapper draws its still
+/// without fetching and reports `invalid_url`.
 func mediaUsableURL(_ raw: String) -> URL? {
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty, !trimmed.contains("{{") else { return nil }
-    return URL(string: trimmed)
+    guard !trimmed.isEmpty, !trimmed.contains("{{"),
+        let url = URL(string: trimmed), url.scheme != nil
+    else { return nil }
+    return url
 }

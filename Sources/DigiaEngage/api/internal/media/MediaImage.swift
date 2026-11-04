@@ -3,109 +3,83 @@ import UIKit
 
 internal import SDWebImageSwiftUI
 
-/// The one image wrapper every surface renders through (D1): SDWebImage via the shared cache
-/// (D6 — GIF/SVG decoding unchanged from `DigiaCachedImageView`), with the authored BlurHash as
-/// the bottom layer while loading AND on error (D5), so the box below is never empty.
+/// The one image wrapper the non-story surfaces render through: SDWebImage via the shared cache
+/// and downloader (GIF and SVG decoding as before), with the authored BlurHash drawn through
+/// the image library's own loading and error slots, so it is gone once the picture draws (a
+/// transparent or letterboxed picture never shows a stale blur) and the box is never empty
+/// before that. There is no spinner.
 ///
-/// A load failure — network ones included — is reported through the media health hook with a
-/// non-nil cause (D5), and the still stays regardless. A spinner joins only after
-/// `spinnerDelaySeconds` with nothing better to show (US9), so short waits feel calm.
+/// `errorContent` is drawn over the still when the load fails and when the URL is unusable
+/// (blank, an unresolved `{{variable}}`, no scheme): surfaces that labelled a failed image keep
+/// their label. The tint applies to the picture only.
 ///
-/// Never throws from the render path: a blank, templated or otherwise unusable URL simply shows
-/// the still without fetching and without reporting.
+/// Health is reported once per failure, for the campaign in the environment: `invalid_url` for
+/// an unusable URL, `http_4xx`, `decode`. A network failure, a timeout or a 5xx reports nothing.
+///
+/// Never throws from the render path: an unusable URL shows the still without fetching.
 struct MediaImage: View {
-    /// How long a still-less load stays blank before the spinner joins it (US9). Named so the
-    /// trailing tests can pin the exact production line (meaningful-tests rule 2).
-    static let spinnerDelaySeconds: TimeInterval = 0.4
-
     let spec: ImageSpec
     var tintColor: Color? = nil
-    /// An already-decoded image (e.g. handed back by `MediaPrefetch.warmImage`): drawn instead
-    /// of fetching, so a surface that reveals only when loaded never flashes (US50).
-    var preloaded: UIImage? = nil
-    var onSuccess: ((UIImage) -> Void)? = nil
-    /// The fetch failed. The argument is the same non-nil cause sent to health.
-    var onFailure: ((String) -> Void)? = nil
+    /// The picture drew.
+    var onSuccess: (() -> Void)? = nil
+    /// The load failed or the URL is unusable (health is already reported).
+    var onFailure: (() -> Void)? = nil
+    var errorContent: AnyView? = nil
 
-    @Environment(\.mediaServices) private var services
     @Environment(\.digiaCampaignKey) private var campaignKey
-    @State private var finished = false
-    @State private var showSpinner = false
-
-    private let blurStill: UIImage?
+    @Environment(\.mediaServices) private var services
+    @State private var failedURL: String?
 
     init(
         spec: ImageSpec,
         tintColor: Color? = nil,
-        preloaded: UIImage? = nil,
-        onSuccess: ((UIImage) -> Void)? = nil,
-        onFailure: ((String) -> Void)? = nil
+        onSuccess: (() -> Void)? = nil,
+        onFailure: (() -> Void)? = nil,
+        errorContent: AnyView? = nil
     ) {
         DigiaImagePipeline.configureIfNeeded()
         self.spec = spec
         self.tintColor = tintColor
-        self.preloaded = preloaded
         self.onSuccess = onSuccess
         self.onFailure = onFailure
-        self.blurStill = spec.blurHash.flatMap { BlurHashDecoder.decode($0, width: 32, height: 32) }
-    }
-
-    /// The US9 rule: the spinner appears only after `spinnerDelaySeconds` of waiting AND only
-    /// when no BlurHash still covers the box. Pure so the trailing boundary tests pin it.
-    static func showsSpinner(hasBlurStill: Bool, waited: TimeInterval) -> Bool {
-        !hasBlurStill && waited >= spinnerDelaySeconds
+        self.errorContent = errorContent
     }
 
     var body: some View {
-        ZStack {
-            if let blurStill {
-                if let mode = spec.fit.contentMode {
-                    Image(uiImage: blurStill)
-                        .resizable()
-                        .aspectRatio(contentMode: mode)
-                } else {
-                    Image(uiImage: blurStill)
-                        .resizable()
-                }
-            } else if showSpinner, !finished {
-                ProgressView()
+        if let url = mediaUsableURL(spec.url) {
+            WebImage(url: url, options: [.retryFailed, .scaleDownLargeImages]) { image in
+                fitted(image)
+            } placeholder: {
+                still(failed: failedURL == spec.url)
             }
-            if let preloaded {
-                fitted(Image(uiImage: preloaded))
-                    .task {
-                        finished = true
-                        onSuccess?(preloaded)
-                    }
-            } else if let url = mediaUsableURL(spec.url) {
-                WebImage(url: url, options: [.retryFailed, .scaleDownLargeImages]) { image in
-                    fitted(image)
-                } placeholder: {
-                    Color.clear
-                }
-                .onSuccess { image, _, _ in
-                    finished = true
-                    showSpinner = false
-                    onSuccess?(image)
-                }
-                .onFailure { error in
-                    finished = true
-                    showSpinner = false
-                    // D5: every failure, network ones included, reports with a non-nil cause.
-                    // The shared mapper returns nil for transport failures (no status to blame),
-                    // which are delivery faults, not silent holes, so they report as "network".
-                    let cause = mediaFailureCause(imageError: error) ?? "network"
+            .onSuccess { _, _, _ in
+                onSuccess?()
+            }
+            .onFailure { error in
+                failedURL = spec.url
+                // Only a cause the author can fix is health: no cause (network, timeout, 5xx)
+                // reports nothing.
+                if let cause = mediaFailureCause(imageError: error) {
                     services.reportHealth(campaignKey, .image, cause)
-                    onFailure?(cause)
                 }
+                onFailure?()
             }
+        } else {
+            still(failed: true)
+                .task(id: spec.url) {
+                    services.reportHealth(campaignKey, .image, "invalid_url")
+                    onFailure?()
+                }
         }
-        .task(id: spec.url) {
-            // The spinner arm: cancelled on disappear or URL change, and disarmed by `finished`.
-            // A still-less load that resolves in time never flashes it.
-            try? await Task.sleep(nanoseconds: UInt64(Self.spinnerDelaySeconds * 1_000_000_000))
-            if !Task.isCancelled {
-                showSpinner = MediaImage.showsSpinner(
-                    hasBlurStill: blurStill != nil, waited: Self.spinnerDelaySeconds)
+    }
+
+    /// What shows until the picture draws, and after a failure.
+    @ViewBuilder
+    private func still(failed: Bool) -> some View {
+        ZStack {
+            MediaStill(spec: .image(spec))
+            if failed, let errorContent {
+                errorContent
             }
         }
     }

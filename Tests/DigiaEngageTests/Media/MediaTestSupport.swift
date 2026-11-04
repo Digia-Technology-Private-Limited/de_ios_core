@@ -146,7 +146,7 @@ final class HealthRecorder: @unchecked Sendable {
     struct Record: Equatable {
         let campaignKey: String?
         let kind: HealthMediaKind
-        let cause: String?
+        let cause: String
     }
 
     private let lock = NSLock()
