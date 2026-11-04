@@ -51,6 +51,7 @@ private func nudge(_ key: String, rule: [String: Any], contextVariables: [[Strin
 struct DMCContextVariablesTests {
     // MARK: campaign parsing
 
+    // dmc-case: dmc.context_vars.malformed_entries_tolerated
     @Test("tolerates malformed entries and a non-list")
     func toleratesMalformed() throws {
         let campaign = try #require(
@@ -67,6 +68,7 @@ struct DMCContextVariablesTests {
         #expect(notAList.variableSchemas.isEmpty)
     }
 
+    // dmc-case: dmc.context_vars.malformed_entries_tolerated
     @Test("a campaign without contextVariables parses to none")
     func noneDeclared() throws {
         let campaign = try #require(try CampaignModel.fromJson(baseCampaign()))
@@ -98,6 +100,7 @@ struct DMCContextVariablesTests {
             ["namespace": "event", "key": "qty", "type": "number"],
         ])
 
+    // dmc-case: dmc.context_vars.trigger_carries_fired_event
     @Test("an OR trigger carries the event that fired")
     func orTriggerCarriesEvent() async throws {
         let sdk = try await boot([orEvent])
@@ -115,6 +118,7 @@ struct DMCContextVariablesTests {
         #expect(interpolate("{{ user.firstName }}", context: context) == "")
     }
 
+    // dmc-case: dmc.context_vars.user_token_resolves_from_attributes
     @Test("a user token resolves from the user attributes")
     func userTokenResolves() async throws {
         let sdk = try await boot([orEvent])
@@ -125,6 +129,7 @@ struct DMCContextVariablesTests {
         #expect(selector(sdk)?["user.firstName"] == "Priya")
     }
 
+    // dmc-case: dmc.context_vars.trigger_carries_fired_event
     @Test("a wait carries the matched event, not the latest")
     func waitCarriesMatchedEvent() async throws {
         let sink = VariablesSink()
@@ -150,6 +155,7 @@ struct DMCContextVariablesTests {
         #expect(selector(sdk)?["event.qty"] == "7")
     }
 
+    // dmc-case: dmc.context_vars.trigger_carries_fired_event
     @Test("an app-open trigger leaves the event scope empty")
     func appOpenLeavesEventScopeEmpty() async throws {
         let rule: [String: Any] = [

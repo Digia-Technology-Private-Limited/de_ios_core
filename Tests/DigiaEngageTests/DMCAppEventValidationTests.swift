@@ -5,6 +5,7 @@ import Testing
 /// Flutter: `test/app_event_validation_test.dart`.
 @Suite("AppEventValidation")
 struct DMCAppEventValidationTests {
+    // dmc-case: dmc.app_event.validation_types_cuts
     @Test("keeps the types the backend stores and drops the rest by key")
     func keepsStoredTypes() {
         let long = String(repeating: "a", count: appEventPropertyStringMaxLength + 88)
@@ -34,6 +35,7 @@ struct DMCAppEventValidationTests {
         #expect(Set(result.dropped) == ["tags", "missing", "cart", "when", "ratio"])
     }
 
+    // dmc-case: dmc.app_event.validation_types_cuts
     @Test("a long list is cut to the item limit without counting as dropped")
     func longListIsCut() {
         let result = cleanAppEventProperties([
@@ -44,6 +46,7 @@ struct DMCAppEventValidationTests {
         #expect(result.dropped.isEmpty)
     }
 
+    // dmc-case: dmc.app_event.validation_types_cuts
     @Test("a cut never splits a surrogate pair")
     func cutKeepsSurrogatePair() {
         let value = String(repeating: "a", count: appEventPropertyStringMaxLength - 1) + "😀tail"

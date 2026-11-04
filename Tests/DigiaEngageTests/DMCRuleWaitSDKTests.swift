@@ -100,6 +100,7 @@ struct DMCRuleWaitSDKTests {
 
     private func shown(_ sdk: SDKInstance) -> String? { sdk.controller.activeNudge?.payload.campaignKey }
 
+    // dmc-case: dmc.wait_cancel.shows_only_after_wait
     @Test("shows only after the wait")
     func showsAfterWait() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -117,6 +118,7 @@ struct DMCRuleWaitSDKTests {
         sdk.controller.dismissNudge()
     }
 
+    // dmc-case: dmc.wait_cancel.cancel_event_stops_show
     @Test("a cancel event stops the show")
     func cancelEventStopsShow() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -130,6 +132,7 @@ struct DMCRuleWaitSDKTests {
         #expect(withReason("login_tip", .waitCancelled).first?.extras == ["cause": "event"])
     }
 
+    // dmc-case: dmc.wait_cancel.cancel_acts_before_analytics_write
     @Test("a cancel event acts before its analytics write ends")
     func cancelActsBeforeWrite() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -142,6 +145,7 @@ struct DMCRuleWaitSDKTests {
         #expect(withReason("login_tip", .waitCancelled).count == 1)
     }
 
+    // dmc-case: dmc.wait_cancel.leaving_screen_stops_show_no_repeat
     @Test("leaving the screen stops the show; a repeat does not")
     func leavingScreenStopsShow() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -158,6 +162,7 @@ struct DMCRuleWaitSDKTests {
         #expect(withReason("login_tip", .waitCancelled).first?.extras == ["cause": "screen_left"])
     }
 
+    // dmc-case: dmc.wait_cancel.wait_runs_in_background_shows_on_return
     @Test("a wait keeps running in the background and shows on return")
     func waitRunsInBackground() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -174,6 +179,7 @@ struct DMCRuleWaitSDKTests {
         sdk.controller.dismissNudge()
     }
 
+    // dmc-case: dmc.wait_cancel.user_change_ends_wait
     @Test("a user change ends the wait")
     func userChangeEndsWait() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -187,6 +193,7 @@ struct DMCRuleWaitSDKTests {
         #expect(withReason("login_tip", .waitCancelled).first?.extras == ["cause": "session_ended"])
     }
 
+    // dmc-case: dmc.wait_cancel.session_end_drops_unready_anchor
     @Test("a session end drops an anchor seen before ready")
     func sessionEndDropsHeldAnchor() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -206,6 +213,7 @@ struct DMCRuleWaitSDKTests {
         #expect(shown(sdk) == nil)
     }
 
+    // dmc-case: dmc.wait_cancel.no_wait_winner_shows_now_waits_start
     @Test("a no-wait winner shows now; waits of the trigger start too")
     func noWaitWinnerShowsNow() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -225,6 +233,7 @@ struct DMCRuleWaitSDKTests {
         sdk.controller.dismissNudge()
     }
 
+    // dmc-case: dmc.wait_cancel.held_signal_no_wait_first
     @Test("a held signal: the no-wait winner shows before an ended wait")
     func heldSignalNoWaitFirst() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -243,6 +252,7 @@ struct DMCRuleWaitSDKTests {
         sdk.controller.dismissNudge()
     }
 
+    // dmc-case: dmc.wait_cancel.simultaneous_ends_router_outcome
     @Test("of waits ending together, the losers find the surface busy")
     func losersFindSurfaceBusy() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -261,6 +271,7 @@ struct DMCRuleWaitSDKTests {
         sdk.controller.dismissNudge()
     }
 
+    // dmc-case: dmc.wait_cancel.cap_rechecked_at_wait_end
     @Test("the cap is checked again when the wait ends")
     func capRecheckedAtWaitEnd() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -278,6 +289,7 @@ struct DMCRuleWaitSDKTests {
         #expect(withReason("capped_tip", .capped).count == 1)
     }
 
+    // dmc-case: dmc.wait_cancel.late_end_finds_surface_busy
     @Test("waits run in parallel; a later end finds the surface busy")
     func parallelWaits() async throws {
         defer { DigiaLogger.unregisterSink(sink) }

@@ -30,12 +30,14 @@ struct DMCContextVariableSchemaTests {
 
     // MARK: VariableScope arithmetic via resolve
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("resolves plain identifier")
     func plainIdentifier() {
         let ctx = VariableContext(values: ["price": "100"], types: ["price": "number"])
         #expect(interpolate("Price: {{ price }}", context: ctx) == "Price: 100")
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("resolves arithmetic expression")
     func arithmetic() {
         let ctx = VariableContext(values: ["price": "99"], types: ["price": "number"])
@@ -44,6 +46,7 @@ struct DMCContextVariableSchemaTests {
 
     // MARK: normalizeContextVariable — parse and resolve
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("parses a user string token with a fallback")
     func parsesUserString() {
         let schema = normalizeContextVariable([
@@ -53,6 +56,7 @@ struct DMCContextVariableSchemaTests {
         #expect(schema.resolve("Priya") == "Priya")
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("parses number and bool types")
     func parsesTypes() {
         func type(_ extra: [String: Any]) -> String? {
@@ -64,11 +68,13 @@ struct DMCContextVariableSchemaTests {
         #expect(type(["type": "list"]) == "string")
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("accepts mixed-case keys with digits and underscores")
     func acceptsMixedCase() {
         #expect(normalizeContextVariable(["namespace": "user", "key": "Plan_2Tier", "type": "string"]) != nil)
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("rejects a missing or unusable namespace or key")
     func rejectsUnusable() {
         let entries: [[String: Any]] = [
@@ -83,6 +89,7 @@ struct DMCContextVariableSchemaTests {
         for entry in entries { #expect(normalizeContextVariable(entry) == nil, "\(entry)") }
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("runtime value wins over fallback")
     func runtimeWins() {
         let schema = context(namespace: "event", key: "qty", type: "number", fallback: "9")
@@ -92,6 +99,7 @@ struct DMCContextVariableSchemaTests {
         #expect(schema.resolve("2.50") == "2.5")
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("a value that does not fit the type falls through to the fallback")
     func misfitFallsThrough() {
         let qty = context(namespace: "event", key: "qty", type: "number", fallback: "9")
@@ -102,6 +110,7 @@ struct DMCContextVariableSchemaTests {
         #expect(vip.resolve("yes") == "false")
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("a missing or unknown type is inferred from a typed fallback")
     func typeInferred() {
         func parse(_ extra: [String: Any]) -> VariableSchema {
@@ -114,6 +123,7 @@ struct DMCContextVariableSchemaTests {
         #expect(parse(["fallbackValue": 3]).resolve(4.0) == "4")
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("empty runtime falls through to fallback")
     func emptyRuntime() {
         let schema = context(namespace: "user", key: "city", fallback: "Mumbai")
@@ -121,6 +131,7 @@ struct DMCContextVariableSchemaTests {
         #expect(schema.resolve("") == "Mumbai")
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("no value and no fallback yields the type default")
     func typeDefault() {
         #expect(context(namespace: "user", key: "city").resolve(nil) == "")
@@ -130,11 +141,13 @@ struct DMCContextVariableSchemaTests {
 
     // MARK: bindContextVariables
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("no declared tokens yields an empty map")
     func bindNone() {
         #expect(bindContextVariables([], userAttributes: ["city": "Pune"]).isEmpty)
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("resolves user and event tokens from their sources")
     func bindSources() {
         let resolved = bindContextVariables(
@@ -148,6 +161,7 @@ struct DMCContextVariableSchemaTests {
         #expect(resolved == ["user.firstName": "Priya", "user.city": "Pune", "event.qty": "3"])
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("a missing event property falls back, then to the type default")
     func bindMissingEvent() {
         let resolved = bindContextVariables(
@@ -160,6 +174,7 @@ struct DMCContextVariableSchemaTests {
         #expect(resolved == ["event.coupon": "SAVE10", "event.qty": "0", "event.vip": "false"])
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("an event token with no properties resolves to its fallback")
     func bindNoProperties() {
         let resolved = bindContextVariables(
@@ -169,6 +184,7 @@ struct DMCContextVariableSchemaTests {
 
     // MARK: namespaced tokens
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("resolves user. and event. tokens from the variable map")
     func namespacedFromMap() {
         let vars = ["user.firstName": "Priya", "event.qty": "3"]
@@ -176,6 +192,7 @@ struct DMCContextVariableSchemaTests {
         #expect(interpolate("Qty {{ event.qty }}", variables: vars) == "Qty 3")
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("mixes namespaced and custom tokens")
     func mixesTokens() {
         let ctx = VariableContext(
@@ -183,12 +200,14 @@ struct DMCContextVariableSchemaTests {
         #expect(interpolate("{{ user.firstName }}, {{ coupon }}", context: ctx) == "Priya, SAVE10")
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("a missing namespaced token collapses to empty")
     func missingNamespaced() {
         #expect(interpolate("{{ user.firstName }}", context: .empty) == "")
         #expect(interpolate("{{ event.qty }}", context: .empty) == "")
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("fromSchemas resolves only declared tokens, custom or context")
     func declaredOnly() {
         let ctx = scope(
@@ -205,6 +224,7 @@ struct DMCContextVariableSchemaTests {
 
     // MARK: user and event tokens behave like custom variables
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("a number user or event token takes part in arithmetic")
     func numberTokensArithmetic() {
         let ctx = scope(
@@ -218,6 +238,7 @@ struct DMCContextVariableSchemaTests {
         #expect(interpolate("{{ event.orderValue * 2 + bonus }}", context: ctx) == "403")
     }
 
+    // dmc-case: dmc.context_vars.schema_parse_bind_fallback
     @Test("a string token is not a number operand")
     func stringNotOperand() {
         let ctx = scope([context(namespace: "user", key: "name")], ["user.name": "Priya"])
@@ -235,16 +256,19 @@ struct DMCContextVariableSchemaTests {
         return sink.records.contains { $0.reason?.wire == TimelineReason.missingVariable.wire }
     }
 
+    // dmc-case: dmc.context_vars.empty_and_sample_report_rules
     @Test("sampleValue only does not report")
     func sampleOnlyNoReport() {
         #expect(!reported(normalizeVariable(name: "name", type: nil, fallbackValue: nil, sampleValue: "Sam"), [:]))
     }
 
+    // dmc-case: dmc.context_vars.empty_and_sample_report_rules
     @Test("CEP empty string with no fallback reports")
     func emptyNoFallbackReports() {
         #expect(reported(normalizeVariable(name: "name", type: nil, fallbackValue: nil, sampleValue: nil), ["name": ""]))
     }
 
+    // dmc-case: dmc.context_vars.empty_and_sample_report_rules
     @Test("empty fallbackValue does not report")
     func emptyFallbackNoReport() {
         #expect(!reported(normalizeVariable(name: "name", type: nil, fallbackValue: "", sampleValue: nil), [:]))

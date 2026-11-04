@@ -20,6 +20,7 @@ struct DMCCampaignFetcherTests {
         #expect(client.recordedRequests[0].headers["x-digia-campaign-schema-version"] == "2")
     }
 
+    // dmc-case: dmc.app_event.upload_policy_defaults_bundle_fallback
     @Test("app event upload settings default to on and unlimited")
     func appEventPolicyDefaults() throws {
         let policy = try CampaignFetcher.parse(Data(#"{"campaigns":[]}"#.utf8)).appEventUploadPolicy
@@ -29,6 +30,7 @@ struct DMCCampaignFetcherTests {
         #expect(policy.blockedNames.isEmpty)
     }
 
+    // dmc-case: dmc.app_event.upload_policy_defaults_bundle_fallback
     @Test("app event upload settings are read from the bundle")
     func appEventPolicyRead() throws {
         let json = #"""
@@ -42,6 +44,7 @@ struct DMCCampaignFetcherTests {
         #expect(policy.blockedNames == ["secret", "other"])
     }
 
+    // dmc-case: dmc.app_event.upload_policy_defaults_bundle_fallback
     @Test("malformed app event upload settings fall back to the defaults")
     func appEventPolicyGarbage() throws {
         let json = #"""

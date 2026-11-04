@@ -30,6 +30,7 @@ struct DMCCampaignPickerTests {
         decision.inlineWinners.map { "\($0.slot):\($0.campaign.campaignKey)" }
     }
 
+    // dmc-case: dmc.trigger.highest_priority_wins_rest_held
     @Test("the highest priority wins; the rest are held back highest first")
     func highestPriorityWins() {
         let decision = Self.pick([
@@ -40,6 +41,7 @@ struct DMCCampaignPickerTests {
         #expect(Self.order(decision) == ["top", "mid", "low"])
     }
 
+    // dmc-case: dmc.trigger.tie_breaks_by_campaign_key
     @Test("a tie goes to the campaign key that sorts first")
     func tieByKey() {
         let decision = Self.pick([
@@ -51,6 +53,7 @@ struct DMCCampaignPickerTests {
         #expect(Self.order(decision) == ["B_tip", "a_tip", "b_tip"])
     }
 
+    // dmc-case: dmc.rule_who.default_priority_600
     @Test("a missing or invalid priority counts as 600")
     func defaultPriority() {
         let decision = Self.pick([
@@ -74,6 +77,7 @@ struct DMCCampaignPickerTests {
 
     // MARK: - inline campaigns (D5)
 
+    // dmc-case: dmc.priority.inline_slot_winners_beside_overlay
     @Test("one winner per slot, besides the single overlay winner")
     func inlineSlots() {
         let decision = Self.pick([
@@ -89,6 +93,7 @@ struct DMCCampaignPickerTests {
             decision.inlineWinners.first?.heldBack.map(\.campaignKey) == ["hero_low"])
     }
 
+    // dmc-case: dmc.priority.inline_slot_winners_beside_overlay
     @Test("a tie in a slot goes to the campaign key that sorts first")
     func inlineTie() {
         let decision = Self.pick([
@@ -98,6 +103,7 @@ struct DMCCampaignPickerTests {
         #expect(Self.slots(decision) == ["hero:a_hero"])
     }
 
+    // dmc-case: dmc.priority.inline_slot_winners_beside_overlay
     @Test("inline does not take the overlay winner place")
     func inlineDoesNotWinOverlay() {
         let decision = Self.pick([Self.inline("hero", "hero", 1000)])
@@ -105,6 +111,7 @@ struct DMCCampaignPickerTests {
         #expect(Self.slots(decision) == ["hero:hero"])
     }
 
+    // dmc-case: dmc.priority.inline_wait_ignored_W8
     @Test("a wait on an inline campaign is ignored")
     func inlineWaitIgnored() {
         let decision = Self.pick([
@@ -118,6 +125,7 @@ struct DMCCampaignPickerTests {
 
     // MARK: - ineligible campaigns (§4.5)
 
+    // dmc-case: dmc.trigger.failed_rule_never_falls_back
     @Test("each verdict becomes its own gating reason")
     func verdictReasons() {
         let decision = Self.pick(
@@ -162,6 +170,7 @@ struct DMCCampaignPickerTests {
         #expect(failedDetail == "attribute.plan")
     }
 
+    // dmc-case: dmc.trigger.failed_rule_never_falls_back
     @Test("a campaign whose rule fails never falls back to a lower one")
     func noFallback() {
         let decision = Self.pick([
@@ -175,6 +184,7 @@ struct DMCCampaignPickerTests {
         }
     }
 
+    // dmc-case: dmc.wait_cancel.pick_reports_already_waiting
     @Test("a campaign already waiting reports already_waiting, not held_back")
     func alreadyWaiting() {
         let decision = Self.pick(
@@ -195,6 +205,7 @@ struct DMCCampaignPickerTests {
         #expect(decision.winner == nil)
     }
 
+    // dmc-case: dmc.trigger.cep_campaign_left_alone
     @Test("a campaign with no rule belongs to a CEP and is left alone")
     func cepCampaign() {
         var json = Self.campaignJson("cep_owned", 900)
@@ -205,6 +216,7 @@ struct DMCCampaignPickerTests {
         #expect(decision.winner?.campaignKey == "ours")
     }
 
+    // dmc-case: dmc.trigger.cep_campaign_left_alone
     @Test("evaluateOne answers for a Digia campaign and nil for a CEP one")
     func evaluateOneOwnership() {
         let ours = Self.campaign("ours", 600)

@@ -26,6 +26,7 @@ struct EngineFrequencyTests {
 
     // Fails if a recorded show stops being counted, or the window stops blocking: the window
     // test `effective >= count` becomes `effective > count` in `frequency_manager.swift`.
+    // dmc-case: dmc.freq.window_caps_day_week_month_rollover
     @Test("a nudge shown this week is capped on the next trigger")
     func shownThisWeekIsCapped() async throws {
         let (sdk, key) = try await boot()
@@ -43,6 +44,7 @@ struct EngineFrequencyTests {
     }
 
     // Fails if the week stops being 7 days long.
+    // dmc-case: dmc.freq.state_persists_across_reloads_and_launches
     @Test("a show six days ago still blocks")
     func sixDaysAgoStillBlocks() async throws {
         let (sdk, key) = try await boot { key in
@@ -59,6 +61,7 @@ struct EngineFrequencyTests {
     }
 
     // Same line, other direction: an 8-day-old show must have rolled out of the week.
+    // dmc-case: dmc.freq.window_caps_day_week_month_rollover
     @Test("a show eight days ago has rolled out of the week")
     func eightDaysAgoHasRolledOut() async throws {
         let (sdk, key) = try await boot { key in
@@ -74,6 +77,7 @@ struct EngineFrequencyTests {
     }
 
     // Fails if the lifetime cap is dropped from the gate (`total >= maxTotal` becomes `>`).
+    // dmc-case: dmc.freq.max_total_lifetime_blocks
     @Test("the lifetime cap of two blocks even though the week rolled")
     func lifetimeCapBlocks() async throws {
         let (sdk, key) = try await boot { key in

@@ -19,6 +19,8 @@ struct EngineSurfaceBusyTests {
     }
 
     // Fails if a nudge over a nudge stops being `.busy` in `SurfaceRule.swift`.
+    // dmc-case: dmc.drop_reason.overlay_busy_first_stays
+    // dmc-case: dmc.gate_order.busy_surface_drops_winner_no_fallback
     @Test("a second nudge is dropped as surface_busy and the first stays")
     func secondNudgeIsTurnedAway() async throws {
         let (sdk, first, second) = try await boot()
@@ -36,6 +38,7 @@ struct EngineSurfaceBusyTests {
     }
 
     // Same line: the redelivered campaign meets its own showing as the blocker.
+    // dmc-case: dmc.drop_reason.same_campaign_redelivery_dropped_quietly
     @Test("the same nudge delivered again while up is dropped, not doubled")
     func sameNudgeAgainIsDropped() async throws {
         let (sdk, first, _) = try await boot()
@@ -52,6 +55,7 @@ struct EngineSurfaceBusyTests {
 
     // Fails if the nudge's close action stops releasing the surface: `dismissNudge()` no longer
     // clears `activeNudge` in `DigiaOverlayController.swift`.
+    // dmc-case: dmc.drop_reason.close_releases_surface
     @Test("once the first is closed the second can take the surface")
     func closingReleasesTheSurface() async throws {
         let (sdk, first, second) = try await boot()
