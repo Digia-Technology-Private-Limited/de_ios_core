@@ -1,7 +1,6 @@
 import AVFoundation
 import AVKit
 internal import Lottie
-internal import SDWebImageSwiftUI
 import SwiftUI
 import UIKit
 
@@ -1897,56 +1896,36 @@ private struct CanvasRemoteLottie: View {
     let loop: Bool
     let fit: String
     @Environment(\.canvasLottieRuntime) private var runtime
-    @Environment(\.digiaCampaignKey) private var campaignKey
-    @State private var failed = false
-    var body: some View {
-        Group {
-            switch runtime.playbackMode {
-            case .frozen(let progress):
-                lottie.paused(at: .progress(progress))
-                    .resizable()
-                    .configure(\.contentMode, to: fit.uiContentMode)
-            case .live:
-                if autoplay {
-                    lottie.playing(loopMode: loop ? .loop : .playOnce)
-                        .resizable()
-                        .configure(\.contentMode, to: fit.uiContentMode)
-                } else {
-                    lottie.resizable().configure(\.contentMode, to: fit.uiContentMode)
-                }
-            }
-        }
-    }
-    private var lottie: LottieView<CanvasLottiePlaceholder> {
-        LottieView {
-            if let customLoader = runtime.loadSource {
-                if let source = try? await customLoader(url) { return source }
-                failed = true
-                return nil
-            }
-            let loaded = await loadLottieSource(url)
-            if loaded.source == nil {
-                failed = true
-                reportMediaLoadFailed(.lottie, cause: loaded.failureCause, campaignKey: campaignKey)
-            }
-            return loaded.source
-        } placeholder: {
-            CanvasLottiePlaceholder(failed: failed, placeholder: placeholder, fit: fit)
-        }
-        .reloadAnimationTrigger(url)
-    }
-}
+    @Environment(\.mediaServices) private var baseServices
 
-private struct CanvasLottiePlaceholder: View {
-    let failed: Bool
-    let placeholder: ImagePlaceholder?
-    let fit: String
     var body: some View {
-        if failed {
-            CanvasPlaceholder(label: "Lottie")
-        } else {
-            BlurHashPlaceholderView(placeholder: placeholder, fit: fit)
+        MediaLottie(
+            spec: LottieSpec(
+                url: url.absoluteString,
+                fit: canvasMediaFit(fit),
+                blurHash: placeholder?.stillBlurHash,
+                loop: loop,
+                autoplay: autoplay
+            ),
+            errorContent: AnyView(CanvasPlaceholder(label: "Lottie")),
+            freezeAt: frozenProgress
+        )
+        .environment(\.mediaServices, services)
+    }
+
+    private var frozenProgress: CGFloat? {
+        if case .frozen(let progress) = runtime.playbackMode { return progress }
+        return nil
+    }
+
+    /// The runtime's custom loader, when it has one, in place of the SDK's.
+    private var services: MediaServices {
+        guard let customLoader = runtime.loadSource else { return baseServices }
+        var services = baseServices
+        services.loadLottie = { url in
+            (try? await customLoader(url), nil)
         }
+        return services
     }
 }
 
@@ -2336,53 +2315,26 @@ private struct FocalCanvasImage: View {
     var tint: CampaignColor? = nil
     var failureLabel: String? = nil
     @Environment(\.digiaVariables) private var variables
-    @Environment(\.digiaCampaignKey) private var campaignKey
-    @State private var failedURL: String?
-
-    init(
-        source: CampaignCanvasMediaSource,
-        isDark: Bool,
-        fit: String,
-        x: CGFloat,
-        y: CGFloat,
-        scale: CGFloat,
-        tint: CampaignColor? = nil,
-        failureLabel: String? = nil
-    ) {
-        DigiaImagePipeline.configureIfNeeded()
-        self.source = source
-        self.isDark = isDark
-        self.fit = fit
-        self.x = x
-        self.y = y
-        self.scale = scale
-        self.tint = tint
-        self.failureLabel = failureLabel
-    }
 
     var body: some View {
         let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
         let resolved = interpolate(raw, context: variables)
-        if resolved.isEmpty || failedURL == resolved {
-            if let failureLabel { CanvasPlaceholder(label: failureLabel) }
-        } else if URL(string: resolved) == nil {
+        if resolved.isEmpty {
             if let failureLabel { CanvasPlaceholder(label: failureLabel) }
         } else {
             GeometryReader { geometry in
-                WebImage(url: URL(string: resolved)) { image in
-                    image.resizable().renderingMode(tint == nil ? .original : .template)
-                } placeholder: {
-                    BlurHashPlaceholderView(placeholder: source.placeholder, fit: fit)
-                }
-                .onFailure { error in
-                    failedURL = resolved
-                    reportMediaLoadFailed(
-                        .image, cause: mediaFailureCause(imageError: error),
-                        campaignKey: campaignKey)
-                }
-                .modifier(CanvasImageFit(fit: fit))
-                .foregroundStyle(
-                    tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) } ?? .clear
+                // The wrapper owns fetch, BlurHash still, fit, tint and health (with this
+                // canvas's campaign key); the focal crop and scale stay here: they are
+                // canvas-authored layout, not media loading. A failed widget image shows its
+                // label over the still.
+                MediaImage(
+                    spec: ImageSpec(
+                        url: resolved,
+                        fit: canvasMediaFit(fit),
+                        blurHash: source.placeholder?.stillBlurHash
+                    ),
+                    tintColor: tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) },
+                    errorContent: failureLabel.map { AnyView(CanvasPlaceholder(label: $0)) }
                 )
                 .frame(
                     width: geometry.size.width, height: geometry.size.height,
@@ -2393,19 +2345,17 @@ private struct FocalCanvasImage: View {
                 )
                 .clipped()
             }
-            .onChange(of: resolved) { _ in failedURL = nil }
         }
     }
 }
 
-private struct CanvasImageFit: ViewModifier {
-    let fit: String
-    @ViewBuilder func body(content: Content) -> some View {
-        switch fit {
-        case "contain": content.scaledToFit()
-        case "fill": content
-        default: content.scaledToFill()
-        }
+/// The wrapper fit for a canvas-authored fit value: `contain` letterboxes, `fill` stretches,
+/// anything else covers.
+private func canvasMediaFit(_ fit: String) -> MediaFit {
+    switch fit {
+    case "contain": .contain
+    case "fill": .fill
+    default: .cover
     }
 }
 
@@ -2557,10 +2507,6 @@ extension CampaignCanvasStrokeCap {
     }
 }
 extension String {
-    fileprivate var uiContentMode: UIView.ContentMode {
-        canvasUIContentMode
-    }
-
     internal var canvasUIContentMode: UIView.ContentMode {
         switch self {
         case "contain": .scaleAspectFit
