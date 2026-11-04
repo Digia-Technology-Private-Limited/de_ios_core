@@ -56,6 +56,8 @@ func deviceClassFor(physicalMemoryBytes: UInt64) -> DeviceClass {
 ///   another key, restarts at 0.
 /// - A URL change under a held key re-points the same player (N5: the surface gives back the old
 ///   URL first, so nothing stays held for it).
+/// - A player whose item failed gets a new item on its next borrow: a borrow never inherits a
+///   failure.
 /// - When the pool is full, a newcomer takes back the lowest-ranked, least recently borrowed
 ///   player only if that one ranks strictly below it; the evicted holder is told and shows its
 ///   still. Otherwise an on-screen borrow gets an extra player, destroyed when it is given back
@@ -105,7 +107,8 @@ final class VideoPlayerPool: @unchecked Sendable {
     func borrow(key: String, url: URL, priority: PoolPriority) -> AVPlayer? {
         seq &+= 1
         if var existing = holders[key] {
-            if existing.url != url {
+            // A failed item never recovers: a borrow never inherits a failure, it retries.
+            if existing.url != url || Self.hasFailed(existing.player) {
                 existing.url = url
                 existing.player.replaceCurrentItem(with: makeItem(url))
             }
@@ -120,7 +123,7 @@ final class VideoPlayerPool: @unchecked Sendable {
         let match = free.lastIndex { $0.key == key && $0.url == url } ?? (free.isEmpty ? nil : free.count - 1)
         if let match {
             let reused = free.remove(at: match)
-            if reused.url != url || reused.player.currentItem == nil {
+            if reused.url != url || reused.player.currentItem == nil || Self.hasFailed(reused.player) {
                 reused.player.replaceCurrentItem(with: makeItem(url))
             } else if reused.key != key || reused.finished {
                 // Same file under another key (two rail cards), or a finished showing: restart.
@@ -214,6 +217,10 @@ final class VideoPlayerPool: @unchecked Sendable {
     private func destroy(_ player: AVPlayer) {
         player.pause()
         player.replaceCurrentItem(with: nil)
+    }
+
+    private static func hasFailed(_ player: AVPlayer) -> Bool {
+        player.currentItem?.status == .failed
     }
 
     private static func isFinished(_ player: AVPlayer) -> Bool {
