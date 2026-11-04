@@ -395,13 +395,13 @@ private struct FloaterStorySessionView: View {
                 let payload = state.payload
                 switch interaction {
                 case let .storyPageViewed(index, total):
-                    SDKInstance.shared.reportStoryStepViewed(
+                    SDKInstance.shared.storyReporter.reportStoryStepViewed(
                         payload, itemIndex: index + 1, itemTotal: total
                     )
                 case let .storyPageDismissed(index, _):
-                    SDKInstance.shared.reportStoryStepDismissed(payload, itemIndex: index + 1)
+                    SDKInstance.shared.storyReporter.reportStoryStepDismissed(payload, itemIndex: index + 1)
                 case let .storyCompleted(total, ms):
-                    SDKInstance.shared.reportStoryCompleted(
+                    SDKInstance.shared.storyReporter.reportStoryCompleted(
                         payload, itemTotal: total, timeToCompleteMs: ms.map(Int64.init)
                     )
                     // And the floater's own serving signal, which is what a
@@ -422,7 +422,7 @@ private struct FloaterStorySessionView: View {
     /// it to go, and an affordance that moves per campaign is one the user has to re-find.
     private var closeButton: some View {
         Button {
-            SDKInstance.shared.reportFloaterStoryClicked(
+            SDKInstance.shared.floaterStoryReporter.reportFloaterStoryClicked(
                 elementId: "floater_close", actionType: "close", ctaRole: "secondary"
             )
             orchestrator.dismiss(.userClose)
@@ -445,7 +445,7 @@ private struct FloaterStorySessionView: View {
 
     private func openStory() {
         guard !orchestrator.storyOpen, !orchestrator.closing else { return }
-        SDKInstance.shared.reportFloaterStoryClicked(
+        SDKInstance.shared.floaterStoryReporter.reportFloaterStoryClicked(
             elementId: "floater_window", actionType: "show_story", ctaRole: "primary"
         )
         orchestrator.openStory()
@@ -469,7 +469,7 @@ private struct FloaterStorySessionView: View {
         // runner reported a step click of its own, put two identically-named "Digia Step Clicked"
         // events on the wire for a single tap on a story page.
         if let step = request.step, step.kind == .storyPage {
-            SDKInstance.shared.reportStoryStepClicked(
+            SDKInstance.shared.storyReporter.reportStoryStepClicked(
                 state.payload,
                 itemIndex: step.index + 1,
                 ctaLabel: request.label,
@@ -477,7 +477,7 @@ private struct FloaterStorySessionView: View {
                 actionUrl: action?.analyticsURL
             )
         } else {
-            SDKInstance.shared.reportFloaterStoryClicked(
+            SDKInstance.shared.floaterStoryReporter.reportFloaterStoryClicked(
                 elementId: request.elementId,
                 actionType: action?.analyticsType ?? "",
                 ctaRole: request.isPrimary ? "primary" : "secondary",

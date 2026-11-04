@@ -41,8 +41,8 @@ struct DigiaInlineStoryView: View {
     }
 
     private func openStory(at index: Int) {
-        SDKInstance.shared.reportStoryOpened(payload)
-        SDKInstance.shared.reportClassicStoryOpened(payload, index: index)
+        SDKInstance.shared.storyReporter.reportStoryOpened(payload)
+        SDKInstance.shared.storyReporter.reportClassicStoryOpened(payload, index: index)
         SDKInstance.shared.controller.showStoryOverlay(
             config: config,
             initialIndex: index,
@@ -750,7 +750,7 @@ private struct InlineStoryOverlayContent: View {
         // `.onAppear` plus the older single-value `onChange` reports the same
         // "fire now and on every subsequent change" sequence.
         .modifier(StoryStepViewedReporter(currentIndex: currentIndex) { idx in
-            SDKInstance.shared.reportStoryStepViewed(
+            SDKInstance.shared.storyReporter.reportStoryStepViewed(
                 state.payload,
                 itemIndex: idx + 1,
                 itemTotal: state.config.items.count
@@ -760,7 +760,7 @@ private struct InlineStoryOverlayContent: View {
         // ESC). Completion sets `completed` first, so it reports only once there.
         .onDisappear {
             if !completed {
-                SDKInstance.shared.reportStoryStepDismissed(state.payload, itemIndex: currentIndex + 1)
+                SDKInstance.shared.storyReporter.reportStoryStepDismissed(state.payload, itemIndex: currentIndex + 1)
             }
         }
     }
@@ -855,7 +855,7 @@ private struct InlineStoryOverlayContent: View {
             move(to: 0)
         } else {
             completed = true
-            SDKInstance.shared.reportStoryCompleted(
+            SDKInstance.shared.storyReporter.reportStoryCompleted(
                 state.payload,
                 itemTotal: state.config.items.count,
                 timeToCompleteMs: Int64(Date().timeIntervalSince(openedAt) * 1000)
@@ -883,7 +883,7 @@ private struct InlineStoryOverlayContent: View {
         let actions = item.actions
         let reportedAction = actions.first?.resolved(with: variables)
         let label = item.ctaText.map { interpolate($0, context: variables) }
-        SDKInstance.shared.reportStoryStepClicked(
+        SDKInstance.shared.storyReporter.reportStoryStepClicked(
             state.payload,
             itemIndex: currentIndex + 1,
             ctaLabel: label,

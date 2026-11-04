@@ -59,7 +59,7 @@ final class NudgeCampaignSurface: CampaignSurface {
             nudge.payload.cepCampaignId == occupant.cepCampaignId
         else { return }
         if sdk.dwellTracker.elapsedMs(occupant.cepCampaignId) != nil {
-            sdk.markNudgeDismissed(reason: .superseded)
+            sdk.nudgeOrchestrator.markNudgeDismissed(reason: .superseded)
         } else {
             sdk.controller.dismissNudge()
             _ = sdk.dwellTracker.consumeDwellMs(occupant.cepCampaignId)
@@ -73,7 +73,7 @@ final class NudgeCampaignSurface: CampaignSurface {
         // and the CEP the same outcome. A watchdog's teardown reaches here already settled, unseen, and
         // stays silent.
         if sdk.coordinator.ownerOf(payload)?.state == .displaying {
-            sdk.markNudgeDismissed(reason: .cancelled)
+            sdk.nudgeOrchestrator.markNudgeDismissed(reason: .cancelled)
         } else {
             sdk.controller.dismissNudge()
         }
@@ -105,7 +105,7 @@ final class SurveySurface: CampaignSurface {
         if sdk.dwellTracker.elapsedMs(occupant.cepCampaignId) != nil {
             // R3-D5 (SR69): the fields a user close sends, from the renderer.
             let progress = sdk.surveyOrchestrator.progress()
-            sdk.markSurveyDismissed(
+            sdk.surveyReporter.markSurveyDismissed(
                 abandonedAtItem: progress?.abandonedAtItem,
                 answeredCount: progress?.answeredCount,
                 reason: .superseded
@@ -113,7 +113,7 @@ final class SurveySurface: CampaignSurface {
         } else {
             sdk.surveyOrchestrator.dismiss()
             _ = sdk.dwellTracker.consumeDwellMs(occupant.cepCampaignId)
-            sdk.clearQuestionViewedAt(token: state.token)
+            sdk.surveyReporter.clearQuestionViewedAt(token: state.token)
             sdk.events.toCep(.dismissed(reason: .superseded), payload: state.payload)
         }
     }
@@ -167,7 +167,7 @@ final class GuideSurface: CampaignSurface {
             sdk.logNativeGuideStage("route", "result=dropped reason=invalid_config campaign_key=\(key)")
             return request.invalidConfig("guide could not start", cause: "start_failed")
         }
-        sdk.guideCompletionFired = false
+        sdk.guideOrchestrator.guideCompletionFired = false
         sdk.logNativeGuideStage("route", "result=accepted campaign_key=\(key)")
         return .accepted(payload: payload, kind: .modal)
     }
@@ -191,12 +191,12 @@ final class GuideSurface: CampaignSurface {
             if sdk.dwellTracker.elapsedMs(occupant.cepCampaignId) != nil {
                 // No `completed:` override, so a completion the CTA already
                 // fired wins (R3-02, R4-D2): CEP `completed`, no Digia dismiss.
-                sdk.dismissGuide(reason: .superseded)
+                sdk.guideOrchestrator.dismissGuide(reason: .superseded)
             } else {
                 sdk.guideOrchestrator.dismiss()
                 _ = sdk.dwellTracker.consumeDwellMs(occupant.cepCampaignId)
-                sdk.guideCompletionFired = false
-                sdk.pendingGuideDismissReason = nil
+                sdk.guideOrchestrator.guideCompletionFired = false
+                sdk.guideOrchestrator.pendingGuideDismissReason = nil
                 sdk.events.toCep(.dismissed(reason: .superseded), payload: state.payload)
             }
         } else if let external = sdk.activeExternalGuide,
