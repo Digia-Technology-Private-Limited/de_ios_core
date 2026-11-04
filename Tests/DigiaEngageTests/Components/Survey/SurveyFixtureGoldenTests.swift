@@ -38,6 +38,7 @@ struct SurveyFixtureGoldenTests {
         defer {
             // SDKInstance is process-wide; end the showing so the next fixture can start.
             orchestrator.dismiss()
+            activeFloaterWindowGeometryOverride = nil
             ComponentTestHost.cleanupOverlayWindow(window)
         }
         // The survey waits its authored delay plus a render buffer before it appears, in a
@@ -58,8 +59,18 @@ struct SurveyFixtureGoldenTests {
     ///
     /// Sized to the screen (`GoldenScreen`'s): the test bundle has no window scene, so
     /// the survey falls back to `UIScreen.main.bounds` for its window frame, and the two must agree.
+    /// The scene lookup also finds no window, so pin the golden device's screen and its
+    /// notch / home-indicator insets (47pt top, 34pt bottom) through the same override
+    /// the nudge fixture goldens use — otherwise insetContent sheets read zero insets.
     @MainActor
     private func makeSurveyWindow() -> UIWindow {
+        let device = ViewImageConfig.engageGolden
+        activeFloaterWindowGeometryOverride = (
+            CGRect(origin: .zero, size: device.size!),
+            EdgeInsets(
+                top: device.safeArea.top, leading: device.safeArea.left,
+                bottom: device.safeArea.bottom, trailing: device.safeArea.right)
+        )
         let window = ComponentTestHost.makeWindow()
         let bounds = window.bounds
 

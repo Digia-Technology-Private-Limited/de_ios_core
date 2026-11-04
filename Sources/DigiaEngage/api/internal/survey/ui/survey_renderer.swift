@@ -296,7 +296,7 @@ private struct SurveySheet<Content: View>: View {
                 : sheet.bottomSafeAreaMode
             let bottomInset = keyboardInset > 0
                 ? keyboardInset
-                : (safeAreaMode == .none ? 0 : surveyWindowSafeAreaInsets.bottom)
+                : (safeAreaMode == .none ? 0 : activeWindowSafeAreaInsets.bottom)
             DigiaBottomSheet(
                 config: DigiaBottomSheetConfig(
                     cornerRadius: CGFloat(sheet.cornerRadius),
@@ -307,6 +307,7 @@ private struct SurveySheet<Content: View>: View {
                     allowDragDismiss: sheet.draggable && keyboardInset == 0,
                     heightCapFraction: heightCapFraction,
                     handleOverlaysContent: canvasBackground != nil,
+                    bottomPadding: canvasBackground == nil ? 8 : 0,
                     bottomSafeAreaMode: safeAreaMode,
                     bottomSafeAreaInset: bottomInset,
                     animateContentHeight: canvasBackground == nil && animateContentHeight,
@@ -334,7 +335,7 @@ private struct SurveySheet<Content: View>: View {
             return { bounds, viewport in
                 AnyView(CanvasNudgeCloseOverlay(
                     config: close, container: bounds, viewport: viewport,
-                    safeAreaInsets: surveyWindowSafeAreaInsets, isBottomSheet: true, action: onDismiss,
+                    safeAreaInsets: activeWindowSafeAreaInsets, isBottomSheet: true, action: onDismiss,
                     accessibilityLabel: "Close survey"))
             }
         }
@@ -619,14 +620,6 @@ private struct CanvasSurveyScrollBounds: UIViewRepresentable {
         .windows.first(where: \.isKeyWindow)
     else { return UIScreen.main.bounds }
     return window.convert(window.bounds, to: nil)
-}
-
-@MainActor private var surveyWindowSafeAreaInsets: UIEdgeInsets {
-    UIApplication.shared.connectedScenes
-        .compactMap { $0 as? UIWindowScene }
-        .first(where: { $0.activationState == .foregroundActive })?
-        .windows.first(where: \.isKeyWindow)?
-        .safeAreaInsets ?? .zero
 }
 
 @available(iOS 16, *)
