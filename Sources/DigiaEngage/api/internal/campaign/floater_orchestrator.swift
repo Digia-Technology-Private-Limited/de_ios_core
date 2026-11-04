@@ -715,6 +715,11 @@ final class FloaterOrchestrator: ObservableObject {
         mediaReadyTask = nil
         awaitingMedia = false
         state = nil
+        // The window is gone with the showing: clear its published frame here, not
+        // only in the view's `onDisappear`, so a teardown that never draws (an
+        // abandoned load, a host reset between showings) cannot leave a ghost rect
+        // behind for the next test — or the host's `hitTest` — to read.
+        activeRect = nil
         surface = .collapsed
         dragFraction = nil
         obscured = false
@@ -794,6 +799,9 @@ final class FloaterOrchestrator: ObservableObject {
         videoState = nil
         preloadedImage = nil
         state = nil
+        // Same ghost-rect clearing as `finishDismiss` (see its comment): a reset
+        // between showings leaves no frame behind.
+        activeRect = nil
         surface = .collapsed
         dragFraction = nil
         awaitingMedia = false

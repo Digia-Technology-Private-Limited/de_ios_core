@@ -218,6 +218,10 @@ internal final class MediaVideoState: ObservableObject {
     private var itemObserver: NSKeyValueObservation?
     private var timeObserver: Any?
     private var failObserver: NSObjectProtocol?
+    /// The item the status + failure observers track. The take-over item is not
+    /// always the playing item: the pool's looping entry swaps it for an
+    /// `AVPlayerLooper` replica once its duration loads (see `trackItem`).
+    private var observedItem: AVPlayerItem?
 
     internal init(
         spec: VideoSpec,
@@ -441,10 +445,7 @@ internal final class MediaVideoState: ObservableObject {
 
     private func observe(player: AVPlayer) {
         detachObservers()
-        statusObserver = player.currentItem?.observe(\.status, options: [.initial, .new]) {
-            [weak self] item, _ in
-            Task { @MainActor in self?.noteItemStatus(item) }
-        }
+        trackItem(player.currentItem)
         itemObserver = player.observe(\.currentItem, options: [.old, .new]) {
             [weak self] _, change in
             Task { @MainActor in self?.noteCurrentItem(
@@ -478,9 +479,29 @@ internal final class MediaVideoState: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Attaches the status + failure observers to the item actually in the player,
+    /// following `currentItem` swaps. The pool's looping entry swaps the take-over
+    /// item for an `AVPlayerLooper` replica once its duration loads, and the
+    /// template then never loads itself — an observer left on it watches an item
+    /// that stays `.unknown` forever while its ready replica goes unreported. A
+    /// player that advances is rescued by the time observer; one that never plays
+    /// (a paused looping showing, the golden stub) stalls until its timeout.
+    private func trackItem(_ item: AVPlayerItem?) {
+        statusObserver?.invalidate()
+        statusObserver = nil
+        if let failObserver { NotificationCenter.default.removeObserver(failObserver) }
+        failObserver = nil
+        observedItem = item
+        guard let item else { return }
+        statusObserver = item.observe(\.status, options: [.initial, .new]) {
+            [weak self] item, _ in
+            Task { @MainActor in self?.noteItemStatus(item) }
+        }
         failObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemFailedToPlayToEndTime,
-            object: player.currentItem,
+            object: item,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in self?.noteItemFailed() }
@@ -513,6 +534,9 @@ internal final class MediaVideoState: ObservableObject {
             degraded = true
             activePlayer = nil
             noteGaveUp()
+        }
+        if let new, new !== observedItem {
+            trackItem(new)
         }
     }
 
@@ -599,6 +623,7 @@ internal final class MediaVideoState: ObservableObject {
         itemObserver = nil
         timeObserver = nil
         failObserver = nil
+        observedItem = nil
     }
 
     private func releaseOwned() {
