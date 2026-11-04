@@ -428,13 +428,18 @@ struct NudgeDialogContainer: View {
                     )
                     let naturalScale = min(width / designWidth, 1.15)
                     let scaledSurface = authoredSurface.scaled(naturalScale)
+                    // Emergency fit is safe-area-bounded like Flutter's dialog
+                    // (`fitHeight = safe.height`): a canvas taller than the safe
+                    // area scales down uniformly instead of overflowing past it.
+                    let safeHeight = max(
+                        1, viewportSize.height - safeAreaInsets.top - safeAreaInsets.bottom)
                     let panel = canvasDialogPanel(
                         canvas: canvas,
                         surface: scaledSurface,
                         runtimeViewportWidth: width,
                         availableSize: CGSize(
                             width: width * ((designWidth - 2 * horizontalMargin) / designWidth),
-                            height: max(1, height)
+                            height: safeHeight
                         )
                     )
                     if closeButton.placement?.mode == .outside {
@@ -585,7 +590,7 @@ struct NudgeDialogContainer: View {
 
 /// Honours `activeFloaterWindowGeometryOverride`, the test seam for the window lookup; `nil` in
 /// production, where the key window of the active scene is read as before.
-@MainActor private var activeWindowSafeAreaInsets: UIEdgeInsets {
+@MainActor var activeWindowSafeAreaInsets: UIEdgeInsets {
     if let override = activeFloaterWindowGeometryOverride {
         return UIEdgeInsets(
             top: override.safeArea.top, left: override.safeArea.leading,
