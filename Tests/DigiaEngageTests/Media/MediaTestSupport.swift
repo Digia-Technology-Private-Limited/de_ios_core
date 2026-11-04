@@ -1,6 +1,8 @@
 import Foundation
 import SDWebImage
+import SnapshotTesting
 import SwiftUI
+import Testing
 import UIKit
 
 @testable import DigiaEngage
@@ -88,6 +90,14 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
 
     static func uninstall() { URLProtocol.unregisterClass(MediaOrigin.self) }
 
+    /// Ends a test that installed the origin: unroutes it, clears its state and puts the SDK's
+    /// media services back.
+    static func end() {
+        uninstall()
+        reset()
+        MediaServices.reset()
+    }
+
     private static let routeDownloader: Void = {
         let downloader = SDWebImageDownloader.shared
         guard let session = downloader.value(forKey: "session") as? URLSession else { return }
@@ -140,8 +150,9 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
     }
 }
 
-/// Records every health report off the main actor: the recording reporter the wrappers read
-/// from `MediaServices`.
+/// Records every health report the media layer makes, off the main actor. Creating one replaces
+/// the process-wide reporter in `MediaServices`, so the report of any path reaches it (the
+/// wrappers and the floater alike) until `MediaOrigin.end()`.
 final class HealthRecorder: @unchecked Sendable {
     struct Record: Equatable {
         let campaignKey: String?
@@ -154,36 +165,16 @@ final class HealthRecorder: @unchecked Sendable {
 
     var all: [Record] { lock.withLock { records } }
 
-    var services: MediaServices {
-        var services = MediaServices.sdk
-        services.reportHealth = { [self] key, kind, cause in
+    init() {
+        MediaServices.override(reportHealth: { [self] key, kind, cause in
             lock.withLock { records.append(Record(campaignKey: key, kind: kind, cause: cause)) }
-        }
-        return services
+        })
     }
 }
 
-struct RGB: Equatable {
-    var r: CGFloat
-    var g: CGFloat
-    var b: CGFloat
-}
-
-/// The rendered center pixel, for asserting what the user would see without goldens.
-func centerPixel(of image: UIImage) -> RGB? {
-    pixel(of: image, atX: 0.5, y: 0.5)
-}
-
-func pixelsNearly(_ left: RGB, _ right: RGB, tolerance: CGFloat = 0.12) -> Bool {
-    abs(left.r - right.r) <= tolerance
-        && abs(left.g - right.g) <= tolerance
-        && abs(left.b - right.b) <= tolerance
-}
-
-/// The center of the decoded BlurHash: what the still layer should show.
-func blurCenter(_ hash: String) -> RGB? {
-    guard let decoded = BlurHashDecoder.decode(hash, width: 32, height: 32) else { return nil }
-    return centerPixel(of: decoded)
+/// Counts callbacks. A class so a closure can bump it.
+final class CallCount: @unchecked Sendable {
+    var value = 0
 }
 
 /// Polls `condition` on drained runloops, like the canvas renderer suites.
@@ -197,15 +188,45 @@ func waitUntilMedia(timeout: TimeInterval = 10.0, condition: () -> Bool) async -
     return condition()
 }
 
-/// Mounts a 200×200 media view on white, like the canvas renderer suites.
-@MainActor
-func mountMedia<Content: View>(_ view: Content) -> UIWindow {
-    let (window, _) = ComponentTestHost.mount(
-        rootView: AnyView(view),
-        size: CGSize(width: 200, height: 200),
-        backgroundColor: .white
-    )
-    return window
+/// The fixed stage every media test draws on: one 240x120 box, centred on the 390x844 golden
+/// frame, over the striped host screen the nudge goldens use. The campaign key of the media is
+/// `MediaStage.campaign`. The box clips its content, as every surface that shows media does.
+enum MediaStage {
+    static let campaign = "test-campaign"
+    static let size = CGSize(width: 240, height: 120)
+
+    @MainActor
+    static func mount<Content: View>(_ content: Content) -> UIWindow {
+        let device = ViewImageConfig.engageGolden
+        let window = ComponentTestHost.makeWindow(frame: CGRect(origin: .zero, size: device.size!))
+        let root = ComponentTestHost.makeDeviceHost(device: device, style: .striped, scrimColor: nil)
+        let stage = ComponentTestHost.mountDialog(
+            rootView: content.environment(\.digiaCampaignKey, campaign)
+                .frame(width: size.width, height: size.height).clipped(), dialogSize: size, in: root)
+        if #available(iOS 16.4, *) {
+            stage.safeAreaRegions = []
+        }
+        window.rootViewController = root
+        window.makeKeyAndVisible()
+        root.view.layoutIfNeeded()
+        ComponentTestHost.drainRunLoop(for: 0.05)
+        return window
+    }
+
+    /// Compares what the stage shows with `goldens/ios/media/<name>.png`.
+    @MainActor
+    static func assertGolden(_ window: UIWindow, named name: String) {
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        assertSurfaceGolden(
+            ComponentTestHost.settledImage(of: window), surface: "media", named: name, precision: 1.0,
+            perceptualPrecision: 0.98)
+    }
+}
+
+/// The bytes of a Test Kit asset (`testkit/mock-server/assets/`), to serve from the fake origin.
+func testkitAsset(_ name: String) throws -> Data {
+    let workspace = try #require(FixtureLoader.workspaceURL())
+    return try Data(contentsOf: workspace.appendingPathComponent("testkit/mock-server/assets/\(name)"))
 }
 
 /// A 4x4 PNG of one solid color.
@@ -230,21 +251,29 @@ func halfTransparentPNG() -> Data {
     }
 }
 
-/// The rendered pixel at a fraction of the image's width and height (0...1).
-func pixel(of image: UIImage, atX fx: CGFloat, y fy: CGFloat) -> RGB? {
-    guard let cgImage = image.cgImage else { return nil }
-    let x = min(cgImage.width - 1, Int(CGFloat(cgImage.width) * fx))
-    let y = min(cgImage.height - 1, Int(CGFloat(cgImage.height) * fy))
-    guard let crop = cgImage.cropping(to: CGRect(x: x, y: y, width: 1, height: 1)) else { return nil }
+/// The color of one pixel of a 1x render. Used by the one test whose proof is a pixel (the memory
+/// cache hit that must draw on the first render, which no callback can tell from a blank one).
+func pixelColor(of image: UIImage, atX x: Int, y: Int) -> UIColor? {
+    guard let cgImage = image.cgImage, x < cgImage.width, y < cgImage.height,
+        let crop = cgImage.cropping(to: CGRect(x: x, y: y, width: 1, height: 1))
+    else { return nil }
     var pixels = [UInt8](repeating: 0, count: 4)
     guard
         let context = CGContext(
             data: &pixels, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4,
             space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-                | CGBitmapInfo.byteOrder32Big.rawValue)
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue)
     else { return nil }
     context.draw(crop, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-    return RGB(
-        r: CGFloat(pixels[0]) / 255, g: CGFloat(pixels[1]) / 255, b: CGFloat(pixels[2]) / 255)
+    return UIColor(
+        red: CGFloat(pixels[0]) / 255, green: CGFloat(pixels[1]) / 255, blue: CGFloat(pixels[2]) / 255, alpha: 1)
+}
+
+/// Whether two colors are within `tolerance` on every channel.
+func colorsNearly(_ left: UIColor, _ right: UIColor, tolerance: CGFloat = 0.05) -> Bool {
+    var (lr, lg, lb, la) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
+    var (rr, rg, rb, ra) = (CGFloat(0), CGFloat(0), CGFloat(0), CGFloat(0))
+    left.getRed(&lr, green: &lg, blue: &lb, alpha: &la)
+    right.getRed(&rr, green: &rg, blue: &rb, alpha: &ra)
+    return abs(lr - rr) <= tolerance && abs(lg - rg) <= tolerance && abs(lb - rb) <= tolerance
 }
