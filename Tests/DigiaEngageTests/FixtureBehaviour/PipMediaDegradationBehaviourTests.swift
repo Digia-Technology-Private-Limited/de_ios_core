@@ -108,6 +108,23 @@ struct PipMediaDegradationBehaviourTests {
         #expect(sdk.pip.activeRect != nil)
     }
 
+    // Fails if: floater_orchestrator.swift `preloadImage` `request.setValue(DIGIA_IMAGE_USER_AGENT,
+    // forHTTPHeaderField: "User-Agent")` is deleted (the gate fetch bypasses the image wrapper, so
+    // the shared downloader's header does not cover it).
+    @Test("the image the window waits for is fetched with the Digia User-Agent")
+    func preloadSendsUserAgent() async throws {
+        MediaOrigin.install()
+        defer { MediaOrigin.uninstall(); MediaOrigin.reset() }
+        let image = MediaOrigin.url("pip.png")
+        MediaOrigin.set(.status(200, solidPNG(.red)), for: image)
+
+        let json = try declaringImage()
+        let (sdk, _) = try await deliver(json, variables: ["image": image.absoluteString])
+        defer { sdk.tearDown() }
+
+        #expect(MediaOrigin.requests(for: image).map(\.userAgent) == ["DigiaEngage/1.0 (iOS)"])
+    }
+
     // Fails if: floater_orchestrator.swift `preloadImage`'s failure branch
     // `self.abandonMedia(token: token, reason: "image failed to load", ...)` is deleted (the
     // window then waits out the 10 s media timeout instead of being dropped at once).

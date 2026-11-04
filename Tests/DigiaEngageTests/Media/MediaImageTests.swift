@@ -80,6 +80,23 @@ struct MediaImageComponentTests {
         #expect(pixelsNearly(middle!, blur!))
     }
 
+    // Fails if the SDK's image fetches stop sending the Digia User-Agent: the
+    // `SDWebImageDownloader.shared.setValue(...)` line in DigiaImagePipeline.configureOnce. The
+    // request log is what reached the (faked) wire from the real downloader.
+    @Test("an image fetch sends the Digia User-Agent")
+    func userAgentOnTheWire() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.uninstall(); MediaOrigin.reset() }
+        let target = MediaOrigin.url("ua.png")
+        MediaOrigin.set(.status(200, solidPNG(.red)), for: target)
+
+        let window = mount(ImageSpec(url: target.absoluteString))
+        defer { ComponentTestHost.unmount(window) }
+
+        #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
+        #expect(MediaOrigin.requests(for: target).map(\.userAgent) == ["DigiaEngage/1.0 (iOS)"])
+    }
+
     // Fails if a second render builds its own cache instead of sharing SDWebImage's: the plain
     // `WebImage(url:options:)` (shared manager) in MediaImage.body — adding `.refreshCached`
     // there refetches and fails this.

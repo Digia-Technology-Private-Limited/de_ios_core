@@ -1,11 +1,15 @@
 import SwiftUI
 import UIKit
-internal import SDWebImageSVGCoder
 internal import SDWebImageSwiftUI
+internal import SDWebImageSVGCoder
+
+/// The `User-Agent` every Engage image fetch sends, so CDN logs can tell SDK traffic apart.
+let DIGIA_IMAGE_USER_AGENT = "DigiaEngage/1.0 (iOS)"
 
 enum DigiaImagePipeline {
     private static let configureOnce: Void = {
         SDImageCodersManager.shared.addCoder(SDImageSVGCoder.shared)
+        SDWebImageDownloader.shared.setValue(DIGIA_IMAGE_USER_AGENT, forHTTPHeaderField: "User-Agent")
     }()
 
     static func configureIfNeeded() {
@@ -13,17 +17,12 @@ enum DigiaImagePipeline {
     }
 }
 
-/// Pre-T6 render body kept byte-identical until W3/W4 move its callers onto
-/// `MediaImage` directly (forwarder removed in T17): bare `WebImage` with the
-/// caller's placeholder in its slot, so inline stills/thumbnails/banners
-/// render exactly as before. `fit: .fill` keeps sizing outside as before.
 struct DigiaCachedImageView: View {
     let url: URL
     let tintColor: Color?
     let placeholder: AnyView
     let onSuccess: ((UIImage) -> Void)?
     let onFailure: (() -> Void)?
-
     @Environment(\.digiaCampaignKey) private var campaignKey
 
     init(
@@ -47,13 +46,13 @@ struct DigiaCachedImageView: View {
         } placeholder: {
             placeholder
         }
-        .onSuccess { image, _, _ in
-            onSuccess?(image)
-        }
-        .onFailure { error in
-            reportMediaLoadFailed(.image, cause: mediaFailureCause(imageError: error), campaignKey: campaignKey)
-            onFailure?()
-        }
+            .onSuccess { image, _, _ in
+                onSuccess?(image)
+            }
+            .onFailure { error in
+                reportMediaLoadFailed(.image, cause: mediaFailureCause(imageError: error), campaignKey: campaignKey)
+                onFailure?()
+            }
     }
 
     @ViewBuilder

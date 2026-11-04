@@ -440,7 +440,9 @@ final class FloaterOrchestrator: ObservableObject {
         // build break with no way to catch it before a device build. The decoded
         // image is kept in `preloadedImage` for the window to draw; only an SVG or
         // animated image is fetched again by the renderer's `WebImage`.
-        let task = URLSession.shared.dataTask(with: parsed) { [weak self] data, response, _ in
+        var request = URLRequest(url: parsed)
+        request.setValue(DIGIA_IMAGE_USER_AGENT, forHTTPHeaderField: "User-Agent")
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
             let status = (response as? HTTPURLResponse)?.statusCode
             Task { @MainActor in
                 guard let self, self.state?.token == token else { return }
