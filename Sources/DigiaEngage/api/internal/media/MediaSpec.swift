@@ -1,8 +1,8 @@
 import Foundation
 import SwiftUI
 
-/// How a `MediaSpec`'s content fills its box. The wrapper-local counterpart of campaign fit
-/// values: callers map campaign JSON to this (D4); the wrappers never parse campaigns.
+/// How a media item fills its box. Callers map campaign JSON to this; the wrappers never parse
+/// campaigns.
 enum MediaFit: String, Sendable, Equatable, Hashable {
     case cover
     case contain
@@ -28,29 +28,45 @@ enum MediaFit: String, Sendable, Equatable, Hashable {
     }
 }
 
-/// The one normalized input every media wrapper takes (D1). Callers convert campaign JSON into
-/// this; the wrappers know nothing about campaigns (D4), so there is deliberately no `fromJson`
-/// and no test for JSON mapping.
-///
-/// - `url`: the image, video or Lottie URL.
-/// - `fit`: how the content fills its box.
-/// - `blurHash`: the authored blurred preview, drawn while loading and on error (D5).
-/// - `posterURL`: video only: a campaign-supplied thumbnail/poster URL (D6), drawn until the
-///   first frame. Posters are images, so they render through `MediaImage`.
-/// - `loop`: whether a video or Lottie loops.
-/// - `autoplay`: whether a video or Lottie starts on its own.
-/// - `muted`: whether a video starts silent.
-/// - `startMs`: where a video starts, in milliseconds. The use site coerces it to >= 0;
-///   it is never an index.
-struct MediaSpec: Sendable, Equatable, Hashable {
+/// An image to show: where it loads from, how it fits, and the authored BlurHash drawn while it
+/// loads and when it fails.
+struct ImageSpec: Sendable, Equatable, Hashable {
     var url: String
     var fit: MediaFit = .cover
     var blurHash: String? = nil
-    var posterURL: String? = nil
-    var loop: Bool = false
+}
+
+/// A Lottie animation to show: where it loads from, how it fits, the authored BlurHash drawn
+/// until the animation is parsed, and its loop and autoplay.
+struct LottieSpec: Sendable, Equatable, Hashable {
+    var url: String
+    var fit: MediaFit = .cover
+    var blurHash: String? = nil
+    var loop: Bool = true
     var autoplay: Bool = true
-    var muted: Bool = true
-    var startMs: Int = 0
+}
+
+/// The one normalized input the media wrappers take: callers convert campaign JSON into the kind
+/// they render (`MediaImage` takes an `ImageSpec`, `MediaLottie` a `LottieSpec`). The wrappers
+/// know nothing about campaigns, so there is deliberately no `fromJson` and no test for JSON
+/// mapping.
+enum MediaSpec: Sendable, Equatable, Hashable {
+    case image(ImageSpec)
+    case lottie(LottieSpec)
+
+    var fit: MediaFit {
+        switch self {
+        case let .image(spec): spec.fit
+        case let .lottie(spec): spec.fit
+        }
+    }
+
+    var blurHash: String? {
+        switch self {
+        case let .image(spec): spec.blurHash
+        case let .lottie(spec): spec.blurHash
+        }
+    }
 }
 
 extension Color {

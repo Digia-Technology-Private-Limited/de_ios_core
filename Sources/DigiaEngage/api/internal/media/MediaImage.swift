@@ -35,7 +35,7 @@ struct MediaImage: View {
     /// trailing tests can pin the exact production line (meaningful-tests rule 2).
     static let spinnerDelaySeconds: TimeInterval = 0.4
 
-    let spec: MediaSpec
+    let spec: ImageSpec
     var tintColor: Color? = nil
     /// An already-decoded image (e.g. handed back by `MediaPrefetch.warmImage`): drawn instead
     /// of fetching, so a surface that reveals only when loaded never flashes (US50).
@@ -56,7 +56,7 @@ struct MediaImage: View {
     private let blurStill: UIImage?
 
     init(
-        spec: MediaSpec,
+        spec: ImageSpec,
         tintColor: Color? = nil,
         preloaded: UIImage? = nil,
         onSuccess: ((UIImage) -> Void)? = nil,

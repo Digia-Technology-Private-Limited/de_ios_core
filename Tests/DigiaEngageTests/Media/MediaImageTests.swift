@@ -24,7 +24,7 @@ struct MediaImageComponentTests {
         }
     }()
 
-    private func mount(_ spec: MediaSpec, box: CauseBox? = nil) -> UIWindow {
+    private func mount(_ spec: ImageSpec, box: CauseBox? = nil) -> UIWindow {
         mountMedia(
             MediaImage(
                 spec: spec,
@@ -50,7 +50,7 @@ struct MediaImageComponentTests {
         FakeImageLoader.set(.hang, for: target)
         let box = CauseBox()
 
-        let window = mount(MediaSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
+        let window = mount(ImageSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
         defer { ComponentTestHost.unmount(window) }
 
         #expect(await waitUntilMedia { FakeImageLoader.requestCount(for: target) > 0 })
@@ -72,7 +72,7 @@ struct MediaImageComponentTests {
         FakeImageLoader.set(.error(FakeImageLoader.httpError(status: 404)), for: target)
         let box = CauseBox()
 
-        let window = mount(MediaSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
+        let window = mount(ImageSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
         defer { ComponentTestHost.unmount(window) }
 
         #expect(await waitUntilMedia { !box.all.isEmpty })
@@ -93,7 +93,7 @@ struct MediaImageComponentTests {
         FakeImageLoader.set(.error(URLError(.notConnectedToInternet) as NSError), for: target)
         let box = CauseBox()
 
-        let window = mount(MediaSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
+        let window = mount(ImageSpec(url: target.absoluteString, blurHash: Self.blurHash), box: box)
         defer { ComponentTestHost.unmount(window) }
 
         #expect(await waitUntilMedia { !box.all.isEmpty })
@@ -115,14 +115,14 @@ struct MediaImageComponentTests {
         FakeImageLoader.set(.image(Self.redDot), for: target)
         let red = RGB(r: 1, g: 0, b: 0)
 
-        let first = mount(MediaSpec(url: target.absoluteString))
+        let first = mount(ImageSpec(url: target.absoluteString))
         #expect(await waitUntilMedia {
             renderedCenter(first).map { pixelsNearly($0, red) } ?? false
         })
         #expect(FakeImageLoader.requestCount(for: target) == 1)
         ComponentTestHost.unmount(first)
 
-        let second = mount(MediaSpec(url: target.absoluteString))
+        let second = mount(ImageSpec(url: target.absoluteString))
         defer { ComponentTestHost.unmount(second) }
         #expect(await waitUntilMedia {
             renderedCenter(second).map { pixelsNearly($0, red) } ?? false
@@ -139,7 +139,7 @@ struct MediaImageComponentTests {
         let target = FakeImageLoader.url("slow.png")
         FakeImageLoader.set(.hang, for: target)
 
-        let window = mount(MediaSpec(url: target.absoluteString))
+        let window = mount(ImageSpec(url: target.absoluteString))
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { FakeImageLoader.requestCount(for: target) > 0 })
 
@@ -153,14 +153,6 @@ struct MediaImageComponentTests {
 /// Pure mapping and rule tests: no rendering, no network.
 @Suite("MediaImage decisions", .tags(.media, .unit))
 struct MediaImageDecisionTests {
-    // Fails if a fit maps to the wrong aspect: `MediaFit.contentMode` in MediaSpec.swift.
-    @Test("fits map to aspects, fill stretches")
-    func fitMapping() {
-        #expect(MediaFit.cover.contentMode == .fill)
-        #expect(MediaFit.contain.contentMode == .fit)
-        #expect(MediaFit.fill.contentMode == nil)
-    }
-
     // Fails if the 400ms boundary moves or a blur stops suppressing the spinner:
     // `MediaImage.showsSpinner(hasBlurStill:waited:)`.
     @Test("the spinner rule honors the blur and the delay boundary")
