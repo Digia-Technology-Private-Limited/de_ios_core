@@ -49,7 +49,7 @@ struct MediaVideoComponentTests {
         MediaServices.override(videoSession: MediaOrigin.session())
     }
 
-    @Test("the thumbnail shows until the first frame", .tags(.golden))
+    @Test("shows the thumbnail until the first frame", .tags(.golden))
     func thumbnailWhileLoading() async {
         install()
         defer { MediaOrigin.end() }
@@ -65,11 +65,11 @@ struct MediaVideoComponentTests {
         // The thumbnail decodes after its request; give it time to draw.
         _ = await waitUntilMedia(timeout: 0.3) { false }
 
-        MediaStage.assertGolden(window, named: "video_thumbnail")
+        MediaStage.assertGolden(window, named: "video_thumbnail_loading")
         MediaOrigin.release(video)
     }
 
-    @Test("without a thumbnail the BlurHash shows, and never a spinner", .tags(.golden))
+    @Test("shows the BlurHash and no spinner until the first frame", .tags(.golden))
     func blurHashWhileLoading() async {
         install()
         defer { MediaOrigin.end() }
@@ -81,11 +81,11 @@ struct MediaVideoComponentTests {
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: video).isEmpty })
         _ = await waitUntilMedia(timeout: MediaVideo.defaultSpinnerDelay + 0.3) { false }
 
-        MediaStage.assertGolden(window, named: "video_blur")
+        MediaStage.assertGolden(window, named: "video_blur_loading")
         MediaOrigin.release(video)
     }
 
-    @Test("the dark backdrop shows before the spinner delay", .tags(.golden))
+    @Test("shows the dark backdrop before the spinner delay", .tags(.golden))
     func darkBeforeSpinner() async {
         install()
         defer { MediaOrigin.end() }
@@ -96,7 +96,7 @@ struct MediaVideoComponentTests {
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: video).isEmpty })
 
-        MediaStage.assertGolden(window, named: "video_dark")
+        MediaStage.assertGolden(window, named: "video_dark_loading")
         MediaOrigin.release(video)
     }
 
@@ -128,7 +128,7 @@ struct MediaVideoComponentTests {
         MediaOrigin.release(video)
     }
 
-    @Test("a 404 shows the failed box and reports http_4xx once", .tags(.golden))
+    @Test("a video that was never uploaded shows the failed box and reports http_4xx", .tags(.golden))
     func notFoundReportsHttp4xx() async {
         install()
         defer { MediaOrigin.end() }
@@ -161,14 +161,14 @@ struct MediaVideoComponentTests {
         #expect(recorder.all.isEmpty)
     }
 
-    @Test("a blank url shows the failed box and reports invalid_url")
-    func blankURLReportsInvalidURL() async {
+    @Test("an unresolved URL reports invalid_url without fetching")
+    func unresolvedURLReportsInvalidURL() async {
         install()
         defer { MediaOrigin.end() }
         let recorder = HealthRecorder()
         let failures = CallCount()
 
-        let window = MediaStage.mount(MediaVideo(url: "", onFailure: { failures.value += 1 }))
+        let window = MediaStage.mount(MediaVideo(url: "{{video}}", onFailure: { failures.value += 1 }))
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { failures.value > 0 })
 
@@ -177,7 +177,7 @@ struct MediaVideoComponentTests {
     }
 
     // Guards the `MediaImage` branch for a non-blank thumbnail and `canShow` in `MediaVideo.open`.
-    @Test("an unusable thumbnail reports invalid_url and the spinner still appears")
+    @Test("an unusable thumbnail is reported and does not hold back the spinner")
     func unusableThumbnailReportsAndAllowsSpinner() async {
         install()
         defer { MediaOrigin.end() }
