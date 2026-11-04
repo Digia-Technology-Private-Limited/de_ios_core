@@ -420,7 +420,10 @@ struct StoryViewer<Chrome: View>: View {
                 if page == index, let handoff, page == start { return handoff }
                 return storyPoolKey(namespace: namespace, index: page)
             },
-            pool: mediaServices.pool()
+            pool: mediaServices.pool(),
+            // Until the new page's first frame the plan names only that page; the page still on
+            // screen and the one a back-swipe returns to keep their players.
+            keepPlayersFor: [index - 1, index + 1]
         )
     }
 

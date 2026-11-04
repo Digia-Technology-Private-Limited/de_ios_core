@@ -178,7 +178,8 @@ final class StoryPlanDriver: @unchecked Sendable {
         urlOf: @Sendable (Int) -> String,
         isVideoOf: @Sendable (Int) -> Bool,
         keyOf: (@Sendable (Int) -> String?)? = nil,
-        pool: VideoPlayerPool? = nil
+        pool: VideoPlayerPool? = nil,
+        keepPlayersFor keep: Set<Int> = []
     ) {
         lock.withLock { tasks = tasks.filter { !$0.value.isCancelled } }
         var wanted: [Int: @Sendable () async -> Void] = [:]
@@ -214,7 +215,7 @@ final class StoryPlanDriver: @unchecked Sendable {
             }
             lock.withLock { tasks[index] = task }
         }
-        updatePlayerLeases(actions: actions, urlOf: urlOf, keyOf: keyOf, pool: pool)
+        updatePlayerLeases(actions: actions, urlOf: urlOf, keyOf: keyOf, pool: pool, keep: keep)
     }
 
     /// Holds one lease per `.player` action in plan (serving) order, releasing the indices
@@ -222,12 +223,16 @@ final class StoryPlanDriver: @unchecked Sendable {
     /// share is dropped and the committed holder stays. A changed holder (eviction,
     /// re-point) replaces the stale lease through the pool's identity check. A refused
     /// borrow holds nothing: the page renders its still (D3) and the driver moves on.
-    /// Nil pool/keyOf keeps the byte-only behavior.
+    /// Leases for the indices in `keep` survive a plan that no longer names them (until the
+    /// new page's first frame the plan names only that page, yet the page still on screen and
+    /// the one a back-swipe returns to must keep their players); only leases already held are
+    /// kept — `keep` never acquires. Nil pool/keyOf keeps the byte-only behavior.
     private func updatePlayerLeases(
         actions: [StoryDownloadPlan.Action],
         urlOf: (Int) -> String,
         keyOf: ((Int) -> String?)?,
-        pool: VideoPlayerPool?
+        pool: VideoPlayerPool?,
+        keep: Set<Int>
     ) {
         guard let pool, let keyOf else { return }
         var wanted: [(index: Int, key: String, url: String, priority: PoolPriority)] = []
@@ -239,7 +244,7 @@ final class StoryPlanDriver: @unchecked Sendable {
         let wantedIndices = Set(wanted.map(\.index))
         let stale: [PlayerLease] = lock.withLock {
             var dropped: [PlayerLease] = []
-            for index in leases.keys where !wantedIndices.contains(index) {
+            for index in leases.keys where !wantedIndices.contains(index) && !keep.contains(index) {
                 if let lease = leases.removeValue(forKey: index) { dropped.append(lease) }
             }
             return dropped
