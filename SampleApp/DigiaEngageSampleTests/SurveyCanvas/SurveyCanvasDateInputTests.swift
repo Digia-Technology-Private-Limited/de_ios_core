@@ -83,10 +83,10 @@ struct SurveyCanvasDateInputTests {
     }
 
     // Fails if: canvas_survey_answer_inputs.swift's Done stops calling `self.select(date)`,
-    // `formatIsoDate` changes the shape sent, or `formatDisplayDate`'s `.mmDdYyyy` case stops
-    // putting the month first.
-    @Test("a chosen date is shown in the authored format and sent as an ISO date")
-    func chosenDateShownAndSent() async throws {
+    // or `formatDisplayDate`'s `.mmDdYyyy` case stops putting the month first;
+    // or the free-text answer reaches analytics instead of being omitted.
+    @Test("a chosen date is shown in the authored format and omitted from analytics")
+    func chosenDateShownAndOmitted() async throws {
         let (sdk, key) = try await open()
         defer { sdk.tearDown() }
 
@@ -98,7 +98,11 @@ struct SurveyCanvasDateInputTests {
         try await sdk.waitUntil("the second date question") { sdk.isShowing(Self.second) }
         let answered = try await sdk.surveyCanvasTracked("Digia Question Answered", of: key, atLeast: 1)
         #expect(answered.count == 1)
-        #expect((answered.first?["properties"] as? [String: Any])?["answer_value"] as? String == "2024-03-05")
+        let props = answered.first?["properties"] as? [String: Any]
+        #expect(props?["question_type"] as? String == "date")
+        for key in ["answer_value", "answer_text", "answer_label", "answer_options", "answer"] {
+            #expect(props?[key] == nil, "\(key) carries free text")
+        }
     }
 
     // Fails if: canvas_survey_answer_inputs.swift `validDateRange` stops rejecting a minimum after

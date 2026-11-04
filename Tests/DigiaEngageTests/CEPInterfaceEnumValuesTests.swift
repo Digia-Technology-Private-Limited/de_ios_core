@@ -32,13 +32,14 @@ struct CEPInterfaceEnumValuesTests {
         #expect(DropReason.screenNotTargeted.value == "screen_not_targeted")
         #expect(DropReason.surfaceBusy.value == "surface_busy")
         #expect(DropReason.superseded.value == "superseded")
+        #expect(DropReason.hostSuppressed.value == "host_suppressed")
         #expect(DropReason.hostNotMounted.value == "host_not_mounted")
         #expect(DropReason.timeout.value == "timeout")
         #expect(DropReason.cancelled.value == "cancelled")
         #expect(DropReason.pluginDetached.value == "plugin_detached")
         #expect(DropReason.pendingExpired.value == "pending_expired")
         #expect(DropReason.error.value == "error")
-        #expect(DropReason.allCases.count == 16)
+        #expect(DropReason.allCases.count == 17)
     }
 
     @Test("DismissReason values")

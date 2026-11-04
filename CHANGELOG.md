@@ -9,6 +9,31 @@ All notable changes to Digia Engage (iOS) are documented in this file.
 - Image placeholders disappear once the picture draws, and Lottie animations no longer sit on a backdrop.
 - Blank, templated or schemeless image and Lottie URLs are reported once as `invalid_url` without a network fetch.
 
+## [4.3.2] - 2026-11-04
+
+### Bug Fixes
+
+- Fixed story pages being clipped or oversized on some screens; they now fit within the safe area.
+
+## [4.3.1] - 2026-11-04
+
+### Bug Fixes
+
+- Dialogs with the close button outside the card are now centered correctly.
+- Dialogs taller than the screen now scale down to fit within the safe area.
+- Survey bottom sheets now use the correct bottom inset and padding.
+
+## [4.3.0] - 2026-11-03
+
+### New Features
+
+- `Digia.setCampaignsSuppressed(_:)` stops overlay campaigns from showing while set; inline placements keep rendering.
+
+### Bug Fixes
+
+- Layout, rendering and interaction fixes and improvements for iPad.
+- The privacy manifest is now accurate and included with every install method.
+
 ## [4.2.0] - 2026-10-29
 
 ### Bug Fixes

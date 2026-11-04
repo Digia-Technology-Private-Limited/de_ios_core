@@ -62,6 +62,11 @@ public enum DropReason: String, CaseIterable, Sendable {
     /// Displaced by a newer trigger before it displayed.
     case superseded = "superseded"
 
+    /// The host app suppressed campaign overlays (`setCampaignsSuppressed(true)`).
+    /// Overlay types only — inline keeps rendering. A drop, never a queue:
+    /// nothing is held or replayed when suppression lifts.
+    case hostSuppressed = "host_suppressed"
+
     /// No host was mounted when the render was due.
     case hostNotMounted = "host_not_mounted"
 

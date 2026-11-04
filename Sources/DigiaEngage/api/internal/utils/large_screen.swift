@@ -33,6 +33,21 @@ internal func nudgeSheetWidth(
     return min(screenWidth, max(designWidth, 1) * maxLargeScreenUpscale)
 }
 
+/// Width of a story floater's small window in points. Phones keep the authored
+/// fraction of the screen width. On a large screen that fraction scales the
+/// window's canvas far past its authored size, so the window stops at the
+/// dialog's cap of its canvas width — never wider than the fraction gives.
+internal func floaterStoryWindowWidth(
+    screenWidth: CGFloat,
+    widthFraction: CGFloat,
+    canvasWidth: CGFloat,
+    largeScreen: Bool
+) -> CGFloat {
+    let fractionWidth = screenWidth * widthFraction
+    guard largeScreen, canvasWidth > 0 else { return fractionWidth }
+    return min(fractionWidth, canvasWidth * maxLargeScreenUpscale)
+}
+
 /// Scale of a full-screen canvas. A phone covers the viewport with it. On a
 /// large screen covering upscales the design far past its authored size and
 /// crops it, so it is fitted whole at the dialog's cap and centred on its

@@ -181,6 +181,19 @@ struct LegacySurveyChoiceTests {
         #expect(legacyResponse(body, "b_vibe") == nil)
         #expect(presentation.outcome.settledValue == nil, "the result page is still up")
 
+        // Fails if `reportSurveyAnswered` leaks the "Other" note into `Digia Question Answered`:
+        // the choice keeps its values, while the comment stays in the submission only.
+        let answered = try await sdk.legacyTracked("Digia Question Answered", of: Self.key)
+        let roleAnswer = try #require(
+            answered.first { ($0["properties"] as? [String: Any])?["question_id"] as? String == "n_role" },
+            "a Question Answered for the role")
+        let roleProps = roleAnswer["properties"] as? [String: Any] ?? [:]
+        #expect(roleProps["answer_value"] as? String == OTHER_CHOICE_ID)
+        #expect(roleProps["answer_text"] as? String == OTHER_CHOICE_ID)
+        let roleEnvelope = roleProps["answer"] as? [String: Any]
+        #expect(roleEnvelope?["values"] as? [String] == [OTHER_CHOICE_ID])
+        #expect(roleEnvelope?["comment"] == nil, "the comment stays out of the event")
+
         try await sdk.legacyTapExact("Finish")
         try await sdk.waitUntil("the survey closed") { presentation.outcome.settledValue != nil }
         #expect(presentation.dismissReason == .completed)

@@ -613,7 +613,8 @@ private struct FloaterStorySessionView: View {
 
 /// The window's rect for the given screen size.
 ///
-/// Width is a fraction of the screen and height follows the authored aspect ratio — which
+/// Width is a fraction of the screen (capped on a large screen, see
+/// `floaterStoryWindowWidth`) and height follows the authored aspect ratio — which
 /// the dashboard derives from the window canvas's own shape, so the box is always the box
 /// the author drew. Margins apply inside the safe area, so a top-corner window clears the
 /// status bar and notch and a bottom one clears the home indicator.
@@ -621,7 +622,12 @@ private func storyWindowRect(
     config: FloaterStoryConfig, screenSize: CGSize, safeInsets: EdgeInsets,
     dragFraction: FloaterFraction?
 ) -> CGRect {
-    let width = screenSize.width * config.window.widthFraction
+    let width = floaterStoryWindowWidth(
+        screenWidth: screenSize.width,
+        widthFraction: config.window.widthFraction,
+        canvasWidth: config.canvas.width,
+        largeScreen: isLargeScreen(shortestSide: min(screenSize.width, screenSize.height))
+    )
     let height = width / config.window.aspectRatio
     let margin = config.window.margin
 
