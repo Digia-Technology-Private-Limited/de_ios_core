@@ -1,26 +1,23 @@
 #!/bin/bash
 set -Eeuo pipefail
 
-# Runs the SampleApp fixture-based test suite (goldens, actions, fixture behaviour) on an iOS Simulator.
+# Runs the SampleApp fixture-based test suite (actions, fixture behaviour, and the anchorless goldens, which
+# need the app's window scene) on an iOS Simulator. Every other golden is a package test.
 # The package tests (Tests/DigiaEngageTests) run through ./run-tests.sh instead.
 #
 #   ./run-sample-tests.sh                                run every test
-#   ./run-sample-tests.sh golden                         run only tests tagged `golden` (any tag below:
-#                                                 kind    - golden, action, widget, campaign_behaviour
-#                                                 surface - nudge, canvas, floater, survey, pip, guide, inline)
-#   ./run-sample-tests.sh campaign_behaviour             campaign behaviour (CampaignBehaviour/*CampaignBehaviourTests): each
-#                                                 surface's Digia /track events, read off StubBackend after the
-#                                                 flush, beside the CEP's markings; known-bug tests run and fail
-#   RECORD_SNAPSHOTS=true ./run-sample-tests.sh golden   re-record every golden baseline instead of comparing
-#                                                 (tolerance: VisualRegression/Support/GoldenHarness.swift)
+#   ./run-sample-tests.sh actions                        run only tests tagged `actions` (any tag declared in
+#                                                 Tests/DigiaEngageTests/TestingTags.swift, as for ./run-tests.sh)
+#   RECORD_SNAPSHOTS=true ./run-sample-tests.sh          re-record the anchorless golden baselines instead of
+#                                                 comparing
 #
 # The tests live in the DigiaEngageSampleTests target and run inside the sample app: the package's own
 # test bundle has no UIApplication, so a surface that needs a window cannot be shown from it. They read
 # the shared campaigns from ../../sdk_testing_fixtures and the media from ../../testkit/mock-server.
 #
-# A test file declares its tags in a `// tags: golden nudge` line; this script runs the suites in the
-# files that carry the tag. Declare a new tag in VALID_TAGS first, so a typo is reported instead of
-# silently matching nothing.
+# A tag selects suites by their Swift Testing tags (`.tags(...)`), through `xcodebuild -only-testing-tags`.
+# It is checked against TestingTags.swift first, and a tag that runs no test fails the run, so a typo is
+# reported instead of silently matching nothing.
 #
 # The full xcodebuild output is kept in build/test-report/xcodebuild.log.
 #
@@ -30,21 +27,20 @@ set -Eeuo pipefail
 # reports/allure-report/ whenever results exist, even if tests failed. The exit code is always
 # xcodebuild's. Needs the Allure CLI (`brew install allure`); without it the raw results are still written.
 #
-#   ALLURE_KEEP_RESULTS=true ./run-sample-tests.sh action   keep existing allure-results/ and add to them
+#   ALLURE_KEEP_RESULTS=true ./run-sample-tests.sh actions  keep existing allure-results/ and add to them
 #   ./run-sample-tests.sh --report                          rebuild the HTML report from allure-results/
 #                                                    without running tests
 #   ./run-sample-tests.sh --open                            serve reports/allure-report/ in the browser
 
 cd "$(dirname "$0")"
 
-VALID_TAGS="golden action widget campaign_behaviour nudge canvas floater survey pip guide inline"
+VALID_TAGS=" $(grep -E '@Tag static var' Tests/DigiaEngageTests/TestingTags.swift | awk '{print $4}' | tr -d ':' | tr '\n' ' ')"
 
 # One pinned device and OS: goldens are rasterised by the simulator's own pipeline. Override with
 # SIMULATOR_NAME / SIMULATOR_OS (e.g. SIMULATOR_NAME="iPhone 17e" SIMULATOR_OS=26.5).
 SIMULATOR_NAME="${SIMULATOR_NAME:-iPhone 17 Pro Max}"
 SIMULATOR_OS="${SIMULATOR_OS:-26.5}"
 
-tests_dir=SampleApp/DigiaEngageSampleTests
 derived_data=.derivedData/tests
 result_bundle=.derivedData/tests.xcresult
 results_dir=allure-results
@@ -79,23 +75,15 @@ case "${1:-}" in
     ;;
 esac
 
-# A tag narrows the run to the suites in the files that carry it.
+# A tag narrows the run to the suites and tests that carry it.
 only_testing=()
 if [[ -n "${1:-}" ]]; then
-  if [[ " $VALID_TAGS " != *" $1 "* ]]; then
+  if [[ "$VALID_TAGS " != *" $1 "* ]]; then
     echo "Unknown tag '$1'. Valid tags:" >&2
     for tag in $VALID_TAGS; do echo "  $tag" >&2; done
     exit 2
   fi
-  while IFS= read -r file; do
-    while IFS= read -r suite; do
-      only_testing+=("-only-testing:DigiaEngageSampleTests/$suite")
-    done < <(grep -oE '^(final )?(struct|class) [A-Za-z0-9_]+' "$file" | awk '{print $NF}')
-  done < <(grep -rlE "^// tags:.*\b$1\b" "$tests_dir" --include='*.swift' || true)
-  if [[ ${#only_testing[@]} -eq 0 ]]; then
-    echo "No test file is tagged '$1' yet." >&2
-    exit 2
-  fi
+  only_testing=(-only-testing-tags "$1")
 fi
 
 # The pinned simulator, created when this machine has none, and booted.
@@ -133,6 +121,12 @@ xcodebuild test \
   2>&1 | tee "$report_dir/xcodebuild.log" | grep --line-buffered -E '^(✔|✘|↳|\*\* TEST|error:|.*: error:)'
 status=${PIPESTATUS[0]}
 set -e
+
+# xcodebuild reports success when a tag matches nothing; treat that as a failure.
+if [[ -n "${1:-}" && "$status" -eq 0 ]] && ! grep -qE '^◇ Test .* started|^Test Case .* started' "$report_dir/xcodebuild.log"; then
+  echo "No test is tagged '$1' in DigiaEngageSampleTests." >&2
+  status=1
+fi
 
 if [[ -d "$result_bundle" ]]; then
   python3 -I Scripts/xcresult-to-allure.py "$result_bundle" "$results_dir" || true

@@ -30,21 +30,27 @@ private struct InlineCarouselView: View {
     /// Items with a usable image, so `items[i]` (image + deepLink) stays aligned
     /// with the page index used for rendering and analytics.
     private var items: [CarouselItem] { config.items.filter { !$0.imageUrl.isEmpty } }
-    /// ACarousel-style boundary clone: displayed slides are `[last] + items + [first]`
-    /// (N+2 total), so "infinite" scroll needs only two extra slides instead of a
-    /// multi-lap window. Landing on a clone silently re-centers onto its real
-    /// counterpart (see `onChange` below) — imperceptible since the clone is
-    /// pixel-identical to the item it stands in for.
+    /// ACarousel-style boundary clones: `loopClones` copies of the trailing items
+    /// lead, and as many of the leading items trail, so "infinite" scroll needs only
+    /// a few extra slides instead of a multi-lap window. Landing on a clone silently
+    /// re-centers onto its real counterpart (see `onChange` below) — imperceptible
+    /// since the clone is pixel-identical to the item it stands in for.
     private var loopEnabled: Bool { config.infiniteScroll && items.count > 1 }
-    private var pageCount: Int { loopEnabled ? items.count + 2 : items.count }
-    /// Maps a display index (over `pageCount`) to a real index into `items`. Also
-    /// correctly resolves the two boundary clones themselves — display index `0`
-    /// (clone of the last item) and `pageCount - 1` (clone of the first item) fall
-    /// out of the same modulo formula as their real counterparts.
+    /// Enough clones that the neighbours peeking beside a clone are real slides
+    /// too; with one clone a side, a strip that had just wrapped onto a clone
+    /// showed an empty gap where the next slide should peek in.
+    private var loopClones: Int {
+        let fraction = min(max(config.viewportFraction, 0.1), 1)
+        return Int(((1 - fraction) / (2 * fraction)).rounded(.up)) + 1
+    }
+    private var pageCount: Int { loopEnabled ? items.count + 2 * loopClones : items.count }
+    /// Maps a display index (over `pageCount`) to a real index into `items`. The
+    /// boundary clones fall out of the same modulo formula as their real
+    /// counterparts.
     private func realIndex(_ displayIndex: Int) -> Int {
         guard loopEnabled else { return displayIndex }
         let n = items.count
-        return (((displayIndex - 1) % n) + n) % n
+        return (((displayIndex - loopClones) % n) + n) % n
     }
     private var currentIndex: Int { realIndex(scrollPosition ?? 0) }
     /// Set just before a silent (non-animated) recenter jump, so the resulting
@@ -115,7 +121,7 @@ private struct InlineCarouselView: View {
                 .frame(maxWidth: .infinity)
                 .onAppear {
                     if scrollPosition == nil {
-                        scrollPosition = loopEnabled ? 1 : 0
+                        scrollPosition = loopEnabled ? loopClones : 0
                     }
                     startAutoPlay()
                 }
@@ -138,8 +144,8 @@ private struct InlineCarouselView: View {
                     // triggered it can race the in-flight scroll-view-aligned settle
                     // animation, which is what caused the old "stuck after autoplay"
                     // symptom.
-                    if loopEnabled, idx == 0 || idx == pageCount - 1 {
-                        let target = idx == 0 ? pageCount - 2 : 1
+                    if loopEnabled, idx < loopClones || idx >= loopClones + items.count {
+                        let target = idx < loopClones ? idx + items.count : idx - items.count
                         isRecentering = true
                         DispatchQueue.main.async {
                             var transaction = Transaction()

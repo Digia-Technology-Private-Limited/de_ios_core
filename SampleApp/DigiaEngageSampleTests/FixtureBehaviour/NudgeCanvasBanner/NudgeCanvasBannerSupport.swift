@@ -1,4 +1,3 @@
-import Darwin
 import SwiftUI
 import Testing
 import UIKit
@@ -84,162 +83,14 @@ extension SdkHarness {
     @discardableResult
     func drag(
         from start: CGPoint, by offset: CGVector, steps: Int = 20, release: Bool = true
-    ) throws -> NudgeCanvasDrag {
-        let drag = try NudgeCanvasDrag(window: try #require(window), start: start)
+    ) throws -> TouchSynthesizer.Finger {
+        let drag = try TouchSynthesizer.Finger(window: try #require(window), start: start)
         for step in 1...steps {
             let fraction = CGFloat(step) / CGFloat(steps)
             try drag.move(to: CGPoint(x: start.x + offset.dx * fraction, y: start.y + offset.dy * fraction))
         }
         if release { try drag.release() }
         return drag
-    }
-}
-
-/// One finger on the touchscreen: down, any number of moves, up — the digitizer events
-/// `TouchSynthesizer` sends for a tap, with moves in between, so SwiftUI's `DragGesture` sees a
-/// real drag. Same private seam (`UIApplication._enqueueHIDEvent`) and the same caveats.
-@MainActor
-final class NudgeCanvasDrag {
-    private let window: UIWindow
-    private let application: UIApplication
-    private let hid: NudgeCanvasHIDEvents
-    private let contextID: UInt32
-    private(set) var location: CGPoint
-
-    init(window: UIWindow, start: CGPoint) throws {
-        guard let application = (UIApplication.self as AnyObject)
-            .perform(NSSelectorFromString("sharedApplication"))?.takeUnretainedValue() as? UIApplication
-        else { throw TouchSynthesizer.Unavailable(description: "No UIApplication") }
-        self.window = window
-        self.application = application
-        hid = try NudgeCanvasHIDEvents()
-        let selector = NSSelectorFromString("_contextId")
-        guard window.responds(to: selector) else {
-            throw TouchSynthesizer.Unavailable(description: "UIWindow._contextId")
-        }
-        typealias Fn = @convention(c) (NSObject, Selector) -> UInt32
-        contextID = unsafeBitCast(window.method(for: selector), to: Fn.self)(window, selector)
-        location = start
-        try send(.down)
-        TouchSynthesizer.drainRunLoop(for: 0.05)
-    }
-
-    /// Moves the finger to [point] (window coordinates) and lets a frame pass.
-    func move(to point: CGPoint) throws {
-        location = point
-        try send(.moved)
-        TouchSynthesizer.drainRunLoop(for: 0.016)
-    }
-
-    /// Lifts the finger where it is and lets the release's handlers run.
-    func release() throws {
-        try send(.up)
-        TouchSynthesizer.drainRunLoop(for: 0.15)
-    }
-
-    private func send(_ phase: NudgeCanvasHIDEvents.Phase) throws {
-        let event = try hid.handEvent(at: window.convert(location, to: nil), phase: phase, contextID: contextID)
-        defer { hid.release(event) }
-        let selector = NSSelectorFromString("_enqueueHIDEvent:")
-        guard application.responds(to: selector) else {
-            throw TouchSynthesizer.Unavailable(description: "UIApplication._enqueueHIDEvent:")
-        }
-        typealias Fn = @convention(c) (NSObject, Selector, UnsafeMutableRawPointer) -> Void
-        unsafeBitCast(application.method(for: selector), to: Fn.self)(application, selector, event)
-    }
-}
-
-/// IOKit's digitizer hand events, as `TouchSynthesizer`'s private `HIDEvents` builds them, plus
-/// the "moved" phase a drag needs (only the position changes; the finger stays in range and
-/// touching).
-private struct NudgeCanvasHIDEvents {
-    enum Phase { case down, moved, up }
-
-    private typealias CreateDigitizerEvent = @convention(c) (
-        UnsafeRawPointer?, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32,
-        Double, Double, Double, Double, Double, UInt8, UInt8, UInt32
-    ) -> UnsafeMutableRawPointer?
-    private typealias CreateFingerEvent = @convention(c) (
-        UnsafeRawPointer?, UInt64, UInt32, UInt32, UInt32,
-        Double, Double, Double, Double, Double, Double, Double, Double, Double, Double,
-        UInt8, UInt8, UInt32
-    ) -> UnsafeMutableRawPointer?
-    private typealias SetIntegerValue = @convention(c) (UnsafeMutableRawPointer, UInt32, Int, UInt32) -> Void
-    private typealias SetSenderID = @convention(c) (UnsafeMutableRawPointer, UInt64) -> Void
-    private typealias AppendEvent = @convention(c) (UnsafeMutableRawPointer, UnsafeMutableRawPointer, UInt32) -> Void
-    private typealias SetDigitizerInfo = @convention(c) (
-        UnsafeMutableRawPointer, UInt32, UInt8, UInt8, UnsafeRawPointer?, Double, Float
-    ) -> Void
-    private typealias Release = @convention(c) (UnsafeMutableRawPointer) -> Void
-
-    private static let transducerHand: UInt32 = 3
-    private static let eventRange: UInt32 = 1
-    private static let eventTouch: UInt32 = 2
-    private static let eventPosition: UInt32 = 4
-    private static let fieldBuiltIn: UInt32 = 4
-    private static let fieldDisplayIntegrated: UInt32 = (11 << 16) + 25
-    private static let fieldOptions = UInt32(bitPattern: -268_435_456)
-    private static let fingerIdentity: UInt32 = 2
-
-    private let createDigitizerEvent: CreateDigitizerEvent
-    private let createFingerEvent: CreateFingerEvent
-    private let setIntegerValue: SetIntegerValue
-    private let setSenderID: SetSenderID
-    private let appendEvent: AppendEvent
-    private let setDigitizerInfo: SetDigitizerInfo
-    private let cfRelease: Release
-
-    init() throws {
-        let iokit = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW)
-        let backboard = dlopen(
-            "/System/Library/PrivateFrameworks/BackBoardServices.framework/BackBoardServices", RTLD_NOW)
-        func symbol<T>(_ handle: UnsafeMutableRawPointer?, _ name: String, as _: T.Type) throws -> T {
-            guard let pointer = dlsym(handle, name) else {
-                throw TouchSynthesizer.Unavailable(description: name)
-            }
-            return unsafeBitCast(pointer, to: T.self)
-        }
-        createDigitizerEvent = try symbol(iokit, "IOHIDEventCreateDigitizerEvent", as: CreateDigitizerEvent.self)
-        createFingerEvent = try symbol(
-            iokit, "IOHIDEventCreateDigitizerFingerEventWithQuality", as: CreateFingerEvent.self)
-        setIntegerValue = try symbol(iokit, "IOHIDEventSetIntegerValueWithOptions", as: SetIntegerValue.self)
-        setSenderID = try symbol(iokit, "IOHIDEventSetSenderID", as: SetSenderID.self)
-        appendEvent = try symbol(iokit, "IOHIDEventAppendEvent", as: AppendEvent.self)
-        setDigitizerInfo = try symbol(backboard, "BKSHIDEventSetDigitizerInfo", as: SetDigitizerInfo.self)
-        cfRelease = try symbol(iokit, "CFRelease", as: Release.self)
-    }
-
-    func handEvent(at location: CGPoint, phase: Phase, contextID: UInt32) throws -> UnsafeMutableRawPointer {
-        let time = mach_absolute_time()
-        let touching: UInt8 = phase == .up ? 0 : 1
-        let changed = phase == .moved ? Self.eventPosition : (Self.eventRange | Self.eventTouch)
-        guard
-            let hand = createDigitizerEvent(
-                nil, time, Self.transducerHand, 0, 0, changed, 0, 0, 0, 0, 0, 0, touching, touching, 0)
-        else { throw TouchSynthesizer.Unavailable(description: "IOHIDEventCreateDigitizerEvent returned nil") }
-        setIntegerValue(hand, Self.fieldDisplayIntegrated, 1, Self.fieldOptions)
-        setIntegerValue(hand, Self.fieldBuiltIn, 1, Self.fieldOptions)
-        setSenderID(hand, 0x0000_0001_2345_6789)
-
-        guard
-            let finger = createFingerEvent(
-                nil, time, 1, Self.fingerIdentity, changed,
-                Double(location.x), Double(location.y), 0, 0, 0, 5, 5, 1, 1, 1,
-                touching, touching, 0)
-        else {
-            cfRelease(hand)
-            throw TouchSynthesizer.Unavailable(
-                description: "IOHIDEventCreateDigitizerFingerEventWithQuality returned nil")
-        }
-        setIntegerValue(finger, Self.fieldDisplayIntegrated, 1, Self.fieldOptions)
-        appendEvent(hand, finger, 0)
-        cfRelease(finger)
-        setDigitizerInfo(hand, contextID, 0, 0, nil, 0, 0)
-        return hand
-    }
-
-    func release(_ event: UnsafeMutableRawPointer) {
-        cfRelease(event)
     }
 }
 

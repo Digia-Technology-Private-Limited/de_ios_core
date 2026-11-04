@@ -123,7 +123,7 @@ struct RecordingBadgeTests {
         #expect(abs(start.minX - 8) <= 1, "starts on the leading edge")
 
         // Released right of centre: snaps to the trailing edge.
-        try WidgetsBadgeDrag.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: start.midX, y: start.midY), by: CGVector(dx: window.bounds.width * 0.6, dy: 200),
             in: window, duration: 0.4, hold: 0.3)
         let right = try await sdk.widgetsSteadyFrame("the bubble after the drag") { Digia.debugBadgeFrame }
@@ -131,14 +131,14 @@ struct RecordingBadgeTests {
         #expect(abs(right.minY - (start.minY + 200)) <= 2)
 
         // A short drag that ends still right of centre goes back to the trailing edge.
-        try WidgetsBadgeDrag.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: right.midX, y: right.midY), by: CGVector(dx: -40, dy: 0),
             in: window, duration: 0.3, hold: 0.3)
         let stillRight = try await sdk.widgetsSteadyFrame("the bubble after a short drag") { Digia.debugBadgeFrame }
         #expect(abs(stillRight.maxX - (window.bounds.width - 8)) <= 1)
 
         // Released left of centre: back on the leading edge, at the height it was dropped.
-        try WidgetsBadgeDrag.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: stillRight.midX, y: stillRight.midY), by: CGVector(dx: -window.bounds.width * 0.6, dy: -100),
             in: window, duration: 0.4, hold: 0.3)
         let left = try await sdk.widgetsSteadyFrame("the bubble back") { Digia.debugBadgeFrame }
@@ -156,7 +156,7 @@ struct RecordingBadgeTests {
         overlay.setVisible(true)
         let start = try await sdk.widgetsSteadyFrame("the bubble") { Digia.debugBadgeFrame }
 
-        try WidgetsBadgeDrag.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: start.midX, y: start.midY), by: CGVector(dx: 0, dy: -start.minY - 200),
             in: window, duration: 0.4, hold: 0.3)
 

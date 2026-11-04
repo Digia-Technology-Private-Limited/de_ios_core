@@ -116,6 +116,10 @@ struct CampaignCanvasView: View {
     let availableSize: CGSize
     let onAction: (CampaignCanvasActionRequest) -> Void
     var showBackground = true
+    /// True when the window is a large screen (tablet). Only the full-screen
+    /// branch reads it; every other surface keeps today's scale. Defaults to
+    /// false so existing call sites keep phone behaviour.
+    var largeScreen: Bool = false
     @ObservedObject private var theme = CampaignCanvasTheme.shared
     @Environment(\.colorScheme) private var colorScheme
 
@@ -126,6 +130,22 @@ struct CampaignCanvasView: View {
     }
     var fittedScale: CGFloat {
         if surface.isFullScreen {
+            // On a large screen the whole authored canvas fits without cropping
+            // (contain) at the dialog's cap, centred on its full-bleed
+            // background; phones keep covering the viewport. Mirrors Android's
+            // `fullScreenCanvasScale`.
+            if largeScreen {
+                let viewportScale =
+                    (runtimeViewportWidth ?? availableSize.width) / max(designWidth, 1)
+                return fullScreenCanvasScale(
+                    authoredWidth: canvas.width,
+                    authoredHeight: canvas.height,
+                    viewportScale: viewportScale,
+                    availableWidth: availableSize.width,
+                    availableHeight: availableSize.height,
+                    largeScreen: true
+                )
+            }
             // Fill the content viewport uniformly; its centered, clipped parent
             // crops overflow without changing the authored composition.
             return max(
@@ -145,7 +165,8 @@ struct CampaignCanvasView: View {
                 ? 0 : surface.cornerRadius / max(designScale, 0.001),
             isDark: theme.isDark(colorScheme),
             showBackground: showBackground,
-            onAction: onAction
+            onAction: onAction,
+            squareBottomCorners: surface.isBottomSheet
         )
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
         .scaleEffect(fittedScale, anchor: surface.isFullScreen ? .center : .topLeading)
@@ -563,6 +584,9 @@ struct CampaignCanvasStage: View {
     /// touch.
     var backgroundTakesTouches = true
     var animateWidgetsOnAppear = true
+    /// A bottom sheet rounds only its top edge, as on Android and Flutter; its
+    /// bottom sits on the screen edge.
+    var squareBottomCorners = false
 
     /// Where a tap that carries `Action.showStory` is routed.
     ///
@@ -588,6 +612,11 @@ struct CampaignCanvasStage: View {
             guard case .widget(_, _, let widget) = child, case .story = widget else { return nil }
             return widget
         }.first
+    }
+
+    private var stageClipShape: CampaignCanvasStageClip {
+        CampaignCanvasStageClip(
+            radius: max(0, authoredCornerRadius), squareBottomCorners: squareBottomCorners)
     }
 
     var body: some View {
@@ -616,7 +645,7 @@ struct CampaignCanvasStage: View {
             }
         }
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
-        .clipShape(RoundedRectangle(cornerRadius: max(0, authoredCornerRadius)))
+        .clipShape(stageClipShape)
         .fullScreenCover(
             isPresented: Binding(
                 get: { storyOpenIndex != nil && story != nil },
@@ -2393,6 +2422,24 @@ private struct CanvasOutsideShadowRing: Shape {
             path.addPath(CampaignCanvasRoundedShape(radius: radius).path(in: inner))
         }
         return path
+    }
+}
+
+/// A canvas stage's clip. Every canvas but a bottom sheet keeps the `RoundedRectangle`
+/// it always had, so its corner curve is unchanged on phones; a bottom sheet rounds
+/// only its top edge.
+struct CampaignCanvasStageClip: Shape {
+    let radius: CGFloat
+    let squareBottomCorners: Bool
+
+    func path(in rect: CGRect) -> Path {
+        guard squareBottomCorners else {
+            return RoundedRectangle(cornerRadius: radius).path(in: rect)
+        }
+        return CampaignCanvasRoundedShape(
+            radius: CampaignCanvasCornerRadius(
+                topLeft: radius, topRight: radius, bottomRight: 0, bottomLeft: 0)
+        ).path(in: rect)
     }
 }
 

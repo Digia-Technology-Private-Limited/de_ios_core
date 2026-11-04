@@ -2,6 +2,17 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [4.3.0] - 2026-11-03
+
+### New Features
+
+- `Digia.setCampaignsSuppressed(_:)` stops overlay campaigns from showing while set; inline placements keep rendering.
+
+### Bug Fixes
+
+- Layout, rendering and interaction fixes and improvements for iPad.
+- The privacy manifest is now accurate and included with every install method.
+
 ## [4.2.0] - 2026-10-29
 
 ### Bug Fixes

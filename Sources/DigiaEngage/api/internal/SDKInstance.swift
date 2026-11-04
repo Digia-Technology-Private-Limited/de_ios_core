@@ -96,6 +96,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private var _currentScreen: String?
     internal var currentScreenForAnchorless: String? { _currentScreen }
     private(set) var lastCampaignDropReason: String?
+    /// Whether the host app asked campaign overlays to stay off screen
+    /// (`Digia.setCampaignsSuppressed`). In memory only and `false` on cold
+    /// start; settable before `initialize()` and untouched by
+    /// `setUserId`/`clearUserId`. While set, overlay deliveries (nudge, guide,
+    /// floater, survey) drop as `host_suppressed` — inline keeps rendering and
+    /// anything already showing is left alone.
+    private(set) var campaignsSuppressed = false
     private var activeExternalGuide: ExternalGuide?
     private var screenUpdateRevision = 0
     private var captureInFlight = false
@@ -128,6 +135,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     // storage or builds a collaborator. The services themselves take storage
     // as given and have no fallbacks (D6).
     private let storage: LocalStorage
+    private let healthSink: HealthSink
     /// Owns the analytics database file for the life of the process. Lives
     /// here rather than in ``SDKServices`` so a retried `initialize()` reuses
     /// it: a second queue on the same file would interleave with the first.
@@ -220,9 +228,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         makeAnalyticsQueue: (_ legacyStorage: LocalStorage) -> any AnalyticsQueueProtocol = { _ in
             MemoryAnalyticsQueue()
         },
-        makeNetworkMonitor: @escaping () -> any NetworkMonitor = { AlwaysOnlineNetworkMonitor() }
+        makeNetworkMonitor: @escaping () -> any NetworkMonitor = { AlwaysOnlineNetworkMonitor() },
+        healthSink: HealthSink = .shared
     ) {
         self.makeNetworkMonitor = makeNetworkMonitor
+        self.healthSink = healthSink
         self.defaults = defaults
         self.legacyDefaults = legacyDefaults
         self.clock = clock
@@ -362,7 +372,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         self.config = config
         // Pending mode (SP10): allowlisted records from here until `activate`
         // below are queued, not lost.
-        HealthSink.shared.beginPending()
+        healthSink.beginPending()
         DigiaLogger.configure(config.logLevel)
         DigiaEndpoints.configure(config)
         let services = SDKServices(
@@ -399,6 +409,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // registry needs only services, and anchors that mounted before this
         // point wait on it.
         configureComponentRegistry(config: config, services: services)
+
+        // The cached SDK config applies in this same synchronous step, before any event.
+        // A first install has none: health events wait for the config call to answer.
+        let configStore = SdkConfigStore(storage: storage.scoped("sdk_config"), projectKey: config.apiKey)
+        if let cached = configStore.cached {
+            applySdkConfig(cached)
+            activateHealthSink()
+        }
+        startSdkConfigFetch(configStore)
 
         // `completeInitialization` marks the SDK ready once the bundle lands. A
         // trigger that arrives before then is dropped, never held (SP5).
@@ -456,15 +475,31 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Increments on reset so a fetch started before it cannot land after it.
     private var initGeneration = 0
     private var fetchTask: Task<Void, Never>?
+    /// Exposed for tests to await.
+    private(set) var sdkConfigFetchTask: Task<Void, Never>?
+
+    /// Not awaited. A failed call changes nothing, except that a first install with no
+    /// cached config runs on the defaults from here, which also sends the held health events.
+    private func startSdkConfigFetch(_ store: SdkConfigStore) {
+        let generation = initGeneration
+        sdkConfigFetchTask = Task { @MainActor [weak self, networkClient] in
+            let fetched = await store.fetch(using: networkClient)
+            guard let self, self.initGeneration == generation else { return }
+            let firstInstall = store.cached == nil
+            guard let config = fetched ?? (firstInstall ? SdkConfig.defaults : nil) else { return }
+            self.applySdkConfig(config)
+            self.activateHealthSink()
+        }
+    }
+
+    private func applySdkConfig(_ config: SdkConfig) {
+        healthSink.applyConfig(enabled: config.healthEnabled, sessionCap: config.healthSessionCap)
+    }
 
     private func applyFetchResult(_ fetched: Result<CampaignBundle, Error>) {
         var campaigns: [CampaignModel] = []
         switch fetched {
         case .success(let bundle):
-            // Applied before the sink activates, so parse-stage records queued
-            // during `fetch()` obey this bundle's kill switch.
-            HealthSink.shared.applyBundleConfig(
-                enabled: bundle.healthEnabled, sessionCap: bundle.healthSessionCap)
             campaigns = bundle.campaigns
             currentDesignTokens = bundle.designTokens
             currentTimeAnchor = bundle.timeAnchor
@@ -484,23 +519,20 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             // Not ready with an empty store (SP7): every trigger drops
             // `initialization_failed` until the host calls `initialize()` again.
             sdkState = .failed
-            activateHealthSink()
             return
         }
-        activateHealthSink()
         needsPlugin = !campaigns.isEmpty
         completeInitialization(campaigns)
     }
 
-    /// Lets queued health records flow, after `applyBundleConfig` has read the kill switch.
-    /// A failed fetch keeps the default, so `fetch_failed_auth` still reaches the backend.
+    /// Lets queued health records flow, once a config has been applied.
     private func activateHealthSink() {
         guard let analytics = services?.analyticsService, analytics.isEnabled else {
             // Nothing can send, so dedup and cap must not be spent.
-            HealthSink.shared.deactivate()
+            healthSink.deactivate()
             return
         }
-        HealthSink.shared.activate { [weak self] payload in
+        healthSink.activate { [weak self] payload in
             Task { @MainActor [weak self] in
                 self?.services?.analyticsService?.captureHealth(
                     campaignKey: payload.campaignKey,
@@ -1188,27 +1220,19 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             )
         }
 
+        // Every guide, anchored or anchorless, ends on any real screen change, whatever its
+        // targetScreenNames, as on Android and Flutter: its steps point at the screen it opened on.
+        // An empty allowlist means "every screen" for a nudge, and read that way it kept a guide up
+        // over a screen it no longer belonged to. `setCurrentScreen` only calls this on a real
+        // change, so re-setting the same screen leaves the guide up.
         if let guide = guideOrchestrator.state {
-            if let pageKey = guide.steps.first?.target.anchorlessTarget?.pageKey,
-               pageKey != _currentScreen {
-                liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
-                    DropReason.screenNotTargeted,
-                    message: "screen changed before the Guide was shown"
-                )
-                dismissGuide(reason: .screenExit)
-            } else if guide.steps.first?.target.anchorlessTarget == nil {
-                // An anchored guide ends on any screen change, whatever its targetScreenNames, as on
-                // Flutter: its steps point at views on the screen it opened on. An empty allowlist means
-                // "every screen" for a nudge, and read that way it kept a guide up over a screen it no
-                // longer belonged to.
-                log.d("Dismissed — screen changed (type=guide, currentScreen=\(_currentScreen ?? "<unset>"))",
-                      campaign: guide.campaign.campaignKey)
-                liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
-                    DropReason.screenNotTargeted,
-                    message: "screen changed before the Guide was shown"
-                )
-                dismissGuide(reason: .screenExit)
-            }
+            log.d("Dismissed — screen changed (type=guide, currentScreen=\(_currentScreen ?? "<unset>"))",
+                  campaign: guide.campaign.campaignKey)
+            liveTestContexts[guide.payload.cepCampaignId]?.reportFailed(
+                DropReason.screenNotTargeted,
+                message: "screen changed before the Guide was shown"
+            )
+            dismissGuide(reason: .screenExit)
         }
 
         if let guide = activeExternalGuide {
@@ -1636,6 +1660,19 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             log.e("Dropped — \(reason)", campaign: key)
             context.onDropped(DropReason.invalidConfig, message: reason)
             return .dropped(reason: .invalidConfig, detail: reason, cause: "channel_mismatch")
+        }
+        // While the host suppresses overlays, an overlay delivery drops here —
+        // after key lookup and the channel-mismatch check above, so those reasons
+        // stay visible, and before targeting, caps and the surface rule, so a
+        // suppressed trigger never consumes a frequency cap. Inline is never
+        // suppressed. The drop settles through `routeNow`, which releases the CEP
+        // hold, and it carries no health extras — a host choice, not an SDK fault.
+        if campaignsSuppressed, !Self.isInlineKind(campaign) {
+            let detail = "campaign overlays suppressed by host"
+            lastCampaignDropReason = detail
+            log.d("Dropped — \(detail)", campaign: key)
+            context.onDropped(DropReason.hostSuppressed, message: detail)
+            return .dropped(reason: .hostSuppressed, detail: detail)
         }
         if !campaign.targetScreenNames.isEmpty
             && !campaign.targetScreenNames.contains(_currentScreen ?? "")
@@ -2191,28 +2228,35 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         ensureWelcomeStartIfNoWelcome(state)
         let block = state.config.blockForNode(stepId)
         let values = Self.stringArray(answer["values"])
-        let comment = Self.stringValue(answer["comment"])
         let viewedKey = Self.questionKey(token: state.token, nodeId: stepId)
         let timeToAnswerMs: Int64? = questionViewedAt[viewedKey].map {
             Int64(Date().timeIntervalSince($0) * 1000)
         }
         questionViewedAt.removeValue(forKey: viewedKey)
         let scaleBounds = block.flatMap(Self.scaleBounds)
+        let typeWire = block?.type.rawValue
+        let openEnded = block.map { Self.openEndedQuestionTypes.contains($0.type) } ?? false
+        var sanitizedAnswer = answer
+        sanitizedAnswer.removeValue(forKey: "comment")
+        let answerValue: String? = openEnded ? nil : values.first
+        let answerText: String? = openEnded ? nil : (values.isEmpty ? nil : values.joined(separator: ", "))
+        let answerLabel: String? = openEnded ? nil : block.flatMap { Self.answerLabel(block: $0, values: values) }
+        let answerOptions: [String]? = openEnded ? nil : (values.count > 1 ? values : nil)
         events.toDigia(
             SurveyEvent.QuestionAnswered(
                 questionId: stepId,
                 questionTitle: block.flatMap(Self.questionTitle),
-                questionType: block?.type.rawValue,
-                answerValue: values.first,
-                answerText: comment ?? (values.isEmpty ? nil : values.joined(separator: ", ")),
-                blockType: block?.type.rawValue,
+                questionType: typeWire,
+                answerValue: answerValue,
+                answerText: answerText,
+                blockType: typeWire,
                 blockId: block?.id,
-                answerLabel: block.flatMap { Self.answerLabel(block: $0, values: values) },
-                answerOptions: values.count > 1 ? values : nil,
+                answerLabel: answerLabel,
+                answerOptions: answerOptions,
                 scaleMin: scaleBounds?.min,
                 scaleMax: scaleBounds?.max,
                 timeToAnswerMs: timeToAnswerMs,
-                answer: Self.foundation(answer)
+                answer: openEnded ? [:] : Self.foundation(sanitizedAnswer)
             ),
             payload: state.payload
         )
@@ -2399,6 +2443,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             return
         }
         services.identityManager.clearUserId()
+    }
+
+    /// Suppresses campaign overlays while the host app shows its own UI (e.g. a
+    /// modal), and restores them when it closes. See
+    /// `Digia.setCampaignsSuppressed`.
+    func setCampaignsSuppressed(_ suppressed: Bool) {
+        guard campaignsSuppressed != suppressed else { return }
+        campaignsSuppressed = suppressed
+        log.d("Campaign overlays \(suppressed ? "suppressed" : "restored") by host")
     }
 
     /// Removes inline content (carousel/story/payload) for each key in `placementKeys`.
@@ -3491,6 +3544,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
+    private static let openEndedQuestionTypes: Set<SurveyBlockType> = [
+        .shortText, .longText, .number, .email, .date
+    ]
+
     /// Stable per-question key for `questionViewedAt`. Scoped by survey token
     /// so a re-show of the same survey doesn't reuse a stale viewed-at.
     private static func questionKey(token: Int64, nodeId: String) -> String {
@@ -3508,14 +3565,19 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         activePlugin = nil
         pendingAttach = nil
         _currentScreen = nil
+        campaignsSuppressed = false
         initGeneration &+= 1
         fetchTask?.cancel()
         fetchTask = nil
+        sdkConfigFetchTask?.cancel()
+        sdkConfigFetchTask = nil
         services?.tearDown()
         services = nil
         currentSession.set(nil, requestHeaders: [:])
         campaignStore.clear()
         liveTestService.stop()
+        // Else a test that resets without initializing inherits the last config and ACKs past the cleared override.
+        liveTestService.ackReporter.resetForTesting()
         config = nil
         hostActionExecutor.clearHandlers()
         sdkState = .notInitialized

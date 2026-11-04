@@ -6,14 +6,15 @@ import UIKit
 @testable import DigiaEngage
 
 /// Every way a PiP or story floater ends and the exact chain it sends. Both float over the app, so the CEP's
-/// hold comes back at the impression while they keep running. Real touches through `SdkHarness`.
+/// hold comes back at the impression while they keep running. The cases that need a real touch; the rest run in the package, in
+/// `Tests/DigiaEngageTests/CampaignBehaviour/FloaterCampaignBehaviourTests.swift`. Real touches through `SdkHarness`.
 ///
 /// The chrome's glyph buttons carry no accessibility label, so a test tells them apart by the fixed corner
 /// each sits in; the touch on them is still a real one.
 ///
 /// platform note: the Dart twin is `test/campaign_behaviour/floating_campaign_behaviour_test.dart`.
 @MainActor
-@Suite("Floater campaign behaviour", .serialized, .tags(.integration, .floater, .pip, .analytics))
+@Suite("Floater campaign behaviour: real touches", .serialized, .tags(.integration, .floater, .pip, .analytics))
 struct FloaterCampaignBehaviourTests {
     private func fixture(_ path: String) -> WorkspaceFixtures.Campaign { WorkspaceFixtures.campaign(path) }
 
@@ -30,15 +31,15 @@ struct FloaterCampaignBehaviourTests {
     /// A real touch on the button nearest `corner` of the area the floater's buttons span.
     private func pressButton(_ sdk: SdkHarness, _ corner: UnitPoint) async throws {
         let window = try #require(sdk.window)
-        let frames = UIProbe.buttonFrames(in: window)
-        try #require(!frames.isEmpty, "no buttons on screen")
-        let bounds = frames.reduce(frames[0]) { $0.union($1) }
+        let buttons = try sdk.floaterButtons(in: window.bounds)
+        try #require(!buttons.isEmpty, "no buttons on screen")
+        let bounds = buttons.reduce(CGRect(origin: buttons[0], size: .zero)) {
+            $0.union(CGRect(origin: $1, size: .zero))
+        }
         let target = CGPoint(x: bounds.minX + corner.x * bounds.width, y: bounds.minY + corner.y * bounds.height)
-        let frame = try #require(
-            frames.min {
-                hypot($0.midX - target.x, $0.midY - target.y) < hypot($1.midX - target.x, $1.midY - target.y)
-            })
-        try await sdk.touch(window.convert(CGPoint(x: frame.midX, y: frame.midY), from: window.screen.coordinateSpace))
+        let button = try #require(
+            buttons.min { hypot($0.x - target.x, $0.y - target.y) < hypot($1.x - target.x, $1.y - target.y) })
+        try await sdk.touch(button)
         try await sdk.settle(1)
     }
 
@@ -57,24 +58,6 @@ struct FloaterCampaignBehaviourTests {
 
         expectChain(
             await sdk.sent(key), d, names: [Chain.triggered, Chain.viewed, Chain.dismissed], reason: .userClose,
-            hold: .floating)
-    }
-
-    @Test("pip: auto-dismiss: dismissed as auto_timeout", .tags(.slow))
-    func pipAutoDismiss() async throws {
-        let key = "test_pip_auto_dismiss"
-        let sdk = try await start("campaigns/pip/pip_auto_dismiss.json")
-        defer { sdk.tearDown() }
-        let d = try sdk.deliverChain(key)
-        try await show(sdk, d)
-
-        // The fixture's autoDismissAfterMs is 3000.
-        try await sdk.waitUntil("the PiP has timed out", timeout: 5) {
-            SDKInstance.shared.floaterOrchestrator.state == nil
-        }
-
-        expectChain(
-            await sdk.sent(key), d, names: [Chain.triggered, Chain.viewed, Chain.dismissed], reason: .autoTimeout,
             hold: .floating)
     }
 
@@ -119,35 +102,6 @@ struct FloaterCampaignBehaviourTests {
             reason: .ctaAction, cepClicks: 0, hold: .floating, wireReason: "cta_taken")
     }
 
-    @Test("pip: leaving its screen: dismissed as screen_exit")
-    func pipLeavingItsScreen() async throws {
-        let key = "test_pip_screen_change_home_only"
-        let sdk = try await start("campaigns/pip/pip_screen_change_home_only.json")
-        defer { sdk.tearDown() }
-        Digia.setCurrentScreen(name: "home")
-        let d = try sdk.deliverChain(key)
-        try await show(sdk, d)
-
-        Digia.setCurrentScreen(name: "search")
-        try await sdk.settle()
-
-        expectChain(
-            await sdk.sent(key), d, names: [Chain.triggered, Chain.viewed, Chain.dismissed], reason: .screenExit,
-            hold: .floating)
-    }
-
-    @Test("pip: off its target screen: screen_not_targeted")
-    func pipOffTargetScreen() async throws {
-        let key = "test_pip_screen_change_home_only"
-        let sdk = try await start("campaigns/pip/pip_screen_change_home_only.json")
-        defer { sdk.tearDown() }
-        Digia.setCurrentScreen(name: "search")
-        let d = try sdk.deliverChain(key)
-        try await sdk.settle(1.5)
-
-        expectDropped(await sdk.sent(key), d, .screenNotTargeted)
-    }
-
     // MARK: - Story floater
 
     @Test("story floater: close button: dismissed as user_close")
@@ -169,24 +123,6 @@ struct FloaterCampaignBehaviourTests {
             events, d, names: [Chain.triggered, Chain.viewed, Chain.clicked, Chain.dismissed], reason: .userClose,
             cepClicks: 0, hold: .floating)
         #expect(propsOf(events, Chain.clicked)["element_id"] as? String == "floater_close")
-    }
-
-    @Test("story floater: auto-dismiss: dismissed as auto_timeout", .tags(.slow))
-    func storyAutoDismiss() async throws {
-        let key = "test_floater_auto_dismiss"
-        let sdk = try await start("campaigns/floater/floater_auto_dismiss.json")
-        defer { sdk.tearDown() }
-        let d = try sdk.deliverChain(key)
-        try await show(sdk, d)
-
-        // The fixture's autoDismissAfterMs is 3000.
-        try await sdk.waitUntil("the floater has timed out", timeout: 5) {
-            SDKInstance.shared.floaterStoryOrchestrator.state == nil
-        }
-
-        expectChain(
-            await sdk.sent(key), d, names: [Chain.triggered, Chain.viewed, Chain.dismissed], reason: .autoTimeout,
-            hold: .floating)
     }
 
     @Test("story floater: open the story, CTA authored dismiss: cta_action")
@@ -211,27 +147,6 @@ struct FloaterCampaignBehaviourTests {
             ],
             // The floater's own name for a CTA ending; the CEP gets cta_action.
             reason: .ctaAction, cepClicks: 0, hold: .floating, wireReason: "cta_taken")
-    }
-
-    @Test("story floater: leaving its screen: dismissed as screen_exit")
-    func storyLeavingItsScreen() async throws {
-        let key = "test_floater_story_screen_change_home_only"
-        let sdk = try await start("campaigns/floater/floater_story_screen_change_home_only.json")
-        defer { sdk.tearDown() }
-        Digia.setCurrentScreen(name: "home")
-        let d = try sdk.deliverChain(key)
-        try await show(sdk, d)
-
-        Digia.setCurrentScreen(name: "search")
-        // The window fades out before its state clears; wait for that rather than a fixed delay
-        // the same length as the fade.
-        try await sdk.waitUntil("the story floater is gone") {
-            SDKInstance.shared.floaterStoryOrchestrator.state == nil
-        }
-
-        expectChain(
-            await sdk.sent(key), d, names: [Chain.triggered, Chain.viewed, Chain.dismissed], reason: .screenExit,
-            hold: .floating)
     }
 
     // MARK: - Dropped
@@ -283,65 +198,6 @@ struct FloaterCampaignBehaviourTests {
             extras: ["cap_rule": "max_total", "cap_limit": 1])
     }
 
-    @Test("pip: CEP cancel before it shows: cancelled")
-    func pipCepCancelBeforeShowing() async throws {
-        let key = "test_pip_close_dismiss"
-        let campaign = fixture("campaigns/pip/pip_close_dismiss.json")
-        let sdk = try await SdkHarness.startChain([campaign]) { Text("App home") }
-        defer { sdk.tearDown() }
-        let d = try sdk.deliverChain(key)
-        d.presentation.cancel()
-        try await sdk.settle(2)
-        #expect(SDKInstance.shared.floaterOrchestrator.state == nil)
-        #expect(!d.displayed)
-
-        expectDroppedWire(
-            await sdk.sent(key), d, .cancelled, campaign, screen: nil,
-            extras: ["cancel_cause": "cep_cancel"], detail: "ended before it displayed (cancelled)")
-    }
-
-    @Test("story floater: off its target screen: screen_not_targeted")
-    func storyOffTargetScreen() async throws {
-        let key = "test_floater_story_screen_change_home_only"
-        let campaign = fixture("campaigns/floater/floater_story_screen_change_home_only.json")
-        let sdk = try await SdkHarness.startChain([campaign]) { Text("App home") }
-        defer { sdk.tearDown() }
-        Digia.setCurrentScreen(name: "search")
-        let d = try sdk.deliverChain(key)
-        try await sdk.settle(1.5)
-
-        expectDroppedWire(
-            await sdk.sent(key), d, .screenNotTargeted, campaign, screen: "search",
-            extras: ["target_screens": ["home"]], detail: "currentScreen=search targetScreenNames=[\"home\"]")
-    }
-
-    // As coded: the image answers 404, so the PiP has no media to float; its window never opens, and the media
-    // end it reports reaches the CEP as a cancel (`cancelled`), with the media end as the cause.
-    @Test("pip: its image fails to load: dropped as cancelled, as coded")
-    func pipMediaFailsToLoad() async throws {
-        let key = "test_pip_close_dismiss"
-        let base = fixture("campaigns/pip/pip_close_dismiss.json")
-        var json = base.json
-        var template = try #require(json["templateConfig"] as? [String: any Sendable])
-        var media = try #require(template["media"] as? [String: any Sendable])
-        media["url"] = "https://images.example.test/missing.jpg"
-        template["media"] = media
-        json["templateConfig"] = template
-        let campaign = WorkspaceFixtures.Campaign(name: base.name, json: json)
-        let sdk = try await SdkHarness.startChain(
-            [campaign], backend: StubBackend.Options(foreignImagesAsStandIn: false)
-        ) { Text("App home") }
-        defer { sdk.tearDown() }
-        let d = try sdk.deliverChain(key)
-        try await sdk.waitUntil("the PiP gives up", timeout: 15) { d.outcome != nil }
-        #expect(SDKInstance.shared.floaterOrchestrator.state == nil)
-        #expect(!d.displayed)
-
-        expectDroppedWire(
-            await sdk.sent(key), d, .cancelled, campaign, screen: nil, extras: ["cancel_cause": "auto_timeout"],
-            detail: "ended before it displayed (auto_timeout)")
-    }
-
     // MARK: - PiP: moved, and starting expanded
 
     /// Asserts a floater still running: the exact chain so far and its one impression id, the CEP's hold back
@@ -366,7 +222,7 @@ struct FloaterCampaignBehaviourTests {
         let rect = try sdk.pipRect()
 
         // Past the middle and released at rest: it snaps to the bottom-left corner.
-        try FloaterBehaviourDrag.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: rect.midX, y: rect.midY), by: CGVector(dx: -250, dy: 0),
             in: try #require(sdk.window), duration: 0.5, hold: 0.3)
         try await sdk.waitUntil("the drop is recorded", timeout: 6) { sdk.pip.dragFraction != nil }
@@ -462,11 +318,9 @@ struct FloaterCampaignBehaviourTests {
         defer { sdk.tearDown() }
         let d = try sdk.deliverChain(key)
         try await sdk.waitUntil("the floater's impression", timeout: 5) { d.displayed }
-        let window = try #require(sdk.window)
 
         try await sdk.waitUntil("the story page is drawn", timeout: 5) {
-            let texts = UIProbe.texts(in: window)
-            return texts.contains("Weekend Health Drop") && texts.contains("No Thanks")
+            sdk.isShowing("Weekend Health Drop") && sdk.isShowing("No Thanks")
         }
         let opened = await sdk.sent(key)
         expectStillRunning(opened, d, names: [Chain.triggered, Chain.viewed, Chain.stepViewed])

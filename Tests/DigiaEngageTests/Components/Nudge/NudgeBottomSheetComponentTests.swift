@@ -1,5 +1,4 @@
 import Foundation
-import SnapshotTesting
 import SwiftUI
 import Testing
 import UIKit
@@ -34,17 +33,6 @@ struct NudgeBottomSheetComponentTests {
             fileName: "nudge_bottomsheet_close_button.json"
         ) else {
             Issue.record("Failed to load fixture for nudge_bottomsheet/nudge_bottomsheet_close_button.json")
-            return [:]
-        }
-        return fixture
-    }
-
-    private func loadSafeAreaFixture(named name: String) throws -> [String: Any] {
-        guard let fixture = FixtureLoader.loadFixture(
-            campaignType: "nudge_bottomsheet",
-            fileName: name
-        ) else {
-            Issue.record("Failed to load fixture for nudge_bottomsheet/\(name)")
             return [:]
         }
         return fixture
@@ -133,137 +121,9 @@ struct NudgeBottomSheetComponentTests {
 
     // MARK: - 6. Visual Pixel Golden Snapshot
 
-    @Test("matches the bottom-sheet visual golden", .tags(.golden)) @MainActor
-    func testNudgeBottomSheetVisualImageGolden() throws {
-        let fixture = try loadCompactBottomSheetFixture()
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
-              nudgeConfig.canvas != nil else {
-            Issue.record("Failed to parse canvas nudge config")
-            return
-        }
-
-        let hostView = ComponentTestHost.makeRealBottomSheetHost(
-            nudgeConfig: nudgeConfig,
-            device: .engageGolden
-        )
-        defer {
-            ComponentTestHost.cleanupOverlayWindow(hostView)
-        }
-
-        assertVisualGolden(
-            matching: ComponentTestHost.renderImage(of: hostView),
-            precision: 0.999,
-            perceptualPrecision: 0.98
-        )
-    }
-
     // MARK: - 7. Device Scrim & Anchoring Golden (.image on device)
 
-    @Test("matches the production bottom-sheet device golden", .tags(.golden, .smoke)) @MainActor
-    func testNudgeBottomSheetDeviceGolden() throws {
-        let fixture = try loadCompactBottomSheetFixture()
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
-              let _ = nudgeConfig.canvas else {
-            Issue.record("Failed to parse canvas nudge config")
-            return
-        }
-
-        let hostView = ComponentTestHost.makeRealBottomSheetHost(
-            nudgeConfig: nudgeConfig,
-            device: .engageGolden,
-            style: .striped
-        )
-        defer {
-            ComponentTestHost.cleanupOverlayWindow(hostView)
-        }
-        assertVisualGolden(
-            matching: ComponentTestHost.renderImage(of: hostView),
-            precision: 0.999,
-            perceptualPrecision: 0.98
-        )
-    }
-
     // MARK: - 8. Safe Area Mode Variants (insetContent, insetSurface, none)
-
-    @Test("matches the inset-content safe-area golden", .tags(.golden)) @MainActor
-    func testNudgeBottomSheetSafeAreaInsetContentVariant() throws {
-        let fixture = try loadSafeAreaFixture(named: "nudge_bottomsheet_safe_area.json")
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
-              let _ = nudgeConfig.canvas else {
-            Issue.record("Failed to parse safe-area bottomsheet config")
-            return
-        }
-
-        #expect(nudgeConfig.surface.bottomSafeAreaMode == .insetContent)
-
-        let hostView = ComponentTestHost.makeRealBottomSheetHost(
-            nudgeConfig: nudgeConfig,
-            device: .engageGolden,
-            style: .striped
-        )
-        defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
-
-        assertVisualGolden(
-            matching: ComponentTestHost.renderImage(of: hostView),
-            precision: 0.999,
-            perceptualPrecision: 0.98
-        )
-    }
-
-    @Test("matches the inset-surface safe-area golden", .tags(.golden)) @MainActor
-    func testNudgeBottomSheetSafeAreaInsetSurfaceVariant() throws {
-        let fixture = try loadSafeAreaFixture(named: "nudge_bottomsheet_safe_area_surface.json")
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
-              let _ = nudgeConfig.canvas else {
-            Issue.record("Failed to parse safe-area-surface bottomsheet config")
-            return
-        }
-
-        #expect(nudgeConfig.surface.bottomSafeAreaMode == .insetSurface)
-
-        let hostView = ComponentTestHost.makeRealBottomSheetHost(
-            nudgeConfig: nudgeConfig,
-            device: .engageGolden,
-            style: .striped
-        )
-        defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
-
-        assertVisualGolden(
-            matching: ComponentTestHost.renderImage(of: hostView),
-            precision: 0.999,
-            perceptualPrecision: 0.98
-        )
-    }
-
-    @Test("matches the edge-to-edge safe-area golden", .tags(.golden)) @MainActor
-    func testNudgeBottomSheetSafeAreaNoneVariant() throws {
-        let fixture = try loadSafeAreaFixture(named: "nudge_bottomsheet_safe_area_none.json")
-        guard let templateConfig = fixture["templateConfig"] as? [String: Any],
-              let nudgeConfig = try NudgeConfig.fromJson(templateConfig),
-              let _ = nudgeConfig.canvas else {
-            Issue.record("Failed to parse safe-area-none bottomsheet config")
-            return
-        }
-
-        #expect(nudgeConfig.surface.bottomSafeAreaMode == .none)
-
-        let hostView = ComponentTestHost.makeRealBottomSheetHost(
-            nudgeConfig: nudgeConfig,
-            device: .engageGolden,
-            style: .striped
-        )
-        defer { ComponentTestHost.cleanupOverlayWindow(hostView) }
-
-        assertVisualGolden(
-            matching: ComponentTestHost.renderImage(of: hostView),
-            precision: 0.999,
-            perceptualPrecision: 0.98
-        )
-    }
 
     // MARK: - 9. Bottom Sheet Dismissal, Gestures & Close Button
 

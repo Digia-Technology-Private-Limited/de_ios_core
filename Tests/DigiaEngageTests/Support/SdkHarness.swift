@@ -40,8 +40,8 @@ final class SdkHarness {
     var cep: FakeCep { plugin }
     var window: UIWindow!
 
-    /// Set by the sample app's workspace-fixture boot (`SdkHarness+Fixtures.swift`): the app is laid
-    /// out full screen and the network is `StubBackend`, not `MockNetworkClient`.
+    /// Set by the workspace-fixture boot (`CampaignBehaviour/Support/SdkHarness+Fixtures.swift`): the app is
+    /// laid out full screen and the network is `StubBackend`, not `MockNetworkClient`.
     var servesWorkspaceFixtures = false
     /// Run last by ``tearDown()``: what a boot outside this file installed and must undo.
     var tearDownHooks: [() -> Void] = []
@@ -205,11 +205,16 @@ final class SdkHarness {
     }
 
     /// What the CEP does when its campaign fires. The handle reports how the showing ended.
+    /// [metadata] is the CEP payload's metadata, e.g. a channel's template name.
     @discardableResult
-    func deliver(_ campaignKey: String, variables: [String: String]? = nil) throws -> CampaignPresentation {
+    func deliver(
+        _ campaignKey: String,
+        variables: [String: String]? = nil,
+        metadata: [String: String] = [:]
+    ) throws -> CampaignPresentation {
         let host = try #require(plugin.host, "No CEP plugin attached")
         return host.deliver(CEPTriggerPayload(
-            cepCampaignId: "cep-\(campaignKey)", campaignKey: campaignKey, cepMetadata: [:],
+            cepCampaignId: "cep-\(campaignKey)", campaignKey: campaignKey, cepMetadata: metadata,
             variables: variables))
     }
 

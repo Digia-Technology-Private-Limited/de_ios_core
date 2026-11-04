@@ -110,6 +110,28 @@ struct LegacySurveyInputsTests {
         #expect(legacyResponse(body, "b_age")?["value"] as? Int == 34)
         #expect(legacyResponse(body, "b_email")?["value"] as? String == "asha@example.com")
         #expect(legacyResponse(body, "b_date")?["value"] as? String == "2024-02-29")
+
+        // Fails if `reportSurveyAnswered` sends free text in `Digia Question Answered`: the event
+        // keeps the question keys only, while the submission above keeps the text.
+        let answered = try await sdk.legacyTracked("Digia Question Answered", of: Self.key)
+        #expect(answered.count == 4, "one answered event per answered question")
+        for event in answered {
+            let props = event["properties"] as? [String: Any] ?? [:]
+            for key in ["answer_value", "answer_text", "answer_label", "answer_options", "answer"] {
+                #expect(props[key] == nil, "\(key) carries free text")
+            }
+            for key in ["question_id", "question_title", "question_type", "block_type", "block_id"] {
+                #expect(props[key] != nil, "\(key) is kept")
+            }
+        }
+        let name = try #require(
+            answered.first { ($0["properties"] as? [String: Any])?["question_id"] as? String == "n_name" },
+            "a Question Answered for the name")
+        let nameProps = name["properties"] as? [String: Any] ?? [:]
+        #expect(nameProps["question_title"] as? String == "What should we call you?")
+        #expect(nameProps["question_type"] as? String == "short_text")
+        #expect(nameProps["block_type"] as? String == "short_text")
+        #expect(nameProps["block_id"] as? String == "b_name")
     }
 
     // Same `showWhen` line, the other way: no email, so the date node is skipped and the survey

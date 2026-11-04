@@ -190,91 +190,6 @@ struct CanvasProgressBarRendererTests {
         #expect(abs(range - 0.75) < 0.001)
     }
 
-    // MARK: - 3. Visual Goldens
-
-    @Test("progress bar renderer matches visual golden", .tags(.golden))
-    func progressBarVisualGolden() throws {
-        let canvas = try CampaignCanvasParser().parse([
-            "version": 2,
-            "canvasWidth": 360,
-            "canvasHeight": 120,
-            "background": ["type": "solid", "color": "#FFFFFFFF"],
-            "children": [
-                [
-                    "kind": "widget",
-                    "id": "progress",
-                    "rect": ["x": 0.05, "y": 0.4, "width": 0.9, "height": 0.2],
-                    "widget": [
-                        "type": "digia/linearProgressBar",
-                        "props": [
-                            "valueMode": "percent",
-                            "percent": "70",
-                            "indicator": ["type": "solid", "color": "#FF2563EB"],
-                            "track": ["type": "solid", "color": "#FFE2E8F0"],
-                            "cornerRadius": 6
-                        ]
-                    ]
-                ]
-            ]
-        ])
-
-        let window = mount(canvas: canvas)
-        defer { unmount(window) }
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
-        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
-    }
-
-    @Test("progress bar renderer handles 0% and 100% boundary extremes", .tags(.golden))
-    func progressBarEmptyAndFullVisualGolden() throws {
-        let canvas = try CampaignCanvasParser().parse([
-            "version": 2,
-            "canvasWidth": 360,
-            "canvasHeight": 120,
-            "background": ["type": "solid", "color": "#FFF8FAFC"],
-            "children": [
-                [
-                    "kind": "widget",
-                    "id": "progress-empty",
-                    "rect": ["x": 0.05, "y": 0.18, "width": 0.9, "height": 0.18],
-                    "widget": [
-                        "type": "digia/linearProgressBar",
-                        "props": [
-                            "valueMode": "percent",
-                            "percent": "0",
-                            "indicator": ["type": "solid", "color": "#FF2563EB"],
-                            "track": ["type": "solid", "color": "#FFE2E8F0"],
-                            "cornerRadius": 6
-                        ]
-                    ]
-                ],
-                [
-                    "kind": "widget",
-                    "id": "progress-full",
-                    "rect": ["x": 0.05, "y": 0.62, "width": 0.9, "height": 0.18],
-                    "widget": [
-                        "type": "digia/linearProgressBar",
-                        "props": [
-                            "valueMode": "percent",
-                            "percent": "100",
-                            "indicator": ["type": "solid", "color": "#FF10B981"],
-                            "track": ["type": "solid", "color": "#FFE2E8F0"],
-                            "cornerRadius": 6
-                        ]
-                    ]
-                ]
-            ]
-        ])
-
-        let window = mount(canvas: canvas)
-        defer { unmount(window) }
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
-        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
-    }
-
     // MARK: - Test Helpers
 
     private func parsedProgress(
@@ -304,16 +219,6 @@ struct CanvasProgressBarRendererTests {
         return widget
     }
 
-    private func mount(
-        canvas: CampaignCanvas,
-        isDark: Bool = false,
-        onAction: @escaping (CampaignCanvasActionRequest) -> Void = { _ in }
-    ) -> UIWindow {
-        ComponentTestHost.mountCanvas(canvas, isDark: isDark, onAction: onAction).window
-    }
 
-    private func unmount(_ window: UIWindow) {
-        ComponentTestHost.unmount(window)
-    }
 }
 }

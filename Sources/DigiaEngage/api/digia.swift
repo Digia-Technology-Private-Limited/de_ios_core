@@ -228,6 +228,24 @@ public enum Digia {
         SDKInstance.shared.clearUserId()
     }
 
+    /// Suppresses campaign overlays while the host app shows its own UI (e.g. a
+    /// modal), and restores them when it closes.
+    ///
+    /// While suppressed, overlay deliveries (nudge/modal, bottom sheet, guide,
+    /// PIP/floater, survey) are dropped permanently as `host_suppressed` — nothing
+    /// is queued or replayed when suppression lifts. Inline placements keep
+    /// rendering, and anything already on screen is left alone (including later
+    /// steps of a showing guide, which belong to that presentation, not a new
+    /// delivery).
+    ///
+    /// In memory only and `false` on every cold start. Safe to call before
+    /// `initialize()` — the value is honoured once the SDK is ready — and
+    /// `setUserId` / `clearUserId` don't reset it. Setting the current value is
+    /// a silent no-op.
+    public static func setCampaignsSuppressed(_ suppressed: Bool) {
+        SDKInstance.shared.setCampaignsSuppressed(suppressed)
+    }
+
     /// The device ID for this install, or an empty string before `initialize`. Never creates an ID.
     public static var anonymousId: String {
         SDKInstance.shared.anonymousId

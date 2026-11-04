@@ -370,10 +370,20 @@ private struct CanvasSurveyScaledStage: View {
                 .transaction { $0.disablesAnimations = false }
         } else {
             GeometryReader { geo in
+                // Window size, not the screen's: on iPad the key window can be
+                // narrower than the screen (multitasking), and the nudge path
+                // already gates on this same window frame.
+                let windowSize = surveyWindowFrame.size
+                let largeScreen = isLargeScreen(
+                    shortestSide: min(windowSize.width, windowSize.height)
+                )
                 let scale = canvasSurveyFitScale(
-                    designScale: canvasSurveyDesignScale(viewportWidth: UIScreen.main.bounds.width),
+                    designScale: canvasSurveyDesignScale(
+                        viewportWidth: windowSize.width,
+                        largeScreen: largeScreen
+                    ),
                     availableWidth: geo.size.width,
-                    availableHeight: geo.size.height > 0 ? geo.size.height : UIScreen.main.bounds.height
+                    availableHeight: geo.size.height > 0 ? geo.size.height : windowSize.height
                 )
                 scaledStage(scale: scale)
             }
@@ -530,9 +540,19 @@ private struct CanvasSurveyScaledStage: View {
         return CampaignCanvasRect(x: left, y: top, width: width, height: labelHeight)
     }
 
-    private func canvasSurveyDesignScale(viewportWidth: CGFloat) -> CGFloat {
+    private func canvasSurveyDesignScale(viewportWidth: CGFloat, largeScreen: Bool = false) -> CGFloat {
         let base = viewportWidth / max(1, designWidth)
-        return survey.settings.display.type == .bottomSheet ? base : min(1.15, base)
+        // On a large screen a full-width bottom sheet scales its canvas past the
+        // screen height, so the sheet takes the dialog's width instead. Mirrors
+        // Android's `CanvasSurveyRenderer`. Dialogs keep today's capped scale.
+        if survey.settings.display.type == .bottomSheet {
+            return nudgeSheetWidth(
+                screenWidth: viewportWidth,
+                designWidth: designWidth,
+                largeScreen: largeScreen
+            ) / max(1, designWidth)
+        }
+        return min(1.15, base)
     }
 
     private func canvasSurveyFitScale(

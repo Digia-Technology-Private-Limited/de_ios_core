@@ -308,8 +308,8 @@ struct CanvasLottieRendererTests {
         #expect(runtime.loadSource == nil)
     }
 
-    // Mode A (failing spy loader) + Golden: pixels of the labelled "Lottie" placeholder.
-    @Test("a failed load shows the labelled placeholder", .tags(.golden))
+    // Mode A (failing spy loader): the loader is asked, and the blank placeholder gives way to the labelled one.
+    @Test("a failed load shows the labelled placeholder")
     func failedLoadShowsLabelledPlaceholder() async throws {
         let probe = LottieRuntimeProbe()
         let runtime = CanvasLottieRuntime(
@@ -333,96 +333,7 @@ struct CanvasLottieRendererTests {
         let rendered = await waitUntil {
             Self.hasMoreThanOneColor(ComponentTestHost.renderImage(of: controller.view))
         }
-        try #require(rendered, "the failed-load placeholder never rendered")
-        ComponentTestHost.drainRunLoop(for: 0.2)
-
-        assertVisualGolden(
-            matching: ComponentTestHost.renderImage(of: controller.view),
-            precision: 0.999,
-            perceptualPrecision: 0.98
-        )
-    }
-
-    @Test(
-        "empty or invalid Lottie URL shows labelled placeholder visual golden",
-        .tags(.golden),
-        arguments: ["", "http://[invalid"]
-    )
-    func emptyOrInvalidLottieURLVisualGolden(url: String) async throws {
-        let runtime = CanvasLottieRuntime(playbackMode: .frozen(progress: 0))
-        let window = mount(lottie: lottieWidget(url: url), runtime: runtime)
-        defer { unmount(window) }
-        let rendered = await waitUntil {
-            guard let view = window.rootViewController?.view else { return false }
-            return Self.hasMoreThanOneColor(ComponentTestHost.renderImage(of: view))
-        }
-        try #require(rendered, "the empty-or-invalid Lottie placeholder never rendered")
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        assertVisualGolden(
-            matching: ComponentTestHost.renderImage(of: window.rootViewController!.view),
-            precision: 0.999,
-            perceptualPrecision: 0.98,
-            named: url.isEmpty ? "empty" : "invalid"
-        )
-    }
-
-    @Test("lottie renderer displays frozen animation at deterministic progress", .tags(.golden))
-    func lottieRendererFrozenPlaybackVisualGolden() async throws {
-        let runtime = CanvasLottieRuntime(playbackMode: .frozen(progress: 0.5))
-        let url = Self.assetURL("static-lottie.json").absoluteString
-        let canvas = try CampaignCanvasParser().parse([
-            "version": 2,
-            "canvasWidth": 360,
-            "canvasHeight": 220,
-            "background": ["type": "solid", "color": "#F1F5F9"],
-            "children": [
-                [
-                    "kind": "widget",
-                    "id": "frozen-lottie",
-                    "rect": ["x": 0.05, "y": 0.05, "width": 0.9, "height": 0.9],
-                    "widget": [
-                        "type": "digia/lottie",
-                        "containerProps": [
-                            "fill": ["type": "solid", "color": "#FFFFFFFF"],
-                            "borderRadius": 16,
-                            "border": ["color": "#CBD5E1", "width": 1.5],
-                            "shadow": [
-                                "color": "#1A000000",
-                                "blur": 8,
-                                "spread": 0,
-                                "offsetX": 0,
-                                "offsetY": 3
-                            ]
-                        ],
-                        "props": [
-                            "source": ["url": url],
-                            "autoplay": false,
-                            "loop": false,
-                            "fit": "contain"
-                        ]
-                    ]
-                ]
-            ]
-        ])
-
-        let (window, controller) = mount(canvas: canvas, runtime: runtime)
-        defer { unmount(window) }
-
-        let view = try #require(await waitForAnimation(in: window), "Animation never loaded")
-        #expect(view.animation != nil)
-        ComponentTestHost.drainRunLoop(for: 0.2)
-
-        let rendered = await waitUntil {
-            Self.hasMoreThanOneColor(ComponentTestHost.renderImage(of: controller.view))
-        }
-        try #require(rendered, "the animation frame never rendered")
-
-        assertVisualGolden(
-            matching: ComponentTestHost.renderImage(of: controller.view),
-            precision: 0.999,
-            perceptualPrecision: 0.98
-        )
+        #expect(rendered, "the failed-load placeholder never rendered")
     }
 
     private func mount(

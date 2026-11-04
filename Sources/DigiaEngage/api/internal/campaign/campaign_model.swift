@@ -109,7 +109,10 @@ struct CampaignModel: Equatable {
                 guard let stateful = try StatefulTimerConfig.fromJson(
                     templateConfig,
                     designTokens: designTokens,
-                    timeAnchor: timeAnchor
+                    timeAnchor: timeAnchor,
+                    variableDefaults: Dictionary(
+                        schemas.filter(\.hasFallback).map { ($0.name, $0.fallbackValue) }
+                    ) { _, last in last }
                 ), var canvasConfig = InlineCanvasConfig.fromStatefulJson(
                     templateConfig,
                     stateful: stateful

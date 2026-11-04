@@ -11,8 +11,9 @@ extension HostedUITests {
 ///
 /// Fixtures (`sdk_testing_fixtures/campaigns/pip/`): `pip_close_dismiss`, `pip_auto_dismiss`,
 /// `pip_mute_toggle`, `pip_media_expand`, `pip_expand_off_free_drop`, `pip_initial_expanded`,
-/// `pip_video_chrome_pinned_height`, `pip_screen_change_home_only`, `pip_screen_change_global`,
-/// `pip_expanded_screen_change_targeted`. Their image and video are the Test Kit's.
+/// `pip_video_chrome_pinned_height`. Their image and video are the Test Kit's. What the window does
+/// untouched (its timeout, the screens it survives, its pinned size) is the package's
+/// `Tests/DigiaEngageTests/FixtureBehaviour/PipSurfaceBehaviourTests.swift`.
 ///
 /// iOS has no system Back for an in-app window; the expanded PiP's swipe-down strip is its Back
 /// (`expandedChrome` routes it to `expanded.onBack`), so the Back tests swipe. Timings run on the
@@ -55,22 +56,6 @@ struct PipSurfaceBehaviourTests {
     }
 
     // MARK: - pip_auto_dismiss
-
-    // Fails if: Sources/DigiaEngage/api/internal/campaign/floater_orchestrator.swift
-    // `restartAutoDismiss` `UInt64(afterMs) * 1_000_000` -> `UInt64(afterMs) * 2_000_000`.
-    @Test("pip_auto_dismiss: leaves after its 3 s timeout, as an auto timeout")
-    func autoDismissAfterItsTimeout() async throws {
-        let (sdk, presentation) = try await boot(try fixture("pip/pip_auto_dismiss"))
-        defer { sdk.tearDown() }
-        let drawnAt = try await sdk.waitForPipWindow()
-
-        try await sdk.settle(max(0, 2.6 - floaterElapsed(since: drawnAt)))
-        #expect(sdk.pip.isShowing, "still inside 3 s")
-
-        try await sdk.waitUntil("the PiP times out", timeout: 2) { !sdk.pip.isShowing }
-        #expect(floaterElapsed(since: drawnAt) < 3.7)
-        #expect(presentation.dismissReason == .autoTimeout)
-    }
 
     // Fails if: floater_orchestrator.swift `restartAutoDismiss`
     // `guard let afterMs = state?.config.behavior.autoDismissAfterMs, surface != .expanded` ->
@@ -159,7 +144,7 @@ struct PipSurfaceBehaviourTests {
         try await sdk.waitForPipWindow()
         let rect = try sdk.pipRect()
 
-        try FloaterBehaviourDrag.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: rect.midX, y: rect.midY), by: CGVector(dx: -60, dy: 0),
             in: try #require(sdk.window), duration: 0.4, hold: 0.3)
         try await sdk.waitUntil("the drop is recorded", timeout: 6) { sdk.pip.dragFraction != nil }
@@ -176,7 +161,7 @@ struct PipSurfaceBehaviourTests {
         try await sdk.waitForPipWindow()
         let rect = try sdk.pipRect()
 
-        try FloaterBehaviourDrag.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: rect.midX, y: rect.midY), by: CGVector(dx: -250, dy: 0),
             in: try #require(sdk.window), duration: 0.5, hold: 0.3)
         try await sdk.waitUntil("the drop is recorded", timeout: 6) { sdk.pip.dragFraction != nil }
@@ -193,7 +178,7 @@ struct PipSurfaceBehaviourTests {
         try await sdk.waitForPipWindow()
         let rect = try sdk.pipRect()
 
-        try FloaterBehaviourDrag.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: rect.midX, y: rect.midY), by: CGVector(dx: -60, dy: 0),
             in: try #require(sdk.window), duration: 0.04, steps: 4)
         try await sdk.waitUntil("the drop is recorded", timeout: 6) { sdk.pip.dragFraction != nil }
@@ -227,7 +212,7 @@ struct PipSurfaceBehaviourTests {
         try await sdk.waitForPipWindow()
         let rect = try sdk.pipRect()
 
-        try FloaterBehaviourDrag.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: rect.midX, y: rect.midY), by: CGVector(dx: 100, dy: -200),
             in: try #require(sdk.window), duration: 0.5, hold: 0.3)
         try await sdk.waitUntil("the drop is recorded", timeout: 6) { sdk.pip.dragFraction != nil }
@@ -281,22 +266,6 @@ struct PipSurfaceBehaviourTests {
         #expect(sdk.pip.surface == .expanded)
         // The transition runs the default 500 ms; the chrome takes taps once it has landed.
         try await sdk.settle(0.7)
-    }
-
-    // Fails if: floater_overlay_view.swift `collapsedRect`
-    // `let height = config.collapsed.hasFixedHeight ? config.collapsed.heightDp : width / ratio` ->
-    // `let height = false ? config.collapsed.heightDp : width / ratio`.
-    @Test("pip_video_chrome_pinned_height: the window is the pinned 240 pt high, not its ratio")
-    func pinnedHeight() async throws {
-        let (sdk, _) = try await bootPinned()
-        defer { sdk.tearDown() }
-        try await sdk.waitForPipWindow()
-        let rect = try sdk.pipRect()
-        let screenWidth = try #require(sdk.window).bounds.width
-
-        // 55 % of the screen wide; a 1.78 ratio alone would make it ~120 pt high.
-        #expect(rect.height == 240)
-        #expect(abs(rect.width - screenWidth * 0.55) < 0.5)
     }
 
     // Fails if: floater_orchestrator.swift `togglePlayback`
@@ -399,57 +368,6 @@ struct PipSurfaceBehaviourTests {
         #expect(during.midX < before.midX - 20, "moving left while it closes")
         #expect(during.midY == before.midY, "and only sideways")
         try await sdk.waitUntil("the exit finishes", timeout: 6) { sdk.pip.state == nil }
-    }
-
-    // MARK: - Screen scope
-
-    // Fails if: floater_orchestrator.swift `onScreenChanged`
-    // `if !targets.isEmpty && !targets.contains(screenName) {` -> `if false {`.
-    @Test("pip_screen_change_home_only: a window targeted at one screen ends when the app leaves it")
-    func endsWhenItsScreenIsLeft() async throws {
-        let (sdk, presentation) = try await boot(try fixture("pip/pip_screen_change_home_only"), screen: "home")
-        defer { sdk.tearDown() }
-        try await sdk.waitForPipWindow()
-
-        sdk.setCurrentScreen("cart")
-
-        try await sdk.waitUntil("the PiP is gone", timeout: 6) { sdk.pip.state == nil }
-        #expect(presentation.dismissReason == .screenExit)
-    }
-
-    // Fails if: floater_orchestrator.swift `onScreenChanged`
-    // `if !targets.isEmpty && !targets.contains(screenName) {` -> `if !targets.contains(screenName) {`.
-    @Test("pip_screen_change_global: a window on every screen survives navigation")
-    func globalSurvivesNavigation() async throws {
-        let (sdk, presentation) = try await boot(try fixture("pip/pip_screen_change_global"), screen: "home")
-        defer { sdk.tearDown() }
-        try await sdk.waitForPipWindow()
-
-        sdk.setCurrentScreen("cart")
-        sdk.setCurrentScreen("brands")
-        try await sdk.settle(1)
-
-        #expect(sdk.pip.isShowing)
-        #expect(presentation.dismissReason == nil)
-    }
-
-    // Fails if: floater_orchestrator.swift `onScreenChanged`
-    // `if !targets.isEmpty && !targets.contains(screenName) {` -> `if false {`.
-    @Test("pip_expanded_screen_change_targeted: full screen stays across the screens it targets and ends on any other")
-    func expandedEndsOffItsScreens() async throws {
-        let (sdk, presentation) = try await boot(
-            try fixture("pip/pip_expanded_screen_change_targeted"), screen: "home")
-        defer { sdk.tearDown() }
-        try await sdk.waitForPipWindow()
-        #expect(sdk.pip.surface == .expanded)
-
-        sdk.setCurrentScreen("brands")
-        try await sdk.settle(1)
-        #expect(sdk.pip.isShowing, "brands is one of its screens")
-
-        sdk.setCurrentScreen("cart")
-        try await sdk.waitUntil("the PiP is gone", timeout: 6) { sdk.pip.state == nil }
-        #expect(presentation.dismissReason == .screenExit, "cart is not, even from full screen")
     }
 }
 }

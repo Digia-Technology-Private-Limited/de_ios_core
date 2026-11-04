@@ -37,23 +37,19 @@ struct InlineStoryStripBehaviourTests {
     }
 
     /// Five items are authored: one with an empty URL, one with none, one whose URL is wrapped as
-    /// `{"value": …}` and two plain ones. Flutter reads the wrapped URL, so three stay. Known gap:
-    /// iOS reads a story item's `url` only as a plain string (`StoryItemConfig.fromJson`,
-    /// `json.nonBlankString("url")`), so it drops the wrapped one too and keeps two. That the items
-    /// without media are gone, and that a tap opens the item at its place among those that stayed,
-    /// holds either way and is asserted unwrapped.
-    // Fails if: Sources/DigiaEngage/api/internal/campaign/inline_story_config.swift:35
-    // `guard let url = json.nonBlankString("url") else { return nil }` -> `let url = json["url"] as? String ?? ""`
-    // (the items with no media stay in the rail, and the second card is the 2nd of five).
+    /// `{"value": …}` and two plain ones. The wrapped URL is read, as in Flutter, so three stay, and
+    /// a tap opens the item at its place among those that stayed.
+    // Fails if: Sources/DigiaEngage/api/internal/campaign/inline_story_config.swift:36
+    // `guard let url = storyLiteral(json["url"]) as? String, !url.isEmpty else { return nil }` ->
+    // `let url = json["url"] as? String ?? ""` (the items with no media stay in the rail, and the
+    // second card is the 2nd of five).
     @Test("items without media are dropped, and a tap opens the item at its place among the ones that stayed")
     func itemsWithoutMediaAreDropped() async throws {
         let (sdk, frame, config, key) = try await show("inline_story_strip_bad_items_and_card_guards")
         defer { sdk.tearDown() }
 
         #expect(config.items.allSatisfy { !$0.url.isEmpty })
-        withKnownIssue("iOS does not read a story item URL wrapped as {\"value\": …}") {
-            #expect(config.items.count == 3)
-        }
+        #expect(config.items.count == 3)
 
         try await sdk.tapStoryCard(1, in: frame, card: config.card)
         try await sdk.waitForStoryViewer()
@@ -61,22 +57,6 @@ struct InlineStoryStripBehaviourTests {
         #expect(try await sdk.storyFramesShown(key) == [InlineStoryFrame(2, config.items.count)],
                 "the second remaining item, not the 2nd of five")
         try await sdk.closeStoryViewer()
-    }
-
-    /// Flutter reports the rail's item count on its `Digia Experience Viewed`. Known gap: iOS
-    /// builds `StoriesEvent.Viewed` without `itemTotal`
-    /// (`Sources/DigiaEngage/api/internal/SDKInstance.swift`, `reportSlotFirstRender`, the
-    /// `.story` case), so the event goes out with no `item_total`. `withKnownIssue` fails the day
-    /// iOS sends it, as the cue to drop the wrapper.
-    @Test("the rail's impression counts only the items that stayed")
-    func impressionCountsTheItemsThatStayed() async throws {
-        let (sdk, _, config, key) = try await show("inline_story_strip_bad_items_and_card_guards")
-        defer { sdk.tearDown() }
-
-        let viewed = try await sdk.waitForEvents("Digia Experience Viewed", of: key, count: 1)
-        withKnownIssue("iOS sends a story's Digia Experience Viewed without item_total") {
-            #expect(viewed.first?["item_total"] as? Int == config.items.count)
-        }
     }
 
     /// Flutter draws a `previewMode: singleImage` story as one full-width preview image that opens

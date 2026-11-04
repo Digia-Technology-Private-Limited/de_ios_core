@@ -59,7 +59,7 @@ typealias HealthReporter = @Sendable (HealthEventPayload) -> Void
 /// | The allowlist | ``HealthReasons/reasons`` — a closed, central list |
 /// | Dedup | first occurrence per key per app session |
 /// | Session cap | server-configurable, ``defaultSessionCap`` absent |
-/// | The kill switch | ``applyBundleConfig(enabled:sessionCap:)`` deregisters the sink outright |
+/// | The kill switch | ``applyConfig(enabled:sessionCap:)`` deregisters the sink outright |
 ///
 /// It is **not** in ``DigiaLogger``'s static registry. The other sinks are
 /// always present; this one registers when `initialize()` starts, in a pending
@@ -86,8 +86,8 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
 
     /// Events per app session when the server names no cap.
     ///
-    /// The server's value rides the campaign bundle and is read once per
-    /// successful fetch; a session whose fetch failed runs on this.
+    /// The server's value rides the SDK config; a session with neither a cached
+    /// nor a fetched one runs on this.
     static let defaultSessionCap = 20
 
     private let lock = NSLock()
@@ -101,7 +101,7 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
     /// reporter (SP10). Bounded by the session cap: every queued event counts
     /// toward `sent`.
     private var queued: [HealthEventPayload] = []
-    /// Set by the kill switch. Nothing registers the sink again this session.
+    /// Set by the kill switch. Holds until a later config turns the sink back on.
     private var killed = false
 
     /// True while a live test parses or routes: a PM's test is not fleet health.
@@ -131,8 +131,7 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         var shouldRegister = false
         lock.lock()
         if !registered, !killed {
-            registered = true
-            buildMode = DigiaDebugDetection.isDebugBuild() ? "debug" : "release"
+            markRegistered()
             shouldRegister = true
         }
         lock.unlock()
@@ -142,19 +141,18 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
     }
 
     /// Registers the sink and sends anything queued, once, in order.
-    /// Call after ``applyBundleConfig(enabled:sessionCap:)``, so the kill switch is read first.
-    /// A failed fetch still activates; after the kill switch this is a no-op.
+    /// Call after ``applyConfig(enabled:sessionCap:)``, so the kill switch is read first.
+    /// Under the kill switch the reporter is kept but nothing registers or sends.
     func activate(_ report: @escaping HealthReporter) {
         var shouldRegister = false
         lock.lock()
+        self.report = report
         guard !killed else {
             lock.unlock()
             return
         }
-        self.report = report
         if !registered {
-            registered = true
-            buildMode = DigiaDebugDetection.isDebugBuild() ? "debug" : "release"
+            markRegistered()
             shouldRegister = true
         }
         let pending = queued
@@ -168,22 +166,32 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         }
     }
 
-    /// Applies the server's switch and cap from a successfully fetched bundle.
-    ///
-    /// Read once per fetch and held for the session — no mid-session re-read,
-    /// so a changed server value applies from the next session that fetches
-    /// successfully. `nil` arguments mean the bundle said nothing usable,
-    /// which is "leave it alone", never "reset to default".
-    func applyBundleConfig(enabled: Bool?, sessionCap: Int?) {
+    /// Applies the SDK config's switch and cap, in either direction. `nil` leaves a field alone.
+    /// Off deregisters the sink and drops its queue; on after off registers it again.
+    func applyConfig(enabled: Bool?, sessionCap: Int?) {
         var shouldDeactivate = false
+        var shouldRegister = false
         lock.lock()
         if let sessionCap, sessionCap >= 0 { cap = sessionCap }
         if enabled == false {
             killed = true
             shouldDeactivate = true
+        } else if enabled == true, killed {
+            killed = false
+            if report != nil, !registered {
+                markRegistered()
+                shouldRegister = true
+            }
         }
         lock.unlock()
         if shouldDeactivate { deactivate() }
+        if shouldRegister { DigiaLogger.registerSink(self) }
+    }
+
+    /// Call with the lock held.
+    private func markRegistered() {
+        registered = true
+        buildMode = DigiaDebugDetection.isDebugBuild() ? "debug" : "release"
     }
 
     /// Unregisters the sink and discards anything queued.

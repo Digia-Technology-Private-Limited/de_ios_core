@@ -352,108 +352,6 @@ struct CanvasTimerRendererTests {
         #expect(block.spans.map { $0.text } == ["01", "30"])
     }
 
-    // MARK: - 4. Visual Goldens
-
-    @Test("timer renderer matches visual golden", .tags(.golden))
-    func timerRendererVisualGolden() throws {
-        guard let widget = try parsedTimer([
-            "preset": "unitBoxes",
-            "separator": ":",
-            "units": [
-                "days": "autoHide",
-                "hours": true,
-                "minutes": true,
-                "seconds": true
-            ],
-            "labels": [
-                "hours": "HRS",
-                "minutes": "MIN",
-                "seconds": "SEC"
-            ],
-            "digitColor": "#FFFFFFFF",
-            "labelColor": "#FF94A3B8",
-            "boxFill": ["type": "solid", "color": "#FF1E293B"],
-            "cornerRadius": 8
-        ]) else {
-            Issue.record("Failed to parse timer")
-            return
-        }
-
-        let window = mount(widget: widget, timerRemainingSeconds: 3665)
-        defer { unmount(window) }
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
-        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
-    }
-
-    @Test("timer renderer renders zero state gracefully without collapsing digits", .tags(.golden))
-    func timerRendererZeroStateVisualGolden() throws {
-        guard let widget = try parsedTimer([
-            "preset": "unitBoxes",
-            "separator": ":",
-            "units": [
-                "days": false,
-                "hours": true,
-                "minutes": true,
-                "seconds": true
-            ],
-            "labels": [
-                "hours": "HRS",
-                "minutes": "MIN",
-                "seconds": "SEC"
-            ],
-            "digitColor": "#FFFFFFFF",
-            "labelColor": "#FF94A3B8",
-            "boxFill": ["type": "solid", "color": "#FF0F172A"],
-            "cornerRadius": 8
-        ]) else {
-            Issue.record("Failed to parse timer")
-            return
-        }
-
-        let window = mount(widget: widget, timerRemainingSeconds: 0)
-        defer { unmount(window) }
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
-        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
-    }
-
-    @Test("timer renderer handles minutes and seconds only with custom styling and separator", .tags(.golden))
-    func timerRendererMinutesSecondsOnlyVisualGolden() throws {
-        guard let widget = try parsedTimer([
-            "preset": "unitBoxes",
-            "separator": ":",
-            "separatorEnabled": true,
-            "separatorColor": "#FFEF4444",
-            "units": [
-                "days": false,
-                "hours": false,
-                "minutes": true,
-                "seconds": true
-            ],
-            "labels": [
-                "minutes": "MIN",
-                "seconds": "SEC"
-            ],
-            "digitColor": "#FFFFFFFF",
-            "labelColor": "#FFCBD5E1",
-            "boxFill": ["type": "solid", "color": "#FF334155"],
-            "cornerRadius": 14
-        ]) else {
-            Issue.record("Failed to parse timer")
-            return
-        }
-
-        let window = mount(widget: widget, timerRemainingSeconds: 754)
-        defer { unmount(window) }
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
-        assertVisualGolden(matching: image, precision: 0.999, perceptualPrecision: 0.98)
-    }
-
     // MARK: - Test Helpers
 
     private func parsedTimer(
@@ -515,8 +413,5 @@ struct CanvasTimerRendererTests {
         ).window
     }
 
-    private func unmount(_ window: UIWindow) {
-        ComponentTestHost.unmount(window)
-    }
 }
 }

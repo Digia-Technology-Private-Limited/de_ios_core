@@ -22,6 +22,9 @@ struct DigiaBottomSheetConfig {
     var prioritizesDragOverScrolling: Bool = false
     var scrollsEntireSurface: Bool = false
     var entireSurfaceScrollingEnabled: Bool = true
+    /// Caps the card's width on a large screen so the sheet centres instead of
+    /// stretching to the full window. Nil (phones) keeps today's full-width card.
+    var cardMaxWidth: CGFloat? = nil
 }
 
 /// A bottom sheet whose card attaches flush to the screen edges (the system
@@ -81,7 +84,9 @@ struct DigiaBottomSheet<Content: View>: View {
                     .contentShape(Rectangle())
                     .onTapGesture { handleBackdropTap() }
 
-                presentedCard
+                // A capped card must not fill the width: the stack centres it
+                // while the scrim stays full-bleed. Nil keeps today's full-width card.
+                presentedCard.frame(maxWidth: config.cardMaxWidth)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .bottom)
             .overlayPreferenceValue(NudgeCloseContainerBoundsKey.self) { anchor in

@@ -1,16 +1,17 @@
 import Darwin
 import UIKit
 
-/// Delivers a real tap the way the touchscreen does: a digitizer `IOHIDEvent` (one finger down,
-/// then up) handed to UIKit through `UIApplication._enqueueHIDEvent`, addressed to the window's
-/// render context. UIKit builds the `UITouch`, hit-tests and dispatches it itself, exactly as for a
-/// finger, so UIKit gesture recognizers *and* SwiftUI gestures (`Button`, `onTapGesture`) see it.
-/// Building the `UITouch` by hand and calling `sendEvent` reaches UIKit recognizers but not
-/// SwiftUI, which ignores such touches.
+/// Delivers real touches the way the touchscreen does: digitizer `IOHIDEvent`s (one finger down,
+/// any moves, then up) handed to UIKit through `UIApplication._enqueueHIDEvent`, addressed to the
+/// window's render context. UIKit builds the `UITouch`es, hit-tests and dispatches them itself,
+/// exactly as for a finger, so UIKit gesture recognizers *and* SwiftUI gestures (`Button`,
+/// `onTapGesture`, `DragGesture`) see them, and a pan recognizer measures the translation and the
+/// release velocity it would measure for a finger. Building the `UITouch` by hand and calling
+/// `sendEvent` reaches UIKit recognizers but not SwiftUI, which ignores such touches.
 ///
 /// Needs a host app: without a `UIApplication` there is no event dispatcher. iOS has no public
 /// touch-injection API, so this drives UIKit's, IOKit's and BackBoardServices' private one, as
-/// lyft's Hammer does. Test target only.
+/// lyft's Hammer does. Test target only; every real touch in this target goes through here.
 @MainActor
 enum TouchSynthesizer {
 
@@ -20,63 +21,134 @@ enum TouchSynthesizer {
 
     /// Taps `point`, in `window`'s coordinates, and drains the run loop so the tap's handler runs.
     static func tap(at point: CGPoint, in window: UIWindow) throws {
-        let application = try sharedApplication()
-        let hid = try HIDEvents()
-        let contextID = try call(window, "_contextId") as UInt32
+        let session = try Session(window: window)
         // The digitizer reports screen points.
         let location = window.convert(point, to: nil)
 
-        try enqueue(hid.handEvent(at: location, touching: true, contextID: contextID), into: application, hid: hid)
+        try session.send(location, .down)
         // A finger stays down for a moment; a zero-length press is not what a recognizer sees.
         drainRunLoop(for: 0.05)
-        try enqueue(hid.handEvent(at: location, touching: false, contextID: contextID), into: application, hid: hid)
+        try session.send(location, .up)
         drainRunLoop(for: 0.15)
     }
 
-    /// Drags one finger from `start` to `end`, in `window`'s coordinates, over `duration`: down, a run of
-    /// moves, then up, as the touchscreen reports a swipe. Scroll views and SwiftUI drag gestures see it.
-    static func drag(from start: CGPoint, to end: CGPoint, in window: UIWindow, duration: TimeInterval = 0.25) throws {
-        let application = try sharedApplication()
-        let hid = try HIDEvents()
-        let contextID = try call(window, "_contextId") as UInt32
-        let from = window.convert(start, to: nil)
-        let to = window.convert(end, to: nil)
-        let steps = 12
+    /// Drags from `start` by `translation` (window points) over `duration`, in `steps` moves, then
+    /// holds still for `hold` before lifting. A long hold releases at rest (no fling); a short
+    /// duration with no hold releases at speed. `pauseAfterDown` is how long the finger rests
+    /// before it starts to move.
+    static func drag(
+        from start: CGPoint,
+        by translation: CGVector,
+        in window: UIWindow,
+        duration: TimeInterval,
+        steps: Int = 12,
+        hold: TimeInterval = 0,
+        pauseAfterDown: TimeInterval = 0.03
+    ) throws {
+        let session = try Session(window: window)
+        let origin = window.convert(start, to: nil)
+        func point(_ fraction: CGFloat) -> CGPoint {
+            CGPoint(x: origin.x + translation.dx * fraction, y: origin.y + translation.dy * fraction)
+        }
 
-        try enqueue(hid.handEvent(at: from, touching: true, contextID: contextID), into: application, hid: hid)
+        try session.send(origin, .down)
+        drainRunLoop(for: pauseAfterDown)
         for step in 1...steps {
+            try session.send(point(CGFloat(step) / CGFloat(steps)), .moved)
             drainRunLoop(for: duration / Double(steps))
-            let t = CGFloat(step) / CGFloat(steps)
-            let point = CGPoint(x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t)
-            try enqueue(
-                hid.handEvent(at: point, touching: true, contextID: contextID, moved: true), into: application, hid: hid)
         }
-        try enqueue(hid.handEvent(at: to, touching: false, contextID: contextID), into: application, hid: hid)
+        if hold > 0 {
+            // Still down, not moving: the recognizer's velocity decays to zero.
+            let end = point(1)
+            let ticks = max(1, Int(hold / 0.03))
+            for _ in 0..<ticks {
+                try session.send(end, .moved)
+                drainRunLoop(for: hold / Double(ticks))
+            }
+        }
+        try session.send(point(1), .up)
         drainRunLoop(for: 0.15)
     }
 
-    private static func sharedApplication() throws -> UIApplication {
-        // `UIApplication.shared` is declared non-optional but is nil without a host app; ask the
-        // runtime so that case fails loudly instead of messaging nil.
-        guard let application = (UIApplication.self as AnyObject)
-            .perform(NSSelectorFromString("sharedApplication"))?.takeUnretainedValue() as? UIApplication
-        else {
-            throw Unavailable(description: "No UIApplication: the test bundle needs a host app")
+    /// A finger held still at `point` for `seconds`, then lifted.
+    static func press(at point: CGPoint, in window: UIWindow, for seconds: TimeInterval, whileHeld: () -> Void = {}) throws {
+        let session = try Session(window: window)
+        let location = window.convert(point, to: nil)
+        try session.send(location, .down)
+        let ticks = max(1, Int(seconds / 0.05))
+        for _ in 0..<ticks {
+            drainRunLoop(for: seconds / Double(ticks))
+            try session.send(location, .moved)
         }
-        return application
+        whileHeld()
+        try session.send(location, .up)
+        drainRunLoop(for: 0.1)
     }
 
-    private static func enqueue(_ event: UnsafeMutableRawPointer, into application: UIApplication, hid: HIDEvents) throws {
-        defer { hid.release(event) }
-        typealias Fn = @convention(c) (NSObject, Selector, UnsafeMutableRawPointer) -> Void
-        let (fn, selector) = try method(application, "_enqueueHIDEvent:", as: Fn.self)
-        fn(application, selector, event)
+    /// One finger on the touchscreen that a test moves and lifts itself: down at init, any number
+    /// of moves, up at `release`, so a test can look at the screen mid-drag.
+    @MainActor
+    final class Finger {
+        private let window: UIWindow
+        private let session: Session
+        private(set) var location: CGPoint
+
+        init(window: UIWindow, start: CGPoint) throws {
+            self.window = window
+            session = try Session(window: window)
+            location = start
+            try session.send(window.convert(start, to: nil), .down)
+            TouchSynthesizer.drainRunLoop(for: 0.05)
+        }
+
+        /// Moves the finger to `point` (window coordinates) and lets a frame pass.
+        func move(to point: CGPoint) throws {
+            location = point
+            try session.send(window.convert(point, to: nil), .moved)
+            TouchSynthesizer.drainRunLoop(for: 0.016)
+        }
+
+        /// Lifts the finger where it is and lets the release's handlers run.
+        func release() throws {
+            try session.send(window.convert(location, to: nil), .up)
+            TouchSynthesizer.drainRunLoop(for: 0.15)
+        }
     }
 
     static func drainRunLoop(for seconds: TimeInterval) {
         let until = Date().addingTimeInterval(seconds)
         while Date() < until {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
+    }
+
+    /// The application, the window's render context and the event builder one gesture uses.
+    @MainActor
+    private struct Session {
+        let application: UIApplication
+        let hid: HIDEvents
+        let contextID: UInt32
+
+        init(window: UIWindow) throws {
+            // `UIApplication.shared` is declared non-optional but is nil without a host app; ask the
+            // runtime so that case fails loudly instead of messaging nil.
+            guard let application = (UIApplication.self as AnyObject)
+                .perform(NSSelectorFromString("sharedApplication"))?.takeUnretainedValue() as? UIApplication
+            else {
+                throw Unavailable(description: "No UIApplication: the test bundle needs a host app")
+            }
+            self.application = application
+            hid = try HIDEvents()
+            contextID = try TouchSynthesizer.call(window, "_contextId") as UInt32
+        }
+
+        /// Sends one event at `location`, in screen points.
+        func send(_ location: CGPoint, _ phase: HIDEvents.Phase) throws {
+            let event = try hid.handEvent(at: location, phase: phase, contextID: contextID)
+            defer { hid.release(event) }
+            typealias Fn = @convention(c) (NSObject, Selector, UnsafeMutableRawPointer) -> Void
+            let (fn, selector) = try TouchSynthesizer.method(application, "_enqueueHIDEvent:", as: Fn.self)
+            fn(application, selector, event)
         }
     }
 
@@ -99,6 +171,10 @@ enum TouchSynthesizer {
 /// driver produces for a single-finger touch — tagged by BackBoardServices with the window context
 /// they are for.
 private struct HIDEvents {
+    /// Down and up change the finger's range and touch; a move changes only its position, the
+    /// finger staying in range and touching.
+    enum Phase { case down, moved, up }
+
     private typealias CreateDigitizerEvent = @convention(c) (
         UnsafeRawPointer?, UInt64, UInt32, UInt32, UInt32, UInt32, UInt32,
         Double, Double, Double, Double, Double, UInt8, UInt8, UInt32
@@ -125,7 +201,7 @@ private struct HIDEvents {
     /// `kIOHIDEventFieldDigitizerIsDisplayIntegrated`: digitizer field base (type 11 << 16) + 25.
     private static let fieldDisplayIntegrated: UInt32 = (11 << 16) + 25
     private static let fieldOptions = UInt32(bitPattern: -268_435_456)
-    /// The finger's identity; the same for the down and up events of one tap.
+    /// The finger's identity; the same for every event of one gesture.
     private static let fingerIdentity: UInt32 = 2
 
     private let createDigitizerEvent: CreateDigitizerEvent
@@ -156,15 +232,11 @@ private struct HIDEvents {
         cfRelease = try symbol(iokit, "CFRelease", as: Release.self)
     }
 
-    /// A +1 hand event with one finger at `location` (screen points), down, lifting, or `moved` while down;
-    /// balance it with `release`.
-    func handEvent(
-        at location: CGPoint, touching: Bool, contextID: UInt32, moved: Bool = false
-    ) throws -> UnsafeMutableRawPointer {
+    /// A +1 hand event with one finger at `location` (screen points); balance it with `release`.
+    func handEvent(at location: CGPoint, phase: Phase, contextID: UInt32) throws -> UnsafeMutableRawPointer {
         let time = mach_absolute_time()
-        let down: UInt8 = touching ? 1 : 0
-        // Range and touch both change on a tap's down and its up; only the position on a move.
-        let changed = moved ? Self.eventPosition : Self.eventRange | Self.eventTouch
+        let down: UInt8 = phase == .up ? 0 : 1
+        let changed = phase == .moved ? Self.eventPosition : (Self.eventRange | Self.eventTouch)
         guard
             let hand = createDigitizerEvent(
                 nil, time, Self.transducerHand, 0, 0, changed, 0, 0, 0, 0, 0, 0, down, down, 0)

@@ -4,7 +4,8 @@ import Testing
 
 extension HostedUITests {
 /// The choice answer input's branches the fixture suites do not reach: taking back a multi-select
-/// choice, a cap of one, the `row` and uneven `grid` layouts, and the `upvote` kind. Each test
+/// choice, a cap of one, the `row` layout, and the `upvote` kind (the uneven `grid` layout is the package's
+/// `Tests/DigiaEngageTests/FixtureBehaviour/SurveyCanvasChoiceInputTests.swift`). Each test
 /// answers a copy of `survey/survey_core_blocks` (single select, optional multi select, rating,
 /// text, thank-you page) with one scene's input or answer host changed, by real touches.
 ///
@@ -103,25 +104,6 @@ struct SurveyCanvasChoiceInputTests {
         try await sdk.waitUntil("the multi select on screen") { sdk.isShowing(Self.multi) }
         let answers = try await sdk.surveyCanvasAnswers(campaign.key, question: "node_scene_single")
         #expect(answers == [["o_rx"]])
-    }
-
-    // Fails if: canvas_survey_answer_inputs.swift's grid stops filling a short last row with an
-    // empty cell (`Color.clear` for `column >= row.count`): the last option then stretches across
-    // both columns.
-    @Test("a grid keeps the last option in its column when the last row is short")
-    func gridShortLastRow() async throws {
-        let campaign = try SurveyCanvasCampaign("survey/survey_core_blocks")
-        try campaign.answerHostProps("scene_single")["style"] = ["layout": "grid", "columns": 2]
-        let sdk = try await open(campaign)
-        defer { sdk.tearDown() }
-
-        let first = try #require(sdk.surveyCanvasFrames("Prescriptions").first)
-        let second = try #require(sdk.surveyCanvasFrames("Wellness").first)
-        let third = try #require(sdk.surveyCanvasFrames("Devices").first)
-        #expect(abs(first.midY - second.midY) < 2, "the first row holds two options")
-        #expect(third.minY > first.maxY, "the third option starts a second row")
-        #expect(abs(third.minX - first.minX) < 2)
-        #expect(third.maxX < second.minX, "the third option stays inside the first column: \(third)")
     }
 
     // Fails if: canvas_survey_input_parser.swift stops reading "upvote" (the input becomes a plain

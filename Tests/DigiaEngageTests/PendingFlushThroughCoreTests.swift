@@ -3,6 +3,7 @@ import Testing
 
 @testable import DigiaEngage
 
+extension RenderedUITests {
 /// What a user gets when campaigns reach a plugin before core is READY: the plugin's
 /// `PendingPayloadBuffer` is flushed from `onHostReady()` into a real `SDKInstance`, so
 /// the outcome is decided by the buffer's flush order, the READY notification and core's
@@ -92,4 +93,5 @@ struct PendingFlushThroughCoreTests {
         #expect(sdk.cep.presentations.count == 1)
         #expect(core.inlineController.getCampaign("slot_late")?.campaignKey == "late")
     }
+}
 }

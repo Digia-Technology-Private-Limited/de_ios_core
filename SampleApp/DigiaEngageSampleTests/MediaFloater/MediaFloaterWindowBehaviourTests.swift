@@ -7,12 +7,12 @@ extension HostedUITests {
 /// The floater window parts the surface ports in `FixtureBehaviour/Floater/` do not reach: moving a
 /// story floater's window with a real drag, the PiP's expand pill, and a CTA in
 /// the expanded PiP. Each test boots the real SDK, delivers a shared fixture the way a CEP does and
-/// lets `DigiaHost` render it; touches are real (`FloaterBehaviourDrag`, `TouchSynthesizer`).
+/// lets `DigiaHost` render it; touches are real (`TouchSynthesizer`).
 ///
 /// Fixtures: `floater/floater_story_window` (bottom-right story window; `controls` set on the loaded
-/// copy), `pip/pip_video_chrome_pinned_height` (expand pill),
-/// `pip/pip_expand_off_free_drop` (expanding turned off), `pip/pip_expanded_canvas_cta` (an
-/// `Action.openUrl` CTA on the expanded canvas).
+/// copy), `pip/pip_video_chrome_pinned_height` (expand pill), `pip/pip_expanded_canvas_cta` (an
+/// `Action.openUrl` CTA on the expanded canvas). That `pip_expand_off_free_drop` draws no expand pill is
+/// checked untouched, in the package's `FixtureBehaviour/PipSurfaceBehaviourTests.swift`.
 ///
 /// Flutter's `surface_floater_test.dart` has no drag or entry-animation case for the story window;
 /// these follow its PiP counterparts in `flutter/core/test/fixture_behaviour/surface_pip_test.dart`
@@ -79,7 +79,7 @@ struct MediaFloaterWindowBehaviourTests {
         try await sdk.waitForStoryWindow()
         let before = try #require(sdk.storyFloater.activeRect)
 
-        try FloaterBehaviourDrag.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: before.midX, y: before.midY), by: CGVector(dx: -250, dy: 0),
             in: try #require(sdk.window), duration: 0.5, hold: 0.3)
         try await sdk.waitUntil("the drop is recorded", timeout: 6) { sdk.storyFloater.dragFraction != nil }
@@ -109,7 +109,7 @@ struct MediaFloaterWindowBehaviourTests {
         try await sdk.waitForStoryWindow()
         let before = try #require(sdk.storyFloater.activeRect)
 
-        try FloaterBehaviourDrag.drag(
+        try TouchSynthesizer.drag(
             from: CGPoint(x: before.midX, y: before.midY), by: CGVector(dx: -100, dy: -200),
             in: try #require(sdk.window), duration: 0.5, hold: 0.3)
         try await sdk.waitUntil("the drop is recorded", timeout: 6) { sdk.storyFloater.dragFraction != nil }
@@ -144,20 +144,6 @@ struct MediaFloaterWindowBehaviourTests {
             .compactMap { $0["element_id"] as? String }
         #expect(clicks.contains("pip_expand"), "\(clicks)")
         #expect(!clicks.contains("pip_media"), "the pill, not the window behind it, took the tap")
-    }
-
-    // Fails if: floater_overlay_view.swift `if config.controls.showExpand, config.behavior.tapExpands {`
-    // -> `if config.controls.showExpand {`.
-    @Test("pip_expand_off_free_drop: no expand pill is drawn when the author turned expanding off")
-    func noExpandPillWhenExpandingIsOff() async throws {
-        let (sdk, _) = try await boot(try fixture("pip/pip_expand_off_free_drop"))
-        defer { sdk.tearDown() }
-        try await sdk.waitForPipWindow()
-        let rect = try sdk.pipRect()
-
-        let bottomLeft = CGRect(x: rect.minX, y: rect.midY, width: rect.width / 2, height: rect.height / 2)
-        #expect(try sdk.floaterButtons(in: bottomLeft).isEmpty, "showExpand is on, but there is nothing to expand to")
-        #expect(try !sdk.floaterButtons(in: rect).isEmpty, "the × is still there")
     }
 
     // MARK: - Expanded PiP CTA
