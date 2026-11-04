@@ -2,6 +2,12 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [Unreleased]
+
+### Bug Fixes
+
+- Fixed story pages being clipped or oversized on some screens; they now fit within the safe area.
+
 ## [4.3.1] - 2026-11-04
 
 ### Bug Fixes
