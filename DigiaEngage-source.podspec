@@ -57,6 +57,7 @@ Pod::Spec.new do |s|
   # here satisfies. NB the CocoaPods pod for Lottie is `lottie-ios` (module `Lottie`); the SPM
   # product name `Lottie` is not a trunk pod.
   s.dependency 'lottie-ios', '~> 4.5'
+  s.dependency 'DigiaMediaCache', '~> 1.0'
   s.dependency 'SDWebImageSwiftUI', '~> 3.1'
   s.dependency 'SDWebImageSVGCoder', '>= 1.7.0'
 end

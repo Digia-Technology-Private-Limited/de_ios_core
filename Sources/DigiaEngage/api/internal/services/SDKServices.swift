@@ -1,4 +1,5 @@
 import Foundation
+import DigiaMediaCache
 
 private let log = DigiaLogger("analytics")
 

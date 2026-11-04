@@ -1,4 +1,5 @@
 import Foundation
+import DigiaMediaCache
 import SDWebImage
 import Testing
 import UIKit

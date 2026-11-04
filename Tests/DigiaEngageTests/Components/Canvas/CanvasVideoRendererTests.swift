@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import DigiaMediaCache
 import SwiftUI
 import Testing
 import UIKit

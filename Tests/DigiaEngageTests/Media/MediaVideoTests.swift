@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreVideo
+import DigiaMediaCache
 import Foundation
 import SwiftUI
 import Testing

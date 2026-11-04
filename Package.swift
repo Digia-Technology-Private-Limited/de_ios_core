@@ -13,6 +13,10 @@ let package = Package(
         ),
     ],
     dependencies: [
+        .package(
+            url: "https://github.com/Digia-Technology-Private-Limited/de-ios-media-cache.git",
+            from: "1.0.0"
+        ),
         .package(url: "https://github.com/airbnb/lottie-spm.git", from: "4.5.0"),
         .package(url: "https://github.com/SDWebImage/SDWebImageSwiftUI.git", from: "3.1.4"),
         .package(url: "https://github.com/SDWebImage/SDWebImageSVGCoder.git", from: "1.8.0"),
@@ -22,6 +26,7 @@ let package = Package(
         .target(
             name: "DigiaEngage",
             dependencies: [
+                .product(name: "DigiaMediaCache", package: "de-ios-media-cache"),
                 .product(name: "Lottie", package: "lottie-spm"),
                 .product(name: "SDWebImageSwiftUI", package: "SDWebImageSwiftUI"),
                 .product(name: "SDWebImageSVGCoder", package: "SDWebImageSVGCoder"),

@@ -1,5 +1,6 @@
 import AVFoundation
 import AVKit
+import DigiaMediaCache
 internal import Lottie
 import SwiftUI
 import UIKit

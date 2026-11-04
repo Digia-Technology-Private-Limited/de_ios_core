@@ -1,4 +1,5 @@
 import Foundation
+import DigiaMediaCache
 import SwiftUI
 
 internal import SDWebImageSwiftUI

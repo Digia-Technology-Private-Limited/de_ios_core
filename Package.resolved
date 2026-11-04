@@ -2,6 +2,15 @@
   "originHash" : "f60c39d91e56d404da6083e5630efafe896a9d75d9cda6bbd16b808394209450",
   "pins" : [
     {
+      "identity" : "de-ios-media-cache",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/Digia-Technology-Private-Limited/de-ios-media-cache.git",
+      "state" : {
+        "revision" : "ea5877712d2868ad58e10fc12026113351153a8f",
+        "version" : "1.0.0"
+      }
+    },
+    {
       "identity" : "lottie-spm",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/airbnb/lottie-spm.git",

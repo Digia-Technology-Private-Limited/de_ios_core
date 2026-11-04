@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import DigiaMediaCache
 import UIKit
 
 enum StoryVideoLoadDemand: Equatable {
