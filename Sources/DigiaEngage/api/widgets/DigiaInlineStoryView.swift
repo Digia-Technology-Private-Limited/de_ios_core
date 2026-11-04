@@ -520,24 +520,6 @@ private final class DigiaStoryHostingController<Content: View>: UIHostingControl
     }
 }
 
-/// The two-param `onChange(of:initial:_:)` needs iOS 17; below that, `.onAppear`
-/// plus the older single-value `onChange` reports the same "fire now and on every
-/// subsequent change" sequence.
-private struct StoryStepViewedReporter: ViewModifier {
-    let currentIndex: Int
-    let report: (Int) -> Void
-
-    func body(content: Content) -> some View {
-        if #available(iOS 17, *) {
-            content.onChange(of: currentIndex, initial: true) { _, idx in report(idx) }
-        } else {
-            content
-                .onAppear { report(currentIndex) }
-                .onChange(of: currentIndex) { idx in report(idx) }
-        }
-    }
-}
-
 @MainActor
 private struct InlineStoryViewerReporter: StoryViewerReporter {
     let payload: CEPTriggerPayload
@@ -558,209 +540,132 @@ private struct InlineStoryViewerReporter: StoryViewerReporter {
 @MainActor
 private struct InlineStoryOverlayContent: View {
     let state: InlineStoryOverlayState
-
-    @StateObject private var session: StoryViewerSession
-    @Environment(\.digiaCampaignKey) private var campaignKey
-
-    @State private var displayedIndex: Int
-    @State private var elapsed: Double = 0
-    @State private var videoProgress: Double = 0
-    @State private var videoStalled: Double = 0
-    @State private var lastVideoProgress: Double = 0
-    @State private var videoReady = false
-    /// True while the current video is buffering (waiting to play). The stall
-    /// watchdog pauses while this is set so a slow network isn't mistaken for a
-    /// dead video and skipped.
-    @State private var videoBuffering = false
-    @State private var applicationActive = UIApplication.shared.applicationState == .active
-    /// Set when the story runs to its last frame, so the teardown reports
-    /// `Completed` rather than `StepDismissed`.
-    @State private var completed = false
-    /// The byte half of the download plan (players borrow through `MediaVideo`). No-op until
-    /// lane H lands the real `MediaPrefetch`; the protocol stays the seam either way.
-    @State private var planDriver = StoryPlanDriver()
-    @State private var firstFrameShown: Bool
-    @State private var slowSource = PathSlowNetworkSource()
-    @Environment(\.mediaServices) private var mediaServices
+    private let entry: StoryViewerEntry
 
     init(state: InlineStoryOverlayState) {
         self.state = state
         let initialIndex = min(max(state.initialIndex, 0), max(state.config.items.count - 1, 0))
         let handoffKey = DigiaStoryPresenter.shared.pendingHandoffKey
         DigiaStoryPresenter.shared.pendingHandoffKey = nil
-        _session = StateObject(wrappedValue: StoryViewerSession(
+        let payload = state.payload
+        let total = state.config.items.count
+        self.entry = StoryViewerEntry(
             stories: state.config.items,
             startIndex: initialIndex,
             handoffKey: handoffKey,
             restartOnCompleted: state.config.restartOnCompleted,
             startMuted: state.config.startMuted,
-            reporter: InlineStoryViewerReporter(payload: state.payload),
-            onDismiss: { SDKInstance.shared.controller.dismissStoryOverlay() }
-        ))
-        _displayedIndex = State(initialValue: initialIndex)
-        _firstFrameShown = State(initialValue:
-            state.config.items.indices.contains(initialIndex)
-                ? state.config.items[initialIndex].type != .video
-                : true)
+            defaultDurationMs: state.config.defaultDuration,
+            reporter: InlineStoryViewerReporter(payload: payload),
+            onDismiss: { SDKInstance.shared.controller.dismissStoryOverlay() },
+            // Step Viewed fires for each frame that becomes visible (including the first),
+            // mirroring Android's LaunchedEffect(currentStoryIndex).
+            onPageShown: { index in
+                SDKInstance.shared.reportStoryStepViewed(
+                    payload, itemIndex: index + 1, itemTotal: total)
+            },
+            tapLayout: .edges(width: 88),
+            // A looping inline story is not a completion in its funnel.
+            reportsCompletionOnLoop: false
+        )
     }
+
+    var body: some View {
+        // Dismissal gestures live in a single SwiftUI DragGesture so they don't fight a
+        // separate UIKit recognizer (which SwiftUI's own pan would starve). Two "back"
+        // affordances:
+        //   • swipe DOWN  — standard full-screen-cover dismissal
+        //   • swipe RIGHT from the left edge — iOS interactive "back"
+        // `simultaneousGesture` (not `gesture`) so this doesn't claim exclusive recognition
+        // over the left/right tap zones beneath it — a plain `.gesture()` here was swallowing
+        // taps meant for story navigation.
+        StoryViewer(entry: entry) { viewer in
+            InlineStoryChrome(state: state, viewer: viewer)
+        }
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 10)
+                .onEnded { value in
+                    let dy = value.translation.height
+                    let dx = value.translation.width
+                    let predictedDX = value.predictedEndTranslation.width
+                    let swipeDown = dy > 48 && dy > abs(dx)
+                    let edgeBack =
+                        value.startLocation.x < 40
+                        && dx > abs(dy)
+                        && (dx > 80 || predictedDX > 200)
+                    if swipeDown || edgeBack {
+                        SDKInstance.shared.controller.dismissStoryOverlay()
+                    }
+                }
+        )
+    }
+}
+
+/// The inline viewer's chrome over the shared pages: progress strip, CTA, close and mute.
+@MainActor
+private struct InlineStoryChrome: View {
+    let state: InlineStoryOverlayState
+    let viewer: StoryViewerContext
 
     private var variables: VariableContext {
         buildVariableContext(schemas: state.config.variableSchemas, cepVars: state.payload.variables)
     }
 
-    private var currentIndex: Int { session.currentIndex }
-
     var body: some View {
-        GeometryReader { proxy in
-            ZStack {
-                Color.black
-                    .ignoresSafeArea()
+        let item = viewer.item
+        ZStack {
+            VStack(spacing: 0) {
+                StoryProgressBar(
+                    totalItems: viewer.count,
+                    currentIndex: viewer.index,
+                    progress: viewer.progress,
+                    config: state.config.indicator
+                )
+                // `proxy.safeAreaInsets` is zero in the viewer because its GeometryReader
+                // ignores the safe area for full-bleed media, so we source the real device
+                // insets from the window instead (see `safeAreaInsets`).
+                .padding(.top, CGFloat(state.config.indicator.topPadding) + safeAreaInsets.top)
+                .padding(.horizontal, CGFloat(state.config.indicator.horizontalPadding))
 
-                if let item = currentItem {
-                    let muted = session.muted
-                    ForEach(renderedIndices, id: \.self) { index in
-                        if state.config.items.indices.contains(index) {
-                            storyPage(
-                                item: state.config.items[index],
-                                index: index,
-                                active: index == currentIndex,
-                                muted: muted
-                            )
-                            .frame(width: proxy.size.width, height: proxy.size.height)
-                            .clipped()
-                            .opacity(index == displayedIndex ? 1 : 0)
-                        }
+                Spacer(minLength: 0)
+
+                if item.ctaEnabled, let text = item.ctaText, !text.isEmpty {
+                    StoryCTAButton(item: item, variables: variables) {
+                        handleCTA(item)
                     }
-
-                    tapZones
-
-                    VStack(spacing: 0) {
-                        StoryProgressBar(
-                            totalItems: state.config.items.count,
-                            currentIndex: currentIndex,
-                            progress: progress,
-                            config: state.config.indicator
-                        )
-                        // `proxy.safeAreaInsets` is zero here because the
-                        // GeometryReader ignores the safe area for full-bleed
-                        // media, so we source the real device insets from the
-                        // window instead (see `safeAreaInsets`).
-                        .padding(.top, CGFloat(state.config.indicator.topPadding) + safeAreaInsets.top)
-                        .padding(.horizontal, CGFloat(state.config.indicator.horizontalPadding))
-
-                        Spacer(minLength: 0)
-
-                        if item.ctaEnabled, let text = item.ctaText, !text.isEmpty {
-                            StoryCTAButton(item: item, variables: variables) {
-                                handleCTA(item)
-                            }
-                            .padding(.horizontal, 24)
-                            .padding(.bottom, safeAreaInsets.bottom + 20)
-                        }
-                    }
-
-                    VStack(spacing: 0) {
-                        StoryChrome(
-                            closeButton: state.config.closeButton,
-                            muteButton: state.config.muteButton,
-                            showMute: item.type == .video,
-                            muted: muted,
-                            onClose: { SDKInstance.shared.controller.dismissStoryOverlay() },
-                            onToggleMute: { session.muted.toggle() }
-                        )
-                        .padding(
-                            .top,
-                            safeAreaInsets.top
-                                + CGFloat(state.config.indicator.topPadding)
-                                + CGFloat(state.config.indicator.height)
-                                + 12
-                        )
-                        .padding(.trailing, CGFloat(state.config.indicator.horizontalPadding))
-
-                        Spacer(minLength: 0)
-                    }
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, safeAreaInsets.bottom + 20)
                 }
             }
-            .contentShape(Rectangle())
-            // Dismissal gestures live in a single SwiftUI DragGesture so they
-            // don't fight a separate UIKit recognizer (which SwiftUI's own pan
-            // would starve). Two "back" affordances:
-            //   • swipe DOWN  — standard full-screen-cover dismissal
-            //   • swipe RIGHT from the left edge — iOS interactive "back"
-            // `simultaneousGesture` (not `gesture`) so this doesn't claim exclusive
-            // recognition over the left/right `tapZones` beneath it — a plain
-            // `.gesture()` here was swallowing taps meant for story navigation.
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 10)
-                    .onEnded { value in
-                        let dy = value.translation.height
-                        let dx = value.translation.width
-                        let predictedDX = value.predictedEndTranslation.width
-                        let swipeDown = dy > 48 && dy > abs(dx)
-                        let edgeBack =
-                            value.startLocation.x < 40
-                            && dx > abs(dy)
-                            && (dx > 80 || predictedDX > 200)
-                        if swipeDown || edgeBack {
-                            SDKInstance.shared.controller.dismissStoryOverlay()
-                        }
-                    }
-            )
-        }
-        .ignoresSafeArea()
-        .onReceive(Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()) { _ in
-            tick()
-        }
-        .onReceive(NotificationCenter.default.publisher(
-            for: UIApplication.willResignActiveNotification
-        )) { _ in
-            applicationActive = false
-        }
-        .onReceive(NotificationCenter.default.publisher(
-            for: UIApplication.didBecomeActiveNotification
-        )) { _ in
-            applicationActive = true
-        }
-        // Step Viewed fires for each frame that becomes visible (including the
-        // first), mirroring Android's LaunchedEffect(currentStoryIndex).
-        //
-        // The two-param `onChange(of:initial:_:)` needs iOS 17; below that,
-        // `.onAppear` plus the older single-value `onChange` reports the same
-        // "fire now and on every subsequent change" sequence.
-        .modifier(StoryStepViewedReporter(currentIndex: currentIndex) { idx in
-            SDKInstance.shared.reportStoryStepViewed(
-                state.payload,
-                itemIndex: idx + 1,
-                itemTotal: state.config.items.count
-            )
-        })
-        // Any teardown before the last frame is a user dismissal (swipe / edge /
-        // ESC). Completion sets `completed` first, so it reports only once there.
-        .onDisappear {
-            planDriver.cancelAll()
-            if !completed {
-                session.dismiss()
+
+            VStack(spacing: 0) {
+                StoryChrome(
+                    closeButton: state.config.closeButton,
+                    muteButton: state.config.muteButton,
+                    showMute: item.type == .video,
+                    muted: viewer.muted,
+                    onClose: { SDKInstance.shared.controller.dismissStoryOverlay() },
+                    onToggleMute: viewer.toggleMute
+                )
+                .padding(
+                    .top,
+                    safeAreaInsets.top
+                        + CGFloat(state.config.indicator.topPadding)
+                        + CGFloat(state.config.indicator.height)
+                        + 12
+                )
+                .padding(.trailing, CGFloat(state.config.indicator.horizontalPadding))
+
+                Spacer(minLength: 0)
             }
-            // After every holder is given back, the rail remounts and resumes.
-            Task { @MainActor in
-                NotificationCenter.default.post(name: .storyViewerDidClose, object: nil)
-            }
-        }
-        .task(id: planInput) {
-            drivePlan()
-        }
-        .onChange(of: currentIndex) { _ in
-            resetTiming()
-            let isVideo = currentItem?.type == .video
-            firstFrameShown = !(isVideo ?? false)
-            drivePlan()
         }
     }
 
-    /// Real device safe-area insets, read from the active window. The
-    /// enclosing GeometryReader uses `.ignoresSafeArea()` for full-bleed media,
-    /// which makes its own `safeAreaInsets` report zero — so the progress bar
-    /// (and CTA) would otherwise sit under the notch / home indicator.
+    /// Real device safe-area insets, read from the active window. The viewer's GeometryReader
+    /// uses `.ignoresSafeArea()` for full-bleed media, which makes its own `safeAreaInsets`
+    /// report zero — so the progress bar (and CTA) would otherwise sit under the notch / home
+    /// indicator.
     private var safeAreaInsets: UIEdgeInsets {
         UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -769,209 +674,13 @@ private struct InlineStoryOverlayContent: View {
             .first(where: { $0.top > 0 }) ?? .zero
     }
 
-    private var currentItem: StoryItemConfig? {
-        state.config.items.indices.contains(currentIndex) ? state.config.items[currentIndex] : nil
-    }
-
-    private var renderedIndices: [Int] {
-        displayedIndex == currentIndex
-            ? [currentIndex]
-            : [displayedIndex, currentIndex]
-    }
-
-    private var currentDuration: Double {
-        storyPageDurationSeconds(item: currentItem, defaultMs: state.config.defaultDuration) ?? 0
-    }
-
-    private var progress: Double {
-        if currentItem?.type == .video {
-            return min(max(videoProgress, 0), 1)
-        }
-        return min(max(elapsed / max(currentDuration, 0.1), 0), 1)
-    }
-
-    private var planInput: String {
-        "\(currentIndex)-\(firstFrameShown)-\(session.replayTick)"
-    }
-
-    private func drivePlan() {
-        let stories = state.config.items.map {
-            StoryDownloadPlan.Item(isVideo: $0.type == .video)
-        }
-        let index = currentIndex
-        // The pool-lease half of the plan (R2-STORY): neighbour holders stay warm under the
-        // same campaign-namespaced keys the pages borrow under, so a swipe hands over the
-        // same instance. Values are snapshotted — `session` is MainActor-bound and the
-        // driver's `keyOf` must stay a capture-free Sendable closure.
-        let start = session.startIndex
-        let handoff = session.handoffKey
-        let namespace = campaignKey
-        planDriver.update(
-            actions: StoryDownloadPlan.plan(
-                stories: stories,
-                currentIndex: index,
-                firstFrameShown: firstFrameShown,
-                slowNetwork: slowSource.isSlow
-            ),
-            urlOf: { state.config.items[$0].url },
-            isVideoOf: { state.config.items[$0].type == .video },
-            keyOf: { page in
-                if page == index, let handoff, page == start { return handoff }
-                return storyPoolKey(namespace: namespace, index: page)
-            },
-            pool: mediaServices.pool()
-        )
-    }
-
-    @ViewBuilder
-    private func storyPage(
-        item: StoryItemConfig,
-        index: Int,
-        active: Bool,
-        muted: Bool
-    ) -> some View {
-        // A replay remounts the current page so its video restarts from 0.
-        let pageID = index == currentIndex
-            ? "\(index)-\(session.replayTick)"
-            : "\(index)"
-        if item.type == .video {
-            VideoStoryPage(
-                item: item,
-                pageKey: session.pageKey(index: index, namespace: campaignKey),
-                muted: muted,
-                playing: active && applicationActive,
-                onReady: { _ in
-                    guard index == currentIndex else { return }
-                    videoReady = true
-                    displayedIndex = index
-                    firstFrameShown = true
-                    drivePlan()
-                },
-                onProgress: {
-                    guard index == currentIndex else { return }
-                    videoProgress = $0
-                },
-                onEnded: {
-                    guard index == currentIndex else { return }
-                    next()
-                },
-                onBuffering: {
-                    guard index == currentIndex else { return }
-                    videoBuffering = $0
-                },
-                onFailed: {
-                    // A broken full-screen item advances, as before.
-                    guard index == currentIndex else { return }
-                    next()
-                }
-            )
-            .id(pageID)
-        } else {
-            ImageStoryPage(item: item) {
-                guard index == currentIndex else { return }
-                videoReady = true
-                displayedIndex = index
-                firstFrameShown = true
-                drivePlan()
-            }
-            .id(pageID)
-        }
-    }
-
-    private var tapZones: some View {
-        HStack(spacing: 0) {
-            Rectangle()
-                .fill(.clear)
-                .contentShape(Rectangle())
-                .frame(width: 88)
-                .onTapGesture { previous() }
-
-            Spacer(minLength: 0)
-
-            Rectangle()
-                .fill(.clear)
-                .contentShape(Rectangle())
-                .frame(width: 88)
-                .onTapGesture { next() }
-        }
-    }
-
-    private func tick() {
-        guard applicationActive, let item = currentItem else { return }
-        if item.type == .video {
-            // File download and buffering are legitimate loading. Start the
-            // watchdog only after the player has displayed its first frame.
-            if !videoReady || videoBuffering { return }
-            if videoProgress > lastVideoProgress + 0.0001 {
-                lastVideoProgress = videoProgress
-                videoStalled = 0
-            } else {
-                videoStalled += 0.05
-                if videoStalled >= 10 { next() }
-            }
-            return
-        }
-        // A zero-duration image degrades forward instead of stalling: the frame is skipped
-        // at once, never waited on.
-        guard let duration = storyPageDurationSeconds(
-            item: currentItem, defaultMs: state.config.defaultDuration) else {
-            next()
-            return
-        }
-        elapsed += 0.05
-        if elapsed >= duration {
-            next()
-        }
-    }
-
-    private func resetTiming() {
-        elapsed = 0
-        videoProgress = 0
-        lastVideoProgress = 0
-        videoStalled = 0
-        videoBuffering = false
-        videoReady = false
-    }
-
-    private func next() {
-        resetTiming()
-        if currentIndex < state.config.items.count - 1 {
-            move(to: currentIndex + 1)
-        } else if state.config.restartOnCompleted {
-            move(to: 0)
-        } else {
-            completed = true
-            session.advance()
-        }
-    }
-
-    private func previous() {
-        resetTiming()
-        if currentIndex == 0 {
-            // Re-show the first story from the top (replayTick remounts its page).
-            session.goBack()
-        } else {
-            move(to: currentIndex - 1)
-        }
-    }
-
-    private func move(to index: Int) {
-        session.showPage(index: index)
-        // Navigation must be visible on the tap that changes it. Previously video pages waited
-        // for the new player's first frame before updating `displayedIndex`; when going back from
-        // page i to i-1 that left page i visible with reset timing, which looked like the current
-        // story restarted instead of moving to the previous story. The target video already draws
-        // its poster/thumbnail until the player is ready, so switch the visible page immediately.
-        displayedIndex = index
-    }
-
     private func handleCTA(_ item: StoryItemConfig) {
         let actions = item.actions
         let reportedAction = actions.first?.resolved(with: variables)
         let label = item.ctaText.map { interpolate($0, context: variables) }
         SDKInstance.shared.reportStoryStepClicked(
             state.payload,
-            itemIndex: currentIndex + 1,
+            itemIndex: viewer.index + 1,
             ctaLabel: label,
             actionType: reportedAction?.analyticsType,
             actionUrl: reportedAction?.analyticsURL

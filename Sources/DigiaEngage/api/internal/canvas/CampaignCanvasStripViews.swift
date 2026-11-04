@@ -947,174 +947,50 @@ final class CanvasStoryViewerReporter: StoryViewerReporter {
     }
 }
 
-/// Full-screen canvas story player: the story's media, the authored overlay, the
-/// chrome the author arranged, tap-to-navigate, hold-to-pause and auto-advance.
-///
-/// The mechanics live in F's shared viewer (T10): mute and the session in
-/// `StoryViewerSession` (one mute state per session, reset to the campaign default on every
-/// open), the byte half of the download plan in `StoryPlanDriver`, and the media in
-/// `VideoStoryPage`/`ImageStoryPage` (pool borrow under the rail's handoff key, a still below
-/// every frame). This entry supplies only the canvas pieces: the stories with their authored
-/// overlays, the authored chrome, and the canvas analytics mapping. Mirrors Android's
-/// `CanvasStoryViewer` (T10).
-@MainActor
-struct CanvasStoryViewer: View {
+/// The authored page and the chrome the author arranged, drawn over the shared viewer's pages.
+/// One layout for the canvas viewer and the floater's: both are authored against the safe
+/// region and scale against its width.
+struct CanvasStoryOverlay: View {
     let pages: [CampaignCanvasStoryPage]
     let chrome: CampaignCanvas
-    let initialIndex: Int
-    let restartOnCompleted: Bool
-    let startMuted: Bool
     let isDark: Bool
-    let onAction: (CampaignCanvasActionRequest) -> Void
-    let onDismiss: () -> Void
     /// Whether to draw the authored page and chrome layers over the media backdrop.
     /// Floater stories suppress these while their media aperture is moving.
-    var showsOverlays = true
+    let showsOverlays: Bool
     /// Physical safe-area insets supplied by the full-bleed host. Media fills
     /// the screen while authored page and chrome content stay inside these margins.
-    var safeAreaInsets = EdgeInsets()
-    /// The rail's transfer token when a playing thumbnail was tapped, else nil. The start page
-    /// borrows its pool player under it (same key + same URL, so the frame stays on screen);
-    /// every other page borrows under its own namespaced key.
-    var handoffKey: String? = nil
-
-    @StateObject private var session: StoryViewerSession
-    @State private var viewerReporter: CanvasStoryViewerReporter
-    /// The byte half of the download plan (players borrow through `MediaVideo`).
-    @State private var planDriver = StoryPlanDriver()
-    @State private var slowSource = PathSlowNetworkSource()
-
-    @State private var displayedIndex: Int
-    @State private var progress: CGFloat = 0
-    @State private var videoProgress = 0.0
-    @State private var lastVideoProgress = 0.0
-    @State private var videoStalled = 0.0
-    @State private var videoReady = false
-    @State private var videoBuffering = false
-    @State private var paused = false
-    @State private var applicationActive = UIApplication.shared.applicationState == .active
-    /// Set when the story runs to its last frame, so the teardown reports
-    /// `Completed` rather than `StepDismissed`.
-    @State private var completed = false
-    @State private var firstFrameShown: Bool
-
-    // ── analytics ──
-    //
-    // Reported from the viewer rather than the rail, because the rail cannot see any of it: a page
-    // advances on a timer, a tap or a video ending, and only this view knows which page is showing.
-    @Environment(\.canvasInteractions) private var reportInteraction
-    @Environment(\.digiaCampaignKey) private var campaignKey
-    @State private var lastReportedIndex: Int?
-
-    init(
-        pages: [CampaignCanvasStoryPage],
-        chrome: CampaignCanvas,
-        initialIndex: Int,
-        restartOnCompleted: Bool,
-        startMuted: Bool,
-        isDark: Bool,
-        onAction: @escaping (CampaignCanvasActionRequest) -> Void,
-        onDismiss: @escaping () -> Void,
-        showsOverlays: Bool = true,
-        safeAreaInsets: EdgeInsets = EdgeInsets(),
-        handoffKey: String? = nil
-    ) {
-        self.pages = pages
-        self.chrome = chrome
-        self.initialIndex = initialIndex
-        self.restartOnCompleted = restartOnCompleted
-        self.startMuted = startMuted
-        self.isDark = isDark
-        self.onAction = onAction
-        self.onDismiss = onDismiss
-        self.showsOverlays = showsOverlays
-        self.safeAreaInsets = safeAreaInsets
-        self.handoffKey = handoffKey
-
-        let stories = pages.map(canvasStoryItem)
-        let clamped = min(max(initialIndex, 0), max(stories.count - 1, 0))
-        // The session (and the reporter it reports through) is first-wins state: the instance
-        // built here is the one the mounted view keeps, so the relay the session holds is the
-        // same one `onAppear` hands the environment reporter to.
-        let reporter = CanvasStoryViewerReporter(total: stories.count)
-        _viewerReporter = State(initialValue: reporter)
-        // The host's dismiss through a Sendable box: the session's `onDismiss` runs on the main
-        // actor, like every other report path here.
-        let dismissBox = CanvasStoryCallback(run: onDismiss)
-        _session = StateObject(wrappedValue: StoryViewerSession(
-            stories: stories,
-            startIndex: clamped,
-            handoffKey: handoffKey,
-            restartOnCompleted: restartOnCompleted,
-            startMuted: startMuted,
-            reporter: reporter,
-            onDismiss: { dismissBox.run() }
-        ))
-        _displayedIndex = State(initialValue: clamped)
-        _firstFrameShown = State(initialValue:
-            stories.indices.contains(clamped) ? stories[clamped].type != .video : true)
-    }
-
-    private var page: CampaignCanvasStoryPage { pages[min(max(0, session.currentIndex), pages.count - 1)] }
-
-    private var currentProgress: CGFloat {
-        if page.thumbnailIsVideo {
-            return CGFloat(min(max(videoProgress, 0), 1))
-        }
-        return progress
-    }
-
-    private var renderedIndices: [Int] {
-        displayedIndex == session.currentIndex
-            ? [session.currentIndex]
-            : [displayedIndex, session.currentIndex]
-    }
+    let safeAreaInsets: EdgeInsets
+    let onAction: (CampaignCanvasActionRequest) -> Void
+    let viewer: StoryViewerContext
 
     var body: some View {
-        GeometryReader { proxy in
+        if pages.indices.contains(viewer.index) {
+            let page = pages[viewer.index]
             // The width the chrome and page are scaled against: the full-bleed
             // reader minus the device's unsafe margins.
             let contentWidth = max(
-                0, proxy.size.width - safeAreaInsets.leading - safeAreaInsets.trailing
+                0, viewer.size.width - safeAreaInsets.leading - safeAreaInsets.trailing
             )
-            // No black plate in this stack: the media backdrop below is opaque
-            // and already covers the screen. One here would sit *over* the
-            // backdrop — a background draws behind its parent's content — and
-            // hide the story's own media behind a black rectangle.
+            // Both the overlay and the chrome are authored against the safe
+            // region, so both draw at the same scale and inside it.
+            let scale = page.canvas.width > 0 ? contentWidth / page.canvas.width : 1
+            // Each layer is pinned to the safe region, so neither can size the
+            // stack. On a tablet the width-scaled portrait page is taller than
+            // the reader; it bottom-anchors and loses its top, as the media
+            // does, and the chrome stays at the top edge. Phones draw as before.
+            let safeHeight = max(
+                0, viewer.size.height - safeAreaInsets.top - safeAreaInsets.bottom
+            )
+            // The page an action came from travels with it, so a CTA inside story 3 reports as
+            // a step click on story 3 rather than as an anonymous click on the card.
+            let pageAction: (CampaignCanvasActionRequest) -> Void = { request in
+                var stamped = request
+                stamped.step = CanvasStep(
+                    kind: .storyPage, index: viewer.index, total: pages.count
+                )
+                onAction(stamped)
+            }
             ZStack(alignment: .top) {
-                // Navigation sits under the chrome and over the page, so a
-                // button the author placed on a page still wins the tap.
-                HStack(spacing: 0) {
-                    Color.clear.contentShape(Rectangle()).onTapGesture { previous() }
-                    Color.clear.contentShape(Rectangle()).onTapGesture { next() }
-                }
-                .simultaneousGesture(
-                    LongPressGesture(minimumDuration: 0.2)
-                        .onChanged { _ in pause() }
-                        .onEnded { _ in resume() }
-                )
-                .allowsHitTesting(showsOverlays)
-                .accessibilityHidden(!showsOverlays)
-
-                // Both the overlay and the chrome are authored against the safe
-                // region, so both draw at the same scale and inside it.
-                let scale = page.canvas.width > 0 ? contentWidth / page.canvas.width : 1
-                // Each layer is pinned to the safe region, so neither can size the
-                // stack. On a tablet the width-scaled portrait page is taller than
-                // the reader; it bottom-anchors and loses its top, as the media
-                // does, and the chrome stays at the top edge. Phones draw as before.
-                let safeHeight = max(
-                    0, proxy.size.height - safeAreaInsets.top - safeAreaInsets.bottom
-                )
-                // The page an action came from travels with it, so a CTA inside story 3 reports as
-                // a step click on story 3 rather than as an anonymous click on the card.
-                let pageAction: (CampaignCanvasActionRequest) -> Void = { request in
-                    var stamped = request
-                    stamped.step = CanvasStep(
-                        kind: .storyPage, index: session.currentIndex, total: pages.count
-                    )
-                    onAction(stamped)
-                }
                 ScaledCanvasStage(
                     canvas: page.canvas,
                     width: contentWidth,
@@ -1144,232 +1020,94 @@ struct CanvasStoryViewer: View {
                 .environment(
                     \.canvasStoryViewer,
                     CanvasStoryViewerState(
-                        index: session.currentIndex,
+                        index: viewer.index,
                         pageCount: pages.count,
-                        progress: currentProgress,
-                        muted: session.muted
+                        progress: CGFloat(viewer.progress),
+                        muted: viewer.muted
                     )
                 )
-                .environment(\.canvasStoryClose, CanvasStoryCallback(run: { session.dismiss() }))
+                .environment(\.canvasStoryClose, CanvasStoryCallback(run: viewer.dismiss))
                 .environment(
                     \.canvasStoryToggleMute,
-                    CanvasStoryCallback(run: { session.muted.toggle() })
+                    CanvasStoryCallback(run: viewer.toggleMute)
                 )
                 .opacity(showsOverlays ? 1 : 0)
                 .allowsHitTesting(showsOverlays)
                 .accessibilityHidden(!showsOverlays)
             }
-            // Inside the safe region, and the backdrop below outside it. The
-            // padding is *inside* the frame that follows, so the stack is offered
-            // the reader minus these insets while the frame — and so the media
-            // behind it — still covers the whole reader.
+            // Inside the safe region; the media below sits outside it. The padding is
+            // *inside* the frame that follows, so the stack is offered the reader minus these
+            // insets while the frame still covers the whole reader.
             .padding(safeAreaInsets)
-            // The screen, and only the screen. Without this the stack takes its
-            // size from its largest child, and a story's media is routinely
-            // larger than the screen — a filling image reports an ideal size in
-            // the image's own pixels. That grew the stack, which carried the
-            // top-aligned chrome above the top edge and the bottom-anchored page
-            // canvas below the bottom one.
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            // The media goes here rather than in the stack for the same reason:
-            // a background is measured against its parent and can never resize
-            // it, however large the image inside turns out to be. It still
-            // bleeds under the status bar and the home indicator, because a
-            // story's media is the screen.
-            .background {
-                CanvasStoryMediaBackdrop {
-                    ZStack {
-                        ForEach(renderedIndices, id: \.self) { mediaIndex in
-                            if session.stories.indices.contains(mediaIndex) {
-                                storyMedia(
-                                    story: session.stories[mediaIndex],
-                                    index: mediaIndex,
-                                    active: mediaIndex == session.currentIndex,
-                                    muted: session.muted
-                                )
-                                .opacity(mediaIndex == displayedIndex ? 1 : 0)
-                            }
-                        }
-                    }
-                }
-                .ignoresSafeArea()
-            }
-        }
-        .onAppear {
-            // The environment reporter lands here, before any report can fire: the session is
-            // built in `init`, where the environment does not exist yet.
-            viewerReporter.report = reportInteraction.report
-            reportPageViewed(session.currentIndex)
-        }
-        .onChange(of: session.currentIndex) { _ in
-            reportPageViewed(session.currentIndex)
-            resetTiming()
-            firstFrameShown = !(currentItem?.type == .video)
-            drivePlan()
-        }
-        // Step Viewed fires for each frame that becomes visible (including the
-        // first), mirroring the media story's viewer.
-        .onReceive(Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()) { _ in
-            tick()
-        }
-        .onReceive(NotificationCenter.default.publisher(
-            for: UIApplication.willResignActiveNotification
-        )) { _ in
-            applicationActive = false
-        }
-        .onReceive(NotificationCenter.default.publisher(
-            for: UIApplication.didBecomeActiveNotification
-        )) { _ in
-            applicationActive = true
-        }
-        .onDisappear {
-            planDriver.cancelAll()
-            if !completed {
-                session.dismiss()
-            }
-            // After every holder is given back, rails remount and resume.
-            Task { @MainActor in
-                NotificationCenter.default.post(name: .storyViewerDidClose, object: nil)
-            }
-        }
-        .task(id: planInput) {
-            drivePlan()
+            // The screen, and only the screen: a layer left to size itself takes its size
+            // from its largest child and carries the top-aligned chrome off the top edge.
+            .frame(width: viewer.size.width, height: viewer.size.height)
         }
     }
+}
 
-    private func reportPageViewed(_ pageIndex: Int) {
-        guard lastReportedIndex != pageIndex else { return }
-        lastReportedIndex = pageIndex
-        reportInteraction(.storyPageViewed(index: pageIndex, total: pages.count))
-    }
+/// Full-screen canvas story player: the shared `StoryViewer` over the canvas pieces — the
+/// stories with their authored overlays, the authored chrome and the canvas analytics mapping.
+/// Mute and the session, the timer, the pages, the borrowing and the download plan are the
+/// viewer's. Mirrors Android's `CanvasStoryViewer` (T10).
+@MainActor
+struct CanvasStoryViewer: View {
+    let pages: [CampaignCanvasStoryPage]
+    let chrome: CampaignCanvas
+    let initialIndex: Int
+    let restartOnCompleted: Bool
+    let startMuted: Bool
+    let isDark: Bool
+    let onAction: (CampaignCanvasActionRequest) -> Void
+    let onDismiss: () -> Void
+    /// Whether to draw the authored page and chrome layers over the media backdrop.
+    /// Floater stories suppress these while their media aperture is moving.
+    var showsOverlays = true
+    /// Physical safe-area insets supplied by the full-bleed host. Media fills
+    /// the screen while authored page and chrome content stay inside these margins.
+    var safeAreaInsets = EdgeInsets()
+    /// The rail's transfer token when a playing thumbnail was tapped, else nil. The start page
+    /// borrows its pool player under it (same key + same URL, so the frame stays on screen);
+    /// every other page borrows under its own namespaced key.
+    var handoffKey: String? = nil
 
-    private var currentItem: StoryItemConfig? {
-        session.stories.indices.contains(session.currentIndex)
-            ? session.stories[session.currentIndex] : nil
-    }
+    @State private var viewerReporter: CanvasStoryViewerReporter
+    /// Reported from the viewer rather than the rail, because the rail cannot see any of it: a
+    /// page advances on a timer, a tap or a video ending, and only the viewer knows which page
+    /// is showing.
+    @Environment(\.canvasInteractions) private var reportInteraction
 
-    private var planInput: String {
-        "\(session.currentIndex)-\(firstFrameShown)-\(session.replayTick)"
-    }
+    private let stories: [StoryItemConfig]
 
-    private func drivePlan() {
-        // Snapshots: the plan driver's closures are Sendable, so they take the plain values,
-        // not the MainActor-bound session.
-        let urls = session.stories.map(\.url)
-        let kinds = session.stories.map { $0.type == .video }
-        planDriver.update(
-            actions: StoryDownloadPlan.plan(
-                stories: session.stories.map {
-                    StoryDownloadPlan.Item(isVideo: $0.type == .video)
-                },
-                currentIndex: session.currentIndex,
-                firstFrameShown: firstFrameShown,
-                slowNetwork: slowSource.isSlow
-            ),
-            urlOf: { urls[$0] },
-            isVideoOf: { kinds[$0] }
-        )
-    }
-
-    @ViewBuilder
-    private func storyMedia(story: StoryItemConfig, index: Int, active: Bool, muted: Bool) -> some View {
-        // A replay remounts the current page so its video restarts from 0.
-        let pageID = index == session.currentIndex
-            ? "\(index)-\(session.replayTick)"
-            : "\(index)"
-        if story.type == .video {
-            VideoStoryPage(
-                item: story,
-                pageKey: session.pageKey(index: index, namespace: campaignKey),
-                muted: muted,
-                playing: active && applicationActive && !paused,
-                onReady: { _ in
-                    guard index == session.currentIndex else { return }
-                    videoReady = true
-                    displayedIndex = index
-                    firstFrameShown = true
-                    drivePlan()
-                },
-                onProgress: {
-                    guard index == session.currentIndex else { return }
-                    videoProgress = $0
-                },
-                onEnded: {
-                    guard index == session.currentIndex else { return }
-                    next()
-                },
-                onBuffering: {
-                    guard index == session.currentIndex else { return }
-                    videoBuffering = $0
-                },
-                onFailed: {
-                    // A broken full-screen item advances, as before.
-                    guard index == session.currentIndex else { return }
-                    next()
-                }
-            )
-            .id(pageID)
-        } else {
-            ImageStoryPage(item: story) {
-                guard index == session.currentIndex else { return }
-                videoReady = true
-                displayedIndex = index
-                firstFrameShown = true
-                drivePlan()
-            }
-            .id(pageID)
-        }
-    }
-
-    private func next() {
-        if session.currentIndex < session.stories.count - 1 {
-            resetTiming()
-            move(to: session.currentIndex + 1)
-        } else {
-            // The end is the completion — reported at most once per showing, then the story
-            // loops or the viewer closes. Unlike the inline entry this reports even when
-            // restarting: the floater's `stopOn: experienceCompleted` rule retires on it.
-            completed = true
-            resetTiming()
-            session.advance()
-            displayedIndex = session.currentIndex
-        }
-    }
-
-    private func previous() {
-        resetTiming()
-        if session.currentIndex == 0 {
-            // Re-show the first story from the top (replayTick remounts its page).
-            session.goBack()
-        } else {
-            move(to: session.currentIndex - 1)
-        }
-    }
-
-    private func move(to index: Int) {
-        session.showPage(index: index)
-        // Navigation must be visible on the tap that changes it. The target video already
-        // draws its still until the player is ready, so switch the visible page at once.
-        displayedIndex = index
-    }
-
-    private func pause() {
-        guard !paused else { return }
-        paused = true
-    }
-
-    private func resume() {
-        guard paused else { return }
-        paused = false
-    }
-
-    private func resetTiming() {
-        progress = 0
-        videoProgress = 0
-        lastVideoProgress = 0
-        videoStalled = 0
-        videoBuffering = false
-        videoReady = false
+    init(
+        pages: [CampaignCanvasStoryPage],
+        chrome: CampaignCanvas,
+        initialIndex: Int,
+        restartOnCompleted: Bool,
+        startMuted: Bool,
+        isDark: Bool,
+        onAction: @escaping (CampaignCanvasActionRequest) -> Void,
+        onDismiss: @escaping () -> Void,
+        showsOverlays: Bool = true,
+        safeAreaInsets: EdgeInsets = EdgeInsets(),
+        handoffKey: String? = nil
+    ) {
+        self.pages = pages
+        self.chrome = chrome
+        self.initialIndex = initialIndex
+        self.restartOnCompleted = restartOnCompleted
+        self.startMuted = startMuted
+        self.isDark = isDark
+        self.onAction = onAction
+        self.onDismiss = onDismiss
+        self.showsOverlays = showsOverlays
+        self.safeAreaInsets = safeAreaInsets
+        self.handoffKey = handoffKey
+        self.stories = pages.map(canvasStoryItem)
+        // The reporter is first-wins state shared with the session the viewer builds from it:
+        // the relay arrives from the `canvasInteractions` environment, which does not exist yet
+        // at init time, and is set before any report can fire.
+        _viewerReporter = State(initialValue: CanvasStoryViewerReporter(total: pages.count))
     }
 
     static func progressIncrement(
@@ -1381,29 +1119,42 @@ struct CanvasStoryViewer: View {
         return CGFloat(interval / max(0.1, duration))
     }
 
-    private func tick() {
-        guard applicationActive, let item = currentItem else { return }
-        if item.type == .video {
-            // File download and buffering are legitimate loading. Start the
-            // watchdog only after the player has displayed its first frame.
-            if !videoReady || videoBuffering { return }
-            if videoProgress > lastVideoProgress + 0.0001 {
-                lastVideoProgress = videoProgress
-                videoStalled = 0
-            } else {
-                videoStalled += 0.05
-                if videoStalled >= 10 { next() }
-            }
-            return
+    var body: some View {
+        StoryViewer(
+            entry: StoryViewerEntry(
+                stories: stories,
+                startIndex: min(max(initialIndex, 0), max(stories.count - 1, 0)),
+                handoffKey: handoffKey,
+                restartOnCompleted: restartOnCompleted,
+                startMuted: startMuted,
+                // Canvas pages always carry their own duration.
+                defaultDurationMs: 0,
+                reporter: viewerReporter,
+                // The host's dismiss through a Sendable box: the session's `onDismiss` runs on
+                // the main actor, like every other report path here.
+                onDismiss: { [dismiss = CanvasStoryCallback(run: onDismiss)] in dismiss.run() },
+                onPageShown: { [total = pages.count, report = reportInteraction] index in
+                    report(.storyPageViewed(index: index, total: total))
+                },
+                tapLayout: .halves,
+                tapInsets: safeAreaInsets,
+                navigationEnabled: showsOverlays
+            )
+        ) { viewer in
+            CanvasStoryOverlay(
+                pages: pages,
+                chrome: chrome,
+                isDark: isDark,
+                showsOverlays: showsOverlays,
+                safeAreaInsets: safeAreaInsets,
+                onAction: onAction,
+                viewer: viewer
+            )
         }
-        // A zero-duration image degrades forward instead of stalling: the frame is skipped
-        // at once, never waited on.
-        guard let duration = storyPageDurationSeconds(item: currentItem, defaultMs: 0) else {
-            next()
-            return
+        .onAppear {
+            // Before any completion or dismissal can fire.
+            viewerReporter.report = reportInteraction.report
         }
-        progress += Self.progressIncrement(interval: 0.05, duration: duration, isPaused: paused)
-        if progress >= 1 { next() }
     }
 }
 

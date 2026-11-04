@@ -48,6 +48,9 @@ final class StoryViewerSession: ObservableObject {
     private var completedReported = false
     private let openedAt = Date()
 
+    /// Whether the end of the story was reported: closing after it is not a dismissal.
+    var isCompleted: Bool { completedReported }
+
     init(
         stories: [StoryItemConfig],
         startIndex: Int,
