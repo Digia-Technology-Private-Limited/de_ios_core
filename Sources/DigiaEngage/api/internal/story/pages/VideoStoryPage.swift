@@ -6,8 +6,8 @@ import SwiftUI
 /// Borrows under `pageKey` — the key a playing thumbnail hands over on tap, so the viewer
 /// reuses the same instance (same key + same URL), reset to the start and unmuted, with the
 /// still below covering every frame until the first one lands (never an empty layer). A refused
-/// borrow or an evicted holder degrades to the still and tells the viewer to move on (`onFailed`,
-/// which the viewer treats like an ended page — the pre-T10 advance-on-failure rule).
+/// borrow or an evicted holder degrades to the still and tells the viewer (`onFailed`), which
+/// runs the page's own time on that still and then moves on.
 /// Mirrors Android `VideoStoryPage`.
 ///
 /// Progress, play/pause and completion all read the owned `MediaVideoState` — never the raw
@@ -99,8 +99,11 @@ struct VideoStoryPage: View {
                 if !ended, !video.ended, !videoCompletedNaturally() { onFailed() }
             }
         }
-        .onChange(of: playing) { _ in video.playing = playing }
-        .onChange(of: muted) { _ in video.spec = Self.spec(item: item, muted: muted) }
+        // The new value, not `self.playing`/`self.muted`: the closure runs with the view value
+        // from before the change, so reading them there acts one change late — a hold would pause
+        // when released and a mute would apply on the next press.
+        .onChange(of: playing) { video.playing = $0 }
+        .onChange(of: muted) { video.spec = Self.spec(item: item, muted: $0) }
         .onChange(of: video.ended) { done in
             if done {
                 ended = true
