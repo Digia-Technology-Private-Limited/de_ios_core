@@ -229,6 +229,25 @@ struct MediaLottieComponentTests {
         MediaOrigin.release(second)
     }
 
+    @Test("a second render of the same animation is a cache hit with no fetches")
+    func secondRenderIsCacheHit() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("cached-once.json")
+        MediaOrigin.set(.status(200, Self.animation), for: target)
+
+        let first = mount(LottieSpec(url: target.absoluteString))
+        #expect(await waitForAnimation(in: first) != nil)
+        #expect(MediaOrigin.requests(for: target).count == 1)
+        ComponentTestHost.unmount(first)
+
+        let second = mount(LottieSpec(url: target.absoluteString))
+        defer { ComponentTestHost.unmount(second) }
+        #expect(await waitForAnimation(in: second) != nil)
+
+        #expect(MediaOrigin.requests(for: target).count == 1)
+    }
+
     @Test("a real animation installs and plays per the spec")
     func realAnimationPlays() async {
         MediaOrigin.install()
