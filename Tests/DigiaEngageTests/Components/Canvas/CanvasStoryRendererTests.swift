@@ -204,31 +204,6 @@ struct CanvasStoryRendererTests {
         #expect(CanvasStoryProgressRenderer.fraction(for: 2, active: 2, elapsed: 1.4) == 1.0)
     }
 
-    @Test("story progress increment and hold to pause rules")
-    func storyProgressIncrementAndHoldToPause() {
-        let interval: TimeInterval = 1.0 / 30.0
-        let duration: Double = 5.0
-
-        // Normal playback increments progress proportionally
-        let normalIncrement = CanvasStoryViewer.progressIncrement(
-            interval: interval, duration: duration, isPaused: false
-        )
-        let expectedIncrement = CGFloat(interval / duration)
-        #expect(abs(normalIncrement - expectedIncrement) < 0.0001)
-
-        // Hold-to-pause stops accumulation completely
-        let pausedIncrement = CanvasStoryViewer.progressIncrement(
-            interval: interval, duration: duration, isPaused: true
-        )
-        #expect(pausedIncrement == 0.0)
-
-        // Safe division against zero or negative authored duration
-        let zeroDurationIncrement = CanvasStoryViewer.progressIncrement(
-            interval: interval, duration: 0.0, isPaused: false
-        )
-        #expect(zeroDurationIncrement == CGFloat(interval / 0.1))
-    }
-
     // MARK: - 5. Fit & Item Mapping Oracle
 
     @Test("canvasStoryItem mapping transforms CampaignCanvasStoryPage into StoryItemConfig")

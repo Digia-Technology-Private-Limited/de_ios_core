@@ -1110,15 +1110,6 @@ struct CanvasStoryViewer: View {
         _viewerReporter = State(initialValue: CanvasStoryViewerReporter(total: pages.count))
     }
 
-    static func progressIncrement(
-        interval: TimeInterval,
-        duration: Double,
-        isPaused: Bool
-    ) -> CGFloat {
-        guard !isPaused else { return 0 }
-        return CGFloat(interval / max(0.1, duration))
-    }
-
     var body: some View {
         StoryViewer(
             entry: StoryViewerEntry(

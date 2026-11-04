@@ -73,9 +73,11 @@ struct StoryViewer<Chrome: View>: View {
 
     @StateObject private var session: StoryViewerSession
 
-    @State private var elapsed: Double = 0
+    /// The current page's own time (images and failed videos); real elapsed time, not ticks.
+    @State private var pageTimer = StoryPageTimer()
+    /// How long the current video has gone without its playhead moving.
+    @State private var stallTimer = StoryPageTimer()
     @State private var videoProgress: Double = 0
-    @State private var videoStalled: Double = 0
     @State private var lastVideoProgress: Double = 0
     @State private var videoReady = false
     /// True while the current video is buffering (waiting to play). The stall watchdog pauses
@@ -131,7 +133,7 @@ struct StoryViewer<Chrome: View>: View {
         if currentItem?.type == .video, !mediaFailed {
             return min(max(videoProgress, 0), 1)
         }
-        return min(max(elapsed / max(currentDuration, 0.1), 0), 1)
+        return min(max(pageTimer.elapsed / max(currentDuration, 0.1), 0), 1)
     }
 
     private var planInput: String {
@@ -329,21 +331,28 @@ struct StoryViewer<Chrome: View>: View {
 
     // MARK: - Timing
 
+    /// A video that shows no playhead movement for this long (loading and buffering excepted)
+    /// is given up on.
+    private static var stallLimit: TimeInterval { 10 }
+
     private func tick() {
-        guard applicationActive, !paused, let item = currentItem else { return }
+        guard let item = currentItem else { return }
+        let now = StoryPageTimer.clock
+        // Held or backgrounded, the timers stand still and the stretch is not counted.
+        let counting = applicationActive && !paused
         if item.type == .video, !mediaFailed {
-            // File download and buffering are legitimate loading. Start the
-            // watchdog only after the player has displayed its first frame.
-            if !videoReady || videoBuffering { return }
             if videoProgress > lastVideoProgress + 0.0001 {
                 lastVideoProgress = videoProgress
-                videoStalled = 0
-            } else {
-                videoStalled += 0.05
-                if videoStalled >= 10 { next() }
+                stallTimer.reset()
             }
+            // File download and buffering are legitimate loading. The guard starts only once the
+            // player has displayed its first frame.
+            stallTimer.tick(now: now, running: counting && videoReady && !videoBuffering)
+            if stallTimer.elapsed >= Self.stallLimit { next() }
             return
         }
+        pageTimer.tick(now: now, running: counting)
+        guard counting else { return }
         // A zero-duration page degrades forward instead of stalling: the frame is skipped
         // at once, never waited on.
         guard let duration = storyPageDurationSeconds(
@@ -351,17 +360,16 @@ struct StoryViewer<Chrome: View>: View {
             next()
             return
         }
-        elapsed += 0.05
-        if elapsed >= duration {
+        if pageTimer.elapsed >= duration {
             next()
         }
     }
 
     private func resetTiming() {
-        elapsed = 0
+        pageTimer.reset(now: StoryPageTimer.clock)
+        stallTimer.reset()
         videoProgress = 0
         lastVideoProgress = 0
-        videoStalled = 0
         videoBuffering = false
         videoReady = false
         mediaFailed = false
