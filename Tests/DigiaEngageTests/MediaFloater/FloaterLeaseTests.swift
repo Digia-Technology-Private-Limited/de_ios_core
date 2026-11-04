@@ -11,7 +11,7 @@ import Testing
 /// factory, so the borrow lands in the showing-scoped seam pool: hermetic, no network,
 /// local test-kit file only.
 @Suite(
-    "Floater: pip lease lifecycle", .serialized, .tags(.integration, .media),
+    "Floater: pip lease lifecycle", .serialized, .tags(.integration, .media, .floater, .pip),
     .enabled(if: testkitAvailable, testkitSkipReason))
 struct FloaterLeaseTests {
 
@@ -179,6 +179,13 @@ struct FloaterLeaseTests {
         #expect(orchestrator.lastStartFailureReason != nil)
     }
 
+    // Crash-guard, not a leak probe: `pool.release()` already clears holders, so the
+    // assertions below only prove teardown after external pool invalidation stays
+    // silent (the lease release is a post-eviction no-op via `giveBackIfHeldBy`).
+    // The genuine pin is the re-start: teardown must leave the orchestrator and the
+    // pool usable, so the same campaign is accepted and reaches its first frame again.
+    // Fails if: floater_orchestrator.swift `dispose` `state = nil` is deleted (the
+    // re-start below is refused as busy).
     @Test("teardown after a pool release is silent")
     @MainActor
     func postEvictionTeardownIsSilent() async throws {
@@ -196,6 +203,11 @@ struct FloaterLeaseTests {
 
         #expect(orchestrator.player == nil)
         #expect(pool.heldKeys().isEmpty)
+
+        // The pool and the orchestrator must still serve the same campaign.
+        try #require(try await startVideo(orchestrator, campaign))
+        #expect(orchestrator.player != nil)
+        orchestrator.dispose()
     }
 }
 
