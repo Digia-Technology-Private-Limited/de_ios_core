@@ -294,7 +294,15 @@ private struct FloaterSessionView: View {
             // `DispatchQueue.main.async` since publishing state synchronously during a
             // view update is invalid.
             .onAppear {
-                DispatchQueue.main.async { orchestrator.activeRect = publishedActiveRect }
+                // The publish is deferred (publishing during a view update is
+                // invalid); drop it if the showing ended meanwhile, so a queued
+                // publish can never resurrect a cleared frame after teardown.
+                let token = state.token
+                let rect = publishedActiveRect
+                DispatchQueue.main.async {
+                    guard orchestrator.state?.token == token else { return }
+                    orchestrator.activeRect = rect
+                }
             }
             .onChange(of: publishedActiveRect) { newRect in
                 orchestrator.activeRect = newRect
