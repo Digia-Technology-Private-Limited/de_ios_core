@@ -663,47 +663,11 @@ internal struct MediaVideo: View {
 
     @Environment(\.digiaCampaignKey) private var campaignKey
     @Environment(\.mediaServices) private var mediaServices
-    /// Old-shape forwarding, set only by the adapter init below.
-    private var adapterSpec: VideoSpec? = nil
-    private var adapterPlaying: Bool? = nil
 
     /// State-driven (canonical): the owner configures `state` and mutates it
     /// directly; this view only opens/closes it and draws from it.
     init(state: MediaVideoState) {
         _state = StateObject(wrappedValue: state)
-    }
-
-    // TODO(r2-remove): temporary old-shape adapter so pre-R2 call sites still
-    // compile. Forwards construction params into the state and live updates
-    // through it; no logic of its own. The R2 migration lanes delete this when
-    // the last caller builds its own state.
-    init(
-        spec: VideoSpec,
-        keepAliveKey: String? = nil,
-        poolPriority: PoolPriority = .onScreen,
-        playing: Bool = true,
-        player: AVPlayer? = nil,
-        pool: VideoPlayerPool? = nil,
-        resourceLoader: MediaResourceLoader? = nil,
-        onReady: ((AVPlayer) -> Void)? = nil,
-        onError: ((String) -> Void)? = nil,
-        onGiveUp: (() -> Void)? = nil
-    ) {
-        let state = MediaVideoState(
-            spec: spec,
-            playing: playing,
-            keepAliveKey: keepAliveKey,
-            poolPriority: poolPriority,
-            pool: pool,
-            resourceLoader: resourceLoader,
-            onReady: onReady,
-            onError: onError,
-            onGiveUp: onGiveUp
-        )
-        state.useExternalPlayer(player)
-        _state = StateObject(wrappedValue: state)
-        self.adapterSpec = spec
-        self.adapterPlaying = playing
     }
 
     var body: some View {
@@ -737,12 +701,6 @@ internal struct MediaVideo: View {
         }
         .onDisappear {
             state.disappear()
-        }
-        .onChange(of: adapterSpec) { _ in
-            if let spec = adapterSpec { state.spec = spec }
-        }
-        .onChange(of: adapterPlaying) { _ in
-            if let playing = adapterPlaying { state.playing = playing }
         }
     }
 }
