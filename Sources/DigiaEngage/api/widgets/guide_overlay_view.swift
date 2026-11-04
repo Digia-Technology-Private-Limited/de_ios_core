@@ -28,6 +28,7 @@ private enum AnchorlessImageLoader {
         if let cached = cache.object(forKey: url as NSURL) { return (cached, nil) }
         var request = URLRequest(url: url)
         request.timeoutInterval = imageLoadTimeout
+        request.setValue(DIGIA_IMAGE_USER_AGENT, forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               !Task.isCancelled
         else { return (nil, nil) }

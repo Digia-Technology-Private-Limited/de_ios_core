@@ -11,6 +11,12 @@ final class StubCropProtocol: URLProtocol {
     /// The bytes for a URL, or nil to leave the request to the real network.
     nonisolated(unsafe) static var data: ((URL) -> Data?)?
 
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var recordedUserAgents: [String?] = []
+
+    /// The `User-Agent` of every request served since `show` reset it.
+    static var userAgents: [String?] { lock.withLock { recordedUserAgents } }
+
     override class func canInit(with request: URLRequest) -> Bool {
         guard let url = request.url, url.scheme == "https" else { return false }
         return data?(url) != nil
@@ -19,6 +25,7 @@ final class StubCropProtocol: URLProtocol {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
+        Self.lock.withLock { Self.recordedUserAgents.append(request.value(forHTTPHeaderField: "User-Agent")) }
         guard let url = request.url, let body = Self.data?(url),
               let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)
         else {
@@ -31,6 +38,8 @@ final class StubCropProtocol: URLProtocol {
     }
 
     override func stopLoading() {}
+
+    static func resetUserAgents() { lock.withLock { recordedUserAgents = [] } }
 }
 
 /// Shows an anchorless guide over the Flutter and Android guide host screen in the sample app's own window scene, as
@@ -64,6 +73,7 @@ enum AnchorlessGuideHost {
         let size = device.size!
 
         StubCropProtocol.data = crop
+        StubCropProtocol.resetUserAgents()
         URLProtocol.registerClass(StubCropProtocol.self)
 
         let window = PinnedInsetsWindow(windowScene: scene)
