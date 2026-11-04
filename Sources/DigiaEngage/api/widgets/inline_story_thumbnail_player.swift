@@ -19,9 +19,8 @@ struct StoryRailGeometryPreference: PreferenceKey {
     }
 }
 
-/// The dark tile a rail card shows under its media. Q1 still open: a video story with no
-/// thumbnail image keeps this backdrop (plus the generated-frame poster below the player, kept
-/// working and repointed at the D2 asset) until its first frame.
+/// The dark tile a rail card shows under its media. A video story with no thumbnail image keeps
+/// this backdrop until its first frame (Q1: no frame is cut from the video).
 struct StoryThumbnailPlaceholderView: View {
     let thumbnail: StoryThumbnailConfig?
     var fitOverride: StoryMediaFit? = nil

@@ -66,9 +66,9 @@ struct StoryThumbnail: View {
 }
 
 /// What a rail card shows when its video is not playing (or while it loads): never empty.
-/// Image thumbnails render through `MediaImage` (D6); a video story with no thumbnail image
-/// keeps the dark backdrop until its first frame (Q1 still open — the generated-frame poster
-/// path stays working underneath the player, repointed at the D2 asset).
+/// Image thumbnails render through `MediaImage` (D6) with their BlurHash; a video story with
+/// no thumbnail image keeps the dark backdrop until its first frame (Q1: no frame is cut from
+/// the video, so nothing is downloaded twice).
 @MainActor
 struct StoryThumbnailStill: View {
     let item: StoryItemConfig
@@ -199,13 +199,7 @@ private struct StoryThumbnailVideo: View {
 
     var body: some View {
         ZStack {
-            // Q1 poster path, untouched: the generated frame (D2 asset) below the player.
             StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
-            if item.thumbnail == nil, let poster = StoryVideoPosterCache.image(
-                for: StoryVideoPosterIdentity(url: item.url, frameMs: startMs)
-            ) {
-                StoryPosterImage(image: poster, fit: item.thumbnailBoxFit)
-            }
             MediaVideo(state: video)
         }
         .id(reappearGeneration)
