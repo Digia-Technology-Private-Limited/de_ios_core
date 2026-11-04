@@ -483,14 +483,44 @@ private struct NudgeVideoView: View {
     let node: NudgeVideo
     let canvasMode: Bool
     @Environment(\.digiaVariables) private var variables
-    /// The player borrowed by the wrapper below, handed out through `onReady`. The
-    /// native controls attach to this same player when the campaign asks for them —
-    /// never a second player (mirrors Android's `showControls` MediaVideo option,
-    /// which the frozen iOS wrapper does not carry; see report).
-    @State private var readyPlayer: AVPlayer? = nil
 
-    private var url: String { interpolate(node.url, context: variables) }
-    private var spec: VideoSpec {
+    var body: some View {
+        let resolved = interpolate(node.url, context: variables)
+        Group {
+            if resolved.isEmpty {
+                EmptyView()
+            } else {
+                NudgeVideoPlayer(node: node, url: resolved, canvasMode: canvasMode)
+            }
+        }
+    }
+}
+
+/// The state-owning half of a nudge video (R2): the outer view resolves the URL
+/// from the environment, this one builds its `MediaVideoState` once and renders
+/// the state-driven `MediaVideo`. The pool key is a fresh key per mount — nudge
+/// nodes carry no stable identity. The player source is the state's lease; the
+/// native controls stay OUTSIDE `MediaVideo` (D13: controls are a view concern,
+/// mirroring Android's `showControls` MediaVideo option, which the frozen iOS
+/// wrapper does not carry).
+private struct NudgeVideoPlayer: View {
+    let node: NudgeVideo
+    let url: String
+    let canvasMode: Bool
+    @StateObject private var videoState: MediaVideoState
+
+    init(node: NudgeVideo, url: String, canvasMode: Bool) {
+        self.node = node
+        self.url = url
+        self.canvasMode = canvasMode
+        _videoState = StateObject(wrappedValue: MediaVideoState(
+            spec: Self.makeSpec(node: node, url: url),
+            playing: node.autoplay,
+            keepAliveKey: "nudge-video-\(UUID().uuidString)"
+        ))
+    }
+
+    private static func makeSpec(node: NudgeVideo, url: String) -> VideoSpec {
         VideoSpec(
             url: url,
             fit: node.boxFit.mediaFit,
@@ -499,36 +529,50 @@ private struct NudgeVideoView: View {
     }
 
     var body: some View {
-        Group {
-            if url.isEmpty {
-                EmptyView()
-            } else {
-                ZStack {
-                    // The D5 still on error, not the "Video failed" box: a failed
-                    // video keeps its dark still. Health reports with the surface's
-                    // campaign key (read from the environment by MediaVideo) — this
-                    // resolves the P0a nudge-video silence.
-                    MediaVideo(
-                        spec: spec,
-                        playing: node.autoplay,
-                        onReady: { readyPlayer = $0 },
-                        onError: { _ in readyPlayer = nil }
-                    )
-                    if node.showControls, let readyPlayer {
-                        PlayerViewController(
-                            player: readyPlayer,
-                            showsPlaybackControls: true,
-                            videoGravity: spec.fit.videoGravity
+        ZStack {
+            MediaVideo(state: videoState)
+            if node.showControls, let player = videoState.activePlayer, !videoState.failed {
+                PlayerViewController(
+                    player: player,
+                    showsPlaybackControls: true,
+                    videoGravity: node.boxFit.mediaFit.videoGravity
+                )
+            }
+            // Main behavior, restored (R0 gate): a visible spinner while loading
+            // (immediate, not the wrapper's delayed one — the two coincide, so
+            // no double image) and a failure box on error instead of the still.
+            // Health still reports with the surface's campaign key through the
+            // state — this keeps the P0a nudge-video silence resolved.
+            if videoState.activePlayer != nil, !videoState.firstFrameShown, !videoState.failed {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                    .tint(.white)
+            }
+            if videoState.failed {
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 28))
+                    Text("Video failed")
+                        .font(
+                            Font(SDKInstance.shared.font.resolve(
+                                size: 13, weight: 400, italic: false
+                            ))
                         )
-                    }
                 }
-                .modifier(CanvasMediaFrame(
-                    canvasMode: canvasMode,
-                    aspectRatio: node.aspectRatio,
-                    height: node.height
-                ))
+                .foregroundStyle(.white)
             }
         }
+        .modifier(CanvasMediaFrame(
+            canvasMode: canvasMode,
+            aspectRatio: node.aspectRatio,
+            height: node.height
+        ))
+        // Rare path (an interpolated URL resolving mid-show): the owner drives
+        // the state's live-set contract (a URL change re-opens, playing drives
+        // play/pause) — the view only opens/closes it. Rebuilt from the current
+        // node so fit/loop/muted stay in step with the new URL.
+        .onChange(of: url) { _ in videoState.spec = Self.makeSpec(node: node, url: url) }
+        .onChange(of: node.autoplay) { _ in videoState.playing = node.autoplay }
     }
 }
 
