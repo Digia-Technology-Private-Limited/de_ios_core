@@ -20,14 +20,6 @@ struct MediaVideoRuleTests {
         #expect(MediaVideoStill(thumbnailUrl: nil, blurHash: "") == .backdrop)
     }
 
-    // Guards `MediaVideoStill.allowsSpinner`: only the bare backdrop earns a spinner.
-    @Test("only the bare backdrop allows a spinner")
-    func spinnerRule() {
-        #expect(MediaVideoStill.backdrop.allowsSpinner)
-        #expect(!MediaVideoStill.blurHash("LEHV").allowsSpinner)
-        #expect(!MediaVideoStill.thumbnail("https://a.test/t.jpg").allowsSpinner)
-    }
-
     // N1: the layer fits relative to its own bounds; guards `MediaFit.videoGravity`.
     @Test("each fit mode maps to its layer gravity")
     func fitPerMode() {

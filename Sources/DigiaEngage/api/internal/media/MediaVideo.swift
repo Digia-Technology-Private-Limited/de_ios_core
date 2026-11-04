@@ -1,4 +1,5 @@
 import AVFoundation
+import AVKit
 import SwiftUI
 import UIKit
 
@@ -17,14 +18,16 @@ extension MediaFit {
 }
 
 /// What a video shows until its first frame (Q1): the authored thumbnail, else the BlurHash,
-/// else the dark backdrop. No frame is cut from the video.
+/// else the dark backdrop. No frame is cut from the video. A non-blank thumbnail always goes to
+/// `MediaImage`, which reports an unusable one as `invalid_url` and draws the BlurHash in its
+/// place (R1-17, the same rule on every stack).
 enum MediaVideoStill: Equatable {
     case thumbnail(String)
     case blurHash(String)
     case backdrop
 
     init(thumbnailUrl: String?, blurHash: String?) {
-        if let thumbnailUrl, mediaUsableURL(thumbnailUrl) != nil {
+        if let thumbnailUrl, !thumbnailUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             self = .thumbnail(thumbnailUrl)
         } else if let blurHash, !blurHash.isEmpty {
             self = .blurHash(blurHash)
@@ -33,36 +36,51 @@ enum MediaVideoStill: Equatable {
         }
     }
 
-    /// Only a bare backdrop earns a spinner: a thumbnail or a BlurHash is better to look at.
-    var allowsSpinner: Bool { self == .backdrop }
+    /// Whether something can actually show before the first frame: a usable thumbnail URL or a
+    /// BlurHash. Only when nothing can does the spinner appear.
+    static func canShow(thumbnailUrl: String?, blurHash: String?) -> Bool {
+        if let thumbnailUrl, mediaUsableURL(thumbnailUrl) != nil { return true }
+        return !(blurHash ?? "").isEmpty
+    }
 }
+
+/// The dark ground under a video's still, the same #1A1A1A as Android and Flutter.
+let mediaVideoBackdrop = Color(red: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 255)
 
 /// The one video wrapper every surface renders through. Flat parameters, like `MediaImage`.
 ///
-/// Until the first frame it shows the still (`MediaVideoStill`). A spinner appears only over the
-/// bare backdrop, after `spinnerDelay` (~400 ms) with no first frame. When the video can't load (or the URL
-/// is unusable) it shows the "Video failed" box, the same box `main`'s nudge video showed, and
-/// reports health once: `invalid_url`, `http_4xx` or `decode`. A network failure, a timeout or a
-/// 5xx reports nothing. Never throws from the render path.
+/// Until the first frame it shows the still (`MediaVideoStill`) on the dark backdrop. A spinner
+/// appears only when no still can show, after `spinnerDelay` (~400 ms) with no first frame. When
+/// the video can't load (or the URL is unusable) it shows the "Video failed" box, the same box
+/// `main`'s nudge video showed, and reports health once: `invalid_url`, `http_4xx` or `decode`.
+/// A network failure, a timeout or a 5xx reports nothing. Never throws from the render path.
 ///
-/// Remote items read through the range cache (`MediaServices.videoLoader`); `file://` plays
-/// directly. The wrapper owns its own player; `playerKey` names the player a surface wants to
-/// keep across remounts (used once players come from the pool).
+/// With a `playerKey` the player is leased from the pool (`MediaServices.videoPool`) at
+/// `poolPriority`: a remount under the same key and URL resumes where it was, an eviction shows
+/// the still again, and a refused borrow shows the still and reports nothing. Without a key the
+/// wrapper builds its own player and destroys it when it goes. Remote items read through the
+/// range cache; `file://` plays directly.
+///
+/// `showControls` draws `main`'s native playback controls (`AVPlayerViewController`), as canvas
+/// and nudge video did on `main`; every other surface leaves it off.
+///
+/// Callbacks (the same set on every stack): `onFirstFrame` once per opened URL (again after a
+/// handover to a new holder), `onEnded` when playback reaches the end and isn't looping,
+/// `onFailure` after health is reported.
 struct MediaVideo: View {
     let url: String
     var fit: MediaFit = .cover
     var thumbnailUrl: String? = nil
     var blurHash: String? = nil
-    var loop: Bool = true
+    var loop: Bool = false
     var muted: Bool = true
     var autoplay: Bool = true
+    var showControls: Bool = false
     var playerKey: String? = nil
-    /// The first frame drew.
+    var poolPriority: PoolPriority = .onScreen
     var onFirstFrame: (() -> Void)? = nil
-    /// The video can't play (health is already reported).
-    var onFailure: (() -> Void)? = nil
-    /// Playback reached the end (not called while looping).
     var onEnded: (() -> Void)? = nil
+    var onFailure: (() -> Void)? = nil
     /// How long a bare backdrop waits for the first frame before showing a spinner. Tests
     /// lengthen it to capture the backdrop alone.
     var spinnerDelay: TimeInterval = MediaVideo.defaultSpinnerDelay
@@ -75,39 +93,53 @@ struct MediaVideo: View {
 
     var body: some View {
         let still = MediaVideoStill(thumbnailUrl: thumbnailUrl, blurHash: blurHash)
+        let _ = playback.updateCallbacks(onFirstFrame: onFirstFrame, onEnded: onEnded, onFailure: onFailure)
         ZStack {
-            Color.black
-            if !playback.firstFrameShown {
-                stillView(still)
-            }
-            if let player = playback.player, !playback.failed {
-                MediaPlayerLayerView(player: player, gravity: fit.videoGravity) {
-                    playback.noteFirstFrame()
-                }
-                .opacity(playback.firstFrameShown ? 1 : 0)
-            }
             if playback.failed {
+                Color.black
                 MediaVideoFailedBox()
-            } else if playback.spinnerVisible {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .tint(.white)
+            } else {
+                mediaVideoBackdrop
+                if !playback.firstFrameShown {
+                    stillView(still)
+                }
+                if let player = playback.player {
+                    playerView(player)
+                        .opacity(playback.firstFrameShown || showControls ? 1 : 0)
+                }
+                if playback.spinnerVisible {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                }
             }
         }
         .clipped()
-        .onAppear { open(still: still) }
+        .onAppear { open(url: url, key: playerKey) }
         .onDisappear { playback.close() }
-        .onChange(of: url) { _ in open(still: still) }
+        // The new value comes in the argument: the closure may still see the old properties.
+        .onChange(of: url) { open(url: $0, key: playerKey) }
+        .onChange(of: playerKey) { open(url: url, key: $0) }
         .onChange(of: muted) { playback.player?.isMuted = $0 }
+        .onChange(of: autoplay) { playback.setPlaying($0) }
+        .onChange(of: loop) { playback.loop = $0 }
     }
 
-    private func open(still: MediaVideoStill) {
-        playback.onFirstFrame = onFirstFrame
-        playback.onFailure = onFailure
-        playback.onEnded = onEnded
+    @ViewBuilder
+    private func playerView(_ player: AVPlayer) -> some View {
+        if showControls {
+            MediaPlayerControllerView(player: player, gravity: fit.videoGravity) { playback.noteFirstFrame() }
+        } else {
+            MediaPlayerLayerView(player: player, gravity: fit.videoGravity) { playback.noteFirstFrame() }
+        }
+    }
+
+    private func open(url: String, key: String?) {
+        let canShow = MediaVideoStill.canShow(thumbnailUrl: thumbnailUrl, blurHash: blurHash)
         playback.open(
-            url: url, loop: loop, muted: muted, autoplay: autoplay, spinnerDelay: still.allowsSpinner ? spinnerDelay : nil,
-            loader: services.videoLoader,
+            url: url, key: key, priority: poolPriority, loop: loop, muted: muted, autoplay: autoplay,
+            spinnerDelay: canShow ? nil : spinnerDelay,
+            services: services,
             report: { [services, campaignKey] cause in services.reportHealth(campaignKey, .video, cause) })
     }
 
@@ -143,8 +175,16 @@ struct MediaVideoFailedBox: View {
     }
 }
 
-/// One showing's player: builds it, watches its item, and publishes first frame and failure.
-/// All on the main actor.
+/// A remote item reads through the range cache (one download serves playback and the cache);
+/// `file://` and URLs the cache scheme can't carry play directly.
+@MainActor
+func mediaVideoItem(for url: URL, loader: MediaResourceLoader) -> AVPlayerItem {
+    if url.isFileURL { return AVPlayerItem(url: url) }
+    return loader.playerItem(for: url) ?? AVPlayerItem(url: url)
+}
+
+/// One showing's player: leases it from the pool (keyed) or builds it (keyless), watches its
+/// item, and publishes first frame and failure. All on the main actor.
 @MainActor
 final class MediaVideoPlayback: ObservableObject {
     @Published private(set) var player: AVPlayer?
@@ -152,47 +192,56 @@ final class MediaVideoPlayback: ObservableObject {
     @Published private(set) var failed = false
     @Published private(set) var spinnerVisible = false
 
-    var onFirstFrame: (() -> Void)?
-    var onFailure: (() -> Void)?
-    var onEnded: (() -> Void)?
+    var loop = false
+    private var onFirstFrame: (() -> Void)?
+    private var onFailure: (() -> Void)?
+    private var onEnded: (() -> Void)?
 
-    private var openedURL: String?
-    private var loop = true
+    private var opened: (url: String, key: String?)?
+    private var lease: (pool: VideoPlayerPool, key: String, eviction: UUID)?
     private var report: (String) -> Void = { _ in }
     private var statusObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
     private var spinnerTask: Task<Void, Never>?
 
-    /// Starts showing `url`. Re-opening the URL already open is a no-op; a new URL frees the
-    /// old player first.
+    /// Keeps the latest closures, so a parent passing new ones for the same URL is heard.
+    func updateCallbacks(onFirstFrame: (() -> Void)?, onEnded: (() -> Void)?, onFailure: (() -> Void)?) {
+        self.onFirstFrame = onFirstFrame
+        self.onEnded = onEnded
+        self.onFailure = onFailure
+    }
+
+    /// Starts showing `url`. Re-opening what is already open is a no-op; anything else frees
+    /// the old player first.
     func open(
-        url: String, loop: Bool, muted: Bool, autoplay: Bool, spinnerDelay: TimeInterval?,
-        loader: MediaResourceLoader, report: @escaping (String) -> Void
+        url: String, key: String?, priority: PoolPriority, loop: Bool, muted: Bool, autoplay: Bool,
+        spinnerDelay: TimeInterval?, services: MediaServices, report: @escaping (String) -> Void
     ) {
-        guard url != openedURL else { return }
+        if let opened, opened.url == url, opened.key == key { return }
         close()
-        openedURL = url
+        opened = (url, key)
         self.loop = loop
         self.report = report
         guard let parsed = mediaUsableURL(url) else {
             fail(cause: "invalid_url")
             return
         }
-        let item = Self.item(for: parsed, loader: loader)
-        let player = AVPlayer(playerItem: item)
+        let player: AVPlayer
+        if let key {
+            let pool = services.videoPool
+            // Refused (pool full, not on screen): the still stays and nothing is reported.
+            guard let borrowed = pool.borrow(key: key, url: parsed, priority: priority) else { return }
+            let eviction = pool.observeEviction(of: key) { [weak self] in self?.evicted() }
+            lease = (pool, key, eviction)
+            player = borrowed
+        } else {
+            player = AVPlayer(playerItem: mediaVideoItem(for: parsed, loader: services.videoLoader))
+        }
         player.isMuted = muted
         player.actionAtItemEnd = .pause
-        statusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
-            guard item.status == .failed else { return }
-            Task { @MainActor in self?.fail(cause: mediaFailureCause(playerItem: item)) }
-        }
-        endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.noteEnded() }
-        }
+        if let item = player.currentItem { watch(item) }
         self.player = player
-        if autoplay { player.play() }
+        setPlaying(autoplay)
         if let spinnerDelay {
             spinnerTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(spinnerDelay * 1_000_000_000))
@@ -202,18 +251,25 @@ final class MediaVideoPlayback: ObservableObject {
         }
     }
 
-    /// Stops and frees the player.
+    func setPlaying(_ playing: Bool) {
+        guard let player, !failed else { return }
+        if playing { player.play() } else { player.pause() }
+    }
+
+    /// Stops the player: gives a leased one back to the pool, destroys an owned one.
     func close() {
-        spinnerTask?.cancel()
-        spinnerTask = nil
-        statusObserver?.invalidate()
-        statusObserver = nil
-        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-        endObserver = nil
-        player?.pause()
-        player?.replaceCurrentItem(with: nil)
+        let leaving = player
+        unwatch()
+        if let lease {
+            lease.pool.removeEvictionObserver(lease.eviction, for: lease.key)
+            if let leaving { lease.pool.giveBack(key: lease.key, player: leaving) }
+        } else {
+            leaving?.pause()
+            leaving?.replaceCurrentItem(with: nil)
+        }
+        lease = nil
         player = nil
-        openedURL = nil
+        opened = nil
         firstFrameShown = false
         failed = false
         spinnerVisible = false
@@ -225,6 +281,38 @@ final class MediaVideoPlayback: ObservableObject {
         spinnerVisible = false
         spinnerTask?.cancel()
         onFirstFrame?()
+    }
+
+    private func watch(_ item: AVPlayerItem) {
+        statusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            guard item.status == .failed else { return }
+            Task { @MainActor in self?.fail(cause: mediaFailureCause(playerItem: item)) }
+        }
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.noteEnded() }
+        }
+    }
+
+    private func unwatch() {
+        spinnerTask?.cancel()
+        spinnerTask = nil
+        statusObserver?.invalidate()
+        statusObserver = nil
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        endObserver = nil
+    }
+
+    /// The pool took the player back for a higher-ranked holder: show the still again. The
+    /// showing stays opened, so it isn't re-borrowed every frame.
+    private func evicted() {
+        unwatch()
+        if let lease { lease.pool.removeEvictionObserver(lease.eviction, for: lease.key) }
+        lease = nil
+        player = nil
+        firstFrameShown = false
+        spinnerVisible = false
     }
 
     /// Shows the failed box once per opened URL. Only a cause the author can fix is health: a
@@ -248,12 +336,46 @@ final class MediaVideoPlayback: ObservableObject {
             onEnded?()
         }
     }
+}
 
-    /// Range-cache-backed for remote URLs (one download serves playback and the cache), direct
-    /// for `file://` and for URLs the cache scheme can't carry.
-    private static func item(for url: URL, loader: MediaResourceLoader) -> AVPlayerItem {
-        if url.isFileURL { return AVPlayerItem(url: url) }
-        return loader.playerItem(for: url) ?? AVPlayerItem(url: url)
+/// `main`'s native controls (`AVPlayerViewController`, as canvas and nudge video drew them).
+/// Reports when the video is ready to display, which is the first frame.
+private struct MediaPlayerControllerView: UIViewControllerRepresentable {
+    let player: AVPlayer
+    let gravity: AVLayerVideoGravity
+    let onReadyForDisplay: () -> Void
+
+    final class Coordinator {
+        var readyObserver: NSKeyValueObservation?
+        weak var boundItem: AVPlayerItem?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let controller = AVPlayerViewController()
+        controller.view.backgroundColor = .black
+        controller.showsPlaybackControls = true
+        updateUIViewController(controller, context: context)
+        return controller
+    }
+
+    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
+        controller.videoGravity = gravity
+        guard controller.player !== player || context.coordinator.boundItem !== player.currentItem else { return }
+        context.coordinator.boundItem = player.currentItem
+        controller.player = nil
+        controller.player = player
+        context.coordinator.readyObserver = controller.observe(\.isReadyForDisplay, options: [.initial, .new]) { _, change in
+            guard change.newValue == true else { return }
+            Task { @MainActor in onReadyForDisplay() }
+        }
+    }
+
+    static func dismantleUIViewController(_ controller: AVPlayerViewController, coordinator: Coordinator) {
+        coordinator.readyObserver?.invalidate()
+        coordinator.readyObserver = nil
+        controller.player = nil
     }
 }
 
@@ -287,11 +409,17 @@ private final class PlayerLayerView: UIView {
 
     private var playerLayer: AVPlayerLayer? { layer as? AVPlayerLayer }
 
+    private weak var boundItem: AVPlayerItem?
+
     func apply(player: AVPlayer, gravity: AVLayerVideoGravity, onReady: @escaping () -> Void) {
         guard let playerLayer else { return }
         self.onReady = onReady
         playerLayer.videoGravity = gravity
-        guard playerLayer.player !== player else { return }
+        // A pooled player re-pointed at a new URL keeps the old frame ready: re-attach it so
+        // readiness, and so the first frame, is the new item's.
+        guard playerLayer.player !== player || boundItem !== player.currentItem else { return }
+        boundItem = player.currentItem
+        playerLayer.player = nil
         playerLayer.player = player
         readyObserver = playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) {
             [weak self] layer, _ in

@@ -20,15 +20,21 @@ struct MediaServices: Sendable {
     var videoLoader: MediaResourceLoader
     /// The range cache behind `videoLoader`, which `MediaPrefetch` warms.
     var videoStore: MediaRangeCacheStore
+    /// The process-wide players keyed `MediaVideo`s lease; its items read through `videoLoader`.
+    var videoPool: VideoPlayerPool
 
-    static let sdk = MediaServices(
-        reportHealth: { campaignKey, kind, cause in
-            reportMediaLoadFailed(kind, cause: cause, campaignKey: campaignKey)
-        },
-        loadLottie: { await loadLottieSource($0) },
-        videoLoader: MediaResourceLoader(store: MediaRangeCacheStore.shared()),
-        videoStore: MediaRangeCacheStore.shared()
-    )
+    static let sdk: MediaServices = {
+        let loader = MediaResourceLoader(store: MediaRangeCacheStore.shared())
+        return MediaServices(
+            reportHealth: { campaignKey, kind, cause in
+                reportMediaLoadFailed(kind, cause: cause, campaignKey: campaignKey)
+            },
+            loadLottie: { await loadLottieSource($0) },
+            videoLoader: loader,
+            videoStore: MediaRangeCacheStore.shared(),
+            videoPool: VideoPlayerPool(makeItem: { mediaVideoItem(for: $0, loader: loader) })
+        )
+    }()
 
     /// The services in force: the SDK's, unless a test overrode them.
     static var current: MediaServices { store.value }
@@ -50,8 +56,10 @@ struct MediaServices: Sendable {
             if let reportHealth { services.reportHealth = reportHealth }
             if let loadLottie { services.loadLottie = loadLottie }
             if let videoStore {
+                let loader = MediaResourceLoader(store: videoStore)
                 services.videoStore = videoStore
-                services.videoLoader = MediaResourceLoader(store: videoStore)
+                services.videoLoader = loader
+                services.videoPool = VideoPlayerPool(makeItem: { mediaVideoItem(for: $0, loader: loader) })
             }
         }
     }
