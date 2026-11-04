@@ -1,4 +1,5 @@
 import Foundation
+import SDWebImage
 import SwiftUI
 import Testing
 import UIKit
@@ -140,6 +141,42 @@ struct MediaImageComponentTests {
         #expect(transparent != nil && pixelsNearly(transparent!, white, tolerance: 0.02))
     }
 
+    // Fails if a picture already in the SDImageCache memory cache is not drawn on the first render:
+    // `MediaImage.memoryCachedPicture` and its branch in MediaImage.body (WebImage alone completes a
+    // cache hit inside the view update, and SwiftUI drops the invalidation, so the picture never
+    // appears). Fails if the blur stays behind it: the transparent half must show what is behind.
+    // The origin is not installed, so the red can only have come from the cache.
+    @Test("a picture already in the memory cache draws on the first render, once reported, leaving no blur", arguments: [
+        false, true,
+    ])
+    func cachedPictureDrawsOnFirstRender(withBlurHash: Bool) throws {
+        let target = MediaOrigin.url("cached.png")
+        let picture = try #require(UIImage(data: halfTransparentPNG()))
+        SDImageCache.shared.storeImage(toMemory: picture, forKey: target.absoluteString)
+        defer { SDImageCache.shared.removeImageFromMemory(forKey: target.absoluteString) }
+        try #require(SDImageCache.shared.imageFromMemoryCache(forKey: target.absoluteString) != nil)
+
+        let successes = SuccessCount()
+        let spec = ImageSpec(url: target.absoluteString, blurHash: withBlurHash ? Self.blurHash : nil)
+        let window = mountMedia(
+            MediaImage(spec: spec, onSuccess: { successes.count += 1 })
+                .environment(\.digiaCampaignKey, Self.campaign)
+                .environment(\.mediaServices, HealthRecorder().services)
+                .frame(width: 200, height: 200)
+        )
+        defer { ComponentTestHost.unmount(window) }
+        ComponentTestHost.drainRunLoop(for: 0.5)
+
+        let red = RGB(r: 1, g: 0, b: 0)
+        let white = RGB(r: 1, g: 1, b: 1)
+        let drawn = rendered(window)
+        let left = pixel(of: drawn, atX: 0.25, y: 0.5)
+        let right = pixel(of: drawn, atX: 0.75, y: 0.5)
+        #expect(left != nil && pixelsNearly(left!, red))
+        #expect(right != nil && pixelsNearly(right!, white, tolerance: 0.02))
+        #expect(successes.count == 1)
+    }
+
     // Fails if an unusable URL reaches the downloader or goes unreported: the `mediaUsableURL`
     // guard in MediaImage.body. Fails if the label is dropped for it: `still(failed: true)`.
     @Test("a blank, unresolved or schemeless url never fetches, keeps the still under errorContent, and reports invalid_url once", arguments: [
@@ -245,3 +282,5 @@ struct MediaImageDecisionTests {
         #expect(first != nil && first === second)
     }
 }
+
+final class SuccessCount { var count = 0 }
