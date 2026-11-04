@@ -967,6 +967,14 @@ struct CanvasStoryViewer: View {
             : [displayedMediaKey, currentMediaKey]
     }
 
+    /// The one scale at which the authored story box fits `available` on both
+    /// axes. A degenerate box (zero or negative side) draws at 1 rather than
+    /// dividing by it.
+    static func storyBoxScale(box: CGSize, available: CGSize) -> CGFloat {
+        guard box.width > 0, box.height > 0 else { return 1 }
+        return max(0, min(available.width / box.width, available.height / box.height))
+    }
+
     var body: some View {
         GeometryReader { proxy in
             // The width the chrome and page are scaled against: the full-bleed
@@ -993,15 +1001,22 @@ struct CanvasStoryViewer: View {
                 .allowsHitTesting(showsOverlays)
                 .accessibilityHidden(!showsOverlays)
 
-                // Both the overlay and the chrome are authored against the safe
-                // region, so both draw at the same scale and inside it.
-                let scale = page.canvas.width > 0 ? contentWidth / page.canvas.width : 1
-                // Each layer is pinned to the safe region, so neither can size the
-                // stack. On a tablet the width-scaled portrait page is taller than
-                // the reader; it bottom-anchors and loses its top, as the media
-                // does, and the chrome stays at the top edge. Phones draw as before.
                 let safeHeight = max(
                     0, proxy.size.height - safeAreaInsets.top - safeAreaInsets.bottom
+                )
+                // The page and the chrome are authored in one box — the safe
+                // content region of the design device — and the dashboard fits
+                // that box into the safe region whole: one scale that satisfies
+                // both axes, centred across and resting on the bottom edge, with
+                // the chrome sharing the page's rect. Scaling by width alone lets
+                // a screen whose safe region is shorter than the design's (a Pro
+                // Max, any iPad) push the page's top up under the chrome.
+                let box = CGSize(
+                    width: max(page.canvas.width, chrome.width),
+                    height: max(page.canvas.height, chrome.height)
+                )
+                let scale = Self.storyBoxScale(
+                    box: box, available: CGSize(width: contentWidth, height: safeHeight)
                 )
                 // The page an action came from travels with it, so a CTA inside story 3 reports as
                 // a step click on story 3 rather than as an anonymous click on the card.
@@ -1014,13 +1029,13 @@ struct CanvasStoryViewer: View {
                 }
                 ScaledCanvasStage(
                     canvas: page.canvas,
-                    width: contentWidth,
+                    width: page.canvas.width * scale,
                     height: page.canvas.height * scale,
                     cornerRadius: 0,
                     isDark: isDark,
                     onAction: pageAction
                 )
-                .frame(height: safeHeight, alignment: .bottom)
+                .frame(width: contentWidth, height: safeHeight, alignment: .bottom)
                 .clipped()
                 .opacity(showsOverlays ? 1 : 0)
                 .allowsHitTesting(showsOverlays)
@@ -1028,7 +1043,7 @@ struct CanvasStoryViewer: View {
 
                 ScaledCanvasStage(
                     canvas: chrome,
-                    width: contentWidth,
+                    width: chrome.width * scale,
                     height: chrome.height * scale,
                     cornerRadius: 0,
                     isDark: isDark,
@@ -1036,7 +1051,10 @@ struct CanvasStoryViewer: View {
                     // Transparent by design — the page shows through, as on Flutter.
                     showBackground: false
                 )
-                .frame(height: safeHeight, alignment: .top)
+                // At the top of the fitted box, which is where it was authored
+                // over the page — not the top of the screen.
+                .frame(height: box.height * scale, alignment: .top)
+                .frame(width: contentWidth, height: safeHeight, alignment: .bottom)
                 .clipped()
                 .environment(
                     \.canvasStoryViewer,

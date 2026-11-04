@@ -2006,28 +2006,35 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         ensureWelcomeStartIfNoWelcome(state)
         let block = state.config.blockForNode(stepId)
         let values = Self.stringArray(answer["values"])
-        let comment = Self.stringValue(answer["comment"])
         let viewedKey = Self.questionKey(token: state.token, nodeId: stepId)
         let timeToAnswerMs: Int64? = questionViewedAt[viewedKey].map {
             Int64(Date().timeIntervalSince($0) * 1000)
         }
         questionViewedAt.removeValue(forKey: viewedKey)
         let scaleBounds = block.flatMap(Self.scaleBounds)
+        let typeWire = block?.type.rawValue
+        let openEnded = block.map { Self.openEndedQuestionTypes.contains($0.type) } ?? false
+        var sanitizedAnswer = answer
+        sanitizedAnswer.removeValue(forKey: "comment")
+        let answerValue: String? = openEnded ? nil : values.first
+        let answerText: String? = openEnded ? nil : (values.isEmpty ? nil : values.joined(separator: ", "))
+        let answerLabel: String? = openEnded ? nil : block.flatMap { Self.answerLabel(block: $0, values: values) }
+        let answerOptions: [String]? = openEnded ? nil : (values.count > 1 ? values : nil)
         events.toDigia(
             SurveyEvent.QuestionAnswered(
                 questionId: stepId,
                 questionTitle: block.flatMap(Self.questionTitle),
-                questionType: block?.type.rawValue,
-                answerValue: values.first,
-                answerText: comment ?? (values.isEmpty ? nil : values.joined(separator: ", ")),
-                blockType: block?.type.rawValue,
+                questionType: typeWire,
+                answerValue: answerValue,
+                answerText: answerText,
+                blockType: typeWire,
                 blockId: block?.id,
-                answerLabel: block.flatMap { Self.answerLabel(block: $0, values: values) },
-                answerOptions: values.count > 1 ? values : nil,
+                answerLabel: answerLabel,
+                answerOptions: answerOptions,
                 scaleMin: scaleBounds?.min,
                 scaleMax: scaleBounds?.max,
                 timeToAnswerMs: timeToAnswerMs,
-                answer: Self.foundation(answer)
+                answer: openEnded ? [:] : Self.foundation(sanitizedAnswer)
             ),
             payload: state.payload
         )
@@ -3314,6 +3321,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         default: return nil
         }
     }
+
+    private static let openEndedQuestionTypes: Set<SurveyBlockType> = [
+        .shortText, .longText, .number, .email, .date
+    ]
 
     /// Stable per-question key for `questionViewedAt`. Scoped by survey token
     /// so a re-show of the same survey doesn't reuse a stale viewed-at.

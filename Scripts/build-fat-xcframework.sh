@@ -148,7 +148,9 @@ xcodebuild "${CREATE_ARGS[@]}"
 
 # --- 4. zip + checksum ------------------------------------------------------
 echo "==> Zipping + checksum"
-( cd "$OUT" && zip -r -q -y "DigiaEngage.xcframework.zip" "DigiaEngage.xcframework" )
+# CocoaPods resolves s.license :file => 'LICENSE' against the :http artifact root, so ship LICENSE beside the xcframework.
+cp "$ROOT/LICENSE" "$OUT/LICENSE"
+( cd "$OUT" && zip -r -q -y "DigiaEngage.xcframework.zip" "DigiaEngage.xcframework" "LICENSE" )
 CHECKSUM="$(swift package compute-checksum "$OUT/DigiaEngage.xcframework.zip")"
 
 # Symlink for local CocoaPods :path => testing.

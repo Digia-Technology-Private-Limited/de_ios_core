@@ -9,11 +9,13 @@
 #   1. Scripts/build-fat-xcframework.sh  →  dist/DigiaEngage.xcframework.zip
 #   2. gh release create <version> dist/DigiaEngage.xcframework.zip
 #   3. pod lib lint DigiaEngage.podspec --allow-warnings
-#   4. pod trunk push DigiaEngage.podspec --allow-warnings
+#   4. pod repo push digia DigiaEngage.podspec --allow-warnings   (Digia spec repo, required)
+#   5. pod trunk push DigiaEngage.podspec --allow-warnings        (best-effort; trunk is read-only from 2026-12-02)
+#   Scripts/release.sh runs all of these.
 
 Pod::Spec.new do |s|
   s.name             = 'DigiaEngage'
-  s.version          = '4.2.0'
+  s.version          = '4.3.2'
   s.summary          = 'Digia Engage iOS SDK — SDUI native rendering layer.'
   s.homepage         = 'https://github.com/Digia-Technology-Private-Limited/digia_engage_iOS'
   s.license          = { :type => 'BUSL-1.1', :file => 'LICENSE' }
