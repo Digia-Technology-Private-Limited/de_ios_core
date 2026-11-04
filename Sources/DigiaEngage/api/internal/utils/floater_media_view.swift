@@ -2,10 +2,11 @@ import AVFoundation
 internal import Lottie
 import SwiftUI
 
-/// The media surface, shared by both states. Reads the orchestrator's own `player` —
-/// created once by `FloaterOrchestrator` (from lane B's `PlayerFactory`, pointed at a
-/// range-cache item), never by this view — so playback is continuous across the
-/// collapsed/expanded grow transition. This view is only ever a child of the one container
+/// The media surface, shared by both states. Reads the orchestrator's `pip-<campaignKey>`
+/// lease — borrowed once by `FloaterOrchestrator` through a `MediaVideoState` before the
+/// first frame, released on teardown — never by this view, so playback is continuous
+/// across the collapsed/expanded grow transition and rotation remounts resume the same
+/// instance. This view is only ever a child of the one container
 /// in `FloaterSessionView` that animates size/position; it must never itself be swapped for
 /// a different view identity between states (see that file's top comment) — the media never
 /// re-appears here as an `if expanded` branch for exactly that reason.
