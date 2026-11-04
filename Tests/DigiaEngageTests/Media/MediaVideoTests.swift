@@ -50,20 +50,26 @@ struct MediaVideoComponentTests {
     }
 
     @Test("shows the thumbnail until the first frame", .tags(.golden))
-    func thumbnailWhileLoading() async {
+    func thumbnailWhileLoading() async throws {
         install()
         defer { MediaOrigin.end() }
         let video = MediaOrigin.url("held-thumb.mp4")
-        let thumbnail = MediaOrigin.url("thumb.png")
+        let thumbnail = MediaOrigin.url("tint-star-icon.png")
         MediaOrigin.set(.status(200, Data()), for: video, held: true)
-        MediaOrigin.set(.status(200, solidPNG(.red)), for: thumbnail)
+        MediaOrigin.set(.status(200, try testkitAsset("tint-star-icon.png")), for: thumbnail)
 
         let window = MediaStage.mount(MediaVideo(
-            url: video.absoluteString, thumbnailUrl: thumbnail.absoluteString, blurHash: Self.blurHash))
+            url: video.absoluteString, fit: .contain, thumbnailUrl: thumbnail.absoluteString,
+            blurHash: Self.blurHash))
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: video).isEmpty && !MediaOrigin.requests(for: thumbnail).isEmpty })
-        // The thumbnail decodes after its request; give it time to draw.
-        _ = await waitUntilMedia(timeout: 0.3) { false }
+        // The thumbnail decodes after its request: wait until the black star covers the box's centre.
+        #expect(await waitUntilMedia {
+            let image = ComponentTestHost.settledImage(of: window)
+            return pixelColor(
+                of: image, atX: Int(image.size.width / 2 * image.scale), y: Int(image.size.height / 2 * image.scale)
+            ).map { colorsNearly($0, .black) } ?? false
+        })
 
         MediaStage.assertGolden(window, named: "video_thumbnail_loading")
         MediaOrigin.release(video)
