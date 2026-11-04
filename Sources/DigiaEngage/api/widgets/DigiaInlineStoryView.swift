@@ -581,6 +581,7 @@ private struct InlineStoryOverlayContent: View {
     @State private var planDriver = StoryPlanDriver()
     @State private var firstFrameShown: Bool
     @State private var slowSource = PathSlowNetworkSource()
+    @Environment(\.mediaServices) private var mediaServices
 
     init(state: InlineStoryOverlayState) {
         self.state = state
@@ -798,6 +799,13 @@ private struct InlineStoryOverlayContent: View {
             StoryDownloadPlan.Item(isVideo: $0.type == .video)
         }
         let index = currentIndex
+        // The pool-lease half of the plan (R2-STORY): neighbour holders stay warm under the
+        // same campaign-namespaced keys the pages borrow under, so a swipe hands over the
+        // same instance. Values are snapshotted — `session` is MainActor-bound and the
+        // driver's `keyOf` must stay a capture-free Sendable closure.
+        let start = session.startIndex
+        let handoff = session.handoffKey
+        let namespace = campaignKey
         planDriver.update(
             actions: StoryDownloadPlan.plan(
                 stories: stories,
@@ -806,7 +814,12 @@ private struct InlineStoryOverlayContent: View {
                 slowNetwork: slowSource.isSlow
             ),
             urlOf: { state.config.items[$0].url },
-            isVideoOf: { state.config.items[$0].type == .video }
+            isVideoOf: { state.config.items[$0].type == .video },
+            keyOf: { page in
+                if page == index, let handoff, page == start { return handoff }
+                return storyPoolKey(namespace: namespace, index: page)
+            },
+            pool: mediaServices.pool()
         )
     }
 

@@ -9,6 +9,13 @@ import SwiftUI
 /// borrow or an evicted holder degrades to the still and tells the viewer to move on (`onFailed`,
 /// which the viewer treats like an ended page — the pre-T10 advance-on-failure rule).
 /// Mirrors Android `VideoStoryPage`.
+///
+/// Progress, play/pause and completion all read the owned `MediaVideoState` — never the raw
+/// player: progress comes from `positionMs`/`durationMs`, the end from `ended`, play/pause
+/// from `playing`. Only the buffering signal (`timeControlStatus`) still reads the borrowed
+/// instance, which has no state equivalent. `onReady` still hands the borrowed instance to
+/// the host (the harness and the PIP handover read the layer/player), but nothing drives
+/// from it anymore.
 @MainActor
 struct VideoStoryPage: View {
     let item: StoryItemConfig
@@ -21,12 +28,41 @@ struct VideoStoryPage: View {
     let onBuffering: @MainActor @Sendable (Bool) -> Void
     let onFailed: @MainActor @Sendable () -> Void
 
-    @State private var player: AVPlayer?
+    @StateObject private var video: MediaVideoState
     @State private var driverTask: Task<Void, Never>?
-    @State private var ended = false
     @State private var buffering = false
+    /// Latched when the end is reported (see below).
+    @State private var ended = false
 
-    private var spec: VideoSpec {
+    init(
+        item: StoryItemConfig,
+        pageKey: String,
+        muted: Bool,
+        playing: Bool,
+        onReady: @escaping @MainActor @Sendable (AVPlayer?) -> Void,
+        onProgress: @escaping @MainActor @Sendable (Double) -> Void,
+        onEnded: @escaping @MainActor @Sendable () -> Void,
+        onBuffering: @escaping @MainActor @Sendable (Bool) -> Void,
+        onFailed: @escaping @MainActor @Sendable () -> Void
+    ) {
+        self.item = item
+        self.pageKey = pageKey
+        self.muted = muted
+        self.playing = playing
+        self.onReady = onReady
+        self.onProgress = onProgress
+        self.onEnded = onEnded
+        self.onBuffering = onBuffering
+        self.onFailed = onFailed
+        _video = StateObject(wrappedValue: MediaVideoState(
+            spec: Self.spec(item: item, muted: muted),
+            playing: playing,
+            keepAliveKey: pageKey,
+            poolPriority: .onScreen
+        ))
+    }
+
+    private static func spec(item: StoryItemConfig, muted: Bool) -> VideoSpec {
         VideoSpec(
             url: item.url,
             fit: item.boxFit.toMediaFit,
@@ -40,48 +76,68 @@ struct VideoStoryPage: View {
         ZStack {
             Color.black
             StoryThumbnailStill(item: item)
-            MediaVideo(
-                spec: spec,
-                keepAliveKey: pageKey,
-                poolPriority: .onScreen,
-                playing: playing,
-                onReady: { ready in
-                    player = ready
-                    startDriver(player: ready)
-                    onReady(ready)
-                },
-                onGiveUp: {
-                    stopDriver()
-                    onFailed()
-                }
-            )
+            MediaVideo(state: video)
+        }
+        .onAppear {
+            video.spec = Self.spec(item: item, muted: muted)
+            video.playing = playing
+            video.onReady = { _ in
+                startDriver()
+                onReady(video.activePlayer)
+            }
+            video.onGiveUp = {
+                stopDriver()
+                // A natural end-of-queue (`AVQueuePlayer` exhausts its single item, so
+                // `currentItem` detaches) trips the state's give-up path right after the
+                // playhead reaches the end — that is a completed page, not a failure. The
+                // detach races the last playhead tick, so neither flag alone is decisive:
+                // suppress when the end was reported, the state published it, or the last
+                // published playhead is within one tick of the known duration. The pre-R2
+                // poll driver only failed a page via `FailedToPlayToEndTime`, never on a
+                // natural end; this restores that exact contract (end exactly once,
+                // failure only for real faults — and downstream both advance the viewer).
+                if !ended, !video.ended, !videoCompletedNaturally() { onFailed() }
+            }
+        }
+        .onChange(of: playing) { _ in video.playing = playing }
+        .onChange(of: muted) { _ in video.spec = Self.spec(item: item, muted: muted) }
+        .onChange(of: video.ended) { done in
+            if done {
+                ended = true
+                stopDriver()
+                onEnded()
+            }
         }
         .onDisappear { stopDriver() }
     }
 
-    private func startDriver(player: AVPlayer) {
+    /// Whether the last published playhead is within one state tick (100 ms, plus the same
+    /// 250 ms slop the rail driver uses) of the known duration: a give-up here is the
+    /// end-of-queue detach, not a mid-play fault.
+    private func videoCompletedNaturally() -> Bool {
+        let durationMs = video.durationMs
+        return durationMs > 0 && video.positionMs + 250 >= durationMs
+    }
+
+    /// Drives progress and buffering from the state: progress from
+    /// `positionMs`/`durationMs`, buffering from the borrowed instance's stall signal (no
+    /// state equivalent). The end comes from `video.ended`, never from here.
+    private func startDriver() {
         stopDriver()
         driverTask = Task { @MainActor in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 50_000_000)
                 guard !Task.isCancelled else { return }
-                let position = player.currentTime()
-                let duration = player.currentItem?.duration ?? .indefinite
-                let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                let waiting = video.activePlayer?.timeControlStatus
+                    == .waitingToPlayAtSpecifiedRate
                 if waiting != buffering {
                     buffering = waiting
                     onBuffering(waiting)
                 }
-                guard position.isNumeric, position.seconds.isFinite,
-                      duration.isNumeric, duration.seconds.isFinite, duration.seconds > 0
-                else { continue }
-                onProgress(min(max(position.seconds / duration.seconds, 0), 1))
-                if !ended, position.seconds >= duration.seconds {
-                    ended = true
-                    stopDriver()
-                    onEnded()
-                    return
-                }
+                let durationMs = video.durationMs
+                guard durationMs > 0 else { continue }
+                onProgress(min(max(
+                    Double(video.positionMs) / Double(durationMs), 0), 1))
             }
         }
     }

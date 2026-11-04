@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Testing
 import UIKit
@@ -160,5 +161,165 @@ struct StoryPlanDriverTests {
         driver.cancelAll()
 
         #expect(await poll(prefetch.cancelled == 2))
+    }
+}
+
+// The player-lease half (R2-STORY): `.player` actions hold pool leases under the same
+// campaign-namespaced keys the pages borrow under, so a swipe hands over the same instance.
+// The real pool + a fake factory, file URLs (no fetch: a lease never plays) — mirrors
+// Android's `StoryPlanDriverPlayerTest` (intended difference: iOS holds leases, Android
+// prepares players; both hand over the same instance under the same key).
+
+private final class LeaseFakeFactory: PlayerFactory {
+    var creates = 0
+    func makePlayer() -> AVQueuePlayer {
+        creates += 1
+        return AVQueuePlayer()
+    }
+}
+
+private func leaseURL(_ index: Int) -> String {
+    "file:///tmp/story-driver-test/\(index).mp4"
+}
+
+private func leaseKey(_ index: Int) -> String { "test/story-\(index)" }
+
+private func leaseVideos(_ count: Int) -> [StoryDownloadPlan.Item] {
+    (0..<count).map { _ in StoryDownloadPlan.Item(isVideo: true) }
+}
+
+@Suite("StoryPlanDriver leases", .tags(.media, .unit))
+@MainActor
+struct StoryPlanDriverLeaseTests {
+    private func pool(factory: LeaseFakeFactory, maxPlayers: Int) -> VideoPlayerPool {
+        VideoPlayerPool(factory: factory, maxPlayers: maxPlayers)
+    }
+
+    private func update(
+        _ driver: StoryPlanDriver, _ pool: VideoPlayerPool,
+        _ count: Int, at index: Int, firstFrameShown: Bool = true
+    ) {
+        driver.update(
+            actions: StoryDownloadPlan.plan(
+                stories: leaseVideos(count),
+                currentIndex: index,
+                firstFrameShown: firstFrameShown,
+                slowNetwork: false
+            ),
+            urlOf: leaseURL, isVideoOf: { _ in true },
+            keyOf: leaseKey, pool: pool)
+    }
+
+    // Fails if neighbour leases are not held under the page keys: without the `.player`
+    // arm's `obtainLease` in `updatePlayerLeases` the window@2 holds nothing.
+    @Test("neighbours hold leases under the page keys")
+    func neighboursHoldLeasesUnderPageKeys() {
+        let factory = LeaseFakeFactory()
+        let pool = pool(factory: factory, maxPlayers: 5)
+        let driver = StoryPlanDriver(prefetch: FakeStoryPrefetch())
+        defer { driver.cancelAll() }
+
+        update(driver, pool, 5, at: 2)
+
+        #expect(pool.heldKeys() == [leaseKey(2), leaseKey(1), leaseKey(3)])
+        #expect(factory.creates == 3)
+    }
+
+    // Fails if priorities are not threaded into the lease: without the action's priority in
+    // the `obtainLease` call the on-screen holder cannot outrank a viewer-next rival — the
+    // rival evicts it. Pinned at onScreen by two rival probes (viewerNext AND onScreen both
+    // refused: a strictly-lower rank would yield to the onScreen rival).
+    @Test("the current holder outranks a viewer-next rival")
+    func currentHolderOutranksViewerNextRival() {
+        let factory = LeaseFakeFactory()
+        let pool = pool(factory: factory, maxPlayers: 1)
+        let driver = StoryPlanDriver(prefetch: FakeStoryPrefetch())
+        defer { driver.cancelAll() }
+
+        update(driver, pool, 5, at: 2)
+        #expect(pool.heldKeys() == [leaseKey(2)])
+
+        let rivalNext = pool.obtain(
+            key: "test/rival", url: URL(string: leaseURL(9))!, priority: .viewerNext)
+        let rivalScreen = pool.obtain(
+            key: "test/rival", url: URL(string: leaseURL(9))!, priority: .onScreen)
+        #expect(rivalNext == nil)
+        #expect(rivalScreen == nil)
+        #expect(pool.heldKeys() == [leaseKey(2)])
+    }
+
+    // Fails if leaving the window does not release: without the held-minus-wanted `release`
+    // in `updatePlayerLeases` the swipe@4 keeps the old holders (bytes stay on disk either
+    // way — only holders go back so the pool can reuse them).
+    @Test("leaving the window releases holders")
+    func leavingTheWindowReleasesHolders() {
+        let factory = LeaseFakeFactory()
+        let pool = pool(factory: factory, maxPlayers: 5)
+        let driver = StoryPlanDriver(prefetch: FakeStoryPrefetch())
+        defer { driver.cancelAll() }
+
+        update(driver, pool, 6, at: 2)
+        update(driver, pool, 6, at: 4)
+
+        #expect(!pool.heldKeys().contains(leaseKey(1)))
+        #expect(!pool.heldKeys().contains(leaseKey(2)))
+        #expect(pool.heldKeys().contains(leaseKey(4)))
+        #expect(pool.heldKeys().contains(leaseKey(3)))
+    }
+
+    // Fails if a swipe does not hand over the same instance: without obtaining under the
+    // same key the pool's existing-key branch never serves the identical player. Fails if
+    // the re-obtain does not raise the priority: without re-obtaining the held key the
+    // swipe keeps the stale viewer-next rank (pinned by the rival probe above).
+    @Test("swipe to next hands the same instance")
+    func swipeToNextHandsTheSameInstance() {
+        let factory = LeaseFakeFactory()
+        let pool = pool(factory: factory, maxPlayers: 5)
+        let driver = StoryPlanDriver(prefetch: FakeStoryPrefetch())
+        defer { driver.cancelAll() }
+
+        update(driver, pool, 5, at: 2)
+        let before = pool.obtainLease(key: leaseKey(3), url: leaseURL(3), priority: .railThumb)
+        let first = before?.player
+        #expect(first != nil)
+        before?.release()
+
+        update(driver, pool, 5, at: 3)
+        let after = pool.obtainLease(key: leaseKey(3), url: leaseURL(3), priority: .railThumb)
+        defer { after?.release() }
+
+        #expect(after?.player === first)
+    }
+
+    // Fails if a refused obtain stops the window: without tolerating the nil borrow the
+    // single slot goes to the wrong index or traps. The current index is obtained first
+    // (serving order), so it wins the only slot and the neighbours degrade to stills.
+    @Test("a refused obtain is tolerated and the current wins the slot")
+    func refusedObtainToleratedCurrentWinsSlot() {
+        let factory = LeaseFakeFactory()
+        let pool = pool(factory: factory, maxPlayers: 1)
+        let driver = StoryPlanDriver(prefetch: FakeStoryPrefetch())
+        defer { driver.cancelAll() }
+
+        update(driver, pool, 3, at: 0)
+
+        #expect(pool.heldKeys() == [leaseKey(0)])
+        #expect(factory.creates == 1)
+    }
+
+    // Fails if `cancelAll` spares leases: without the lease release in `cancelAll` the
+    // viewer close leaks every holder (the pages' own shares never free — only the
+    // committed holder's release returns the player).
+    @Test("cancel all releases leases")
+    func cancelAllReleasesLeases() {
+        let factory = LeaseFakeFactory()
+        let pool = pool(factory: factory, maxPlayers: 5)
+        let driver = StoryPlanDriver(prefetch: FakeStoryPrefetch())
+
+        update(driver, pool, 5, at: 2)
+        #expect(!pool.heldKeys().isEmpty)
+        driver.cancelAll()
+
+        #expect(pool.heldKeys().isEmpty)
     }
 }
