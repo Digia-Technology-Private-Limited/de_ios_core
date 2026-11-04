@@ -18,7 +18,9 @@ internal import SDWebImageSwiftUI
 ///
 /// Never throws from the render path: an unusable URL shows the still without fetching.
 struct MediaImage: View {
-    let spec: ImageSpec
+    let url: String
+    var fit: MediaFit = .cover
+    var blurHash: String? = nil
     var tintColor: Color? = nil
     /// The picture drew.
     var onSuccess: (() -> Void)? = nil
@@ -32,14 +34,18 @@ struct MediaImage: View {
     @State private var reported = ReportedURL()
 
     init(
-        spec: ImageSpec,
+        url: String,
+        fit: MediaFit = .cover,
+        blurHash: String? = nil,
         tintColor: Color? = nil,
         onSuccess: (() -> Void)? = nil,
         onFailure: (() -> Void)? = nil,
         errorContent: AnyView? = nil
     ) {
         DigiaImagePipeline.configureIfNeeded()
-        self.spec = spec
+        self.url = url
+        self.fit = fit
+        self.blurHash = blurHash
         self.tintColor = tintColor
         self.onSuccess = onSuccess
         self.onFailure = onFailure
@@ -47,24 +53,24 @@ struct MediaImage: View {
     }
 
     var body: some View {
-        if let url = mediaUsableURL(spec.url) {
-            if let cached = Self.memoryCachedPicture(for: url) {
+        if let target = mediaUsableURL(url) {
+            if let cached = Self.memoryCachedPicture(for: target) {
                 // Already decoded in memory: drawn from the first body evaluation. WebImage would
                 // complete this load inside the view update, where SwiftUI drops its invalidation
                 // and the picture never appears.
                 fitted(Image(uiImage: cached))
-                    .task(id: spec.url) { reportSuccess() }
+                    .task(id: url) { reportSuccess() }
             } else {
-                WebImage(url: url, options: [.retryFailed, .scaleDownLargeImages]) { image in
+                WebImage(url: target, options: [.retryFailed, .scaleDownLargeImages]) { image in
                     fitted(image)
                 } placeholder: {
-                    still(failed: failedURL == spec.url)
+                    still(failed: failedURL == url)
                 }
                 .onSuccess { _, _, _ in
                     reportSuccess()
                 }
                 .onFailure { error in
-                    failedURL = spec.url
+                    failedURL = url
                     // Only a cause the author can fix is health: no cause (network, timeout, 5xx)
                     // reports nothing.
                     if let cause = mediaFailureCause(imageError: error) {
@@ -75,7 +81,7 @@ struct MediaImage: View {
             }
         } else {
             still(failed: true)
-                .task(id: spec.url) {
+                .task(id: url) {
                     services.reportHealth(campaignKey, .image, "invalid_url")
                     onFailure?()
                 }
@@ -84,8 +90,8 @@ struct MediaImage: View {
 
     /// The success callback, once per URL however the picture arrived.
     private func reportSuccess() {
-        guard reported.url != spec.url else { return }
-        reported.url = spec.url
+        guard reported.url != url else { return }
+        reported.url = url
         onSuccess?()
     }
 
@@ -104,7 +110,7 @@ struct MediaImage: View {
     @ViewBuilder
     private func still(failed: Bool) -> some View {
         ZStack {
-            MediaStill(spec: .image(spec))
+            MediaStill(fit: fit, blurHash: blurHash)
             if failed, let errorContent {
                 errorContent
             }
@@ -114,7 +120,7 @@ struct MediaImage: View {
     @ViewBuilder
     private func fitted(_ image: Image) -> some View {
         if let tintColor {
-            if let mode = spec.fit.contentMode {
+            if let mode = fit.contentMode {
                 image
                     .resizable()
                     .renderingMode(.template)
@@ -126,7 +132,7 @@ struct MediaImage: View {
                     .renderingMode(.template)
                     .foregroundStyle(tintColor)
             }
-        } else if let mode = spec.fit.contentMode {
+        } else if let mode = fit.contentMode {
             image
                 .resizable()
                 .aspectRatio(contentMode: mode)

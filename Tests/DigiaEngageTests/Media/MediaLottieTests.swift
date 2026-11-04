@@ -32,12 +32,16 @@ struct MediaLottieComponentTests {
         @ObservedObject var model: Model
 
         var body: some View {
-            MediaLottie(spec: LottieSpec(url: model.url, blurHash: MediaLottieComponentTests.blurHash))
+            MediaLottie(url: model.url, blurHash: MediaLottieComponentTests.blurHash)
         }
     }
 
-    private func mount(_ spec: LottieSpec) -> UIWindow {
-        MediaStage.mount(MediaLottie(spec: spec))
+    private func mount(
+        url: String, fit: MediaFit = .cover, blurHash: String? = nil, loop: Bool = true,
+        autoplay: Bool = true
+    ) -> UIWindow {
+        MediaStage.mount(
+            MediaLottie(url: url, fit: fit, blurHash: blurHash, loop: loop, autoplay: autoplay))
     }
 
     private func lottieViews(in window: UIWindow) -> [LottieAnimationView] {
@@ -64,7 +68,7 @@ struct MediaLottieComponentTests {
         MediaOrigin.set(.status(200, try testkitAsset("static-lottie.json")), for: target, held: true)
         let recorder = HealthRecorder()
 
-        let window = mount(LottieSpec(url: target.absoluteString, blurHash: Self.blurHash, autoplay: false))
+        let window = mount(url: target.absoluteString, blurHash: Self.blurHash, autoplay: false)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
 
@@ -81,7 +85,7 @@ struct MediaLottieComponentTests {
         MediaOrigin.set(.status(200, try testkitAsset("static-lottie.json")), for: target, held: true)
         let recorder = HealthRecorder()
 
-        let window = mount(LottieSpec(url: target.absoluteString, autoplay: false))
+        let window = mount(url: target.absoluteString, autoplay: false)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
 
@@ -98,7 +102,7 @@ struct MediaLottieComponentTests {
         MediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
         let recorder = HealthRecorder()
 
-        let window = mount(LottieSpec(url: target.absoluteString, blurHash: Self.blurHash, autoplay: false))
+        let window = mount(url: target.absoluteString, blurHash: Self.blurHash, autoplay: false)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !recorder.all.isEmpty })
 
@@ -111,7 +115,7 @@ struct MediaLottieComponentTests {
         defer { MediaOrigin.end() }
         let recorder = HealthRecorder()
 
-        let window = mount(LottieSpec(url: "", blurHash: Self.blurHash, autoplay: false))
+        let window = mount(url: "", blurHash: Self.blurHash, autoplay: false)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !recorder.all.isEmpty })
 
@@ -124,7 +128,7 @@ struct MediaLottieComponentTests {
         defer { MediaOrigin.end() }
         let recorder = HealthRecorder()
 
-        let window = mount(LottieSpec(url: "", autoplay: false))
+        let window = mount(url: "", autoplay: false)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !recorder.all.isEmpty })
 
@@ -138,7 +142,7 @@ struct MediaLottieComponentTests {
         let target = MediaOrigin.url("static-lottie.json")
         MediaOrigin.set(.status(200, try testkitAsset("static-lottie.json")), for: target, held: true)
 
-        let window = mount(LottieSpec(url: target.absoluteString, blurHash: Self.blurHash, autoplay: false))
+        let window = mount(url: target.absoluteString, blurHash: Self.blurHash, autoplay: false)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
         MediaOrigin.release(target)
@@ -158,7 +162,7 @@ struct MediaLottieComponentTests {
         defer { MediaOrigin.end() }
         let recorder = HealthRecorder()
 
-        let window = mount(LottieSpec(url: url, blurHash: Self.blurHash))
+        let window = mount(url: url, blurHash: Self.blurHash)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !recorder.all.isEmpty })
         ComponentTestHost.drainRunLoop(for: 0.3)
@@ -176,7 +180,7 @@ struct MediaLottieComponentTests {
         MediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
         let recorder = HealthRecorder()
 
-        let window = mount(LottieSpec(url: target.absoluteString, blurHash: Self.blurHash))
+        let window = mount(url: target.absoluteString, blurHash: Self.blurHash)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !recorder.all.isEmpty })
         ComponentTestHost.drainRunLoop(for: 0.3)
@@ -198,7 +202,7 @@ struct MediaLottieComponentTests {
             return loaded
         })
 
-        let window = mount(LottieSpec(url: target.absoluteString, blurHash: Self.blurHash))
+        let window = mount(url: target.absoluteString, blurHash: Self.blurHash)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { finished.value > 0 })
         ComponentTestHost.drainRunLoop(for: 0.3)
@@ -236,12 +240,12 @@ struct MediaLottieComponentTests {
         let target = MediaOrigin.url("cached-once.json")
         MediaOrigin.set(.status(200, Self.animation), for: target)
 
-        let first = mount(LottieSpec(url: target.absoluteString))
+        let first = mount(url: target.absoluteString)
         #expect(await waitForAnimation(in: first) != nil)
         #expect(MediaOrigin.requests(for: target).count == 1)
         ComponentTestHost.unmount(first)
 
-        let second = mount(LottieSpec(url: target.absoluteString))
+        let second = mount(url: target.absoluteString)
         defer { ComponentTestHost.unmount(second) }
         #expect(await waitForAnimation(in: second) != nil)
 
@@ -255,7 +259,7 @@ struct MediaLottieComponentTests {
         let target = MediaOrigin.url("ok.json")
         MediaOrigin.set(.status(200, Self.animation), for: target)
 
-        let window = mount(LottieSpec(url: target.absoluteString, loop: true))
+        let window = mount(url: target.absoluteString, loop: true)
         defer { ComponentTestHost.unmount(window) }
         let view = await waitForAnimation(in: window)
 

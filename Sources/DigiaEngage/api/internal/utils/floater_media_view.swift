@@ -49,12 +49,12 @@ struct FloaterMediaView: View {
     @ViewBuilder
     private var lottieView: some View {
         if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{") {
-            MediaLottie(spec: LottieSpec(
+            MediaLottie(
                 url: resolvedUrl,
                 fit: cover ? .cover : .contain,
                 loop: media.loop,
                 autoplay: media.autoplay
-            ))
+            )
         }
     }
 
@@ -70,7 +70,7 @@ struct FloaterMediaView: View {
                 .resizable()
                 .aspectRatio(contentMode: cover ? .fill : .fit)
         } else if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{") {
-            MediaImage(spec: ImageSpec(url: resolvedUrl, fit: cover ? .cover : .contain))
+            MediaImage(url: resolvedUrl, fit: cover ? .cover : .contain)
         }
     }
 }

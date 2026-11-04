@@ -18,9 +18,12 @@ struct MediaImageComponentTests {
     private static let blurHash = "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
 
     private func mount(
-        _ spec: ImageSpec, onSuccess: (() -> Void)? = nil, onFailure: (() -> Void)? = nil
+        url: String, fit: MediaFit = .cover, blurHash: String? = nil,
+        onSuccess: (() -> Void)? = nil, onFailure: (() -> Void)? = nil
     ) -> UIWindow {
-        MediaStage.mount(MediaImage(spec: spec, onSuccess: onSuccess, onFailure: onFailure))
+        MediaStage.mount(
+            MediaImage(
+                url: url, fit: fit, blurHash: blurHash, onSuccess: onSuccess, onFailure: onFailure))
     }
 
     @Test("shows the authored blur while the picture is on its way", .tags(.golden))
@@ -31,7 +34,7 @@ struct MediaImageComponentTests {
         MediaOrigin.set(.status(200, solidPNG(.red)), for: target, held: true)
         let recorder = HealthRecorder()
 
-        let window = mount(ImageSpec(url: target.absoluteString, blurHash: Self.blurHash))
+        let window = mount(url: target.absoluteString, blurHash: Self.blurHash)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
 
@@ -48,7 +51,7 @@ struct MediaImageComponentTests {
         MediaOrigin.set(.status(200, solidPNG(.red)), for: target, held: true)
         let recorder = HealthRecorder()
 
-        let window = mount(ImageSpec(url: target.absoluteString))
+        let window = mount(url: target.absoluteString)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
 
@@ -66,7 +69,7 @@ struct MediaImageComponentTests {
         let failures = CallCount()
 
         let window = mount(
-            ImageSpec(url: target.absoluteString, blurHash: Self.blurHash), onFailure: { failures.value += 1 })
+            url: target.absoluteString, blurHash: Self.blurHash, onFailure: { failures.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { failures.value > 0 })
 
@@ -83,7 +86,7 @@ struct MediaImageComponentTests {
         let successes = CallCount()
 
         let window = mount(
-            ImageSpec(url: target.absoluteString, fit: .contain, blurHash: Self.blurHash),
+            url: target.absoluteString, fit: .contain, blurHash: Self.blurHash,
             onSuccess: { successes.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
@@ -101,7 +104,7 @@ struct MediaImageComponentTests {
         MediaOrigin.set(.status(200, solidPNG(.red)), for: target, held: true)
         let successes = CallCount()
 
-        let window = mount(ImageSpec(url: target.absoluteString), onSuccess: { successes.value += 1 })
+        let window = mount(url: target.absoluteString, onSuccess: { successes.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
         MediaOrigin.release(target)
@@ -119,7 +122,7 @@ struct MediaImageComponentTests {
         MediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
         let failures = CallCount()
 
-        let window = mount(ImageSpec(url: target.absoluteString), onFailure: { failures.value += 1 })
+        let window = mount(url: target.absoluteString, onFailure: { failures.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { failures.value > 0 })
         ComponentTestHost.drainRunLoop(for: 0.5)
@@ -136,12 +139,12 @@ struct MediaImageComponentTests {
         let firstSuccesses = CallCount()
         let secondSuccesses = CallCount()
 
-        let first = mount(ImageSpec(url: target.absoluteString), onSuccess: { firstSuccesses.value += 1 })
+        let first = mount(url: target.absoluteString, onSuccess: { firstSuccesses.value += 1 })
         #expect(await waitUntilMedia { firstSuccesses.value > 0 })
         #expect(MediaOrigin.requests(for: target).count == 1)
         ComponentTestHost.unmount(first)
 
-        let second = mount(ImageSpec(url: target.absoluteString), onSuccess: { secondSuccesses.value += 1 })
+        let second = mount(url: target.absoluteString, onSuccess: { secondSuccesses.value += 1 })
         defer { ComponentTestHost.unmount(second) }
         #expect(await waitUntilMedia { secondSuccesses.value > 0 })
 
@@ -162,7 +165,7 @@ struct MediaImageComponentTests {
         let successes = CallCount()
 
         let window = mount(
-            ImageSpec(url: target.absoluteString, blurHash: withBlurHash ? Self.blurHash : nil),
+            url: target.absoluteString, blurHash: withBlurHash ? Self.blurHash : nil,
             onSuccess: { successes.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { successes.value > 0 })
@@ -187,7 +190,7 @@ struct MediaImageComponentTests {
         MediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
         let recorder = HealthRecorder()
 
-        let window = mount(ImageSpec(url: target.absoluteString, blurHash: Self.blurHash))
+        let window = mount(url: target.absoluteString, blurHash: Self.blurHash)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !recorder.all.isEmpty })
         ComponentTestHost.drainRunLoop(for: 0.3)
@@ -208,7 +211,7 @@ struct MediaImageComponentTests {
         let failures = CallCount()
 
         let window = mount(
-            ImageSpec(url: target.absoluteString, blurHash: Self.blurHash), onFailure: { failures.value += 1 })
+            url: target.absoluteString, blurHash: Self.blurHash, onFailure: { failures.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { failures.value > 0 })
         ComponentTestHost.drainRunLoop(for: 0.3)
@@ -227,7 +230,7 @@ struct MediaImageComponentTests {
         defer { MediaOrigin.end() }
         let recorder = HealthRecorder()
 
-        let window = mount(ImageSpec(url: url, blurHash: Self.blurHash))
+        let window = mount(url: url, blurHash: Self.blurHash)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !recorder.all.isEmpty })
         ComponentTestHost.drainRunLoop(for: 0.3)
@@ -243,7 +246,7 @@ struct MediaImageComponentTests {
         let target = MediaOrigin.url("ua.png")
         MediaOrigin.set(.status(200, solidPNG(.red)), for: target)
 
-        let window = mount(ImageSpec(url: target.absoluteString))
+        let window = mount(url: target.absoluteString)
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
 

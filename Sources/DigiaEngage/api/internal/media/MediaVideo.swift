@@ -115,7 +115,7 @@ struct MediaVideo: View {
     private func stillView(_ still: MediaVideoStill) -> some View {
         switch still {
         case let .thumbnail(thumbnail):
-            MediaImage(spec: ImageSpec(url: thumbnail, fit: fit, blurHash: blurHash))
+            MediaImage(url: thumbnail, fit: fit, blurHash: blurHash)
         case let .blurHash(hash):
             if let image = BlurHashCache.image(for: hash, size: BlurHashPlaceholderView.decodeSize) {
                 if let mode = fit.contentMode {

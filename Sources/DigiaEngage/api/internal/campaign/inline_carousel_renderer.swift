@@ -231,11 +231,11 @@ private struct InlineCarouselItemImage: View {
     let cornerRadius: CGFloat
 
     var body: some View {
-        MediaImage(spec: ImageSpec(
+        MediaImage(
             url: item.imageUrl,
             fit: MediaFit(rawValue: item.fit.rawValue) ?? .cover,
             blurHash: item.placeholder?.stillBlurHash
-        ))
+        )
             .frame(width: width, height: height)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
     }
