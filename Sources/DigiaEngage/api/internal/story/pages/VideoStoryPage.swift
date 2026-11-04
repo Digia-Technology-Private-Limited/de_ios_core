@@ -98,6 +98,11 @@ struct VideoStoryPage: View {
                 // failure only for real faults — and downstream both advance the viewer).
                 if !ended, !video.ended, !videoCompletedNaturally() { onFailed() }
             }
+            // The state opens when `MediaVideo` appears, which is before this runs (a child
+            // appears before its parent), so a failure at that instant — an unusable URL, a
+            // refused borrow — fired no callback. Without this the page would wait for a
+            // first frame that can never come.
+            if video.gaveUp { onFailed() }
         }
         // The new value, not `self.playing`/`self.muted`: the closure runs with the view value
         // from before the change, so reading them there acts one change late — a hold would pause
