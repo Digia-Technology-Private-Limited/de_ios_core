@@ -47,27 +47,14 @@ struct DigiaInlineBannerView: View {
     private var image: some View {
         ZStack {
             Color(red: 241 / 255, green: 241 / 255, blue: 245 / 255)
-            if let url = URL(string: interpolate(config.image.url, context: variables)) {
-                fitted(DigiaCachedImageView(
-                    url: url,
-                    placeholder: AnyView(BlurHashPlaceholderView(placeholder: config.image.placeholder, fit: config.image.boxFit.rawValue))
-                ))
-            }
+            MediaImage(spec: ImageSpec(
+                url: interpolate(config.image.url, context: variables),
+                fit: MediaFit(rawValue: config.image.boxFit.rawValue) ?? .cover,
+                blurHash: config.image.placeholder?.stillBlurHash
+            ))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: config.image.cornerRadius))
-    }
-
-    @ViewBuilder
-    private func fitted(_ image: DigiaCachedImageView) -> some View {
-        switch config.image.boxFit {
-        case .cover:
-            image.scaledToFill().clipped()
-        case .contain:
-            image.scaledToFit()
-        case .fill:
-            image
-        }
     }
 
     private func handleTap() {
