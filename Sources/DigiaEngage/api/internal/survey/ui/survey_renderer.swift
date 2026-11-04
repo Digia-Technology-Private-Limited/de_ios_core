@@ -1132,7 +1132,9 @@ struct SurveyMediaImage: View {
         ZStack {
             if !loaded { SurveyTokens.surfaceSunken }
             MediaImage(
-                spec: ImageSpec(url: url, fit: fit, blurHash: placeholder?.stillBlurHash),
+                url: url,
+                fit: fit,
+                blurHash: placeholder?.stillBlurHash,
                 onSuccess: { loaded = true }
             )
         }

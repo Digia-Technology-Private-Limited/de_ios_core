@@ -47,11 +47,11 @@ struct DigiaInlineBannerView: View {
     private var image: some View {
         ZStack {
             Color(red: 241 / 255, green: 241 / 255, blue: 245 / 255)
-            MediaImage(spec: ImageSpec(
+            MediaImage(
                 url: interpolate(config.image.url, context: variables),
                 fit: MediaFit(rawValue: config.image.boxFit.rawValue) ?? .cover,
                 blurHash: config.image.placeholder?.stillBlurHash
-            ))
+            )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: config.image.cornerRadius))

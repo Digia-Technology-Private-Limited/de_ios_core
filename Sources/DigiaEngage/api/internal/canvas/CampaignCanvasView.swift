@@ -1901,13 +1901,11 @@ private struct CanvasRemoteLottie: View {
 
     var body: some View {
         MediaLottie(
-            spec: LottieSpec(
-                url: url.absoluteString,
-                fit: canvasMediaFit(fit),
-                blurHash: placeholder?.stillBlurHash,
-                loop: loop,
-                autoplay: autoplay
-            ),
+            url: url.absoluteString,
+            fit: canvasMediaFit(fit),
+            blurHash: placeholder?.stillBlurHash,
+            loop: loop,
+            autoplay: autoplay,
             errorContent: AnyView(CanvasPlaceholder(label: "Lottie")),
             freezeAt: frozenProgress
         )

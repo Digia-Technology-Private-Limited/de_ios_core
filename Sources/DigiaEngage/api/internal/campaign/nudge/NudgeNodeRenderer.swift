@@ -155,7 +155,7 @@ private struct NudgeImageView: View {
     // dashboard) while the image downloads; empty when the payload has none. The fit is
     // applied by the wrapper, so each layout below passes the one it needs.
     private func image(_ fit: MediaFit) -> some View {
-        MediaImage(spec: ImageSpec(url: url, fit: fit, blurHash: node.placeholder?.stillBlurHash))
+        MediaImage(url: url, fit: fit, blurHash: node.placeholder?.stillBlurHash)
     }
 
     var body: some View {
@@ -383,12 +383,12 @@ private struct NudgeLottieView: View {
         } else {
             // The wire carries no placeholder for Lottie, so the still below the animation
             // is empty.
-            MediaLottie(spec: LottieSpec(
+            MediaLottie(
                 url: resolved,
                 fit: MediaFit(rawValue: node.fit.rawValue) ?? .cover,
                 loop: node.loop,
                 autoplay: node.autoplay
-            ))
+            )
             .modifier(CanvasMediaFrame(
                 canvasMode: canvasMode,
                 aspectRatio: node.aspectRatio,
@@ -422,7 +422,7 @@ private struct NudgeCarouselView: View {
                     ForEach(0..<pageCount, id: \.self) { index in
                         // The carousel wire carries no per-image placeholder; the still
                         // under each page is empty.
-                        MediaImage(spec: ImageSpec(url: images[index % images.count], fit: .cover))
+                        MediaImage(url: images[index % images.count], fit: .cover)
                             .frame(maxWidth: .infinity)
                             .frame(height: node.height)
                             .clipped()

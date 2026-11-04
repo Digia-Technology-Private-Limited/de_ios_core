@@ -17,7 +17,11 @@ internal import Lottie
 ///
 /// Never throws from the render path: an unusable URL shows the still without fetching.
 struct MediaLottie: View {
-    let spec: LottieSpec
+    let url: String
+    var fit: MediaFit = .cover
+    var blurHash: String? = nil
+    var loop: Bool = true
+    var autoplay: Bool = true
     var errorContent: AnyView? = nil
     var freezeAt: CGFloat? = nil
 
@@ -31,14 +35,14 @@ struct MediaLottie: View {
             if let source {
                 animation(source)
             } else {
-                MediaStill(spec: .lottie(spec))
+                MediaStill(fit: fit, blurHash: blurHash)
                 if failed, let errorContent {
                     errorContent
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .task(id: spec.url) {
+        .task(id: url) {
             await load()
         }
     }
@@ -49,11 +53,11 @@ struct MediaLottie: View {
         // never re-fetched on re-render; loading happens once per URL in `load()`.
         let view = LottieView { source }
             .resizable()
-            .configure(\.contentMode, to: spec.fit.viewContentMode)
+            .configure(\.contentMode, to: fit.viewContentMode)
         if let freezeAt {
             view.paused(at: .progress(freezeAt))
-        } else if spec.autoplay {
-            view.playing(loopMode: spec.loop ? .loop : .playOnce)
+        } else if autoplay {
+            view.playing(loopMode: loop ? .loop : .playOnce)
         } else {
             view
         }
@@ -62,7 +66,7 @@ struct MediaLottie: View {
     private func load() async {
         source = nil
         failed = false
-        guard let url = mediaUsableURL(spec.url) else {
+        guard let url = mediaUsableURL(url) else {
             failed = true
             services.reportHealth(campaignKey, .lottie, "invalid_url")
             return
