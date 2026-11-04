@@ -1,4 +1,5 @@
 import AVFoundation
+import DigiaMediaCache
 import Foundation
 import Testing
 import UIKit
@@ -54,7 +55,8 @@ private func storyIsVideo(_ index: Int) -> Bool { index != 7 }
 
 private func poll(
     _ condition: @autoclosure () -> Bool,
-    timeout: TimeInterval = 2
+    timeout: TimeInterval = 2,
+    isolation: isolated (any Actor)? = #isolation
 ) async -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
     while Date() < deadline {
@@ -197,7 +199,8 @@ struct StoryPlanDriverLeaseTests {
 
     private func update(
         _ driver: StoryPlanDriver, _ pool: VideoPlayerPool,
-        _ count: Int, at index: Int, firstFrameShown: Bool = true
+        _ count: Int, at index: Int, firstFrameShown: Bool = true,
+        keep: Set<Int> = []
     ) {
         driver.update(
             actions: StoryDownloadPlan.plan(
@@ -207,7 +210,7 @@ struct StoryPlanDriverLeaseTests {
                 slowNetwork: false
             ),
             urlOf: leaseURL, isVideoOf: { _ in true },
-            keyOf: leaseKey, pool: pool)
+            keyOf: leaseKey, pool: pool, keepPlayersFor: keep)
     }
 
     // Fails if neighbour leases are not held under the page keys: without the `.player`
@@ -321,5 +324,93 @@ struct StoryPlanDriverLeaseTests {
         driver.cancelAll()
 
         #expect(pool.heldKeys().isEmpty)
+    }
+
+    // Fails if the pages one either side are released before the new page's first frame: the
+    // `&& !keep.contains(index)` in `updatePlayerLeases` (the plan names only the new page
+    // until then, so the page still on screen and the back-swipe target would go).
+    @Test("players one page either side survive until the new page's first frame")
+    func neighboursSurviveUntilTheFirstFrame() {
+        let factory = LeaseFakeFactory()
+        let pool = pool(factory: factory, maxPlayers: 5)
+        let driver = StoryPlanDriver(prefetch: FakeStoryPrefetch())
+        defer { driver.cancelAll() }
+
+        update(driver, pool, 6, at: 2)
+        #expect(pool.heldKeys() == [leaseKey(1), leaseKey(2), leaseKey(3)])
+
+        // Swipe to 3: its first frame has not shown, so the plan names only page 3.
+        update(driver, pool, 6, at: 3, firstFrameShown: false, keep: [2, 4])
+
+        // 2 (still on screen, back-swipe target) and 3 stay; 1 is two away and goes; 4 was
+        // never held and `keep` does not acquire it.
+        #expect(pool.heldKeys() == [leaseKey(2), leaseKey(3)])
+    }
+
+    // Fails if a neighbour streams around the range cache: the `prepareNeighbour` call after a
+    // newly committed lease (the pool's own item is a plain `AVPlayerItem(url:)`, scheme https).
+    // Fails if the on-screen page's player is prepared too: the `priority != .onScreen` test
+    // (the page owns its own take-over).
+    @Test("a neighbour waits paused and muted on the range-cache item, the current page's player is left alone")
+    func neighbourReadsThroughTheCache() throws {
+        let factory = LeaseFakeFactory()
+        let pool = pool(factory: factory, maxPlayers: 5)
+        let store = MediaRangeCacheStore(
+            folder: FileManager.default.temporaryDirectory
+                .appendingPathComponent("digia-story-driver-\(UUID().uuidString)"),
+            client: FakeRangeFetchClient())
+        let driver = StoryPlanDriver(
+            prefetch: FakeStoryPrefetch(), resourceLoader: MediaResourceLoader(store: store))
+        defer { driver.cancelAll() }
+        let url: @Sendable (Int) -> String = { "https://story-driver.invalid/\($0).mp4" }
+
+        driver.update(
+            actions: StoryDownloadPlan.plan(
+                stories: leaseVideos(3), currentIndex: 1, firstFrameShown: true, slowNetwork: false),
+            urlOf: url, isVideoOf: { _ in true },
+            keyOf: leaseKey, pool: pool)
+
+        func scheme(of index: Int) throws -> String? {
+            let lease = try #require(pool.obtainLease(
+                key: leaseKey(index), url: url(index), priority: .railThumb))
+            defer { lease.release() }
+            return (lease.player.currentItem?.asset as? AVURLAsset)?.url.scheme
+        }
+        #expect(try scheme(of: 2) == MediaResourceLoader.scheme)
+        #expect(try scheme(of: 0) == MediaResourceLoader.scheme)
+        #expect(try scheme(of: 1) == "https")
+        let next = try #require(pool.obtainLease(
+            key: leaseKey(2), url: url(2), priority: .railThumb))
+        defer { next.release() }
+        #expect(next.player.isMuted)
+        #expect(next.player.rate == 0)
+    }
+
+    // Fails if a first-bytes warm is not timed, or another warm is: the `onWarm` call in the
+    // `.firstBytes` arm of `update` (measured throughput is the first-bytes range only, as
+    // Android notes it).
+    @Test("only a first-bytes warm reports its size and time")
+    func onlyFirstBytesWarmsAreMeasured() async {
+        final class Samples: @unchecked Sendable {
+            private let lock = NSLock()
+            private var values: [Int] = []
+            func add(_ bytes: Int) { lock.withLock { values.append(bytes) } }
+            var all: [Int] { lock.withLock { values } }
+        }
+        let samples = Samples()
+        let prefetch = FakeStoryPrefetch()
+        let driver = StoryPlanDriver(prefetch: prefetch, onWarm: { bytes, elapsed in
+            #expect(elapsed >= 0)
+            samples.add(bytes)
+        })
+        defer { driver.cancelAll() }
+
+        driver.update(
+            actions: [.firstBytes(index: 1), .wholeFile(index: 2)],
+            urlOf: storyURL, isVideoOf: { _ in true })
+
+        #expect(await poll(prefetch.ranged.count == 1 && prefetch.whole.count == 1))
+        #expect(await poll(samples.all.count == 1))
+        #expect(samples.all == [storyFirstBytes])
     }
 }
