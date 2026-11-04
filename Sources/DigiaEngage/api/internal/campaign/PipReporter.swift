@@ -3,8 +3,7 @@ import Foundation
 /// Reports a PiP's lifecycle, from the orchestrator's hooks and the renderer's
 /// taps.
 ///
-/// Moved verbatim from `SDKInstance` (floater lifecycle section); only the
-/// receiver changed. Mirrors Flutter's `PipReporter` (PR #253) in name — on
+/// Mirrors Flutter's `PipReporter` in name — on
 /// iOS the PiP is called a floater, so the vocabulary here is the shared
 /// `FloaterEvent` one both stacks already use.
 ///

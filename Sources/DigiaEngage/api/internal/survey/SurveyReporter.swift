@@ -3,8 +3,7 @@ import Foundation
 /// Reports the active survey's lifecycle as the renderer walks it. Each call
 /// fires the matching experience event to the CEP and to Digia analytics.
 ///
-/// Moved verbatim from `SDKInstance` (survey lifecycle section); only the
-/// receiver changed. Mirrors Flutter's `SurveyReporter` (PR #253).
+/// Mirrors Flutter's `SurveyReporter`.
 ///
 /// CEP plugin sees: Impressed (started), Dismissed (every teardown — closed
 /// without finishing AND completed; all routed through markSurveyDismissed).

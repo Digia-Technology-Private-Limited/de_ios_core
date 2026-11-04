@@ -12,7 +12,7 @@ import Foundation
 ///
 /// Mirrors Flutter's `CampaignSurface` (`campaign_surface.dart`). The one
 /// structural difference: iOS cancel and timeout share a single teardown path
-/// (``SDKInstance/dismissSurfaces(for:)-style`` delivery-identity matching),
+/// (the delivery-identity matching in `SDKInstance.dismissSurfaces(for:)`),
 /// so there is one `dismiss` here instead of Flutter's `dismissCampaign` plus
 /// `dismissTimedOut`.
 @MainActor

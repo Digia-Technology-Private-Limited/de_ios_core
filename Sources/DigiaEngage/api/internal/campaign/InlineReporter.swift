@@ -3,10 +3,8 @@ import Foundation
 /// Reports inline slots — carousel, banner, canvas and timer — as they paint
 /// and are tapped.
 ///
-/// Moved verbatim from `SDKInstance` (inline slot lifecycle section, plus the
-/// two inline-canvas methods from the nudge section, as Flutter's
-/// `InlineReporter` also owns those); only the receiver changed. Mirrors
-/// Flutter's `InlineReporter` (PR #253).
+/// Mirrors Flutter's `InlineReporter`, which also owns the inline-canvas
+/// methods.
 ///
 /// Inline impressions fire at first render; dismissal fires at final removal.
 /// Inline campaigns are never frequency-capped.

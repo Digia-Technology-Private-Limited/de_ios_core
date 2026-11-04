@@ -2,9 +2,7 @@ import Foundation
 
 /// Reports the nudge on screen — its impression, clicks and dismissal.
 ///
-/// Moved verbatim from `SDKInstance` (nudge lifecycle section, minus the two
-/// inline-canvas methods, which belong to `InlineReporter`); only the receiver
-/// changed. Mirrors Flutter's `NudgeOrchestrator` (PR #253) in name: on iOS
+/// Mirrors Flutter's `NudgeOrchestrator` in name: on iOS
 /// the overlay itself lives in `DigiaOverlayController`, so this owns the
 /// lifecycle reporting rather than the route.
 ///

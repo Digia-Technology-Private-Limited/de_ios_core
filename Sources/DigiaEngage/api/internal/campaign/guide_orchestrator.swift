@@ -109,10 +109,9 @@ final class GuideOrchestrator: ObservableObject {
 
 // MARK: - Guide lifecycle reporting
 //
-// Moved verbatim from `SDKInstance`; only the receiver changed. Guide
-// reporting lives on the existing `GuideOrchestrator` rather than a new
-// reporter — the one accepted deviation from Flutter's PR #253, whose
-// `GuideOrchestrator`/`GuideShowcaseManager` split has no iOS equivalent.
+// Guide reporting lives on the existing `GuideOrchestrator` rather than a new
+// reporter: Flutter's `GuideOrchestrator`/`GuideShowcaseManager` split has no
+// iOS equivalent.
 
 extension GuideOrchestrator {
     /// The SDK always sets this at init. A missing one is a programmer error:

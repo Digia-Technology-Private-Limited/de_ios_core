@@ -3,9 +3,7 @@ import Foundation
 /// Reports a story floater's lifecycle, from the orchestrator's hooks and the
 /// renderer's taps.
 ///
-/// Moved verbatim from `SDKInstance` (story floater lifecycle section);
-/// only the receiver changed. Mirrors Flutter's `FloaterStoryReporter`
-/// (PR #253).
+/// Mirrors Flutter's `FloaterStoryReporter`.
 ///
 /// Reported through the PiP's own event vocabulary rather than a parallel set. Both
 /// are `floater` campaigns and both answer the same questions — was the window seen,

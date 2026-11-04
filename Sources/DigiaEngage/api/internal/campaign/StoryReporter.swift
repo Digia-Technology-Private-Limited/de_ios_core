@@ -3,8 +3,7 @@ import Foundation
 /// Reports a story's frames, shared by the inline story and the story
 /// floater.
 ///
-/// Moved verbatim from `SDKInstance` (inline story lifecycle section); only
-/// the receiver changed. Mirrors Flutter's `StoryReporter` (PR #253). The two
+/// Mirrors Flutter's `StoryReporter`. The two
 /// `reportClassic*` methods are iOS-only (classic RN bridge) and move with
 /// their surface's reporter.
 @MainActor

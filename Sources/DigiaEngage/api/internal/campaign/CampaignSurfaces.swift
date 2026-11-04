@@ -3,13 +3,13 @@ import Foundation
 // One ``CampaignSurface`` per kind, in the order the SDK asks them. Each holds
 // its kind's branch of what used to be a switch in ``SDKInstance`` —
 // `surfaceOccupants`, `settleSuperseded`, `dismissSurfaces(for:)` and
-// `startCampaign` — moved verbatim; only the receiver changed.
+// `startCampaign`.
 //
-// They are separate classes (not extensions) because A2 gives each surface
+// They are separate classes (not extensions) because each surface has
 // its own reporter next to its orchestrator; the state they read — the nudge
-// overlay, survey tokens, the emitter — still lives on the SDK for now.
+// overlay, survey tokens, the emitter — lives on the SDK.
 //
-// Mirrors Flutter's `campaign_surfaces.dart` (PR #252), adapted for the
+// Mirrors Flutter's `campaign_surfaces.dart`, adapted for the
 // iOS-only pieces: the classic-RN external guide, `presentationId`-stamped
 // delivery matching, and the floater busy-surface detail.
 
