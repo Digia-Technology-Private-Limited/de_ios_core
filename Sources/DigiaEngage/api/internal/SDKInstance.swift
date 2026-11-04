@@ -33,7 +33,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         return instance
     }()
 
-    private struct ExternalGuide {
+    struct ExternalGuide {
         let campaign: CampaignModel
         let payload: CEPTriggerPayload
     }
@@ -102,15 +102,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// floater, survey) drop as `host_suppressed` — inline keeps rendering and
     /// anything already showing is left alone.
     private(set) var campaignsSuppressed = false
-    private var activeExternalGuide: ExternalGuide?
+    var activeExternalGuide: ExternalGuide?
     private var screenUpdateRevision = 0
     private var captureInFlight = false
-    private var guideCompletionFired = false
+    var guideCompletionFired = false
     private var lastReportedGuideStep: (token: Int64, index: Int)?
     /// Terminal reason the initiator knows and the dismiss call does not carry
     /// directly — consumed once by the next guide dismiss. Mirrors Flutter's
     /// `_pendingDismissReason`.
-    private var pendingGuideDismissReason: DismissReason?
+    var pendingGuideDismissReason: DismissReason?
     /// Screen the current guide step showed on — an anchor that unmounts after
     /// a host screen change is a screen exit, in place it is a lost target.
     private var screenAtGuideStep: String?
@@ -199,6 +199,19 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// outlives its view, and a story floater has no media surface at all — its window is
     /// a canvas and its story is mounted by `FloaterStoryOverlayView`.
     var floaterStoryOrchestrator: FloaterStoryOrchestrator!
+    /// Every place a campaign can occupy the screen, asked in this order. Only
+    /// the occupant order depends on it: it is the order a live test supersedes
+    /// occupants in, and which of two blockers in one column is reported.
+    /// Mirrors Flutter's `_surfaces` (PR #252).
+    lazy var surfaces: [any CampaignSurface] = [
+        nudgeSurface, surveySurface, guideSurface, pipSurface, floaterStorySurface, inlineSurface,
+    ]
+    lazy var nudgeSurface = NudgeCampaignSurface(self)
+    lazy var surveySurface = SurveySurface(self)
+    lazy var guideSurface = GuideSurface(self)
+    lazy var pipSurface = PipSurface(self)
+    lazy var floaterStorySurface = FloaterStorySurface(self)
+    lazy var inlineSurface = InlineSurface(self)
     /// Wired to `floaterOrchestrator.setAppForegrounded` in `init()` — matches
     /// Android's `DigiaInstance.kt` `ProcessLifecycleOwner` `ON_START`/`ON_STOP`
     /// observer, pausing/resuming the floater's video when the app backgrounds.
@@ -239,7 +252,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     // coarse CEP channel (`toCep`) and Digia's rich analytics (`toDigia`).
     // Campaign id/type are resolved from the store inside the Digia sink.
     let dwellTracker = DwellTracker()
-    private var events: EngageEventEmitter!
+    var events: EngageEventEmitter!
 
     /// `shared` is the only production instance. Tests build their own with
     /// isolated defaults, a fake network client and, to simulate time, a clock.
@@ -975,43 +988,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// so a watchdog firing late can't take down a newer delivery of the same
     /// CEP campaign (SR60). An unstamped one (a live test) matches by id.
     private func dismissSurfaces(for payload: CEPTriggerPayload) {
-        let campaignID = payload.cepCampaignId
-        func owns(_ other: CEPTriggerPayload?) -> Bool {
-            guard let other, other.cepCampaignId == campaignID else { return false }
-            return payload.presentationId == nil || other.presentationId == payload.presentationId
-        }
-        if owns(activeExternalGuide?.payload) {
-            activeExternalGuide = nil
-        }
-        if owns(controller.activeNudge?.payload) {
-            // A CEP cancel of a nudge on screen ends it like any close: Digia gets its Dismissed(cancelled),
-            // and the CEP the same outcome. A watchdog's teardown reaches here already settled, unseen, and
-            // stays silent.
-            if coordinator.ownerOf(payload)?.state == .displaying {
-                markNudgeDismissed(reason: .cancelled)
-            } else {
-                controller.dismissNudge()
-            }
-        }
-        if owns(surveyOrchestrator.state?.payload) {
-            surveyOrchestrator.dismiss()
-        }
-        if owns(floaterStoryOrchestrator.state?.payload) {
-            floaterStoryOrchestrator.dismiss(.invalidated)
-        }
-        if owns(floaterOrchestrator.state?.payload) {
-            floaterOrchestrator.dismiss(.invalidated)
-        }
-        // Id-keyed below, so only when this delivery really is in a slot: a
-        // non-inline timeout must not clear an inline slot, or its impression
-        // mark, that shares the CEP id (CleverTap repeats ids) (R3-07).
-        if inlineController.slotOccupants.contains(where: { owns($0.payload) }) {
-            inlineController.removeCampaign(campaignID)
-            // Forget the impression mark so a re-trigger impresses to Digia afresh.
-            events.resetImpression(campaignID)
-        }
-        if owns(guideOrchestrator.state?.payload) {
-            guideOrchestrator.dismissIfActive(payloadId: campaignID)
+        for surface in surfaces {
+            surface.dismiss(payload)
         }
     }
 
@@ -1391,34 +1369,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     /// Every campaign routing accepted that has not settled yet (SR03), read
-    /// from the orchestrators at the moment of routing. A floater animating out
+    /// from the surfaces at the moment of routing. A floater animating out
     /// has already ended and is not an occupant. An RN classic guide
     /// (`activeExternalGuide`) is a guide occupant (plan §2.4, owner decision).
     private func surfaceOccupants() -> [SurfaceOccupant] {
-        var result: [SurfaceOccupant] = []
-        func add(_ kind: SurfaceKind, _ payload: CEPTriggerPayload, priority: Double? = nil) {
-            result.append(occupant(kind, payload, priority: priority))
-        }
-        if let nudge = controller.activeNudge { add(.nudge, nudge.payload) }
-        if let survey = surveyOrchestrator.state { add(.survey, survey.payload) }
-        if let guide = guideOrchestrator.state { add(.guide, guide.payload) }
-        if let external = activeExternalGuide { add(.guide, external.payload) }
-        if let floater = floaterOrchestrator.state, !floaterOrchestrator.closing {
-            add(floaterOrchestrator.surface == .expanded ? .floaterExpanded : .floaterCollapsed, floater.payload)
-        }
-        if let story = floaterStoryOrchestrator.state, !floaterStoryOrchestrator.closing {
-            // An open story is the story floater's expanded state.
-            add(floaterStoryOrchestrator.storyOverlayActive ? .floaterExpanded : .floaterCollapsed, story.payload)
-        }
-        for occupant in inlineController.slotOccupants {
-            add(
-                .inline(slot: occupant.slot), occupant.payload,
-                priority: campaignStore.find(occupant.payload.campaignKey)?.rulePriority)
-        }
-        return result
+        surfaces.flatMap { $0.occupants }
     }
 
-    private func occupant(
+    func occupant(
         _ kind: SurfaceKind, _ payload: CEPTriggerPayload, priority: Double? = nil
     ) -> SurfaceOccupant {
         // Inline counts as displayed once it impressed; every other kind once its
@@ -1468,60 +1426,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // D5 (SR44): the CEP hears `superseded` once; Digia's dismiss event,
         // with that type's usual fields, only for one that was displayed
         // (its dwell started at the impression). `hasDisplayed` is inline-only.
-        let displayed = dwellTracker.elapsedMs(id) != nil
-        switch occupant.kind {
-        case .nudge:
-            if let nudge = controller.activeNudge, nudge.payload.cepCampaignId == id {
-                if displayed {
-                    markNudgeDismissed(reason: .superseded)
-                } else {
-                    controller.dismissNudge()
-                    _ = dwellTracker.consumeDwellMs(id)
-                    events.toCep(.dismissed(reason: .superseded), payload: nudge.payload)
-                }
-            }
-        case .survey:
-            if let state = surveyOrchestrator.state, state.payload.cepCampaignId == id {
-                if displayed {
-                    // R3-D5 (SR69): the fields a user close sends, from the renderer.
-                    let progress = surveyOrchestrator.progress()
-                    markSurveyDismissed(
-                        abandonedAtItem: progress?.abandonedAtItem,
-                        answeredCount: progress?.answeredCount,
-                        reason: .superseded
-                    )
-                } else {
-                    surveyOrchestrator.dismiss()
-                    _ = dwellTracker.consumeDwellMs(id)
-                    clearQuestionViewedAt(token: state.token)
-                    events.toCep(.dismissed(reason: .superseded), payload: state.payload)
-                }
-            }
-        case .guide:
-            if let state = guideOrchestrator.state, state.payload.cepCampaignId == id {
-                if displayed {
-                    // No `completed:` override, so a completion the CTA already
-                    // fired wins (R3-02, R4-D2): CEP `completed`, no Digia dismiss.
-                    dismissGuide(reason: .superseded)
-                } else {
-                    guideOrchestrator.dismiss()
-                    _ = dwellTracker.consumeDwellMs(id)
-                    guideCompletionFired = false
-                    pendingGuideDismissReason = nil
-                    events.toCep(.dismissed(reason: .superseded), payload: state.payload)
-                }
-            } else if let external = activeExternalGuide, external.payload.cepCampaignId == id {
-                activeExternalGuide = nil
-                events.toCep(.dismissed(reason: .superseded), payload: external.payload)
-            }
-        case .floaterExpanded, .floaterCollapsed:
-            if floaterOrchestrator.state?.payload.cepCampaignId == id {
-                floaterOrchestrator.dismiss(.superseded)
-            } else if floaterStoryOrchestrator.state?.payload.cepCampaignId == id {
-                floaterStoryOrchestrator.dismiss(.superseded)
-            }
-        case .inline(let slot):
-            inlineController.dismissCampaign(slot, reason: .superseded)
+        for surface in surfaces {
+            surface.supersede(occupant)
         }
     }
 
@@ -1569,7 +1475,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         return request.invalidConfig("campaign has no valid Canvas guide content", cause: "empty_content")
     }
 
-    private func isClassicRNGuide(_ guide: GuideConfigModel) -> Bool {
+    func isClassicRNGuide(_ guide: GuideConfigModel) -> Bool {
         !guide.isAnchorless
             && config?.wrapperBinding == "react_native"
             && !guide.steps.isEmpty
@@ -1578,139 +1484,35 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     /// Starts a campaign every gate has passed.
     private func startCampaign(_ request: CampaignRequest) -> RoutingVerdict {
-        let campaign = request.campaign
-        let payload = request.payload
-        let key = campaign.campaignKey
-        func inlineRouted() -> RoutingVerdict {
-            // No synchronous way to know a matching DigiaSlot exists anywhere in
-            // the app, so a live test's own watchdog stands in for the anchor
-            // check a guide gets — this only narrows its verdict to the inline
-            // one. reportSlotFirstRender's shown ACK wins the race if a slot
-            // renders first (LiveTestContext is idempotent).
-            if let liveTest = request.driver as? LiveTestDriver { liveTest.context.expectSlotToMount() }
-            return .accepted(payload: payload, kind: .inline)
-        }
-        switch campaign.config {
+        switch request.campaign.config {
         case .inline(let cfg):
-            inlineController.setCarouselConfig(cfg.slotKey, config: cfg)
-            inlineController.setCampaign(cfg.slotKey, payload: payload)
-            return inlineRouted()
+            return inlineSurface.startCarousel(request, cfg)
         case .banner(let cfg):
-            inlineController.setBannerConfig(cfg.slotKey, config: cfg)
-            inlineController.setCampaign(cfg.slotKey, payload: payload)
-            return inlineRouted()
+            return inlineSurface.startBanner(request, cfg)
         case .inlineCanvas(let cfg):
-            inlineController.setCanvasConfig(cfg.slotKey, config: cfg)
-            inlineController.setCampaign(cfg.slotKey, payload: payload)
-            return inlineRouted()
+            return inlineSurface.startCanvas(request, cfg)
         case .story(let cfg):
-            inlineController.setStoryConfig(cfg.slotKey, config: cfg)
-            inlineController.setCampaign(cfg.slotKey, payload: payload)
-            return inlineRouted()
-        case .guide(let guideConfig):
-            if isClassicRNGuide(guideConfig) {
-                guard let renderViaJs = onGuideRenderRequest else {
-                    let message = "React Native guide renderer is not registered"
-                    request.driver.policy.onDropped(DropReason.hostNotMounted, message)
-                    logNativeGuideStage("route", "result=dropped reason=js_renderer_missing campaign_key=\(key)")
-                    return .dropped(reason: .hostNotMounted, detail: message)
-                }
-                activeExternalGuide = ExternalGuide(campaign: campaign, payload: payload)
-                // `payload` was stamped by `coordinator.open()` before routing
-                // ever saw it, so this is only ever empty for a delivery that
-                // bypassed that stamp — a live test's synthesised payload. The
-                // fallback is a harmless dead id rather than a crash: it simply
-                // never resolves in `reportExternalGuideLifecycle`.
-                renderViaJs(
-                    GuideRenderRequest(
-                        payload: payload,
-                        presentationId: payload.presentationId ?? "",
-                        campaignId: campaign.id,
-                        templateConfigJson: campaign.guideTemplateJson
-                    )
-                )
-                return .accepted(payload: payload, kind: .modal)
-            }
-            // As Flutter: skip steps with no canvas, and show the rest.
-            var canvasGuide = guideConfig
-            canvasGuide.steps = guideConfig.steps.filter { $0.widgetConfig.canvas != nil }
-            // The surface rule has cleared the screen, so a refusal here is the
-            // campaign itself (not a parsed guide), never another guide.
-            var canvasCampaign = campaign
-            canvasCampaign.config = .guide(canvasGuide)
-            guard guideOrchestrator.start(canvasCampaign, payload: payload) else {
-                logNativeGuideStage("route", "result=dropped reason=invalid_config campaign_key=\(key)")
-                return request.invalidConfig("guide could not start", cause: "start_failed")
-            }
-            guideCompletionFired = false
-            logNativeGuideStage("route", "result=accepted campaign_key=\(key)")
-            return .accepted(payload: payload, kind: .modal)
-        case .nudge(let nudgeConfig):
-            // Resolve variable context: dashboard schemas define type + fallback;
-            // CEP trigger variables win over fallbacks (D3′).
-            let variableContext = buildVariableContext(
-                schemas: nudgeConfig.variableSchemas,
-                cepVars: payload.variables
-            )
-            controller.showNudge(
-                DigiaNudgePresentation(
-                    config: nudgeConfig,
-                    payload: payload,
-                    variables: variableContext.values.isEmpty && variableContext.types.isEmpty
-                        ? nil : variableContext
-                ))
-            return .accepted(payload: payload, kind: .modal)
+            return inlineSurface.startStory(request, cfg)
+        case .guide(let cfg):
+            return guideSurface.start(request, cfg)
+        case .nudge(let cfg):
+            return nudgeSurface.start(request, cfg)
         case .survey(let cfg):
-            guard surveyOrchestrator.start(payload: payload, config: cfg) else {
-                return request.invalidConfig("survey could not start", cause: "start_failed")
-            }
-            return .accepted(payload: payload, kind: .modal)
+            return surveySurface.start(request, cfg)
         // Both floater subtypes route through the same gate — a collapsed window of
         // either kind is the same third, non-blocking lane.
         case .floater, .floaterStory:
             // Two template shapes under one campaign type, each with its own
             // orchestrator — see `CampaignConfigModel.floaterStory`.
-            let isStory = campaign.floaterStoryConfig != nil
-            let started: Bool
-            let failure: String?
-            let failedBusy: Bool
-            if isStory {
-                started = floaterStoryOrchestrator.start(campaign, payload: payload, screenName: _currentScreen)
-                failure = floaterStoryOrchestrator.lastStartFailureReason
-                failedBusy = floaterStoryOrchestrator.lastStartFailedBusy
-            } else {
-                started = floaterOrchestrator.start(campaign, payload: payload, screenName: _currentScreen)
-                failure = floaterOrchestrator.lastStartFailureReason
-                failedBusy = floaterOrchestrator.lastStartFailedBusy
+            if request.campaign.floaterStoryConfig != nil {
+                return floaterStorySurface.start(request)
             }
-            var busyDetail: [String: Any] = [:]
-            guard started else {
-                let message = failure ?? "floater start failed"
-                log.d("Dropped — floater not started (reason=\(failure ?? "unknown"))", campaign: key)
-                // Another floater on screen is a busy surface, not a broken campaign.
-                if failedBusy {
-                    request.driver.policy.onDropped(DropReason.surfaceBusy, message)
-                    var blocker: SurfaceOccupant?
-                    if isStory, let story = floaterStoryOrchestrator.state {
-                        blocker = occupant(
-                            floaterStoryOrchestrator.storyOverlayActive ? .floaterExpanded : .floaterCollapsed,
-                            story.payload)
-                    } else if let floater = floaterOrchestrator.state {
-                        blocker = occupant(
-                            floaterOrchestrator.surface == .expanded ? .floaterExpanded : .floaterCollapsed,
-                            floater.payload)
-                    }
-                    busyDetail = blocker.map {
-                        CampaignRouter.surfaceBusyDetail($0, campaignId: campaignStore.find($0.campaignKey)?.id)
-                    } ?? [:]
-                    return .dropped(reason: .surfaceBusy, detail: message, deliveryDetail: busyDetail)
-                }
-                return request.invalidConfig(message, cause: "start_failed")
-            }
-            return .accepted(payload: payload, kind: .floating)
+            return pipSurface.start(request)
         case .unsupported(let config):
             request.driver.policy.onDropped(TimelineReason.campaignUnsupported, config.reason)
-            log.e("Dropped — unsupported config (reason=\(config.reason))", campaign: key)
+            log.e(
+                "Dropped — unsupported config (reason=\(config.reason))",
+                campaign: request.campaign.campaignKey)
             return .dropped(reason: .invalidConfig, detail: config.reason)
         }
     }
@@ -2184,7 +1986,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         clearQuestionViewedAt(token: state.token)
     }
 
-    private func clearQuestionViewedAt(token: Int64) {
+    func clearQuestionViewedAt(token: Int64) {
         let prefix = "\(token):"
         questionViewedAt = questionViewedAt.filter { !$0.key.hasPrefix(prefix) }
     }
@@ -3134,7 +2936,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         failure == .unsupportedLayout ? ["cause": "anchorless_layout"] : nil
     }
 
-    private func logNativeGuideStage(_ stage: String, _ details: String) {
+    func logNativeGuideStage(_ stage: String, _ details: String) {
         guard config?.wrapperBinding == "react_native" else { return }
         log.d("Guide stage: \(stage) \(details)")
     }
