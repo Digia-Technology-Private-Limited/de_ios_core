@@ -2,6 +2,14 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [4.3.1] - 2026-11-04
+
+### Bug Fixes
+
+- Dialogs with the close button outside the card are now centered correctly.
+- Dialogs taller than the screen now scale down to fit within the safe area.
+- Survey bottom sheets now use the correct bottom inset and padding.
+
 ## [4.3.0] - 2026-11-03
 
 ### New Features
