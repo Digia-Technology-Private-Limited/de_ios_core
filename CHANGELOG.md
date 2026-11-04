@@ -2,7 +2,7 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
-## [Unreleased]
+## [4.3.2] - 2026-11-04
 
 ### Bug Fixes
 
