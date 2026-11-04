@@ -227,7 +227,14 @@ struct StoryViewer<Chrome: View>: View {
     private func page(item: StoryItemConfig, index: Int) -> some View {
         // A replay remounts the current page so its video restarts from 0.
         let pageID = "\(index)-\(session.replayTick)"
-        if item.type == .video {
+        if item.type == .video, mediaFailed {
+            // The video failed or stalled: its still, with the page's own time running.
+            ZStack {
+                Color.black
+                StoryThumbnailStill(item: item)
+            }
+            .id(pageID)
+        } else if item.type == .video {
             VideoStoryPage(
                 item: item,
                 pageKey: session.pageKey(index: index, namespace: campaignKey),
@@ -253,7 +260,7 @@ struct StoryViewer<Chrome: View>: View {
                 },
                 onFailed: {
                     guard index == currentIndex else { return }
-                    mediaFailed = true
+                    giveUpOnVideo()
                 }
             )
             .id(pageID)
@@ -332,7 +339,7 @@ struct StoryViewer<Chrome: View>: View {
     // MARK: - Timing
 
     /// A video that shows no playhead movement for this long (loading and buffering excepted)
-    /// is given up on.
+    /// is given up on: it shows its still for the page's own time.
     private static var stallLimit: TimeInterval { 10 }
 
     private func tick() {
@@ -348,7 +355,10 @@ struct StoryViewer<Chrome: View>: View {
             // File download and buffering are legitimate loading. The guard starts only once the
             // player has displayed its first frame.
             stallTimer.tick(now: now, running: counting && videoReady && !videoBuffering)
-            if stallTimer.elapsed >= Self.stallLimit { next() }
+            if stallTimer.elapsed >= Self.stallLimit {
+                // A stall is a transport fault: network faults report no health event on any stack.
+                giveUpOnVideo()
+            }
             return
         }
         pageTimer.tick(now: now, running: counting)
@@ -363,6 +373,14 @@ struct StoryViewer<Chrome: View>: View {
         if pageTimer.elapsed >= duration {
             next()
         }
+    }
+
+    /// The current video cannot play (it failed, or stalled past the guard): its still stays and
+    /// the page's own time starts now, then the story moves on — never an immediate skip.
+    private func giveUpOnVideo() {
+        guard !mediaFailed else { return }
+        mediaFailed = true
+        pageTimer.reset()
     }
 
     private func resetTiming() {
