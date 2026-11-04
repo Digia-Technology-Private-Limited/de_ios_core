@@ -7,6 +7,14 @@ All notable changes to Digia Engage (iOS) are documented in this file.
 ### Added
 - Internal range-caching media store (`api/internal/media/cache/`): AVAsset reads stream through a per-folder disk cache with HTTP Range fetch, partial entries, 256 MB LRU, and a fake-fetch contract suite. No surface rewired; `DigiaVideoFileCache` untouched.
 
+### Bug Fixes
+- Inline stories now pause on a press-and-hold, for the page timer and for a playing video, like canvas and floater stories.
+- A story video that cannot play, or that stalls, now shows its still picture for the page's own time before the story moves on, instead of skipping the page at once. A video with a blank URL no longer holds the story up.
+- The story mute button now applies to the playing video at once instead of one press late.
+- Story pages now keep time by the real clock, so a busy main thread no longer stretches a page.
+- Story viewers now warm the neighbouring pages' videos through the media cache, and release them only after the new page shows its first frame. The slow-network rule is one: a metered link, or a measured warm below 1500 kbps; a warm served from the cache no longer reads as a fast link.
+- Floater story pages now resolve `{{variable}}` media URLs.
+
 ## [4.2.0] - 2026-10-29
 
 ### Bug Fixes
