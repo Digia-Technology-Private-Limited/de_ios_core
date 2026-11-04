@@ -36,6 +36,7 @@ internal final actor FakeRangeFetchClient: RangeFetchClient {
     internal func enableFailAllCalls() { failAllCalls = true }
     internal func callCount() -> Int { calls.count }
     internal func recordedRanges() -> [Range<Int64>?] { calls.map(\.range) }
+    internal func recordedURLs() -> [URL] { calls.map(\.url) }
     internal func didObserveCancellation() -> Bool { observedCancellation }
 
     internal func fetch(url: URL, range: Range<Int64>?) async throws -> RangeFetchResponse {
