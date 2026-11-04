@@ -1,6 +1,5 @@
 import SwiftUI
 import UIKit
-internal import SDWebImageSwiftUI
 
 @MainActor
 enum InlineCarouselRenderer {
@@ -230,46 +229,15 @@ private struct InlineCarouselItemImage: View {
     let width: CGFloat
     let height: CGFloat
     let cornerRadius: CGFloat
-    @Environment(\.digiaCampaignKey) private var campaignKey
-
-    init(item: CarouselItem, width: CGFloat, height: CGFloat, cornerRadius: CGFloat) {
-        DigiaImagePipeline.configureIfNeeded()
-        self.item = item
-        self.width = width
-        self.height = height
-        self.cornerRadius = cornerRadius
-    }
 
     var body: some View {
-        fittedImage
+        MediaImage(spec: ImageSpec(
+            url: item.imageUrl,
+            fit: MediaFit(rawValue: item.fit.rawValue) ?? .cover,
+            blurHash: item.placeholder?.stillBlurHash
+        ))
             .frame(width: width, height: height)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
-    }
-
-    @ViewBuilder
-    private var fittedImage: some View {
-        switch item.fit {
-        case .cover:
-            webImage(placeholderContentMode: .fill)
-                .scaledToFill()
-        case .contain:
-            webImage(placeholderContentMode: .fit)
-                .scaledToFit()
-        case .fill:
-            webImage(placeholderContentMode: nil)
-        }
-    }
-
-    private func webImage(placeholderContentMode: ContentMode?) -> some View {
-        WebImage(url: URL(string: item.imageUrl)) {
-            $0.resizable()
-        } placeholder: {
-            BlurHashPlaceholderView(
-                placeholder: item.placeholder,
-                contentMode: placeholderContentMode
-            )
-        }
-        .onFailure { reportMediaLoadFailed(.image, cause: mediaFailureCause(imageError: $0), campaignKey: campaignKey) }
     }
 }
 
