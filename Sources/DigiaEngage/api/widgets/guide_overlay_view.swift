@@ -328,7 +328,9 @@ private struct GuideStepOverlay: View {
             let loaded = await AnchorlessImageLoader.image(for: imageURL)
             guard let decoded = loaded.image else {
                 guard !Task.isCancelled else { return }
-                reportMediaLoadFailed(.image, cause: loaded.failureCause, campaignKey: campaignKey)
+                if let cause = loaded.failureCause {
+                    MediaServices.current.reportHealth(campaignKey, .image, cause)
+                }
                 SDKInstance.shared.reportGuideRenderFailure(
                     nil,
                     guideToken: guideToken,

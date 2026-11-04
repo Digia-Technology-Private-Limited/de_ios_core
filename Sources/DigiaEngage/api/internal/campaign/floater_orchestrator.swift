@@ -331,7 +331,9 @@ final class FloaterOrchestrator: ObservableObject {
             "Dropped — media could not be loaded (reason=\(reason))",
             campaign: active.campaign.campaignKey
         )
-        reportMediaLoadFailed(active.config.media.kind.healthKind, cause: cause, campaignKey: active.campaign.campaignKey)
+        if let cause {
+            MediaServices.current.reportHealth(active.campaign.campaignKey, active.config.media.kind.healthKind, cause)
+        }
         lastStartFailureReason = "media could not be loaded: \(reason)"
         onDismissed(active, .mediaEnd, metricsSnapshot(), false)
         finishDismiss()
@@ -467,7 +469,7 @@ final class FloaterOrchestrator: ObservableObject {
             return
         }
         Task { [weak self] in
-            let loaded = await loadLottieSource(parsed)
+            let loaded = await MediaServices.current.loadLottie(parsed)
             guard let self, self.state?.token == token else { return }
             if loaded.source != nil {
                 self.markVisible(token: token)
