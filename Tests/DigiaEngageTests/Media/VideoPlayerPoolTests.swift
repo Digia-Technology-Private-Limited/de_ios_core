@@ -110,6 +110,7 @@ private final class PooledVideoModel: ObservableObject {
     @Published var shown = true
     @Published var url: String
     var frames = 0
+    var failures = 0
 
     init(url: String) { self.url = url }
 }
@@ -119,7 +120,8 @@ private struct PooledVideoHost: View {
 
     var body: some View {
         if model.shown {
-            MediaVideo(url: model.url, autoplay: false, playerKey: "card", onFirstFrame: { model.frames += 1 })
+            MediaVideo(url: model.url, autoplay: false, playerKey: "card", onFirstFrame: { model.frames += 1 },
+                       onFailure: { model.failures += 1 })
         }
     }
 }
@@ -181,6 +183,30 @@ struct VideoPlayerPoolMediaVideoTests {
 
         #expect(pool.heldPlayer(for: "card") === player)
         #expect(abs(player.currentTime().seconds - 3) < 0.1)
+}
+
+    // Guards the `hasFailed` checks in `VideoPlayerPool.borrow` (R2-02): an AVPlayerItem never
+    // recovers, so a pooled player that failed must get a new item before the next holder.
+    @Test("a keyed video that failed plays on its next mount once the origin serves again")
+    func failedPlayerIsNotInherited() async throws {
+        MediaOrigin.install()
+        MediaServices.override(videoSession: MediaOrigin.session())
+        defer { MediaOrigin.end() }
+        let video = MediaOrigin.url("flaky.mp4")
+        MediaOrigin.set(.fail(.notConnectedToInternet), for: video)
+        let model = PooledVideoModel(url: video.absoluteString)
+
+        let window = MediaStage.mount(PooledVideoHost(model: model))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { model.failures == 1 })
+
+        model.shown = false
+        ComponentTestHost.drainRunLoop(for: 0.1)
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
+        model.shown = true
+
+        #expect(await waitUntilMedia { model.frames == 1 })
+        #expect(model.failures == 1)
     }
 }
 }
