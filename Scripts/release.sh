@@ -20,7 +20,8 @@ export GH_EDITOR=true
 #
 # This script intentionally performs external, irreversible actions: it commits
 # and pushes the release files, pushes a git tag, creates a GitHub Release,
-# uploads the fat XCFramework, and publishes the pod to CocoaPods trunk.
+# uploads the fat XCFramework, publishes the pod to the Digia CocoaPods spec repo
+# (digia-podspecs), and attempts a best-effort push to CocoaPods trunk.
 
 readonly EXPECTED_BRANCH="main"
 readonly POD_NAME="DigiaEngage"
@@ -28,6 +29,11 @@ readonly PODSPEC="DigiaEngage.podspec"
 readonly SOURCE_PODSPEC="DigiaEngage-source.podspec"
 readonly SDK_VERSION_FILE="Sources/DigiaEngage/SdkVersion.swift"
 readonly CHANGELOG="CHANGELOG.md"
+# Digia CocoaPods spec repo. CocoaPods trunk goes read-only on 2026-12-02, so
+# this repo is the required publication target; trunk is best-effort only.
+readonly SPEC_REPO="digia"
+readonly SPEC_REPO_SLUG="Digia-Technology-Private-Limited/digia-podspecs"
+readonly SPEC_REPO_URL="https://github.com/$SPEC_REPO_SLUG.git"
 readonly BUILD_SCRIPT="Scripts/build-fat-xcframework.sh"
 readonly XCFRAMEWORK="dist/DigiaEngage.xcframework"
 readonly ZIP_PATH="dist/DigiaEngage.xcframework.zip"
@@ -41,7 +47,8 @@ readonly -a RELEASE_FILES=(
 VERSION=""
 VERSION_REGEX=""
 DRY_RUN=0
-TOTAL_STEPS=12
+TOTAL_STEPS=13
+TRUNK_STATUS="not attempted"
 BRANCH=""
 GH_REPO=""
 BASE_VERSION=""
@@ -80,7 +87,10 @@ Before running:
   - Keep release notes in the top CHANGELOG.md [Unreleased] section (or use an
     already-bumped top section when resuming before the release commit).
   - Ensure main matches origin/main.
-  - Authenticate GitHub CLI and CocoaPods trunk.
+  - Authenticate GitHub CLI.
+  - Register the Digia spec repo once:
+      pod repo add digia https://github.com/Digia-Technology-Private-Limited/digia-podspecs.git
+  - CocoaPods trunk auth is optional: the trunk push is best-effort.
 
 The script commits only:
   CHANGELOG.md
@@ -92,7 +102,7 @@ Dry-run mode:
   Performs the version simulation, manifest validation, XCFramework build, artifact checks,
   and pod lint inside a disposable temporary clone. It never modifies the real
   checkout/index/refs or performs a commit, push, tag, GitHub Release creation,
-  upload, CocoaPods publication, or other remote write. Temporary compiler and
+  upload, spec-repo or CocoaPods trunk publication, or other remote write. Temporary compiler and
   validation files are deleted automatically at exit.
 EOF
 }
@@ -584,14 +594,27 @@ validate_preflight() {
     fail "GitHub Release $VERSION already exists in $GH_REPO."
   fi
 
-  if ! pod trunk me > "$RUN_DIR/pod-trunk-me.out" 2>&1; then
-    fail "CocoaPods trunk is not authenticated. Run: pod trunk register engg@digia.tech 'Digia Engineering'"
-  fi
+  validate_spec_repo
 
+  # Trunk is best-effort (read-only from 2026-12-02): warn, never block.
+  if ! pod trunk me > "$RUN_DIR/pod-trunk-me.out" 2>&1; then
+    echo "    WARNING: CocoaPods trunk is not authenticated; the best-effort trunk push will be skipped." >&2
+  fi
   pod_info=$(pod trunk info "$POD_NAME" 2>/dev/null || true)
   if printf '%s\n' "$pod_info" | grep -Eq "^[[:space:]]*-[[:space:]]+$VERSION_REGEX([[:space:]]|$)"; then
-    fail "CocoaPods trunk already contains $POD_NAME $VERSION."
+    echo "    WARNING: CocoaPods trunk already contains $POD_NAME $VERSION; the trunk push will fail (best-effort)." >&2
   fi
+}
+
+validate_spec_repo() {
+  local repo_url
+  repo_url=$(pod repo list 2>/dev/null | awk -v name="$SPEC_REPO" '$0 == name { found = 1; next } found && /- URL:/ { print $3; exit }')
+  [ -n "$repo_url" ] || fail "CocoaPods spec repo '$SPEC_REPO' is not registered. Run: pod repo add $SPEC_REPO $SPEC_REPO_URL"
+  [ "$repo_url" = "$SPEC_REPO_URL" ] || fail "CocoaPods spec repo '$SPEC_REPO' points to '$repo_url', expected '$SPEC_REPO_URL'."
+  if gh api "repos/$SPEC_REPO_SLUG/contents/$POD_NAME/$VERSION" >/dev/null 2>&1; then
+    fail "Spec repo $SPEC_REPO_SLUG already contains $POD_NAME $VERSION."
+  fi
+  echo "    Spec repo '$SPEC_REPO' is registered and does not yet contain $POD_NAME $VERSION."
 }
 
 bump_release_files() {
@@ -935,12 +958,26 @@ lint_podspec_dry() {
   assert_exact_release_changes
 }
 
+push_spec_repo() {
+  require_live_mode "Digia spec repo publication" || return 1
+  pod repo push "$SPEC_REPO" "$PODSPEC" --allow-warnings
+}
+
+# Best-effort: trunk refuses pushes during the 2026-11 test window and is
+# read-only from 2026-12-02. A failure here never fails the release.
 push_cocoapods_trunk() {
   require_live_mode "CocoaPods trunk publication" || return 1
   if ! pod trunk me > "$RUN_DIR/pod-trunk-me-final.out" 2>&1; then
-    fail "CocoaPods authentication expired. Run: pod trunk register engg@digia.tech 'Digia Engineering'"
+    TRUNK_STATUS="skipped (not authenticated)"
+  elif pod trunk push "$PODSPEC" --allow-warnings; then
+    TRUNK_STATUS="published"
+  else
+    TRUNK_STATUS="failed"
   fi
-  pod trunk push "$PODSPEC" --allow-warnings
+  if [ "$TRUNK_STATUS" != "published" ]; then
+    echo "WARNING: CocoaPods trunk push $TRUNK_STATUS. The release is still valid via the spec repo." >&2
+    echo "         To retry later from tag $VERSION: pod trunk push $PODSPEC --allow-warnings" >&2
+  fi
 }
 
 verify_final_state() {
@@ -951,6 +988,8 @@ verify_final_state() {
   [ "$remote_head" = "$RELEASE_COMMIT" ] || fail "Final branch verification failed for origin/$BRANCH."
   [ "$remote_tag" = "$RELEASE_COMMIT" ] || fail "Final tag verification failed for $VERSION."
   gh release view "$VERSION" --repo "$GH_REPO" >/dev/null
+  gh api "repos/$SPEC_REPO_SLUG/contents/$POD_NAME/$VERSION/$PODSPEC" >/dev/null 2>&1 \
+    || fail "Spec repo $SPEC_REPO_SLUG does not contain $POD_NAME/$VERSION/$PODSPEC."
   [ -z "$(git status --porcelain --untracked-files=no)" ] || fail "The release left tracked worktree changes behind."
 }
 
@@ -968,10 +1007,11 @@ print_success() {
   echo "Release commit: $RELEASE_COMMIT"
   echo "Previous released tag: $LATEST_RELEASED_TAG"
   echo "GitHub Release: $RELEASE_URL"
-  echo "CocoaPods: pod trunk push completed successfully"
+  echo "Digia spec repo: $POD_NAME $VERSION published to $SPEC_REPO_URL"
+  echo "CocoaPods trunk (best-effort): $TRUNK_STATUS"
   echo ""
-  echo "Suggested next step: wait 2–5 minutes for CocoaPods propagation, then run:"
-  echo "  pod search $POD_NAME"
+  echo "Suggested next step: in a consumer app whose Podfile lists the spec repo source, run:"
+  echo "  pod repo update $SPEC_REPO && pod update $POD_NAME"
   echo "============================================================"
 }
 
@@ -990,7 +1030,7 @@ print_dry_run_success() {
   echo "  - real release files, git index, HEAD, and refs are unchanged"
   echo "  - no commit, push, or tag was created"
   echo "  - no GitHub Release or asset upload was created"
-  echo "  - nothing was published to CocoaPods trunk"
+  echo "  - nothing was published to the Digia spec repo or CocoaPods trunk"
   echo "  - temporary validation files were removed at exit"
   echo "Validated against latest released tag: $LATEST_RELEASED_TAG"
   echo ""
@@ -1039,7 +1079,7 @@ run_dry_run() {
 
   run_step \
     "Lint the podspec in isolation" \
-    "Fix the CocoaPods lint error and rerun the dry-run; nothing was pushed to trunk." \
+    "Fix the CocoaPods lint error and rerun the dry-run; nothing was published." \
     "CocoaPods accepts the simulated local binary podspec using a temporary validation directory" \
     lint_podspec_dry
 
@@ -1112,7 +1152,7 @@ main() {
     return 0
   fi
 
-  echo "This will commit, push, tag, create a GitHub Release, and publish to CocoaPods trunk."
+  echo "This will commit, push, tag, create a GitHub Release, publish to the Digia spec repo, and try CocoaPods trunk."
 
   run_step \
     "Preflight validation" \
@@ -1175,9 +1215,15 @@ main() {
     lint_podspec
 
   run_step \
-    "Push to CocoaPods trunk" \
-    "If authentication failed, register with CocoaPods; otherwise resolve the trunk error and rerun: pod trunk push $PODSPEC --allow-warnings" \
-    "CocoaPods trunk accepted $POD_NAME $VERSION" \
+    "Push to the Digia spec repo" \
+    "Resolve the spec repo error (registration, access, or lint), then rerun: pod repo push $SPEC_REPO $PODSPEC --allow-warnings" \
+    "spec repo $SPEC_REPO accepted $POD_NAME $VERSION" \
+    push_spec_repo
+
+  run_step \
+    "Push to CocoaPods trunk (best-effort)" \
+    "Trunk failures never fail the release; retry later from tag $VERSION: pod trunk push $PODSPEC --allow-warnings" \
+    "the trunk attempt finished without blocking the release" \
     push_cocoapods_trunk
 
   run_step \
