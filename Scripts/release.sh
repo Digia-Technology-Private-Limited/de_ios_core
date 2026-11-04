@@ -781,6 +781,7 @@ validate_artifacts() {
   [ -d "$XCFRAMEWORK" ] || fail "Build completed without producing $XCFRAMEWORK."
   [ -s "$ZIP_PATH" ] || fail "Build completed without producing a non-empty $ZIP_PATH."
   unzip -tq "$ZIP_PATH" > "$RUN_DIR/unzip-test.out"
+  unzip -l "$ZIP_PATH" | grep -q ' LICENSE$' || fail "Release zip is missing LICENSE at its root (DigiaEngage.podspec declares s.license :file => 'LICENSE')."
 
   while IFS= read -r framework; do
     [ -z "$framework" ] && continue
