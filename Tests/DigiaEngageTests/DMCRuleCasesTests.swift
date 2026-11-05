@@ -123,20 +123,7 @@ final class DMCRuleCasesTests: XCTestCase {
     /// `testkit/.../evidence/c-ios-missing.md` §2.
     private let knownRed: Set<String> = [
         "identified_condition_follows_login_and_logout",
-        "inline_exhausted_history_does_not_block",
-        "inline_ignores_screens",
-        "inline_total_cap_is_ignored",
-        "inline_window_cap_is_ignored",
-        "max_per_window_zero_never_shows",
-        "max_total_zero_never_shows",
         "newline_inside_braces_is_whitespace",
-        "screens_checked_again_when_the_wait_ends",
-        "screens_pick_the_offer_for_this_screen",
-        "screens_shape",
-        "unknown_window_name_is_unsupported",
-        "wait_not_on_target_screen_cancels_and_does_not_compete",
-        "wait_not_on_target_screen_survives_leave_and_return",
-        "wait_with_screens_starts_only_on_a_listed_screen",
         "waits_end_together_dropped_lead_falls_through",
         "waits_end_together_lead_routes",
         "zero_never_prints_a_sign",
@@ -182,6 +169,133 @@ final class DMCRuleCasesTests: XCTestCase {
         XCTAssertTrue(
             failed.isEmpty,
             "\(failed.count) rule cases failed:\n" + failed.joined(separator: "\n"))
+    }
+
+    // MARK: - Cases named in testkit/contracts/dmc-cases.json
+
+    /// Runs the named corpus cases (`<area>/<id>`) and fails on any problem.
+    private func runCases(_ names: [String], file: StaticString = #filePath, line: UInt = #line) throws {
+        try XCTSkipUnless(
+            RuleCaseFiles.root != nil,
+            "Test Kit rule cases not found; run `bash clone.sh` in de_workspace")
+        for name in names {
+            guard let found = RuleCaseFiles.loaded.cases.first(where: { $0.file == name + ".json" }) else {
+                XCTFail("rule case \(name) not found", file: file, line: line)
+                continue
+            }
+            let problems = World(file: found.file, json: found.json).run()
+            XCTAssertTrue(
+                problems.isEmpty, "\(name):\n" + problems.joined(separator: "\n"), file: file, line: line)
+        }
+    }
+
+    // dmc-case: dmc.freq.max_total_zero_never_shows
+    func testZeroCapNeverShows() throws {
+        try runCases([
+            "frequency/max_total_zero_never_shows",
+            "frequency/max_per_window_zero_never_shows",
+        ])
+    }
+
+    // dmc-case: dmc.priority.audience_gate
+    func testAudienceGate() throws {
+        try runCases([
+            "priority/audience_gate_applies_only_to_gated_campaigns",
+            "priority/in_audience_wins",
+            "priority/not_in_audience_steps_aside",
+            "priority/audience_gate_then_cap_then_priority",
+            "combined/audience_gate_with_conditions",
+            "combined/event_filter_and_audience_conditions",
+        ])
+    }
+
+    // dmc-case: dmc.priority.equal_priority_rotates_through_caps
+    func testEqualPriorityRotatesThroughCaps() throws {
+        try runCases(["priority/equal_priority_rotates_through_caps"])
+    }
+
+    // dmc-case: dmc.priority.inline_never_capped
+    func testInlineNeverCapped() throws {
+        try runCases([
+            "frequency/inline_total_cap_is_ignored",
+            "frequency/inline_window_cap_is_ignored",
+            "frequency/inline_exhausted_history_does_not_block",
+        ])
+    }
+
+    // dmc-case: dmc.priority.waiting_campaign_does_not_block_lower_priority
+    func testWaitingCampaignDoesNotBlockLowerPriority() throws {
+        try runCases(["combined/waiting_campaign_does_not_block_lower_priority"])
+    }
+
+    // dmc-case: dmc.rule_when.event_where_compares_typed_props
+    func testEventWhereComparesTypedProps() throws {
+        try runCases(["when/event_where_prop_types"])
+    }
+
+    // dmc-case: dmc.rule_when.event_where_unknown_op_unsupported
+    func testEventWhereUnknownOpUnsupported() throws {
+        try runCases(["when/event_where_unsupported"])
+    }
+
+    // dmc-case: dmc.rule_who.contains_exists_type_edges
+    func testContainsExistsTypeEdges() throws {
+        try runCases(["who/list_and_falsy_values"])
+    }
+
+    // dmc-case: dmc.rule_who.in_matches_exact_json_types
+    func testInMatchesExactJsonTypes() throws {
+        try runCases(["who/in_operator_types"])
+    }
+
+    // dmc-case: dmc.rule_who.locale_platform_operators
+    func testLocalePlatformOperators() throws {
+        try runCases(["who/device_locale_and_platform_operators"])
+    }
+
+    // dmc-case: dmc.rule_who.platform_condition_gates_on_host
+    func testPlatformConditionGatesOnHost() throws {
+        try runCases(["who/device_attributes"])
+    }
+
+    // dmc-case: dmc.show_on.inline_ignores_screens
+    func testInlineIgnoresScreens() throws {
+        try runCases(["combined/inline_ignores_screens"])
+    }
+
+    // dmc-case: dmc.show_on.leave_and_return_in_time_still_shows
+    func testLeaveAndReturnInTimeStillShows() throws {
+        try runCases(["combined/wait_not_on_target_screen_survives_leave_and_return"])
+    }
+
+    // dmc-case: dmc.show_on.wait_ending_off_target_cancelled
+    func testWaitEndingOffTargetCancelled() throws {
+        try runCases(["combined/wait_not_on_target_screen_cancels_and_does_not_compete"])
+    }
+
+    // dmc-case: dmc.trigger.any_listed_trigger_matches_with_own_where
+    func testAnyListedTriggerMatchesWithOwnWhere() throws {
+        try runCases(["when/multiple_triggers_any"])
+    }
+
+    // dmc-case: dmc.trigger.each_trigger_type_matches_only_its_signal
+    func testEachTriggerTypeMatchesOnlyItsSignal() throws {
+        try runCases(["combined/each_trigger_type_shows_its_campaign"])
+    }
+
+    // dmc-case: dmc.trigger.same_event_two_triggers_shows_once
+    func testSameEventTwoTriggersShowsOnce() throws {
+        try runCases(["combined/same_event_two_triggers_shows_once"])
+    }
+
+    // dmc-case: dmc.trigger.signal_type_must_match_trigger_type
+    func testSignalTypeMustMatchTriggerType() throws {
+        try runCases(["when/signal_type_must_match"])
+    }
+
+    // dmc-case: dmc.wait_cancel.start_signal_cannot_cancel_itself
+    func testStartSignalCannotCancelItself() throws {
+        try runCases(["combined/wait_start_signal_cannot_cancel_itself"])
     }
 }
 
@@ -555,7 +669,8 @@ private final class World: DecisionFacts {
     func capped(_ campaign: CampaignModel) -> Bool {
         guard let policy = campaign.frequency else { return false }
         return !FrequencyEvaluator.evaluate(
-            policy, frequency[campaign.campaignKey], Int64(now), sessionId
+            policy, frequency[campaign.campaignKey], Int64(now), sessionId,
+            unseenCountsAsZero: campaign.rule != nil
         ).allow
     }
 

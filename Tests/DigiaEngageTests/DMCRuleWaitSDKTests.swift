@@ -60,7 +60,9 @@ struct DMCRuleWaitSDKTests {
         ] as [String: Any])
 
     /// Boots an SDK; `hold` leaves the bundle request unanswered and returns the release.
-    private func boot(_ campaigns: [[String: Any]], hold: Bool = false) async throws -> (SDKInstance, () -> Void) {
+    private func boot(
+        _ campaigns: [[String: Any]], hold: Bool = false, sessionClock: ManualClock? = nil
+    ) async throws -> (SDKInstance, () -> Void) {
         let network = HeldBundleNetworkClient()
         let body = try JSONSerialization.data(withJSONObject: ["campaigns": campaigns])
         let response = Result<NetworkResponse, Error>.success(
@@ -68,7 +70,8 @@ struct DMCRuleWaitSDKTests {
         let sdk = SDKInstance(
             defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
-            makeNetworkClient: { _ in network })
+            makeNetworkClient: { _ in network },
+            clock: sessionClock.map { session in { Int64(session.now) } } ?? SessionManager.systemClock)
         sdk.waitClock = { [clock] in clock.now }
         DigiaLogger.registerSink(sink)
         try await sdk.initialize(DigiaConfig(apiKey: "test-api-key"))
@@ -99,6 +102,40 @@ struct DMCRuleWaitSDKTests {
     }
 
     private func shown(_ sdk: SDKInstance) -> String? { sdk.controller.activeNudge?.payload.campaignKey }
+
+    // dmc-case: dmc.show_on.foreground_wait_survives_rotation
+    @Test("an app_foregrounded wait survives the session rotation")
+    func foregroundWaitSurvivesRotation() async throws {
+        defer { DigiaLogger.unregisterSink(sink) }
+        let session = ManualClock()
+        session.now = 1_700_000_000_000
+        let foregroundRule: [String: Any] = [
+            "priority": 600,
+            "trigger": ["any": [["type": "app_foregrounded"]]],
+            "conditions": ["all": [Any]()],
+            "wait": ["type": "delay", "ms": 5_000],
+        ]
+        let (sdk, _) = try await boot(
+            [nudge("welcome_back", 600, rule: foregroundRule)], sessionClock: session)
+        let firstSession = try #require(sdk.services?.sessionManager.sessionId)
+
+        // A return after the session timeout rotates the session first, then
+        // sends app_foregrounded, as the two foreground observers do.
+        let sessions = try #require(sdk.services?.sessionManager)
+        sessions.onBackground()
+        sdk.appDidEnterBackground()
+        session.now += 31 * 60 * 1000
+        sessions.touch()
+        sdk.appWillEnterForeground()
+        // The app keeps running while the wait counts down.
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(sdk.services?.sessionManager.sessionId != firstSession)
+        #expect(shown(sdk) == nil)
+        advance(sdk, ms: 5_000)
+        #expect(shown(sdk) == "welcome_back")
+        sdk.controller.dismissNudge()
+    }
 
     // dmc-case: dmc.wait_cancel.shows_only_after_wait
     @Test("shows only after the wait")
