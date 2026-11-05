@@ -96,6 +96,7 @@ final class DecisionEngine {
             signal: signal,
             attributes: facts.attributes,
             device: facts.device,
+            currentScreen: facts.currentScreen,
             isWaiting: { self.waits.isWaiting($0) },
             inAudience: facts.inAudience,
             capped: facts.capped
@@ -272,6 +273,13 @@ final class DecisionEngine {
             logWaitEnded(key, outcome: "gone", waitMs: pending.wait.ms)
             return false
         }
+        // Checked again, here: leaving the screen and coming back in time is fine.
+        if case .valid(let validRule)? = campaign.rule, let screens = validRule.screens,
+           !screens.contains(facts.currentScreen)
+        {
+            logWaitCancelled(pending, cause: .notOnTargetScreen)
+            return false
+        }
         let verdict = evaluateOne(
             campaign, trigger: pending.trigger,
             attributes: facts.attributes, device: facts.device)
@@ -364,6 +372,7 @@ final class DecisionEngine {
         }
         var extras = ["verdict": "ineligible"]
         if reason == .conditionFailed { extras["condition"] = detail ?? "" }
+        if reason == .notOnTargetScreen { extras["screen"] = detail ?? "" }
         if reason == .notInAudience { extras["context"] = facts.audienceContext }
         log.d(
             "Ineligible — \(reason.wire)",

@@ -132,6 +132,10 @@ enum TimelineReason: String, CaseIterable, DiagnosticReason {
     /// The signal matched a rule, but its conditions are false for this user.
     case conditionFailed = "condition_failed"
 
+    /// The rule passed, but the user is not on one of the campaign's `screens`.
+    /// The screen is in `screen`.
+    case notOnTargetScreen = "not_on_target_screen"
+
     /// The rule passed, but the user is not in the campaign's audience.
     case notInAudience = "not_in_audience"
 
