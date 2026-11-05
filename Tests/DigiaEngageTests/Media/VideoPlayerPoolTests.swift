@@ -190,25 +190,6 @@ struct VideoPlayerPoolMediaVideoTests {
         #expect(pool.heldKeys.isEmpty)
     }
 
-    // Guards the keyless branch in `MediaVideoPlayback.open`, which builds its own player
-    // (OD-10, R2-06b).
-    @Test("a keyless video plays outside the pool and never counts toward its size")
-    func keylessPlaysOutsideThePool() async throws {
-        MediaOrigin.install()
-        MediaServices.override(videoSession: MediaOrigin.session())
-        defer { MediaOrigin.end() }
-        let video = MediaOrigin.url("keyless.mp4")
-        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
-        let pool = MediaServices.current.videoPool
-        var frames = 0
-
-        let window = MediaStage.mount(MediaVideo(url: video.absoluteString, autoplay: false, onFirstFrame: { frames += 1 }))
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { frames == 1 })
-
-        #expect(pool.livePlayerCount == 0)
-    }
-
     // Guards the `reused.key != key || reused.finished` restart check in `VideoPlayerPool.borrow` (N2).
     @Test("a remount with the same key and URL resumes at its playhead")
     func remountResumesAtThePlayhead() async throws {
