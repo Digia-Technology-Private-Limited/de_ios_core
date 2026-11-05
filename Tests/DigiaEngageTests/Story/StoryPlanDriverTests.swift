@@ -151,19 +151,27 @@ struct StoryPlanDriverTests {
         }
     }
 
-    /// A throughput that already holds a slow sample (419 kbps), fed by a driver whose warms take
-    /// 0.1 s and answer `delivered` (nil: all that was asked).
-    private func slowVerdict(
-        delivered: Int?, then act: (StoryPlanDriver) async -> Void
+    /// A throughput seeded with one 512 KiB sample that took `seededElapsed` seconds (10 reads as
+    /// slow, 0.5 as fast), fed by a driver whose warms answer `delivered` (nil: all that was asked)
+    /// after 0.1 s. Every warm the driver reports is taken as lasting `reportedElapsed` seconds, so
+    /// the verdict never depends on the real clock; `act` gets a log with one entry per report to
+    /// wait on.
+    private func verdict(
+        seededElapsed: TimeInterval, reportedElapsed: TimeInterval = 0.5, delivered: Int?,
+        then act: (StoryPlanDriver, WarmLog) async -> Void
     ) async -> SlowNetworkThroughput {
         let throughput = SlowNetworkThroughput()
-        throughput.note(bytes: storyFirstBytes, elapsed: 10)
+        throughput.note(bytes: storyFirstBytes, elapsed: seededElapsed)
+        let reports = WarmLog()
         let driver = StoryPlanDriver(
             pool: pool(size: 4),
             warm: { _, _, bytes in await Self.laterNoMatterWhat(0.1, delivered ?? bytes ?? 0) },
-            onWarm: { throughput.note(bytes: $0, elapsed: $1) })
+            onWarm: { bytes, _ in
+                throughput.note(bytes: bytes, elapsed: reportedElapsed)
+                reports.add("\(bytes)")
+            })
         update(driver, at: 2, firstFrameShown: true, stories: remote)
-        await act(driver)
+        await act(driver, reports)
         driver.cancelAll()
         return throughput
     }
@@ -176,28 +184,28 @@ struct StoryPlanDriverTests {
     // a warm the plan moved on from, though it ended with bytes in hand, measured nothing.
     @Test("a warm cancelled when the plan moves on leaves a slow verdict slow")
     func cancelledWarmDoesNotVote() async {
-        let throughput = await slowVerdict(delivered: nil) { driver in
+        let throughput = await verdict(seededElapsed: 10, delivered: nil) { driver, _ in
             try? await Task.sleep(nanoseconds: 30_000_000)
             driver.cancelAll()
             try? await Task.sleep(nanoseconds: 300_000_000)
         }
 
-        #expect(isSlow(throughput), "the cancelled warm's sample would read as 40 Mbps")
+        #expect(isSlow(throughput), "the cancelled warm's sample would read as a fast link")
     }
 
     // Guards the 0-byte discard in `SlowNetworkThroughput.note`, which `updateBytes` feeds: a warm
-    // that failed delivers 0 bytes and votes nothing, while one that completed does (the control:
-    // the vote is wired).
+    // that failed delivers 0 bytes and votes nothing (counted, it would read 0 kbps and flip a fast
+    // verdict to slow), while one that completed does (the control: the vote is wired).
     @Test("a failed warm votes nothing, a completed one does")
     func onlyACompletedWarmVotes() async {
-        let failed = await slowVerdict(delivered: 0) { _ in
-            try? await Task.sleep(nanoseconds: 400_000_000)
+        let failed = await verdict(seededElapsed: 0.5, delivered: 0) { _, reports in
+            _ = await waitUntilMedia(timeout: 5) { !reports.all.isEmpty }
         }
-        #expect(isSlow(failed), "a warm that delivered nothing left the verdict as it was")
+        #expect(!isSlow(failed), "a warm that delivered nothing left the verdict as it was")
 
-        let completed = await slowVerdict(delivered: nil) { _ in
-            try? await Task.sleep(nanoseconds: 400_000_000)
+        let completed = await verdict(seededElapsed: 0.5, reportedElapsed: 10, delivered: nil) { _, reports in
+            _ = await waitUntilMedia(timeout: 5) { !reports.all.isEmpty }
         }
-        #expect(!isSlow(completed), "a warm that moved 512 KiB in 0.1 s is a fast link")
+        #expect(isSlow(completed), "a completed 512 KiB warm taking 10 s is a slow link")
     }
 }
