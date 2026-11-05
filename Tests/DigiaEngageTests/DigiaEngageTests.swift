@@ -708,6 +708,44 @@ struct DigiaEngageTests {
         #expect(!recorder.displayed)
     }
 
+    @Test("reportExternalGuideLifecycle settles a dismissed-before-displayed report as a drop, never trapping")
+    func reportExternalGuideLifecycleDismissedBeforeDisplayedSettlesDropped() throws {
+        // Bug C (DMC overnight run #2): the RN guide tore itself down (step-1
+        // anchor off-screen) ~40 ms after mount, before any `viewed`, so the
+        // bridge reported `dismissed(user_close)` with no prior `displaying`.
+        // That ordering arrives from outside the SDK over an async bridge and
+        // must settle as a drop through the coordinator's normalisation —
+        // never trap the host in `PresentationBacking.settle`.
+        SDKInstance.shared.resetForTesting()
+        defer { SDKInstance.shared.resetForTesting() }
+        SDKInstance.shared.markInitializedForTesting(
+            with: DigiaConfig(apiKey: "test", wrapperBinding: "react_native"))
+        let plugin = TestPlugin(id: "plugin")
+        Digia.register(plugin)
+        var presentationId: String?
+        SDKInstance.shared.onGuideRenderRequest = { presentationId = $0.presentationId }
+        defer { SDKInstance.shared.onGuideRenderRequest = nil }
+        let campaign = try #require(targetedGuideCampaign())
+        SDKInstance.shared.setCampaignsForTesting([campaign])
+        SDKInstance.shared.setCurrentScreen("Help")
+        let recorder = PresentationRecorder(
+            SDKInstance.shared.deliver(
+                CEPTriggerPayload(
+                    cepCampaignId: "rn-guide-dismissed-undisplayed", campaignKey: campaign.campaignKey,
+                    cepMetadata: [:])))
+        let id = try #require(presentationId)
+
+        SDKInstance.shared.reportExternalGuideLifecycle(
+            presentationId: id,
+            event: .settled(.dismissed(reason: .userClose, completed: false)))
+
+        #expect(recorder.isSettled)
+        #expect(recorder.isHoldReleased)
+        #expect(!recorder.displayed)
+        #expect(recorder.dismissReason == nil)
+        #expect(recorder.dropReason == .cancelled)
+    }
+
     @Test("Digia.reportExternalGuideLifecycle hops off-main-thread calls onto the real controller")
     func digiaReportExternalGuideLifecycleHopsToMainActor() async throws {
         SDKInstance.shared.resetForTesting()
