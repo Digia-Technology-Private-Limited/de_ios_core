@@ -244,7 +244,7 @@ extension SDKInstance {
     private func clearDigiaInlineContent() {
         for (slot, payload) in inlineController.slotOccupants
         where payload.cepCampaignId.hasPrefix(selfTriggeredCepIdPrefix) {
-            inlineController.dismissCampaign(slot, reason: .superseded)
+            inlineController.dismissCampaign(slot, reason: .cancelled)
         }
     }
 
