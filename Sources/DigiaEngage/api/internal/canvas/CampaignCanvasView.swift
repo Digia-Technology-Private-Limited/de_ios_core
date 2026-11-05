@@ -2336,6 +2336,9 @@ private struct FocalCanvasImage: View {
                     errorContent: failureLabel.map { AnyView(CanvasPlaceholder(label: $0)) }
                 )
                 .frame(width: geometry.size.width, height: geometry.size.height)
+                // Kept as before: the picture is drawn through a scale layer even at 1, which
+                // resamples it at its fractional offset and so keeps the canvas goldens unchanged.
+                .scaleEffect(1)
                 .clipped()
             }
         }
