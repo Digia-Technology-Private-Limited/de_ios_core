@@ -36,12 +36,15 @@ struct RuleDecision {
 /// eligible overlay without a wait and with the highest priority shows now,
 /// every eligible overlay with a wait starts it, and the eligible inline
 /// campaign with the highest priority wins each slot; a tie goes to the
-/// campaign key that sorts first. Has no side effects. Never throws.
+/// campaign key that sorts first. An overlay joins, or starts its wait, only
+/// on one of its `screens`; `currentScreen` is empty when unset and matches
+/// none. Has no side effects. Never throws.
 func pickCampaign(
     _ campaigns: [CampaignModel],
     signal: RuleSignal,
     attributes: [String: Any],
     device: [String: Any],
+    currentScreen: String,
     isWaiting: (String) -> Bool,
     inAudience: (CampaignModel) -> Bool,
     capped: (CampaignModel) -> Bool
@@ -65,6 +68,15 @@ func pickCampaign(
             continue
         }
         guard case .valid(let validRule) = rule else { continue }
+        if let screens = validRule.screens, campaign.inlineSlotKey == nil,
+           !screens.contains(currentScreen)
+        {
+            skipped.append(
+                .ineligible(
+                    campaign, .notOnTargetScreen,
+                    currentScreen.isEmpty ? "<unset>" : currentScreen))
+            continue
+        }
         eligible.append((campaign, validRule))
     }
     eligible.sort {

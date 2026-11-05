@@ -59,6 +59,7 @@ struct TimelineWireStringsTests {
         #expect(TimelineReason.unsupportedFeature.wire == "unsupported_feature")
         #expect(TimelineReason.malformedRule.wire == "malformed_rule")
         #expect(TimelineReason.conditionFailed.wire == "condition_failed")
+        #expect(TimelineReason.notOnTargetScreen.wire == "not_on_target_screen")
         #expect(TimelineReason.notInAudience.wire == "not_in_audience")
         #expect(TimelineReason.capped.wire == "capped")
         #expect(TimelineReason.lowerPriority.wire == "lower_priority")
@@ -68,7 +69,7 @@ struct TimelineWireStringsTests {
         #expect(TimelineReason.waitCancelled.wire == "wait_cancelled")
         #expect(TimelineReason.waitEnded.wire == "wait_ended")
         #expect(CEPPluginReason.bridgeUnavailable.wire == "cep_bridge_unavailable")
-        #expect(TimelineReason.allCases.count == 42)
+        #expect(TimelineReason.allCases.count == 43)
     }
 
     /// The delivery enums *are* the timeline's reasons for a delivery — no
