@@ -56,4 +56,14 @@ struct SlowNetworkTests {
 
         #expect(abs((throughput.lastKbps ?? 0) - 419.4304) < 0.001)
     }
+
+    // Fails if the source ignores measurements: the `noteWarm` forward to the throughput
+    // (the verdict would stay "not slow" however slow the warms are).
+    @Test("a slow warm makes the live source slow")
+    func slowWarmMakesTheSourceSlow() {
+        let source = PathSlowNetworkSource()
+        source.noteWarm(bytes: 512 * 1_024, elapsed: 10)
+
+        #expect(source.isSlow)
+    }
 }
