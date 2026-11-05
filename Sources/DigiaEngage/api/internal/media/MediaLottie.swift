@@ -5,17 +5,18 @@ internal import Lottie
 
 /// The one Lottie wrapper the non-story surfaces render through: the platform composition
 /// loaded through Lottie's own cache (Lottie bytes are never routed through the image cache),
-/// with the authored BlurHash as the still while there is no animation (loading or failed) and
-/// no backdrop of its own, so a transparent animation stays transparent over the page.
+/// with the authored BlurHash as the still while the animation loads and no backdrop of its own,
+/// so a transparent animation stays transparent over the page.
 ///
-/// `errorContent` is drawn over the still when the load fails and when the URL is unusable.
+/// When the load fails, and when the URL is unusable, the box shows the error placeholder
+/// ("Lottie failed") and no BlurHash; `errorContent` replaces the placeholder.
 /// `freezeAt` draws one frame at that progress instead of playing, for deterministic snapshots.
 ///
 /// Health is reported once per failure, for the campaign in the environment: `invalid_url` for an
 /// unusable URL (blank, an unresolved `{{variable}}`, no scheme), `http_4xx`, `decode`. A network
 /// failure, a timeout or a 5xx reports nothing.
 ///
-/// Never throws from the render path: an unusable URL shows the still without fetching.
+/// Never throws from the render path: an unusable URL shows the error placeholder without fetching.
 struct MediaLottie: View {
     let url: String
     var fit: MediaFit = .cover
@@ -35,9 +36,10 @@ struct MediaLottie: View {
             if let source {
                 animation(source)
             } else {
-                MediaStill(fit: fit, blurHash: blurHash)
-                if failed, let errorContent {
-                    errorContent
+                if failed {
+                    errorContent ?? AnyView(MediaErrorPlaceholder(label: "Lottie failed"))
+                } else {
+                    MediaStill(fit: fit, blurHash: blurHash)
                 }
             }
         }

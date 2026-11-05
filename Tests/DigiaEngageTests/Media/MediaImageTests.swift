@@ -31,7 +31,7 @@ struct MediaImageComponentTests {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("held.png")
-        MediaOrigin.set(.status(200, solidPNG(.red)), for: target, held: true)
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: target, held: true)
         let recorder = HealthRecorder()
 
         let window = mount(url: target.absoluteString, blurHash: Self.blurHash)
@@ -48,7 +48,7 @@ struct MediaImageComponentTests {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("held-no-blur.png")
-        MediaOrigin.set(.status(200, solidPNG(.red)), for: target, held: true)
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: target, held: true)
         let recorder = HealthRecorder()
 
         let window = mount(url: target.absoluteString)
@@ -60,8 +60,8 @@ struct MediaImageComponentTests {
         MediaOrigin.release(target)
     }
 
-    @Test("shows the blur when the picture was never uploaded", .tags(.golden))
-    func blurWhenNeverUploaded() async {
+    @Test("shows the error placeholder, not the blur, when the picture was never uploaded", .tags(.golden))
+    func placeholderWhenNeverUploaded() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("never-uploaded.jpg")
@@ -74,20 +74,19 @@ struct MediaImageComponentTests {
         #expect(await waitUntilMedia { failures.value > 0 })
 
         #expect(MediaOrigin.requests(for: target).count == 1)
-        MediaStage.assertGolden(window, named: "image_error_blur")
+        MediaStage.assertGolden(window, named: "image_error_placeholder")
     }
 
     @Test("leaves no blur behind a loaded picture", .tags(.golden))
-    func noBlurBehindLoadedPicture() async throws {
+    func noBlurBehindLoadedPicture() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
-        let target = MediaOrigin.url("testkit-badge.svg")
-        MediaOrigin.set(.status(200, try testkitAsset("testkit-badge.svg")), for: target, held: true)
+        let target = MediaOrigin.url("quadrants.png")
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: target, held: true)
         let successes = CallCount()
 
         let window = mount(
-            url: target.absoluteString, fit: .contain, blurHash: Self.blurHash,
-            onSuccess: { successes.value += 1 })
+            url: target.absoluteString, blurHash: Self.blurHash, onSuccess: { successes.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
         MediaOrigin.release(target)

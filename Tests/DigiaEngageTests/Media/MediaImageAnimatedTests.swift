@@ -5,8 +5,8 @@ import UIKit
 
 @testable import DigiaEngage
 
-// GIF and WebP pictures through `MediaImage` over the fake origin. The GIFs are built in the test:
-// a long frame delay keeps a frame on screen for the whole test, so the goldens are stable.
+// GIF and WebP pictures through `MediaImage` over the fake origin. // `media/two-frames.gif` holds each frame for a second: the first-frame golden is taken well inside
+// the first second, the second-frame one in the middle of the second.
 
 extension RenderedUITests {
 @MainActor
@@ -17,14 +17,14 @@ struct MediaImageAnimatedTests {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("two-frames.gif")
-        MediaOrigin.set(.status(200, MediaFixtures.gif(firstDelay: 60, secondDelay: 60)), for: target)
+        MediaOrigin.set(.status(200, MediaFixtures.twoFrames), for: target)
         let recorder = HealthRecorder()
         let successes = CallCount()
 
-        let window = MediaStage.image(url: target.absoluteString, onSuccess: { successes.value += 1 })
+        let window = MediaStage.image(
+            url: target.absoluteString, fit: .contain, onSuccess: { successes.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { successes.value > 0 })
-        ComponentTestHost.drainRunLoop(for: 0.5)
 
         #expect(successes.value == 1)
         #expect(recorder.all.isEmpty)
@@ -36,13 +36,14 @@ struct MediaImageAnimatedTests {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("plays-on.gif")
-        MediaOrigin.set(.status(200, MediaFixtures.gif(firstDelay: 0.1, secondDelay: 60)), for: target)
+        MediaOrigin.set(.status(200, MediaFixtures.twoFrames), for: target)
         let successes = CallCount()
 
-        let window = MediaStage.image(url: target.absoluteString, onSuccess: { successes.value += 1 })
+        let window = MediaStage.image(
+            url: target.absoluteString, fit: .contain, onSuccess: { successes.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { successes.value > 0 })
-        ComponentTestHost.drainRunLoop(for: 1.0)
+        ComponentTestHost.drainRunLoop(for: 1.1)
 
         MediaStage.assertGolden(window, named: "image_gif_second_frame")
     }
@@ -52,11 +53,12 @@ struct MediaImageAnimatedTests {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("picture.webp")
-        MediaOrigin.set(.status(200, MediaFixtures.webP), for: target)
+        MediaOrigin.set(.status(200, MediaFixtures.quadrantsWebP), for: target)
         let recorder = HealthRecorder()
         let successes = CallCount()
 
-        let window = MediaStage.image(url: target.absoluteString, onSuccess: { successes.value += 1 })
+        let window = MediaStage.image(
+            url: target.absoluteString, fit: .contain, onSuccess: { successes.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { successes.value > 0 })
         ComponentTestHost.drainRunLoop(for: 0.3)

@@ -35,10 +35,10 @@ struct MediaImagePictureTests {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("held-bad-blur.png")
-        MediaOrigin.set(.status(200, solidPNG(.red)), for: target, held: true)
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: target, held: true)
         let recorder = HealthRecorder()
 
-        let window = MediaStage.image(url: target.absoluteString, blurHash: "!!! not a blurhash !!!")
+        let window = MediaStage.image(url: target.absoluteString, blurHash: "not-a-blurhash")
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
 
@@ -51,8 +51,8 @@ struct MediaImagePictureTests {
     func transparentPictureShowsThePage() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
-        let target = MediaOrigin.url("ring.png")
-        MediaOrigin.set(.status(200, MediaFixtures.transparentRingPNG()), for: target)
+        let target = MediaOrigin.url("transparent-frame.png")
+        MediaOrigin.set(.status(200, MediaFixtures.transparentFrame), for: target)
         let successes = CallCount()
 
         let window = MediaStage.image(
@@ -79,18 +79,79 @@ struct MediaImagePictureTests {
         await drawQuadrants(fit: .fill, golden: "image_fit_fill")
     }
 
-    private func drawQuadrants(fit: MediaFit, golden: String) async {
+    private func drawQuadrants(
+        fit: MediaFit = .cover, focalX: CGFloat = 0.5, focalY: CGFloat = 0.5, zoom: CGFloat = 1,
+        golden: String
+    ) async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("quadrants-\(fit.rawValue).png")
-        MediaOrigin.set(.status(200, MediaFixtures.quadrantPNG()), for: target)
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: target)
         let successes = CallCount()
 
-        let window = MediaStage.image(url: target.absoluteString, fit: fit, onSuccess: { successes.value += 1 })
+        let window = MediaStage.image(
+            url: target.absoluteString, fit: fit, focalX: focalX, focalY: focalY, zoom: zoom,
+            onSuccess: { successes.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { successes.value > 0 })
 
         MediaStage.assertGolden(window, named: golden)
+    }
+
+    @Test("contain with the focal point at the top start puts the whole picture at the top start", .tags(.golden))
+    func alignedTopStartPutsTheLetterboxedPictureAtTheTopStart() async {
+        await drawQuadrants(fit: .contain, focalX: 0, focalY: 0, golden: "image_aligned_top_start")
+    }
+
+    @Test("a focal point at the top start shows the top start of a cropped picture", .tags(.golden))
+    func focalTopStartShowsTheTopStart() async {
+        await drawQuadrants(focalX: 0, focalY: 0, golden: "image_focal_top_start")
+    }
+
+    @Test("a focal point at the bottom end shows the bottom end of a cropped picture", .tags(.golden))
+    func focalBottomEndShowsTheBottomEnd() async {
+        await drawQuadrants(focalX: 1, focalY: 1, golden: "image_focal_bottom_end")
+    }
+
+    @Test("zoom 2 magnifies the picture around the centre", .tags(.golden))
+    func zoomInMagnifiesAroundTheCentre() async {
+        await drawQuadrants(zoom: 2, golden: "image_zoom_in")
+    }
+
+    @Test("zoom 2 magnifies around the focal point, not the centre", .tags(.golden))
+    func zoomInMagnifiesAroundTheFocalPoint() async {
+        await drawQuadrants(focalX: 0.1, focalY: 0.9, zoom: 2, golden: "image_zoom_in_corner")
+    }
+
+    @Test("zoom 0.5 shrinks the picture and shows the page around it", .tags(.golden))
+    func zoomOutShowsThePageAroundThePicture() async {
+        await drawQuadrants(zoom: 0.5, golden: "image_zoom_out")
+    }
+
+    @Test("a focal point or zoom out of range, or not a number, draws like the nearest valid one")
+    func badFocalAndZoomDegrade() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("quadrants-bad-focal.png")
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: target)
+
+        func render(focalX: CGFloat, focalY: CGFloat, zoom: CGFloat) async -> Data? {
+            let successes = CallCount()
+            let window = MediaStage.image(
+                url: target.absoluteString, focalX: focalX, focalY: focalY, zoom: zoom,
+                onSuccess: { successes.value += 1 })
+            defer { ComponentTestHost.unmount(window) }
+            guard await waitUntilMedia(condition: { successes.value > 0 }) else { return nil }
+            ComponentTestHost.drainRunLoop(for: 0.3)
+            return ComponentTestHost.settledImage(of: window).pngData()
+        }
+
+        let nearest = await render(focalX: 1, focalY: 0, zoom: 10)
+        #expect(nearest != nil)
+        #expect(await render(focalX: 7, focalY: -3, zoom: 100) == nearest)
+        let centred = await render(focalX: 0.5, focalY: 0.5, zoom: 1)
+        #expect(await render(focalX: .nan, focalY: .infinity, zoom: .nan) == centred)
+        #expect(nearest != centred)
     }
 
     @Test("a tint colours the picture and not the blur", .tags(.golden))
@@ -102,7 +163,7 @@ struct MediaImagePictureTests {
         let successes = CallCount()
 
         let window = MediaStage.image(
-            url: target.absoluteString, fit: .contain, blurHash: Self.blurHash, tintColor: .red,
+            url: target.absoluteString, fit: .contain, blurHash: Self.blurHash, tintColor: MediaFixtures.tint,
             onSuccess: { successes.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
@@ -159,8 +220,8 @@ struct MediaImagePictureTests {
         #expect(failures.value == 1)
     }
 
-    @Test("a blank url shows the error placeholder", .tags(.golden))
-    func blankURLShowsPlaceholder() async {
+    @Test("a blank url shows the still only", .tags(.golden))
+    func blankURLShowsTheStillOnly() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let failures = CallCount()
@@ -178,8 +239,8 @@ struct MediaImagePictureTests {
         defer { MediaOrigin.end() }
         let first = MediaOrigin.url("first.png")
         let second = MediaOrigin.url("second.png")
-        MediaOrigin.set(.status(200, MediaFixtures.quadrantPNG()), for: first)
-        MediaOrigin.set(.status(200, solidPNG(.red)), for: second, held: true)
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: first)
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: second, held: true)
         let model = MediaModel(url: first.absoluteString)
         let successes = CallCount()
 
@@ -239,6 +300,52 @@ struct MediaImagePictureTests {
 
         #expect(recorder.all == [.init(campaignKey: MediaStage.campaign, kind: .image, cause: "invalid_url")])
         #expect(failures.value == 1)
+    }
+
+    @Test("a client error from 400 to 499 is http_4xx and a 500 is not", arguments: [400, 499, 500])
+    func clientErrorRangeIsHealth(status: Int) async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("status-\(status).png")
+        MediaOrigin.set(.status(status, Data("error".utf8)), for: target)
+        let recorder = HealthRecorder()
+        let failures = CallCount()
+
+        let window = MediaStage.image(url: target.absoluteString, onFailure: { failures.value += 1 })
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { failures.value > 0 })
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        let expected: [HealthRecorder.Record] =
+            status < 500 ? [.init(campaignKey: MediaStage.campaign, kind: .image, cause: "http_4xx")] : []
+        #expect(recorder.all == expected)
+        #expect(failures.value == 1)
+    }
+
+    @Test("a new url that also fails reports its own failure, not only the first")
+    func newURLThatAlsoFailsIsReported() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let first = MediaOrigin.url("gone-first.png")
+        let second = MediaOrigin.url("gone-second.png")
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: first)
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: second)
+        let recorder = HealthRecorder()
+        let failures = CallCount()
+        let model = MediaModel(url: first.absoluteString)
+
+        let window = MediaStage.mount(
+            Host(model: model, blurHash: Self.blurHash, onFailure: { failures.value += 1 }))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { failures.value == 1 })
+
+        model.url = second.absoluteString
+        #expect(await waitUntilMedia { failures.value == 2 })
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        let report = HealthRecorder.Record(campaignKey: MediaStage.campaign, kind: .image, cause: "http_4xx")
+        #expect(recorder.all == [report, report])
+        #expect(MediaOrigin.requests(for: second).count == 1)
     }
 
     @Test("health carries the campaign key of the surface that drew it", arguments: [

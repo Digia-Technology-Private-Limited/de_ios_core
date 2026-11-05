@@ -5,7 +5,6 @@ import SnapshotTesting
 import SwiftUI
 import Testing
 import UIKit
-import UniformTypeIdentifiers
 
 @testable import DigiaEngage
 
@@ -330,72 +329,28 @@ final class MediaModel: ObservableObject {
 enum MediaFixtures {
     static let blurHash = "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
 
-    /// A 100x100 picture of four colored quadrants inside a black frame: cropping, centring and
-    /// stretching are all visible at 240x120.
-    static func quadrantPNG() -> Data {
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        return UIGraphicsImageRenderer(size: CGSize(width: 100, height: 100), format: format).pngData { context in
-            UIColor.black.setFill()
-            context.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
-            let quadrants: [(CGRect, UIColor)] = [
-                (CGRect(x: 6, y: 6, width: 44, height: 44), .red),
-                (CGRect(x: 50, y: 6, width: 44, height: 44), .green),
-                (CGRect(x: 6, y: 50, width: 44, height: 44), .blue),
-                (CGRect(x: 50, y: 50, width: 44, height: 44), .yellow),
-            ]
-            for (rect, color) in quadrants {
-                color.setFill()
-                context.fill(rect)
-            }
+    /// The Test Kit files the media goldens are built from (`testkit/mock-server/assets/media/`),
+    /// as the catalog `testkit/contracts/media-goldens.md` names them.
+    static func asset(_ name: String) -> Data {
+        guard let data = try? testkitAsset(name) else {
+            preconditionFailure("Test Kit asset \(name) not found")
         }
+        return data
     }
 
-    /// A 100x100 picture that is a red ring on a fully transparent ground.
-    static func transparentRingPNG() -> Data {
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        format.opaque = false
-        return UIGraphicsImageRenderer(size: CGSize(width: 100, height: 100), format: format).pngData { _ in
-            UIColor.red.setStroke()
-            let ring = UIBezierPath(ovalIn: CGRect(x: 10, y: 10, width: 80, height: 80))
-            ring.lineWidth = 14
-            ring.stroke()
-        }
-    }
+    /// Four coloured quadrants in a black frame: cropping, centring and stretching are visible.
+    static var quadrants: Data { asset("media/quadrants.png") }
+    /// A PNG with transparent areas, so the page must show through a loaded picture.
+    static var transparentFrame: Data { asset("media/transparent-frame.png") }
+    /// A two-frame GIF, red then blue, one second each.
+    static var twoFrames: Data { asset("media/two-frames.gif") }
+    /// The quadrants as a static WebP.
+    static var quadrantsWebP: Data { asset("media/quadrants.webp") }
+    /// A 100x100 Lottie, 60 frames at 30 fps: an orange square slides from left to right.
+    static var marker: Data { asset("media/marker.json") }
 
-    /// A two-frame GIF, red then blue, that plays once and holds the blue frame. The delays are in
-    /// seconds; a long one keeps that frame on screen for the whole test.
-    static func gif(firstDelay: Double, secondDelay: Double) -> Data {
-        let data = NSMutableData()
-        guard
-            let destination = CGImageDestinationCreateWithData(
-                data, UTType.gif.identifier as CFString, 2, nil)
-        else { return Data() }
-        CGImageDestinationSetProperties(
-            destination,
-            [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 1]] as CFDictionary)
-        for (color, delay) in [(UIColor.red, firstDelay), (UIColor.blue, secondDelay)] {
-            let format = UIGraphicsImageRendererFormat()
-            format.scale = 1
-            let frame = UIGraphicsImageRenderer(size: CGSize(width: 48, height: 24), format: format).image { context in
-                color.setFill()
-                context.fill(CGRect(x: 0, y: 0, width: 48, height: 24))
-            }
-            guard let cgImage = frame.cgImage else { continue }
-            CGImageDestinationAddImage(
-                destination, cgImage,
-                [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delay]] as CFDictionary)
-        }
-        CGImageDestinationFinalize(destination)
-        return data as Data
-    }
-
-    /// A 48x24 lossless WebP: a red band, a yellow disc and a blue band on white.
-    static let webP = Data(
-        base64Encoded:
-            "UklGRmAAAABXRUJQVlA4TFQAAAAvL8AFAB8gECBOZHlWZUMh2wiQ2/wpTuMVkBA54v8K18x//GcoQcAqkqRWS/KFhDgmz+T9AS8IiOh/mJlJkrv7D1rZwaZCuGtQ3q0Q7gTatLKTfgA="
-    )!
+    /// The catalog's tint, `#E91E63`.
+    static let tint = Color(red: 0xE9 / 255, green: 0x1E / 255, blue: 0x63 / 255)
 
     /// The bytes of a GIF header followed by nothing a decoder can read.
     static let brokenGIF = Data("GIF89a-this-is-not-an-image".utf8)
@@ -406,7 +361,8 @@ enum MediaFixtures {
     /// Text that looks like an SVG that was cut off.
     static let brokenSVG = Data(#"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect x="#.utf8)
 
-    /// A 100x100 animation: a blue ground, a white disc and an orange square that slides from the
+    /// A short variant of `marker.json` for the tests that need the playhead to reach the end quickly
+    /// (not a golden). A 100x100 animation: a blue ground, a white disc and an orange square that slides from the
     /// left to the right over `frames` frames at 30 fps. At frame 0 the square is at the left, at
     /// the middle of the animation it is at the centre. The disc runs off the top and bottom of a
     /// 240x120 cover crop and stretches into an ellipse when filled.
@@ -449,27 +405,42 @@ extension MediaStage {
     @MainActor
     static func image(
         url: String, fit: MediaFit = .cover, blurHash: String? = nil, tintColor: Color? = nil,
-        onSuccess: (() -> Void)? = nil, onFailure: (() -> Void)? = nil
+        focalX: CGFloat = 0.5, focalY: CGFloat = 0.5, zoom: CGFloat = 1,
+        onSuccess: (() -> Void)? = nil, onFailure: (() -> Void)? = nil, errorContent: AnyView? = nil
     ) -> UIWindow {
         mount(
             MediaImage(
-                url: url, fit: fit, blurHash: blurHash, tintColor: tintColor, onSuccess: onSuccess,
-                onFailure: onFailure))
+                url: url, fit: fit, blurHash: blurHash, tintColor: tintColor, focalX: focalX,
+                focalY: focalY, zoom: zoom, onSuccess: onSuccess, onFailure: onFailure,
+                errorContent: errorContent))
     }
 
     /// An animation on the stage.
     @MainActor
     static func lottie(
         url: String, fit: MediaFit = .cover, blurHash: String? = nil, loop: Bool = true,
-        autoplay: Bool = true, freezeAt: CGFloat? = nil
+        autoplay: Bool = true, freezeAt: CGFloat? = nil, errorContent: AnyView? = nil
     ) -> UIWindow {
         mount(
             MediaLottie(
-                url: url, fit: fit, blurHash: blurHash, loop: loop, autoplay: autoplay, freezeAt: freezeAt))
+                url: url, fit: fit, blurHash: blurHash, loop: loop, autoplay: autoplay,
+                errorContent: errorContent, freezeAt: freezeAt))
     }
 }
 
 extension MediaStage {
+    /// The text of the caller's own failure look, for the tests that pass an `errorContent`.
+    static let errorMarker = "caller's error content"
+
+    static var errorContent: AnyView { AnyView(Text(errorMarker)) }
+
+    /// Whether `text` is on screen, read from the accessibility tree (what a user could see).
+    @MainActor
+    static func shows(_ text: String, in window: UIWindow) -> Bool {
+        guard let root = window.rootViewController?.view else { return false }
+        return SdkHarness.find(in: root) { SdkHarness.shownText(of: $0) == text } != nil
+    }
+
     /// Every Lottie animation view on the stage.
     @MainActor
     static func lottieViews(in window: UIWindow) -> [LottieAnimationView] {

@@ -61,11 +61,11 @@ struct MediaLottieComponentTests {
     }
 
     @Test("shows the authored blur while the animation is on its way", .tags(.golden))
-    func blurWhileLoading() async throws {
+    func blurWhileLoading() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
-        let target = MediaOrigin.url("static-lottie.json")
-        MediaOrigin.set(.status(200, try testkitAsset("static-lottie.json")), for: target, held: true)
+        let target = MediaOrigin.url("marker.json")
+        MediaOrigin.set(.status(200, MediaFixtures.marker), for: target, held: true)
         let recorder = HealthRecorder()
 
         let window = mount(url: target.absoluteString, blurHash: Self.blurHash, autoplay: false)
@@ -78,11 +78,11 @@ struct MediaLottieComponentTests {
     }
 
     @Test("shows nothing while the animation is on its way when no blur is authored", .tags(.golden))
-    func nothingWhileLoadingWithoutBlur() async throws {
+    func nothingWhileLoadingWithoutBlur() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
-        let target = MediaOrigin.url("static-lottie.json")
-        MediaOrigin.set(.status(200, try testkitAsset("static-lottie.json")), for: target, held: true)
+        let target = MediaOrigin.url("marker.json")
+        MediaOrigin.set(.status(200, MediaFixtures.marker), for: target, held: true)
         let recorder = HealthRecorder()
 
         let window = mount(url: target.absoluteString, autoplay: false)
@@ -94,8 +94,8 @@ struct MediaLottieComponentTests {
         MediaOrigin.release(target)
     }
 
-    @Test("shows the blur when the animation cannot load", .tags(.golden))
-    func blurWhenItCannotLoad() async {
+    @Test("shows the error placeholder, not the blur, when the animation cannot load", .tags(.golden))
+    func placeholderWhenItCannotLoad() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("nope.json")
@@ -109,8 +109,8 @@ struct MediaLottieComponentTests {
         MediaStage.assertGolden(window, named: "lottie_error_placeholder")
     }
 
-    @Test("a blank url shows the blur", .tags(.golden))
-    func blankURLShowsBlur() async {
+    @Test("a blank url shows the error placeholder, not the blur", .tags(.golden))
+    func blankURLShowsPlaceholder() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let recorder = HealthRecorder()
@@ -122,8 +122,8 @@ struct MediaLottieComponentTests {
         MediaStage.assertGolden(window, named: "lottie_blank_url")
     }
 
-    @Test("a blank url shows nothing when no blur is authored", .tags(.golden))
-    func blankURLShowsNothingWithoutBlur() async {
+    @Test("a blank url shows the error placeholder when no blur is authored", .tags(.golden))
+    func blankURLShowsPlaceholderWithoutBlur() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let recorder = HealthRecorder()
