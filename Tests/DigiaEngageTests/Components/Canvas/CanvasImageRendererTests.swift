@@ -100,7 +100,7 @@ struct CanvasImageRendererTests {
 
     // MARK: - 2. Health through MediaImage
 
-    @Test("a canvas image that is not found reports http_4xx once, for the canvas's campaign")
+    @Test("a canvas image that is not found reports http_4xx once and is fetched once, for the canvas's campaign")
     func missingCanvasImageReportsOnce() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
@@ -108,22 +108,26 @@ struct CanvasImageRendererTests {
         MediaOrigin.set(.status(404, Data()), for: target)
         let recorder = HealthRecorder()
 
-        let (window, controller) = ComponentTestHost.mountCanvas(
-            CampaignCanvas(
+        // The campaign key is in the environment from the first mount: swapping the root view after
+        // the mount rebuilds the image, and a rebuild after the 404 arrived fetches it again.
+        let stage = ComponentTestHost.CanvasStageHost(
+            canvas: CampaignCanvas(
                 version: 2, width: 320, height: 200, background: .solid(.literal("#FFFFFFFF")),
                 children: [
                     .widget(
                         id: "image", rect: CampaignCanvasRect(x: 0, y: 0, width: 320, height: 200),
                         widget: imageWidget(url: target.absoluteString))
                 ]))
+        let (window, _) = ComponentTestHost.mount(
+            rootView: AnyView(stage.environment(\.digiaCampaignKey, "canvas-campaign")),
+            size: CGSize(width: 320, height: 200))
         defer { unmount(window) }
-        controller.rootView = AnyView(
-            controller.rootView.environment(\.digiaCampaignKey, "canvas-campaign"))
 
         #expect(await waitUntilMedia { !recorder.all.isEmpty })
         ComponentTestHost.drainRunLoop(for: 0.3)
         #expect(
             recorder.all == [.init(campaignKey: "canvas-campaign", kind: .image, cause: "http_4xx")])
+        #expect(MediaOrigin.requests(for: target).count == 1)
     }
 
     // MARK: - 5. Theme Switching
