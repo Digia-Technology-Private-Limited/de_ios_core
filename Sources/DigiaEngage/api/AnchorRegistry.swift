@@ -87,7 +87,8 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     /// left alone.
     private var scrollPending = false
 
-    /// Told each time an anchor registers. Set once by `SDKInstance.shared`
+    /// Told each time an anchor key appears: it had no live view or rect
+    /// before. Set once by `SDKInstance.shared`
     /// (see `setAnchorSeenHandler`) rather than reached for from here.
     private var onAnchorSeen: ((String) -> Void)?
 
@@ -105,6 +106,8 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     }
 
     public func register(key: String, view: UIView, cornerRadius: CGFloat = 0) {
+        let appeared = viewRegistry[key]?.contains(where: { $0.value != nil }) != true
+            && rectRegistry[key] == nil
         viewRegistry[key] = viewRegistry[key, default: []]
             .filter { $0.value != nil && $0.value !== view } + [WeakBox(view, cornerRadius)]
         rectRegistry.removeValue(forKey: key)
@@ -112,7 +115,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         if activeKey == key { trackedCornerRadius = nil }
         cornerRadii.removeValue(forKey: key)
         version &+= 1
-        onAnchorSeen?(key)
+        if appeared { onAnchorSeen?(key) }
         guard activeKey == key, !isInStepDelay else { return }
         if !activeAnchorWasAvailable { startReadinessTimeout(for: key) }
         startSampling(key: key)
@@ -121,12 +124,13 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     public func register(key: String, rect: CGRect, cornerRadius: CGFloat = 0) {
         guard viewRegistry[key]?.contains(where: { $0.value != nil }) != true else { return }
         viewRegistry.removeValue(forKey: key)
+        let appeared = rectRegistry[key] == nil
         rectRegistry[key] = rect
         trackedRects.removeValue(forKey: key)
         if activeKey == key { trackedCornerRadius = nil }
         cornerRadii[key] = cornerRadius
         version &+= 1
-        onAnchorSeen?(key)
+        if appeared { onAnchorSeen?(key) }
         guard activeKey == key, !isInStepDelay else { return }
         activeAnchorWasAvailable = false
         activeViewSampler.stop()
