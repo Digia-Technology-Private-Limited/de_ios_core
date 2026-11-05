@@ -485,7 +485,8 @@ private struct NudgeVideoView: View {
                 loop: node.loop,
                 muted: node.muted,
                 autoplay: node.autoplay,
-                showControls: node.showControls
+                showControls: node.showControls,
+                groundAfterFirstFrame: .black
             )
             .modifier(CanvasMediaFrame(
                 canvasMode: canvasMode,

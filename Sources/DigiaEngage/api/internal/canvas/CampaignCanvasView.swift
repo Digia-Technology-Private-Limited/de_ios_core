@@ -1935,7 +1935,8 @@ private struct CanvasVideoRenderer: View {
                         loop: loop,
                         muted: muted,
                         autoplay: autoplay,
-                        showControls: showControls
+                        showControls: showControls,
+                        groundAfterFirstFrame: .black
                     )
                 }
             }

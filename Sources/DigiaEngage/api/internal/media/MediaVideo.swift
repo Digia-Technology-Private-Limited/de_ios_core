@@ -65,6 +65,9 @@ let mediaVideoBackdrop = Color(red: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 
 /// and nudge video did on `main`; every other surface leaves it off. The controls appear with
 /// the first frame; until then the still shows (OD-7).
 ///
+/// `groundAfterFirstFrame` is what a letterbox shows once the first frame is drawn. It is the
+/// dark backdrop by default; legacy nudge and canvas video pass black, as on `main` (OD-12).
+///
 /// Callbacks (the same set on every stack): `onFirstFrame` once per opened URL (again after a
 /// handover to a new holder), `onEnded` when playback reaches the end and isn't looping,
 /// `onFailure` after health is reported.
@@ -77,6 +80,7 @@ struct MediaVideo: View {
     var muted: Bool = true
     var autoplay: Bool = true
     var showControls: Bool = false
+    var groundAfterFirstFrame: Color = mediaVideoBackdrop
     var playerKey: String? = nil
     var poolPriority: PoolPriority = .onScreen
     var onFirstFrame: (() -> Void)? = nil
@@ -100,7 +104,7 @@ struct MediaVideo: View {
                 Color.black
                 MediaVideoFailedBox()
             } else {
-                mediaVideoBackdrop
+                playback.firstFrameShown ? groundAfterFirstFrame : mediaVideoBackdrop
                 if !playback.firstFrameShown {
                     stillView(still)
                 }
