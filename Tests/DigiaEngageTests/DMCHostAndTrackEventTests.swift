@@ -53,6 +53,7 @@ struct DMCHostTriggerTests {
         return json
     }
 
+    // dmc-case: dmc.trigger.host_trigger_routes_and_respects_cap
     @Test("triggerCampaign routes a stored campaign and respects the cap")
     func routesAndRespectsCap() async throws {
         let sdk = try await readySDK(campaigns: [
@@ -75,6 +76,7 @@ struct DMCHostTriggerTests {
         #expect(sdk.controller.activeNudge == nil)
     }
 
+    // dmc-case: dmc.trigger.calls_before_init_dropped_not_held
     @Test("a host trigger before initialize drops at once, not silently")
     func dropsBeforeInitialize() {
         let sdk = SDKInstance(
@@ -104,6 +106,7 @@ struct DMCTrackEventTests {
         sink.records.filter { $0.reason?.wire == TimelineReason.appEventInvalid.wire }
     }
 
+    // dmc-case: dmc.app_event.unstorable_names_values_warned_dropped
     @Test("a name that cannot be stored warns with a bounded sample")
     func unstorableNameWarns() async throws {
         let sink = HostSink()
@@ -122,6 +125,7 @@ struct DMCTrackEventTests {
         #expect(warnings(sink).allSatisfy { $0.stage == .session })
     }
 
+    // dmc-case: dmc.app_event.unstorable_names_values_warned_dropped
     @Test("a value that cannot be stored is dropped, and the warning names the event")
     func unstorableValueWarns() async throws {
         let sink = HostSink()
@@ -140,6 +144,7 @@ struct DMCTrackEventTests {
         #expect(found.first?.extras["event_name"] == "add_to_cart")
     }
 
+    // dmc-case: dmc.trigger.calls_before_init_dropped_not_held
     @Test("trackEvent and setUserAttributes before initialize are ignored, not held for later")
     func beforeInitializeIsIgnored() async throws {
         // initialize() marks the process-wide endpoints as initialized.
@@ -183,6 +188,7 @@ struct DMCTrackEventTests {
         #expect(sdk.selfTriggerCount == 1)
     }
 
+    // dmc-case: dmc.user_context.attributes_merge_fast
     @Test("fire-and-forget attributes are merged before the call returns, so the next event sees them")
     func attributesAreMergedAtOnce() async throws {
         let sdk = try await readySDK(campaigns: [])

@@ -258,15 +258,23 @@ struct CampaignModel: Equatable {
                     reason: "\(campaignType) rendering is not supported in this SDK"))
         }
 
+        let frequency = FrequencyPolicy.fromJson(selectedJson.object("frequency"))
+        var rule = selectedJson["rule"].flatMap { $0 is NSNull ? nil : parseRule($0) }
+        // A window this SDK cannot count must not show uncapped, so the campaign
+        // is unsupported, the same as an unknown operator.
+        if case .valid? = rule, let window = frequency?.maxPerWindow, !window.isSupported {
+            rule = .invalid(InvalidRule(reason: .unsupportedFeature, detail: "frequency window \(window.window)"))
+        }
+
         return CampaignModel(
             id: id,
             campaignKey: campaignKey,
             campaignType: campaignType,
             config: config,
             targetScreenNames: targetScreenNames,
-            frequency: FrequencyPolicy.fromJson(selectedJson.object("frequency")),
+            frequency: frequency,
             audienceGated: selectedJson["audienceGated"] as? Bool == true,
-            rule: selectedJson["rule"].flatMap { $0 is NSNull ? nil : parseRule($0) },
+            rule: rule,
             guideTemplateJson: campaignType == "guide"
                 // Authored under either key depending on the campaign's age; both carry
                 // the same `{ templateType, steps, variables }` shape the JS renderer reads.

@@ -68,6 +68,7 @@ struct DMCUserContextManagerTests {
         return manager
     }
 
+    // dmc-case: dmc.user_context.attributes_merge_fast
     @Test("attributes merge across calls rather than replacing")
     func attributesMerge() async {
         let manager = manager()
@@ -81,6 +82,7 @@ struct DMCUserContextManagerTests {
         #expect(same(server.sent.last?["attributes"], ["plan": "pro", "cart": "3"]))
     }
 
+    // dmc-case: dmc.user_context.attributes_merge_fast
     @Test("sends the whole map, not a delta, so a failed send self-heals")
     func sendsWholeMap() async {
         let manager = manager()
@@ -107,6 +109,7 @@ struct DMCUserContextManagerTests {
         #expect(server.sent.count == afterFirst)
     }
 
+    // dmc-case: dmc.user_context.attributes_merge_fast
     @Test("app-supplied attributes win over imported ones")
     func appAttributesWin() async {
         let manager = manager(reply: [
@@ -121,6 +124,7 @@ struct DMCUserContextManagerTests {
         #expect(manager.resolvedAttributes["country"] == "India")
     }
 
+    // dmc-case: dmc.user_context.clearing_user_drops_context
     @Test("clearing the user drops the context and the attributes")
     func clearingDropsContext() async {
         let manager = manager(reply: [
@@ -182,6 +186,7 @@ struct DMCUserContextManagerTests {
         #expect(server.sent.count == first + 1)
     }
 
+    // dmc-case: dmc.user_context.clearing_user_drops_context
     @Test("a change of user is not answered with the previous user's context")
     func previousUserDroppedAtOnce() async {
         let manager = manager(reply: ["campaigns": ["c1"], "attributes": ["plan": "pro"], "expiresInSeconds": 900])
@@ -200,6 +205,7 @@ struct DMCUserContextManagerTests {
         private let server = ContextServer()
         private let storage = UserDefaultsLocalStorage(defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!)
 
+        // dmc-case: dmc.user_context.typed_attributes_kept_for_rules
         @Test("keep their type on the wire, in storage and for rules")
         func keepType() async {
             server.respond(with: ["campaigns": [String](), "attributes": ["score": 7, "vip": true], "expiresInSeconds": 900])
@@ -222,6 +228,7 @@ struct DMCUserContextManagerTests {
             #expect(same(manager.attributes, typed))
         }
 
+        // dmc-case: dmc.user_context.typed_attributes_kept_for_rules
         @Test("drop other values with a log line each")
         func dropOthers() async {
             server.respond(with: ["campaigns": [String](), "attributes": [String: Any](), "expiresInSeconds": 900])

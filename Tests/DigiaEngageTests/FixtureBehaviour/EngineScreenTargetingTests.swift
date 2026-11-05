@@ -20,6 +20,7 @@ struct EngineScreenTargetingTests {
 
     // Fails if a non-string entry is no longer skipped when the screen list is parsed in
     // `campaign_model.swift`: the campaign is dropped from the bundle and neither screen shows it.
+    // dmc-case: dmc.show_on.on_screen_names_fire
     @Test("shows on each real name in the list, home and cart")
     func showsOnEachRealName() async throws {
         let (sdk, key) = try await boot()
@@ -37,6 +38,7 @@ struct EngineScreenTargetingTests {
     }
 
     // Fails if the screen gate stops excluding other screens, including the no-screen case.
+    // dmc-case: dmc.show_on.off_screen_overlay_does_not_fire
     @Test("is dropped as screen_not_targeted anywhere else: no screen, another screen, and screens named like the stray entries")
     func droppedEverywhereElse() async throws {
         let (sdk, key) = try await boot()

@@ -25,6 +25,7 @@ struct DMCSignalGateTests {
         }
     }
 
+    // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
     @Test("replays every kind in arrival order, each with its own held time")
     func replaysInOrder() {
         let harness = Harness()
@@ -44,6 +45,7 @@ struct DMCSignalGateTests {
         #expect(harness.sent.map(\.1) == [1000, 900, 750, 700])
     }
 
+    // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
     @Test("once open, a signal passes straight through with no age")
     func passesThrough() {
         let harness = Harness()
@@ -54,6 +56,7 @@ struct DMCSignalGateTests {
         #expect(harness.sent.map(\.1) == [0])
     }
 
+    // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
     @Test("held signals are gone when the app backgrounds before ready")
     func dropHeld() {
         let harness = Harness()
@@ -64,6 +67,7 @@ struct DMCSignalGateTests {
         #expect(harness.sent.isEmpty)
     }
 
+    // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
     @Test("held signals are gone when loading fails, and the gate stays shut")
     func close() {
         let harness = Harness()
@@ -75,6 +79,7 @@ struct DMCSignalGateTests {
         #expect(harness.sent.map(\.0) == ["event:late"])
     }
 
+    // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
     @Test("a slow load replays only what is still recent")
     func slowLoad() {
         let harness = Harness()
@@ -88,6 +93,7 @@ struct DMCSignalGateTests {
         #expect(harness.sent.map(\.1) == [SignalGate.maxHoldMs + 1 - 5000])
     }
 
+    // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
     @Test("a load that never succeeds keeps only the newest signals")
     func boundedHeld() {
         let harness = Harness()

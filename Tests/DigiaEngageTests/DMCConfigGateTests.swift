@@ -42,6 +42,7 @@ struct DMCConfigGateTests {
         return sdk
     }
 
+    // dmc-case: dmc.gate_order.template_config_gate_drops_invalid_config
     @Test("a guide with no steps is dropped with the cause on its record")
     func emptyGuideDropped() async throws {
         let sink = GateSink()
@@ -66,6 +67,7 @@ struct DMCConfigGateTests {
         #expect(drops.first?.extras == ["cause": "empty_content"])
     }
 
+    // dmc-case: dmc.gate_order.template_config_gate_drops_invalid_config
     @Test("a campaign type this SDK cannot render drops as unsupported")
     func unsupportedTypeDropped() async throws {
         let sdk = try await ready()

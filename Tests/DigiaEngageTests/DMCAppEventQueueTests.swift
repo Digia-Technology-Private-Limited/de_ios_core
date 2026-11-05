@@ -96,6 +96,7 @@ struct DMCAppEventQueueTests {
         for _ in 0..<500 where !condition() { try await Task.sleep(nanoseconds: 10_000_000) }
     }
 
+    // dmc-case: dmc.app_event.separate_queues_flush_own_drop_oldest
     @Test("app events and experience events use separate queues")
     func separateQueues() async {
         let rig = start()
@@ -117,6 +118,7 @@ struct DMCAppEventQueueTests {
         #expect(await names(rig.experience) == ["Digia Experience Viewed"])
     }
 
+    // dmc-case: dmc.app_event.separate_queues_flush_own_drop_oldest
     @Test("each queue flushes only its own events")
     func flushesOwnEvents() async throws {
         let rig = start()
@@ -143,6 +145,7 @@ struct DMCAppEventQueueTests {
         #expect(sent?["_digia_app_event"] == nil)
     }
 
+    // dmc-case: dmc.app_event.separate_queues_flush_own_drop_oldest
     @Test("an app event an older build left in the experience queue still sends")
     func legacyMarkedEventStillSends() {
         let entry = QueueEntry(
@@ -159,6 +162,7 @@ struct DMCAppEventQueueTests {
         #expect(appEvents?.first?["_digia_app_event"] == nil)
     }
 
+    // dmc-case: dmc.app_event.separate_queues_flush_own_drop_oldest
     @Test("each queue drops its own oldest at its own cap")
     func ownCaps() async {
         let rig = start(
@@ -179,6 +183,7 @@ struct DMCAppEventQueueTests {
         #expect(await names(rig.appEvents) == ["app-2", "app-3"])
     }
 
+    // dmc-case: dmc.app_event.separate_queues_flush_own_drop_oldest
     @Test("the upload switch keeps events out of the app-event queue")
     func uploadSwitchKeepsQueueEmpty() {
         let rig = start()
@@ -189,6 +194,7 @@ struct DMCAppEventQueueTests {
         #expect(rig.appEvents.queue.size == 0)
     }
 
+    // dmc-case: dmc.app_event.separate_queues_flush_own_drop_oldest
     @Test("each app-event drop reports one reason, and upload-off stays silent")
     func dropReasons() {
         let rig = start(appQueueMax: 2)

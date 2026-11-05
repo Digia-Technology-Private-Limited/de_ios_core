@@ -23,6 +23,7 @@ struct DMCServerDataRobustnessTests {
 
     // MARK: wait delay
 
+    // dmc-case: dmc.wait_cancel.huge_values_do_not_overflow
     @Test("a delay beyond any session is bounded, not a trap")
     func hugeDelayIsBounded() {
         for text in ["1e20", "9223372036854775807", "9.3e18", "1e15", "2e15"] {
@@ -37,6 +38,7 @@ struct DMCServerDataRobustnessTests {
         }
     }
 
+    // dmc-case: dmc.wait_cancel.huge_values_do_not_overflow
     @Test("a delay of Int.max cannot overflow the end time")
     func waitsEndTimeSaturates() {
         let now = 5_000
@@ -55,6 +57,7 @@ struct DMCServerDataRobustnessTests {
 
     // MARK: user context lifetime
 
+    // dmc-case: dmc.user_context.context_lifetime_ignores_insane_seconds
     @Test("the context lifetime ignores anything that is not a sane number of seconds")
     func expirySeconds() {
         #expect(UserContextManager.expirySeconds(Self.json("1800")) == 1800)
@@ -71,6 +74,7 @@ struct DMCServerDataRobustnessTests {
 
     // MARK: equality, versions, ordering
 
+    // dmc-case: dmc.rule.eq_bool_not_string_true
     @Test("a boolean equals only a boolean: true is not 1")
     func booleanIsNotANumber() {
         let one = Self.json("1"), zero = Self.json("0")
@@ -85,6 +89,7 @@ struct DMCServerDataRobustnessTests {
         #expect(ruleJSONEquals(one, 1.0))
     }
 
+    // dmc-case: dmc.rule.eq_string_true_not_bool
     @Test("a rule comparing to true does not match the attribute 1")
     func booleanRuleVersusNumberAttribute() {
         let leaf: [String: Any] = ["type": "attribute", "key": "vip", "op": "eq", "value": true]
@@ -95,6 +100,8 @@ struct DMCServerDataRobustnessTests {
         #expect(Self.verdict(leaf, attributes: yes) == "eligible")
     }
 
+    // dmc-case: dmc.rule.version_part_without_digits_is_zero
+    // dmc-case: dmc.rule_who.version_keys_compare_as_versions
     @Test("only ASCII digits count in a version part")
     func versionPartsAreAsciiDigits() {
         func verdict(_ actual: String, _ value: String) -> String {
@@ -108,6 +115,7 @@ struct DMCServerDataRobustnessTests {
         #expect(verdict("5.3", "5.3") == "eligible")
     }
 
+    // dmc-case: dmc.trigger.tie_breaks_by_campaign_key
     @Test("equal priorities break by campaign key in UTF-16 code-unit order")
     func tieBreakIsUtf16() {
         // U+1F600 is the surrogate pair D83D DE00, which sorts below U+FFFF.
@@ -120,6 +128,7 @@ struct DMCServerDataRobustnessTests {
 
     // MARK: text of a number
 
+    // dmc-case: dmc.render_safety.numbers_print_like_dart
     @Test("a floating number prints with its point, as Dart does")
     func dartTextOfNumbers() {
         #expect(dartText(Self.json("1.0")) == "1.0")
@@ -130,6 +139,7 @@ struct DMCServerDataRobustnessTests {
 
     // MARK: clock
 
+    // dmc-case: dmc.wait_cancel.sleep_clock_counts_suspend_monotonic
     @Test("the wait clock never goes backwards")
     func monotonicClockNeverDecreases() {
         var previous = MonotonicClock.nowMs()

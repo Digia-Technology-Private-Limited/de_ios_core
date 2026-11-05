@@ -310,9 +310,14 @@ private enum ParseStep {
     case complete(RuleCondition)
 }
 
-/// Parses a condition tree with an explicit stack, not recursion. The SDK sets
-/// no nesting limit, and a deep rule must not overflow the stack: Swift cannot
-/// catch that, so it would crash the host app.
+/// Deepest group nesting a rule may have. Far above anything the dashboard
+/// builds; a deeper rule is malformed, because releasing or comparing a tree
+/// that deep recurses and could overflow the stack.
+private let maxRuleDepth = 1_000
+
+/// Parses a condition tree with an explicit stack, not recursion, so a deep
+/// rule cannot overflow the stack: Swift cannot catch that, so it would crash
+/// the host app.
 private func parseNode(_ root: Any?, leaves: Set<String>) throws -> RuleCondition {
     var stack: [GroupFrame] = []
     var step = ParseStep.parse(root)
@@ -324,6 +329,9 @@ private func parseNode(_ root: Any?, leaves: Set<String>) throws -> RuleConditio
                 step = .complete(condition)
             case .group(let frame):
                 if let first = frame.children.first {
+                    guard stack.count < maxRuleDepth else {
+                        try malformed("nesting deeper than \(maxRuleDepth) groups")
+                    }
                     stack.append(frame)
                     step = .parse(first)
                 } else {

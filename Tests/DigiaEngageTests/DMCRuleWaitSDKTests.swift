@@ -60,7 +60,9 @@ struct DMCRuleWaitSDKTests {
         ] as [String: Any])
 
     /// Boots an SDK; `hold` leaves the bundle request unanswered and returns the release.
-    private func boot(_ campaigns: [[String: Any]], hold: Bool = false) async throws -> (SDKInstance, () -> Void) {
+    private func boot(
+        _ campaigns: [[String: Any]], hold: Bool = false, sessionClock: ManualClock? = nil
+    ) async throws -> (SDKInstance, () -> Void) {
         let network = HeldBundleNetworkClient()
         let body = try JSONSerialization.data(withJSONObject: ["campaigns": campaigns])
         let response = Result<NetworkResponse, Error>.success(
@@ -68,7 +70,8 @@ struct DMCRuleWaitSDKTests {
         let sdk = SDKInstance(
             defaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
             legacyDefaults: UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!,
-            makeNetworkClient: { _ in network })
+            makeNetworkClient: { _ in network },
+            clock: sessionClock.map { session in { Int64(session.now) } } ?? SessionManager.systemClock)
         sdk.waitClock = { [clock] in clock.now }
         DigiaLogger.registerSink(sink)
         try await sdk.initialize(DigiaConfig(apiKey: "test-api-key"))
@@ -100,6 +103,41 @@ struct DMCRuleWaitSDKTests {
 
     private func shown(_ sdk: SDKInstance) -> String? { sdk.controller.activeNudge?.payload.campaignKey }
 
+    // dmc-case: dmc.show_on.foreground_wait_survives_rotation
+    @Test("an app_foregrounded wait survives the session rotation")
+    func foregroundWaitSurvivesRotation() async throws {
+        defer { DigiaLogger.unregisterSink(sink) }
+        let session = ManualClock()
+        session.now = 1_700_000_000_000
+        let foregroundRule: [String: Any] = [
+            "priority": 600,
+            "trigger": ["any": [["type": "app_foregrounded"]]],
+            "conditions": ["all": [Any]()],
+            "wait": ["type": "delay", "ms": 5_000],
+        ]
+        let (sdk, _) = try await boot(
+            [nudge("welcome_back", 600, rule: foregroundRule)], sessionClock: session)
+        let firstSession = try #require(sdk.services?.sessionManager.sessionId)
+
+        // A return after the session timeout rotates the session first, then
+        // sends app_foregrounded, as the two foreground observers do.
+        let sessions = try #require(sdk.services?.sessionManager)
+        sessions.onBackground()
+        sdk.appDidEnterBackground()
+        session.now += 31 * 60 * 1000
+        sessions.touch()
+        sdk.appWillEnterForeground()
+        // The app keeps running while the wait counts down.
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(sdk.services?.sessionManager.sessionId != firstSession)
+        #expect(shown(sdk) == nil)
+        advance(sdk, ms: 5_000)
+        #expect(shown(sdk) == "welcome_back")
+        sdk.controller.dismissNudge()
+    }
+
+    // dmc-case: dmc.wait_cancel.shows_only_after_wait
     @Test("shows only after the wait")
     func showsAfterWait() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -113,10 +151,11 @@ struct DMCRuleWaitSDKTests {
         #expect(shown(sdk) == nil)
         advance(sdk, ms: 1)
         #expect(shown(sdk) == "login_tip")
-        #expect(withReason("login_tip", .waitEnded).first?.extras == ["outcome": "checked"])
+        #expect(withReason("login_tip", .waitEnded).first?.extras["outcome"] == "checked")
         sdk.controller.dismissNudge()
     }
 
+    // dmc-case: dmc.wait_cancel.cancel_event_stops_show
     @Test("a cancel event stops the show")
     func cancelEventStopsShow() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -130,6 +169,7 @@ struct DMCRuleWaitSDKTests {
         #expect(withReason("login_tip", .waitCancelled).first?.extras == ["cause": "event"])
     }
 
+    // dmc-case: dmc.wait_cancel.cancel_acts_before_analytics_write
     @Test("a cancel event acts before its analytics write ends")
     func cancelActsBeforeWrite() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -142,6 +182,7 @@ struct DMCRuleWaitSDKTests {
         #expect(withReason("login_tip", .waitCancelled).count == 1)
     }
 
+    // dmc-case: dmc.wait_cancel.leaving_screen_stops_show_no_repeat
     @Test("leaving the screen stops the show; a repeat does not")
     func leavingScreenStopsShow() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -158,6 +199,7 @@ struct DMCRuleWaitSDKTests {
         #expect(withReason("login_tip", .waitCancelled).first?.extras == ["cause": "screen_left"])
     }
 
+    // dmc-case: dmc.wait_cancel.wait_runs_in_background_shows_on_return
     @Test("a wait keeps running in the background and shows on return")
     func waitRunsInBackground() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -174,6 +216,7 @@ struct DMCRuleWaitSDKTests {
         sdk.controller.dismissNudge()
     }
 
+    // dmc-case: dmc.wait_cancel.user_change_ends_wait
     @Test("a user change ends the wait")
     func userChangeEndsWait() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -187,6 +230,30 @@ struct DMCRuleWaitSDKTests {
         #expect(withReason("login_tip", .waitCancelled).first?.extras == ["cause": "session_ended"])
     }
 
+    // dmc-case: dmc.wait_cancel.user_change_removes_inline_cancelled
+    @Test("a user change removes Digia inline content as cancelled")
+    func userChangeRemovesInlineCancelled() async throws {
+        defer { DigiaLogger.unregisterSink(sink) }
+        let (sdk, _) = try await boot([loginWait])
+        let opened = sdk.coordinator.open(
+            CEPTriggerPayload(
+                cepCampaignId: selfTriggeredCepId("id-inline", firing: 1), campaignKey: "inline_offer",
+                cepMetadata: [:]),
+            owner: "test")
+        sdk.coordinator.accept(opened, kind: .inline)
+        let recorder = PresentationRecorder(opened.presentation)
+        sdk.inlineController.setCampaign("hero", payload: recorder.payload)
+        // On screen, so its end is a dismissal whose reason is told apart.
+        sdk.coordinator.handle(.impressed, payload: recorder.payload)
+
+        sdk.setUserId("user-2")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(sdk.inlineController.getCampaign("hero") == nil)
+        #expect(recorder.dismissReason == .cancelled)
+    }
+
+    // dmc-case: dmc.wait_cancel.session_end_drops_unready_anchor
     @Test("a session end drops an anchor seen before ready")
     func sessionEndDropsHeldAnchor() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -206,6 +273,29 @@ struct DMCRuleWaitSDKTests {
         #expect(shown(sdk) == nil)
     }
 
+    // dmc-case: dmc.wait_cancel.anchor_reappears_resends
+    @Test("an anchor that leaves and comes back shows its campaign again")
+    func anchorReappearsResends() async throws {
+        defer { DigiaLogger.unregisterSink(sink) }
+        let anchorRule: [String: Any] = [
+            "priority": 600,
+            "trigger": ["any": [["type": "anchor_visible", "keys": ["cta"]]]],
+            "conditions": ["all": [Any]()],
+        ]
+        let (sdk, _) = try await boot([nudge("cta_tip", 600, rule: anchorRule)])
+
+        sdk.recordAnchorSeen("cta")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(shown(sdk) == "cta_tip")
+        sdk.controller.dismissNudge()
+
+        sdk.recordAnchorSeen("cta")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(shown(sdk) == "cta_tip")
+        sdk.controller.dismissNudge()
+    }
+
+    // dmc-case: dmc.wait_cancel.no_wait_winner_shows_now_waits_start
     @Test("a no-wait winner shows now; waits of the trigger start too")
     func noWaitWinnerShowsNow() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -225,6 +315,7 @@ struct DMCRuleWaitSDKTests {
         sdk.controller.dismissNudge()
     }
 
+    // dmc-case: dmc.wait_cancel.held_signal_no_wait_first
     @Test("a held signal: the no-wait winner shows before an ended wait")
     func heldSignalNoWaitFirst() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -243,6 +334,7 @@ struct DMCRuleWaitSDKTests {
         sdk.controller.dismissNudge()
     }
 
+    // dmc-case: dmc.wait_cancel.simultaneous_ends_router_outcome
     @Test("of waits ending together, the losers find the surface busy")
     func losersFindSurfaceBusy() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -261,6 +353,7 @@ struct DMCRuleWaitSDKTests {
         sdk.controller.dismissNudge()
     }
 
+    // dmc-case: dmc.wait_cancel.cap_rechecked_at_wait_end
     @Test("the cap is checked again when the wait ends")
     func capRecheckedAtWaitEnd() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
@@ -278,6 +371,7 @@ struct DMCRuleWaitSDKTests {
         #expect(withReason("capped_tip", .capped).count == 1)
     }
 
+    // dmc-case: dmc.wait_cancel.late_end_finds_surface_busy
     @Test("waits run in parallel; a later end finds the surface busy")
     func parallelWaits() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
