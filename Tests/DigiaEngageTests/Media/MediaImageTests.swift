@@ -60,8 +60,8 @@ struct MediaImageComponentTests {
         MediaOrigin.release(target)
     }
 
-    @Test("shows the blur when the picture was never uploaded", .tags(.golden))
-    func blurWhenNeverUploaded() async {
+    @Test("shows the error placeholder, not the blur, when the picture was never uploaded", .tags(.golden))
+    func placeholderWhenNeverUploaded() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("never-uploaded.jpg")
@@ -74,7 +74,7 @@ struct MediaImageComponentTests {
         #expect(await waitUntilMedia { failures.value > 0 })
 
         #expect(MediaOrigin.requests(for: target).count == 1)
-        MediaStage.assertGolden(window, named: "image_error_blur")
+        MediaStage.assertGolden(window, named: "image_error_placeholder")
     }
 
     @Test("leaves no blur behind a loaded picture", .tags(.golden))

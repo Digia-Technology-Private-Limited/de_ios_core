@@ -66,8 +66,8 @@ struct MediaImageVectorTests {
         MediaOrigin.release(target)
     }
 
-    @Test("a missing vector reports http_4xx once and shows the blur", .tags(.golden))
-    func missingVectorReportsAndShowsBlur() async {
+    @Test("a missing vector reports http_4xx once and shows the error placeholder", .tags(.golden))
+    func missingVectorReportsAndShowsPlaceholder() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("never-uploaded.svg")
