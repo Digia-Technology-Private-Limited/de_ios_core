@@ -12,8 +12,12 @@ import Foundation
 // MARK: - Types
 
 struct FrequencyWindow: Equatable {
+    static let supported: Set<String> = ["session", "day", "week", "month"]
+
     let count: Int
     let window: String
+
+    var isSupported: Bool { Self.supported.contains(window) }
 }
 
 struct FrequencyPolicy: Equatable {
