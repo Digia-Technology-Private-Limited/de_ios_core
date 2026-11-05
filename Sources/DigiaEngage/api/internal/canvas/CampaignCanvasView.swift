@@ -24,32 +24,6 @@ private struct CanvasVideoUsesStoryPlaybackKey: EnvironmentKey {
     static let defaultValue = false
 }
 
-/// The AVPlayer side effects a Canvas video performs.
-///
-/// The renderer, layout and `AVPlayerViewController` stay real in component tests. Only these
-/// process-bound effects are replaceable so autoplay, looping and teardown can be asserted without
-/// waiting for a remote stream or inferring behavior from a black video surface.
-struct CanvasVideoRuntime: @unchecked Sendable {
-    var makePlayer: @MainActor (AVPlayerItem) -> AVPlayer
-    var play: @MainActor (AVPlayer) -> Void
-    var pause: @MainActor (AVPlayer) -> Void
-    var restart: @MainActor (AVPlayer) -> Void
-
-    static let live = CanvasVideoRuntime(
-        makePlayer: { AVPlayer(playerItem: $0) },
-        play: { $0.play() },
-        pause: { $0.pause() },
-        restart: {
-            $0.seek(to: .zero)
-            $0.play()
-        }
-    )
-}
-
-private struct CanvasVideoRuntimeKey: EnvironmentKey {
-    static let defaultValue = CanvasVideoRuntime.live
-}
-
 /// The playback mode for Canvas Lottie animations.
 enum CanvasLottiePlaybackMode: Sendable, Equatable {
     case live
@@ -86,11 +60,6 @@ extension EnvironmentValues {
     var canvasVideoUsesStoryPlayback: Bool {
         get { self[CanvasVideoUsesStoryPlaybackKey.self] }
         set { self[CanvasVideoUsesStoryPlaybackKey.self] = newValue }
-    }
-
-    var canvasVideoRuntime: CanvasVideoRuntime {
-        get { self[CanvasVideoRuntimeKey.self] }
-        set { self[CanvasVideoRuntimeKey.self] = newValue }
     }
 
     var canvasLottieRuntime: CanvasLottieRuntime {
@@ -1928,6 +1897,9 @@ private struct CanvasRemoteLottie: View {
     }
 }
 
+/// A canvas video plays through `MediaVideo` (T3): the authored controls, fit, loop, mute and
+/// autoplay as on `main`, with `MediaVideo`'s still, spinner and "Video failed" box (OD-7). A
+/// story page's canvas keeps the story media engine until T8 moves it.
 private struct CanvasVideoRenderer: View {
     let box: CampaignCanvasBox
     let source: CampaignCanvasMediaSource
@@ -1939,11 +1911,6 @@ private struct CanvasVideoRenderer: View {
     let isDark: Bool
     @Environment(\.digiaVariables) private var variables
     @Environment(\.canvasVideoUsesStoryPlayback) private var usesStoryPlayback
-    @Environment(\.canvasVideoRuntime) private var runtime
-    @Environment(\.digiaCampaignKey) private var campaignKey
-    @State private var player: AVPlayer?
-    @State private var observer: NSObjectProtocol?
-    @State private var statusObservation: NSKeyValueObservation?
     private var url: String {
         interpolate(CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark), context: variables)
     }
@@ -1962,56 +1929,17 @@ private struct CanvasVideoRenderer: View {
                     )
                     .id(url)
                 } else {
-                    ZStack {
-                        Color.black
-                        if let player {
-                            CanvasPlayerController(
-                                player: player, controls: showControls,
-                                gravity: fit == "contain" ? .resizeAspect : .resizeAspectFill)
-                        }
-                    }
+                    MediaVideo(
+                        url: url,
+                        fit: fit == "contain" ? .contain : .cover,
+                        loop: loop,
+                        muted: muted,
+                        autoplay: autoplay,
+                        showControls: showControls
+                    )
                 }
             }
         }
-        .onAppear { setup(url: url) }
-        .onChange(of: url) { newURL in
-            teardown()
-            setup(url: newURL)
-        }
-        .onDisappear { teardown() }
-    }
-    private func setup(url: String) {
-        guard !usesStoryPlayback else { return }
-        guard player == nil, let parsed = URL(string: url), !url.isEmpty else { return }
-        let item = AVPlayerItem(url: parsed)
-        let value = runtime.makePlayer(item)
-        value.isMuted = muted
-        player = value
-        let campaignKey = campaignKey
-        statusObservation = item.observe(\.status) { item, _ in
-            guard item.status == .failed else { return }
-            Task { @MainActor in
-                reportMediaLoadFailed(
-                    .video, cause: mediaFailureCause(playerItem: item), campaignKey: campaignKey)
-            }
-        }
-        if loop {
-            observer = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-            ) { _ in
-                MainActor.assumeIsolated {
-                    runtime.restart(value)
-                }
-            }
-        }
-        if autoplay { runtime.play(value) }
-    }
-    private func teardown() {
-        if let player { runtime.pause(player) }
-        player = nil
-        statusObservation = nil
-        if let observer { NotificationCenter.default.removeObserver(observer) }
-        observer = nil
     }
 }
 

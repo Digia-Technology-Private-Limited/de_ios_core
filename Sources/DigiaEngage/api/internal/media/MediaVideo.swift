@@ -62,7 +62,8 @@ let mediaVideoBackdrop = Color(red: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 
 /// range cache; `file://` plays directly.
 ///
 /// `showControls` draws `main`'s native playback controls (`AVPlayerViewController`), as canvas
-/// and nudge video did on `main`; every other surface leaves it off.
+/// and nudge video did on `main`; every other surface leaves it off. The controls appear with
+/// the first frame; until then the still shows (OD-7).
 ///
 /// Callbacks (the same set on every stack): `onFirstFrame` once per opened URL (again after a
 /// handover to a new holder), `onEnded` when playback reaches the end and isn't looping,
@@ -103,9 +104,11 @@ struct MediaVideo: View {
                 if !playback.firstFrameShown {
                     stillView(still)
                 }
+                // Hidden until the first frame, also with controls: the still shows, not the
+                // controller's black backdrop, and the controls come on top with the frame (OD-7).
                 if let player = playback.player {
                     playerView(player)
-                        .opacity(playback.firstFrameShown || showControls ? 1 : 0)
+                        .opacity(playback.firstFrameShown ? 1 : 0)
                 }
                 if playback.spinnerVisible {
                     ProgressView()

@@ -1,4 +1,3 @@
-import AVFoundation
 import Foundation
 import Lottie
 import SDWebImage
@@ -98,7 +97,6 @@ struct CanvasGoldenTests {
         let window = ComponentTestHost.makeWindow(frame: CGRect(origin: .zero, size: size))
 
         let host = SlotHostScreen(config: config, payload: payload, safeArea: device.safeArea)
-            .environment(\.canvasVideoRuntime, Self.pausedVideo)
             .environment(\.canvasLottieRuntime, CanvasLottieRuntime(playbackMode: .frozen(progress: Self.lottieProgress)))
             // Appear animations jump to their end state, so the golden shows the settled card.
             .transaction { transaction in
@@ -116,14 +114,6 @@ struct CanvasGoldenTests {
         ComponentTestHost.drainRunLoop(for: 0.2)
         return window
     }
-
-    /// A player that never starts: autoplay would put a playing video at a different frame in every run.
-    private static let pausedVideo = CanvasVideoRuntime(
-        makePlayer: { AVPlayer(playerItem: $0) },
-        play: { _ in },
-        pause: { $0.pause() },
-        restart: { _ in }
-    )
 
     // MARK: - Media
 
