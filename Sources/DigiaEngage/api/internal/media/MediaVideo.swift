@@ -67,8 +67,14 @@ let mediaVideoBackdrop = Color(red: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 
 /// the first frame; until then the still shows (OD-7).
 ///
 /// `groundAfterFirstFrame` is what a letterbox shows once the first frame is drawn: black by
-/// default on every surface (OD-16). The #1A1A1A backdrop is only the loading ground before the
-/// first frame. The floating window passes its own transparent ground.
+/// default (OD-16); a surface passes the colour its `main` drew around the video (OD-18: the
+/// inline story's video page passes #1A1A1A). The #1A1A1A backdrop is only the loading ground
+/// before the first frame.
+///
+/// `bare` draws no ground of its own (no backdrop, no ground after the first frame) and no
+/// spinner: the caller owns what shows around and behind the video, as on Android. The PIP window
+/// and a rail tile pass it, so the window's own background or the tile's still shows through
+/// (OD-20, OD-18). A thumbnail or BlurHash given to the video still draws until the first frame.
 ///
 /// Callbacks (the same set on every stack): `onFirstFrame` once per opened URL (again after a
 /// handover to a new holder), `onEnded` when playback reaches the end and isn't looping,
@@ -90,6 +96,7 @@ struct MediaVideo: View {
     var autoplay: Bool = true
     var showControls: Bool = false
     var groundAfterFirstFrame: Color = .black
+    var bare: Bool = false
     var playerKey: String? = nil
     var poolPriority: PoolPriority = .onScreen
     var startMs: Int64? = nil
@@ -117,7 +124,9 @@ struct MediaVideo: View {
                 Color.black
                 MediaVideoFailedBox()
             } else {
-                playback.firstFrameShown ? groundAfterFirstFrame : mediaVideoBackdrop
+                if !bare {
+                    playback.firstFrameShown ? groundAfterFirstFrame : mediaVideoBackdrop
+                }
                 if !playback.firstFrameShown {
                     stillView(still)
                 }
@@ -160,7 +169,7 @@ struct MediaVideo: View {
         playback.open(
             url: url, key: key, priority: poolPriority, loop: loop, muted: muted, volume: volume,
             autoplay: autoplay,
-            startMs: startMs, spinnerDelay: canShow ? nil : spinnerDelay,
+            startMs: startMs, spinnerDelay: canShow || bare ? nil : spinnerDelay,
             services: services,
             report: { [services, campaignKey] cause in services.reportHealth(campaignKey, .video, cause) })
     }

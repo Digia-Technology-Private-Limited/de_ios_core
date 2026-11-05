@@ -29,8 +29,10 @@ struct FloaterMediaView: View {
                 muted: muted,
                 volume: media.volume,
                 autoplay: media.autoplay,
-                // A letterbox shows the window's own ground (the expanded background), as on `main`.
-                groundAfterFirstFrame: .clear,
+                // The window owns the ground: its own background shows between ready and the first
+                // frame (no #1A1A1A backdrop, no spinner: OD-20) and letterboxes the video after
+                // it (the expanded background), as on `main`.
+                bare: true,
                 playerKey: videoPlayerKey,
                 poolPriority: .onScreen
             )
