@@ -1859,9 +1859,14 @@ private struct CanvasLottieRenderer: View {
         value.shadow = nil
         return value
     }
+    /// With no visible background or border the shadow follows the drawn animation's alpha,
+    /// as the image widget's does; otherwise it stays a ring around the box.
+    private var contentShadow: CampaignCanvasShadow? {
+        box.hasVisibleSurface(isDark: isDark) ? nil : box.shadow
+    }
     var body: some View {
         ZStack {
-            if let shadow = box.shadow {
+            if let shadow = box.shadow, contentShadow == nil {
                 CampaignCanvasShadowView(
                     shadow: shadow,
                     cornerRadius: box.cornerRadius,
@@ -1869,21 +1874,23 @@ private struct CanvasLottieRenderer: View {
                     outsideOnly: true
                 )
             }
-            CampaignCanvasBoxView(box: boxWithoutShadow, isDark: isDark) {
-                let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
-                let resolved = interpolate(raw, context: variables)
-                if resolved.isEmpty {
-                    CanvasPlaceholder(label: "Lottie")
-                } else if let url = URL(string: resolved) {
-                    CanvasRemoteLottie(
-                        url: url, placeholder: source.placeholder, autoplay: autoplay, loop: loop,
-                        fit: fit
-                    )
-                    .id(resolved)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
-                } else {
-                    CanvasPlaceholder(label: "Lottie")
+            CanvasAlphaContentShadow(shadow: contentShadow, isDark: isDark) {
+                CampaignCanvasBoxView(box: boxWithoutShadow, isDark: isDark) {
+                    let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
+                    let resolved = interpolate(raw, context: variables)
+                    if resolved.isEmpty {
+                        CanvasPlaceholder(label: "Lottie")
+                    } else if let url = URL(string: resolved) {
+                        CanvasRemoteLottie(
+                            url: url, placeholder: source.placeholder, autoplay: autoplay,
+                            loop: loop, fit: fit
+                        )
+                        .id(resolved)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                    } else {
+                        CanvasPlaceholder(label: "Lottie")
+                    }
                 }
             }
         }
