@@ -17,6 +17,8 @@ struct VideoStoryPage: View {
     let muted: Bool
     let playing: Bool
     let startMs: Int64?
+    /// What a letterbox shows after the first frame (OD-18).
+    var groundAfterFirstFrame: Color = .black
     let onReady: (AVPlayer) -> Void
     let onEnded: () -> Void
     let onFailure: () -> Void
@@ -33,6 +35,7 @@ struct VideoStoryPage: View {
                 priority: .onScreen,
                 muted: muted,
                 playing: playing,
+                groundAfterFirstFrame: groundAfterFirstFrame,
                 startMs: startMs,
                 onReady: onReady,
                 onEnded: onEnded,

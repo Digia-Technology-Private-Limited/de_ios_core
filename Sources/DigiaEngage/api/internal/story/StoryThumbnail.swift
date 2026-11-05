@@ -102,9 +102,11 @@ struct StoryImage: View {
 /// A story video through `MediaVideo` on the pool. An authored thumbnail (image or colour) is
 /// drawn over the player until the first frame, and a failed video goes back to its still, over
 /// `MediaVideo`'s "Video failed" box (T8: a story page shows its still and runs its timer). With no
-/// thumbnail a page shows `MediaVideo`'s dark backdrop and spinner rule (T2); a rail tile
-/// (`showsSpinner` off) keeps the dark still instead, as Android's bare tile does. After the first
-/// frame a letterbox is black (OD-16).
+/// thumbnail a page shows `MediaVideo`'s dark backdrop and spinner rule (T2). A rail tile (`bare`)
+/// draws its still beneath a bare `MediaVideo` and never covers it, so the still shows until the
+/// first frame and around a contained video after it, as `main`'s tile did (OD-18). After the first
+/// frame a page's letterbox is `groundAfterFirstFrame`: black by default (OD-16), #1A1A1A on the
+/// inline story's page as on `main` (OD-18).
 @MainActor
 struct StoryVideoSurface: View {
     let item: StoryItemConfig
@@ -115,7 +117,8 @@ struct StoryVideoSurface: View {
     let muted: Bool
     let playing: Bool
     var loop = false
-    var showsSpinner = true
+    var groundAfterFirstFrame: Color = .black
+    var bare = false
     let startMs: Int64?
     var onReady: (AVPlayer) -> Void = { _ in }
     var onEnded: () -> Void = {}
@@ -127,12 +130,17 @@ struct StoryVideoSurface: View {
 
     var body: some View {
         ZStack {
+            if bare {
+                StoryThumbnailStill(item: item, fitOverride: stillFit)
+            }
             MediaVideo(
                 url: item.url,
                 fit: fit.toMediaFit,
                 loop: loop,
                 muted: muted,
                 autoplay: playing,
+                groundAfterFirstFrame: groundAfterFirstFrame,
+                bare: bare,
                 playerKey: poolKey,
                 poolPriority: priority,
                 startMs: startMs,
@@ -148,7 +156,7 @@ struct StoryVideoSurface: View {
                     onFailure()
                 }
             )
-            if failed || (!firstFrameShown && (item.thumbnail != nil || !showsSpinner)) {
+            if failed || (!bare && !firstFrameShown && item.thumbnail != nil) {
                 StoryThumbnailStill(item: item, fitOverride: stillFit)
             }
         }
@@ -199,7 +207,7 @@ private struct StoryThumbnailVideo: View {
             playing: true,
             // A lone full window from 0 loops natively; any other window ends through the driver.
             loop: repeatWindow && item.thumbnailPlayback.durationMode == .full && authoredStartMs == 0,
-            showsSpinner: false,
+            bare: true,
             startMs: authoredStartMs,
             onReady: { ready in
                 player = ready

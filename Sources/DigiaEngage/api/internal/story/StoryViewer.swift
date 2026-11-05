@@ -309,6 +309,9 @@ struct StoryViewerEntry {
     /// Whether the viewer going away before the end reports a dismissal (inline, torn down by its
     /// host from anywhere). Canvas and floater report only from their own close, as on `main`.
     var dismissesOnDisappear = false
+    /// What a video page's letterbox shows after the first frame: black, but the inline story
+    /// passes #1A1A1A as on `main` (OD-18).
+    var videoGroundAfterFirstFrame: Color = .black
 }
 
 // MARK: - Viewer
@@ -417,6 +420,7 @@ struct StoryViewer<Chrome: View>: View {
                 muted: session.muted,
                 playing: running,
                 startMs: session.startMs(for: index),
+                groundAfterFirstFrame: entry.videoGroundAfterFirstFrame,
                 onReady: { ready in
                     guard index == session.currentIndex else { return }
                     player = (index, ready)

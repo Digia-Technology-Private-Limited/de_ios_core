@@ -182,7 +182,7 @@ private struct InlineStoryReporter: StoryViewerReporter {
 /// and close buttons, the item's call to action), 88 pt edge strips to navigate, and the swipe
 /// down / edge swipe to close, as on `main`.
 @MainActor
-private struct InlineStoryOverlayContent: View {
+struct InlineStoryOverlayContent: View {
     let state: InlineStoryOverlayState
 
     private var variables: VariableContext {
@@ -208,7 +208,9 @@ private struct InlineStoryOverlayContent: View {
             tapLayout: .edges(width: 88),
             reportsCompletionOnLoop: false,
             // Any teardown before the last frame is a dismissal (swipe, edge, ESC, close, CTA).
-            dismissesOnDisappear: true
+            dismissesOnDisappear: true,
+            // `main`'s inline story video page letterboxed on this dark grey (OD-18).
+            videoGroundAfterFirstFrame: mediaVideoBackdrop
         )) { context in
             chrome(context)
         }
