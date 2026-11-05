@@ -202,7 +202,7 @@ extension DigiaEngageTests {
         let (sdk, window) = try await makeGuideInstance(stepCount: 2)
         let recorder = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
         let anchor = try #require(window.subviews.first as? DigiaAnchorView)
-        sdk.reportGuideShown()
+        sdk.guideOrchestrator.reportGuideShown()
 
         anchor.removeFromSuperview()
         await nextTurn()
@@ -226,9 +226,9 @@ extension DigiaEngageTests {
             stepCount: 2, frequency: ["stopOn": "experienceCompleted"]
         )
         let recorder = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
-        sdk.reportGuideShown()
+        sdk.guideOrchestrator.reportGuideShown()
         sdk.advanceGuide()
-        sdk.reportGuideShown()
+        sdk.guideOrchestrator.reportGuideShown()
         let anchor = try #require(window.subviews.last as? DigiaAnchorView)
 
         anchor.removeFromSuperview()
@@ -258,11 +258,11 @@ extension DigiaEngageTests {
     func ctaOnLastStepCompletionCarriesDwell() async throws {
         let (sdk, _) = try await makeGuideInstance(stepCount: 2)
         _ = PresentationRecorder(sdk.triggerCampaign("a40-guide", variables: nil))
-        sdk.reportGuideShown()
+        sdk.guideOrchestrator.reportGuideShown()
         sdk.advanceGuide()
-        sdk.reportGuideShown()
+        sdk.guideOrchestrator.reportGuideShown()
 
-        sdk.reportGuideStepClicked(actionType: "dismiss", actionUrl: nil, ctaLabel: "Done")
+        sdk.guideOrchestrator.reportGuideStepClicked(actionType: "dismiss", actionUrl: nil, ctaLabel: "Done")
 
         let entries = try await #require(sdk.services?.analyticsService).queue.peek(maxCount: 100)
         let completed = entries.first {

@@ -9,9 +9,8 @@ extension RenderedUITests {
 /// (`engine_surface_busy_first`), through the real fetch and parse path.
 /// Port of `flutter/core/test/fixture_behaviour/degradation_bundle_test.dart`.
 ///
-/// platform note: the rule fixtures (`degrade_engine_rule_*`) are not ported — this SDK has no
-/// rule engine; a campaign is shown only by a CEP trigger. An unknown campaign type is dropped at
-/// parse (Flutter keeps it as unsupported), so it is asserted as dropped here.
+/// platform note: the rule fixtures (`degrade_engine_rule_*`) are not ported here; the rule engine
+/// has its own suites. An unknown campaign type is kept in the store as unsupported, as Flutter does.
 @Suite("Degradation: campaign bundle", .serialized, .tags(.integration, .behaviour, .contract))
 @MainActor
 struct DegradationBundleTests {
@@ -27,7 +26,6 @@ struct DegradationBundleTests {
         "degrade_engine_missing_id",
         "degrade_engine_missing_key",
         "degrade_engine_missing_type",
-        "degrade_engine_unknown_type_alt_id",
         "degrade_nudge_canvas_version_older",
         "degrade_nudge_canvas_version_newer",
         "degrade_guide_removed_outside_tap_value",
@@ -53,14 +51,20 @@ struct DegradationBundleTests {
 
     // Fails if an unknown campaign type stops being reported: `CampaignModel.fromJson`'s default
     // branch must record `campaign_unsupported` with the type, so the drop is diagnosable.
-    @Test("an unknown campaign type is reported as campaign_unsupported")
+    @Test("an unknown campaign type is reported as campaign_unsupported and costs only itself")
     func unknownTypeIsReported() async throws {
         let unknown = try fixture("degradation/degrade_engine_unknown_type_alt_id")
-        let sdk = try await SdkHarness.start(campaigns: [unknown])
+        let neighbour = try fixture("engine/engine_surface_busy_first")
+        let sdk = try await SdkHarness.start(campaigns: [unknown, neighbour])
         defer { sdk.tearDown() }
+        try sdk.mount { Text("host app") }
 
         let unsupported = sdk.records.filter { $0.reason?.wire == TimelineReason.campaignUnsupported.wire }
         #expect(unsupported.count == 1)
+        let lost = try sdk.deliver(keyOf(unknown))
+        #expect(lost.dropReason == .invalidConfig)
+        try sdk.deliver(keyOf(neighbour))
+        try await sdk.waitUntil("the neighbour is up") { sdk.isShowing(Self.neighbourTitle) }
     }
 
     // A timer is also dropped when the response carries no server clock, so the version guard is

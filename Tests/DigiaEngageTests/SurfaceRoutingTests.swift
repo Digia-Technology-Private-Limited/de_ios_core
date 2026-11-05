@@ -68,7 +68,7 @@ extension DigiaEngageTests {
             sdk.floaterOrchestrator.expand()
             #expect(sdk.floaterOrchestrator.surface == .collapsed)
 
-            sdk.markNudgeDismissed()
+            sdk.nudgeOrchestrator.markNudgeDismissed()
             sdk.floaterOrchestrator.expand()
             #expect(sdk.floaterOrchestrator.surface == .expanded)
         }
@@ -134,7 +134,7 @@ extension DigiaEngageTests {
         func inlineSameSlotDisplayed() throws {
             try start([inlineJson("i1"), inlineJson("i2")])
             let first = deliver("i1", "cep-1")
-            sdk.reportSlotFirstRender(first.payload)
+            sdk.inlineReporter.reportSlotFirstRender(first.payload)
 
             let second = deliver("i2", "cep-2")
 
@@ -151,7 +151,7 @@ extension DigiaEngageTests {
             try start([nudgeJson("welcome"), nudgeJson("sale")])
             _ = deliver("welcome", "cep-1")
             // A never-displayed blocker is not named (SR64).
-            sdk.reportNudgeImpression()
+            sdk.nudgeOrchestrator.reportNudgeImpression()
             _ = deliver("sale", "cep-2")
 
             var record: TimelineRecord?

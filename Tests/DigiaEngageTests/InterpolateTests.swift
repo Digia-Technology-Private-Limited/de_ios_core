@@ -167,20 +167,32 @@ struct InterpolateTests {
         #expect(result == "")
     }
 
-    // MARK: - Identifier grammar (D22′: lowercase only)
+    // MARK: - Identifier grammar (context variables allow mixed case and one dot)
 
-    @Test("uppercase identifier is not substituted")
+    @Test("uppercase identifier is substituted")
     func uppercaseIdentifier() {
         let ctx = VariableContext(values: ["Name": "Alex"], types: ["Name": "string"])
         let result = interpolate("{{Name}}", context: ctx)
-        #expect(result == "")
+        #expect(result == "Alex")
     }
 
-    @Test("underscore prefix identifier is not substituted")
+    @Test("underscore prefix identifier is substituted")
     func underscorePrefixIdentifier() {
         let ctx = VariableContext(values: ["_name": "Alex"], types: ["_name": "string"])
         let result = interpolate("{{_name}}", context: ctx)
-        #expect(result == "")
+        #expect(result == "Alex")
+    }
+
+    @Test("a dotted context variable is substituted")
+    func dottedIdentifier() {
+        let ctx = VariableContext(values: ["user.firstName": "Alex"], types: ["user.firstName": "string"])
+        #expect(interpolate("{{user.firstName}}", context: ctx) == "Alex")
+    }
+
+    @Test("two dots are not an identifier")
+    func twoDotsIdentifier() {
+        let ctx = VariableContext(values: ["a.b.c": "x"], types: ["a.b.c": "string"])
+        #expect(interpolate("{{a.b.c}}", context: ctx) == "")
     }
 
     // MARK: - Multi-placeholder interpolation

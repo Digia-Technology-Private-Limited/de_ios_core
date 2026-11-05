@@ -42,7 +42,7 @@ final class CarouselStepGate {
     private func send() {
         guard exposed, index >= 0, index != sentIndex else { return }
         sentIndex = index
-        SDKInstance.shared.reportCarouselStepViewed(
+        SDKInstance.shared.inlineReporter.reportCarouselStepViewed(
             payload: payload, itemIndex: index + 1, itemTotal: total, auto: auto
         )
     }
