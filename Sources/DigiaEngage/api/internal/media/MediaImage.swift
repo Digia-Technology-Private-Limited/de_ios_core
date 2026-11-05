@@ -127,12 +127,16 @@ struct MediaImage: View {
 
     /// What shows until the picture draws (the still), and after a failure (the error look, with no
     /// still behind it).
+    /// The wrapper ZStack stays the same view in both states: the image library re-runs its load when
+    /// the placeholder slot's root view is replaced, which would fetch a failed URL again.
     @ViewBuilder
     private func still(failed: Bool) -> some View {
-        if failed {
-            errorContent ?? AnyView(MediaErrorPlaceholder(label: "Image failed"))
-        } else {
-            placed(MediaStill(fit: fit, blurHash: blurHash))
+        ZStack {
+            if failed {
+                errorContent ?? AnyView(MediaErrorPlaceholder(label: "Image failed"))
+            } else {
+                placed(MediaStill(fit: fit, blurHash: blurHash))
+            }
         }
     }
 

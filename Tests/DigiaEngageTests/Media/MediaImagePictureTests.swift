@@ -35,10 +35,10 @@ struct MediaImagePictureTests {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("held-bad-blur.png")
-        MediaOrigin.set(.status(200, solidPNG(.red)), for: target, held: true)
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: target, held: true)
         let recorder = HealthRecorder()
 
-        let window = MediaStage.image(url: target.absoluteString, blurHash: "!!! not a blurhash !!!")
+        let window = MediaStage.image(url: target.absoluteString, blurHash: "not-a-blurhash")
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
 
@@ -51,8 +51,8 @@ struct MediaImagePictureTests {
     func transparentPictureShowsThePage() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
-        let target = MediaOrigin.url("ring.png")
-        MediaOrigin.set(.status(200, MediaFixtures.transparentRingPNG()), for: target)
+        let target = MediaOrigin.url("transparent-frame.png")
+        MediaOrigin.set(.status(200, MediaFixtures.transparentFrame), for: target)
         let successes = CallCount()
 
         let window = MediaStage.image(
@@ -86,7 +86,7 @@ struct MediaImagePictureTests {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("quadrants-\(fit.rawValue).png")
-        MediaOrigin.set(.status(200, MediaFixtures.quadrantPNG()), for: target)
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: target)
         let successes = CallCount()
 
         let window = MediaStage.image(
@@ -96,6 +96,11 @@ struct MediaImagePictureTests {
         #expect(await waitUntilMedia { successes.value > 0 })
 
         MediaStage.assertGolden(window, named: golden)
+    }
+
+    @Test("contain with the focal point at the top start puts the whole picture at the top start", .tags(.golden))
+    func alignedTopStartPutsTheLetterboxedPictureAtTheTopStart() async {
+        await drawQuadrants(fit: .contain, focalX: 0, focalY: 0, golden: "image_aligned_top_start")
     }
 
     @Test("a focal point at the top start shows the top start of a cropped picture", .tags(.golden))
@@ -128,7 +133,7 @@ struct MediaImagePictureTests {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("quadrants-bad-focal.png")
-        MediaOrigin.set(.status(200, MediaFixtures.quadrantPNG()), for: target)
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: target)
 
         func render(focalX: CGFloat, focalY: CGFloat, zoom: CGFloat) async -> Data? {
             let successes = CallCount()
@@ -158,7 +163,7 @@ struct MediaImagePictureTests {
         let successes = CallCount()
 
         let window = MediaStage.image(
-            url: target.absoluteString, fit: .contain, blurHash: Self.blurHash, tintColor: .red,
+            url: target.absoluteString, fit: .contain, blurHash: Self.blurHash, tintColor: MediaFixtures.tint,
             onSuccess: { successes.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: target).isEmpty })
@@ -215,8 +220,8 @@ struct MediaImagePictureTests {
         #expect(failures.value == 1)
     }
 
-    @Test("a blank url shows the error placeholder", .tags(.golden))
-    func blankURLShowsPlaceholder() async {
+    @Test("a blank url shows the still only", .tags(.golden))
+    func blankURLShowsTheStillOnly() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let failures = CallCount()
@@ -234,8 +239,8 @@ struct MediaImagePictureTests {
         defer { MediaOrigin.end() }
         let first = MediaOrigin.url("first.png")
         let second = MediaOrigin.url("second.png")
-        MediaOrigin.set(.status(200, MediaFixtures.quadrantPNG()), for: first)
-        MediaOrigin.set(.status(200, solidPNG(.red)), for: second, held: true)
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: first)
+        MediaOrigin.set(.status(200, MediaFixtures.quadrants), for: second, held: true)
         let model = MediaModel(url: first.absoluteString)
         let successes = CallCount()
 

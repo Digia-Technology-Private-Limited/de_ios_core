@@ -7,7 +7,7 @@ import UIKit
 @testable import DigiaEngage
 
 // How `MediaLottie` fits and plays an animation that loaded, over the fake origin. The animation
-// is `MediaFixtures.markerAnimation`: an orange square that slides from the left to the right, so
+// is `media/marker.json` (`MediaFixtures.marker`): an orange square that slides from the left to the right, so
 // the frame on screen shows where the playhead is. Lottie caches a composition by URL, so each
 // test loads its own URL.
 
@@ -34,7 +34,7 @@ struct MediaLottiePlaybackTests {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("marker-\(fit.rawValue).json")
-        MediaOrigin.set(.status(200, MediaFixtures.markerAnimation(frames: 60)), for: target)
+        MediaOrigin.set(.status(200, MediaFixtures.marker), for: target)
 
         let window = MediaStage.lottie(url: target.absoluteString, fit: fit, autoplay: false)
         defer { ComponentTestHost.unmount(window) }
@@ -99,7 +99,7 @@ struct MediaLottiePlaybackTests {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("pinned.json")
-        MediaOrigin.set(.status(200, MediaFixtures.markerAnimation(frames: 60)), for: target)
+        MediaOrigin.set(.status(200, MediaFixtures.marker), for: target)
 
         let window = MediaStage.lottie(url: target.absoluteString, autoplay: true, freezeAt: 0.5)
         defer { ComponentTestHost.unmount(window) }

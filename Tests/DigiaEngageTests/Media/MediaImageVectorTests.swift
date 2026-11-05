@@ -153,7 +153,7 @@ struct MediaImageVectorTests {
         let successes = CallCount()
 
         let window = MediaStage.image(
-            url: target.absoluteString, fit: .contain, tintColor: .red, onSuccess: { successes.value += 1 })
+            url: target.absoluteString, fit: .contain, tintColor: MediaFixtures.tint, onSuccess: { successes.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { successes.value > 0 })
 
