@@ -213,6 +213,25 @@ struct LocalStorageMigratorTests {
         #expect(!FileManager.default.fileExists(atPath: legacyDir.path))
         try? FileManager.default.removeItem(at: caches)
     }
+
+    // Guards the `tech.digia.engage.video` folder name in `deleteLegacyStoryVideoCache` (T5,
+    // R10-06): an empty name would delete the caches directory itself.
+    @Test("main's whole-file story video cache is deleted, and nothing beside it")
+    func legacyStoryVideoCacheIsDeleted() throws {
+        let legacy = caches.appendingPathComponent("tech.digia.engage.video", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try Data("video".utf8).write(to: legacy.appendingPathComponent("clip.mp4"))
+        let sibling = caches.appendingPathComponent("keep.txt")
+        try Data("keep".utf8).write(to: sibling)
+        defer { try? FileManager.default.removeItem(at: caches) }
+
+        LocalStorageMigrator.deleteLegacyStoryVideoCache(in: caches)
+
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
+        #expect(FileManager.default.fileExists(atPath: sibling.path), "only the cache folder goes")
+        // Running again with nothing to delete is fine.
+        LocalStorageMigrator.deleteLegacyStoryVideoCache(in: caches)
+    }
 }
 
 /// Drops writes to `identity.*` while `failIdentityWrites` is set, standing in
