@@ -192,12 +192,14 @@ final class DecisionEngine {
         guard !waiting.isEmpty else { return }
         for (campaign, rule) in waiting {
             guard let wait = rule.wait else { continue }
+            // A signal held before the SDK was ready has already used part of it.
+            let remaining = min(max(wait.ms - ageMs, 0), wait.ms)
             log.d(
-                "Waiting \(wait.ms) ms before the campaign shows",
+                "Waiting \(remaining) ms before the campaign shows",
                 campaign: campaign.campaignKey,
                 stage: .gating,
                 reason: TimelineReason.waitStarted,
-                extras: ["ms": String(wait.ms)]
+                extras: ["ms": String(wait.ms), "remaining_ms": String(remaining)]
             )
         }
         waits.start(
@@ -273,7 +275,7 @@ final class DecisionEngine {
         let key = pending.campaignKey
         let campaign = facts.ready ? facts.find(key) : nil
         guard let campaign else {
-            logWaitEnded(key, outcome: "gone", waitMs: pending.wait.ms)
+            logWaitEnded(key, outcome: "gone")
             return false
         }
         // Checked again, here: leaving the screen and coming back in time is fine.
@@ -287,14 +289,23 @@ final class DecisionEngine {
             campaign, trigger: pending.trigger,
             attributes: facts.attributes, device: facts.device)
         guard let verdict else {
-            logWaitEnded(key, outcome: "gone", waitMs: pending.wait.ms)
+            logWaitEnded(key, outcome: "gone")
             return false
         }
         if verdict.kind == .notTriggered {
-            logWaitEnded(key, outcome: "rule_changed", waitMs: pending.wait.ms)
+            logWaitEnded(key, outcome: "rule_changed")
             return false
         }
-        logWaitEnded(key, outcome: "checked", waitMs: pending.wait.ms)
+        // The time that passed, which a sleeping phone or a held signal makes
+        // differ from the configured length.
+        let elapsedMs = nowMs() - pending.startedAtMs
+        log.d(
+            "Wait ended after \(elapsedMs) ms",
+            campaign: key,
+            stage: .gating,
+            reason: TimelineReason.waitEnded,
+            extras: ["outcome": "checked", "ms": String(pending.wait.ms), "elapsed_ms": String(elapsedMs)]
+        )
         if let reason = ineligibility(
             campaign, verdict: verdict, inAudience: facts.inAudience, capped: facts.capped)
         {
@@ -318,13 +329,11 @@ final class DecisionEngine {
         }
     }
 
-    private func logWaitEnded(_ campaignKey: String, outcome: String, waitMs: Int) {
+    private func logWaitEnded(_ campaignKey: String, outcome: String) {
         let message =
             outcome == "gone"
             ? "Wait ended — the campaign is no longer live"
-            : outcome == "rule_changed"
-                ? "Wait ended — the rule changed and no longer matches"
-                : "Wait ended after \(waitMs) ms"
+            : "Wait ended — the rule changed and no longer matches"
         log.d(
             message,
             campaign: campaignKey,

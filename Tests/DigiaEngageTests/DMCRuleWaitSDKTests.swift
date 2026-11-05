@@ -114,7 +114,7 @@ struct DMCRuleWaitSDKTests {
         #expect(shown(sdk) == nil)
         advance(sdk, ms: 1)
         #expect(shown(sdk) == "login_tip")
-        #expect(withReason("login_tip", .waitEnded).first?.extras == ["outcome": "checked"])
+        #expect(withReason("login_tip", .waitEnded).first?.extras["outcome"] == "checked")
         sdk.controller.dismissNudge()
     }
 
