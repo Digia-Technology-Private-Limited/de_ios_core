@@ -68,7 +68,8 @@ struct InlineGoldenTests {
             FixtureLoader.loadFixture(campaignType: campaignType, fileName: fixture),
             "Failed to load fixture \(campaignType)/\(fixture).json"
         )
-        let (standIn, imageURLs) = withLocalImages(json, fixture: fixture)
+        let (localImages, imageURLs) = withLocalImages(json, fixture: fixture)
+        let standIn = campaignType == "inline_story" ? withVideoStills(localImages) : localImages
         let campaign = try #require(
             try CampaignModel.fromJson(withAutoPlayHeld(standIn) as! [String: Any], designTokens: fixtureTokens(json), timeAnchor: Self.timerNow),
             "Fixture must decode to a campaign"
@@ -178,6 +179,25 @@ struct InlineGoldenTests {
 
     private func isAction(_ dictionary: [String: Any]) -> Bool {
         (dictionary["type"] as? String)?.hasPrefix("Action.") == true
+    }
+
+    /// Points a story's videos at a file that is not there, so every card shows its still (Q1:
+    /// thumbnail, else the dark backdrop), never a first frame that lands at a different moment in
+    /// each capture. Since T8 the cards play through `MediaVideo` straight from disk, so whether a
+    /// first frame is drawn before the capture is timing; `main`'s cards cut a poster from the file
+    /// first. Android's and Flutter's goldens show the same stills (their fake players draw no frame).
+    private func withVideoStills(_ value: Any) -> Any {
+        switch value {
+        case let string as String:
+            guard let url = URL(string: string), url.isFileURL, url.pathExtension.lowercased() == "mp4" else { return string }
+            return "file:///digia-golden-no-video.mp4"
+        case let dictionary as [String: Any]:
+            return dictionary.mapValues(withVideoStills)
+        case let array as [Any]:
+            return array.map(withVideoStills)
+        default:
+            return value
+        }
     }
 
     /// Holds a carousel's autoplay off for a day: at the authored interval the slide on screen would
