@@ -149,6 +149,51 @@ struct StoryViewerTests {
         #expect(other.startMs(for: 0) == 0, "going back on the first page replays it")
     }
 
+    // Guards `loopToFirstPage`'s `replayedIndex = 0` in `StoryViewerSession` (V8-02): tapping on
+    // from page 0 left it mid-play, and the loop's wrap back to it starts it from the top, as on
+    // `main`, on the canvas/floater loop and the inline one alike.
+    @Test("the loop's wrap starts the first page from 0 even though a tap left it mid-play")
+    func wrapRestartsTheFirstPageAtZero() {
+        for completionOnLoop in [true, false] {
+            let session = session(
+                [Self.video(), Self.video()], restart: true, completionOnLoop: completionOnLoop)
+            session.advance(now: 1)
+            #expect(session.currentIndex == 1)
+            session.advance(now: 2)
+
+            #expect(session.currentIndex == 0)
+            #expect(session.startMs(for: 0) == 0, "completionOnLoop \(completionOnLoop)")
+        }
+    }
+
+    // Guards `replayedIndex = next` and `replayTick &+= 1` in `showPage`'s same-page branch
+    // (Z8-02): a one-page story that restarts remounts its page and starts it from 0.
+    @Test("a one-page story that restarts remounts its page and plays it from 0")
+    func onePageRestartReplays() {
+        let session = session([Self.video()], restart: true, completionOnLoop: false)
+        let tick = session.replayTick
+
+        session.advance(now: 1)
+
+        #expect(session.currentIndex == 0)
+        #expect(session.replayTick == tick + 1, "the page is mounted again")
+        #expect(session.startMs(for: 0) == 0)
+    }
+
+    // Guards `replayTick &+= 1` in `goBack`'s first-page branch (Z8-01): back from page 0
+    // remounts it and plays it from 0, never frozen where it was.
+    @Test("going back from the first page remounts it and plays it from 0")
+    func backFromTheFirstPageReplays() {
+        let session = session([Self.video(), Self.video()])
+        let tick = session.replayTick
+
+        session.goBack()
+
+        #expect(session.currentIndex == 0)
+        #expect(session.replayTick == tick + 1)
+        #expect(session.startMs(for: 0) == 0)
+    }
+
     // MARK: What the session reports
 
     // Guards `restartOnCompleted, !reportsCompletionOnLoop` in `StoryViewerSession.advance` (inline

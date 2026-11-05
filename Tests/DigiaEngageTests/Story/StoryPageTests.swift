@@ -112,6 +112,97 @@ struct StoryPageTests {
         #expect(await waitUntilMedia(timeout: 2) { !pool.heldKeys.contains(next) }, "slow: only its first bytes are planned")
     }
 
+    private func viewer(_ stories: [StoryItemConfig], handover: StoryHandover? = nil) -> some View {
+        StoryViewer(entry: StoryViewerEntry(
+            stories: stories, startIndex: 0, handover: handover, restartOnCompleted: false, startMuted: true,
+            defaultDurationMs: 5_000, reporter: SilentReporter(), onDismiss: {}
+        )) { _ in EmptyView() }
+    }
+
+    // Guards the `StoryVideoSurface(... priority: .railThumb ...)` in `StoryThumbnailVideo` (T3): a
+    // rail video tile plays through `MediaVideo`, on the pool, at the thumbnail rank.
+    @Test("a rail video tile plays through MediaVideo on the pool at the thumbnail rank")
+    func railTileRoutesThroughMediaVideoOnThePool() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let video = MediaOrigin.url("rail-tile.mp4")
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
+        let pool = MediaServices.current.videoPool
+        let item = StoryItemConfig(type: .video, url: video.absoluteString, duration: nil)
+
+        let window = MediaStage.mount(StoryRail(
+            items: [item], mode: .simultaneous, cardWidth: 120, cardHeight: 120, cardCornerRadius: 8,
+            cardSpacing: 8, overlayOpen: false, onOpen: { _, _ in }))
+        defer { ComponentTestHost.unmount(window) }
+
+        let key = storyPoolKey(namespace: MediaStage.campaign, index: 0)
+        #expect(await waitUntilMedia { pool.priority(of: key) == .railThumb })
+        #expect(await waitUntilMedia { !MediaOrigin.requests(for: video).isEmpty }, "read through the range cache")
+    }
+
+    // Guards `keepPlayersFor: firstFrameShown ? [] : [index - 1, index + 1]` in
+    // `StoryViewer.drivePlan` (V8-04): after a swipe on, until the new page's first frame, the page
+    // just left keeps its player (a swipe back resumes it, N9), though the plan names only the new one.
+    @Test("the viewer keeps the page just left's player until the new page's first frame")
+    func viewerKeepsTheLeftPlayerUntilTheFirstFrame() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let first = MediaOrigin.url("keep-first.mp4")
+        let second = MediaOrigin.url("keep-second.mp4")
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: first)
+        MediaOrigin.set(.status(200, Data()), for: second, held: true)
+        let pool = MediaServices.current.videoPool
+        let stories = [first, second, second].map { StoryItemConfig(type: .video, url: $0.absoluteString, duration: nil) }
+
+        let window = MediaStage.mount(viewer(stories))
+        defer { ComponentTestHost.unmount(window) }
+        let keyFirst = storyPoolKey(namespace: MediaStage.campaign, index: 0)
+        let keySecond = storyPoolKey(namespace: MediaStage.campaign, index: 1)
+        #expect(await waitUntilMedia { pool.heldPlayer(for: keySecond) != nil }, "page 0 showed its first frame, so page 1 is held")
+        let player = try #require(pool.heldPlayer(for: keyFirst))
+        let duration = try #require(player.currentItem?.duration.seconds)
+        await player.seek(to: CMTime(seconds: duration - 0.4, preferredTimescale: 600))
+
+        // Page 0's video ends and the viewer moves to page 1, whose video never shows a frame.
+        #expect(await waitUntilMedia { pool.priority(of: keySecond) == .onScreen }, "the viewer moved on")
+        ComponentTestHost.drainRunLoop(for: 0.2)
+
+        #expect(pool.heldPlayer(for: keyFirst) === player, "page 0's player is kept for a swipe back")
+        #expect(pool.heldPlayer(for: keySecond) != nil)
+    }
+
+    // Guards `playback.firstFrameShown ? groundAfterFirstFrame : mediaVideoBackdrop` in
+    // `MediaVideo.body` as a handed-over player reaches it (V8-04; Android X8-05): the viewer page
+    // over a player the rail card already holds shows the dark backdrop until the layer reports its
+    // first frame, never the black ground of a frame already shown.
+    @Test("a handed-over player's page shows the backdrop, not black, until its first frame")
+    func handoverShowsNoBlackFrame() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let video = MediaOrigin.url("handover.mp4")
+        MediaOrigin.set(.status(200, Data()), for: video, held: true)
+        let pool = MediaServices.current.videoPool
+        let item = StoryItemConfig(type: .video, url: video.absoluteString, duration: nil)
+        let key = storyPoolKey(namespace: MediaStage.campaign, index: 0)
+        let url = try #require(URL(string: item.url))
+        let tile = try #require(pool.borrow(key: key, url: url, priority: .railThumb))
+        let handover = try #require(storyRailHandover(item: item, playing: true, key: key, pool: pool))
+
+        let window = MediaStage.mount(viewer([item], handover: handover))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { !MediaOrigin.requests(for: video).isEmpty })
+        ComponentTestHost.drainRunLoop(for: 0.2)
+
+        #expect(pool.heldPlayer(for: key) === tile, "the page plays the card's own player")
+        let image = ComponentTestHost.settledImage(of: window)
+        let corner = pixelColor(
+            of: image,
+            atX: Int(((image.size.width - MediaStage.size.width) / 2 + 6) * image.scale),
+            y: Int(((image.size.height - MediaStage.size.height) / 2 + 6) * image.scale))
+        #expect(corner.map { colorsNearly($0, Self.backdrop, tolerance: 0.03) } == true, "the dark backdrop, not black")
+        MediaOrigin.release(video)
+    }
+
     /// Whether something lighter than the backdrop is drawn in the stage box.
     private static func lit(_ image: UIImage) -> Bool {
         let scale = image.scale
