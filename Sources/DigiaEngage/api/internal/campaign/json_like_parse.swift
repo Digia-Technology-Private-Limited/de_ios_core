@@ -49,6 +49,14 @@ extension Dictionary where Key == String, Value == Any {
         return value.flatMap { $0 > 0 ? $0 : nil }
     }
 
+    /// Int of any value, zero included, or `nil` for a missing/null/non-number.
+    /// Frequency caps keep 0 — a zero cap means the campaign never shows — so
+    /// they must not use `positiveInt`.
+    func anyInt(_ key: String) -> Int? {
+        guard let raw = self[key], !(raw is NSNull) else { return nil }
+        return (raw as? NSNumber)?.intValue
+    }
+
     func object(_ key: String) -> [String: Any]? {
         self[key] as? [String: Any]
     }

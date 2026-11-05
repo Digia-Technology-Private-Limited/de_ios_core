@@ -149,15 +149,17 @@ final class DecisionEngine {
     private func routeInlineWinners(_ winners: [SlotWinner], signal: RuleSignal) throws {
         for slotWinner in winners {
             let campaign = slotWinner.campaign
-            if facts.slotCampaignKey(slotWinner.slot) == campaign.campaignKey {
+            let inSlot = facts.slotCampaignKey(slotWinner.slot) == campaign.campaignKey
+            if inSlot {
                 log.d(
                     "Skipped — already in slot \(slotWinner.slot)",
                     campaign: campaign.campaignKey)
-                continue
+            } else {
+                for candidate in [campaign] + slotWinner.heldBack {
+                    reportDefaultedPriority(candidate)
+                }
             }
-            for candidate in [campaign] + slotWinner.heldBack {
-                reportDefaultedPriority(candidate)
-            }
+            // The others lose to this winner whether or not it routes again.
             for loser in slotWinner.heldBack {
                 log.d(
                     "Not shown — \(campaign.campaignKey) wins slot \(slotWinner.slot)",
@@ -176,6 +178,7 @@ final class DecisionEngine {
                     "Wait ignored — an inline campaign shows at once",
                     campaign: campaign.campaignKey)
             }
+            guard !inSlot else { continue }
             try route(campaign, signal.name, signal)
         }
     }

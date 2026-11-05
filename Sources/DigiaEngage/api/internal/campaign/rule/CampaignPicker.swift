@@ -112,7 +112,9 @@ func compareByPriority(
     return aKey.utf16.lexicographicallyPrecedes(bKey.utf16) ? -1 : 1
 }
 
-/// Why an evaluated campaign may not show, or nil when it may.
+/// Why an evaluated campaign may not show, or nil when it may. An inline
+/// campaign is never capped: the SDK neither checks its caps nor records a
+/// show for it.
 func ineligibility(
     _ campaign: CampaignModel,
     verdict: RuleVerdict,
@@ -124,7 +126,7 @@ func ineligibility(
     case .malformedRule: return .malformedRule
     case .conditionFailed: return .conditionFailed
     case nil where !inAudience(campaign): return .notInAudience
-    case nil where capped(campaign): return .capped
+    case nil where campaign.inlineSlotKey == nil && capped(campaign): return .capped
     default: return nil
     }
 }
