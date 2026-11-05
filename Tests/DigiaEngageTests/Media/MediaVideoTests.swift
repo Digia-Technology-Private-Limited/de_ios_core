@@ -35,6 +35,20 @@ struct MediaVideoRuleTests {
         #expect(MediaFit.contain.videoGravity == .resizeAspect)
         #expect(MediaFit.fill.videoGravity == .resize)
     }
+
+    // R7-03: guards the CoreMedia -12938 line in `mediaCacheHTTPStatus`. The error shapes are the
+    // ones a simulator run logged for a stream playlist answered 404 and 500 (the error log was empty).
+    @Test("a stream playlist's 404 reports http_4xx and its 5xx reports nothing")
+    func streamNotFoundIsHttp4xx() {
+        func itemError(_ urlCode: Int, _ coreMediaCode: Int) -> NSError {
+            NSError(domain: NSURLErrorDomain, code: urlCode, userInfo: [
+                NSUnderlyingErrorKey: NSError(domain: "CoreMediaErrorDomain", code: coreMediaCode),
+            ])
+        }
+        #expect(mediaCacheHTTPStatus(in: itemError(-1100, -12938)) == 404)
+        #expect(mediaFailureCause(httpStatus: mediaCacheHTTPStatus(in: itemError(-1100, -12938))) == "http_4xx")
+        #expect(mediaCacheHTTPStatus(in: itemError(-1008, -16847)) == nil)
+    }
 }
 
 extension RenderedUITests {
