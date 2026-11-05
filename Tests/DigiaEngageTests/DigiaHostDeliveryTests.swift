@@ -124,8 +124,8 @@ extension DigiaEngageTests {
             let dropped = deliver("help-only")
             _ = deliver("not-in-bundle")
             let shown = deliver("shown")
-            sdk.reportNudgeImpression()
-            sdk.markNudgeDismissed()
+            sdk.nudgeOrchestrator.reportNudgeImpression()
+            sdk.nudgeOrchestrator.markNudgeDismissed()
             try? await Task.sleep(nanoseconds: 100_000_000)
 
             let events = await (try #require(sdk.services?.analyticsService)).queue.peek(maxCount: 100)
@@ -161,8 +161,8 @@ extension DigiaEngageTests {
                 _ = sdk.deliver(CEPTriggerPayload(cepCampaignId: "cep-\(key)", campaignKey: key, cepMetadata: [:]))
             }
             deliver("once")
-            sdk.reportNudgeImpression()
-            sdk.markNudgeDismissed()
+            sdk.nudgeOrchestrator.reportNudgeImpression()
+            sdk.nudgeOrchestrator.markNudgeDismissed()
             deliver("once")
             deliver("survey-a")
             deliver("survey-b")

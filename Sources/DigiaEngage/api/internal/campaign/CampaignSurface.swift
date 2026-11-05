@@ -10,11 +10,9 @@ import Foundation
 /// ``CampaignConfigModel`` in ``SDKInstance/startCampaign(_:)``, so adding a
 /// config subtype fails to compile until it is routed.
 ///
-/// Mirrors Flutter's `CampaignSurface` (`campaign_surface.dart`). The one
-/// structural difference: iOS cancel and timeout share a single teardown path
-/// (``SDKInstance/dismissSurfaces(for:)-style`` delivery-identity matching),
-/// so there is one `dismiss` here instead of Flutter's `dismissCampaign` plus
-/// `dismissTimedOut`.
+/// Cancel and timeout share a single teardown path (the delivery-identity
+/// matching in `SDKInstance.dismissSurfaces(for:)`), so there is one `dismiss`
+/// here rather than separate cancel and timeout methods.
 @MainActor
 protocol CampaignSurface: AnyObject {
     /// What this surface holds that has not settled yet, including a campaign

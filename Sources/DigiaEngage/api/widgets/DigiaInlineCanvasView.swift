@@ -49,7 +49,7 @@ struct DigiaInlineCanvasView: View {
             visible: visible
         )) {
             if visible, !Task.isCancelled, let resolved, resolved.canvas != nil {
-                SDKInstance.shared.reportInlineTimerStateRender(
+                SDKInstance.shared.inlineReporter.reportInlineTimerStateRender(
                     payload: payload,
                     config: config,
                     resolved: resolved
@@ -91,7 +91,7 @@ struct DigiaInlineCanvasView: View {
             margin: timerState?.margin ?? config.margin,
             onAction: { request in
                 if let timerState {
-                    SDKInstance.shared.reportInlineTimerStateRender(
+                    SDKInstance.shared.inlineReporter.reportInlineTimerStateRender(
                         payload: payload, config: config, resolved: timerState
                     )
                 }
@@ -112,15 +112,15 @@ struct DigiaInlineCanvasView: View {
             case let .carouselSlideViewed(index, total, auto):
                 stepGate.onStep(index: index, total: total, auto: auto)
             case .storyOpened:
-                SDKInstance.shared.reportStoryOpened(payload)
+                SDKInstance.shared.storyReporter.reportStoryOpened(payload)
             case let .storyPageViewed(index, total):
-                SDKInstance.shared.reportStoryStepViewed(
+                SDKInstance.shared.storyReporter.reportStoryStepViewed(
                     payload, itemIndex: index + 1, itemTotal: total
                 )
             case let .storyPageDismissed(index, _):
-                SDKInstance.shared.reportStoryStepDismissed(payload, itemIndex: index + 1)
+                SDKInstance.shared.storyReporter.reportStoryStepDismissed(payload, itemIndex: index + 1)
             case let .storyCompleted(total, timeToCompleteMs):
-                SDKInstance.shared.reportStoryCompleted(
+                SDKInstance.shared.storyReporter.reportStoryCompleted(
                     payload,
                     itemTotal: total,
                     timeToCompleteMs: timeToCompleteMs.map(Int64.init)
@@ -135,20 +135,20 @@ struct DigiaInlineCanvasView: View {
         timerContext: TimerEventContext?
     ) {
         guard SDKInstance.shared.inlineController.getCampaign(config.slotKey) == payload else { return }
-        if timerContext == nil { SDKInstance.shared.reportSlotFirstRender(payload) }
+        if timerContext == nil { SDKInstance.shared.inlineReporter.reportSlotFirstRender(payload) }
         guard SDKInstance.shared.inlineController.getCampaign(config.slotKey) == payload else { return }
-        SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: request.elementId, isPrimary: request.isPrimary)
+        SDKInstance.shared.nudgeOrchestrator.reportPrimaryCTAClick(payload: payload, elementId: request.elementId, isPrimary: request.isPrimary)
         guard !request.actions.isEmpty else { return }
         let action = request.actions.first?.resolved(with: variables)
         // A tap inside a slide or a page is a *step* click, matching what the legacy carousel and
         // story report; a tap on the card itself stays a canvas click.
         switch request.step?.kind {
         case .carouselSlide:
-            SDKInstance.shared.reportCarouselStepClicked(
+            SDKInstance.shared.inlineReporter.reportCarouselStepClicked(
                 payload: payload, itemIndex: (request.step?.index ?? 0) + 1, action: action
             )
         case .storyPage:
-            SDKInstance.shared.reportStoryStepClicked(
+            SDKInstance.shared.storyReporter.reportStoryStepClicked(
                 payload,
                 itemIndex: (request.step?.index ?? 0) + 1,
                 ctaLabel: request.label,
@@ -156,7 +156,7 @@ struct DigiaInlineCanvasView: View {
                 actionUrl: action?.analyticsURL
             )
         case nil:
-            SDKInstance.shared.emitInlineCanvasClick(
+            SDKInstance.shared.inlineReporter.emitInlineCanvasClick(
                 payload: payload,
                 elementId: request.elementId,
                 ctaLabel: request.label,
@@ -170,7 +170,7 @@ struct DigiaInlineCanvasView: View {
         // session. That deliberately bypasses the stickiness which otherwise
         // keeps an inline campaign alive across navigation.
         let dismiss = {
-            SDKInstance.shared.dismissInlineCanvas(
+            SDKInstance.shared.inlineReporter.dismissInlineCanvas(
                 slotKey: config.slotKey,
                 payload: payload,
                 timerContext: timerContext

@@ -3,17 +3,12 @@ import Foundation
 // One ``CampaignSurface`` per kind, in the order the SDK asks them. Each holds
 // its kind's branch of what used to be a switch in ``SDKInstance`` —
 // `surfaceOccupants`, `settleSuperseded`, `dismissSurfaces(for:)` and
-// `startCampaign` — moved verbatim; only the receiver changed.
+// `startCampaign`.
 //
-// They are separate classes (not extensions) because A2 gives each surface
+// They are separate classes (not extensions) because each surface has
 // its own reporter next to its orchestrator; the state they read — the nudge
-// overlay, survey tokens, the emitter — still lives on the SDK for now.
-//
-// Mirrors Flutter's `campaign_surfaces.dart` (PR #252), adapted for the
-// iOS-only pieces: the classic-RN external guide, `presentationId`-stamped
-// delivery matching, and the floater busy-surface detail.
+// overlay, survey tokens, the emitter — lives on the SDK.
 
-/// The SDK's one logging style — see ``DigiaLogger``.
 private let surfaceLog = DigiaLogger()
 
 /// Whether `other` is the delivery `payload` identifies: same CEP campaign,
@@ -59,7 +54,7 @@ final class NudgeCampaignSurface: CampaignSurface {
             nudge.payload.cepCampaignId == occupant.cepCampaignId
         else { return }
         if sdk.dwellTracker.elapsedMs(occupant.cepCampaignId) != nil {
-            sdk.markNudgeDismissed(reason: .superseded)
+            sdk.nudgeOrchestrator.markNudgeDismissed(reason: .superseded)
         } else {
             sdk.controller.dismissNudge()
             _ = sdk.dwellTracker.consumeDwellMs(occupant.cepCampaignId)
@@ -73,7 +68,7 @@ final class NudgeCampaignSurface: CampaignSurface {
         // and the CEP the same outcome. A watchdog's teardown reaches here already settled, unseen, and
         // stays silent.
         if sdk.coordinator.ownerOf(payload)?.state == .displaying {
-            sdk.markNudgeDismissed(reason: .cancelled)
+            sdk.nudgeOrchestrator.markNudgeDismissed(reason: .cancelled)
         } else {
             sdk.controller.dismissNudge()
         }
@@ -105,7 +100,7 @@ final class SurveySurface: CampaignSurface {
         if sdk.dwellTracker.elapsedMs(occupant.cepCampaignId) != nil {
             // R3-D5 (SR69): the fields a user close sends, from the renderer.
             let progress = sdk.surveyOrchestrator.progress()
-            sdk.markSurveyDismissed(
+            sdk.surveyReporter.markSurveyDismissed(
                 abandonedAtItem: progress?.abandonedAtItem,
                 answeredCount: progress?.answeredCount,
                 reason: .superseded
@@ -113,7 +108,7 @@ final class SurveySurface: CampaignSurface {
         } else {
             sdk.surveyOrchestrator.dismiss()
             _ = sdk.dwellTracker.consumeDwellMs(occupant.cepCampaignId)
-            sdk.clearQuestionViewedAt(token: state.token)
+            sdk.surveyReporter.clearQuestionViewedAt(token: state.token)
             sdk.events.toCep(.dismissed(reason: .superseded), payload: state.payload)
         }
     }
@@ -156,7 +151,7 @@ final class GuideSurface: CampaignSurface {
             )
             return .accepted(payload: payload, kind: .modal)
         }
-        // As Flutter: skip steps with no canvas, and show the rest.
+        // Skip steps with no canvas, and show the rest.
         var canvasGuide = guideConfig
         canvasGuide.steps = guideConfig.steps.filter { $0.widgetConfig.canvas != nil }
         // The surface rule has cleared the screen, so a refusal here is the
@@ -167,7 +162,7 @@ final class GuideSurface: CampaignSurface {
             sdk.logNativeGuideStage("route", "result=dropped reason=invalid_config campaign_key=\(key)")
             return request.invalidConfig("guide could not start", cause: "start_failed")
         }
-        sdk.guideCompletionFired = false
+        sdk.guideOrchestrator.guideCompletionFired = false
         sdk.logNativeGuideStage("route", "result=accepted campaign_key=\(key)")
         return .accepted(payload: payload, kind: .modal)
     }
@@ -191,12 +186,12 @@ final class GuideSurface: CampaignSurface {
             if sdk.dwellTracker.elapsedMs(occupant.cepCampaignId) != nil {
                 // No `completed:` override, so a completion the CTA already
                 // fired wins (R3-02, R4-D2): CEP `completed`, no Digia dismiss.
-                sdk.dismissGuide(reason: .superseded)
+                sdk.guideOrchestrator.dismissGuide(reason: .superseded)
             } else {
                 sdk.guideOrchestrator.dismiss()
                 _ = sdk.dwellTracker.consumeDwellMs(occupant.cepCampaignId)
-                sdk.guideCompletionFired = false
-                sdk.pendingGuideDismissReason = nil
+                sdk.guideOrchestrator.guideCompletionFired = false
+                sdk.guideOrchestrator.pendingGuideDismissReason = nil
                 sdk.events.toCep(.dismissed(reason: .superseded), payload: state.payload)
             }
         } else if let external = sdk.activeExternalGuide,

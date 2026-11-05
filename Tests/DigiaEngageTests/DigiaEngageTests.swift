@@ -804,16 +804,16 @@ struct DigiaEngageTests {
                     cepMetadata: [:])))
 
         #expect(!recorder.isSettled)
-        SDKInstance.shared.reportGuideShown()
+        SDKInstance.shared.guideOrchestrator.reportGuideShown()
         SDKInstance.shared.advanceGuide()
-        SDKInstance.shared.reportGuideStepClicked(
+        SDKInstance.shared.guideOrchestrator.reportGuideStepClicked(
             actionType: "dismiss",
             actionUrl: nil,
             ctaLabel: "Close",
             action: .dismiss,
             elementId: "primary"
         )
-        SDKInstance.shared.dismissGuide()
+        SDKInstance.shared.guideOrchestrator.dismissGuide()
 
         #expect(recorder.signals == [.displayed])
         // The last step's CTA completes the guide; completed wins (SR71).
@@ -973,17 +973,17 @@ struct DigiaEngageTests {
                 cepCampaignId: "inline", campaignKey: "inline", cepMetadata: [:]))
         let payload = recorder.payload
 
-        SDKInstance.shared.reportStoryOpened(payload)
-        SDKInstance.shared.reportStoryStepClicked(
+        SDKInstance.shared.storyReporter.reportStoryOpened(payload)
+        SDKInstance.shared.storyReporter.reportStoryStepClicked(
             payload, itemIndex: 1, ctaLabel: "Continue", actionType: "openUrl", actionUrl: nil)
-        SDKInstance.shared.reportCarouselStepClicked(payload: payload, itemIndex: 1, action: nil)
-        SDKInstance.shared.reportBannerClicked(payload: payload, action: nil)
-        SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: "secondary", isPrimary: false)
+        SDKInstance.shared.inlineReporter.reportCarouselStepClicked(payload: payload, itemIndex: 1, action: nil)
+        SDKInstance.shared.inlineReporter.reportBannerClicked(payload: payload, action: nil)
+        SDKInstance.shared.nudgeOrchestrator.reportPrimaryCTAClick(payload: payload, elementId: "secondary", isPrimary: false)
         #expect(recorder.signals.isEmpty)
 
-        SDKInstance.shared.reportClassicStoryOpened(payload, index: 0)
-        SDKInstance.shared.reportClassicCarouselContainerClicked(payload)
-        SDKInstance.shared.reportPrimaryCTAClick(payload: payload, elementId: "primary", isPrimary: true)
+        SDKInstance.shared.storyReporter.reportClassicStoryOpened(payload, index: 0)
+        SDKInstance.shared.inlineReporter.reportClassicCarouselContainerClicked(payload)
+        SDKInstance.shared.nudgeOrchestrator.reportPrimaryCTAClick(payload: payload, elementId: "primary", isPrimary: true)
         // A click promotes a presentation that never reported an impression, so
         // G3's "displayed first" holds for the plugin either way.
         #expect(recorder.displayed)
@@ -1006,12 +1006,12 @@ struct DigiaEngageTests {
         #expect(SDKInstance.shared.surveyOrchestrator.start(
             payload: recorder.payload, config: config))
 
-        SDKInstance.shared.reportSurveyWelcomeStart()
-        SDKInstance.shared.reportSurveyQuestionSkipped(nodeId: "node-1", itemIndex: 1)
-        SDKInstance.shared.reportSurveyCompleted(response: [:])
+        SDKInstance.shared.surveyReporter.reportSurveyWelcomeStart()
+        SDKInstance.shared.surveyReporter.reportSurveyQuestionSkipped(nodeId: "node-1", itemIndex: 1)
+        SDKInstance.shared.surveyReporter.reportSurveyCompleted(response: [:])
         #expect(recorder.clickedElementIds.isEmpty)
 
-        SDKInstance.shared.reportSurveyStartClicked()
+        SDKInstance.shared.surveyReporter.reportSurveyStartClicked()
         #expect(recorder.clickedElementIds == ["welcome_start"])
     }
 
@@ -1039,7 +1039,7 @@ struct DigiaEngageTests {
         SDKInstance.shared.controller.showNudge(
             DigiaNudgePresentation(config: config, payload: payload, variables: nil))
 
-        SDKInstance.shared.reportPrimaryCTAClick(elementId: "secondary", isPrimary: false)
+        SDKInstance.shared.nudgeOrchestrator.reportPrimaryCTAClick(elementId: "secondary", isPrimary: false)
         #expect(recorder.clickedElementIds.isEmpty)
         let buttons = config.layout.children.compactMap { node -> NudgeButton? in
             if case .button(let button) = node { return button }
@@ -1047,7 +1047,7 @@ struct DigiaEngageTests {
         }
         #expect(buttons.map(\.isPrimary) == [false, false, true])
         for button in buttons {
-            SDKInstance.shared.reportPrimaryCTAClick(elementId: "cta_primary", isPrimary: button.isPrimary)
+            SDKInstance.shared.nudgeOrchestrator.reportPrimaryCTAClick(elementId: "cta_primary", isPrimary: button.isPrimary)
         }
         #expect(recorder.clickedElementIds == ["cta_primary"])
 
@@ -1058,9 +1058,9 @@ struct DigiaEngageTests {
         ]))
         SDKInstance.shared.controller.showNudge(
             DigiaNudgePresentation(config: canvasConfig, payload: payload, variables: nil))
-        SDKInstance.shared.reportPrimaryCTAClick(elementId: "secondary", isPrimary: false)
+        SDKInstance.shared.nudgeOrchestrator.reportPrimaryCTAClick(elementId: "secondary", isPrimary: false)
         #expect(recorder.clickedElementIds.count == 1)
-        SDKInstance.shared.reportPrimaryCTAClick(elementId: "primary", isPrimary: true)
+        SDKInstance.shared.nudgeOrchestrator.reportPrimaryCTAClick(elementId: "primary", isPrimary: true)
         #expect(recorder.clickedElementIds == ["cta_primary", "primary"])
     }
 }
