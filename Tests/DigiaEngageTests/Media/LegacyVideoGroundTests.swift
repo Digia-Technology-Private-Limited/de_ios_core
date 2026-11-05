@@ -6,17 +6,17 @@ import UIKit
 
 @testable import DigiaEngage
 
-// OD-12: on legacy canvas and nudge video the letterbox after the first frame is black, as on
-// `main`. `MediaVideo`'s #1A1A1A stays for the loading still and the new surfaces.
+// OD-16: the letterbox after the first frame is black by default, on every surface. `MediaVideo`'s
+// #1A1A1A is only the loading ground before the first frame.
 
 extension RenderedUITests {
 @MainActor
 @Suite("Legacy video ground", .serialized, .tags(.media, .component, .canvas))
 struct LegacyVideoGroundTests {
-    // Fails if `groundAfterFirstFrame: .black` goes from the `MediaVideo(...)` call in
-    // `CanvasVideoRenderer.body`, or if `MediaVideo.body` draws `mediaVideoBackdrop` after the
-    // first frame instead of `groundAfterFirstFrame`.
-    @Test("a contain canvas video without controls letterboxes on black after the first frame")
+    // Fails if `MediaVideo`'s `groundAfterFirstFrame` default (`.black`) changes, or if
+    // `MediaVideo.body` draws `mediaVideoBackdrop` after the first frame instead of
+    // `groundAfterFirstFrame`.
+    @Test("a contain video letterboxes on black after the first frame by default")
     func canvasLetterboxIsBlackAfterTheFirstFrame() async throws {
         MediaOrigin.install()
         MediaServices.override(videoSession: MediaOrigin.session())
