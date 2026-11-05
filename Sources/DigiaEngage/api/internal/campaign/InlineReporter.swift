@@ -3,9 +3,6 @@ import Foundation
 /// Reports inline slots — carousel, banner, canvas and timer — as they paint
 /// and are tapped.
 ///
-/// Mirrors Flutter's `InlineReporter`, which also owns the inline-canvas
-/// methods.
-///
 /// Inline impressions fire at first render; dismissal fires at final removal.
 /// Inline campaigns are never frequency-capped.
 @MainActor
@@ -91,7 +88,6 @@ final class InlineReporter {
         ctx.events.clicked(payload: payload, elementId: "carousel_container")
     }
 
-    /// A carousel item (or its CTA) was tapped.
     func reportCarouselStepClicked(
         payload: CEPTriggerPayload, itemIndex: Int, action: EngageAction?
     ) {

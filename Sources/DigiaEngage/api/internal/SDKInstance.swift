@@ -193,7 +193,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Every place a campaign can occupy the screen, asked in this order. Only
     /// the occupant order depends on it: it is the order a live test supersedes
     /// occupants in, and which of two blockers in one column is reported.
-    /// Mirrors Flutter's `_surfaces`.
     lazy var surfaces: [any CampaignSurface] = [
         nudgeSurface, surveySurface, guideSurface, pipSurface, floaterStorySurface, inlineSurface,
     ]
@@ -205,7 +204,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     lazy var inlineSurface = InlineSurface(self)
 
     /// What every surface's reporter reads from the SDK.
-    /// Mirrors Flutter's `_surfaceContext`.
     ///
     /// Hooks are closures, not tear-offs, so building an orchestrator does not
     /// build the reporter that reads it.

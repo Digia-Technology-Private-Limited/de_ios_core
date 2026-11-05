@@ -2,13 +2,11 @@ import Foundation
 
 /// Reports the nudge on screen — its impression, clicks and dismissal.
 ///
-/// Mirrors Flutter's `NudgeOrchestrator` in name: on iOS
-/// the overlay itself lives in `DigiaOverlayController`, so this owns the
+/// The overlay itself lives in `DigiaOverlayController`, so this owns the
 /// lifecycle reporting rather than the route.
 ///
 /// Impression and Dismissed go to both CEP and Digia analytics (toBoth); a
-/// CTA Click is a Digia-only engagement signal (toDigia), matching
-/// Android's NudgeNodeRenderer.
+/// CTA Click is a Digia-only engagement signal (toDigia).
 @MainActor
 final class NudgeOrchestrator {
     init(_ ctx: SurfaceContext) { self.ctx = ctx }

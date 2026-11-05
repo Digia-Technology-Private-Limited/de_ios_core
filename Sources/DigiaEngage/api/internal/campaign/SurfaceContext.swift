@@ -8,9 +8,8 @@ import Foundation
 /// (live-test bookkeeping, the campaign store, logging) — those stay behind
 /// `sdk` rather than growing this interface.
 ///
-/// Mirrors Flutter's `SurfaceContext`. Two iOS-specific behaviors
-/// are preserved: live tests never consume frequency budget, and `recordShow`
-/// / `recordCompleted` take the store's frequency policy, as the SDK did.
+/// Two behaviors are preserved: live tests never consume frequency budget, and
+/// `recordShow` / `recordCompleted` take the store's frequency policy.
 @MainActor
 final class SurfaceContext {
     init(sdk: SDKInstance) { self.sdk = sdk }

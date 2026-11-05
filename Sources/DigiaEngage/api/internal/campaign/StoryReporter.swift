@@ -3,8 +3,7 @@ import Foundation
 /// Reports a story's frames, shared by the inline story and the story
 /// floater.
 ///
-/// Mirrors Flutter's `StoryReporter`. The two
-/// `reportClassic*` methods are iOS-only (classic RN bridge) and move with
+/// The two `reportClassic*` methods serve the classic RN bridge and move with
 /// their surface's reporter.
 @MainActor
 final class StoryReporter {
@@ -17,7 +16,7 @@ final class StoryReporter {
         ctx.events.toDigia(StoriesEvent.Opened(), payload: payload)
     }
 
-    /// The CEP's click names the story opened, `story_item_<n>` (1-based), as on Flutter.
+    /// The CEP's click names the story opened, `story_item_<n>` (1-based).
     func reportClassicStoryOpened(_ payload: CEPTriggerPayload, index: Int) {
         ctx.events.clicked(payload: payload, elementId: "story_item_\(index + 1)")
     }
@@ -28,7 +27,6 @@ final class StoryReporter {
             StoriesEvent.StepViewed(itemIndex: itemIndex, itemTotal: itemTotal), payload: payload)
     }
 
-    /// A CTA inside a story frame was tapped.
     func reportStoryStepClicked(
         _ payload: CEPTriggerPayload,
         itemIndex: Int,

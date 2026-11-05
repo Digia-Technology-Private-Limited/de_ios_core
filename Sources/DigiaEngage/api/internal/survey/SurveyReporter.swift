@@ -3,8 +3,6 @@ import Foundation
 /// Reports the active survey's lifecycle as the renderer walks it. Each call
 /// fires the matching experience event to the CEP and to Digia analytics.
 ///
-/// Mirrors Flutter's `SurveyReporter`.
-///
 /// CEP plugin sees: Impressed (started), Dismissed (every teardown — closed
 /// without finishing AND completed; all routed through markSurveyDismissed).
 /// Internal analytics sees: Answered, Completed.
@@ -91,7 +89,7 @@ final class SurveyReporter {
     /// An eligible optional question was skipped (advanced without an answer).
     func reportSurveyQuestionSkipped(nodeId: String, itemIndex: Int) {
         guard let state = orchestrator.state else { return }
-        // No welcome-start Clicked here: a skip is not an engagement with the survey, as on Flutter. Only an
+        // No welcome-start Clicked here: a skip is not an engagement with the survey. Only an
         // answer stands in for the missing welcome's Start.
         guard let block = state.config.blockForNode(nodeId) else { return }
         questionViewedAt.removeValue(forKey: Self.questionKey(token: state.token, nodeId: nodeId))
@@ -285,7 +283,7 @@ final class SurveyReporter {
         questionViewedAt = questionViewedAt.filter { !$0.key.hasPrefix(prefix) }
     }
 
-    // MARK: - Survey answer derivations (mirror Android's SurveyConfig helpers)
+    // MARK: - Survey answer derivations
 
     /// Converts a `JSONValue` map to a Foundation map for JSON serialization,
     /// dropping `null` entries.

@@ -3,9 +3,8 @@ import Foundation
 /// Reports a PiP's lifecycle, from the orchestrator's hooks and the renderer's
 /// taps.
 ///
-/// Mirrors Flutter's `PipReporter` in name — on
-/// iOS the PiP is called a floater, so the vocabulary here is the shared
-/// `FloaterEvent` one both stacks already use.
+/// The PiP is called a floater here, so the vocabulary is the existing
+/// `FloaterEvent` one.
 ///
 /// Impression, Dismissed, and Completed go to both CEP and Digia analytics —
 /// except Completed, which has no CEP case. Step/chrome/CTA signals are
@@ -34,7 +33,7 @@ final class PipReporter {
     /// SDK chrome click: expand, collapse, mute/unmute, play/pause. **Never** the
     /// × — that routes straight to `dismissFloater`/`endFloaterExpanded` with no
     /// Clicked report (see `FloaterEvent.Clicked`'s kdoc; this exact bug already
-    /// drove dismissal rate to a permanent 0% once in the Flutter build).
+    /// drove dismissal rate to a permanent 0% once).
     /// `pipState` is derived here from the live surface, not caller-supplied, so
     /// it can never go stale relative to what actually happened.
     func reportFloaterClicked(elementId: String, actionType: String, ctaRole: String) {
@@ -57,8 +56,7 @@ final class PipReporter {
     ///
     /// No `ctaRole` parameter, unlike `reportFloaterClicked` — every authored CTA here
     /// is a genuine conversion with no chrome/content ambiguity, so `FloaterEvent
-    /// .StepClicked`'s own default (`"primary"`) applies; mirrors Android's identical
-    /// `DigiaInstance.reportFloaterStepClicked` signature.
+    /// .StepClicked`'s own default (`"primary"`) applies.
     func reportFloaterStepClicked(
         elementId: String, ctaLabel: String, actionType: String?, actionUrl: String?
     ) {

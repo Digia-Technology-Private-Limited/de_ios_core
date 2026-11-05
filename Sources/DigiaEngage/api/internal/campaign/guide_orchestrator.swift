@@ -1,7 +1,6 @@
 import Foundation
 import Combine
 
-/// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger()
 
 // Ported from Android `GuideOrchestrator.kt`. Drives a multi-step guide
@@ -49,8 +48,7 @@ final class GuideOrchestrator: ObservableObject {
     var guideCompletionFired = false
     private var lastReportedGuideStep: (token: Int64, index: Int)?
     /// Terminal reason the initiator knows and the dismiss call does not carry
-    /// directly — consumed once by the next guide dismiss. Mirrors Flutter's
-    /// `_pendingDismissReason`.
+    /// directly — consumed once by the next guide dismiss.
     var pendingGuideDismissReason: DismissReason?
     /// Screen the current guide step showed on — an anchor that unmounts after
     /// a host screen change is a screen exit, in place it is a lost target.
@@ -109,9 +107,8 @@ final class GuideOrchestrator: ObservableObject {
 
 // MARK: - Guide lifecycle reporting
 //
-// Guide reporting lives on the existing `GuideOrchestrator` rather than a new
-// reporter: Flutter's `GuideOrchestrator`/`GuideShowcaseManager` split has no
-// iOS equivalent.
+// Guide reporting lives on the existing `GuideOrchestrator` rather than a
+// separate reporter.
 
 extension GuideOrchestrator {
     /// The SDK always sets this at init. A missing one is a programmer error:
@@ -121,8 +118,8 @@ extension GuideOrchestrator {
         return surfaceContext
     }
 
-    /// Displayed-guide reason in Flutter's `_finish` order: a completion, then
-    /// the initiator's pending reason, then the direct reason.
+    /// Displayed-guide reason order: a completion, then the initiator's pending
+    /// reason, then the direct reason.
     private func resolveGuideDismissReason(explicit reason: DismissReason, completed: Bool) -> DismissReason {
         if completed { return .completed }
         return pendingGuideDismissReason ?? reason
@@ -168,7 +165,7 @@ extension GuideOrchestrator {
     func reportGuideShown() {
         guard let ctx = reportingContext() else { return }
         guard let state else { return }
-        // Snapshot for a later anchor loss, as Flutter's `_screenAtStep`.
+        // Snapshot for a later anchor loss.
         screenAtGuideStep = ctx.currentScreen
         let stepWasReported = lastReportedGuideStep.map {
             $0.token == state.token && $0.index == state.stepIndex
@@ -205,7 +202,7 @@ extension GuideOrchestrator {
                 payload: payload
             )
         }
-        // Every step, a single one included, as on Flutter and Android; `stepWasReported` keeps it once.
+        // Every step, a single one included; `stepWasReported` keeps it once.
         if !stepWasReported {
             lastReportedGuideStep = (state.token, state.stepIndex)
             ctx.events.toDigia(
@@ -293,8 +290,8 @@ extension GuideOrchestrator {
         }
     }
 
-    /// `anchorLeft`: the last step's anchor left while it showed. Flutter then
-    /// sends the dwell as `timeToCompleteMs` and records no frequency completion.
+    /// `anchorLeft`: the last step's anchor left while it showed. The dwell is
+    /// then sent as `timeToCompleteMs` and no frequency completion is recorded.
     func reportGuideCompletedIfNeeded(_ state: ActiveGuideState, anchorLeft: Bool = false) {
         guard let ctx = reportingContext() else { return }
         guard !guideCompletionFired else { return }
@@ -308,7 +305,7 @@ extension GuideOrchestrator {
         ctx.events.toDigia(
             GuideEvent.Completed(
                 itemTotal: state.steps.count,
-                // Dwell since step 1 showed, as Flutter; a peek, so a later dismiss keeps it (A61).
+                // Dwell since step 1 showed; a peek, so a later dismiss keeps it (A61).
                 timeToCompleteMs: ctx.dwell.elapsedMs(state.payload.cepCampaignId)
             ),
             payload: state.payload
@@ -316,8 +313,8 @@ extension GuideOrchestrator {
     }
 
     /// The unified anchorless-failure table: one reason drives the live-test
-    /// ACK, the campaign timeline and the CEP outcome on every stack. `nil` is
-    /// an image-load failure; its watchdog makes `timeout` the honest reason.
+    /// ACK, the campaign timeline and the CEP outcome. `nil` is an image-load
+    /// failure; its watchdog makes `timeout` the honest reason.
     private static func dropReason(for failure: AnchorlessFailure?) -> DropReason {
         switch failure {
         case .pageKeyMismatch: return .screenNotTargeted

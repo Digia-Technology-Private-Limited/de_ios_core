@@ -8,12 +8,7 @@ import Foundation
 // They are separate classes (not extensions) because each surface has
 // its own reporter next to its orchestrator; the state they read — the nudge
 // overlay, survey tokens, the emitter — lives on the SDK.
-//
-// Mirrors Flutter's `campaign_surfaces.dart`, adapted for the
-// iOS-only pieces: the classic-RN external guide, `presentationId`-stamped
-// delivery matching, and the floater busy-surface detail.
 
-/// The SDK's one logging style — see ``DigiaLogger``.
 private let surfaceLog = DigiaLogger()
 
 /// Whether `other` is the delivery `payload` identifies: same CEP campaign,
@@ -156,7 +151,7 @@ final class GuideSurface: CampaignSurface {
             )
             return .accepted(payload: payload, kind: .modal)
         }
-        // As Flutter: skip steps with no canvas, and show the rest.
+        // Skip steps with no canvas, and show the rest.
         var canvasGuide = guideConfig
         canvasGuide.steps = guideConfig.steps.filter { $0.widgetConfig.canvas != nil }
         // The surface rule has cleared the screen, so a refusal here is the

@@ -3,8 +3,6 @@ import Foundation
 /// Reports a story floater's lifecycle, from the orchestrator's hooks and the
 /// renderer's taps.
 ///
-/// Mirrors Flutter's `FloaterStoryReporter`.
-///
 /// Reported through the PiP's own event vocabulary rather than a parallel set. Both
 /// are `floater` campaigns and both answer the same questions — was the window seen,
 /// was it moved, was its content opened, how long was the user inside — so one schema
@@ -66,7 +64,6 @@ final class FloaterStoryReporter {
             cepCampaignId: state.payload.cepCampaignId)
     }
 
-    /// SDK chrome taps on the window itself — opening the story, and the ×.
     /// A tap on the window — the campaign's own surface, so an experience-level click.
     ///
     /// Covers both the SDK's chrome (opening the story, the ×) and the author's own elements. The
