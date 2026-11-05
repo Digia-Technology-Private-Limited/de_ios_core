@@ -20,10 +20,6 @@ extension EnvironmentValues {
     }
 }
 
-private struct CanvasVideoUsesStoryPlaybackKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
 /// The playback mode for Canvas Lottie animations.
 enum CanvasLottiePlaybackMode: Sendable, Equatable {
     case live
@@ -57,11 +53,6 @@ private struct CanvasLottieRuntimeKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    var canvasVideoUsesStoryPlayback: Bool {
-        get { self[CanvasVideoUsesStoryPlaybackKey.self] }
-        set { self[CanvasVideoUsesStoryPlaybackKey.self] = newValue }
-    }
-
     var canvasLottieRuntime: CanvasLottieRuntime {
         get { self[CanvasLottieRuntimeKey.self] }
         set { self[CanvasLottieRuntimeKey.self] = newValue }
@@ -1898,8 +1889,8 @@ private struct CanvasRemoteLottie: View {
 }
 
 /// A canvas video plays through `MediaVideo` (T3): the authored controls, fit, loop, mute and
-/// autoplay as on `main`, with `MediaVideo`'s still, spinner and "Video failed" box (OD-7). A
-/// story page's canvas keeps the story media engine until T8 moves it.
+/// autoplay as on `main`, with `MediaVideo`'s still, spinner and "Video failed" box (OD-7), on
+/// every canvas, the story floater's window included (T8 retired its story media engine).
 private struct CanvasVideoRenderer: View {
     let box: CampaignCanvasBox
     let source: CampaignCanvasMediaSource
@@ -1910,75 +1901,22 @@ private struct CanvasVideoRenderer: View {
     let fit: String
     let isDark: Bool
     @Environment(\.digiaVariables) private var variables
-    @Environment(\.canvasVideoUsesStoryPlayback) private var usesStoryPlayback
     private var url: String {
         interpolate(CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark), context: variables)
     }
     var body: some View {
         CampaignCanvasBoxView(box: box, isDark: isDark) {
             if !url.isEmpty {
-                if usesStoryPlayback {
-                    CanvasStoryCachedMedia(
-                        url: url,
-                        isVideo: true,
-                        contentMode: fit == "contain" ? .fit : .fill,
-                        autoplay: autoplay,
-                        loop: loop,
-                        muted: muted,
-                        showControls: showControls
-                    )
-                    .id(url)
-                } else {
-                    MediaVideo(
-                        url: url,
-                        fit: fit == "contain" ? .contain : .cover,
-                        loop: loop,
-                        muted: muted,
-                        autoplay: autoplay,
-                        showControls: showControls
-                    )
-                }
+                MediaVideo(
+                    url: url,
+                    fit: fit == "contain" ? .contain : .cover,
+                    loop: loop,
+                    muted: muted,
+                    autoplay: autoplay,
+                    showControls: showControls
+                )
             }
         }
-    }
-}
-
-struct CanvasPlayerController: UIViewControllerRepresentable {
-    let player: AVPlayer
-    let controls: Bool
-    let gravity: AVLayerVideoGravity
-    var onReadyForDisplay: () -> Void = {}
-
-    final class Coordinator {
-        var readyObservation: NSKeyValueObservation?
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let value = AVPlayerViewController()
-        value.player = player
-        value.showsPlaybackControls = controls
-        value.videoGravity = gravity
-        context.coordinator.readyObservation = value.observe(
-            \.isReadyForDisplay, options: [.initial, .new]
-        ) { _, change in
-            guard change.newValue == true else { return }
-            Task { @MainActor in onReadyForDisplay() }
-        }
-        return value
-    }
-    func updateUIViewController(_ value: AVPlayerViewController, context: Context) {
-        value.player = player
-        value.showsPlaybackControls = controls
-        value.videoGravity = gravity
-    }
-
-    static func dismantleUIViewController(_ value: AVPlayerViewController, coordinator: Coordinator)
-    {
-        coordinator.readyObservation?.invalidate()
-        coordinator.readyObservation = nil
-        value.player = nil
     }
 }
 

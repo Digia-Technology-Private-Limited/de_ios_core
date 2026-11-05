@@ -331,7 +331,6 @@ private struct FloaterStorySessionView: View {
         )
         .environment(\.digiaVariables, state.variableContext)
         .environment(\.digiaCampaignKey, state.payload.campaignKey)
-        .environment(\.canvasVideoUsesStoryPlayback, true)
     }
 
     /// The story itself.
