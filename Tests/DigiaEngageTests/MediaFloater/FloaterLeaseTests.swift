@@ -241,6 +241,57 @@ struct FloaterLeaseTests {
         #expect(second.pool.heldKeys.isEmpty, "dispose gave the player back")
     }
 
+    // Fails if the orchestrator builds its own player instead of borrowing, or lets the window
+    // show before the media is ready (W8-02; Android `orchestratorObtainsThePipLeaseBeforeShow...`):
+    // floater_orchestrator.swift `preparePlayer` `pool.borrow(key: key, ...)` -> `pool.borrow(key:
+    // key + "-x", ...)` (the pool holds nothing under the showing's key).
+    @Test("the orchestrator takes the PiP lease before the window shows")
+    func orchestratorTakesThePipLeaseBeforeTheWindowShows() async throws {
+        let pool = VideoPlayerPool(maxPlayers: 3, makeItem: { AVPlayerItem(url: $0) })
+        MediaServices.override(videoPool: pool)
+        defer { MediaServices.reset() }
+        let json = try floaterFixture("pip/pip_mute_toggle")
+        let campaign = try #require(try CampaignModel.fromJson(json, designTokens: fixtureTokens(json)))
+        let orchestrator = try #require(SDKInstance.shared.floaterOrchestrator)
+        defer { orchestrator.dispose() }
+
+        try #require(orchestrator.start(
+            campaign,
+            payload: CEPTriggerPayload(cepCampaignId: "test_pip", campaignKey: campaign.campaignKey, cepMetadata: [:]),
+            screenName: nil))
+
+        // Back from `start`, before any run-loop turn: the player is leased, the window waits.
+        let key = floaterVideoPlayerKey(try #require(orchestrator.state))
+        #expect(orchestrator.awaitingMedia, "the window waits for the first frame")
+        #expect(pool.heldKeys == [key], "the lease is taken before the window shows")
+        #expect(orchestrator.player === pool.heldPlayer(for: key))
+        try await waitFor("the media is ready") { !orchestrator.awaitingMedia }
+    }
+
+    // Fails if a dismissal leaves the freed player playing (W8-02; Android
+    // `anInstantDismissalPausesThePlayerItFrees`, Flutter Y8-01): floater_orchestrator.swift
+    // `finishDismiss` `player?.pause()` -> removed for the instant path (the window's own hold is
+    // still on the player when the orchestrator lets go, so only this line stops it), and for the
+    // animated path `dismiss`'s `player?.pause()` before the exit task. The pool pausing on the
+    // last give-back is guarded in VideoPlayerPoolTests.
+    @Test("a dismissal pauses the player it frees, with and without an exit animation",
+          arguments: ["none", "fade_out"])
+    func aDismissalPausesThePlayerItFrees(exit: String) async throws {
+        var cleanups: [() -> Void] = []
+        defer { cleanups.reversed().forEach { $0() } }
+        let showing = try await show(
+            [(["collapsed", "exitAnimation"], ["type": exit])], cleanups: &cleanups)
+        let leased = try #require(showing.orchestrator.player)
+        #expect(leased.rate > 0, "it was playing")
+
+        showing.orchestrator.dismiss(.userClose)
+
+        #expect(leased.rate == 0, "paused as the dismissal begins, before the window lets go")
+        try await waitFor("the showing ends") { showing.orchestrator.state == nil }
+        try await waitFor("the window lets go") { showing.pool.heldKeys.isEmpty }
+        #expect(leased.rate == 0, "and it stays paused once the lease is back in the pool")
+    }
+
     // Fails if a video that cannot load is shown anyway or keeps its player (OD-4):
     // floater_orchestrator.swift `preparePlayer` `case .failed:` -> `case .failed where false:`
     // (the window waits out the 10 s media timeout with the lease held).
