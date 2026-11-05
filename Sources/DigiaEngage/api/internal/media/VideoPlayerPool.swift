@@ -54,8 +54,13 @@ func deviceClassFor(physicalMemoryBytes: UInt64) -> DeviceClass {
 /// - A freed player is paused and kept with its item: a remount under the same key and URL gets
 ///   it back where it was (rotation, swipe back; N2). A finished showing, or the same file under
 ///   another key, restarts at 0.
-/// - A URL change under a held key re-points the same player (N5: the surface gives back the old
-///   URL first, so nothing stays held for it).
+/// - Each hold carries its own rank; a key ranks as the highest of its current holds, so its
+///   rank drops when a higher hold goes (OD-10, R2-06a).
+/// - A borrow of a held key with another URL re-points the player and tells every other holder
+///   through its eviction observer: their holds end, they show their still and borrow again
+///   when they next open (OD-10, R2-06c; no silent re-point, N5).
+/// - Keyless players are built by `MediaVideo` outside the pool and never count toward its size
+///   (OD-10, R2-06b).
 /// - A player whose item failed gets a new item on its next borrow: a borrow never inherits a
 ///   failure.
 /// - When the pool is full, a newcomer takes back the lowest-ranked, least recently borrowed
@@ -69,10 +74,12 @@ func deviceClassFor(physicalMemoryBytes: UInt64) -> DeviceClass {
 final class VideoPlayerPool: @unchecked Sendable {
     private struct Holder {
         var url: URL
-        var priority: PoolPriority
         let player: AVPlayer
         var seq: UInt64
-        var holds: Int
+        /// One rank per current hold.
+        var holds: [PoolPriority]
+        /// The highest rank among the current holds.
+        var priority: PoolPriority { holds.min() ?? .railThumb }
     }
 
     private struct FreePlayer {
@@ -107,16 +114,20 @@ final class VideoPlayerPool: @unchecked Sendable {
     func borrow(key: String, url: URL, priority: PoolPriority) -> AVPlayer? {
         seq &+= 1
         if var existing = holders[key] {
+            let repointed = existing.url != url
             // A failed item never recovers: a borrow never inherits a failure, it retries.
-            if existing.url != url || Self.hasFailed(existing.player) {
+            if repointed || Self.hasFailed(existing.player) {
                 existing.url = url
                 existing.player.replaceCurrentItem(with: makeItem(url))
             }
-            // A lower-ranked co-holder never lowers an on-screen player's rank.
-            existing.priority = min(existing.priority, priority)
+            if repointed {
+                // The other holders' URL is gone: their holds end and they are told (R2-06c).
+                existing.holds = []
+            }
             existing.seq = seq
-            existing.holds += 1
+            existing.holds.append(priority)
             holders[key] = existing
+            if repointed { notifyEvicted(key) }
             return existing.player
         }
         // Prefer the free player that last played this key and URL, so it resumes.
@@ -130,7 +141,7 @@ final class VideoPlayerPool: @unchecked Sendable {
                 reused.player.seek(to: .zero)
             }
             // Otherwise the same key and URL: it resumes where it was (N2).
-            holders[key] = Holder(url: url, priority: priority, player: reused.player, seq: seq, holds: 1)
+            holders[key] = Holder(url: url, player: reused.player, seq: seq, holds: [priority])
             return reused.player
         }
         if holders.count >= maxPlayers {
@@ -142,18 +153,20 @@ final class VideoPlayerPool: @unchecked Sendable {
             // On screen with nothing to take back: an extra player beyond the size (OD-1).
         }
         let player = AVPlayer(playerItem: makeItem(url))
-        holders[key] = Holder(url: url, priority: priority, player: player, seq: seq, holds: 1)
+        holders[key] = Holder(url: url, player: player, seq: seq, holds: [priority])
         return player
     }
 
-    /// Releases one hold on `key` while it is still `player`'s. A stale call (evicted, released,
-    /// re-borrowed by another player) is a no-op. The last hold pauses the player and keeps it,
+    /// Releases one hold of `priority` on `key` while it is still `player`'s. A stale call
+    /// (evicted, re-pointed away, released, re-borrowed by another player) is a no-op. The key's
+    /// rank becomes the highest of the holds left. The last hold pauses the player and keeps it,
     /// or destroys it while the pool is over its size.
     @MainActor
-    func giveBack(key: String, player: AVPlayer) {
-        guard var holder = holders[key], holder.player === player else { return }
-        holder.holds -= 1
-        guard holder.holds <= 0 else {
+    func giveBack(key: String, player: AVPlayer, priority: PoolPriority) {
+        guard var holder = holders[key], holder.player === player,
+              let index = holder.holds.firstIndex(of: priority) else { return }
+        holder.holds.remove(at: index)
+        guard holder.holds.isEmpty else {
             holders[key] = holder
             return
         }
@@ -194,6 +207,7 @@ final class VideoPlayerPool: @unchecked Sendable {
     @MainActor var heldKeys: Set<String> { Set(holders.keys) }
     @MainActor var livePlayerCount: Int { holders.count + free.count }
     @MainActor func heldPlayer(for key: String) -> AVPlayer? { holders[key]?.player }
+    @MainActor func priority(of key: String) -> PoolPriority? { holders[key]?.priority }
     /// Every bookkeeping entry; bounded by the live players and the mounted surfaces (N8).
     @MainActor var bookkeepingCount: Int {
         holders.count + free.count + evictionObservers.values.reduce(0) { $0 + $1.count }
@@ -211,6 +225,11 @@ final class VideoPlayerPool: @unchecked Sendable {
     private func evict(key: String) {
         guard let holder = holders.removeValue(forKey: key) else { return }
         destroy(holder.player)
+        notifyEvicted(key)
+    }
+
+    @MainActor
+    private func notifyEvicted(_ key: String) {
         evictionObservers[key]?.values.forEach { $0() }
     }
 

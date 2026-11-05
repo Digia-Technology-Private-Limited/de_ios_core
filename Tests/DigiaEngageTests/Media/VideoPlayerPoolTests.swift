@@ -45,7 +45,7 @@ struct VideoPlayerPoolTests {
         player.play()
         #expect(player.rate > 0)
 
-        pool.giveBack(key: "k", player: player)
+        pool.giveBack(key: "k", player: player, priority: .onScreen)
 
         #expect(player.rate == 0)
         #expect(pool.heldKeys.isEmpty)
@@ -59,7 +59,7 @@ struct VideoPlayerPoolTests {
         let extra = try #require(pool.borrow(key: "pip", url: url("b"), priority: .onScreen))
         #expect(pool.livePlayerCount == 2)
 
-        pool.giveBack(key: "pip", player: extra)
+        pool.giveBack(key: "pip", player: extra, priority: .onScreen)
 
         #expect(pool.livePlayerCount == 1)
         #expect(extra.currentItem == nil)
@@ -97,7 +97,7 @@ struct VideoPlayerPoolTests {
             guard let player = pool.borrow(key: key, url: url("v\(index % 7)"), priority: .onScreen) else { continue }
             let observer = pool.observeEviction(of: key) {}
             pool.removeEvictionObserver(observer, for: key)
-            pool.giveBack(key: key, player: player)
+            pool.giveBack(key: key, player: player, priority: .onScreen)
         }
 
         #expect(pool.bookkeepingCount <= pool.maxPlayers)

@@ -198,7 +198,7 @@ final class MediaVideoPlayback: ObservableObject {
     private var onEnded: (() -> Void)?
 
     private var opened: (url: String, key: String?)?
-    private var lease: (pool: VideoPlayerPool, key: String, eviction: UUID)?
+    private var lease: (pool: VideoPlayerPool, key: String, priority: PoolPriority, eviction: UUID)?
     private var report: (String) -> Void = { _ in }
     private var statusObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
@@ -232,7 +232,7 @@ final class MediaVideoPlayback: ObservableObject {
             // Refused (pool full, not on screen): the still stays and nothing is reported.
             guard let borrowed = pool.borrow(key: key, url: parsed, priority: priority) else { return }
             let eviction = pool.observeEviction(of: key) { [weak self] in self?.evicted() }
-            lease = (pool, key, eviction)
+            lease = (pool, key, priority, eviction)
             player = borrowed
         } else {
             player = AVPlayer(playerItem: mediaVideoItem(for: parsed, loader: services.videoLoader))
@@ -262,7 +262,7 @@ final class MediaVideoPlayback: ObservableObject {
         unwatch()
         if let lease {
             lease.pool.removeEvictionObserver(lease.eviction, for: lease.key)
-            if let leaving { lease.pool.giveBack(key: lease.key, player: leaving) }
+            if let leaving { lease.pool.giveBack(key: lease.key, player: leaving, priority: lease.priority) }
         } else {
             leaving?.pause()
             leaving?.replaceCurrentItem(with: nil)
@@ -304,8 +304,9 @@ final class MediaVideoPlayback: ObservableObject {
         endObserver = nil
     }
 
-    /// The pool took the player back for a higher-ranked holder: show the still again. The
-    /// showing stays opened, so it isn't re-borrowed every frame.
+    /// The pool took the player back for a higher-ranked holder, or re-pointed it at another
+    /// URL for another holder: show the still again. The showing stays opened, so it isn't
+    /// re-borrowed every frame; it borrows again when it next opens.
     private func evicted() {
         unwatch()
         if let lease { lease.pool.removeEvictionObserver(lease.eviction, for: lease.key) }
