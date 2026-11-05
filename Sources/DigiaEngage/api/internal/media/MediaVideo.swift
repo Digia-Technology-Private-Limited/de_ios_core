@@ -72,6 +72,11 @@ let mediaVideoBackdrop = Color(red: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 
 /// Callbacks (the same set on every stack): `onFirstFrame` once per opened URL (again after a
 /// handover to a new holder), `onEnded` when playback reaches the end and isn't looping,
 /// `onFailure` after health is reported.
+///
+/// Story surfaces (T8) also use: `startMs`, where an opened player is put (nil keeps the pool's
+/// playhead, so a remount resumes); `onReady`, the player at its first frame (the story reads
+/// its playhead); `onLost`, a keyed borrow that was refused or a holder that was evicted, which
+/// says nothing about the video.
 struct MediaVideo: View {
     let url: String
     var fit: MediaFit = .cover
@@ -86,7 +91,10 @@ struct MediaVideo: View {
     var groundAfterFirstFrame: Color = .black
     var playerKey: String? = nil
     var poolPriority: PoolPriority = .onScreen
+    var startMs: Int64? = nil
     var onFirstFrame: (() -> Void)? = nil
+    var onReady: ((AVPlayer) -> Void)? = nil
+    var onLost: (() -> Void)? = nil
     var onEnded: (() -> Void)? = nil
     var onFailure: (() -> Void)? = nil
     /// How long a bare backdrop waits for the first frame before showing a spinner. Tests
@@ -101,7 +109,8 @@ struct MediaVideo: View {
 
     var body: some View {
         let still = MediaVideoStill(thumbnailUrl: thumbnailUrl, blurHash: blurHash)
-        let _ = playback.updateCallbacks(onFirstFrame: onFirstFrame, onEnded: onEnded, onFailure: onFailure)
+        let _ = playback.updateCallbacks(
+            onFirstFrame: onFirstFrame, onEnded: onEnded, onFailure: onFailure, onReady: onReady, onLost: onLost)
         ZStack {
             if playback.failed {
                 Color.black
@@ -150,7 +159,7 @@ struct MediaVideo: View {
         playback.open(
             url: url, key: key, priority: poolPriority, loop: loop, muted: muted, volume: volume,
             autoplay: autoplay,
-            spinnerDelay: canShow ? nil : spinnerDelay,
+            startMs: startMs, spinnerDelay: canShow ? nil : spinnerDelay,
             services: services,
             report: { [services, campaignKey] cause in services.reportHealth(campaignKey, .video, cause) })
     }
@@ -208,6 +217,8 @@ final class MediaVideoPlayback: ObservableObject {
     private var onFirstFrame: (() -> Void)?
     private var onFailure: (() -> Void)?
     private var onEnded: (() -> Void)?
+    private var onReady: ((AVPlayer) -> Void)?
+    private var onLost: (() -> Void)?
 
     private var opened: (url: String, key: String?)?
     private var lease: (pool: VideoPlayerPool, key: String, priority: PoolPriority, eviction: UUID)?
@@ -215,19 +226,30 @@ final class MediaVideoPlayback: ObservableObject {
     private var statusObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
     private var spinnerTask: Task<Void, Never>?
+    /// A `startMs` seek is waiting for the item to be ready, or on its way: the player starts once
+    /// it lands, so it never plays on from where the pool left it, nor from 0.
+    private var seekPending = false
+    private var pendingStartMs: Int64?
+    private var wantsPlaying = false
 
     /// Keeps the latest closures, so a parent passing new ones for the same URL is heard.
-    func updateCallbacks(onFirstFrame: (() -> Void)?, onEnded: (() -> Void)?, onFailure: (() -> Void)?) {
+    func updateCallbacks(
+        onFirstFrame: (() -> Void)?, onEnded: (() -> Void)?, onFailure: (() -> Void)?,
+        onReady: ((AVPlayer) -> Void)? = nil, onLost: (() -> Void)? = nil
+    ) {
         self.onFirstFrame = onFirstFrame
         self.onEnded = onEnded
         self.onFailure = onFailure
+        self.onReady = onReady
+        self.onLost = onLost
     }
 
     /// Starts showing `url`. Re-opening what is already open is a no-op; anything else frees
     /// the old player first.
     func open(
         url: String, key: String?, priority: PoolPriority, loop: Bool, muted: Bool, volume: Float,
-        autoplay: Bool, spinnerDelay: TimeInterval?, services: MediaServices, report: @escaping (String) -> Void
+        autoplay: Bool, startMs: Int64? = nil, spinnerDelay: TimeInterval?, services: MediaServices,
+        report: @escaping (String) -> Void
     ) {
         if let opened, opened.url == url, opened.key == key { return }
         close()
@@ -242,7 +264,10 @@ final class MediaVideoPlayback: ObservableObject {
         if let key {
             let pool = services.videoPool
             // Refused (pool full, not on screen): the still stays and nothing is reported.
-            guard let borrowed = pool.borrow(key: key, url: parsed, priority: priority) else { return }
+            guard let borrowed = pool.borrow(key: key, url: parsed, priority: priority) else {
+                onLost?()
+                return
+            }
             let eviction = pool.observeEviction(of: key) { [weak self] in self?.evicted() }
             lease = (pool, key, priority, eviction)
             player = borrowed
@@ -252,8 +277,13 @@ final class MediaVideoPlayback: ObservableObject {
         player.isMuted = muted
         player.volume = volume
         player.actionAtItemEnd = .pause
+        if let startMs {
+            seekPending = true
+            pendingStartMs = max(startMs, 0)
+        }
         if let item = player.currentItem { watch(item) }
         self.player = player
+        seekToStartIfReady()
         setPlaying(autoplay)
         if let spinnerDelay {
             spinnerTask = Task { @MainActor [weak self] in
@@ -264,8 +294,25 @@ final class MediaVideoPlayback: ObservableObject {
         }
     }
 
+    /// Issues the `startMs` seek once the item is ready (a seek on an item still loading lands
+    /// nowhere), then starts the player if it should play.
+    private func seekToStartIfReady() {
+        guard let player, let startMs = pendingStartMs, player.currentItem?.status == .readyToPlay else { return }
+        pendingStartMs = nil
+        player.seek(to: CMTime(value: startMs, timescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero) {
+            [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.player === player, self.seekPending else { return }
+                self.seekPending = false
+                self.setPlaying(self.wantsPlaying)
+            }
+        }
+    }
+
     func setPlaying(_ playing: Bool) {
+        wantsPlaying = playing
         guard let player, !failed else { return }
+        if playing, seekPending { return }
         if playing { player.play() } else { player.pause() }
     }
 
@@ -283,23 +330,32 @@ final class MediaVideoPlayback: ObservableObject {
         lease = nil
         player = nil
         opened = nil
+        seekPending = false
+        pendingStartMs = nil
         firstFrameShown = false
         failed = false
         spinnerVisible = false
     }
 
     func noteFirstFrame() {
-        guard !firstFrameShown, !failed, player != nil else { return }
+        guard !firstFrameShown, !failed, let player else { return }
         firstFrameShown = true
         spinnerVisible = false
         spinnerTask?.cancel()
         onFirstFrame?()
+        onReady?(player)
     }
 
     private func watch(_ item: AVPlayerItem) {
         statusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
-            guard item.status == .failed else { return }
-            Task { @MainActor in self?.fail(cause: mediaFailureCause(playerItem: item)) }
+            switch item.status {
+            case .failed:
+                Task { @MainActor in self?.fail(cause: mediaFailureCause(playerItem: item)) }
+            case .readyToPlay:
+                Task { @MainActor in self?.seekToStartIfReady() }
+            default:
+                break
+            }
         }
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
@@ -327,6 +383,7 @@ final class MediaVideoPlayback: ObservableObject {
         player = nil
         firstFrameShown = false
         spinnerVisible = false
+        onLost?()
     }
 
     /// Shows the failed box once per opened URL. Only a cause the author can fix is health: a
