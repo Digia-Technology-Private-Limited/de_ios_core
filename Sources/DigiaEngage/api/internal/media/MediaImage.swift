@@ -16,8 +16,9 @@ internal import SDWebImageSwiftUI
 /// `focalX` and `focalY` (0-1) say where the picture sits in its box: the overflow of a cropped
 /// picture, or the free space around a letterboxed one, is split so that the picture's offset is
 /// (box - picture) x focal on each axis, continuously (0.5 is centred). `zoom` scales the drawn
-/// content, the picture and its still alike, around the point (focalX, focalY) of the box,
-/// clipped to the box; below 1 the page shows around a smaller picture. All three are clamped
+/// content, the picture and its still alike, around the point (focalX, focalY) of the box: the
+/// picture is fitted and cropped to the box first, then that box is scaled and clipped again, so
+/// below 1 the page shows around a smaller cropped picture. All three are clamped
 /// (focal 0-1, zoom 0.1-10, anything non-finite is the default), and at their defaults (0.5, 0.5,
 /// 1) the picture is drawn exactly as without them. The failure content is not zoomed.
 ///
@@ -158,6 +159,7 @@ struct MediaImage: View {
                     .alignmentGuide(.leading) { -(box.size.width - $0.width) * fx }
                     .alignmentGuide(.top) { -(box.size.height - $0.height) * fy }
                     .frame(width: box.size.width, height: box.size.height, alignment: .topLeading)
+                    .clipped()
                     .scaleEffect(scale, anchor: UnitPoint(x: fx, y: fy))
                     .clipped()
             }
