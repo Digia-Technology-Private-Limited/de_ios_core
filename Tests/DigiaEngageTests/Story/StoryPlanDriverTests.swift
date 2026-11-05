@@ -143,4 +143,60 @@ struct StoryPlanDriverTests {
         ])
         driver.cancelAll()
     }
+
+    /// Answers after `seconds` whatever the task's state: a warm that does not notice a cancel.
+    private static func laterNoMatterWhat(_ seconds: Double, _ value: Int) async -> Int {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global().asyncAfter(deadline: .now() + seconds) { continuation.resume(returning: value) }
+        }
+    }
+
+    /// A throughput that already holds a slow sample (419 kbps), fed by a driver whose warms take
+    /// 0.1 s and answer `delivered` (nil: all that was asked).
+    private func slowVerdict(
+        delivered: Int?, then act: (StoryPlanDriver) async -> Void
+    ) async -> SlowNetworkThroughput {
+        let throughput = SlowNetworkThroughput()
+        throughput.note(bytes: storyFirstBytes, elapsed: 10)
+        let driver = StoryPlanDriver(
+            pool: pool(size: 4),
+            warm: { _, _, bytes in await Self.laterNoMatterWhat(0.1, delivered ?? bytes ?? 0) },
+            onWarm: { throughput.note(bytes: $0, elapsed: $1) })
+        update(driver, at: 2, firstFrameShown: true, stories: remote)
+        await act(driver)
+        driver.cancelAll()
+        return throughput
+    }
+
+    private func isSlow(_ throughput: SlowNetworkThroughput) -> Bool {
+        slowNetworkFor(isExpensive: false, isConstrained: false, measuredKbps: throughput.lastKbps)
+    }
+
+    // Guards `guard !Task.isCancelled` ahead of `onWarm` in `StoryPlanDriver.updateBytes` (V8-01):
+    // a warm the plan moved on from, though it ended with bytes in hand, measured nothing.
+    @Test("a warm cancelled when the plan moves on leaves a slow verdict slow")
+    func cancelledWarmDoesNotVote() async {
+        let throughput = await slowVerdict(delivered: nil) { driver in
+            try? await Task.sleep(nanoseconds: 30_000_000)
+            driver.cancelAll()
+            try? await Task.sleep(nanoseconds: 300_000_000)
+        }
+
+        #expect(isSlow(throughput), "the cancelled warm's sample would read as 40 Mbps")
+    }
+
+    // Guards `delivered > 0` in the same place: a warm that failed delivers 0 bytes and votes
+    // nothing, while one that completed does (the control: the vote is wired).
+    @Test("a failed warm votes nothing, a completed one does")
+    func onlyACompletedWarmVotes() async {
+        let failed = await slowVerdict(delivered: 0) { _ in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+        #expect(isSlow(failed), "a warm that delivered nothing left the verdict as it was")
+
+        let completed = await slowVerdict(delivered: nil) { _ in
+            try? await Task.sleep(nanoseconds: 400_000_000)
+        }
+        #expect(!isSlow(completed), "a warm that moved 512 KiB in 0.1 s is a fast link")
+    }
 }
