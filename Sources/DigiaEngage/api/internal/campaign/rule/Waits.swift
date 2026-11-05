@@ -32,6 +32,9 @@ struct PendingWait {
     /// The screen when the wait started, for `screen_left` without names.
     /// Empty when no screen was set.
     let screen: String
+    /// When the wait began on `nowMs`: earlier than the start call for a
+    /// signal that was held while the SDK loaded.
+    let startedAtMs: Int
     let endsAtMs: Int
 }
 
@@ -69,13 +72,15 @@ final class Waits {
         elapsedMs: Int = 0
     ) {
         for entry in waits where !isWaiting(entry.campaignKey) {
-            let end = nowMs().addingReportingOverflow(entry.wait.ms)
+            let now = nowMs()
+            let end = now.addingReportingOverflow(entry.wait.ms)
             pending[entry.campaignKey] = PendingWait(
                 campaignKey: entry.campaignKey,
                 priority: entry.priority,
                 wait: entry.wait,
                 trigger: trigger,
                 screen: screen,
+                startedAtMs: now - elapsedMs,
                 endsAtMs: (end.overflow ? Int.max : end.partialValue) - elapsedMs
             )
         }

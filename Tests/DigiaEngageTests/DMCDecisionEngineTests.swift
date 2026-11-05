@@ -317,13 +317,48 @@ struct DMCDecisionEngineTests {
 
         engine.send(.screenViewed("login"))
         #expect(routedKeys.isEmpty)
-        #expect(gating("tip", TimelineReason.waitStarted).first?.extras == ["ms": "20000"])
+        #expect(gating("tip", TimelineReason.waitStarted).first?.extras["ms"] == "20000")
 
         advance(19999)
         #expect(routedKeys.isEmpty)
         advance(1)
         #expect(routedKeys == ["tip"])
         #expect(outcomes("tip") == ["checked"])
+    }
+
+    // dmc-case: dmc.wait_cancel.held_and_late_waits_log_elapsed
+    @Test("a signal held while loading logs the time that is left")
+    func heldSignalLogsRemaining() {
+        defer { finish() }
+        facts.ready = false
+        facts.add(Self.campaign("tip", screen: "login", waitMs: 20000))
+        engine.send(.screenViewed("login"))
+        clock.now += 8000
+        facts.ready = true
+        engine.ready()
+
+        let started = sink.records.filter { $0.campaignKey == "tip" && $0.message.hasPrefix("Waiting") }
+        #expect(started.count == 1)
+        #expect(started.first?.message.hasPrefix("Waiting 12000 ms") == true)
+        advance(12000)
+        #expect(sink.records.filter { $0.message.hasPrefix("Wait ended after") }.map(\.message)
+            == ["Wait ended after 20000 ms"])
+    }
+
+    // dmc-case: dmc.wait_cancel.held_and_late_waits_log_elapsed
+    @Test("a wait that ends late logs the time that really passed")
+    func lateWaitLogsElapsed() {
+        defer { finish() }
+        facts.add(Self.campaign("tip", screen: "login", waitMs: 20000))
+        engine.ready()
+        engine.send(.screenViewed("login"))
+        // The clock moves on while the timer is held, as on a sleeping phone.
+        clock.now += 5000
+        advance(20000)
+
+        let ended = sink.records.filter { $0.message.hasPrefix("Wait ended after") }
+        #expect(ended.map(\.message) == ["Wait ended after 25000 ms"])
+        #expect(ended.first?.extras["ms"] == "20000")
     }
 
     @Test("a re-trigger keeps the first timer (D4) and says so")
