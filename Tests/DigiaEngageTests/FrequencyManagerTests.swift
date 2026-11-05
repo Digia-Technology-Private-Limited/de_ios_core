@@ -221,4 +221,43 @@ struct FrequencyManagerTests {
         #expect(FrequencyEvaluator.evaluate(window, nil, 0, "s1").allow)
         #expect(!FrequencyEvaluator.evaluate(window, nil, 0, "s1", unseenCountsAsZero: true).allow)
     }
+
+    private func campaign(window: String, withRule: Bool = true) throws -> CampaignModel? {
+        var json: [String: Any] = [
+            "id": "id-c1", "campaignKey": "c1", "campaignType": "nudge", "status": "active",
+            "frequency": ["maxPerWindow": ["count": 5, "window": window]],
+            "templateConfig": [
+                "templateType": "nudge", "layoutMode": "canvas",
+                "container": ["displayType": "dialog"],
+                "canvas": ["version": 2, "canvasWidth": 320, "canvasHeight": 200, "children": [Any]()],
+            ] as [String: Any],
+        ]
+        if withRule {
+            json["rule"] = [
+                "priority": 2,
+                "trigger": ["any": [["type": "app_opened"]]],
+                "conditions": ["all": [Any]()],
+            ] as [String: Any]
+        }
+        return try CampaignModel.fromJson(json)
+    }
+
+    @Test("a window this SDK cannot count makes a Digia-decided campaign unsupported")
+    func unknownWindowIsUnsupported() throws {
+        let hour = try #require(try campaign(window: "hour"))
+        guard case .invalid(let invalid)? = hour.rule else {
+            Issue.record("expected an invalid rule, got \(String(describing: hour.rule))")
+            return
+        }
+        #expect(invalid.reason == .unsupportedFeature)
+        #expect(invalid.detail == "frequency window hour")
+
+        let day = try #require(try campaign(window: "day"))
+        guard case .valid? = day.rule else {
+            Issue.record("a known window keeps the rule valid")
+            return
+        }
+        // A CEP-decided campaign has no rule to mark.
+        #expect(try campaign(window: "hour", withRule: false)?.rule == nil)
+    }
 }
