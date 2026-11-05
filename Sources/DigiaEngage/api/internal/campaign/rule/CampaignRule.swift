@@ -138,6 +138,10 @@ struct ValidRule: Equatable {
     let conditions: RuleCondition
     /// Nil when the campaign shows at the trigger.
     let wait: RuleWait?
+    /// The campaign fires, and shows, only on one of these screens: checked
+    /// at the trigger and again when a wait ends. Nil means any screen. Not
+    /// read for an inline campaign, whose slot already sits on one screen.
+    let screens: [String]?
 }
 
 /// A rule this SDK cannot evaluate. `reason` is `unsupported_feature` or
@@ -196,6 +200,11 @@ private func parseEnvelope(_ json: Any?) throws -> CampaignRule {
             wait: try json["wait"].flatMap { raw -> RuleWait? in
                 if raw is NSNull { return nil }
                 return try parseWait(raw)
+            },
+            // Missing or null means any screen; otherwise a name list like any other.
+            screens: try json["screens"].flatMap { raw -> [String]? in
+                if raw is NSNull { return nil }
+                return try nameList(raw, "screens")
             }
         ))
 }

@@ -221,5 +221,20 @@ struct FrequencyManagerTests {
         #expect(p?.stopOn == "experienceCompleted")
         // Old snake_case payload has no recognised keys → uncapped (nil).
         #expect(FrequencyPolicy.fromJson(["max_total": 3, "stop_on": "click"]) == nil)
+        // A cap of 0 is kept: it means never shown.
+        #expect(FrequencyPolicy.fromJson(["maxTotal": 0])?.maxTotal == 0)
+        #expect(
+            FrequencyPolicy.fromJson(["maxPerWindow": ["count": 0, "window": "day"]])?.maxPerWindow
+                == FrequencyWindow(count: 0, window: "day"))
+    }
+
+    @Test("a zero cap blocks an unseen Digia-decided campaign but not a CEP one")
+    func zeroCapUnseen() {
+        let total = FrequencyPolicy(maxTotal: 0)
+        #expect(FrequencyEvaluator.evaluate(total, nil, 0, "s1").allow)
+        #expect(!FrequencyEvaluator.evaluate(total, nil, 0, "s1", unseenCountsAsZero: true).allow)
+        let window = FrequencyPolicy(maxPerWindow: win(0, "day"))
+        #expect(FrequencyEvaluator.evaluate(window, nil, 0, "s1").allow)
+        #expect(!FrequencyEvaluator.evaluate(window, nil, 0, "s1", unseenCountsAsZero: true).allow)
     }
 }

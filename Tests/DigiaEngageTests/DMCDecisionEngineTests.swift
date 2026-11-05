@@ -29,6 +29,11 @@ private final class Facts: DecisionFacts {
     /// Campaigns whose frequency check blocks them.
     var capped2: Set<String> = []
 
+    /// Real frequency state, wired the way `EngineFacts` wires it: the check
+    /// and the show recording both go through the real `FrequencyManager`.
+    /// Nil keeps the `capped2` stub above.
+    var frequency: FrequencyManager?
+
     @discardableResult
     func add(_ campaign: CampaignModel) -> Facts {
         campaigns.append(campaign)
@@ -47,7 +52,14 @@ private final class Facts: DecisionFacts {
     func listeningTo(_ signal: RuleSignal) -> [CampaignModel] { index.listeningTo(signal) }
     func find(_ campaignKey: String) -> CampaignModel? { campaigns.first { $0.campaignKey == campaignKey } }
     func inAudience(_ campaign: CampaignModel) -> Bool { true }
-    func capped(_ campaign: CampaignModel) -> Bool { capped2.contains(campaign.campaignKey) }
+    func capped(_ campaign: CampaignModel) -> Bool {
+        if let frequency {
+            return frequency.blockReason(
+                campaignKey: campaign.campaignKey, policy: campaign.frequency,
+                unseenCountsAsZero: campaign.rule != nil) != nil
+        }
+        return capped2.contains(campaign.campaignKey)
+    }
     func slotCampaignKey(_ slot: String) -> String? { slots[slot] }
     var audienceContext: String { "missing" }
 }
@@ -76,7 +88,10 @@ struct DMCDecisionEngineTests {
         self.routed = routed
         engine = DecisionEngine(
             facts: facts,
-            route: { campaign, _, _ in routed.value.append(campaign.campaignKey) },
+            route: { campaign, _, _ in
+                routed.value.append(campaign.campaignKey)
+                facts.frequency?.recordShow(campaign.campaignKey, campaign.frequency)
+            },
             nowMs: { clock.now }
         )
         DigiaLogger.registerSink(sink)
@@ -552,19 +567,101 @@ struct DMCDecisionEngineTests {
         triggers: [[String: Any]]? = nil,
         conditions: Any? = nil,
         waitMs: Int? = nil,
-        cancels: [[String: Any]]? = nil
+        cancels: [[String: Any]]? = nil,
+        frequency: [String: Any]? = nil
     ) -> CampaignModel {
         try! CampaignModel.fromJson(
             json(
                 key, priority: priority,
                 triggers: triggers ?? (screen.map { [["type": "screen_viewed", "names": [$0]]] } ?? cartLanded),
-                conditions: conditions, waitMs: waitMs, cancels: cancels))!
+                conditions: conditions, waitMs: waitMs, cancels: cancels, frequency: frequency))!
     }
 
     private static func inline(
-        _ key: String, _ slot: String, priority: Any? = 600, waitMs: Int? = nil
+        _ key: String, _ slot: String, priority: Any? = 600, waitMs: Int? = nil,
+        frequency: [String: Any]? = nil
     ) -> CampaignModel {
-        try! CampaignModel.fromJson(json(key, priority: priority, slot: slot, waitMs: waitMs))!
+        try! CampaignModel.fromJson(json(key, priority: priority, slot: slot, waitMs: waitMs, frequency: frequency))!
+    }
+
+    private static func isolatedFrequency() -> FrequencyManager {
+        let defaults = UserDefaults(suiteName: "digia.dmc.test.\(UUID().uuidString)")!
+        return FrequencyManager(
+            storage: UserDefaultsLocalStorage(defaults: defaults).scoped("frequency"),
+            sessionIdProvider: { "s1" },
+            clock: { 0 })
+    }
+
+    // MARK: zero frequency caps (dmc-cases max_total_zero_never_shows,
+    // max_per_window_zero_never_shows)
+
+    @Test("a maxTotal 0 campaign never shows; the capped winner falls through")
+    func zeroMaxTotalNeverShows() {
+        defer { finish() }
+        facts.frequency = Self.isolatedFrequency()
+        facts.add(Self.campaign("c1", priority: 2, frequency: ["maxTotal": 0]))
+        facts.add(Self.campaign("c2", priority: 1, frequency: ["maxTotal": 1]))
+        engine.ready()
+
+        engine.send(.event("cart_landed", [:]))
+        #expect(routedKeys == ["c2"])
+        #expect(gating("c1", TimelineReason.capped).count == 1)
+
+        engine.send(.event("cart_landed", [:]))
+        #expect(routedKeys == ["c2"])
+        #expect(gating("c2", TimelineReason.capped).count == 1)
+    }
+
+    @Test("a maxPerWindow count 0 campaign never shows")
+    func zeroWindowCountNeverShows() {
+        defer { finish() }
+        facts.frequency = Self.isolatedFrequency()
+        facts.add(Self.campaign(
+            "c1", priority: 2, frequency: ["maxPerWindow": ["count": 0, "window": "day"]]))
+        facts.add(Self.campaign(
+            "c2", priority: 1, frequency: ["maxPerWindow": ["count": 1, "window": "day"]]))
+        engine.ready()
+
+        engine.send(.event("cart_landed", [:]))
+        #expect(routedKeys == ["c2"])
+        #expect(gating("c1", TimelineReason.capped).count == 1)
+
+        engine.send(.event("cart_landed", [:]))
+        #expect(routedKeys == ["c2"])
+        #expect(gating("c2", TimelineReason.capped).count == 1)
+    }
+
+    @Test("an inline campaign is never frequency-capped")
+    func inlineIgnoresFrequencyCaps() {
+        defer { finish() }
+        facts.frequency = Self.isolatedFrequency()
+        facts.add(Self.inline("c1", "s1", priority: 900, frequency: ["maxTotal": 1]))
+        facts.add(Self.campaign("c3", priority: 900, frequency: ["maxTotal": 1]))
+        facts.add(Self.campaign("c4", priority: 100))
+        engine.ready()
+
+        engine.send(.event("cart_landed", [:]))
+        #expect(routedKeys == ["c1", "c3"])
+
+        engine.send(.event("cart_landed", [:]))
+        #expect(routedKeys == ["c1", "c3", "c1", "c4"])
+        #expect(gating("c3", TimelineReason.capped).count == 1)
+    }
+
+    @Test("slot losers are still held back when the winner is already in its slot")
+    func slotLosersLoggedWhenWinnerInSlot() {
+        defer { finish() }
+        facts.add(Self.inline("c1", "s1", priority: 900))
+        facts.add(Self.inline("c2", "s1", priority: 100))
+        facts.slots = ["s1": "c1"]
+        engine.ready()
+
+        engine.send(.event("cart_landed", [:]))
+
+        #expect(routedKeys.isEmpty)
+        #expect(gating("c2", TimelineReason.lowerPriority).first?.extras == [
+            "verdict": "eligible", "outcome": "held_back", "lost_to": "c1",
+        ])
     }
 
     private static func json(
@@ -574,7 +671,8 @@ struct DMCDecisionEngineTests {
         triggers: [[String: Any]]? = nil,
         conditions: Any? = nil,
         waitMs: Int? = nil,
-        cancels: [[String: Any]]? = nil
+        cancels: [[String: Any]]? = nil,
+        frequency: [String: Any]? = nil
     ) -> [String: Any] {
         var rule: [String: Any] = [
             "trigger": ["any": triggers ?? cartLanded],
@@ -600,7 +698,7 @@ struct DMCDecisionEngineTests {
                 "slotKey": slot as Any,
                 "image": ["url": "https://cdn.example.com/a.png"],
             ]
-        return [
+        var out: [String: Any] = [
             "id": "id-\(key)",
             "campaignKey": key,
             "campaignType": slot == nil ? "nudge" : "inline",
@@ -608,5 +706,7 @@ struct DMCDecisionEngineTests {
             "rule": rule,
             "templateConfig": template,
         ]
+        if let frequency { out["frequency"] = frequency }
+        return out
     }
 }

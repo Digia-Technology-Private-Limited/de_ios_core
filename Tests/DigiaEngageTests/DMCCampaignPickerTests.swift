@@ -8,6 +8,7 @@ struct DMCCampaignPickerTests {
 
     static func pick(
         _ campaigns: [CampaignModel],
+        currentScreen: String = "",
         isWaiting: (String) -> Bool = { _ in false },
         inAudience: (CampaignModel) -> Bool = { _ in true },
         capped: (CampaignModel) -> Bool = { _ in false }
@@ -17,6 +18,7 @@ struct DMCCampaignPickerTests {
             signal: .event("cart_landed", [:]),
             attributes: [:],
             device: [:],
+            currentScreen: currentScreen,
             isWaiting: isWaiting,
             inAudience: inAudience,
             capped: capped)

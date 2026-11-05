@@ -893,7 +893,8 @@ struct DMCRuleEvaluatorTests {
             triggers: [.appOpened],
             conditions: .comparison(
                 Comparison(source: .attribute, key: "k", op: .gt, value: "not-a-number")),
-            wait: nil)
+            wait: nil,
+            screens: nil)
         let verdict = RuleEvaluator.evaluate(
             .valid(broken), .appOpened, attributes: ["k": 5], device: [:])
         #expect(verdict.kind == .ineligible)

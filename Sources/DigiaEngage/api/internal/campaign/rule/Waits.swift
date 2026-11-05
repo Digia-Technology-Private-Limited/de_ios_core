@@ -16,6 +16,7 @@ enum WaitCancelCause: String {
     case screenViewed = "screen_viewed"
     case screenLeft = "screen_left"
     case sessionEnded = "session_ended"
+    case notOnTargetScreen = "not_on_target_screen"
 
     var wire: String { rawValue }
 }

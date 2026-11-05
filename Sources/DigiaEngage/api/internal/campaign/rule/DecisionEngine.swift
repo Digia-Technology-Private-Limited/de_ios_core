@@ -96,6 +96,7 @@ final class DecisionEngine {
             signal: signal,
             attributes: facts.attributes,
             device: facts.device,
+            currentScreen: facts.currentScreen,
             isWaiting: { self.waits.isWaiting($0) },
             inAudience: facts.inAudience,
             capped: facts.capped
@@ -149,15 +150,17 @@ final class DecisionEngine {
     private func routeInlineWinners(_ winners: [SlotWinner], signal: RuleSignal) throws {
         for slotWinner in winners {
             let campaign = slotWinner.campaign
-            if facts.slotCampaignKey(slotWinner.slot) == campaign.campaignKey {
+            let inSlot = facts.slotCampaignKey(slotWinner.slot) == campaign.campaignKey
+            if inSlot {
                 log.d(
                     "Skipped — already in slot \(slotWinner.slot)",
                     campaign: campaign.campaignKey)
-                continue
+            } else {
+                for candidate in [campaign] + slotWinner.heldBack {
+                    reportDefaultedPriority(candidate)
+                }
             }
-            for candidate in [campaign] + slotWinner.heldBack {
-                reportDefaultedPriority(candidate)
-            }
+            // The others lose to this winner whether or not it routes again.
             for loser in slotWinner.heldBack {
                 log.d(
                     "Not shown — \(campaign.campaignKey) wins slot \(slotWinner.slot)",
@@ -176,6 +179,7 @@ final class DecisionEngine {
                     "Wait ignored — an inline campaign shows at once",
                     campaign: campaign.campaignKey)
             }
+            guard !inSlot else { continue }
             try route(campaign, signal.name, signal)
         }
     }
@@ -272,6 +276,13 @@ final class DecisionEngine {
             logWaitEnded(key, outcome: "gone", waitMs: pending.wait.ms)
             return false
         }
+        // Checked again, here: leaving the screen and coming back in time is fine.
+        if case .valid(let validRule)? = campaign.rule, let screens = validRule.screens,
+           !screens.contains(facts.currentScreen)
+        {
+            logWaitCancelled(pending, cause: .notOnTargetScreen)
+            return false
+        }
         let verdict = evaluateOne(
             campaign, trigger: pending.trigger,
             attributes: facts.attributes, device: facts.device)
@@ -364,6 +375,7 @@ final class DecisionEngine {
         }
         var extras = ["verdict": "ineligible"]
         if reason == .conditionFailed { extras["condition"] = detail ?? "" }
+        if reason == .notOnTargetScreen { extras["screen"] = detail ?? "" }
         if reason == .notInAudience { extras["context"] = facts.audienceContext }
         log.d(
             "Ineligible — \(reason.wire)",
