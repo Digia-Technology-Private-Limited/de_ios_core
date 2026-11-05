@@ -29,6 +29,9 @@ public enum ExternalGuideLifecycleEvent: Sendable, Equatable {
     case clicked(elementId: String?)
 
     /// The terminal outcome — dismissed after displaying, or dropped before it
-    /// ever did. Mirrors ``PresentationController/settle(_:)``.
+    /// ever did. A dismissal reaches the presentation through the
+    /// coordinator's normalisation (an undisplayed dismissal settles
+    /// dropped), never as a raw `settle`, because an external renderer's
+    /// ordering is not trustworthy; a drop settles directly.
     case settled(PresentationOutcome)
 }
