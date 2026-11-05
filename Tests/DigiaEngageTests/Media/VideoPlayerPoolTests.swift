@@ -75,7 +75,7 @@ struct VideoPlayerPoolTests {
         #expect(pool.livePlayerCount == 1)
     }
 
-    // Guards `min(existing.priority, priority)` in `borrow` (R1-10).
+    // Guards `holds.min()` in `Holder.priority` (R1-10).
     @Test("a warm borrow of a key held on screen keeps it on screen")
     func coHolderKeepsTheHighestRank() {
         let pool = pool(size: 2)
@@ -86,6 +86,41 @@ struct VideoPlayerPoolTests {
         #expect(pool.borrow(key: "next", url: url("c"), priority: .viewerNext) != nil)
 
         #expect(pool.heldKeys == ["story-1", "next"])
+    }
+
+    // Guards `holds.remove(at:)` in `giveBack` (OD-10, R2-06a).
+    @Test("a key's rank drops when its on-screen hold is given back")
+    func rankDropsWhenTheHigherHoldGoes() throws {
+        let pool = pool(size: 2)
+        let story = try #require(pool.borrow(key: "story-1", url: url("a"), priority: .onScreen))
+        _ = pool.borrow(key: "story-1", url: url("a"), priority: .railThumb)
+        _ = pool.borrow(key: "page", url: url("b"), priority: .onScreen)
+        var evicted: [String] = []
+        _ = pool.observeEviction(of: "story-1") { evicted.append("story-1") }
+
+        pool.giveBack(key: "story-1", player: story, priority: .onScreen)
+
+        #expect(pool.priority(of: "story-1") == .railThumb)
+        #expect(pool.borrow(key: "next", url: url("c"), priority: .viewerNext) != nil)
+        #expect(evicted == ["story-1"])
+        #expect(pool.livePlayerCount == 2)
+    }
+
+    // Guards `notifyEvicted(key)` after a re-point in `borrow` (OD-10, R2-06c).
+    @Test("a borrow of a held key with another URL tells the other holders")
+    func repointTellsTheOtherHolders() throws {
+        let pool = pool(size: 2)
+        let player = try #require(pool.borrow(key: "canvas", url: url("light"), priority: .onScreen))
+        var told = 0
+        _ = pool.observeEviction(of: "canvas") { told += 1 }
+
+        let repointed = try #require(pool.borrow(key: "canvas", url: url("dark"), priority: .onScreen))
+
+        #expect(repointed === player)
+        #expect(told == 1)
+        // The old holder's hold ended with the notice: the new holder's give-back frees it.
+        pool.giveBack(key: "canvas", player: repointed, priority: .onScreen)
+        #expect(pool.heldKeys.isEmpty)
     }
 
     // Guards the removals in `giveBack` and `removeEvictionObserver` (N8).
@@ -153,6 +188,25 @@ struct VideoPlayerPoolMediaVideoTests {
 
         // The dark showing's hold was the only one: nothing stays held for either URL.
         #expect(pool.heldKeys.isEmpty)
+    }
+
+    // Guards the keyless branch in `MediaVideoPlayback.open`, which builds its own player
+    // (OD-10, R2-06b).
+    @Test("a keyless video plays outside the pool and never counts toward its size")
+    func keylessPlaysOutsideThePool() async throws {
+        MediaOrigin.install()
+        MediaServices.override(videoSession: MediaOrigin.session())
+        defer { MediaOrigin.end() }
+        let video = MediaOrigin.url("keyless.mp4")
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
+        let pool = MediaServices.current.videoPool
+        var frames = 0
+
+        let window = MediaStage.mount(MediaVideo(url: video.absoluteString, autoplay: false, onFirstFrame: { frames += 1 }))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { frames == 1 })
+
+        #expect(pool.livePlayerCount == 0)
     }
 
     // Guards the `reused.key != key || reused.finished` restart check in `VideoPlayerPool.borrow` (N2).
