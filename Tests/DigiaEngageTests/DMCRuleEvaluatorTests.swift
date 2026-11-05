@@ -300,6 +300,25 @@ struct DMCRuleEvaluatorTests {
         #expect(Self.verdictName(Self.run(Self.rule(node), attributes: ["plan": "free"])) == "ineligible")
     }
 
+    // dmc-case: dmc.rule_who.stack_overflow_depth_malformed
+    @Test("a rule nested tens of thousands of levels deep is malformed")
+    func absurdlyNestedRuleIsMalformed() {
+        // The nested JSON itself releases recursively, so build and drop it on
+        // a thread with room for that.
+        var reason: IneligibleReason?
+        let done = DispatchSemaphore(value: 0)
+        let thread = Thread {
+            var node: Any = ["type": "attribute", "key": "plan", "op": "exists"]
+            for _ in 0..<100_000 { node = ["all": [node]] }
+            if case .invalid(let invalid) = parseRule(Self.rule(node)) { reason = invalid.reason }
+            done.signal()
+        }
+        thread.stackSize = 256 << 20
+        thread.start()
+        done.wait()
+        #expect(reason == .malformedRule)
+    }
+
     // dmc-case: dmc.rule.version_compares_parts_as_numbers
     // dmc-case: dmc.rule_who.version_keys_compare_as_versions
     @Test("version keys compare as versions")
