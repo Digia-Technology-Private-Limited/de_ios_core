@@ -33,6 +33,23 @@ struct AnchorlessFormatsGoldenTests {
         try await assertFirstStep([Step(url: "https://crops.test/crop.\(format)")], named: "crop_\(format)")
     }
 
+    // Fails if: guide_overlay_view.swift `AnchorlessImageLoader.image` `request.setValue(
+    // DIGIA_IMAGE_USER_AGENT, forHTTPHeaderField: "User-Agent")` is deleted (the crop is fetched
+    // outside the image wrapper, so the shared downloader's header does not cover it). The URL is
+    // this test's own: the loader caches by URL, so a crop another test drew would send no request.
+    @Test("the crop is fetched with the Digia User-Agent")
+    @MainActor
+    func testCropSendsUserAgent() async throws {
+        let showing = try show([Step(url: "https://crops.test/user_agent.png")])
+        defer { showing.end() }
+
+        try #require(
+            try await AnchorlessGuideHost.waitUntilDrawn(showing.window, differingFrom: showing.hostOnly),
+            "The guide drew nothing"
+        )
+        #expect(StubCropProtocol.userAgents == ["DigiaEngage/1.0 (iOS)"])
+    }
+
     @Test("matches the pill highlight golden")
     @MainActor
     func testHighlightPillGolden() async throws {

@@ -1,7 +1,6 @@
 import SwiftUI
 import UIKit
 import Combine
-internal import SDWebImageSwiftUI
 
 /// Frame-settling buffer added before the survey is shown.
 private let RENDER_DELAY_MS: Int = 150
@@ -1102,37 +1101,46 @@ private struct BlockTitleView: View {
 private struct BlockMediaImage: View {
     let media: BlockMedia
 
-    init(media: BlockMedia) {
-        DigiaImagePipeline.configureIfNeeded()
-        self.media = media
-    }
-
-    private var contentMode: ContentMode {
+    private var fit: MediaFit {
         switch media.boxFit {
-        case "contain": return .fit
-        default: return .fill
+        case "contain": return .contain
+        case "fill": return .fill
+        default: return .cover
         }
     }
 
     var body: some View {
-        if media.hasUrl, let url = URL(string: media.url) {
-            WebImage(url: url) { image in
-                if media.boxFit == "fill" {
-                    image.resizable()
-                } else {
-                    image.resizable().aspectRatio(contentMode: contentMode)
-                }
-            } placeholder: {
-                ZStack {
-                    SurveyTokens.surfaceSunken
-                    BlurHashPlaceholderView(placeholder: media.placeholder, fit: media.boxFit)
-                }
-            }
+        if media.hasUrl {
+            SurveyMediaImage(url: media.url, fit: fit, placeholder: media.placeholder)
             .frame(height: 176)
             .frame(maxWidth: .infinity)
             .clipShape(RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(SurveyTokens.border, lineWidth: 1))
         }
+    }
+}
+
+/// A survey picture: the image wrapper over the survey's sunken fill, which shows until the
+/// picture draws (so a loading picture is a sunken box with its BlurHash on it, and a failed one the
+/// bare sunken box).
+struct SurveyMediaImage: View {
+    let url: String
+    let fit: MediaFit
+    let placeholder: ImagePlaceholder?
+    @State private var loaded = false
+
+    var body: some View {
+        ZStack {
+            if !loaded { SurveyTokens.surfaceSunken }
+            MediaImage(
+                url: url,
+                fit: fit,
+                blurHash: placeholder?.stillBlurHash,
+                onSuccess: { loaded = true },
+                errorContent: AnyView(Color.clear)
+            )
+        }
+        .onChange(of: url) { _ in loaded = false }
     }
 }
 

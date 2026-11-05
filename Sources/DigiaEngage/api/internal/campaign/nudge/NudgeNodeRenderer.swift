@@ -1,7 +1,5 @@
 import AVFoundation
 import AVKit
-internal import Lottie
-internal import SDWebImageSwiftUI
 import SwiftUI
 import UIKit
 
@@ -151,20 +149,13 @@ private struct NudgeImageView: View {
     let canvasMode: Bool
     @Environment(\.digiaVariables) private var variables
 
-    init(node: NudgeImage, canvasMode: Bool) {
-        DigiaImagePipeline.configureIfNeeded()
-        self.node = node
-        self.canvasMode = canvasMode
-    }
-
     private var url: String { interpolate(node.url, context: variables) }
     private var maxWidth: CGFloat? { node.box.fillWidth ? .infinity : nil }
-    // Placeholder slot shows the payload's blurhash (auto-computed by the
-    // dashboard) while the image downloads; empty when the payload has none.
-    private var image: some View {
-        WebImage(url: URL(string: url)) { $0.resizable() } placeholder: {
-            BlurHashPlaceholderView(placeholder: node.placeholder, fit: node.fit.rawValue)
-        }
+    // The still under the picture is the payload's blurhash (auto-computed by the
+    // dashboard) while the image downloads; empty when the payload has none. The fit is
+    // applied by the wrapper, so each layout below passes the one it needs.
+    private func image(_ fit: MediaFit) -> some View {
+        MediaImage(url: url, fit: fit, blurHash: node.placeholder?.stillBlurHash)
     }
 
     var body: some View {
@@ -191,16 +182,14 @@ private struct NudgeImageView: View {
         GeometryReader { geometry in
             switch node.fit {
             case .contain:
-                image
-                    .scaledToFit()
+                image(.contain)
                     .frame(width: geometry.size.width, height: geometry.size.height)
             case .cover:
-                image
-                    .scaledToFill()
+                image(.cover)
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .clipped()
             case .fill:
-                image
+                image(.fill)
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .clipped()
             }
@@ -213,19 +202,20 @@ private struct NudgeImageView: View {
     private var aspectRatioImage: some View {
         switch node.fit {
         case .contain:
-            image.aspectRatio(node.aspectRatio, contentMode: .fit)
+            // The picture stretches to the ratio's box, as it always has here.
+            image(.fill).aspectRatio(node.aspectRatio, contentMode: .fit)
                 .frame(maxWidth: maxWidth)
         case .cover:
             Color.clear
                 .aspectRatio(node.aspectRatio, contentMode: .fit)
-                .overlay(image.scaledToFill())
+                .overlay(image(.cover))
                 .frame(maxWidth: .infinity)
                 .clipped()
         case .fill:
             // Stretch: a clear box of the target ratio, image overlaid to fill it exactly.
             Color.clear
                 .aspectRatio(node.aspectRatio, contentMode: .fit)
-                .overlay(image)
+                .overlay(image(.fill))
                 .frame(maxWidth: .infinity)
                 .clipped()
         }
@@ -236,18 +226,18 @@ private struct NudgeImageView: View {
     private var fixedImage: some View {
         switch node.fit {
         case .contain:
-            image.scaledToFit()
+            image(.contain)
                 .frame(maxWidth: maxWidth, maxHeight: node.box.fixedHeight)
         case .cover:
             // scaledToFill overflows horizontally with an unbounded (hug) width,
             // pushing the rounded corners off-screen so the radius looks unapplied.
             // Cover always fills the available width, so bound it to the parent.
-            image.scaledToFill()
+            image(.cover)
                 .frame(maxWidth: .infinity, maxHeight: node.box.fixedHeight)
                 .clipped()
         case .fill:
-            // No scaledTo: the image stretches to exactly fill the frame bounds.
-            image
+            // The image stretches to exactly fill the frame bounds.
+            image(.fill)
                 .frame(maxWidth: .infinity, maxHeight: node.box.fixedHeight)
                 .clipped()
         }
@@ -390,33 +380,21 @@ private struct NudgeLottieView: View {
         let resolved = interpolate(node.url, context: variables)
         if resolved.isEmpty {
             nudgePlaceholder(label: "Lottie", height: node.height)
-        } else if let url = URL(string: resolved) {
-            Group {
-                if node.autoplay {
-                    lottie(url: url)
-                        .playing(loopMode: node.loop ? .loop : .playOnce)
-                } else {
-                    lottie(url: url)
-                }
-            }
+        } else {
+            // The wire carries no placeholder for Lottie, so the still below the animation
+            // is empty.
+            MediaLottie(
+                url: resolved,
+                fit: MediaFit(rawValue: node.fit.rawValue) ?? .cover,
+                loop: node.loop,
+                autoplay: node.autoplay
+            )
             .modifier(CanvasMediaFrame(
                 canvasMode: canvasMode,
                 aspectRatio: node.aspectRatio,
                 height: node.height
             ))
         }
-    }
-
-    // `.resizable()` lets the animation fill the frame; `contentMode` then applies the fit.
-    private func lottie(url: URL) -> LottieView<EmptyView> {
-        LottieView {
-            if url.pathExtension.lowercased() == "lottie" {
-                return try await DotLottieFile.loadedFrom(url: url).animationSource
-            }
-            return await LottieAnimation.loadedFrom(url: url)?.animationSource
-        }
-            .resizable()
-            .configure(\.contentMode, to: node.fit.uiContentMode)
     }
 }
 
@@ -426,10 +404,6 @@ private struct NudgeCarouselView: View {
     let node: NudgeCarousel
     @Environment(\.digiaVariables) private var variables
 
-    init(node: NudgeCarousel) {
-        DigiaImagePipeline.configureIfNeeded()
-        self.node = node
-    }
     @State private var currentIndex = 0
     @State private var autoPlayTimer: Timer? = nil
 
@@ -446,9 +420,9 @@ private struct NudgeCarouselView: View {
             VStack(spacing: 0) {
                 TabView(selection: $currentIndex) {
                     ForEach(0..<pageCount, id: \.self) { index in
-                        WebImage(url: URL(string: images[index % images.count]))
-                            .resizable()
-                            .scaledToFill()
+                        // The carousel wire carries no per-image placeholder; the still
+                        // under each page is empty.
+                        MediaImage(url: images[index % images.count], fit: .cover)
                             .frame(maxWidth: .infinity)
                             .frame(height: node.height)
                             .clipped()
@@ -723,18 +697,6 @@ extension View {
 }
 
 // MARK: - Media (image / Lottie) helpers
-
-extension NudgeContentFit {
-    /// Lottie scales via its underlying `LottieAnimationView` (a UIView), so each fit
-    /// maps to a UIView content mode.
-    fileprivate var uiContentMode: UIView.ContentMode {
-        switch self {
-        case .cover: return .scaleAspectFill
-        case .contain: return .scaleAspectFit
-        case .fill: return .scaleToFill
-        }
-    }
-}
 
 extension View {
     /// Sizes a full-width media view: aspect ratio (when set) drives the height,

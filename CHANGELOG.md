@@ -2,6 +2,13 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [Unreleased]
+
+### Bug Fixes
+- Every image request now carries the Digia User-Agent.
+- Image placeholders disappear once the picture draws, and Lottie animations no longer sit on a backdrop.
+- Blank, templated or schemeless image and Lottie URLs are reported once as `invalid_url` without a network fetch.
+
 ## [4.3.2] - 2026-11-04
 
 ### Bug Fixes

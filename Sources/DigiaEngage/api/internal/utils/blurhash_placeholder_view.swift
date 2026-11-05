@@ -28,7 +28,7 @@ struct BlurHashPlaceholderView: View {
     }
 
     /// Size the hash is decoded at; the upscale to the image box is the blur.
-    private static let decodeSize = 32
+    static let decodeSize = 32
 
     private var decoded: UIImage? {
         guard let placeholder,
@@ -54,7 +54,7 @@ struct BlurHashPlaceholderView: View {
 
 /// Tiny decode cache so recomposition doesn't re-run the inverse DCT — hashes
 /// are stable per campaign payload, so this stays small.
-private enum BlurHashCache {
+enum BlurHashCache {
     // NSCache is documented thread-safe, so unsynchronised shared access is fine.
     nonisolated(unsafe) private static let cache = NSCache<NSString, UIImage>()
 

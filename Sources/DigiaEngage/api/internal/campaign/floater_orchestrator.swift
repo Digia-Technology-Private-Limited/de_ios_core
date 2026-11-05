@@ -331,7 +331,9 @@ final class FloaterOrchestrator: ObservableObject {
             "Dropped — media could not be loaded (reason=\(reason))",
             campaign: active.campaign.campaignKey
         )
-        reportMediaLoadFailed(active.config.media.kind.healthKind, cause: cause, campaignKey: active.campaign.campaignKey)
+        if let cause {
+            MediaServices.current.reportHealth(active.campaign.campaignKey, active.config.media.kind.healthKind, cause)
+        }
         lastStartFailureReason = "media could not be loaded: \(reason)"
         onDismissed(active, .mediaEnd, metricsSnapshot(), false)
         finishDismiss()
@@ -440,7 +442,9 @@ final class FloaterOrchestrator: ObservableObject {
         // build break with no way to catch it before a device build. The decoded
         // image is kept in `preloadedImage` for the window to draw; only an SVG or
         // animated image is fetched again by the renderer's `WebImage`.
-        let task = URLSession.shared.dataTask(with: parsed) { [weak self] data, response, _ in
+        var request = URLRequest(url: parsed)
+        request.setValue(DIGIA_IMAGE_USER_AGENT, forHTTPHeaderField: "User-Agent")
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
             let status = (response as? HTTPURLResponse)?.statusCode
             Task { @MainActor in
                 guard let self, self.state?.token == token else { return }
@@ -465,7 +469,7 @@ final class FloaterOrchestrator: ObservableObject {
             return
         }
         Task { [weak self] in
-            let loaded = await loadLottieSource(parsed)
+            let loaded = await MediaServices.current.loadLottie(parsed)
             guard let self, self.state?.token == token else { return }
             if loaded.source != nil {
                 self.markVisible(token: token)

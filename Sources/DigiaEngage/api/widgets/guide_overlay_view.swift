@@ -28,6 +28,7 @@ private enum AnchorlessImageLoader {
         if let cached = cache.object(forKey: url as NSURL) { return (cached, nil) }
         var request = URLRequest(url: url)
         request.timeoutInterval = imageLoadTimeout
+        request.setValue(DIGIA_IMAGE_USER_AGENT, forHTTPHeaderField: "User-Agent")
         guard let (data, response) = try? await URLSession.shared.data(for: request),
               !Task.isCancelled
         else { return (nil, nil) }
@@ -327,7 +328,9 @@ private struct GuideStepOverlay: View {
             let loaded = await AnchorlessImageLoader.image(for: imageURL)
             guard let decoded = loaded.image else {
                 guard !Task.isCancelled else { return }
-                reportMediaLoadFailed(.image, cause: loaded.failureCause, campaignKey: campaignKey)
+                if let cause = loaded.failureCause {
+                    MediaServices.current.reportHealth(campaignKey, .image, cause)
+                }
                 SDKInstance.shared.reportGuideRenderFailure(
                     nil,
                     guideToken: guideToken,

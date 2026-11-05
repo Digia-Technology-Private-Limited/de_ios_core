@@ -98,45 +98,37 @@ struct CanvasImageRendererTests {
         #expect(tint == nil)
     }
 
-    // MARK: - 2. Focal Alignment Boundaries
+    // MARK: - 2. Health through MediaImage
 
-    @Test("focalAlignment maps 9 quadrants correctly across 0.34 and 0.66 thresholds")
-    func focalAlignmentQuadrants() {
-        // Top row (y < 0.34)
-        #expect(focalAlignment(x: 0.0, y: 0.0) == .topLeading)
-        #expect(focalAlignment(x: 0.33, y: 0.33) == .topLeading)
-        #expect(focalAlignment(x: 0.34, y: 0.1) == .top)
-        #expect(focalAlignment(x: 0.5, y: 0.2) == .top)
-        #expect(focalAlignment(x: 0.66, y: 0.1) == .top)
-        #expect(focalAlignment(x: 0.67, y: 0.0) == .topTrailing)
-        #expect(focalAlignment(x: 1.0, y: 0.33) == .topTrailing)
+    @Test("a canvas image that is not found reports http_4xx once and is fetched once, for the canvas's campaign")
+    func missingCanvasImageReportsOnce() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("canvas-missing.png")
+        MediaOrigin.set(.status(404, Data()), for: target)
+        let recorder = HealthRecorder()
 
-        // Center row (0.34 <= y <= 0.66)
-        #expect(focalAlignment(x: 0.1, y: 0.34) == .leading)
-        #expect(focalAlignment(x: 0.33, y: 0.5) == .leading)
-        #expect(focalAlignment(x: 0.34, y: 0.34) == .center)
-        #expect(focalAlignment(x: 0.5, y: 0.5) == .center)
-        #expect(focalAlignment(x: 0.66, y: 0.66) == .center)
-        #expect(focalAlignment(x: 0.67, y: 0.5) == .trailing)
-        #expect(focalAlignment(x: 1.0, y: 0.66) == .trailing)
+        // The campaign key is in the environment from the first mount: swapping the root view after
+        // the mount rebuilds the image, and a rebuild after the 404 arrived fetches it again.
+        let stage = ComponentTestHost.CanvasStageHost(
+            canvas: CampaignCanvas(
+                version: 2, width: 320, height: 200, background: .solid(.literal("#FFFFFFFF")),
+                children: [
+                    .widget(
+                        id: "image", rect: CampaignCanvasRect(x: 0, y: 0, width: 320, height: 200),
+                        widget: imageWidget(url: target.absoluteString))
+                ]))
+        let (window, _) = ComponentTestHost.mount(
+            rootView: AnyView(stage.environment(\.digiaCampaignKey, "canvas-campaign")),
+            size: CGSize(width: 320, height: 200))
+        defer { unmount(window) }
 
-        // Bottom row (y > 0.66)
-        #expect(focalAlignment(x: 0.0, y: 0.67) == .bottomLeading)
-        #expect(focalAlignment(x: 0.33, y: 1.0) == .bottomLeading)
-        #expect(focalAlignment(x: 0.34, y: 0.67) == .bottom)
-        #expect(focalAlignment(x: 0.5, y: 0.9) == .bottom)
-        #expect(focalAlignment(x: 0.66, y: 1.0) == .bottom)
-        #expect(focalAlignment(x: 0.67, y: 0.67) == .bottomTrailing)
-        #expect(focalAlignment(x: 1.0, y: 1.0) == .bottomTrailing)
+        #expect(await waitUntilMedia { !recorder.all.isEmpty })
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        #expect(
+            recorder.all == [.init(campaignKey: "canvas-campaign", kind: .image, cause: "http_4xx")])
+        #expect(MediaOrigin.requests(for: target).count == 1)
     }
-
-    @Test("focalAnchorPoint clamps x and y coordinates to [0, 1] unit range")
-    func focalAnchorPointClamping() {
-        #expect(focalAnchorPoint(x: 0.5, y: 0.5) == UnitPoint(x: 0.5, y: 0.5))
-        #expect(focalAnchorPoint(x: -0.2, y: 1.5) == UnitPoint(x: 0.0, y: 1.0))
-        #expect(focalAnchorPoint(x: 1.2, y: -0.5) == UnitPoint(x: 1.0, y: 0.0))
-    }
-
 
     // MARK: - 5. Theme Switching
 

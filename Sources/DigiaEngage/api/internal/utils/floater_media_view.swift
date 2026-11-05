@@ -1,6 +1,4 @@
 import AVFoundation
-internal import Lottie
-internal import SDWebImageSwiftUI
 import SwiftUI
 
 /// The media surface, shared by both states. Reads the orchestrator's own `player` —
@@ -28,7 +26,6 @@ struct FloaterMediaView: View {
         media: FloaterMediaConfig, player: AVPlayer?, cover: Bool, resolvedUrl: String,
         preloadedImage: UIImage?
     ) {
-        DigiaImagePipeline.configureIfNeeded()
         self.media = media
         self.player = player
         self.cover = cover
@@ -51,26 +48,14 @@ struct FloaterMediaView: View {
 
     @ViewBuilder
     private var lottieView: some View {
-        if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{"), let url = URL(string: resolvedUrl) {
-            Group {
-                if media.autoplay {
-                    lottie(url: url).playing(loopMode: media.loop ? .loop : .playOnce)
-                } else {
-                    lottie(url: url)
-                }
-            }
+        if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{") {
+            MediaLottie(
+                url: resolvedUrl,
+                fit: cover ? .cover : .contain,
+                loop: media.loop,
+                autoplay: media.autoplay
+            )
         }
-    }
-
-    private func lottie(url: URL) -> LottieView<EmptyView> {
-        LottieView {
-            if url.pathExtension.lowercased() == "lottie" {
-                return try await DotLottieFile.loadedFrom(url: url).animationSource
-            }
-            return await LottieAnimation.loadedFrom(url: url)?.animationSource
-        }
-            .resizable()
-            .configure(\.contentMode, to: cover ? .scaleAspectFill : .scaleAspectFit)
     }
 
     @ViewBuilder
@@ -84,9 +69,8 @@ struct FloaterMediaView: View {
             Image(uiImage: preloadedImage)
                 .resizable()
                 .aspectRatio(contentMode: cover ? .fill : .fit)
-        } else if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{"), let url = URL(string: resolvedUrl) {
-            WebImage(url: url) { $0.resizable() } placeholder: { Color.black }
-                .aspectRatio(contentMode: cover ? .fill : .fit)
+        } else if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{") {
+            MediaImage(url: resolvedUrl, fit: cover ? .cover : .contain)
         }
     }
 }
