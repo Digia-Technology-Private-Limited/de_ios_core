@@ -455,7 +455,7 @@ private struct FloaterSessionView: View {
 
     private func expandFromCollapsedMediaTap() {
         guard !expanded, config.behavior.tapExpands, !orchestrator.closing else { return }
-        SDKInstance.shared.reportFloaterClicked(
+        SDKInstance.shared.pipReporter.reportFloaterClicked(
             elementId: "pip_media", actionType: "expand", ctaRole: "primary"
         )
         orchestrator.expand()
@@ -877,7 +877,7 @@ private func performFloaterCanvasAction(
     _ request: CampaignCanvasActionRequest, state: ActiveFloaterState
 ) {
     let resolvedAction = request.actions.first?.resolved(with: state.variableContext)
-    SDKInstance.shared.reportFloaterStepClicked(
+    SDKInstance.shared.pipReporter.reportFloaterStepClicked(
         elementId: request.elementId, ctaLabel: request.label ?? "",
         actionType: resolvedAction?.analyticsType, actionUrl: resolvedAction?.analyticsURL
     )
@@ -979,7 +979,7 @@ private struct FloaterChromeView: View {
         FloaterChromePill(size: expandedIconSize) {
             if config.controls.showCollapse {
                 FloaterChromeIcon(glyph: .fullscreenExit, size: expandedIconSize) {
-                    SDKInstance.shared.reportFloaterClicked(
+                    SDKInstance.shared.pipReporter.reportFloaterClicked(
                         elementId: "pip_collapse", actionType: "collapse", ctaRole: "secondary"
                     )
                     orchestrator.collapse()
@@ -1039,7 +1039,7 @@ private struct FloaterChromeView: View {
                 if config.controls.showExpand, config.behavior.tapExpands {
                     FloaterChromePill(size: collapsedIconSize) {
                         FloaterChromeIcon(glyph: .fullscreen, size: collapsedIconSize) {
-                            SDKInstance.shared.reportFloaterClicked(
+                            SDKInstance.shared.pipReporter.reportFloaterClicked(
                                 elementId: "pip_expand", actionType: "expand", ctaRole: "primary"
                             )
                             orchestrator.expand()
@@ -1079,7 +1079,7 @@ private struct FloaterMuteButton: View {
     var body: some View {
         FloaterChromeIcon(glyph: orchestrator.muted ? .volumeOff : .volumeUp, size: size) {
             let willMute = !orchestrator.muted
-            SDKInstance.shared.reportFloaterClicked(
+            SDKInstance.shared.pipReporter.reportFloaterClicked(
                 elementId: willMute ? "pip_mute" : "pip_unmute",
                 actionType: willMute ? "mute" : "unmute", ctaRole: "secondary"
             )
@@ -1094,7 +1094,7 @@ private struct FloaterPlayPauseButton: View {
 
     var body: some View {
         FloaterChromeIcon(glyph: orchestrator.isPlaying ? .pause : .play, size: size) {
-            SDKInstance.shared.reportFloaterClicked(
+            SDKInstance.shared.pipReporter.reportFloaterClicked(
                 elementId: orchestrator.isPlaying ? "pip_pause" : "pip_play",
                 actionType: orchestrator.isPlaying ? "pause" : "play", ctaRole: "secondary"
             )

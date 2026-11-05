@@ -49,7 +49,7 @@ extension DigiaEngageTests {
         func displayedNudgeSuperseded() async throws {
             let sdk = try await makeSdk([nudgeJson("real")])
             let real = deliver(sdk, "real", "cep-1")
-            sdk.reportNudgeImpression()
+            sdk.nudgeOrchestrator.reportNudgeImpression()
             #expect(try await digiaEvents(sdk).map(\.name).contains("Digia Experience Viewed"))
 
             liveTest(sdk, "inv-1", nudgeJson("t1"))
@@ -80,7 +80,7 @@ extension DigiaEngageTests {
         func displayedGuideSuperseded() async throws {
             let sdk = try await makeSdk([guideJson("g")])
             let guide = deliver(sdk, "g", "cep-1")
-            sdk.reportGuideShown()
+            sdk.guideOrchestrator.reportGuideShown()
 
             liveTest(sdk, "inv-1", nudgeJson("t1"))
 
@@ -129,7 +129,7 @@ extension DigiaEngageTests {
             defer { DigiaLogger.unregisterSink(recorder) }
             let sdk = try await makeSdk([inlineJson("i1")])
             let first = deliver(sdk, "i1", "cep-1")
-            sdk.reportSlotFirstRender(first.payload)
+            sdk.inlineReporter.reportSlotFirstRender(first.payload)
 
             let again = deliver(sdk, "i1", "cep-2")
 

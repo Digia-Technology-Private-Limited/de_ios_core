@@ -177,7 +177,7 @@ private struct InlineCarouselView: View {
             }
             .contentShape(Rectangle())
             .onTapGesture {
-                SDKInstance.shared.reportClassicCarouselContainerClicked(payload)
+                SDKInstance.shared.inlineReporter.reportClassicCarouselContainerClicked(payload)
             }
         } else {
             EmptyView()
@@ -189,7 +189,7 @@ private struct InlineCarouselView: View {
         let item = items[realIndex]
         let actions = item.actions
         let reportedAction = actions.first?.resolved(with: variables)
-        SDKInstance.shared.reportCarouselStepClicked(
+        SDKInstance.shared.inlineReporter.reportCarouselStepClicked(
             payload: payload,
             itemIndex: realIndex + 1,
             action: reportedAction
