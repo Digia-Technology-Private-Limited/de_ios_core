@@ -116,7 +116,7 @@ final class StoryViewerSession: ObservableObject {
             return
         }
         if restartOnCompleted, !reportsCompletionOnLoop {
-            showPage(index: 0)
+            loopToFirstPage()
             return
         }
         // Reaching the end is the completion: at most once per showing.
@@ -124,7 +124,14 @@ final class StoryViewerSession: ObservableObject {
             isCompleted = true
             reporter.onCompleted(total: stories.count, timeToCompleteMs: Int64((now - openedAt) * 1_000))
         }
-        if restartOnCompleted { showPage(index: 0) } else { onDismiss() }
+        if restartOnCompleted { loopToFirstPage() } else { onDismiss() }
+    }
+
+    /// The loop's wrap from the last page to the first: page 0 starts from 0, as on `main`, also
+    /// when a tap left it mid-play earlier in this session (V8-02).
+    private func loopToFirstPage() {
+        showPage(index: 0)
+        replayedIndex = 0
     }
 
     /// The video on the current page ran to its end: like `advance`, and showing the page again
