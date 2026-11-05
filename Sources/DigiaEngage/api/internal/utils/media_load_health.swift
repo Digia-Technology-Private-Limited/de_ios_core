@@ -65,11 +65,16 @@ func mediaFailureCause(playerItem: AVPlayerItem) -> String? {
 /// The HTTP status the range cache failed a loading request with, searched through the
 /// error's underlying errors. AVFoundation keeps the code but re-wraps it as an OSStatus, so a
 /// positive OSStatus in the HTTP range counts too (real OSStatus errors are negative).
+///
+/// A stream bypasses the cache, and its playlist's 4xx leaves the item's error log empty. Only a
+/// 404 is mapped: CoreMedia's "HTTP 404: File Not Found" (-12938). A 400, 403 or 410 arrives as
+/// another CoreMedia code (-16845, -12660, -12668) and stays silent, the same rule as Flutter iOS.
 func mediaCacheHTTPStatus(in error: Error?) -> Int? {
     var current = error.map { $0 as NSError }
     while let nsError = current {
         if nsError.domain == MediaResourceLoader.httpStatusErrorDomain { return nsError.code }
         if nsError.domain == NSOSStatusErrorDomain, (100..<600).contains(nsError.code) { return nsError.code }
+        if nsError.domain == "CoreMediaErrorDomain", nsError.code == -12938 { return 404 }
         current = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
     }
     return nil
