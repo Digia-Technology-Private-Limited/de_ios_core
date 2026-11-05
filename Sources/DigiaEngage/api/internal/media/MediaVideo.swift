@@ -55,11 +55,12 @@ let mediaVideoBackdrop = Color(red: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 
 /// `main`'s nudge video showed, and reports health once: `invalid_url`, `http_4xx` or `decode`.
 /// A network failure, a timeout or a 5xx reports nothing. Never throws from the render path.
 ///
-/// With a `playerKey` the player is leased from the pool (`MediaServices.videoPool`) at
-/// `poolPriority`: a remount under the same key and URL resumes where it was, an eviction shows
-/// the still again, and a refused borrow shows the still and reports nothing. Without a key the
-/// wrapper builds its own player and destroys it when it goes. Remote items read through the
-/// range cache; `file://` plays directly.
+/// The player always comes from the pool (`MediaServices.videoPool`, OD-15), at `poolPriority`.
+/// With a `playerKey`, a remount under the same key and URL resumes where it was. Without one the
+/// node borrows under a key of its own, stable while it is mounted, and its player is destroyed
+/// when it leaves: nothing is left idle for a dead node. An eviction shows the still again, and a
+/// refused borrow shows the still and reports nothing. Remote items read through the range
+/// cache; `file://` plays directly.
 ///
 /// `showControls` draws `main`'s native playback controls (`AVPlayerViewController`), as canvas
 /// and nudge video did on `main`; every other surface leaves it off. The controls appear with
@@ -204,8 +205,8 @@ func mediaVideoItem(for url: URL, loader: MediaResourceLoader) -> AVPlayerItem {
     return loader.playerItem(for: url) ?? AVPlayerItem(url: url)
 }
 
-/// One showing's player: leases it from the pool (keyed) or builds it (keyless), watches its
-/// item, and publishes first frame and failure. All on the main actor.
+/// One showing's player: leases it from the pool, watches its item, and publishes first frame
+/// and failure. All on the main actor.
 @MainActor
 final class MediaVideoPlayback: ObservableObject {
     @Published private(set) var player: AVPlayer?
@@ -221,7 +222,9 @@ final class MediaVideoPlayback: ObservableObject {
     private var onLost: (() -> Void)?
 
     private var opened: (url: String, key: String?)?
-    private var lease: (pool: VideoPlayerPool, key: String, priority: PoolPriority, eviction: UUID)?
+    private var lease: (pool: VideoPlayerPool, key: String, priority: PoolPriority, eviction: UUID, own: Bool)?
+    /// The pool key of this node when the surface gives none (OD-15), stable while it is mounted.
+    private let ownKey = "media-video-\(UUID().uuidString)"
     private var report: (String) -> Void = { _ in }
     private var statusObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
@@ -260,20 +263,15 @@ final class MediaVideoPlayback: ObservableObject {
             fail(cause: "invalid_url")
             return
         }
-        let player: AVPlayer
-        if let key {
-            let pool = services.videoPool
-            // Refused (pool full, not on screen): the still stays and nothing is reported.
-            guard let borrowed = pool.borrow(key: key, url: parsed, priority: priority) else {
-                onLost?()
-                return
-            }
-            let eviction = pool.observeEviction(of: key) { [weak self] in self?.evicted() }
-            lease = (pool, key, priority, eviction)
-            player = borrowed
-        } else {
-            player = AVPlayer(playerItem: mediaVideoItem(for: parsed, loader: services.videoLoader))
+        let pool = services.videoPool
+        let poolKey = key ?? ownKey
+        // Refused (pool full, not on screen): the still stays and nothing is reported.
+        guard let player = pool.borrow(key: poolKey, url: parsed, priority: priority) else {
+            onLost?()
+            return
         }
+        let eviction = pool.observeEviction(of: poolKey) { [weak self] in self?.evicted() }
+        lease = (pool, poolKey, priority, eviction, key == nil)
         player.isMuted = muted
         player.volume = volume
         player.actionAtItemEnd = .pause
@@ -316,16 +314,21 @@ final class MediaVideoPlayback: ObservableObject {
         if playing { player.play() } else { player.pause() }
     }
 
-    /// Stops the player: gives a leased one back to the pool, destroys an owned one.
+    /// Stops the player: gives it back to the pool, which keeps it for a remount, or destroys it
+    /// when the key was this node's own (OD-15).
     func close() {
         let leaving = player
         unwatch()
         if let lease {
             lease.pool.removeEvictionObserver(lease.eviction, for: lease.key)
-            if let leaving { lease.pool.giveBack(key: lease.key, player: leaving, priority: lease.priority) }
-        } else {
-            leaving?.pause()
-            leaving?.replaceCurrentItem(with: nil)
+            if let leaving {
+                if lease.own {
+                    leaving.pause()
+                    lease.pool.discard(key: lease.key, player: leaving)
+                } else {
+                    lease.pool.giveBack(key: lease.key, player: leaving, priority: lease.priority)
+                }
+            }
         }
         lease = nil
         player = nil

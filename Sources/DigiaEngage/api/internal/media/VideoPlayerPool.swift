@@ -59,8 +59,8 @@ func deviceClassFor(physicalMemoryBytes: UInt64) -> DeviceClass {
 /// - A borrow of a held key with another URL re-points the player and tells every other holder
 ///   through its eviction observer: their holds end, they show their still and borrow again
 ///   when they next open (OD-10, R2-06c; no silent re-point, N5).
-/// - Keyless players are built by `MediaVideo` outside the pool and never count toward its size
-///   (OD-10, R2-06b).
+/// - Every player comes from the pool (OD-15): a `MediaVideo` with no natural key borrows under
+///   a key of its own and `discard`s it when it leaves, so nothing is left idle for a dead node.
 /// - A player whose item failed gets a new item on its next borrow: a borrow never inherits a
 ///   failure.
 /// - When the pool is full, a newcomer takes back the lowest-ranked, least recently borrowed
@@ -180,6 +180,16 @@ final class VideoPlayerPool: @unchecked Sendable {
             return
         }
         free.append(FreePlayer(player: player, key: key, url: holder.url, finished: Self.isFinished(player)))
+    }
+
+    /// Ends the hold of a node whose key nobody else can borrow (OD-15): the player is destroyed,
+    /// not kept idle. A stale call (evicted, re-pointed away, re-borrowed by another player) is a
+    /// no-op.
+    @MainActor
+    func discard(key: String, player: AVPlayer) {
+        guard let holder = holders[key], holder.player === player else { return }
+        holders[key] = nil
+        destroy(player)
     }
 
     /// Calls `handler` if `key`'s player is evicted while the observer is registered.

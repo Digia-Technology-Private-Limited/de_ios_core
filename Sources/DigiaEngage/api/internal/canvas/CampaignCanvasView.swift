@@ -640,8 +640,9 @@ private struct CanvasChildView: View {
     let onAction: (CampaignCanvasActionRequest) -> Void
     var body: some View {
         switch child {
-        case .widget(_, _, let widget):
+        case .widget(let id, _, let widget):
             CampaignCanvasRendererRegistry.render(widget, isDark: isDark, onAction: onAction)
+                .environment(\.digiaCanvasChildId, id)
         case .tapRegion(let id, _, let actions, let isPrimary):
             Color.clear.contentShape(Rectangle()).onTapGesture {
                 onAction(
@@ -1901,8 +1902,17 @@ private struct CanvasVideoRenderer: View {
     let fit: String
     let isDark: Bool
     @Environment(\.digiaVariables) private var variables
+    @Environment(\.digiaCampaignKey) private var campaignKey
+    @Environment(\.digiaCanvasChildId) private var childId
     private var url: String {
         interpolate(CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark), context: variables)
+    }
+    /// The pool key of this node (OD-15): the campaign plus the dashboard's child id, as Android's.
+    /// A remount (rotation) gets its player back, and a URL change under the key re-points it (N5).
+    /// Without both, `MediaVideo` borrows under a key of its own.
+    private var playerKey: String? {
+        guard let campaignKey, !campaignKey.isEmpty, let childId, !childId.isEmpty else { return nil }
+        return "canvas-video-\(campaignKey)-\(childId)"
     }
     var body: some View {
         CampaignCanvasBoxView(box: box, isDark: isDark) {
@@ -1913,7 +1923,8 @@ private struct CanvasVideoRenderer: View {
                     loop: loop,
                     muted: muted,
                     autoplay: autoplay,
-                    showControls: showControls
+                    showControls: showControls,
+                    playerKey: playerKey
                 )
             }
         }
