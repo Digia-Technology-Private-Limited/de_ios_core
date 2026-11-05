@@ -185,8 +185,9 @@ struct StoryPlanDriverTests {
         #expect(isSlow(throughput), "the cancelled warm's sample would read as 40 Mbps")
     }
 
-    // Guards `delivered > 0` in the same place: a warm that failed delivers 0 bytes and votes
-    // nothing, while one that completed does (the control: the vote is wired).
+    // Guards the 0-byte discard in `SlowNetworkThroughput.note`, which `updateBytes` feeds: a warm
+    // that failed delivers 0 bytes and votes nothing, while one that completed does (the control:
+    // the vote is wired).
     @Test("a failed warm votes nothing, a completed one does")
     func onlyACompletedWarmVotes() async {
         let failed = await slowVerdict(delivered: 0) { _ in

@@ -18,6 +18,22 @@ struct VideoPlayerPoolTests {
 
     private func url(_ name: String) -> URL { URL(string: "https://pool.test/\(name).mp4")! }
 
+    // Guards the thresholds in `deviceClassFor` and the sizes in `maxPoolPlayers` (OD-1, OD-10): the
+    // pool size per device class is a parity setting, so each boundary is pinned on both sides.
+    @Test("the pool holds 2, 3 or 4 players by device memory, and 3 when memory is unknown")
+    func poolSizePerDeviceClass() {
+        let gib: UInt64 = 1_024 * 1_024 * 1_024
+        func size(_ bytes: UInt64) -> Int { maxPoolPlayers(deviceClass: deviceClassFor(physicalMemoryBytes: bytes)) }
+
+        #expect(size(0) == 3, "unknown is the middle class")
+        #expect(size(2 * gib) == 2)
+        #expect(size(4 * gib - 1) == 2)
+        #expect(size(4 * gib) == 3)
+        #expect(size(7 * gib - 1) == 3)
+        #expect(size(7 * gib) == 4)
+        #expect(size(16 * gib) == 4)
+    }
+
     // Guards `evictableTail` (lowest rank, then least recently borrowed) and `evict`'s observer call.
     @Test("a full pool takes back the lowest-ranked, least recently borrowed player first")
     func evictionOrder() {

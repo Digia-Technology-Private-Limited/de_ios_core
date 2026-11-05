@@ -150,15 +150,18 @@ struct FloaterLeaseTests {
         let showing = try await show(cleanups: &cleanups)
         let orchestrator = showing.orchestrator
         orchestrator.moveTo(FloaterFraction(x: 0, y: 0))
-        try await Task.sleep(nanoseconds: 300_000_000)
+        try await waitFor("the window is in the dragged corner") { orchestrator.activeRect?.origin == CGPoint(x: 16, y: 16) }
         let layer = try #require(playerLayers(in: showing.window).first)
         let before = layer.player?.currentTime().seconds ?? 0
 
         orchestrator.expand()
-        try await Task.sleep(nanoseconds: 800_000_000)
+        try await waitFor("the window is full screen") { (orchestrator.activeRect?.width ?? 0) >= Self.portrait.width - 1 }
         #expect(playerLayers(in: showing.window).first === layer, "the same layer full screen")
         orchestrator.collapse()
-        try await Task.sleep(nanoseconds: 800_000_000)
+        try await waitFor("the window is back in its corner") {
+            orchestrator.activeRect?.origin == CGPoint(x: 16, y: 16) && (orchestrator.activeRect?.width ?? .infinity) < Self.portrait.width / 2
+        }
+        try await waitFor("the video carried on") { (layer.player?.currentTime().seconds ?? 0) > before }
 
         let after = try #require(playerLayers(in: showing.window).first)
         #expect(after === layer, "the same layer back in the window")
@@ -185,7 +188,10 @@ struct FloaterLeaseTests {
         setGeometry(Self.landscape)
         showing.window.frame = CGRect(origin: .zero, size: Self.landscape)
         showing.window.layoutIfNeeded()
-        try await Task.sleep(nanoseconds: 600_000_000)
+        try await waitFor("the window is sized for the landscape screen") {
+            abs((orchestrator.activeRect?.width ?? 0) - Self.landscape.width * 0.35) < 0.5
+        }
+        try await waitFor("the video carried on") { leased.currentTime().seconds > before }
 
         #expect(orchestrator.state?.token == token, "the same showing")
         let rect = try #require(orchestrator.activeRect)

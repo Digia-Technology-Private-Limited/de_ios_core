@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import SwiftUI
 import Testing
@@ -37,34 +38,32 @@ private struct CanvasVideoHost: View {
     }
 }
 
+/// A canvas of 120 x 120 video widgets side by side, each with its own URL; `variables` resolve
+/// `{{...}}` in them.
+private func canvasVideoStage(
+    urls: [String], loop: Bool = false, autoplay: Bool = false, variables: VariableContext? = nil
+) -> some View {
+    var stage = CampaignCanvasStage(
+        canvas: CampaignCanvas(
+            version: 2, width: 240, height: 120, background: .solid(.literal("#FF000000")),
+            children: urls.enumerated().map { index, url in
+                .widget(
+                    id: "video-\(index)",
+                    rect: CampaignCanvasRect(x: CGFloat(index) * 120, y: 0, width: 120, height: 120),
+                    widget: .video(
+                        box: .none,
+                        source: CampaignCanvasMediaSource(url: url, darkUrl: nil, placeholder: nil),
+                        autoplay: autoplay, loop: loop, muted: true, showControls: false, fit: "cover"))
+            }),
+        authoredCornerRadius: 0, isDark: false, showBackground: true, onAction: { _ in })
+    stage.animateWidgetsOnAppear = false
+    return stage.environment(\.digiaVariables, variables)
+}
+
 extension RenderedUITests {
 @MainActor
 @Suite("MediaVideo routing", .serialized, .tags(.media, .component))
 struct MediaVideoRoutingTests {
-    // Guards the `MediaVideo(...)` call in `NudgeVideoView.body`.
-    @Test("a nudge video plays through MediaVideo")
-    func nudgeVideoRoutesThroughMediaVideo() async throws {
-        MediaOrigin.install()
-        MediaServices.override(videoSession: MediaOrigin.session())
-        defer { MediaOrigin.end() }
-        let video = MediaOrigin.url("nudge.mp4")
-        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
-        let column = try #require(NudgeParser().parse([
-            "layout": [
-                "type": "digia/column",
-                "children": [[
-                    "type": "digia/videoPlayer",
-                    "props": ["url": video.absoluteString, "autoPlay": false, "height": 120],
-                ]],
-            ],
-        ]))
-
-        let window = MediaStage.mount(NudgeColumnContent(column: column, onDismiss: {}))
-        defer { ComponentTestHost.unmount(window) }
-
-        #expect(await waitUntilMedia { !MediaOrigin.requests(for: video).isEmpty })
-    }
-
     // Guards the `MediaVideo(...)` call in `CanvasVideoRenderer.body`.
     @Test("a canvas video plays the theme's source through MediaVideo")
     func canvasVideoRoutesThroughMediaVideo() async throws {
@@ -94,6 +93,90 @@ struct MediaVideoRoutingTests {
             #expect(MediaOrigin.requests(for: other).isEmpty)
             ComponentTestHost.unmount(window)
         }
+    }
+
+    // Guards `interpolate(...)` in `CanvasVideoRenderer.url`: a `{{variable}}` in the URL is
+    // resolved before the player is built, so the resolved URL is fetched and nothing is reported.
+    @Test("a canvas video's URL variables resolve before its player is built")
+    func canvasVideoResolvesItsURLVariables() async throws {
+        MediaOrigin.install()
+        MediaServices.override(videoSession: MediaOrigin.session())
+        defer { MediaOrigin.end() }
+        let recorder = HealthRecorder()
+        let resolved = MediaOrigin.url("resolved-clip.mp4")
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: resolved)
+        let template = "https://\(MediaOrigin.host)/\(resolved.pathComponents[1])/{{clip}}.mp4"
+
+        let window = MediaStage.mount(canvasVideoStage(
+            urls: [template],
+            variables: VariableContext(values: ["clip": "resolved-clip"], types: ["clip": "string"])))
+        defer { ComponentTestHost.unmount(window) }
+
+        #expect(await waitUntilMedia { !MediaOrigin.requests(for: resolved).isEmpty })
+        #expect(recorder.all.isEmpty, "not reported as an unusable URL")
+    }
+
+    // Guards `if !url.isEmpty` in `CanvasVideoRenderer.body`: a canvas video with no URL builds no
+    // player and reports nothing (an empty `MediaVideo` would report `invalid_url`).
+    @Test("a canvas video with an empty URL builds no player and reports nothing")
+    func canvasVideoWithAnEmptyURLBuildsNoPlayer() async {
+        MediaOrigin.install()
+        MediaServices.override(videoSession: MediaOrigin.session())
+        defer { MediaOrigin.end() }
+        let recorder = HealthRecorder()
+        let pool = MediaServices.current.videoPool
+
+        let window = MediaStage.mount(canvasVideoStage(urls: [""]))
+        defer { ComponentTestHost.unmount(window) }
+        _ = await waitUntilMedia(timeout: 0.5) { false }
+
+        #expect(recorder.all.isEmpty)
+        #expect(pool.livePlayerCount == 0)
+        #expect(MediaOrigin.totalRequestCount() == 0)
+    }
+
+    // Guards `NotificationCenter ... object: item` in `MediaVideoPlayback.watch` and the `loop`
+    // branch of `noteEnded`: a looping video that ends starts over, and its neighbour, playing the
+    // same kind of item, is not restarted with it.
+    @Test("a looping video restarts only the item that ended", arguments: ["canvas", "nudge"])
+    func loopRestartsOnlyTheItemThatEnded(surface: String) async throws {
+        MediaOrigin.install()
+        MediaServices.override(videoSession: MediaOrigin.session())
+        defer { MediaOrigin.end() }
+        let urls = [MediaOrigin.url("loop-a.mp4"), MediaOrigin.url("loop-b.mp4")]
+        for url in urls { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
+        let pool = MediaServices.current.videoPool
+        let window: UIWindow
+        if surface == "canvas" {
+            window = MediaStage.mount(canvasVideoStage(urls: urls.map(\.absoluteString), loop: true, autoplay: true))
+        } else {
+            let column = try #require(NudgeParser().parse([
+                "layout": [
+                    "type": "digia/column",
+                    "children": urls.map { url in
+                        [
+                            "type": "digia/videoPlayer",
+                            "props": ["url": url.absoluteString, "autoPlay": true, "looping": true, "height": 60],
+                        ] as [String: Any]
+                    },
+                ],
+            ]))
+            window = MediaStage.mount(NudgeColumnContent(column: column, onDismiss: {}))
+        }
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { pool.heldKeys.count == 2 })
+        let players = pool.heldKeys.sorted().compactMap { pool.heldPlayer(for: $0) }
+        let (ending, other) = (players[0], players[1])
+        #expect(await waitUntilMedia { players.allSatisfy { $0.currentTime().seconds > 0.3 } }, "both are playing")
+        // Exact, so the neighbour sits mid-video rather than snapping to the last keyframe, which is
+        // near the end.
+        #expect(await other.seek(
+            to: CMTime(seconds: 4, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero))
+        let duration = try #require(ending.currentItem?.duration.seconds)
+        #expect(await ending.seek(to: CMTime(seconds: duration - 0.4, preferredTimescale: 600)))
+
+        #expect(await waitUntilMedia(timeout: 6) { ending.currentTime().seconds < 2 && ending.rate > 0 }, "the ended one started over")
+        #expect(other.currentTime().seconds >= 4, "its neighbour carried on from 4 s: \(other.currentTime().seconds)")
     }
 
     // Guards `key ?? ownKey` in `MediaVideoPlayback.open` and the `own` discard in `close` (OD-15):

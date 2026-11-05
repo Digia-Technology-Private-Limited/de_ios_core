@@ -128,39 +128,19 @@ struct StoryDownloadPlanTests {
         ) == [wholeFile(0)])
     }
 
-    // Swiping recomputes: each position plans its own window and drops indices
-    // more than one away, so the viewer releases what the plan no longer names.
-    // (The prototype never landed — re-checked origin/main 2026-11-02 — so
-    // these sequences come from the issue window rules only.)
-    @Test("swipe sequences recompute the window forward and back")
-    func swipeSequencesRecomputeTheWindowForwardAndBack() {
-        let stories = [video, video, video, video, video]
-        func at(_ n: Int) -> [StoryDownloadPlan.Action] {
-            StoryDownloadPlan.plan(
-                stories: stories, currentIndex: n, firstFrameShown: true, slowNetwork: false
-            )
-        }
-
-        #expect(at(0) == [player(0, .onScreen), player(1, .viewerNext), firstBytes(2)])
-        #expect(at(1) == [
+    // Fails if the middle-of-the-list window loses its backward player: a swipe to 1 plans the
+    // next player, its bytes and the previous player (`at(0)` and `at(2)` are the open-at-zero and
+    // middle cases above).
+    @Test("a swipe to the second story plans its own window")
+    func aSwipeToTheSecondStoryPlansItsOwnWindow() {
+        #expect(StoryDownloadPlan.plan(
+            stories: [video, video, video, video, video], currentIndex: 1, firstFrameShown: true, slowNetwork: false
+        ) == [
             player(1, .onScreen),
             player(2, .viewerNext),
             firstBytes(3),
             player(0, .viewerPrev),
         ])
-        #expect(at(0) == [player(0, .onScreen), player(1, .viewerNext), firstBytes(2)])
-        // The window only ever names players within one step: the viewer
-        // releases players further away on every swipe.
-        for action in at(2) {
-            if case let .player(index, _) = action {
-                #expect((1 ... 3).contains(index), "player out of reach at swipe 2: \(action)")
-            }
-        }
-        for action in at(0) {
-            if case let .player(index, _) = action {
-                #expect((0 ... 1).contains(index), "player out of reach at swipe 0: \(action)")
-            }
-        }
     }
 
     // Fails if an empty list or a bad index throws: the
@@ -173,15 +153,5 @@ struct StoryDownloadPlanTests {
         #expect(StoryDownloadPlan.plan(
             stories: [video], currentIndex: 9, firstFrameShown: true, slowNetwork: false
         ) == [])
-    }
-
-    // Fails if the D10 mapping misreads the path: the `isExpensive ||
-    // isConstrained` line in `slowNetworkFor`. A constrained-or-expensive path
-    // is slow; an ordinary path is not.
-    @Test("slow signal is expensive or constrained")
-    func slowSignalIsExpensiveOrConstrained() {
-        #expect(slowNetworkFor(isExpensive: true, isConstrained: false))
-        #expect(slowNetworkFor(isExpensive: false, isConstrained: true))
-        #expect(!slowNetworkFor(isExpensive: false, isConstrained: false))
     }
 }

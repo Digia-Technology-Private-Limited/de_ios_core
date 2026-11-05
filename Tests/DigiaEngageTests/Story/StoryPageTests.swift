@@ -171,12 +171,75 @@ struct StoryPageTests {
         #expect(pool.heldPlayer(for: keySecond) != nil)
     }
 
-    // Guards `playback.firstFrameShown ? groundAfterFirstFrame : mediaVideoBackdrop` in
-    // `MediaVideo.body` as a handed-over player reaches it (V8-04; Android X8-05): the viewer page
-    // over a player the rail card already holds shows the dark backdrop until the layer reports its
-    // first frame, never the black ground of a frame already shown.
-    @Test("a handed-over player's page shows the backdrop, not black, until its first frame")
-    func handoverShowsNoBlackFrame() async throws {
+    private func singleSlotPool() -> VideoPlayerPool {
+        let loader = MediaServices.current.videoLoader
+        let pool = VideoPlayerPool(maxPlayers: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
+        MediaServices.override(videoPool: pool)
+        return pool
+    }
+
+    // Guards `onLost: { stopDriver(); if !gone { onSkipped() } }` in `StoryThumbnailVideo`: a tile
+    // whose borrow the pool refuses (full, nothing ranked below the rail) skips its turn once; it
+    // is not a failure, so the card is not removed for the session.
+    @Test("a rail tile the pool refuses skips its turn and does not fail")
+    func railTileRefusalIsASkip() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let pool = singleSlotPool()
+        let blocking = MediaOrigin.url("rail-blocker.mp4")
+        let video = MediaOrigin.url("rail-refused.mp4")
+        for url in [blocking, video] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
+        let blocker = try #require(pool.borrow(key: "page", url: blocking, priority: .onScreen))
+        let skipped = CallCount(), failed = CallCount()
+
+        let window = MediaStage.mount(StoryThumbnail(
+            item: StoryItemConfig(type: .video, url: video.absoluteString, duration: nil),
+            poolKey: "tile", playing: true, repeatWindow: false, restartGeneration: 0,
+            onWindowCompleted: {}, onFailed: { failed.value += 1 }, onSkipped: { skipped.value += 1 }))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { skipped.value > 0 })
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        #expect(skipped.value == 1)
+        #expect(failed.value == 0)
+        #expect(pool.heldKeys == ["page"], "nothing borrowed for the tile")
+        pool.giveBack(key: "page", player: blocker, priority: .onScreen)
+    }
+
+    // Guards `onSkipped: { playback = playback.skip(index: index) }` in `StoryRail.card`: when the
+    // pool takes a playing card's player back, the turn passes to the next card (here taking the
+    // slot the other holder frees at once), instead of staying with the card that lost its player.
+    @Test("a rail card whose player is evicted passes its turn to the next card")
+    func evictedRailCardPassesTheTurn() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let pool = singleSlotPool()
+        let videos = [MediaOrigin.url("rail-turn-0.mp4"), MediaOrigin.url("rail-turn-1.mp4")]
+        let other = MediaOrigin.url("rail-turn-other.mp4")
+        for url in videos + [other] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
+        let items = videos.map { StoryItemConfig(type: .video, url: $0.absoluteString, duration: nil) }
+        let keys = (0 ..< 2).map { storyPoolKey(namespace: MediaStage.campaign, index: $0) }
+
+        let window = MediaStage.mount(StoryRail(
+            items: items, mode: .sequential, cardWidth: 100, cardHeight: 100, cardCornerRadius: 0,
+            cardSpacing: 8, overlayOpen: false, onOpen: { _, _ in }))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { pool.heldPlayer(for: keys[0]) != nil }, "card 0 has the first turn")
+
+        let taker = try #require(pool.borrow(key: "page", url: other, priority: .onScreen))
+        pool.giveBack(key: "page", player: taker, priority: .onScreen)
+
+        #expect(await waitUntilMedia { pool.heldPlayer(for: keys[1]) != nil }, "card 1 took the turn")
+        #expect(pool.heldPlayer(for: keys[0]) == nil)
+    }
+
+    // Guards the `mediaVideoBackdrop` branch of `playback.firstFrameShown ? groundAfterFirstFrame :
+    // mediaVideoBackdrop` in `MediaVideo.body` as a handed-over player reaches it (V8-04; Android
+    // X8-05): the viewer page over a player the rail card already holds shows the dark backdrop
+    // while no first frame has been reported. The held origin never delivers one, so the
+    // after-first-frame ground of a handed-over player is not covered here.
+    @Test("a handed-over player's page shows the backdrop, not black, before any first frame")
+    func handoverShowsTheBackdropBeforeAnyFirstFrame() async throws {
         install()
         defer { MediaOrigin.end() }
         let video = MediaOrigin.url("handover.mp4")
