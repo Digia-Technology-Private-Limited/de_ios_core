@@ -9,9 +9,10 @@ internal import SDWebImageSwiftUI
 /// transparent or letterboxed picture never shows a stale blur) and the box is never empty
 /// before that. There is no spinner.
 ///
-/// `errorContent` is drawn over the still when the load fails and when the URL is unusable
-/// (blank, an unresolved `{{variable}}`, no scheme): surfaces that labelled a failed image keep
-/// their label. The tint applies to the picture only.
+/// When the load fails, and when the URL is unusable (blank, an unresolved `{{variable}}`, no
+/// scheme), the box shows the error placeholder ("Image failed") and no BlurHash: `errorContent`
+/// replaces the placeholder, for surfaces that draw their own failure look. The BlurHash is for
+/// loading only. The tint applies to the picture only.
 ///
 /// `focalX` and `focalY` (0-1) say where the picture sits in its box: the overflow of a cropped
 /// picture, or the free space around a letterboxed one, is split so that the picture's offset is
@@ -20,12 +21,12 @@ internal import SDWebImageSwiftUI
 /// picture is fitted and cropped to the box first, then that box is scaled and clipped again, so
 /// below 1 the page shows around a smaller cropped picture. All three are clamped
 /// (focal 0-1, zoom 0.1-10, anything non-finite is the default), and at their defaults (0.5, 0.5,
-/// 1) the picture is drawn exactly as without them. The failure content is not zoomed.
+/// 1) the picture is drawn exactly as without them. The failure look is not zoomed or placed.
 ///
 /// Health is reported once per failure, for the campaign in the environment: `invalid_url` for
 /// an unusable URL, `http_4xx`, `decode`. A network failure, a timeout or a 5xx reports nothing.
 ///
-/// Never throws from the render path: an unusable URL shows the still without fetching.
+/// Never throws from the render path: an unusable URL shows the error placeholder without fetching.
 struct MediaImage: View {
     let url: String
     var fit: MediaFit = .cover
@@ -124,14 +125,14 @@ struct MediaImage: View {
         return image
     }
 
-    /// What shows until the picture draws, and after a failure.
+    /// What shows until the picture draws (the still), and after a failure (the error look, with no
+    /// still behind it).
     @ViewBuilder
     private func still(failed: Bool) -> some View {
-        ZStack {
+        if failed {
+            errorContent ?? AnyView(MediaErrorPlaceholder(label: "Image failed"))
+        } else {
             placed(MediaStill(fit: fit, blurHash: blurHash))
-            if failed, let errorContent {
-                errorContent
-            }
         }
     }
 

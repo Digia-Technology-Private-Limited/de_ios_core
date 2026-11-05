@@ -1121,7 +1121,8 @@ private struct BlockMediaImage: View {
 }
 
 /// A survey picture: the image wrapper over the survey's sunken fill, which shows until the
-/// picture draws (so a loading or failed picture is a sunken box with its BlurHash on it).
+/// picture draws (so a loading picture is a sunken box with its BlurHash on it, and a failed one the
+/// bare sunken box).
 struct SurveyMediaImage: View {
     let url: String
     let fit: MediaFit
@@ -1135,7 +1136,8 @@ struct SurveyMediaImage: View {
                 url: url,
                 fit: fit,
                 blurHash: placeholder?.stillBlurHash,
-                onSuccess: { loaded = true }
+                onSuccess: { loaded = true },
+                errorContent: AnyView(Color.clear)
             )
         }
         .onChange(of: url) { _ in loaded = false }

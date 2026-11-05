@@ -2333,7 +2333,7 @@ private struct FocalCanvasImage: View {
                     focalX: x,
                     focalY: y,
                     zoom: scale,
-                    errorContent: failureLabel.map { AnyView(CanvasPlaceholder(label: $0)) }
+                    errorContent: failureLabel.map { AnyView(CanvasPlaceholder(label: $0)) } ?? AnyView(Color.clear)
                 )
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 // Kept as before: the picture is drawn through a scale layer even at 1, which
