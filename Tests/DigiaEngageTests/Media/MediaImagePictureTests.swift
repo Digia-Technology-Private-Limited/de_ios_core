@@ -302,6 +302,52 @@ struct MediaImagePictureTests {
         #expect(failures.value == 1)
     }
 
+    @Test("a client error from 400 to 499 is http_4xx and a 500 is not", arguments: [400, 499, 500])
+    func clientErrorRangeIsHealth(status: Int) async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("status-\(status).png")
+        MediaOrigin.set(.status(status, Data("error".utf8)), for: target)
+        let recorder = HealthRecorder()
+        let failures = CallCount()
+
+        let window = MediaStage.image(url: target.absoluteString, onFailure: { failures.value += 1 })
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { failures.value > 0 })
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        let expected: [HealthRecorder.Record] =
+            status < 500 ? [.init(campaignKey: MediaStage.campaign, kind: .image, cause: "http_4xx")] : []
+        #expect(recorder.all == expected)
+        #expect(failures.value == 1)
+    }
+
+    @Test("a new url that also fails reports its own failure, not only the first")
+    func newURLThatAlsoFailsIsReported() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let first = MediaOrigin.url("gone-first.png")
+        let second = MediaOrigin.url("gone-second.png")
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: first)
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: second)
+        let recorder = HealthRecorder()
+        let failures = CallCount()
+        let model = MediaModel(url: first.absoluteString)
+
+        let window = MediaStage.mount(
+            Host(model: model, blurHash: Self.blurHash, onFailure: { failures.value += 1 }))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { failures.value == 1 })
+
+        model.url = second.absoluteString
+        #expect(await waitUntilMedia { failures.value == 2 })
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        let report = HealthRecorder.Record(campaignKey: MediaStage.campaign, kind: .image, cause: "http_4xx")
+        #expect(recorder.all == [report, report])
+        #expect(MediaOrigin.requests(for: second).count == 1)
+    }
+
     @Test("health carries the campaign key of the surface that drew it", arguments: [
         "campaign-a", "campaign-b",
     ])

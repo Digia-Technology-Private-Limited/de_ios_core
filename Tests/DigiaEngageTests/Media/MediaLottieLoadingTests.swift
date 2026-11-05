@@ -98,6 +98,29 @@ struct MediaLottieLoadingTests {
         #expect(recorder.all.isEmpty)
     }
 
+    @Test("a new url that also fails reports its own failure, not only the first")
+    func newURLThatAlsoFailsIsReported() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let first = MediaOrigin.url("gone-first.json")
+        let second = MediaOrigin.url("gone-second.json")
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: first)
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: second)
+        let recorder = HealthRecorder()
+        let model = MediaModel(url: first.absoluteString)
+
+        let window = MediaStage.mount(Host(model: model))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { recorder.all.count == 1 })
+
+        model.url = second.absoluteString
+        #expect(await waitUntilMedia { recorder.all.count == 2 })
+        ComponentTestHost.drainRunLoop(for: 0.3)
+
+        let report = HealthRecorder.Record(campaignKey: MediaStage.campaign, kind: .lottie, cause: "http_4xx")
+        #expect(recorder.all == [report, report])
+    }
+
     @Test("a failure is reported once, not again when the surface redraws (a 404)")
     func notFoundIsNotReportedAgainOnRedraw() async {
         MediaOrigin.install()
@@ -135,6 +158,24 @@ struct MediaLottieLoadingTests {
         }
 
         #expect(recorder.all == [.init(campaignKey: MediaStage.campaign, kind: .lottie, cause: "invalid_url")])
+    }
+
+    @Test("health carries the campaign key of the surface that drew it", arguments: [
+        "campaign-a", "campaign-b",
+    ])
+    func healthCarriesTheSurfaceCampaign(campaign: String) async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("gone-\(campaign).json")
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
+        let recorder = HealthRecorder()
+
+        let window = MediaStage.mount(
+            MediaLottie(url: target.absoluteString).environment(\.digiaCampaignKey, campaign))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { !recorder.all.isEmpty })
+
+        #expect(recorder.all == [.init(campaignKey: campaign, kind: .lottie, cause: "http_4xx")])
     }
 }
 }
