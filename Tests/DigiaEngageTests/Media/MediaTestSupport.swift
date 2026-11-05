@@ -1,9 +1,11 @@
 import Foundation
+import Lottie
 import SDWebImage
 import SnapshotTesting
 import SwiftUI
 import Testing
 import UIKit
+import UniformTypeIdentifiers
 
 @testable import DigiaEngage
 
@@ -311,4 +313,193 @@ func colorsNearly(_ left: UIColor, _ right: UIColor, tolerance: CGFloat = 0.05) 
     left.getRed(&lr, green: &lg, blue: &lb, alpha: &la)
     right.getRed(&rr, green: &rg, blue: &rb, alpha: &ra)
     return abs(lr - rr) <= tolerance && abs(lg - rg) <= tolerance && abs(lb - rb) <= tolerance
+}
+
+/// Lets a test change the URL of a mounted wrapper, and redraw it without changing anything it
+/// reads (`redraw()` re-evaluates the host's body, so the wrapper is rebuilt with the same input).
+final class MediaModel: ObservableObject {
+    @Published var url: String
+    @Published private(set) var redraws = 0
+
+    init(url: String) { self.url = url }
+
+    func redraw() { redraws += 1 }
+}
+
+/// Small pictures and animations served from the fake origin, so the suites need no extra files.
+enum MediaFixtures {
+    static let blurHash = "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
+
+    /// A 100x100 picture of four colored quadrants inside a black frame: cropping, centring and
+    /// stretching are all visible at 240x120.
+    static func quadrantPNG() -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: CGSize(width: 100, height: 100), format: format).pngData { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
+            let quadrants: [(CGRect, UIColor)] = [
+                (CGRect(x: 6, y: 6, width: 44, height: 44), .red),
+                (CGRect(x: 50, y: 6, width: 44, height: 44), .green),
+                (CGRect(x: 6, y: 50, width: 44, height: 44), .blue),
+                (CGRect(x: 50, y: 50, width: 44, height: 44), .yellow),
+            ]
+            for (rect, color) in quadrants {
+                color.setFill()
+                context.fill(rect)
+            }
+        }
+    }
+
+    /// A 100x100 picture that is a red ring on a fully transparent ground.
+    static func transparentRingPNG() -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = false
+        return UIGraphicsImageRenderer(size: CGSize(width: 100, height: 100), format: format).pngData { _ in
+            UIColor.red.setStroke()
+            let ring = UIBezierPath(ovalIn: CGRect(x: 10, y: 10, width: 80, height: 80))
+            ring.lineWidth = 14
+            ring.stroke()
+        }
+    }
+
+    /// A two-frame GIF, red then blue, that plays once and holds the blue frame. The delays are in
+    /// seconds; a long one keeps that frame on screen for the whole test.
+    static func gif(firstDelay: Double, secondDelay: Double) -> Data {
+        let data = NSMutableData()
+        guard
+            let destination = CGImageDestinationCreateWithData(
+                data, UTType.gif.identifier as CFString, 2, nil)
+        else { return Data() }
+        CGImageDestinationSetProperties(
+            destination,
+            [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 1]] as CFDictionary)
+        for (color, delay) in [(UIColor.red, firstDelay), (UIColor.blue, secondDelay)] {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let frame = UIGraphicsImageRenderer(size: CGSize(width: 48, height: 24), format: format).image { context in
+                color.setFill()
+                context.fill(CGRect(x: 0, y: 0, width: 48, height: 24))
+            }
+            guard let cgImage = frame.cgImage else { continue }
+            CGImageDestinationAddImage(
+                destination, cgImage,
+                [kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: delay]] as CFDictionary)
+        }
+        CGImageDestinationFinalize(destination)
+        return data as Data
+    }
+
+    /// A 48x24 lossless WebP: a red band, a yellow disc and a blue band on white.
+    static let webP = Data(
+        base64Encoded:
+            "UklGRmAAAABXRUJQVlA4TFQAAAAvL8AFAB8gECBOZHlWZUMh2wiQ2/wpTuMVkBA54v8K18x//GcoQcAqkqRWS/KFhDgmz+T9AS8IiOh/mJlJkrv7D1rZwaZCuGtQ3q0Q7gTatLKTfgA="
+    )!
+
+    /// The bytes of a GIF header followed by nothing a decoder can read.
+    static let brokenGIF = Data("GIF89a-this-is-not-an-image".utf8)
+
+    /// A page that is not a picture, as an error page served with a 200.
+    static let htmlPage = Data("<html><body><h1>Sign in to continue</h1></body></html>".utf8)
+
+    /// Text that looks like an SVG that was cut off.
+    static let brokenSVG = Data(#"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect x="#.utf8)
+
+    /// A 100x100 animation: a blue ground, a white disc and an orange square that slides from the
+    /// left to the right over `frames` frames at 30 fps. At frame 0 the square is at the left, at
+    /// the middle of the animation it is at the centre. The disc runs off the top and bottom of a
+    /// 240x120 cover crop and stretches into an ellipse when filled.
+    static func markerAnimation(frames: Int) -> Data {
+        let still = #"{"a":0,"k":[0,0,0]}"#
+        func layer(index: Int, name: String, position: String, shape: String, color: String) -> String {
+            #"""
+            {"ddd":0,"ind":\#(index),"ty":4,"nm":"\#(name)","sr":1,"ks":{"o":{"a":0,"k":100},"r":{"a":0,"k":0},"p":\#(position),"a":\#(still),"s":{"a":0,"k":[100,100,100]}},"ao":0,"shapes":[{"ty":"gr","it":[\#(shape),{"ty":"fl","c":{"a":0,"k":\#(color)},"o":{"a":0,"k":100},"r":1},{"ty":"tr","p":{"a":0,"k":[0,0]},"a":{"a":0,"k":[0,0]},"s":{"a":0,"k":[100,100]},"r":{"a":0,"k":0},"o":{"a":0,"k":100}}]}],"ip":0,"op":\#(frames),"st":0,"bm":0}
+            """#
+        }
+        let slide =
+            #"{"a":1,"k":[{"t":0,"s":[15,35,0],"i":{"x":[1],"y":[1]},"o":{"x":[0],"y":[0]}},{"t":\#(frames),"s":[85,35,0]}]}"#
+        let centre = #"{"a":0,"k":[50,50,0]}"#
+        let square = layer(
+            index: 1, name: "square", position: slide,
+            shape: #"{"ty":"rc","d":1,"s":{"a":0,"k":[16,16]},"p":{"a":0,"k":[0,0]},"r":{"a":0,"k":0}}"#,
+            color: "[1,0.6,0,1]")
+        let disc = layer(
+            index: 2, name: "disc", position: centre,
+            shape: #"{"ty":"el","d":1,"s":{"a":0,"k":[60,60]},"p":{"a":0,"k":[0,0]}}"#,
+            color: "[1,1,1,1]")
+        let ground = layer(
+            index: 3, name: "ground", position: centre,
+            shape: #"{"ty":"rc","d":1,"s":{"a":0,"k":[100,100]},"p":{"a":0,"k":[0,0]},"r":{"a":0,"k":0}}"#,
+            color: "[0.15,0.39,0.92,1]")
+        return Data(
+            #"{"v":"5.7.4","fr":30,"ip":0,"op":\#(frames),"w":100,"h":100,"nm":"marker","ddd":0,"assets":[],"layers":[\#(square),\#(disc),\#(ground)]}"#
+                .utf8)
+    }
+
+    /// A `.lottie` archive that lists an animation it does not contain (no `animations/` folder).
+    static let dotLottieWithoutAnimations = Data(
+        base64Encoded:
+            "UEsDBBQAAAAIAE29ZF08yhboRgAAAE0AAAANAAAAbWFuaWZlc3QuanNvbqtWKkstKs7Mz1OyUlAyVNJRUEpPzUstSizJLwKJpGSmZybqlqQWl4CkEvMycxNLgIqLgXLR1UqZKSA1uYlF2alFSrWxtQBQSwECFAMUAAAACABNvWRdPMoW6EYAAABNAAAADQAAAAAAAAAAAAAAgAEAAAAAbWFuaWZlc3QuanNvblBLBQYAAAAAAQABADsAAABxAAAAAAA="
+    )!
+}
+
+extension MediaStage {
+    /// An image on the stage.
+    @MainActor
+    static func image(
+        url: String, fit: MediaFit = .cover, blurHash: String? = nil, tintColor: Color? = nil,
+        onSuccess: (() -> Void)? = nil, onFailure: (() -> Void)? = nil
+    ) -> UIWindow {
+        mount(
+            MediaImage(
+                url: url, fit: fit, blurHash: blurHash, tintColor: tintColor, onSuccess: onSuccess,
+                onFailure: onFailure))
+    }
+
+    /// An animation on the stage.
+    @MainActor
+    static func lottie(
+        url: String, fit: MediaFit = .cover, blurHash: String? = nil, loop: Bool = true,
+        autoplay: Bool = true, freezeAt: CGFloat? = nil
+    ) -> UIWindow {
+        mount(
+            MediaLottie(
+                url: url, fit: fit, blurHash: blurHash, loop: loop, autoplay: autoplay, freezeAt: freezeAt))
+    }
+}
+
+extension MediaStage {
+    /// Every Lottie animation view on the stage.
+    @MainActor
+    static func lottieViews(in window: UIWindow) -> [LottieAnimationView] {
+        var found: [LottieAnimationView] = []
+        func walk(_ view: UIView) {
+            if let lottie = view as? LottieAnimationView { found.append(lottie) }
+            view.subviews.forEach(walk)
+        }
+        if let root = window.rootViewController?.view { walk(root) }
+        return found
+    }
+
+    /// The animation view once it holds a parsed animation.
+    @MainActor
+    static func animationView(in window: UIWindow) async -> LottieAnimationView? {
+        _ = await waitUntilMedia { lottieViews(in: window).first?.animation != nil }
+        ComponentTestHost.drainRunLoop(for: 0.1)
+        return lottieViews(in: window).first(where: { $0.animation != nil })
+    }
+
+    /// Counts the loads the Lottie loader finishes, so a test can wait for a load that is meant to
+    /// report nothing.
+    @MainActor
+    static func countLottieLoads() -> CallCount {
+        let finished = CallCount()
+        MediaServices.override(loadLottie: { url in
+            let loaded = await MediaServices.sdk.loadLottie(url)
+            await MainActor.run { finished.value += 1 }
+            return loaded
+        })
+        return finished
+    }
 }
