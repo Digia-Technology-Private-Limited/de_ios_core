@@ -232,6 +232,29 @@ struct LocalStorageMigratorTests {
         // Running again with nothing to delete is fine.
         LocalStorageMigrator.deleteLegacyStoryVideoCache(in: caches)
     }
+
+    // Guards the placement of the `deleteLegacyStoryVideoCache` call before
+    // `guard currentVersion < currentStorageVersion` in `migrateIfNeeded` (T5, R10-06): `main`
+    // already set the marker, so a delete behind it would never run on those devices.
+    @Test("main's story video cache is deleted on every start, also with the version marker set")
+    func legacyStoryVideoCacheGoesEvenWhenTheMarkerIsCurrent() async throws {
+        let (targetDefaults, standardDefaults) = makeIsolatedDefaults()
+        targetDefaults.set(1, forKey: "storage.version")
+        let legacy = caches.appendingPathComponent("tech.digia.engage.video", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try Data("video".utf8).write(to: legacy.appendingPathComponent("clip.mp4"))
+        defer { try? FileManager.default.removeItem(at: caches) }
+
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults, cachesDirectory: caches)
+
+        // The delete runs off the main thread: poll for it.
+        var gone = false
+        for _ in 0..<100 where !gone {
+            gone = !FileManager.default.fileExists(atPath: legacy.path)
+            if !gone { try await Task.sleep(nanoseconds: 50_000_000) }
+        }
+        #expect(gone)
+    }
 }
 
 /// Drops writes to `identity.*` while `failIdentityWrites` is set, standing in
