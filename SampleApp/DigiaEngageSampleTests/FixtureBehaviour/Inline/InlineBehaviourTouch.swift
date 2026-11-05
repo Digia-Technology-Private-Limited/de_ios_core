@@ -102,14 +102,15 @@ extension SdkHarness {
         try TouchSynthesizer.tap(at: point, in: window)
     }
 
-    /// The video players on screen now: each `InlineStoryPlayerContainer` holding a player, with
-    /// the rail card it sits on (by its frame inside [slot]).
+    /// The video players on screen now: each view drawing an `AVPlayerLayer` with a player (the
+    /// story rail and viewer draw through `MediaVideo`), with the rail card it sits on (by its
+    /// frame inside [slot]).
     func storyPlayers(in slot: InlineSlotFrame, card: StoryCardConfig) -> [(card: Int?, player: AVPlayer)] {
         guard let window else { return [] }
         var found: [(Int?, AVPlayer)] = []
         func walk(_ view: UIView) {
-            if let container = view as? InlineStoryPlayerContainer, let player = container.playerLayer.player {
-                let frame = container.convert(container.bounds, to: window)
+            if let layer = view.layer as? AVPlayerLayer, let player = layer.player {
+                let frame = view.convert(view.bounds, to: window)
                 let stride = CGFloat(card.width + Double(card.spacing))
                 let index = frame.width < window.bounds.width * 0.9
                     ? Int(((frame.midX - slot.frame.minX - CGFloat(card.spacing)) / stride).rounded(.down))
@@ -123,14 +124,18 @@ extension SdkHarness {
     }
 }
 
-/// Watches the story players for as long as a test runs, keeping every player it saw in the order
-/// it first saw each, with where its playhead was when it started playing.
+/// Watches the story players for as long as a test runs, keeping every turn it saw in the order it
+/// first saw each, with where its playhead was when it started playing.
 ///
-/// Players are held strongly: an `ObjectIdentifier` of a released player could otherwise be
-/// reused by the next one.
+/// A turn is a player on one card (or full screen) for as long as it stays there: the rail plays
+/// through the pool, which hands one player to card after card, so turns are read by where a
+/// player shows, not by the player alone. Players are held strongly: an `ObjectIdentifier` of a
+/// released player could otherwise be reused by the next one.
 @MainActor
 final class InlinePlayerWatch {
     private(set) var seen: [InlineSeenPlayer] = []
+    /// The turns on screen at the last sample.
+    private var showing: [InlineSeenPlayer] = []
     private var task: Task<Void, Never>?
 
     init(_ sdk: SdkHarness, slot: InlineSlotFrame, card: StoryCardConfig) {
@@ -147,18 +152,21 @@ final class InlinePlayerWatch {
     func stop() { task?.cancel() }
 
     private func sample(_ players: [(card: Int?, player: AVPlayer)]) {
+        var now: [InlineSeenPlayer] = []
         for (card, player) in players {
             let entry: InlineSeenPlayer
-            if let known = seen.first(where: { $0.player === player }) {
+            if let known = showing.first(where: { $0.player === player && $0.card == card }) {
                 entry = known
             } else {
                 entry = InlineSeenPlayer(player: player, card: card)
                 seen.append(entry)
             }
+            now.append(entry)
             if entry.firstPlayingAt == nil, player.rate > 0 {
                 entry.firstPlayingAt = player.currentTime().seconds
             }
         }
+        showing = now
     }
 
     /// The players that have started playing, in order.
@@ -186,6 +194,10 @@ final class InlinePlayerWatch {
 /// after playing through (the Flutter tests move the fake player's playhead the same way).
 @MainActor
 func inlineRunOut(_ player: AVPlayer) async {
+    // A pooled player can be playing before its item has loaded: wait for the duration.
+    for _ in 0..<100 where !(player.currentItem?.duration.isNumeric ?? false) {
+        try? await Task.sleep(nanoseconds: 50_000_000)
+    }
     guard let duration = player.currentItem?.duration, duration.isNumeric else { return }
     let target = CMTimeSubtract(duration, CMTime(value: 150, timescale: 1_000))
     await player.seek(to: target, toleranceBefore: .zero, toleranceAfter: .zero)
