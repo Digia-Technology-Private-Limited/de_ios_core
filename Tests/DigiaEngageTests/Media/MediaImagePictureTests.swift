@@ -79,18 +79,74 @@ struct MediaImagePictureTests {
         await drawQuadrants(fit: .fill, golden: "image_fit_fill")
     }
 
-    private func drawQuadrants(fit: MediaFit, golden: String) async {
+    private func drawQuadrants(
+        fit: MediaFit = .cover, focalX: CGFloat = 0.5, focalY: CGFloat = 0.5, zoom: CGFloat = 1,
+        golden: String
+    ) async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("quadrants-\(fit.rawValue).png")
         MediaOrigin.set(.status(200, MediaFixtures.quadrantPNG()), for: target)
         let successes = CallCount()
 
-        let window = MediaStage.image(url: target.absoluteString, fit: fit, onSuccess: { successes.value += 1 })
+        let window = MediaStage.image(
+            url: target.absoluteString, fit: fit, focalX: focalX, focalY: focalY, zoom: zoom,
+            onSuccess: { successes.value += 1 })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { successes.value > 0 })
 
         MediaStage.assertGolden(window, named: golden)
+    }
+
+    @Test("a focal point at the top start shows the top start of a cropped picture", .tags(.golden))
+    func focalTopStartShowsTheTopStart() async {
+        await drawQuadrants(focalX: 0, focalY: 0, golden: "image_focal_top_start")
+    }
+
+    @Test("a focal point at the bottom end shows the bottom end of a cropped picture", .tags(.golden))
+    func focalBottomEndShowsTheBottomEnd() async {
+        await drawQuadrants(focalX: 1, focalY: 1, golden: "image_focal_bottom_end")
+    }
+
+    @Test("zoom 2 magnifies the picture around the centre", .tags(.golden))
+    func zoomInMagnifiesAroundTheCentre() async {
+        await drawQuadrants(zoom: 2, golden: "image_zoom_in")
+    }
+
+    @Test("zoom 2 magnifies around the focal point, not the centre", .tags(.golden))
+    func zoomInMagnifiesAroundTheFocalPoint() async {
+        await drawQuadrants(focalX: 0.1, focalY: 0.9, zoom: 2, golden: "image_zoom_in_corner")
+    }
+
+    @Test("zoom 0.5 shrinks the picture and shows the page around it", .tags(.golden))
+    func zoomOutShowsThePageAroundThePicture() async {
+        await drawQuadrants(zoom: 0.5, golden: "image_zoom_out")
+    }
+
+    @Test("a focal point or zoom out of range, or not a number, draws like the nearest valid one")
+    func badFocalAndZoomDegrade() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("quadrants-bad-focal.png")
+        MediaOrigin.set(.status(200, MediaFixtures.quadrantPNG()), for: target)
+
+        func render(focalX: CGFloat, focalY: CGFloat, zoom: CGFloat) async -> Data? {
+            let successes = CallCount()
+            let window = MediaStage.image(
+                url: target.absoluteString, focalX: focalX, focalY: focalY, zoom: zoom,
+                onSuccess: { successes.value += 1 })
+            defer { ComponentTestHost.unmount(window) }
+            guard await waitUntilMedia(condition: { successes.value > 0 }) else { return nil }
+            ComponentTestHost.drainRunLoop(for: 0.3)
+            return ComponentTestHost.settledImage(of: window).pngData()
+        }
+
+        let nearest = await render(focalX: 1, focalY: 0, zoom: 10)
+        #expect(nearest != nil)
+        #expect(await render(focalX: 7, focalY: -3, zoom: 100) == nearest)
+        let centred = await render(focalX: 0.5, focalY: 0.5, zoom: 1)
+        #expect(await render(focalX: .nan, focalY: .infinity, zoom: .nan) == centred)
+        #expect(nearest != centred)
     }
 
     @Test("a tint colours the picture and not the blur", .tags(.golden))

@@ -414,12 +414,13 @@ extension MediaStage {
     @MainActor
     static func image(
         url: String, fit: MediaFit = .cover, blurHash: String? = nil, tintColor: Color? = nil,
+        focalX: CGFloat = 0.5, focalY: CGFloat = 0.5, zoom: CGFloat = 1,
         onSuccess: (() -> Void)? = nil, onFailure: (() -> Void)? = nil
     ) -> UIWindow {
         mount(
             MediaImage(
-                url: url, fit: fit, blurHash: blurHash, tintColor: tintColor, onSuccess: onSuccess,
-                onFailure: onFailure))
+                url: url, fit: fit, blurHash: blurHash, tintColor: tintColor, focalX: focalX,
+                focalY: focalY, zoom: zoom, onSuccess: onSuccess, onFailure: onFailure))
     }
 
     /// An animation on the stage.

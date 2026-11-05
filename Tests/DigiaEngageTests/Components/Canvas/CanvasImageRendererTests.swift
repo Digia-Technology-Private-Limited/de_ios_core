@@ -98,6 +98,34 @@ struct CanvasImageRendererTests {
         #expect(tint == nil)
     }
 
+    // MARK: - 2. Health through MediaImage
+
+    @Test("a canvas image that is not found reports http_4xx once, for the canvas's campaign")
+    func missingCanvasImageReportsOnce() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("canvas-missing.png")
+        MediaOrigin.set(.status(404, Data()), for: target)
+        let recorder = HealthRecorder()
+
+        let (window, controller) = ComponentTestHost.mountCanvas(
+            CampaignCanvas(
+                version: 2, width: 320, height: 200, background: .solid(.literal("#FFFFFFFF")),
+                children: [
+                    .widget(
+                        id: "image", rect: CampaignCanvasRect(x: 0, y: 0, width: 320, height: 200),
+                        widget: imageWidget(url: target.absoluteString))
+                ]))
+        defer { unmount(window) }
+        controller.rootView = AnyView(
+            controller.rootView.environment(\.digiaCampaignKey, "canvas-campaign"))
+
+        #expect(await waitUntilMedia { !recorder.all.isEmpty })
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        #expect(
+            recorder.all == [.init(campaignKey: "canvas-campaign", kind: .image, cause: "http_4xx")])
+    }
+
     // MARK: - 5. Theme Switching
 
     @Test("theme mediaURL resolution respects light vs dark modes and empty fallbacks")
