@@ -1,3 +1,4 @@
+import SwiftUI
 import AVFoundation
 import Combine
 import UIKit
@@ -673,4 +674,68 @@ enum StoryVideoPosterCache {
         cache.setObject(image, forKey: key.cacheKey as NSString, cost: cost)
         stored.send(key)
     }
+}
+
+// The window helpers and poster view `StoryVideoPlayback` reads; the story rail and viewer moved to
+// `story/` (T8), and this file is left only for the floater window's canvas video until T5/T9.
+
+struct StoryPosterImage: View {
+    let image: UIImage
+    let fit: StoryMediaFit
+
+    @ViewBuilder
+    var body: some View {
+        let content = Image(uiImage: image).resizable()
+        if fit.stretchesImage {
+            content.frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            content.aspectRatio(contentMode: fit.imageContentMode)
+        }
+    }
+}
+
+func effectiveThumbnailStartMs(
+    item: StoryItemConfig,
+    naturalDurationMs: Int64
+) -> Int64 {
+    let start = max(item.thumbnailPlayback.startTimeMs, 0)
+    return naturalDurationMs > 0 && start >= naturalDurationMs ? 0 : start
+}
+
+func shouldFallbackToZeroThumbnailStart(
+    effectiveStartMs: Int64,
+    naturalDurationMs: Int64
+) -> Bool {
+    effectiveStartMs > 0
+        && naturalDurationMs > 0
+        && effectiveStartMs >= naturalDurationMs
+}
+
+enum ThumbnailSeekRecoveryAction: Equatable {
+    case complete
+    case retryAtZero
+    case fail
+}
+
+func thumbnailSeekRecoveryAction(
+    succeeded: Bool,
+    retryAtZero: Bool,
+    effectiveStartMs: Int64
+) -> ThumbnailSeekRecoveryAction {
+    if succeeded { return .complete }
+    if retryAtZero, effectiveStartMs != 0 { return .retryAtZero }
+    return .fail
+}
+
+func thumbnailPlaybackWindowEnded(
+    item: StoryItemConfig,
+    currentPositionMs: Int64,
+    effectiveStartMs: Int64
+) -> Bool {
+    guard item.thumbnailPlayback.durationMode == .fixed,
+          let durationMs = item.thumbnailPlayback.durationMs
+    else {
+        return false
+    }
+    return currentPositionMs - effectiveStartMs >= durationMs
 }
