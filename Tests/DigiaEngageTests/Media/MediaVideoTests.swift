@@ -51,6 +51,22 @@ struct MediaVideoRuleTests {
     }
 }
 
+@MainActor
+private final class MuteModel: ObservableObject {
+    @Published var muted = true
+}
+
+private struct VolumeHost: View {
+    @ObservedObject var model: MuteModel
+    let url: String
+    let key: String
+    let volume: Float
+
+    var body: some View {
+        MediaVideo(url: url, muted: model.muted, volume: volume, autoplay: false, playerKey: key)
+    }
+}
+
 extension RenderedUITests {
 @MainActor
 @Suite("MediaVideo wrapper", .serialized, .tags(.media, .component))
@@ -232,6 +248,52 @@ struct MediaVideoComponentTests {
         #expect(await waitUntilMedia { !Self.playerControllers(in: controlled.rootViewController).isEmpty })
         #expect(Self.playerControllers(in: controlled.rootViewController).allSatisfy { $0.showsPlaybackControls })
         MediaOrigin.release(video)
+    }
+
+    // Guards `player.volume = volume` in `MediaVideoPlayback.open` (W8-03; Flutter Y8-02, Android
+    // `configuredVolume...`): the authored level is on the player from the start, independent of
+    // mute, so unmuting gives that level and not the player's default 1.
+    @Test("the authored volume is the level after unmute")
+    func authoredVolumeSurvivesUnmute() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let video = MediaOrigin.url("volume.mp4")
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
+        let pool = MediaServices.current.videoPool
+        let model = MuteModel()
+
+        let window = MediaStage.mount(VolumeHost(model: model, url: video.absoluteString, key: "pip", volume: 0.5))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "pip") != nil })
+        let player = try #require(pool.heldPlayer(for: "pip"))
+        #expect(player.isMuted)
+        #expect(player.volume == 0.5, "set while muted")
+
+        model.muted = false
+        #expect(await waitUntilMedia { !player.isMuted })
+        #expect(player.volume == 0.5, "audible at the authored level")
+    }
+
+    // Guards the same line when the player is a freed one that last played at another level: the
+    // PIP reusing it must not inherit that level.
+    @Test("a freed player with another volume plays at the new holder's volume")
+    func reusedPlayerTakesTheNewVolume() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let video = MediaOrigin.url("volume-reuse.mp4")
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
+        let pool = MediaServices.current.videoPool
+        let url = try #require(URL(string: video.absoluteString))
+        let freed = try #require(pool.borrow(key: "story", url: url, priority: .onScreen))
+        freed.volume = 0.8
+        pool.giveBack(key: "story", player: freed, priority: .onScreen)
+
+        let window = MediaStage.mount(VolumeHost(model: MuteModel(), url: video.absoluteString, key: "pip", volume: 0.25))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "pip") != nil })
+
+        #expect(pool.heldPlayer(for: "pip") === freed, "the freed player was reused")
+        #expect(freed.volume == 0.25)
     }
 
     private static func playerControllers(in controller: UIViewController?) -> [AVPlayerViewController] {
