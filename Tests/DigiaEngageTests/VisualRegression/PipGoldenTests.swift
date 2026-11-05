@@ -37,12 +37,14 @@ struct PipGoldenTests {
         let campaign = try #require(loadCampaign(fixture), "Fixture must decode to a campaign")
         let config = try #require(campaign.floaterConfig, "Fixture must decode to a PiP")
         let orchestrator = SDKInstance.shared.floaterOrchestrator!
-        // A player that stays paused at zero on the local file: it reaches `readyToPlay` (which is
-        // what reveals the window) without the network, and autoplay cannot move it.
-        orchestrator.playerFactory = { url in NeverPlayingPlayer(url: URL(string: url)!) }
+        // A pool whose players stay paused at zero on the local file: the leased player reaches
+        // `readyToPlay` (which is what reveals the window) without the network, and autoplay
+        // cannot move it. The window's `MediaVideo` joins the same pool.
+        MediaServices.override(videoPool: VideoPlayerPool(
+            makeItem: { AVPlayerItem(url: $0) }, makePlayer: { NeverPlayingPlayer(playerItem: $0) }))
         // Each cleanup is registered as soon as its state is set, so a failed `#require` below
         // cannot leave it for the next test, of this suite or another.
-        defer { orchestrator.playerFactory = nil }
+        defer { MediaServices.reset() }
         let started = orchestrator.start(
             campaign,
             payload: CEPTriggerPayload(
@@ -77,6 +79,9 @@ struct PipGoldenTests {
         // The window draws the image the orchestrator decoded before revealing it.
         case .image: try #require(orchestrator.preloadedImage != nil, "Media image was not preloaded")
         case .lottie: try await awaitLottieLoaded(in: window)
+        // The window's `MediaVideo` shows its loading still until the first frame; capture the
+        // window as it then stays.
+        case .video: try await awaitVideoFrame(in: window)
         default: break
         }
 
@@ -131,6 +136,21 @@ struct PipGoldenTests {
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         try #require(hasLoadedLottie(window), "Media Lottie did not load")
+    }
+
+    /// Polls until the window's video layer has its first frame ready, up to 5s.
+    @MainActor
+    private func awaitVideoFrame(in window: UIWindow) async throws {
+        func ready(_ layer: CALayer) -> Bool {
+            if let video = layer as? AVPlayerLayer, video.player != nil, video.isReadyForDisplay { return true }
+            return layer.sublayers?.contains(where: ready) ?? false
+        }
+        for _ in 0..<250 where !ready(window.layer) {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        try #require(ready(window.layer), "Media video did not reach its first frame")
+        // The still gives way to the frame on the main queue after readiness.
+        ComponentTestHost.drainRunLoop(for: 0.2)
     }
 
     @MainActor

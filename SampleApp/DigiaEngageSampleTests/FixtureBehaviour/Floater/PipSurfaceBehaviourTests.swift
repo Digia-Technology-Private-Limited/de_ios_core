@@ -87,9 +87,10 @@ struct PipSurfaceBehaviourTests {
 
     // MARK: - pip_mute_toggle
 
-    // Fails if: floater_orchestrator.swift `setMuted` `player?.isMuted = value` ->
-    // `player?.isMuted = true`, or `player?.volume = value ? 0 : active.config.media.volume` ->
-    // `player?.volume = 0`.
+    // Fails if: Sources/DigiaEngage/api/internal/media/MediaVideo.swift
+    // `.onChange(of: muted) { playback.player?.isMuted = $0 }` -> `{ playback.player?.isMuted = true }`
+    // (the window's `MediaVideo` owns mute, T9), or floater_media_view.swift `volume: media.volume`
+    // -> `volume: 0`.
     @Test("pip_mute_toggle: the mute button flips the sound of the playing video")
     func muteFlipsTheSound() async throws {
         let (sdk, _) = try await boot(try fixture("pip/pip_mute_toggle"))
@@ -105,14 +106,13 @@ struct PipSurfaceBehaviourTests {
         try sdk.tapFloater(at: mute)
 
         #expect(!sdk.pip.muted)
-        #expect(!player.isMuted)
+        try await sdk.waitUntil("the window unmutes its video") { !player.isMuted }
         #expect(player.volume > 0)
 
         try sdk.tapFloater(at: mute)
 
         #expect(sdk.pip.muted)
-        #expect(player.isMuted)
-        #expect(player.volume == 0)
+        try await sdk.waitUntil("the window mutes its video") { player.isMuted }
     }
 
     // MARK: - pip_media_expand
@@ -136,7 +136,8 @@ struct PipSurfaceBehaviourTests {
         #expect(sdk.pip.isShowing)
     }
 
-    // Fails if: floater_overlay_view.swift `commitDrag` `fx = projectedFx >= 0.5 ? 1 : 0` -> `fx = 0`.
+    // Fails if: Sources/DigiaEngage/api/internal/floating/FloatingWindow.swift `floatingReleaseFraction`
+    // `return (projected - min) / span >= 0.5 ? 1 : 0` -> `return 0`.
     @Test("pip_media_expand: a short, slow drag settles back into the same corner")
     func shortSlowDragSnapsBack() async throws {
         let (sdk, _) = try await boot(try fixture("pip/pip_media_expand"))
@@ -153,7 +154,8 @@ struct PipSurfaceBehaviourTests {
         #expect(sdk.pip.surface == .collapsed, "dragging is not a tap")
     }
 
-    // Fails if: floater_overlay_view.swift `commitDrag` `fx = projectedFx >= 0.5 ? 1 : 0` -> `fx = 1`.
+    // Fails if: FloatingWindow.swift `floatingReleaseFraction`
+    // `return (projected - min) / span >= 0.5 ? 1 : 0` -> `return 1`.
     @Test("pip_media_expand: a drag past the middle snaps to the opposite edge")
     func dragPastTheMiddleSnapsAcross() async throws {
         let (sdk, _) = try await boot(try fixture("pip/pip_media_expand"))
@@ -169,8 +171,8 @@ struct PipSurfaceBehaviourTests {
         #expect(sdk.pip.dragFraction == FloaterFraction(x: 0, y: 1))
     }
 
-    // Fails if: floater_overlay_view.swift `handlePan` `width: translation.width + velocity.x * 0.18`
-    // -> `width: translation.width`.
+    // Fails if: FloatingWindow.swift `handlePan`
+    // `onDragEnded(translation, CGVector(dx: velocity.x, dy: velocity.y))` -> `onDragEnded(translation, .zero)`.
     @Test("pip_media_expand: a fast fling snaps to the corner it was thrown at, even from a short drag")
     func flingSnapsToTheThrownCorner() async throws {
         let (sdk, _) = try await boot(try fixture("pip/pip_media_expand"))
@@ -203,8 +205,8 @@ struct PipSurfaceBehaviourTests {
         #expect(sdk.pip.isShowing)
     }
 
-    // Fails if: floater_overlay_view.swift `commitDrag` `if config.controls.snapToCorner {` ->
-    // `if true {`.
+    // Fails if: FloatingWindow.swift `floatingReleaseFraction` `guard snapToCorner else {` ->
+    // `guard true else {`.
     @Test("pip_expand_off_free_drop: with snapping off, a drop stays where it was let go")
     func freeDropStaysWhereReleased() async throws {
         let (sdk, _) = try await boot(try fixture("pip/pip_expand_off_free_drop"))
@@ -351,9 +353,9 @@ struct PipSurfaceBehaviourTests {
     /// the shield's `gestureRecognizerShouldBegin` refusing while `closing` — cannot be reached by
     /// a touch here: the window's published rect jumps to its off-screen end at once, so no touch
     /// lands on it. That half is not ported.
-    // Fails if: floater_overlay_view.swift `runExitAnimation`
-    // `if flies { flyOffsetFraction = flyOffset(exit.to) }` ->
-    // `if flies { flyOffsetFraction = flyOffset(config.collapsed.entryAnimation.from) }`.
+    // Fails if: Sources/DigiaEngage/api/internal/floating/FloatingWindow.swift `runExit`
+    // `if flies { flyOffsetFraction = floatingFlyOffset(exit.to) }` ->
+    // `if flies { flyOffsetFraction = floatingFlyOffset(.right) }`.
     @Test("pip_video_chrome_pinned_height: a window closed from its corner × flies out to the left")
     func closedWindowFliesOutLeft() async throws {
         let (sdk, _) = try await bootPinned()
