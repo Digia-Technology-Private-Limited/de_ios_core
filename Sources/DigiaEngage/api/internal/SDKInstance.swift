@@ -1309,10 +1309,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         dismiss()
     }
 
-    /// Called the first time an anchor key registers (`AnchorRegistry.register`).
+    /// Called each time an anchor key appears (`AnchorRegistry.register`). An
+    /// anchor that leaves and comes back is a new exposure, so it signals again.
     func recordAnchorSeen(_ anchorKey: String) {
         componentRegistry.recordAnchor(anchorKey, screenName: _currentScreen)
-        sendVisibleOnce("anchor:\(anchorKey)", .anchorVisible(anchorKey))
+        // After the frame that mounted it, so routing sees the finished layout.
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated { self?.engine.send(.anchorVisible(anchorKey)) }
+        }
     }
 
     /// Called the first time a placement key appears (`DigiaSlot`).
