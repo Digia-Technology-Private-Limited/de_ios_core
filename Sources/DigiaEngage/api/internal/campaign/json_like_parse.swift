@@ -49,6 +49,14 @@ extension Dictionary where Key == String, Value == Any {
         return value.flatMap { $0 > 0 ? $0 : nil }
     }
 
+    /// Int, zero included, or `nil` when missing or not a number. Frequency caps
+    /// keep 0 (never shown), so they must not use `positiveInt`.
+    func anyInt(_ key: String) -> Int? {
+        if let value = self[key] as? NSNumber { return value.intValue }
+        if let value = self[key] as? String { return Int(value) }
+        return nil
+    }
+
     func object(_ key: String) -> [String: Any]? {
         self[key] as? [String: Any]
     }

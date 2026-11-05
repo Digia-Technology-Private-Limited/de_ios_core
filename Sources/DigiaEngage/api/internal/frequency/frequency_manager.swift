@@ -35,12 +35,13 @@ struct FrequencyPolicy: Equatable {
     /// / inline). Legacy snake_case payloads carry no recognised keys → `nil`.
     static func fromJson(_ json: [String: Any]?) -> FrequencyPolicy? {
         guard let json else { return nil }
-        let maxTotal = json.positiveInt("maxTotal")
+        // A cap of 0 is kept: it means never shown.
+        let maxTotal = json.anyInt("maxTotal")
         var window: FrequencyWindow?
         if let w = json.object("maxPerWindow") {
-            let count = w.int("count", default: 0)
+            let count = w.anyInt("count")
             let unit = w.nonBlankString("window")
-            if count > 0, let unit { window = FrequencyWindow(count: count, window: unit) }
+            if let count, let unit { window = FrequencyWindow(count: count, window: unit) }
         }
         let stopOn = json.nonBlankString("stopOn")
         let policy = FrequencyPolicy(maxTotal: maxTotal, maxPerWindow: window, stopOn: stopOn)
@@ -83,20 +84,24 @@ enum FrequencyEvaluator {
     ]
 
     /// Pure eligibility check. Blocks if ANY active constraint is exceeded:
-    /// permanent stop, lifetime total, or the current window.
+    /// permanent stop, lifetime total, or the current window. With no stored
+    /// state a Digia-decided campaign (`unseenCountsAsZero`) has been shown
+    /// zero times, so a zero cap blocks it; a CEP-decided one is allowed.
     static func evaluate(
         _ policy: FrequencyPolicy,
         _ state: FrequencyState?,
         _ now: Int64,
-        _ sessionId: String?
+        _ sessionId: String?,
+        unseenCountsAsZero: Bool = false
     ) -> FrequencyEvalResult {
-        guard let state else { return FrequencyEvalResult(true) }
-        if state.stoppedAt != nil { return FrequencyEvalResult(false, .stopped) }
-        if let maxTotal = policy.maxTotal, state.total >= maxTotal {
+        let current = state ?? (unseenCountsAsZero ? FrequencyState() : nil)
+        guard let current else { return FrequencyEvalResult(true) }
+        if current.stoppedAt != nil { return FrequencyEvalResult(false, .stopped) }
+        if let maxTotal = policy.maxTotal, current.total >= maxTotal {
             return FrequencyEvalResult(false, .maxTotal)
         }
         if let w = policy.maxPerWindow {
-            let effective = isWindowExpired(w, state, now, sessionId) ? 0 : state.windowCount
+            let effective = isWindowExpired(w, current, now, sessionId) ? 0 : current.windowCount
             if effective >= w.count { return FrequencyEvalResult(false, .window) }
         }
         return FrequencyEvalResult(true)
@@ -175,9 +180,16 @@ final class FrequencyManager {
     /// The reason this campaign would be capped right now, or `nil` when it is
     /// allowed (or carries no constraint). Drives the gate via `isAllowed` and lets
     /// the route emit a verbose "why it was dropped" log without re-deriving it.
-    func blockReason(campaignKey: String, policy: FrequencyPolicy?) -> FrequencySkipReason? {
+    /// `unseenCountsAsZero` counts a campaign with no stored state as shown
+    /// zero times — set for Digia-decided campaigns, which carry a rule.
+    func blockReason(
+        campaignKey: String, policy: FrequencyPolicy?, unseenCountsAsZero: Bool = false
+    ) -> FrequencySkipReason? {
         guard let policy, policy.hasConstraint else { return nil }
-        return FrequencyEvaluator.evaluate(policy, load(campaignKey), clock(), sessionIdProvider()).reason
+        return FrequencyEvaluator.evaluate(
+            policy, load(campaignKey), clock(), sessionIdProvider(),
+            unseenCountsAsZero: unseenCountsAsZero
+        ).reason
     }
 
     /// Bump on "Digia Experience Viewed". No-op for an uncapped policy.
