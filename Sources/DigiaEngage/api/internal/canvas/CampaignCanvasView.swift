@@ -2304,6 +2304,9 @@ private struct CampaignCanvasGradientView: View {
     }
 }
 
+/// A canvas picture. The light/dark choice, `{{variable}}` interpolation and the failure label
+/// are the canvas's own; the picture, its BlurHash still, the focal point, the zoom, the tint and
+/// the health report (for the canvas's campaign) are `MediaImage`'s.
 private struct FocalCanvasImage: View {
     let source: CampaignCanvasMediaSource
     let isDark: Bool
@@ -2314,75 +2317,27 @@ private struct FocalCanvasImage: View {
     var tint: CampaignColor? = nil
     var failureLabel: String? = nil
     @Environment(\.digiaVariables) private var variables
-    @Environment(\.digiaCampaignKey) private var campaignKey
-    @State private var failedURL: String?
-
-    init(
-        source: CampaignCanvasMediaSource,
-        isDark: Bool,
-        fit: String,
-        x: CGFloat,
-        y: CGFloat,
-        scale: CGFloat,
-        tint: CampaignColor? = nil,
-        failureLabel: String? = nil
-    ) {
-        DigiaImagePipeline.configureIfNeeded()
-        self.source = source
-        self.isDark = isDark
-        self.fit = fit
-        self.x = x
-        self.y = y
-        self.scale = scale
-        self.tint = tint
-        self.failureLabel = failureLabel
-    }
 
     var body: some View {
         let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
         let resolved = interpolate(raw, context: variables)
-        if resolved.isEmpty || failedURL == resolved {
-            if let failureLabel { CanvasPlaceholder(label: failureLabel) }
-        } else if URL(string: resolved) == nil {
+        if resolved.isEmpty || URL(string: resolved) == nil {
             if let failureLabel { CanvasPlaceholder(label: failureLabel) }
         } else {
             GeometryReader { geometry in
-                WebImage(url: URL(string: resolved)) { image in
-                    image.resizable().renderingMode(tint == nil ? .original : .template)
-                } placeholder: {
-                    BlurHashPlaceholderView(placeholder: source.placeholder, fit: fit)
-                }
-                .onFailure { error in
-                    failedURL = resolved
-                    reportMediaLoadFailed(
-                        .image, cause: mediaFailureCause(imageError: error),
-                        campaignKey: campaignKey)
-                }
-                .modifier(CanvasImageFit(fit: fit))
-                .foregroundStyle(
-                    tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) } ?? .clear
+                MediaImage(
+                    url: resolved,
+                    fit: canvasMediaFit(fit),
+                    blurHash: source.placeholder?.stillBlurHash,
+                    tintColor: tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) },
+                    focalX: x,
+                    focalY: y,
+                    zoom: scale,
+                    errorContent: failureLabel.map { AnyView(CanvasPlaceholder(label: $0)) }
                 )
-                .frame(
-                    width: geometry.size.width, height: geometry.size.height,
-                    alignment: focalAlignment(x: x, y: y)
-                )
-                .scaleEffect(
-                    max(0.1, scale), anchor: focalAnchorPoint(x: x, y: y)
-                )
+                .frame(width: geometry.size.width, height: geometry.size.height)
                 .clipped()
             }
-            .onChange(of: resolved) { _ in failedURL = nil }
-        }
-    }
-}
-
-private struct CanvasImageFit: ViewModifier {
-    let fit: String
-    @ViewBuilder func body(content: Content) -> some View {
-        switch fit {
-        case "contain": content.scaledToFit()
-        case "fill": content
-        default: content.scaledToFill()
         }
     }
 }
@@ -2552,16 +2507,6 @@ extension String {
         default: .scaleAspectFill
         }
     }
-}
-
-internal func focalAlignment(x: CGFloat, y: CGFloat) -> Alignment {
-    Alignment(
-        horizontal: x < 0.34 ? .leading : (x > 0.66 ? .trailing : .center),
-        vertical: y < 0.34 ? .top : (y > 0.66 ? .bottom : .center))
-}
-
-internal func focalAnchorPoint(x: CGFloat, y: CGFloat) -> UnitPoint {
-    UnitPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
 }
 
 internal func canvasGlyphShadowBlurRadius(blur: CGFloat, spread: CGFloat) -> CGFloat {

@@ -98,46 +98,6 @@ struct CanvasImageRendererTests {
         #expect(tint == nil)
     }
 
-    // MARK: - 2. Focal Alignment Boundaries
-
-    @Test("focalAlignment maps 9 quadrants correctly across 0.34 and 0.66 thresholds")
-    func focalAlignmentQuadrants() {
-        // Top row (y < 0.34)
-        #expect(focalAlignment(x: 0.0, y: 0.0) == .topLeading)
-        #expect(focalAlignment(x: 0.33, y: 0.33) == .topLeading)
-        #expect(focalAlignment(x: 0.34, y: 0.1) == .top)
-        #expect(focalAlignment(x: 0.5, y: 0.2) == .top)
-        #expect(focalAlignment(x: 0.66, y: 0.1) == .top)
-        #expect(focalAlignment(x: 0.67, y: 0.0) == .topTrailing)
-        #expect(focalAlignment(x: 1.0, y: 0.33) == .topTrailing)
-
-        // Center row (0.34 <= y <= 0.66)
-        #expect(focalAlignment(x: 0.1, y: 0.34) == .leading)
-        #expect(focalAlignment(x: 0.33, y: 0.5) == .leading)
-        #expect(focalAlignment(x: 0.34, y: 0.34) == .center)
-        #expect(focalAlignment(x: 0.5, y: 0.5) == .center)
-        #expect(focalAlignment(x: 0.66, y: 0.66) == .center)
-        #expect(focalAlignment(x: 0.67, y: 0.5) == .trailing)
-        #expect(focalAlignment(x: 1.0, y: 0.66) == .trailing)
-
-        // Bottom row (y > 0.66)
-        #expect(focalAlignment(x: 0.0, y: 0.67) == .bottomLeading)
-        #expect(focalAlignment(x: 0.33, y: 1.0) == .bottomLeading)
-        #expect(focalAlignment(x: 0.34, y: 0.67) == .bottom)
-        #expect(focalAlignment(x: 0.5, y: 0.9) == .bottom)
-        #expect(focalAlignment(x: 0.66, y: 1.0) == .bottom)
-        #expect(focalAlignment(x: 0.67, y: 0.67) == .bottomTrailing)
-        #expect(focalAlignment(x: 1.0, y: 1.0) == .bottomTrailing)
-    }
-
-    @Test("focalAnchorPoint clamps x and y coordinates to [0, 1] unit range")
-    func focalAnchorPointClamping() {
-        #expect(focalAnchorPoint(x: 0.5, y: 0.5) == UnitPoint(x: 0.5, y: 0.5))
-        #expect(focalAnchorPoint(x: -0.2, y: 1.5) == UnitPoint(x: 0.0, y: 1.0))
-        #expect(focalAnchorPoint(x: 1.2, y: -0.5) == UnitPoint(x: 1.0, y: 0.0))
-    }
-
-
     // MARK: - 5. Theme Switching
 
     @Test("theme mediaURL resolution respects light vs dark modes and empty fallbacks")
