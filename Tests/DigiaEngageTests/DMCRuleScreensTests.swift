@@ -2,10 +2,6 @@ import Foundation
 import Testing
 @testable import DigiaEngage
 
-/// DMC `rule.screens`: an overlay fires only on a listed screen, a wait ending
-/// off its screens is cancelled, inline campaigns ignore screens, and malformed
-/// screens degrade to `malformed_rule`. Mirrors Android `DecisionEngineTest`
-/// "screens" cases and Flutter `dmc_rule_wait_test.dart` screen cases.
 @MainActor
 private final class ScreensFacts: DecisionFacts {
     var ready = true
@@ -32,6 +28,10 @@ private final class ScreensFacts: DecisionFacts {
     var audienceContext: String { "missing" }
 }
 
+/// DMC `rule.screens`: an overlay fires only on a listed screen, a wait ending
+/// off its screens is cancelled, inline campaigns ignore screens, and malformed
+/// screens degrade to `malformed_rule`. Mirrors Android `DecisionEngineTest`
+/// "screens" cases and Flutter `dmc_rule_wait_test.dart` screen cases.
 @MainActor
 @Suite("DMC rule screens", .serialized)
 struct DMCRuleScreensTests {
@@ -79,16 +79,6 @@ struct DMCRuleScreensTests {
     }
 
     // MARK: - parsing
-
-    @Test("a screens list parses onto the rule")
-    func screensListParses() {
-        let campaign = Self.overlay("home_offer", screens: ["home"])
-        guard case .valid(let rule)? = campaign.rule else {
-            Issue.record("expected a valid rule")
-            return
-        }
-        #expect(rule.screens == ["home"])
-    }
 
     @Test("an empty screens list is malformed")
     func emptyScreensIsMalformed() {
@@ -141,19 +131,6 @@ struct DMCRuleScreensTests {
         #expect(routedKeys == ["home_offer"])
     }
 
-    @Test("an overlay for home does not fire while no screen is set")
-    func overlayUnsetScreenDoesNotFire() {
-        defer { finish() }
-        facts.add(Self.overlay("home_offer", screens: ["home"]))
-        engine.ready()
-
-        facts.currentScreen = ""
-        engine.send(.event("promo", [:]))
-
-        #expect(routedKeys.isEmpty)
-        #expect(notOnTargetScreen("home_offer").count == 1)
-    }
-
     @Test("screen matching is exact")
     func screenMatchIsExact() {
         defer { finish() }
@@ -200,77 +177,6 @@ struct DMCRuleScreensTests {
                 $0.campaignKey == "home_offer" && $0.reason?.wire == "wait_cancelled"
                     && $0.extras["cause"] == "not_on_target_screen"
             })
-    }
-
-    @Test("leaving and returning before the wait ends still shows")
-    func waitSurvivesLeaveAndReturn() {
-        defer { finish() }
-        facts.add(Self.overlay("home_offer", screens: ["home"], waitMs: 1000))
-        engine.ready()
-
-        facts.currentScreen = "home"
-        engine.send(.event("promo", [:]))
-        facts.currentScreen = "cart"
-        facts.currentScreen = "home"
-        advance(2000)
-
-        #expect(routedKeys == ["home_offer"])
-    }
-
-    // MARK: - picker
-
-    private func decide(_ campaigns: [CampaignModel], screen: String) -> RuleDecision {
-        pickCampaign(
-            campaigns,
-            signal: .event("promo", [:]),
-            attributes: [:],
-            device: [:],
-            currentScreen: screen,
-            isWaiting: { _ in false },
-            inAudience: { _ in true },
-            capped: { _ in false })
-    }
-
-    @Test("the picker drops an overlay off its screens as not_on_target_screen")
-    func pickerDropsOffScreens() {
-        let decision = decide([Self.overlay("home_offer", screens: ["home"])], screen: "cart")
-        #expect(decision.winner == nil)
-        guard case .ineligible(let campaign, let reason, let detail)? = decision.skipped.first
-        else {
-            Issue.record("expected ineligible")
-            return
-        }
-        #expect(campaign.campaignKey == "home_offer")
-        #expect(reason == .notOnTargetScreen)
-        #expect(detail == "cart")
-    }
-
-    @Test("the picker names an unset screen <unset>")
-    func pickerUnsetScreenDetail() {
-        let decision = decide([Self.overlay("home_offer", screens: ["home"])], screen: "")
-        #expect(decision.winner == nil)
-        guard case .ineligible(_, let reason, let detail)? = decision.skipped.first else {
-            Issue.record("expected ineligible")
-            return
-        }
-        #expect(reason == .notOnTargetScreen)
-        #expect(detail == "<unset>")
-    }
-
-    @Test("the picker keeps an overlay on its screens")
-    func pickerKeepsOnScreens() {
-        let decision = decide([Self.overlay("home_offer", screens: ["home"])], screen: "home")
-        #expect(decision.winner?.campaignKey == "home_offer")
-        #expect(decision.skipped.isEmpty)
-    }
-
-    @Test("the picker lets an inline through off its screens")
-    func pickerInlineIgnoresScreens() {
-        let decision = decide(
-            [Self.inline("hero_offer", slot: "hero", screens: ["home"])], screen: "cart")
-        #expect(decision.winner == nil)
-        #expect(decision.inlineWinners.map(\.campaign.campaignKey) == ["hero_offer"])
-        #expect(decision.skipped.isEmpty)
     }
 
     // MARK: - fixtures

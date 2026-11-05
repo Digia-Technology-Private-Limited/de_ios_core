@@ -191,13 +191,6 @@ private func parseEnvelope(_ json: Any?) throws -> CampaignRule {
     guard let trigger = json["trigger"] as? [String: Any],
           let anyTriggers = trigger["any"] as? [Any]
     else { try malformed("trigger has no any list") }
-    // Missing or null `screens` means any screen. A present one must be a
-    // non-empty list of non-empty names, like every other name list.
-    let screens: [String]? = try {
-        let raw = json["screens"]
-        guard raw != nil, !(raw is NSNull) else { return nil }
-        return try nameList(raw, "screens")
-    }()
     return .valid(
         ValidRule(
             priority: validPriority ? ruleJSONNumber(priority)! : defaultPriority,
@@ -208,7 +201,11 @@ private func parseEnvelope(_ json: Any?) throws -> CampaignRule {
                 if raw is NSNull { return nil }
                 return try parseWait(raw)
             },
-            screens: screens
+            // Missing or null means any screen; otherwise a name list like any other.
+            screens: try json["screens"].flatMap { raw -> [String]? in
+                if raw is NSNull { return nil }
+                return try nameList(raw, "screens")
+            }
         ))
 }
 
