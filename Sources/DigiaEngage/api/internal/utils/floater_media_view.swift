@@ -1,44 +1,39 @@
-import AVFoundation
 import SwiftUI
 
-/// The media surface, shared by both states. Reads the orchestrator's own `player` —
-/// created once by `FloaterOrchestrator`, never by this view — so playback is
-/// continuous across the collapsed/expanded grow transition. This view is only ever
-/// a child of the one container in `FloaterSessionView` that animates size/position;
-/// it must never itself be swapped for a different view identity between states (see
-/// that file's top comment) — the media never re-appears here as an `if expanded`
-/// branch for exactly that reason.
+/// The PIP window's content, shared by both states. This view is only ever a child of the one
+/// container in `FloaterSessionView` that animates size and position; it must never itself be
+/// swapped for a different view identity between states (see that file's top comment), so the
+/// media never re-appears here as an `if expanded` branch.
 ///
-/// Video reuses `InlineStoryPlayerLayer` (`DigiaInlineStoryView.swift`) — the
-/// existing raw `AVPlayerLayer`/`layerClass` shim, chosen over `NudgeVideoView`'s
-/// `AVPlayerViewController` wrapper because floater draws its own chrome and needs
-/// the bare layer, not a controller with its own playback UI (see
-/// `ai_docs/pip-campaign-design.md` §4.4's corrected citation).
+/// Video is a `MediaVideo` borrowing the showing's player from the pool under `videoPlayerKey`,
+/// the key `FloaterOrchestrator` already holds for its warm-up: the window joins that held player
+/// (same item, same playhead), so growing, collapsing or a remount never restarts it (N2). It is
+/// an on-screen borrow, so a full pool makes an extra player rather than refuse (OD-1). Mute, volume
+/// and loop are the content's; errors after the window is shown are `MediaVideo`'s (OD-4).
 struct FloaterMediaView: View {
     let media: FloaterMediaConfig
-    let player: AVPlayer?
+    let videoPlayerKey: String
+    let muted: Bool
     let cover: Bool
     let resolvedUrl: String
     /// The orchestrator's already-decoded image, drawn in place of a `WebImage` load.
     let preloadedImage: UIImage?
 
-    init(
-        media: FloaterMediaConfig, player: AVPlayer?, cover: Bool, resolvedUrl: String,
-        preloadedImage: UIImage?
-    ) {
-        self.media = media
-        self.player = player
-        self.cover = cover
-        self.resolvedUrl = resolvedUrl
-        self.preloadedImage = preloadedImage
-    }
-
     var body: some View {
         switch media.kind {
         case .video:
-            if let player {
-                InlineStoryPlayerLayer(player: player, gravity: cover ? .resizeAspectFill : .resizeAspect)
-            }
+            MediaVideo(
+                url: resolvedUrl,
+                fit: cover ? .cover : .contain,
+                loop: media.loop,
+                muted: muted,
+                volume: media.volume,
+                autoplay: media.autoplay,
+                // A letterbox shows the window's own ground (the expanded background), as on `main`.
+                groundAfterFirstFrame: .clear,
+                playerKey: videoPlayerKey,
+                poolPriority: .onScreen
+            )
         case .lottie:
             lottieView
         case .image, .gif:

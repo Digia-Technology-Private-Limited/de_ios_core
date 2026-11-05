@@ -95,6 +95,7 @@ final class VideoPlayerPool: @unchecked Sendable {
 
     let maxPlayers: Int
     private let makeItem: @MainActor (URL) -> AVPlayerItem
+    private let makePlayer: @MainActor (AVPlayerItem) -> AVPlayer
     private var holders: [String: Holder] = [:]
     private var free: [FreePlayer] = []
     private var evictionObservers: [String: [UUID: @MainActor () -> Void]] = [:]
@@ -102,10 +103,12 @@ final class VideoPlayerPool: @unchecked Sendable {
 
     init(
         maxPlayers: Int = maxPoolPlayers(deviceClass: deviceClassFor(physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory)),
-        makeItem: @escaping @MainActor (URL) -> AVPlayerItem
+        makeItem: @escaping @MainActor (URL) -> AVPlayerItem,
+        makePlayer: @escaping @MainActor (AVPlayerItem) -> AVPlayer = { AVPlayer(playerItem: $0) }
     ) {
         self.maxPlayers = max(1, maxPlayers)
         self.makeItem = makeItem
+        self.makePlayer = makePlayer
     }
 
     /// One hold on the player for `key`, or nil when refused (pool full, nothing ranked below,
@@ -152,7 +155,7 @@ final class VideoPlayerPool: @unchecked Sendable {
             }
             // On screen with nothing to take back: an extra player beyond the size (OD-1).
         }
-        let player = AVPlayer(playerItem: makeItem(url))
+        let player = makePlayer(makeItem(url))
         holders[key] = Holder(url: url, player: player, seq: seq, holds: [priority])
         return player
     }

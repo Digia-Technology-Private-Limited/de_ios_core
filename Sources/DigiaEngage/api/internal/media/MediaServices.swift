@@ -43,7 +43,8 @@ struct MediaServices: Sendable {
     static func override(
         reportHealth: (@Sendable (String?, HealthMediaKind, String) -> Void)? = nil,
         loadLottie: (@Sendable (URL) async -> (source: LottieAnimationSource?, failureCause: String?))? = nil,
-        videoSession: URLSession? = nil
+        videoSession: URLSession? = nil,
+        videoPool: VideoPlayerPool? = nil
     ) {
         // A fresh cache folder per override, so no test reads another's bytes.
         let videoStore = videoSession.map { session in
@@ -61,6 +62,7 @@ struct MediaServices: Sendable {
                 services.videoLoader = loader
                 services.videoPool = VideoPlayerPool(makeItem: { mediaVideoItem(for: $0, loader: loader) })
             }
+            if let videoPool { services.videoPool = videoPool }
         }
     }
 

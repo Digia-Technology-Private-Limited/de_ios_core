@@ -79,6 +79,8 @@ struct MediaVideo: View {
     var blurHash: String? = nil
     var loop: Bool = false
     var muted: Bool = true
+    /// The level when not muted, 0...1 (the PIP's authored volume). Independent of `muted`.
+    var volume: Float = 1
     var autoplay: Bool = true
     var showControls: Bool = false
     var groundAfterFirstFrame: Color = .black
@@ -129,6 +131,7 @@ struct MediaVideo: View {
         .onChange(of: url) { open(url: $0, key: playerKey) }
         .onChange(of: playerKey) { open(url: url, key: $0) }
         .onChange(of: muted) { playback.player?.isMuted = $0 }
+        .onChange(of: volume) { playback.player?.volume = $0 }
         .onChange(of: autoplay) { playback.setPlaying($0) }
         .onChange(of: loop) { playback.loop = $0 }
     }
@@ -145,7 +148,8 @@ struct MediaVideo: View {
     private func open(url: String, key: String?) {
         let canShow = MediaVideoStill.canShow(thumbnailUrl: thumbnailUrl, blurHash: blurHash)
         playback.open(
-            url: url, key: key, priority: poolPriority, loop: loop, muted: muted, autoplay: autoplay,
+            url: url, key: key, priority: poolPriority, loop: loop, muted: muted, volume: volume,
+            autoplay: autoplay,
             spinnerDelay: canShow ? nil : spinnerDelay,
             services: services,
             report: { [services, campaignKey] cause in services.reportHealth(campaignKey, .video, cause) })
@@ -222,8 +226,8 @@ final class MediaVideoPlayback: ObservableObject {
     /// Starts showing `url`. Re-opening what is already open is a no-op; anything else frees
     /// the old player first.
     func open(
-        url: String, key: String?, priority: PoolPriority, loop: Bool, muted: Bool, autoplay: Bool,
-        spinnerDelay: TimeInterval?, services: MediaServices, report: @escaping (String) -> Void
+        url: String, key: String?, priority: PoolPriority, loop: Bool, muted: Bool, volume: Float,
+        autoplay: Bool, spinnerDelay: TimeInterval?, services: MediaServices, report: @escaping (String) -> Void
     ) {
         if let opened, opened.url == url, opened.key == key { return }
         close()
@@ -246,6 +250,7 @@ final class MediaVideoPlayback: ObservableObject {
             player = AVPlayer(playerItem: mediaVideoItem(for: parsed, loader: services.videoLoader))
         }
         player.isMuted = muted
+        player.volume = volume
         player.actionAtItemEnd = .pause
         if let item = player.currentItem { watch(item) }
         self.player = player
