@@ -87,7 +87,7 @@ struct StoryPlanDriverTests {
     @Test("until the new page's first frame the players either side stay, those further away go")
     func neighboursStayUntilTheFirstFrame() throws {
         let pool = pool(size: 4)
-        let driver = StoryPlanDriver(pool: pool, warm: { _, _, _ in })
+        let driver = StoryPlanDriver(pool: pool, warm: { _, _, _ in 0 })
         update(driver, at: 1, firstFrameShown: true)
         #expect(driver.heldIndices == [0, 1, 2])
         let left = try #require(driver.heldPlayer(for: 1))
@@ -106,7 +106,7 @@ struct StoryPlanDriverTests {
     @Test("the page left waits paused and muted at its playhead, so swiping back resumes it (N9)")
     func pageLeftWaitsAtItsPlayhead() throws {
         let pool = pool(size: 4)
-        let driver = StoryPlanDriver(pool: pool, warm: { _, _, _ in })
+        let driver = StoryPlanDriver(pool: pool, warm: { _, _, _ in 0 })
         update(driver, at: 1, firstFrameShown: true)
         let left = try #require(driver.heldPlayer(for: 1))
         let item = left.currentItem
@@ -132,6 +132,7 @@ struct StoryPlanDriverTests {
         let log = WarmLog()
         let driver = StoryPlanDriver(pool: pool(size: 4), warm: { url, kind, bytes in
             log.add("\(url) \(kind) \(bytes.map(String.init) ?? "-")")
+            return bytes ?? 0
         })
         update(driver, at: 2, firstFrameShown: true, stories: remote)
         _ = await waitUntilMedia(timeout: 2) { log.all.count >= 2 }

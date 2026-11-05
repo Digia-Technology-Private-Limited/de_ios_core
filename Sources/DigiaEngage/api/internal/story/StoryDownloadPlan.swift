@@ -253,8 +253,10 @@ final class StoryPlanDriver {
     }
 
     private let pool: VideoPlayerPool
-    private let warm: @Sendable (String, MediaPrefetchKind, Int?) async -> Void
-    /// Told how long each first-bytes warm took (bytes, seconds): the measured slow vote.
+    /// Warms a URL and answers the video bytes it delivered: 0 for a cancelled or failed warm.
+    private let warm: @Sendable (String, MediaPrefetchKind, Int?) async -> Int
+    /// Told how long each completed first-bytes warm took (bytes delivered, seconds): the measured
+    /// slow vote. A cancelled or failed warm votes nothing.
     private let onWarm: @Sendable (Int, TimeInterval) -> Void
     private var tasks: [Int: Task<Void, Never>] = [:]
     private var warmed: Set<Int> = []
@@ -262,7 +264,7 @@ final class StoryPlanDriver {
 
     init(
         pool: VideoPlayerPool,
-        warm: @escaping @Sendable (String, MediaPrefetchKind, Int?) async -> Void = { url, kind, bytes in
+        warm: @escaping @Sendable (String, MediaPrefetchKind, Int?) async -> Int = { url, kind, bytes in
             await MediaPrefetch.warm(url, kind: kind, bytes: bytes)
         },
         onWarm: @escaping @Sendable (Int, TimeInterval) -> Void = { _, _ in }
@@ -364,11 +366,13 @@ final class StoryPlanDriver {
             let onWarm = onWarm
             tasks[index] = Task { [weak self] in
                 let began = ProcessInfo.processInfo.systemUptime
-                await warm(work.url, work.kind, work.bytes)
-                if work.kind == .video, let bytes = work.bytes {
-                    onWarm(bytes, ProcessInfo.processInfo.systemUptime - began)
-                }
+                let delivered = await warm(work.url, work.kind, work.bytes)
+                // A warm the plan moved on from measured nothing: no vote. One that failed delivered
+                // 0 bytes, which `SlowNetworkThroughput.note` does not count.
                 guard !Task.isCancelled else { return }
+                if work.kind == .video, work.bytes != nil {
+                    onWarm(delivered, ProcessInfo.processInfo.systemUptime - began)
+                }
                 self?.tasks[index] = nil
                 self?.warmed.insert(index)
             }

@@ -15,20 +15,31 @@ enum MediaPrefetchKind: Sendable {
 /// Lottie (Lottie's cache). Something already cached makes no request. Internal: there is no
 /// app-start policy, callers (the story plan) decide what to warm.
 ///
-/// A failed warm is silent: the render that follows reports its own health.
+/// A failed warm is silent: the render that follows reports its own health. `warm` answers the
+/// bytes of a video it delivered: 0 for a warm that was cancelled or failed, and for anything that
+/// is not a cacheable video. A caller measuring throughput counts only a positive answer.
 enum MediaPrefetch {
     /// The first bytes of a video a warm fetches when the caller doesn't say.
     static let defaultVideoBytes = 512 * 1_024
 
+    @discardableResult
     static func warm(
         _ url: String, kind: MediaPrefetchKind, bytes: Int? = nil, services: MediaServices = .current
-    ) async {
-        guard let parsed = mediaUsableURL(url) else { return }
+    ) async -> Int {
+        guard let parsed = mediaUsableURL(url) else { return 0 }
         switch kind {
         case .video:
             // HLS and file URLs have nothing to warm in the range cache.
-            guard MediaResourceLoader.isCacheable(parsed) else { return }
-            try? await services.videoStore.warm(url: parsed, offset: 0, length: bytes ?? defaultVideoBytes)
+            guard MediaResourceLoader.isCacheable(parsed) else { return 0 }
+            let asked = bytes ?? defaultVideoBytes
+            do {
+                try await services.videoStore.warm(url: parsed, offset: 0, length: asked)
+            } catch {
+                return 0
+            }
+            // A video shorter than the window delivers all of it, not the window.
+            let total = await services.videoStore.contentInfo(for: parsed)?.contentLength ?? MediaContentInfo.unknownLength
+            return total >= 0 ? min(asked, Int(total)) : asked
         case .image:
             DigiaImagePipeline.configureIfNeeded()
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
@@ -41,5 +52,6 @@ enum MediaPrefetch {
         case .lottie:
             _ = await services.loadLottie(parsed)
         }
+        return 0
     }
 }
