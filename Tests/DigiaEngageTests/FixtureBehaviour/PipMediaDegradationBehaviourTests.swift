@@ -9,9 +9,9 @@ extension RenderedUITests {
 /// a control that shows once its media exists.
 ///
 /// Flutter also records every URL its image loader is asked for, to prove an unusable url is never
-/// fetched and a missing one was. iOS preloads through `URLSession.shared`, which has no seam; the
-/// `invalid_url` cause on the `media_load_failed` record, and the orchestrator's
-/// `lastStartFailureReason`, say which path dropped it. The Test Kit media are file URLs here, so
+/// fetched and a missing one was. iOS preloads through the image library's loader into the cache
+/// the window's `MediaImage` reads; the `invalid_url` cause on the `media_load_failed` record, and
+/// the orchestrator's `lastStartFailureReason`, say which path dropped it. The Test Kit media are file URLs here, so
 /// "404" is a missing file: a load failure with no HTTP status, which (as a network-class fault)
 /// is not reported to health.
 ///
@@ -108,11 +108,12 @@ struct PipMediaDegradationBehaviourTests {
         #expect(sdk.pip.activeRect != nil)
     }
 
-    // Fails if: floater_orchestrator.swift `preloadImage` `request.setValue(DIGIA_IMAGE_USER_AGENT,
-    // forHTTPHeaderField: "User-Agent")` is deleted (the gate fetch bypasses the image wrapper, so
-    // the shared downloader's header does not cover it).
-    @Test("the image the window waits for is fetched with the Digia User-Agent")
-    func preloadSendsUserAgent() async throws {
+    // Fails if: floater_orchestrator.swift `preloadImage` loads the picture some way the image cache
+    // does not see (the `SDWebImageManager.shared.loadImage(...)` call replaced by a plain
+    // `URLSession` fetch): the window's `MediaImage` then fetches it a second time, and the log holds
+    // two requests, the first without the Digia User-Agent.
+    @Test("the image the window waits for is fetched once, with the Digia User-Agent")
+    func preloadFetchesOnceWithUserAgent() async throws {
         MediaOrigin.install()
         defer { MediaOrigin.uninstall(); MediaOrigin.reset() }
         let image = MediaOrigin.url("pip.png")
