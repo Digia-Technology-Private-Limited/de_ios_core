@@ -71,7 +71,10 @@ struct StoryThumbnailStill: View {
                     MediaImage(
                         url: source,
                         fit: (fitOverride ?? fit).toMediaFit,
-                        blurHash: placeholder?.type == .blurhash ? placeholder?.blurHash : nil
+                        blurHash: placeholder?.type == .blurhash ? placeholder?.blurHash : nil,
+                        errorContent: AnyView(MediaStill(
+                            fit: (fitOverride ?? fit).toMediaFit,
+                            blurHash: placeholder?.type == .blurhash ? placeholder?.blurHash : nil))
                     )
                 case nil:
                     EmptyView()
@@ -94,7 +97,7 @@ struct StoryImage: View {
     var body: some View {
         ZStack {
             if !loaded { mediaVideoBackdrop }
-            MediaImage(url: url, fit: fit, onSuccess: { loaded = true })
+            MediaImage(url: url, fit: fit, onSuccess: { loaded = true }, errorContent: AnyView(EmptyView()))
         }
     }
 }
