@@ -74,8 +74,6 @@ struct PipGoldenTests {
         let window = makePipWindow(device: device)
         defer { ComponentTestHost.cleanupOverlayWindow(window) }
         switch config.media.kind {
-        // The window draws the image the orchestrator decoded before revealing it.
-        case .image: try #require(orchestrator.preloadedImage != nil, "Media image was not preloaded")
         case .lottie: try await awaitLottieLoaded(in: window)
         default: break
         }

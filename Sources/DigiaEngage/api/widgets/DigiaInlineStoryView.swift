@@ -949,22 +949,33 @@ struct StoryRemoteImage: View {
     let urlString: String
     let fit: StoryMediaFit
 
-    @ViewBuilder
+    /// The dark ground shows while the picture loads and after a failure; once the picture has
+    /// drawn, a letterbox shows what is behind the card, as it always did.
+    @State private var loaded = false
+
     var body: some View {
-        if let url = URL(string: urlString) {
-            let image = DigiaCachedImageView(
-                url: url,
-                placeholder: AnyView(Color(red: 0.10, green: 0.10, blue: 0.10))
+        // The picture is stretched to the box it is given (`.fill`): this view applies the story's
+        // own aspect rule below, as it did around the cached image view.
+        let image = ZStack {
+            if !loaded { storyImageGround }
+            MediaImage(
+                url: urlString,
+                fit: .fill,
+                onSuccess: { loaded = true },
+                errorContent: AnyView(storyImageGround)
             )
+        }
+        Group {
             if fit.stretchesImage {
                 image.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 image.aspectRatio(contentMode: fit.imageContentMode)
             }
-        } else {
-            Color(red: 0.16, green: 0.16, blue: 0.16)
         }
+        .onChange(of: urlString) { _ in loaded = false }
     }
+
+    private var storyImageGround: Color { Color(red: 0.10, green: 0.10, blue: 0.10) }
 }
 
 @MainActor

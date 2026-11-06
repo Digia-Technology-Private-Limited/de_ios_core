@@ -36,38 +36,20 @@ struct StoryThumbnailPlaceholderView: View {
             case let .color(value):
                 Color(hex: value) ?? Color(red: 0.10, green: 0.10, blue: 0.10)
             case let .image(source, fit, placeholder):
-                if let url = URL(string: source) {
-                    let effectiveFit = fitOverride ?? fit
-                    fitted(
-                        DigiaCachedImageView(
-                            url: url,
-                            placeholder: AnyView(
-                                BlurHashPlaceholderView(placeholder: placeholder, fit: effectiveFit.rawValue)
-                            )
-                        ),
-                        fit: effectiveFit
-                    )
-                }
+                // A picture that cannot load keeps the authored BlurHash, as it always did.
+                let mediaFit = MediaFit(rawValue: (fitOverride ?? fit).rawValue) ?? .cover
+                let blurHash = placeholder?.stillBlurHash
+                MediaImage(
+                    url: source,
+                    fit: mediaFit,
+                    blurHash: blurHash,
+                    errorContent: AnyView(MediaStill(fit: mediaFit, blurHash: blurHash))
+                )
             case nil:
                 EmptyView()
             }
         }
         .clipped()
-    }
-
-    @ViewBuilder
-    private func fitted<Content: View>(
-        _ content: Content,
-        fit: StoryMediaFit
-    ) -> some View {
-        switch fit {
-        case .cover:
-            content.aspectRatio(contentMode: .fill)
-        case .contain:
-            content.aspectRatio(contentMode: .fit)
-        case .fill:
-            content.frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
     }
 }
 
