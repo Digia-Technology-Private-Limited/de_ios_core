@@ -1,5 +1,3 @@
-import AVFoundation
-import AVKit
 import SwiftUI
 import UIKit
 
@@ -468,113 +466,33 @@ private struct NudgeCarouselView: View {
 
 // MARK: - Video
 
-private enum VideoLoadState {
-    case loading
-    case ready
-    case failed
-}
-
+/// The nudge video plays through `MediaVideo` (T3): its still and spinner until the first frame
+/// (OD-7), `main`'s native controls when authored, and `MediaVideo`'s "Video failed" box.
 private struct NudgeVideoView: View {
     let node: NudgeVideo
     let canvasMode: Bool
     @Environment(\.digiaVariables) private var variables
-    @State private var player: AVPlayer? = nil
-    @State private var state: VideoLoadState = .loading
-    @State private var statusObserver: NSKeyValueObservation? = nil
-    @State private var loopObserver: NSObjectProtocol? = nil
 
     private var url: String { interpolate(node.url, context: variables) }
 
     var body: some View {
-        Group {
-            if url.isEmpty {
-                EmptyView()
-            } else {
-                ZStack {
-                    Color.black
-
-                    if let player, state != .failed {
-                        PlayerViewController(
-                            player: player,
-                            showsPlaybackControls: node.showControls,
-                            videoGravity: node.boxFit.videoGravity
-                        )
-                    }
-
-                    switch state {
-                    case .loading:
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .tint(.white)
-                    case .failed:
-                        VStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.system(size: 28))
-                            Text("Video failed")
-                                .font(
-                                    Font(SDKInstance.shared.font.resolve(
-                                        size: 13, weight: 400, italic: false
-                                    ))
-                                )
-                        }
-                        .foregroundStyle(.white)
-                    case .ready:
-                        EmptyView()
-                    }
-                }
-                .modifier(CanvasMediaFrame(
-                    canvasMode: canvasMode,
-                    aspectRatio: node.aspectRatio,
-                    height: node.height
-                ))
-            }
+        if url.isEmpty {
+            EmptyView()
+        } else {
+            MediaVideo(
+                url: url,
+                fit: node.boxFit.mediaFit,
+                loop: node.loop,
+                muted: node.muted,
+                autoplay: node.autoplay,
+                showControls: node.showControls
+            )
+            .modifier(CanvasMediaFrame(
+                canvasMode: canvasMode,
+                aspectRatio: node.aspectRatio,
+                height: node.height
+            ))
         }
-        .onAppear { setupPlayer() }
-        .onDisappear { teardown() }
-    }
-
-    private func setupPlayer() {
-        guard player == nil, !url.isEmpty, let parsed = URL(string: url) else { return }
-        let item = AVPlayerItem(url: parsed)
-        let p = AVPlayer(playerItem: item)
-        p.isMuted = node.muted
-
-        statusObserver = item.observe(\.status, options: [.initial, .new]) { item, _ in
-            DispatchQueue.main.async {
-                switch item.status {
-                case .readyToPlay:
-                    state = .ready
-                    if node.autoplay { p.play() }
-                case .failed:
-                    state = .failed
-                default:
-                    state = .loading
-                }
-            }
-        }
-
-        if node.loop {
-            loopObserver = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-            ) { _ in
-                MainActor.assumeIsolated {
-                    p.seek(to: .zero)
-                    p.play()
-                }
-            }
-        }
-
-        player = p
-    }
-
-    private func teardown() {
-        player?.pause()
-        statusObserver?.invalidate()
-        statusObserver = nil
-        if let loopObserver { NotificationCenter.default.removeObserver(loopObserver) }
-        loopObserver = nil
-        player = nil
-        state = .loading
     }
 }
 
@@ -593,37 +511,13 @@ private struct CanvasMediaFrame: ViewModifier {
     }
 }
 
-/// Keeps the native control chrome inside the authored frame while applying
-/// content fit only to the video surface.
-private struct PlayerViewController: UIViewControllerRepresentable {
-    let player: AVPlayer
-    let showsPlaybackControls: Bool
-    let videoGravity: AVLayerVideoGravity
-
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let controller = AVPlayerViewController()
-        controller.view.backgroundColor = .black
-        controller.player = player
-        controller.showsPlaybackControls = showsPlaybackControls
-        controller.videoGravity = videoGravity
-        return controller
-    }
-
-    func updateUIViewController(_ controller: AVPlayerViewController, context: Context) {
-        controller.player = player
-        controller.showsPlaybackControls = showsPlaybackControls
-        controller.videoGravity = videoGravity
-    }
-}
-
 extension NudgeVideoFit {
-    var videoGravity: AVLayerVideoGravity {
+    var mediaFit: MediaFit {
         switch self {
-        case .cover: .resizeAspectFill
-        case .contain: .resizeAspect
+        case .cover: .cover
+        case .contain: .contain
         }
     }
-
 }
 
 // MARK: - Placeholder

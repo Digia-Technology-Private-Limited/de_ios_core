@@ -5,6 +5,13 @@ struct InlineStoryOverlayState: Equatable {
     let config: InlineStoryConfig
     let initialIndex: Int
     let payload: CEPTriggerPayload
+    /// The rail card's player on its way to the viewer, when a playing card was tapped.
+    var handover: StoryHandover? = nil
+
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.config == rhs.config && lhs.initialIndex == rhs.initialIndex && lhs.payload == rhs.payload
+            && lhs.handover === rhs.handover
+    }
 }
 
 @MainActor
@@ -57,18 +64,24 @@ final class DigiaOverlayController: ObservableObject {
         }
     }
 
-    func showStoryOverlay(config: InlineStoryConfig, initialIndex: Int, payload: CEPTriggerPayload)
-    {
+    func showStoryOverlay(
+        config: InlineStoryConfig, initialIndex: Int, payload: CEPTriggerPayload, handover: StoryHandover? = nil
+    ) {
+        // A story already showing gives up any handover it never used.
+        activeStoryOverlay?.handover?.release()
         let state = InlineStoryOverlayState(
             config: config,
             initialIndex: initialIndex,
-            payload: payload
+            payload: payload,
+            handover: handover
         )
         activeStoryOverlay = state
         DigiaStoryPresenter.shared.present(state: state)
     }
 
     func dismissStoryOverlay() {
+        // Never left held if the viewer did not get to use it (no top controller to present on).
+        activeStoryOverlay?.handover?.release()
         activeStoryOverlay = nil
         DigiaStoryPresenter.shared.dismiss()
     }

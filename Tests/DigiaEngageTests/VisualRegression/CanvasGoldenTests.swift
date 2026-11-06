@@ -1,4 +1,4 @@
-import AVFoundation
+import AVKit
 import Foundation
 import Lottie
 import SDWebImage
@@ -18,8 +18,8 @@ extension RenderedUITests {
 /// renders for an inline Canvas campaign — placed in a scrolling host screen, so each golden is the
 /// card users see. The view is given its campaign directly rather than read from the SDK's shared
 /// inline controller: other Canvas suites run in parallel and reset that controller, which would
-/// empty the slot mid-capture. Nothing on screen may move with wall-clock time: the video never plays and the
-/// Lottie is pinned to one frame.
+/// empty the slot mid-capture. Nothing on screen may move with wall-clock time: the video is autoplay off and is
+/// captured at its first frame, and the Lottie is pinned to one frame.
 ///
 /// Images and Lottie files are read from the Test Kit mock server's directory. Two goldens record
 /// a stand-in rather than the authored media:
@@ -75,6 +75,9 @@ struct CanvasGoldenTests {
         // fixed time.
         try await awaitImagesLoaded(imageURLs(in: standIn))
         if hasExistingLottie(standIn) { try await awaitLottieLoaded(in: window) }
+        // A video is captured after its first frame, when the still has gone and the controls show
+        // (OD-7): a fixed wait races the 400 ms spinner and the first frame.
+        if hasVideo(standIn) { try await awaitVideoReady(in: window) }
 
         // Exact within the perceptual tolerance, as the other fixture goldens.
         assertSurfaceGolden(
@@ -98,7 +101,6 @@ struct CanvasGoldenTests {
         let window = ComponentTestHost.makeWindow(frame: CGRect(origin: .zero, size: size))
 
         let host = SlotHostScreen(config: config, payload: payload, safeArea: device.safeArea)
-            .environment(\.canvasVideoRuntime, Self.pausedVideo)
             .environment(\.canvasLottieRuntime, CanvasLottieRuntime(playbackMode: .frozen(progress: Self.lottieProgress)))
             // Appear animations jump to their end state, so the golden shows the settled card.
             .transaction { transaction in
@@ -116,14 +118,6 @@ struct CanvasGoldenTests {
         ComponentTestHost.drainRunLoop(for: 0.2)
         return window
     }
-
-    /// A player that never starts: autoplay would put a playing video at a different frame in every run.
-    private static let pausedVideo = CanvasVideoRuntime(
-        makePlayer: { AVPlayer(playerItem: $0) },
-        play: { _ in },
-        pause: { $0.pause() },
-        restart: { _ in }
-    )
 
     // MARK: - Media
 
@@ -201,6 +195,46 @@ struct CanvasGoldenTests {
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         try #require(hasLoadedLottie(window), "Lottie did not load")
+    }
+
+    /// Polls until the card's `AVPlayerViewController` exists and is ready for display, up to 5s,
+    /// then lets SwiftUI swap the still for the player.
+    @MainActor
+    private func awaitVideoReady(in window: UIWindow) async throws {
+        func ready() -> Bool {
+            let players = playerControllers(in: window.rootViewController)
+            return !players.isEmpty && players.allSatisfy { $0.isReadyForDisplay }
+        }
+        for _ in 0..<250 where !ready() {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        try #require(ready(), "Video did not show its first frame")
+        // `MediaVideo` notes the frame in a main-actor task, which runs only while this test is
+        // suspended (a nested run loop does not drain the main queue); then SwiftUI redraws.
+        try await Task.sleep(nanoseconds: 200_000_000)
+        ComponentTestHost.drainRunLoop(for: 0.2)
+    }
+
+    /// Whether [value] names a video file.
+    private func hasVideo(_ value: Any) -> Bool {
+        switch value {
+        case let string as String:
+            guard let url = URL(string: string) else { return false }
+            return ["mp4", "mov", "m4v", "m3u8"].contains(url.pathExtension.lowercased())
+        case let dictionary as [String: Any]:
+            return dictionary.values.contains(where: hasVideo)
+        case let array as [Any]:
+            return array.contains(where: hasVideo)
+        default:
+            return false
+        }
+    }
+
+    @MainActor
+    private func playerControllers(in controller: UIViewController?) -> [AVPlayerViewController] {
+        guard let controller else { return [] }
+        let own = (controller as? AVPlayerViewController).map { [$0] } ?? []
+        return own + controller.children.flatMap(playerControllers)
     }
 
     @MainActor

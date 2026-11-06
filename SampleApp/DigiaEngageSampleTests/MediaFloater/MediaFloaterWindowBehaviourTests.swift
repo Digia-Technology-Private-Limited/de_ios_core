@@ -67,10 +67,10 @@ struct MediaFloaterWindowBehaviourTests {
 
     // MARK: - Story window drag
 
-    // Fails if: Sources/DigiaEngage/api/widgets/floater_story_overlay_view.swift `handleDragEnded`
-    // `fx = projectedFx >= 0.5 ? 1 : 0` -> `fx = 1`.
-    // Fails if: floater_story_overlay_view.swift `handleDragEnded` `orchestrator.moveTo(FloaterFraction(x: fx, y: fy))`
-    // is deleted (the window springs back and the move is never counted).
+    // Fails if: Sources/DigiaEngage/api/internal/floating/FloatingWindow.swift `floatingReleaseFraction`
+    // `return (projected - min) / span >= 0.5 ? 1 : 0` -> `return 1`.
+    // Fails if: floater_story_overlay_view.swift `onCommit: { orchestrator.moveTo($0) }` ->
+    // `onCommit: { _ in }` (the window springs back and the move is never counted).
     @Test("floater_story_window: a drag past the middle snaps the window to the opposite corner, and the move is reported")
     func storyWindowDragSnapsAcross() async throws {
         let json = try fixture("floater/floater_story_window")
@@ -98,8 +98,8 @@ struct MediaFloaterWindowBehaviourTests {
         #expect(dismissed["expands"] as? Int == 0)
     }
 
-    // Fails if: floater_story_overlay_view.swift `handleDragEnded` `if config.controls.snapToCorner {`
-    // -> `if true {`.
+    // Fails if: FloatingWindow.swift `floatingReleaseFraction` `guard snapToCorner else {`
+    // -> `guard true else {`.
     @Test("floater_story_window: with snapping off, a drop stays where it was let go")
     func storyWindowFreeDropStays() async throws {
         let json = try floaterFixture(

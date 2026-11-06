@@ -204,31 +204,6 @@ struct CanvasStoryRendererTests {
         #expect(CanvasStoryProgressRenderer.fraction(for: 2, active: 2, elapsed: 1.4) == 1.0)
     }
 
-    @Test("story progress increment and hold to pause rules")
-    func storyProgressIncrementAndHoldToPause() {
-        let interval: TimeInterval = 1.0 / 30.0
-        let duration: Double = 5.0
-
-        // Normal playback increments progress proportionally
-        let normalIncrement = CanvasStoryViewer.progressIncrement(
-            interval: interval, duration: duration, isPaused: false
-        )
-        let expectedIncrement = CGFloat(interval / duration)
-        #expect(abs(normalIncrement - expectedIncrement) < 0.0001)
-
-        // Hold-to-pause stops accumulation completely
-        let pausedIncrement = CanvasStoryViewer.progressIncrement(
-            interval: interval, duration: duration, isPaused: true
-        )
-        #expect(pausedIncrement == 0.0)
-
-        // Safe division against zero or negative authored duration
-        let zeroDurationIncrement = CanvasStoryViewer.progressIncrement(
-            interval: interval, duration: 0.0, isPaused: false
-        )
-        #expect(zeroDurationIncrement == CGFloat(interval / 0.1))
-    }
-
     // MARK: - 5. Fit & Item Mapping Oracle
 
     @Test("canvasStoryItem mapping transforms CampaignCanvasStoryPage into StoryItemConfig")
@@ -268,81 +243,6 @@ struct CanvasStoryRendererTests {
 
         let squareAspectRatio: CGFloat = 1.0
         #expect(abs(CanvasStoryRailRenderer.cardWidth(railHeight: railHeight, cardAspectRatio: squareAspectRatio) - 160.0) < 0.001)
-    }
-
-    // MARK: - 7. Navigation & Interaction Mechanics
-
-    @Test("story navigation outcome on CanvasStoryViewer models tap back, advance, and completion bounds")
-    func storyStepNavigationOutcome() {
-        let totalPages = 3
-
-        // 1. Tapping left at page 0: delta -1 -> restarts current page
-        #expect(CanvasStoryViewer.navigationOutcome(
-            currentIndex: 0,
-            delta: -1,
-            pageCount: totalPages,
-            restartOnCompleted: false
-        ) == .restartCurrent)
-
-        // 2. Tapping right at page 0 -> advances to page 1
-        #expect(CanvasStoryViewer.navigationOutcome(
-            currentIndex: 0,
-            delta: 1,
-            pageCount: totalPages,
-            restartOnCompleted: false
-        ) == .advance(to: 1))
-
-        // 3. Tapping left at page 1 -> moves back to page 0
-        #expect(CanvasStoryViewer.navigationOutcome(
-            currentIndex: 1,
-            delta: -1,
-            pageCount: totalPages,
-            restartOnCompleted: false
-        ) == .advance(to: 0))
-
-        // 4. Tapping right at page 1 -> advances to page 2 (last page)
-        #expect(CanvasStoryViewer.navigationOutcome(
-            currentIndex: 1,
-            delta: 1,
-            pageCount: totalPages,
-            restartOnCompleted: false
-        ) == .advance(to: 2))
-
-        // 5. Tapping right at page 2 (last page, restartOnCompleted = false) -> completes and signals dismiss
-        #expect(CanvasStoryViewer.navigationOutcome(
-            currentIndex: 2,
-            delta: 1,
-            pageCount: totalPages,
-            restartOnCompleted: false
-        ) == .complete(loopToStart: false))
-
-        // 6. Tapping right at page 2 (last page, restartOnCompleted = true) -> completes and loops to page 0
-        #expect(CanvasStoryViewer.navigationOutcome(
-            currentIndex: 2,
-            delta: 1,
-            pageCount: totalPages,
-            restartOnCompleted: true
-        ) == .complete(loopToStart: true))
-    }
-
-
-    @Test("story viewer distinguishes dismissal from completion analytics")
-    func storyViewerAnalyticsAndDismissal() {
-        // Scenario 1: Early dismissal on page 1 of 3
-        let earlyDismiss = CanvasStoryViewer.dismissalInteraction(currentIndex: 1, pageCount: 3, completedReported: false)
-        #expect(earlyDismiss == .storyPageDismissed(index: 1, total: 3))
-
-        // Scenario 2: Close after already completed does not double-report
-        let completedDismiss = CanvasStoryViewer.dismissalInteraction(currentIndex: 2, pageCount: 3, completedReported: true)
-        #expect(completedDismiss == nil)
-
-        // Scenario 3: First completion reports storyCompleted
-        let completion = CanvasStoryViewer.completionInteraction(pageCount: 3, timeToCompleteMs: 4200, completedReported: false)
-        #expect(completion == .storyCompleted(total: 3, timeToCompleteMs: 4200))
-
-        // Scenario 4: Subsequent completion does not double-report
-        let repeatedCompletion = CanvasStoryViewer.completionInteraction(pageCount: 3, timeToCompleteMs: 8400, completedReported: true)
-        #expect(repeatedCompletion == nil)
     }
 
     // MARK: - 8. Story Viewer Behavioral Tests

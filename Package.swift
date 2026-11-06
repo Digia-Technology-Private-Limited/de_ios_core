@@ -17,6 +17,8 @@ let package = Package(
         .package(url: "https://github.com/SDWebImage/SDWebImageSwiftUI.git", from: "3.1.4"),
         .package(url: "https://github.com/SDWebImage/SDWebImageSVGCoder.git", from: "1.8.0"),
         .package(url: "https://github.com/pointfreeco/swift-snapshot-testing.git", from: "1.18.0"),
+        // TODO(split-pin): the local cache checkout until DigiaMediaCache is tagged with the Xcode 26.6 fix.
+        .package(name: "DigiaMediaCache", path: "../media-cache"),
     ],
     targets: [
         .target(
@@ -25,6 +27,7 @@ let package = Package(
                 .product(name: "Lottie", package: "lottie-spm"),
                 .product(name: "SDWebImageSwiftUI", package: "SDWebImageSwiftUI"),
                 .product(name: "SDWebImageSVGCoder", package: "SDWebImageSVGCoder"),
+                .product(name: "DigiaMediaCache", package: "DigiaMediaCache"),
             ],
             path: "Sources/DigiaEngage",
             resources: [

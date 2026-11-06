@@ -19,8 +19,8 @@ struct NudgeVideoFitTests {
 
     @Test("maps fits to player video gravity")
     func mapsVideoGravity() {
-        #expect(NudgeVideoFit.cover.videoGravity == .resizeAspectFill)
-        #expect(NudgeVideoFit.contain.videoGravity == .resizeAspect)
+        #expect(NudgeVideoFit.cover.mediaFit.videoGravity == .resizeAspectFill)
+        #expect(NudgeVideoFit.contain.mediaFit.videoGravity == .resizeAspect)
     }
 
     private func video(_ boxFit: String? = nil) throws -> NudgeVideo {

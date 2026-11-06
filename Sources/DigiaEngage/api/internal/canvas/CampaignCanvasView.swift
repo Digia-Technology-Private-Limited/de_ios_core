@@ -20,36 +20,6 @@ extension EnvironmentValues {
     }
 }
 
-private struct CanvasVideoUsesStoryPlaybackKey: EnvironmentKey {
-    static let defaultValue = false
-}
-
-/// The AVPlayer side effects a Canvas video performs.
-///
-/// The renderer, layout and `AVPlayerViewController` stay real in component tests. Only these
-/// process-bound effects are replaceable so autoplay, looping and teardown can be asserted without
-/// waiting for a remote stream or inferring behavior from a black video surface.
-struct CanvasVideoRuntime: @unchecked Sendable {
-    var makePlayer: @MainActor (AVPlayerItem) -> AVPlayer
-    var play: @MainActor (AVPlayer) -> Void
-    var pause: @MainActor (AVPlayer) -> Void
-    var restart: @MainActor (AVPlayer) -> Void
-
-    static let live = CanvasVideoRuntime(
-        makePlayer: { AVPlayer(playerItem: $0) },
-        play: { $0.play() },
-        pause: { $0.pause() },
-        restart: {
-            $0.seek(to: .zero)
-            $0.play()
-        }
-    )
-}
-
-private struct CanvasVideoRuntimeKey: EnvironmentKey {
-    static let defaultValue = CanvasVideoRuntime.live
-}
-
 /// The playback mode for Canvas Lottie animations.
 enum CanvasLottiePlaybackMode: Sendable, Equatable {
     case live
@@ -83,16 +53,6 @@ private struct CanvasLottieRuntimeKey: EnvironmentKey {
 }
 
 extension EnvironmentValues {
-    var canvasVideoUsesStoryPlayback: Bool {
-        get { self[CanvasVideoUsesStoryPlaybackKey.self] }
-        set { self[CanvasVideoUsesStoryPlaybackKey.self] = newValue }
-    }
-
-    var canvasVideoRuntime: CanvasVideoRuntime {
-        get { self[CanvasVideoRuntimeKey.self] }
-        set { self[CanvasVideoRuntimeKey.self] = newValue }
-    }
-
     var canvasLottieRuntime: CanvasLottieRuntime {
         get { self[CanvasLottieRuntimeKey.self] }
         set { self[CanvasLottieRuntimeKey.self] = newValue }
@@ -680,8 +640,9 @@ private struct CanvasChildView: View {
     let onAction: (CampaignCanvasActionRequest) -> Void
     var body: some View {
         switch child {
-        case .widget(_, _, let widget):
+        case .widget(let id, _, let widget):
             CampaignCanvasRendererRegistry.render(widget, isDark: isDark, onAction: onAction)
+                .environment(\.digiaCanvasChildId, id)
         case .tapRegion(let id, _, let actions, let isPrimary):
             Color.clear.contentShape(Rectangle()).onTapGesture {
                 onAction(
@@ -1935,6 +1896,9 @@ private struct CanvasRemoteLottie: View {
     }
 }
 
+/// A canvas video plays through `MediaVideo` (T3): the authored controls, fit, loop, mute and
+/// autoplay as on `main`, with `MediaVideo`'s still, spinner and "Video failed" box (OD-7), on
+/// every canvas, the story floater's window included (T8 retired its story media engine).
 private struct CanvasVideoRenderer: View {
     let box: CampaignCanvasBox
     let source: CampaignCanvasMediaSource
@@ -1945,119 +1909,32 @@ private struct CanvasVideoRenderer: View {
     let fit: String
     let isDark: Bool
     @Environment(\.digiaVariables) private var variables
-    @Environment(\.canvasVideoUsesStoryPlayback) private var usesStoryPlayback
-    @Environment(\.canvasVideoRuntime) private var runtime
     @Environment(\.digiaCampaignKey) private var campaignKey
-    @State private var player: AVPlayer?
-    @State private var observer: NSObjectProtocol?
-    @State private var statusObservation: NSKeyValueObservation?
+    @Environment(\.digiaCanvasChildId) private var childId
     private var url: String {
         interpolate(CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark), context: variables)
+    }
+    /// The pool key of this node (OD-15): the campaign plus the dashboard's child id, as Android's.
+    /// A remount (rotation) gets its player back, and a URL change under the key re-points it (N5).
+    /// Without both, `MediaVideo` borrows under a key of its own.
+    private var playerKey: String? {
+        guard let campaignKey, !campaignKey.isEmpty, let childId, !childId.isEmpty else { return nil }
+        return "canvas-video-\(campaignKey)-\(childId)"
     }
     var body: some View {
         CampaignCanvasBoxView(box: box, isDark: isDark) {
             if !url.isEmpty {
-                if usesStoryPlayback {
-                    CanvasStoryCachedMedia(
-                        url: url,
-                        isVideo: true,
-                        contentMode: fit == "contain" ? .fit : .fill,
-                        autoplay: autoplay,
-                        loop: loop,
-                        muted: muted,
-                        showControls: showControls
-                    )
-                    .id(url)
-                } else {
-                    ZStack {
-                        Color.black
-                        if let player {
-                            CanvasPlayerController(
-                                player: player, controls: showControls,
-                                gravity: fit == "contain" ? .resizeAspect : .resizeAspectFill)
-                        }
-                    }
-                }
+                MediaVideo(
+                    url: url,
+                    fit: fit == "contain" ? .contain : .cover,
+                    loop: loop,
+                    muted: muted,
+                    autoplay: autoplay,
+                    showControls: showControls,
+                    playerKey: playerKey
+                )
             }
         }
-        .onAppear { setup(url: url) }
-        .onChange(of: url) { newURL in
-            teardown()
-            setup(url: newURL)
-        }
-        .onDisappear { teardown() }
-    }
-    private func setup(url: String) {
-        guard !usesStoryPlayback else { return }
-        guard player == nil, let parsed = URL(string: url), !url.isEmpty else { return }
-        let item = AVPlayerItem(url: parsed)
-        let value = runtime.makePlayer(item)
-        value.isMuted = muted
-        player = value
-        let campaignKey = campaignKey
-        statusObservation = item.observe(\.status) { item, _ in
-            guard item.status == .failed else { return }
-            Task { @MainActor in
-                reportMediaLoadFailed(
-                    .video, cause: mediaFailureCause(playerItem: item), campaignKey: campaignKey)
-            }
-        }
-        if loop {
-            observer = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-            ) { _ in
-                MainActor.assumeIsolated {
-                    runtime.restart(value)
-                }
-            }
-        }
-        if autoplay { runtime.play(value) }
-    }
-    private func teardown() {
-        if let player { runtime.pause(player) }
-        player = nil
-        statusObservation = nil
-        if let observer { NotificationCenter.default.removeObserver(observer) }
-        observer = nil
-    }
-}
-
-struct CanvasPlayerController: UIViewControllerRepresentable {
-    let player: AVPlayer
-    let controls: Bool
-    let gravity: AVLayerVideoGravity
-    var onReadyForDisplay: () -> Void = {}
-
-    final class Coordinator {
-        var readyObservation: NSKeyValueObservation?
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeUIViewController(context: Context) -> AVPlayerViewController {
-        let value = AVPlayerViewController()
-        value.player = player
-        value.showsPlaybackControls = controls
-        value.videoGravity = gravity
-        context.coordinator.readyObservation = value.observe(
-            \.isReadyForDisplay, options: [.initial, .new]
-        ) { _, change in
-            guard change.newValue == true else { return }
-            Task { @MainActor in onReadyForDisplay() }
-        }
-        return value
-    }
-    func updateUIViewController(_ value: AVPlayerViewController, context: Context) {
-        value.player = player
-        value.showsPlaybackControls = controls
-        value.videoGravity = gravity
-    }
-
-    static func dismantleUIViewController(_ value: AVPlayerViewController, coordinator: Coordinator)
-    {
-        coordinator.readyObservation?.invalidate()
-        coordinator.readyObservation = nil
-        value.player = nil
     }
 }
 
