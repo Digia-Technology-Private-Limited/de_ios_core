@@ -187,6 +187,29 @@ struct DMCRuleWaitSDKTests {
         #expect(withReason("login_tip", .waitCancelled).first?.extras == ["cause": "session_ended"])
     }
 
+    // dmc-case: dmc.wait_cancel.user_change_removes_inline_cancelled
+    @Test("a user change removes Digia inline content as cancelled")
+    func userChangeRemovesInlineCancelled() async throws {
+        defer { DigiaLogger.unregisterSink(sink) }
+        let (sdk, _) = try await boot([loginWait])
+        let opened = sdk.coordinator.open(
+            CEPTriggerPayload(
+                cepCampaignId: selfTriggeredCepId("id-inline", firing: 1), campaignKey: "inline_offer",
+                cepMetadata: [:]),
+            owner: "test")
+        sdk.coordinator.accept(opened, kind: .inline)
+        let recorder = PresentationRecorder(opened.presentation)
+        sdk.inlineController.setCampaign("hero", payload: recorder.payload)
+        // On screen, so its end is a dismissal whose reason is told apart.
+        sdk.coordinator.handle(.impressed, payload: recorder.payload)
+
+        sdk.setUserId("user-2")
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        #expect(sdk.inlineController.getCampaign("hero") == nil)
+        #expect(recorder.dismissReason == .cancelled)
+    }
+
     @Test("a session end drops an anchor seen before ready")
     func sessionEndDropsHeldAnchor() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
