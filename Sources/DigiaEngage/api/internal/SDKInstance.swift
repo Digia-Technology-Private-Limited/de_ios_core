@@ -2105,7 +2105,20 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .clicked(let elementId):
             controller.emitClicked(elementId: elementId)
         case .settled(let outcome):
-            controller.settle(outcome)
+            // An external renderer reports over an async bridge, so its
+            // ordering is not trustworthy: a guide torn down before its first
+            // frame (anchor off-screen, host torn down) reports `dismissed`
+            // with no prior `displaying` — the exact sequence
+            // `PresentationBacking.settle` traps on. Route a dismissal
+            // through the coordinator like every other surface: one that never
+            // displayed settles as a drop, never a trap.
+            switch outcome {
+            case .dismissed(let reason, let completed):
+                coordinator.handle(
+                    .dismissed(reason: reason, completed: completed), payload: controller.trigger)
+            case .dropped(let reason, let detail):
+                controller.settle(.dropped(reason: reason, detail: detail))
+            }
         }
     }
 
