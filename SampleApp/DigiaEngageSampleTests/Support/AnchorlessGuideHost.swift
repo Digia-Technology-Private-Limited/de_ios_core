@@ -75,6 +75,7 @@ enum AnchorlessGuideHost {
         StubCropProtocol.data = crop
         StubCropProtocol.resetUserAgents()
         URLProtocol.registerClass(StubCropProtocol.self)
+        routeImageDownloader(through: StubCropProtocol.self)
 
         let window = PinnedInsetsWindow(windowScene: scene)
         window.frame = CGRect(origin: .zero, size: size)
@@ -106,6 +107,7 @@ enum AnchorlessGuideHost {
             ComponentTestHost.cleanupOverlayWindow(window)
             sdk.setCurrentScreen("")
             URLProtocol.unregisterClass(StubCropProtocol.self)
+            unrouteImageDownloader(StubCropProtocol.self)
             StubCropProtocol.data = nil
         }
         // Each campaign its own id, so no dwell carries over from the previous one.
