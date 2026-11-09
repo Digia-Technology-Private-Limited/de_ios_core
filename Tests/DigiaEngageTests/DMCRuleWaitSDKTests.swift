@@ -206,6 +206,28 @@ struct DMCRuleWaitSDKTests {
         #expect(shown(sdk) == nil)
     }
 
+    // dmc-case: dmc.wait_cancel.anchor_reappears_resends
+    @Test("an anchor that leaves and comes back shows its campaign again")
+    func anchorReappearsResends() async throws {
+        defer { DigiaLogger.unregisterSink(sink) }
+        let anchorRule: [String: Any] = [
+            "priority": 600,
+            "trigger": ["any": [["type": "anchor_visible", "keys": ["cta"]]]],
+            "conditions": ["all": [Any]()],
+        ]
+        let (sdk, _) = try await boot([nudge("cta_tip", 600, rule: anchorRule)])
+
+        sdk.recordAnchorSeen("cta")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(shown(sdk) == "cta_tip")
+        sdk.controller.dismissNudge()
+
+        sdk.recordAnchorSeen("cta")
+        try await Task.sleep(nanoseconds: 50_000_000)
+        #expect(shown(sdk) == "cta_tip")
+        sdk.controller.dismissNudge()
+    }
+
     @Test("a no-wait winner shows now; waits of the trigger start too")
     func noWaitWinnerShowsNow() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
