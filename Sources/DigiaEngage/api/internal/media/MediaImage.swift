@@ -28,6 +28,10 @@ internal import SDWebImageSwiftUI
 ///
 /// Never throws from the render path: an unusable URL shows the error placeholder without fetching.
 struct MediaImage: View {
+    /// The options every load of a wrapper picture uses. A preload (the floater's) passes the same
+    /// set, so its picture lands in the cache entry this wrapper reads instead of being fetched again.
+    static let loadOptions: SDWebImageOptions = [.retryFailed, .scaleDownLargeImages]
+
     let url: String
     var fit: MediaFit = .cover
     var blurHash: String? = nil
@@ -80,7 +84,7 @@ struct MediaImage: View {
                 placed(fitted(Image(uiImage: cached)))
                     .task(id: url) { reportSuccess() }
             } else {
-                WebImage(url: target, options: [.retryFailed, .scaleDownLargeImages]) { image in
+                WebImage(url: target, options: Self.loadOptions) { image in
                     placed(fitted(image))
                 } placeholder: {
                     still(failed: failedURL == url)

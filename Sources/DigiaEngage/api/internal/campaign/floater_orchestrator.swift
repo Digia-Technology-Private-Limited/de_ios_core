@@ -434,7 +434,7 @@ final class FloaterOrchestrator: ObservableObject {
         // with, so the picture is in the cache that wrapper reads from its first frame instead of
         // being fetched a second time. The window is revealed once this has decoded it.
         SDWebImageManager.shared.loadImage(
-            with: parsed, options: [.retryFailed, .scaleDownLargeImages], progress: nil
+            with: parsed, options: MediaImage.loadOptions, progress: nil
         ) { [weak self] image, _, error, _, _, _ in
             let decoded = image != nil
             let cause = error.flatMap { mediaFailureCause(imageError: $0) }

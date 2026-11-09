@@ -48,7 +48,7 @@ func thumbnailPlayerIdentity(_ item: StoryItemConfig) -> StoryThumbnailPlayerIde
         thumbnail: item.thumbnail.map { thumbnail in
             switch thumbnail {
             case let .image(source, fit, placeholder):
-                .image(source: source, fit: fit, blurHash: placeholder?.blurHash)
+                .image(source: source, fit: fit, blurHash: placeholder?.stillBlurHash)
             case let .color(value):
                 .color(value)
             }

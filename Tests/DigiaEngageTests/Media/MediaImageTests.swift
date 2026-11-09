@@ -270,8 +270,8 @@ struct MediaImageDecisionTests {
     @Test("a blurhash decodes once")
     func blurHashDecodesOnce() {
         let hash = "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
-        let first = BlurHashCache.image(for: hash, size: BlurHashPlaceholderView.decodeSize)
-        let second = BlurHashCache.image(for: hash, size: BlurHashPlaceholderView.decodeSize)
+        let first = BlurHashCache.image(for: hash, size: BlurHashCache.decodeSize)
+        let second = BlurHashCache.image(for: hash, size: BlurHashCache.decodeSize)
         #expect(first != nil && first === second)
     }
 }
