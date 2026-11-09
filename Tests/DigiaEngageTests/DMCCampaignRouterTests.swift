@@ -69,6 +69,7 @@ struct DMCCampaignRouterTests {
         return nil
     }
 
+    // dmc-case: dmc.gate_order.screen_before_frequency_before_surface
     @Test("the screen gate drops before the frequency gate")
     func screenBeforeFrequency() throws {
         let surfaces = FakeSurfaces([])
@@ -79,6 +80,7 @@ struct DMCCampaignRouterTests {
         #expect(surfaces.started == nil)
     }
 
+    // dmc-case: dmc.gate_order.screen_before_frequency_before_surface
     @Test("the frequency gate drops before the surface gate")
     func frequencyBeforeSurface() throws {
         let surfaces = FakeSurfaces([occupant(.nudge)])
@@ -90,6 +92,7 @@ struct DMCCampaignRouterTests {
         #expect(surfaces.started == nil)
     }
 
+    // dmc-case: dmc.gate_order.live_test_skips_cap_supersedes_occupants
     @Test("a live test skips the cap")
     func liveTestSkipsCap() throws {
         let surfaces = FakeSurfaces([])
@@ -100,6 +103,7 @@ struct DMCCampaignRouterTests {
         #expect(surfaces.started != nil)
     }
 
+    // dmc-case: dmc.gate_order.live_test_skips_cap_supersedes_occupants
     @Test("a live test supersedes every blocking occupant and shows")
     func liveTestSupersedesAll() throws {
         let real = occupant(.nudge, key: "real")
@@ -111,6 +115,7 @@ struct DMCCampaignRouterTests {
         #expect(verdict.isAccepted)
     }
 
+    // dmc-case: dmc.gate_order.live_test_skips_cap_supersedes_occupants
     @Test("a real campaign never displaces a live test")
     func realNeverDisplacesLiveTest() throws {
         let test = occupant(.nudge, key: "test", liveTest: true)
@@ -122,6 +127,7 @@ struct DMCCampaignRouterTests {
         #expect(reason(verdict) == .surfaceBusy)
     }
 
+    // dmc-case: dmc.gate_order.template_config_gate_drops_invalid_config
     @Test("the template gate drops an inline CleverTap custom template")
     func templateGateDropsInlineCustomTemplate() throws {
         let surfaces = FakeSurfaces([])

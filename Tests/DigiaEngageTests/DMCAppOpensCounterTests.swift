@@ -16,6 +16,7 @@ struct DMCAppOpensCounterTests {
         store.backing[AppOpensCounter.storageKey] as? Int
     }
 
+    // dmc-case: dmc.session.app_opens_counter_storage
     @Test("an open counted before storage loads is added to the stored count")
     func countedBeforeStorageLoads() {
         store.set(4, forKey: AppOpensCounter.storageKey)
@@ -28,6 +29,7 @@ struct DMCAppOpensCounterTests {
         #expect(saved == 5)
     }
 
+    // dmc-case: dmc.session.app_opens_counter_storage
     @Test("an open counted after storage loaded is stored too")
     func countedAfterStorageLoaded() {
         store.set(4, forKey: AppOpensCounter.storageKey)
@@ -41,6 +43,7 @@ struct DMCAppOpensCounterTests {
         #expect(saved == 5)
     }
 
+    // dmc-case: dmc.session.app_opens_counter_storage
     @Test("the first attach and the first open are the only ones that count")
     func onlyFirstAttachAndOpenCount() {
         let counting = CountingStorage()
@@ -56,6 +59,7 @@ struct DMCAppOpensCounterTests {
         #expect(counting.writes == 1)
     }
 
+    // dmc-case: dmc.session.app_opens_counter_storage
     @Test("a count stored as another type stays unknown instead of restarting")
     func otherTypeStaysUnknown() {
         // 0 would make every campaign on "app opens = 1" match again.
@@ -73,6 +77,7 @@ struct DMCAppOpensCounterTests {
     // equivalent: `LocalStorage` reads and writes cannot throw. The nearest
     // failure a Swift storage has is a write that is silently dropped (full
     // disk), which must leave the in-memory fact correct.
+    // dmc-case: dmc.session.app_opens_counter_storage
     @Test("a write that is dropped leaves the in-memory fact correct")
     func droppedWriteKeepsFact() {
         store.dropWrites = true

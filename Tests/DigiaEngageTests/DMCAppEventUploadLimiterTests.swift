@@ -24,12 +24,14 @@ struct DMCAppEventUploadLimiterTests {
         return (limiter, clock, apply)
     }
 
+    // dmc-case: dmc.app_event.upload_limiter_rate_burst_blocklist
     @Test("a rate of 0 is unlimited")
     func unlimited() {
         let (limiter, _, _) = make()
         for _ in 0..<1000 { #expect(limiter.consume("add_to_cart") == nil) }
     }
 
+    // dmc-case: dmc.app_event.upload_limiter_rate_burst_blocklist
     @Test("bursts, then sustains the per-minute rate")
     func burstThenSustain() {
         // 60 a minute is one token a second, with three in hand.
@@ -49,6 +51,7 @@ struct DMCAppEventUploadLimiterTests {
         #expect(limiter.consume("e") == nil)
     }
 
+    // dmc-case: dmc.app_event.upload_limiter_rate_burst_blocklist
     @Test("no named burst means one minute of capacity")
     func noBurstIsAMinute() {
         let (limiter, _, _) = make(ratePerMinute: 2, burst: 0)
@@ -57,6 +60,7 @@ struct DMCAppEventUploadLimiterTests {
         #expect(limiter.consume("e") == .rate)
     }
 
+    // dmc-case: dmc.app_event.upload_limiter_rate_burst_blocklist
     @Test("refill never exceeds the burst")
     func refillClampsToBurst() {
         let (limiter, clock, _) = make(ratePerMinute: 60, burst: 2)
@@ -66,6 +70,7 @@ struct DMCAppEventUploadLimiterTests {
         #expect(limiter.consume("e") == .rate)
     }
 
+    // dmc-case: dmc.app_event.upload_limiter_rate_burst_blocklist
     @Test("the upload switch drops everything as disabled")
     func uploadSwitch() {
         let (limiter, _, _) = make(enabled: false)
@@ -73,6 +78,7 @@ struct DMCAppEventUploadLimiterTests {
         #expect(limiter.consume("e") == .disabled)
     }
 
+    // dmc-case: dmc.app_event.upload_limiter_rate_burst_blocklist
     @Test("the blocklist drops by name, before the rate")
     func blocklistBeforeRate() {
         let (limiter, _, _) = make(ratePerMinute: 1, burst: 1, blockedNames: ["scroll"])
@@ -82,6 +88,7 @@ struct DMCAppEventUploadLimiterTests {
         #expect(limiter.consume("product_viewed") == .rate)
     }
 
+    // dmc-case: dmc.app_event.upload_limiter_rate_burst_blocklist
     @Test("applying a policy refills the bucket")
     func applyRefills() {
         let (limiter, _, apply) = make(ratePerMinute: 1, burst: 1)

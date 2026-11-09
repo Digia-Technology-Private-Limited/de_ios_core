@@ -54,6 +54,7 @@ struct DMCInlineTimerTests {
         return sdk
     }
 
+    // dmc-case: dmc.render_safety.unresolvable_timer_dropped_before_slot
     @Test("a timer whose time variable never resolves is dropped before its slot")
     func unresolvedVariableDropped() async throws {
         let sink = TimerSink()
@@ -76,6 +77,7 @@ struct DMCInlineTimerTests {
         #expect(drops.first?.extras == ["cause": "timer_precondition"])
     }
 
+    // dmc-case: dmc.render_safety.renderable_timer_fills_slot_with_deadline
     @Test("a renderable timer fills its slot with its deadline pinned")
     func renderableTimerFillsSlot() async throws {
         let sdk = try await ready()
@@ -102,11 +104,13 @@ struct DMCInlineTimerVariableTests {
         source.resolve(buildVariableContext(schemas: schemas, cepVars: ["ends_at": sent]).values)
     }
 
+    // dmc-case: dmc.context_vars.timer_variable_falls_back_then_sent_wins
     @Test("a timer variable the trigger leaves empty uses its fallback")
     func emptyUsesFallback() {
         #expect(resolve("") == 1_893_456_000_000)
     }
 
+    // dmc-case: dmc.context_vars.timer_variable_falls_back_then_sent_wins
     @Test("a timer variable the trigger sends wins over the fallback")
     func sentValueWins() {
         #expect(resolve("2031-06-01T00:00:00Z") == 1_938_038_400_000)

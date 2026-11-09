@@ -8,6 +8,7 @@ import Testing
 struct DMCSignalBusTests {
     enum TestError: Error { case boom }
 
+    // dmc-case: dmc.trigger.signal_bus_contains_throwing_handler
     @Test("a throwing handler neither escapes nor strands queued signals")
     func throwingHandler() {
         var handled: [String] = []

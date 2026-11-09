@@ -120,6 +120,7 @@ struct DMCDecisionEngineTests {
 
     // MARK: signals before the bundle is ready (R58)
 
+    // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
     @Test("signals before the bundle is ready are held, then replayed in arrival order")
     func heldThenReplayed() {
         defer { finish() }
@@ -137,6 +138,7 @@ struct DMCDecisionEngineTests {
         #expect(routedKeys == ["home_tip", "cart_tip"])
     }
 
+    // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
     @Test("signals are dropped when the app backgrounds before ready")
     func droppedOnBackground() {
         defer { finish() }
@@ -151,6 +153,7 @@ struct DMCDecisionEngineTests {
         #expect(routedKeys.isEmpty)
     }
 
+    // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
     @Test("signals are dropped, not held again, when loading fails")
     func droppedOnClose() {
         defer { finish() }
@@ -167,6 +170,7 @@ struct DMCDecisionEngineTests {
         #expect(engine.isReady)
     }
 
+    // dmc-case: dmc.trigger.mounting_slot_is_trigger_signal
     @Test("a mounting slot is a signal a campaign can trigger on")
     func slotVisibleTriggers() {
         defer { finish() }
@@ -180,6 +184,7 @@ struct DMCDecisionEngineTests {
 
     // MARK: one winner per trigger (§3.12)
 
+    // dmc-case: dmc.trigger.highest_priority_wins_rest_held
     @Test("routes the highest priority, holds the rest back with a log")
     func highestWins() {
         defer { finish() }
@@ -198,6 +203,7 @@ struct DMCDecisionEngineTests {
         #expect(gating("low", TimelineReason.lowerPriority).count == 1)
     }
 
+    // dmc-case: dmc.trigger.failed_rule_never_falls_back
     @Test("never routes a campaign whose conditions fail")
     func conditionsFail() {
         defer { finish() }
@@ -213,6 +219,7 @@ struct DMCDecisionEngineTests {
         #expect(failed.first?.extras == ["verdict": "ineligible", "condition": "attribute.plan"])
     }
 
+    // dmc-case: dmc.rule_who.bad_rule_reported_once_per_session
     @Test("reports a defaulted priority once per session, not per signal")
     func defaultedPriorityOnce() {
         defer { finish() }
@@ -229,6 +236,7 @@ struct DMCDecisionEngineTests {
         #expect(reported.count == 1)
     }
 
+    // dmc-case: dmc.rule_who.bad_rule_reported_once_per_session
     @Test("reports an unreadable rule once per session; reset clears it")
     func unreadableRuleOnce() {
         defer { finish() }
@@ -248,6 +256,7 @@ struct DMCDecisionEngineTests {
 
     // MARK: inline campaigns (§3.10)
 
+    // dmc-case: dmc.priority.inline_slot_winners_beside_overlay
     @Test("each slot winner is routed besides the overlay winner")
     func slotWinnersBesideOverlay() {
         defer { finish() }
@@ -266,6 +275,7 @@ struct DMCDecisionEngineTests {
         ])
     }
 
+    // dmc-case: dmc.priority.already_in_slot_not_routed_again
     @Test("a campaign already in its slot is not routed again")
     func alreadyInSlot() {
         defer { finish() }
@@ -280,6 +290,7 @@ struct DMCDecisionEngineTests {
         #expect(logged.count == 1)
     }
 
+    // dmc-case: dmc.priority.inline_wait_ignored_W8
     @Test("an inline campaign shows at once: its wait is ignored (W8)")
     func inlineWaitIgnored() {
         defer { finish() }
@@ -294,6 +305,7 @@ struct DMCDecisionEngineTests {
         #expect(routedKeys == ["hero"])
     }
 
+    // dmc-case: dmc.priority.repeating_trigger_refans_slots
     @Test("a repeating trigger re-fans out every slot")
     func repeatingFansOut() {
         defer { finish() }
@@ -309,6 +321,7 @@ struct DMCDecisionEngineTests {
 
     // MARK: waits (§3.9, §11)
 
+    // dmc-case: dmc.wait_cancel.fires_after_delay_keeps_first_timer
     @Test("a wait starts on the trigger and shows when the delay is over")
     func waitStartsAndShows() {
         defer { finish() }
@@ -361,6 +374,7 @@ struct DMCDecisionEngineTests {
         #expect(ended.first?.extras["ms"] == "20000")
     }
 
+    // dmc-case: dmc.wait_cancel.retrigger_keeps_first_timer_and_logs
     @Test("a re-trigger keeps the first timer (D4) and says so")
     func retriggerKeepsFirst() {
         defer { finish() }
@@ -380,6 +394,7 @@ struct DMCDecisionEngineTests {
         #expect(routedKeys == ["tip"])
     }
 
+    // dmc-case: dmc.wait_cancel.event_cancel_ends_wait_before_signal_eval
     @Test("an event cancel ends the wait before the signal is evaluated")
     func eventCancelsBeforeEvaluation() {
         defer { finish() }
@@ -399,6 +414,7 @@ struct DMCDecisionEngineTests {
         #expect(routedKeys == ["submit_banner"])
     }
 
+    // dmc-case: dmc.wait_cancel.cap_rechecked_at_wait_end
     @Test("a wait blocked by a cap is dropped when it ends")
     func waitCapped() {
         defer { finish() }
@@ -414,6 +430,7 @@ struct DMCDecisionEngineTests {
         #expect(outcomes("tip") == ["checked"])
     }
 
+    // dmc-case: dmc.wait_cancel.wait_rechecked_at_end
     @Test("a wait is checked again at the end: a failed condition drops it")
     func waitRecheckedCondition() {
         defer { finish() }
@@ -432,6 +449,7 @@ struct DMCDecisionEngineTests {
         #expect(outcomes("tip") == ["checked"])
     }
 
+    // dmc-case: dmc.wait_cancel.wait_rechecked_at_end
     @Test("a wait is checked again at the end: a changed rule drops it")
     func waitRuleChanged() {
         defer { finish() }
@@ -447,6 +465,7 @@ struct DMCDecisionEngineTests {
         #expect(outcomes("tip") == ["rule_changed"])
     }
 
+    // dmc-case: dmc.wait_cancel.wait_rechecked_at_end
     @Test("a wait is dropped when the campaign is gone from the bundle")
     func waitCampaignGone() {
         defer { finish() }
@@ -461,6 +480,7 @@ struct DMCDecisionEngineTests {
         #expect(outcomes("tip") == ["gone"])
     }
 
+    // dmc-case: dmc.wait_cancel.wait_rechecked_at_end
     @Test("a wait is dropped when the campaign moved to a CEP while waiting")
     func waitCampaignMovedToCep() throws {
         defer { finish() }
@@ -480,6 +500,7 @@ struct DMCDecisionEngineTests {
         #expect(outcomes("tip") == ["gone"])
     }
 
+    // dmc-case: dmc.wait_cancel.simultaneous_ends_router_outcome
     @Test("two waits ending together: the loser finds the surface busy")
     func twoWaitsEndTogether() {
         defer { finish() }
@@ -495,6 +516,7 @@ struct DMCDecisionEngineTests {
         #expect(gating("low_tip", TimelineReason.waitEnded).isEmpty)
     }
 
+    // dmc-case: dmc.wait_cancel.background_time_counts_fires_on_resume
     @Test("waits keep counting in the background and fire on the return")
     func waitsAcrossBackground() {
         defer { finish() }
@@ -510,6 +532,7 @@ struct DMCDecisionEngineTests {
         #expect(routedKeys == ["tip"])
     }
 
+    // dmc-case: dmc.session.ends_waits_and_drops_held_signals
     @Test("a session end ends every wait and drops held signals")
     func sessionEnd() {
         defer { finish() }
@@ -537,6 +560,7 @@ struct DMCDecisionEngineTests {
 
     // MARK: server data that must not crash
 
+    // dmc-case: dmc.priority.huge_priority_logged_not_trap
     @Test("a priority beyond the Int range is logged, not a trap")
     func hugePriorityIsLogged() {
         defer { finish() }
@@ -550,6 +574,7 @@ struct DMCDecisionEngineTests {
         #expect(gating("small", TimelineReason.lowerPriority).count == 1)
     }
 
+    // dmc-case: dmc.render_safety.router_throw_contained
     @Test("a router that throws costs that show, not the app")
     func throwingRouterAfterWaitIsContained() {
         defer { finish() }

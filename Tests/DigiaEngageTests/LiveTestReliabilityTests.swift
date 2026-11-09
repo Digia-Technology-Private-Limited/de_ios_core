@@ -19,6 +19,7 @@ struct LiveTestReliabilityTests {
 
     // MARK: - The ACK wire
 
+    // dmc-case: dmc.drop_reason.blocker_reported_with_wire_name
     @Test("pins every Phase-B reason wire the live-test path can send")
     func pinsPhaseBReasonWires() {
         // Longhand on purpose: every entry here needs a copy entry on the

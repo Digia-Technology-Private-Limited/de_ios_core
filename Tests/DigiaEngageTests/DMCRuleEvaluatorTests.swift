@@ -119,6 +119,150 @@ struct DMCRuleEvaluatorTests {
         #expect(Set(Self.vectorCases.map(\.name)).count == Self.vectorCases.count)
     }
 
+    // dmc-case: dmc.rule.all_empty_is_true
+    // dmc-case: dmc.rule.any_empty_is_false
+    // dmc-case: dmc.rule.any_trigger_matches
+    // dmc-case: dmc.rule.app_open_signal_does_not_match_screen_trigger
+    // dmc-case: dmc.rule.children_not_list_is_malformed
+    // dmc-case: dmc.rule.conditions_checked_after_trigger
+    // dmc-case: dmc.rule.conditions_read_attributes_not_props
+    // dmc-case: dmc.rule.contains_bool_actual_is_false
+    // dmc-case: dmc.rule.contains_case_sensitive
+    // dmc-case: dmc.rule.contains_list_member
+    // dmc-case: dmc.rule.contains_list_not_member
+    // dmc-case: dmc.rule.contains_number_actual_is_false
+    // dmc-case: dmc.rule.contains_number_expected_on_string_is_false
+    // dmc-case: dmc.rule.contains_substring
+    // dmc-case: dmc.rule.contract_example_eligible
+    // dmc-case: dmc.rule.contract_example_excluded
+    // dmc-case: dmc.rule.depth_6_is_allowed
+    // dmc-case: dmc.rule.depth_7_is_malformed
+    // dmc-case: dmc.rule.device_locale_eq_bcp47
+    // dmc-case: dmc.rule.device_missing_value_is_false
+    // dmc-case: dmc.rule.device_platform_eq
+    // dmc-case: dmc.rule.device_platform_in
+    // dmc-case: dmc.rule.device_unknown_key_is_malformed
+    // dmc-case: dmc.rule.empty_key_is_malformed
+    // dmc-case: dmc.rule.eq_bool
+    // dmc-case: dmc.rule.eq_bool_not_string_true
+    // dmc-case: dmc.rule.eq_null_value_is_malformed
+    // dmc-case: dmc.rule.eq_number_int_equals_double
+    // dmc-case: dmc.rule.eq_number_not_numeric_string
+    // dmc-case: dmc.rule.eq_numeric_string_not_number
+    // dmc-case: dmc.rule.eq_string_case_sensitive
+    // dmc-case: dmc.rule.eq_string_exact
+    // dmc-case: dmc.rule.eq_string_true_not_bool
+    // dmc-case: dmc.rule.event_name_missing_is_malformed
+    // dmc-case: dmc.rule.event_trigger_name_case_sensitive
+    // dmc-case: dmc.rule.event_trigger_name_only
+    // dmc-case: dmc.rule.event_where_all_node_is_malformed
+    // dmc-case: dmc.rule.event_where_fails_is_not_triggered
+    // dmc-case: dmc.rule.event_where_is_and
+    // dmc-case: dmc.rule.event_where_missing_prop_is_not_triggered
+    // dmc-case: dmc.rule.event_where_mix_fails_on_not
+    // dmc-case: dmc.rule.event_where_mixes_prop_and_not
+    // dmc-case: dmc.rule.event_where_not_attribute_is_malformed
+    // dmc-case: dmc.rule.event_where_not_bad_op_is_malformed
+    // dmc-case: dmc.rule.event_where_not_contains_fails
+    // dmc-case: dmc.rule.event_where_not_contains_passes
+    // dmc-case: dmc.rule.event_where_not_exists_fails
+    // dmc-case: dmc.rule.event_where_not_exists_passes
+    // dmc-case: dmc.rule.event_where_not_in_fails
+    // dmc-case: dmc.rule.event_where_not_in_missing_prop_passes
+    // dmc-case: dmc.rule.event_where_not_in_passes
+    // dmc-case: dmc.rule.event_where_not_not_is_malformed
+    // dmc-case: dmc.rule.event_where_not_prop_is_malformed
+    // dmc-case: dmc.rule.event_where_not_with_extra_key_is_malformed
+    // dmc-case: dmc.rule.event_where_numeric_string
+    // dmc-case: dmc.rule.event_where_passes
+    // dmc-case: dmc.rule.event_where_unknown_op_is_malformed
+    // dmc-case: dmc.rule.exists_false_bool_is_true
+    // dmc-case: dmc.rule.exists_ignores_value
+    // dmc-case: dmc.rule.exists_string_is_true
+    // dmc-case: dmc.rule.gt_number_equal_is_false
+    // dmc-case: dmc.rule.gte_number_above
+    // dmc-case: dmc.rule.gte_number_equal
+    // dmc-case: dmc.rule.in_empty_list_is_false
+    // dmc-case: dmc.rule.in_number_numeric_equality
+    // dmc-case: dmc.rule.in_numeric_string_not_number
+    // dmc-case: dmc.rule.in_string_member
+    // dmc-case: dmc.rule.in_string_not_member
+    // dmc-case: dmc.rule.in_value_not_list_is_malformed
+    // dmc-case: dmc.rule.lt_number
+    // dmc-case: dmc.rule.lte_double_equal
+    // dmc-case: dmc.rule.missing_key_contains_is_false
+    // dmc-case: dmc.rule.missing_key_eq_is_false
+    // dmc-case: dmc.rule.missing_key_gt_is_false
+    // dmc-case: dmc.rule.missing_key_in_is_false
+    // dmc-case: dmc.rule.missing_key_neq_is_false
+    // dmc-case: dmc.rule.missing_key_under_not_is_true
+    // dmc-case: dmc.rule.missing_op_is_malformed
+    // dmc-case: dmc.rule.missing_schema_is_unsupported
+    // dmc-case: dmc.rule.neq_bool
+    // dmc-case: dmc.rule.neq_different_string
+    // dmc-case: dmc.rule.neq_same_string
+    // dmc-case: dmc.rule.neq_type_differs
+    // dmc-case: dmc.rule.node_not_object_is_malformed
+    // dmc-case: dmc.rule.node_with_two_shapes_is_malformed
+    // dmc-case: dmc.rule.not_counts_toward_depth
+    // dmc-case: dmc.rule.not_exists_on_missing_key
+    // dmc-case: dmc.rule.not_in_op_is_malformed
+    // dmc-case: dmc.rule.not_negates_true_leaf
+    // dmc-case: dmc.rule.null_value_exists_is_false
+    // dmc-case: dmc.rule.null_value_under_not_is_true
+    // dmc-case: dmc.rule.numeric_bool_actual_is_false
+    // dmc-case: dmc.rule.numeric_expected_bool_is_malformed
+    // dmc-case: dmc.rule.numeric_expected_null_is_malformed
+    // dmc-case: dmc.rule.numeric_expected_string_is_malformed
+    // dmc-case: dmc.rule.numeric_list_actual_is_false
+    // dmc-case: dmc.rule.numeric_string_decimal
+    // dmc-case: dmc.rule.numeric_string_exponent_is_false
+    // dmc-case: dmc.rule.numeric_string_integer
+    // dmc-case: dmc.rule.numeric_string_negative
+    // dmc-case: dmc.rule.numeric_string_plus_sign_is_false
+    // dmc-case: dmc.rule.numeric_string_trailing_dot_is_false
+    // dmc-case: dmc.rule.numeric_string_with_space_is_false
+    // dmc-case: dmc.rule.numeric_text_is_false
+    // dmc-case: dmc.rule.prop_leaf_in_conditions_is_malformed
+    // dmc-case: dmc.rule.rank_fraction_is_malformed
+    // dmc-case: dmc.rule.rank_missing_is_malformed
+    // dmc-case: dmc.rule.rank_zero_is_malformed
+    // dmc-case: dmc.rule.requires_missing_is_malformed
+    // dmc-case: dmc.rule.rule_not_object_is_malformed
+    // dmc-case: dmc.rule.screen_names_empty_is_malformed
+    // dmc-case: dmc.rule.screen_signal_does_not_match_app_open
+    // dmc-case: dmc.rule.screen_trigger_case_sensitive
+    // dmc-case: dmc.rule.screen_trigger_exact_name
+    // dmc-case: dmc.rule.trigger_checked_before_conditions
+    // dmc-case: dmc.rule.trigger_without_any_is_malformed
+    // dmc-case: dmc.rule.unknown_envelope_key_is_ignored
+    // dmc-case: dmc.rule.unknown_leaf_type_is_unsupported
+    // dmc-case: dmc.rule.unknown_op_is_malformed
+    // dmc-case: dmc.rule.unknown_requires_is_unsupported
+    // dmc-case: dmc.rule.unknown_schema_is_unsupported
+    // dmc-case: dmc.rule.unknown_trigger_type_is_unsupported
+    // dmc-case: dmc.rule.unsupported_wins_over_malformed
+    // dmc-case: dmc.rule.version_build_suffix_ignored
+    // dmc-case: dmc.rule.version_compares_parts_as_numbers
+    // dmc-case: dmc.rule.version_expected_number_is_malformed
+    // dmc-case: dmc.rule.version_gte_equal
+    // dmc-case: dmc.rule.version_lt_is_false
+    // dmc-case: dmc.rule.version_missing_part_is_zero
+    // dmc-case: dmc.rule.version_neq
+    // dmc-case: dmc.rule.version_os_lt
+    // dmc-case: dmc.rule.version_part_without_digits_is_zero
+    // dmc-case: dmc.rule.version_sdk_gte
+    // dmc-case: dmc.rule.version_suffix_ignored
+    // dmc-case: dmc.rule.wait_cancel_screen_left_empty_names_is_malformed
+    // dmc-case: dmc.rule.wait_does_not_change_trigger_match
+    // dmc-case: dmc.rule.wait_ms_fraction_is_malformed
+    // dmc-case: dmc.rule.wait_ms_over_guard_is_malformed
+    // dmc-case: dmc.rule.wait_ms_zero_is_malformed
+    // dmc-case: dmc.rule.wait_not_an_object_is_malformed
+    // dmc-case: dmc.rule.wait_unknown_cancel_type_is_unsupported
+    // dmc-case: dmc.rule.wait_unknown_type_is_unsupported
+    // dmc-case: dmc.rule.wait_with_all_cancel_types_is_eligible
+    // dmc-case: dmc.rule.wait_without_cancel_is_eligible
     @Test("dmc_rule_vectors.json", arguments: vectorCases)
     func vectors(_ vector: VectorCase) {
         let signalJSON = Self.jsonObject(vector.signalJSON) as? [String: Any] ?? [:]
@@ -135,6 +279,7 @@ struct DMCRuleEvaluatorTests {
 
     // MARK: - dmc_rule_spec.json
 
+    // dmc-case: dmc.rule_who.device_keys_are_documented_set
     @Test("limits and device keys match")
     func specLimits() throws {
         let spec = try #require(Self.fixture("dmc_rule_spec.json") as? [String: Any])
@@ -142,6 +287,7 @@ struct DMCRuleEvaluatorTests {
         #expect(ruleDeviceKeys == Set(deviceKeys.keys))
     }
 
+    // dmc-case: dmc.rule_who.depth_7_evaluates_no_dashboard_limit
     @Test("a rule nested far past any dashboard limit parses and evaluates")
     func deeplyNestedRule() {
         let leaf: [String: Any] = ["type": "attribute", "key": "plan", "op": "eq", "value": "pro"]
@@ -173,6 +319,8 @@ struct DMCRuleEvaluatorTests {
         #expect(reason == .malformedRule)
     }
 
+    // dmc-case: dmc.rule.version_compares_parts_as_numbers
+    // dmc-case: dmc.rule_who.version_keys_compare_as_versions
     @Test("version keys compare as versions")
     func specVersionKeys() throws {
         let spec = try #require(Self.fixture("dmc_rule_spec.json") as? [String: Any])
@@ -185,6 +333,7 @@ struct DMCRuleEvaluatorTests {
         }
     }
 
+    // dmc-case: dmc.rule_who.parser_accepts_exactly_spec_operators
     @Test("the parser accepts exactly the device operators")
     func specOperators() throws {
         let spec = try #require(Self.fixture("dmc_rule_spec.json") as? [String: Any])
@@ -209,6 +358,7 @@ struct DMCRuleEvaluatorTests {
 
     // MARK: - parseRule
 
+    // dmc-case: dmc.rule_who.parser_evaluator_never_throw
     @Test("never throws on any JSON shape")
     func neverThrows() {
         for input in [nil, 1, "x", [], [:], ["schema": NSNull()]] as [Any?] {
@@ -268,6 +418,7 @@ struct DMCRuleEvaluatorTests {
         }
     }
 
+    // dmc-case: dmc.rule_who.default_priority_600
     @Test("a missing or invalid priority counts as 600, not a malformed rule")
     func invalidPriority() throws {
         for priority in [nil, "high", Double.nan, Double.infinity] as [Any?] {
@@ -282,6 +433,7 @@ struct DMCRuleEvaluatorTests {
         }
     }
 
+    // dmc-case: dmc.rule_who.invalid_rule_carries_detail
     @Test("an InvalidRule carries a detail for the log")
     func invalidDetail() {
         var json = Self.rule(["all": []])
@@ -293,6 +445,7 @@ struct DMCRuleEvaluatorTests {
         #expect(rule.detail.contains("trigger"))
     }
 
+    // dmc-case: dmc.rule_when.empty_trigger_never_triggers
     @Test("an empty trigger list never triggers")
     func emptyTrigger() {
         let verdict = Self.run(Self.rule(["all": []], trigger: []), attributes: [:])
@@ -310,6 +463,19 @@ struct DMCRuleEvaluatorTests {
         ).kind
     }
 
+    // dmc-case: dmc.rule.eq_bool
+    // dmc-case: dmc.rule.eq_bool_not_string_true
+    // dmc-case: dmc.rule.eq_null_value_is_malformed
+    // dmc-case: dmc.rule.eq_number_int_equals_double
+    // dmc-case: dmc.rule.eq_number_not_numeric_string
+    // dmc-case: dmc.rule.eq_numeric_string_not_number
+    // dmc-case: dmc.rule.eq_string_case_sensitive
+    // dmc-case: dmc.rule.eq_string_exact
+    // dmc-case: dmc.rule.eq_string_true_not_bool
+    // dmc-case: dmc.rule.neq_bool
+    // dmc-case: dmc.rule.neq_different_string
+    // dmc-case: dmc.rule.neq_same_string
+    // dmc-case: dmc.rule.neq_type_differs
     @Test("eq and neq need the same JSON type")
     func eqNeq() {
         #expect(leaf("eq", 2, 2.0) == .eligible)
@@ -320,6 +486,12 @@ struct DMCRuleEvaluatorTests {
         #expect(leaf("neq", "a", "a") == .ineligible)
     }
 
+    // dmc-case: dmc.rule.in_empty_list_is_false
+    // dmc-case: dmc.rule.in_number_numeric_equality
+    // dmc-case: dmc.rule.in_numeric_string_not_number
+    // dmc-case: dmc.rule.in_string_member
+    // dmc-case: dmc.rule.in_string_not_member
+    // dmc-case: dmc.rule.in_value_not_list_is_malformed
     @Test("in matches one list element")
     func inList() {
         #expect(leaf("in", ["a", "b"], "b") == .eligible)
@@ -327,6 +499,13 @@ struct DMCRuleEvaluatorTests {
         #expect(leaf("in", ["1"], 1) == .ineligible)
     }
 
+    // dmc-case: dmc.rule.contains_bool_actual_is_false
+    // dmc-case: dmc.rule.contains_case_sensitive
+    // dmc-case: dmc.rule.contains_list_member
+    // dmc-case: dmc.rule.contains_list_not_member
+    // dmc-case: dmc.rule.contains_number_actual_is_false
+    // dmc-case: dmc.rule.contains_number_expected_on_string_is_false
+    // dmc-case: dmc.rule.contains_substring
     @Test("contains checks substrings and list members")
     func contains() {
         #expect(leaf("contains", "ol", "gold") == .eligible)
@@ -335,6 +514,24 @@ struct DMCRuleEvaluatorTests {
         #expect(leaf("contains", "x", 5) == .ineligible)
     }
 
+    // dmc-case: dmc.rule.gt_number_equal_is_false
+    // dmc-case: dmc.rule.gte_number_above
+    // dmc-case: dmc.rule.gte_number_equal
+    // dmc-case: dmc.rule.lt_number
+    // dmc-case: dmc.rule.lte_double_equal
+    // dmc-case: dmc.rule.numeric_bool_actual_is_false
+    // dmc-case: dmc.rule.numeric_expected_bool_is_malformed
+    // dmc-case: dmc.rule.numeric_expected_null_is_malformed
+    // dmc-case: dmc.rule.numeric_expected_string_is_malformed
+    // dmc-case: dmc.rule.numeric_list_actual_is_false
+    // dmc-case: dmc.rule.numeric_string_decimal
+    // dmc-case: dmc.rule.numeric_string_exponent_is_false
+    // dmc-case: dmc.rule.numeric_string_integer
+    // dmc-case: dmc.rule.numeric_string_negative
+    // dmc-case: dmc.rule.numeric_string_plus_sign_is_false
+    // dmc-case: dmc.rule.numeric_string_trailing_dot_is_false
+    // dmc-case: dmc.rule.numeric_string_with_space_is_false
+    // dmc-case: dmc.rule.numeric_text_is_false
     @Test("numeric ops accept numbers and numeric strings only")
     func numericOps() {
         #expect(leaf("gt", 1, 2) == .eligible)
@@ -346,6 +543,9 @@ struct DMCRuleEvaluatorTests {
         #expect(leaf("gt", 1, Double.nan) == .ineligible)
     }
 
+    // dmc-case: dmc.rule.exists_false_bool_is_true
+    // dmc-case: dmc.rule.exists_ignores_value
+    // dmc-case: dmc.rule.exists_string_is_true
     @Test("exists is true for every non-null value")
     func exists() {
         #expect(leaf("exists", nil, "") == .eligible)
@@ -353,6 +553,13 @@ struct DMCRuleEvaluatorTests {
         #expect(leaf("exists", nil, nil) == .ineligible)
     }
 
+    // dmc-case: dmc.rule.missing_key_contains_is_false
+    // dmc-case: dmc.rule.missing_key_eq_is_false
+    // dmc-case: dmc.rule.missing_key_gt_is_false
+    // dmc-case: dmc.rule.missing_key_in_is_false
+    // dmc-case: dmc.rule.missing_key_neq_is_false
+    // dmc-case: dmc.rule.not_exists_on_missing_key
+    // dmc-case: dmc.rule.null_value_exists_is_false
     @Test("every op is false for a missing value")
     func missingValue() {
         for op in ["eq", "neq", "in", "contains", "gt", "exists"] {
@@ -363,6 +570,8 @@ struct DMCRuleEvaluatorTests {
 
     // MARK: - plain part names
 
+    // dmc-case: dmc.rule.unknown_leaf_type_is_unsupported
+    // dmc-case: dmc.rule_who.malformed_vs_unsupported_reasons
     @Test("a plain-name part with an unknown type skips the campaign")
     func unknownType() {
         let cases: [(String, [String: Any], IneligibleReason)] = [
@@ -403,6 +612,11 @@ struct DMCRuleEvaluatorTests {
         }
     }
 
+    // dmc-case: dmc.rule.missing_schema_is_unsupported
+    // dmc-case: dmc.rule.requires_missing_is_malformed
+    // dmc-case: dmc.rule.unknown_envelope_key_is_ignored
+    // dmc-case: dmc.rule.unknown_schema_is_unsupported
+    // dmc-case: dmc.rule_who.unknown_envelope_keys_ignored
     @Test("a leftover schema or requires key is ignored")
     func leftoverKeys() {
         var json = Self.rule(["all": []])
@@ -411,6 +625,9 @@ struct DMCRuleEvaluatorTests {
         #expect(Self.parses(json))
     }
 
+    // dmc-case: dmc.rule.unknown_leaf_type_is_unsupported
+    // dmc-case: dmc.rule.unknown_requires_is_unsupported
+    // dmc-case: dmc.rule_who.malformed_vs_unsupported_reasons
     @Test("a rule using a part this SDK does not know is skipped, never thrown on")
     func newerPart() {
         var json = Self.rule(["all": []], trigger: [["type": "app_opened@2"]])
@@ -426,6 +643,12 @@ struct DMCRuleEvaluatorTests {
         #expect(verdict.reason == .unsupportedFeature)
     }
 
+    // dmc-case: dmc.rule.event_name_missing_is_malformed
+    // dmc-case: dmc.rule.event_where_unknown_op_is_malformed
+    // dmc-case: dmc.rule.screen_names_empty_is_malformed
+    // dmc-case: dmc.rule.trigger_without_any_is_malformed
+    // dmc-case: dmc.rule.unknown_trigger_type_is_unsupported
+    // dmc-case: dmc.rule_who.malformed_vs_unsupported_reasons
     @Test("bad trigger shapes and unknown names have different reasons")
     func malformedShapes() {
         let cases: [(String, [String: Any], IneligibleReason)] = [
@@ -474,6 +697,7 @@ struct DMCRuleEvaluatorTests {
         }
     }
 
+    // dmc-case: dmc.rule_when.trigger_key_lists_reject_bad_shapes
     @Test("a wait with a non-finite ms is malformed, not a crash")
     func nonFiniteWait() {
         let parsed = parseRule(
@@ -503,6 +727,7 @@ struct DMCRuleEvaluatorTests {
         runWith(rule(["all": []], trigger: [trigger]), signal).kind
     }
 
+    // dmc-case: dmc.session.app_opened_vs_foregrounded_moments
     @Test("app_foregrounded and app_opened are different moments")
     func foregroundVsOpened() {
         let foreground: [String: Any] = ["type": "app_foregrounded"]
@@ -511,6 +736,7 @@ struct DMCRuleEvaluatorTests {
         #expect(Self.trigger(["type": "app_opened"], .appForegrounded) == .notTriggered)
     }
 
+    // dmc-case: dmc.trigger.anchor_and_slot_visible_match_listed_key
     @Test("anchor_visible and slot_visible match one listed key")
     func visibilityTriggers() {
         #expect(Self.trigger(["type": "anchor_visible", "keys": ["cta", "buy"]], .anchorVisible("buy")) == .eligible)
@@ -519,6 +745,7 @@ struct DMCRuleEvaluatorTests {
         #expect(Self.trigger(["type": "slot_visible", "slots": ["hero"]], .slotVisible("rail")) == .notTriggered)
     }
 
+    // dmc-case: dmc.rule_who.app_opens_condition_reads_counter
     @Test("app_opens reads the device counter: null fails, eq and gte compare")
     func appOpensCondition() {
         func condition(_ op: String, _ value: Any) -> [String: Any] {
@@ -539,6 +766,9 @@ struct DMCRuleEvaluatorTests {
         #expect(at(1, "gte", 2) == .ineligible)
     }
 
+    // dmc-case: dmc.rule.version_compares_parts_as_numbers
+    // dmc-case: dmc.rule.version_gte_equal
+    // dmc-case: dmc.rule_who.version_keys_compare_as_versions
     @Test("a version part is a number: 5.10 is above 5.9")
     func versionComparisons() {
         func appVersion(_ actual: Any?, _ op: String, _ value: String) -> RuleVerdictKind {
@@ -557,6 +787,7 @@ struct DMCRuleEvaluatorTests {
         #expect(appVersion("2.17.3-beta", "gt", "2.17.2+41") == .eligible)
     }
 
+    // dmc-case: dmc.rule_who.list_equality_elementwise
     @Test("a list compares with a list element by element")
     func listComparison() {
         #expect(
@@ -578,6 +809,7 @@ struct DMCRuleEvaluatorTests {
             ).kind == .eligible)
     }
 
+    // dmc-case: dmc.rule.not_in_op_is_malformed
     @Test("not_in and not_exists are not nodes around the positive operator")
     func negatedByNot() {
         func cities(_ actual: Any?, _ op: String, _ value: Any?) -> RuleVerdictKind {
@@ -604,6 +836,7 @@ struct DMCRuleEvaluatorTests {
         #expect(cities("Pune", "exists", nil) == .ineligible)
     }
 
+    // dmc-case: dmc.rule_who.complex_and_or_over_sources
     @Test("S14: an AND of OR groups over an attribute, a prop and the device")
     func s14() {
         let rule = Self.rule(
@@ -644,6 +877,7 @@ struct DMCRuleEvaluatorTests {
             ).kind == .eligible)
     }
 
+    // dmc-case: dmc.rule_who.invalid_rule_carries_detail
     @Test("the failure detail names the top-level shape that failed")
     func failureDetail() throws {
         let attributeLeaf: [String: Any] = [
@@ -669,6 +903,7 @@ struct DMCRuleEvaluatorTests {
         #expect(mixed.detail == "any")
     }
 
+    // dmc-case: dmc.rule_who.parser_evaluator_never_throw
     @Test("the evaluator never throws on a rule the parser would reject")
     func evaluatorNeverThrows() {
         let broken = ValidRule(

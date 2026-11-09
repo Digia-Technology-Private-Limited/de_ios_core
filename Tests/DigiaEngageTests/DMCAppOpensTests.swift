@@ -66,6 +66,7 @@ private struct Phone {
 @MainActor
 @Suite("DMC app opens through SDKInstance", .serialized)
 struct DMCAppOpensTests {
+    // dmc-case: dmc.session.cold_start_counts_open_foregrounds_do_not
     @Test("counts cold starts, not foregrounds")
     func countsColdStarts() async throws {
         let phone = Phone()
@@ -104,6 +105,7 @@ struct DMCAppOpensTests {
 @MainActor
 @Suite("DMC background launch", .serialized)
 struct DMCBackgroundLaunchTests {
+    // dmc-case: dmc.session.cold_start_counts_open_foregrounds_do_not
     @Test("a launch in the background counts the open on return")
     func backgroundLaunchCountsOnReturn() async throws {
         let phone = Phone()

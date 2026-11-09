@@ -51,6 +51,7 @@ struct DMCRuleRoutingTests {
         return found.first
     }
 
+    // dmc-case: dmc.trigger.highest_priority_wins_rest_held
     @Test("the highest priority wins and the others are held back")
     func highestPriorityWins() async throws {
         let (sdk, sink) = try await Self.ready()
@@ -64,6 +65,7 @@ struct DMCRuleRoutingTests {
         #expect(held?.extras == ["verdict": "eligible", "outcome": "held_back", "lost_to": "high"])
     }
 
+    // dmc-case: dmc.trigger.failed_rule_never_falls_back
     @Test("each ineligible campaign records its reason")
     func ineligibleReasons() async throws {
         let (sdk, sink) = try await Self.ready()
@@ -83,6 +85,7 @@ struct DMCRuleRoutingTests {
         #expect(gating(sink, "broken")?.extras == ["verdict": "ineligible", "exception_class": "parse"])
     }
 
+    // dmc-case: dmc.gate_order.malformed_rule_logged_once
     @Test("a malformed rule is logged once")
     func malformedLoggedOnce() async throws {
         let (sdk, sink) = try await Self.ready()
@@ -98,6 +101,7 @@ struct DMCRuleRoutingTests {
         #expect(reports.count == 1)
     }
 
+    // dmc-case: dmc.gate_order.busy_surface_drops_winner_no_fallback
     @Test("a busy surface drops the winner with no fallback")
     func busySurfaceNoFallback() async throws {
         let (sdk, sink) = try await Self.ready()
@@ -112,6 +116,7 @@ struct DMCRuleRoutingTests {
         #expect(sink.records.filter { $0.campaignKey == "rank_two" && $0.stage != .gating }.isEmpty)
     }
 
+    // dmc-case: dmc.trigger.screen_rule_fires_without_plugin
     @Test("a screen rule fires with no plugin registered (#163)")
     func screenRuleNoPlugin() async throws {
         let (sdk, sink) = try await Self.ready()
@@ -122,6 +127,7 @@ struct DMCRuleRoutingTests {
         #expect(active(sdk) == "on_cart")
     }
 
+    // dmc-case: dmc.trigger.event_name_trimmed_overlong_prop_cut
     @Test("a property over 512 characters is cut before the rule sees it (D7)")
     func longPropertyCut() async throws {
         let (sdk, sink) = try await Self.ready()
@@ -132,6 +138,7 @@ struct DMCRuleRoutingTests {
         #expect(active(sdk) == "note_saver")
     }
 
+    // dmc-case: dmc.trigger.event_name_trimmed_overlong_prop_cut
     @Test("the event name is trimmed before the rule matches it")
     func eventNameTrimmed() async throws {
         let (sdk, sink) = try await Self.ready()
@@ -142,6 +149,7 @@ struct DMCRuleRoutingTests {
         #expect(active(sdk) == "trimmed_tip")
     }
 
+    // dmc-case: dmc.trigger.cep_trigger_for_digia_dropped
     @Test("a CEP trigger for a Digia-decided campaign is dropped")
     func cepTriggerDropped() async throws {
         let (sdk, sink) = try await Self.ready()

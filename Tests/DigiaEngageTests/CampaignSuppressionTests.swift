@@ -17,6 +17,8 @@ extension DigiaEngageTests {
     @MainActor
     @Suite("Campaign suppression", .serialized, .tags(.integration, .surface, .cep))
     struct CampaignSuppressionTests {
+        // dmc-case: dmc.gate_order.suppressed_overlay_drops_host_suppressed
+        // dmc-case: dmc.gate_order.suppression_checked_before_screen_and_frequency
         @Test("while suppressed, an overlay delivery drops host_suppressed and releases the hold")
         func suppressedOverlayDropsAndReleases() async throws {
             let sdk = try await SdkHarness.start(campaigns: [nudgeJson("n")])
@@ -38,6 +40,7 @@ extension DigiaEngageTests {
             #expect(hosted.isHoldReleased)
         }
 
+        // dmc-case: dmc.gate_order.suppressed_inline_still_routes
         @Test("while suppressed, an inline delivery still gets through")
         func suppressedInlineStillRenders() async throws {
             let sdk = try await SdkHarness.start(campaigns: [inlineJson("i", slotKey: "home_hero")])
@@ -51,6 +54,7 @@ extension DigiaEngageTests {
             #expect(inline.isHoldReleased)
         }
 
+        // dmc-case: dmc.gate_order.unsuppress_restores_overlay
         @Test("after unsuppressing, an overlay delivery is accepted again")
         func unsuppressRestoresOverlays() async throws {
             let sdk = try await SdkHarness.start(campaigns: [nudgeJson("n")])
@@ -67,6 +71,7 @@ extension DigiaEngageTests {
             #expect(sdk.sdk.controller.activeNudge?.payload.campaignKey == "n")
         }
 
+        // dmc-case: dmc.gate_order.template_config_gate_drops_invalid_config
         @Test("a channel mismatch while suppressed is still invalid_config")
         func channelMismatchBeatsSuppression() async throws {
             let sdk = try await SdkHarness.start(campaigns: [floaterJson("pip")])
@@ -82,6 +87,8 @@ extension DigiaEngageTests {
             #expect(dropped.isHoldReleased)
         }
 
+        // dmc-case: dmc.freq.suppressed_trigger_skips_cap
+        // dmc-case: dmc.gate_order.suppression_checked_before_screen_and_frequency
         @Test("a suppressed trigger never consumes a frequency cap")
         func suppressedTriggerSkipsFrequencyCap() async throws {
             var once = nudgeJson("once")
@@ -103,6 +110,7 @@ extension DigiaEngageTests {
             #expect(PresentationRecorder(try sdk.deliver("once")).dropReason == .frequencyCapped)
         }
 
+        // dmc-case: dmc.gate_order.unsuppress_restores_overlay
         @Test("suppression set before initialize() is honoured once ready")
         func suppressionBeforeInitializeIsHonoured() async throws {
             let sdk = try await SdkHarness.startHeld(nudgeJson("n"))

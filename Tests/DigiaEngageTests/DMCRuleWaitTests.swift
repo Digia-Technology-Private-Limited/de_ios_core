@@ -20,6 +20,7 @@ struct DMCRuleWaitTests {
 
     // MARK: - parse
 
+    // dmc-case: dmc.wait_cancel.parses_wait_and_cancel_shapes
     @Test("reads the wait and each cancel type")
     func parsesCancels() throws {
         let parsed = parseRule(
@@ -53,6 +54,8 @@ struct DMCRuleWaitTests {
         #expect(address == ["address"])
     }
 
+    // dmc-case: dmc.rule_when.wait_without_cancel_is_eligible
+    // dmc-case: dmc.wait_cancel.parses_wait_and_cancel_shapes
     @Test("a rule without wait has none")
     func noWait() {
         guard case .valid(let rule) = parseRule(Self.rule()) else {
@@ -62,6 +65,8 @@ struct DMCRuleWaitTests {
         #expect(rule.wait == nil)
     }
 
+    // dmc-case: dmc.rule_when.wait_without_cancel_is_eligible
+    // dmc-case: dmc.wait_cancel.parses_wait_and_cancel_shapes
     @Test("a wait without cancel cancels on nothing")
     func noCancel() {
         guard case .valid(let rule) = parseRule(
@@ -74,6 +79,9 @@ struct DMCRuleWaitTests {
         #expect(wait.cancels.isEmpty)
     }
 
+    // dmc-case: dmc.rule_when.nonfinite_wait_ms_malformed
+    // dmc-case: dmc.rule_when.trigger_key_lists_reject_bad_shapes
+    // dmc-case: dmc.wait_cancel.bad_wait_shapes_malformed
     @Test("bad waits are malformed")
     func malformedWaits() {
         let cases: [(String, [String: Any])] = [
@@ -97,6 +105,7 @@ struct DMCRuleWaitTests {
         }
     }
 
+    // dmc-case: dmc.wait_cancel.unknown_wait_or_cancel_unsupported
     @Test("an unknown wait or cancel type is an unsupported feature")
     func unknownWaitTypes() {
         let waits: [[String: Any]] = [
@@ -138,6 +147,7 @@ struct DMCRuleWaitTests {
         RuleWait(ms: ms, cancels: cancels)
     }
 
+    // dmc-case: dmc.wait_cancel.fires_after_delay_keeps_first_timer
     @Test("fires after the delay, not before")
     func firesAfterDelay() {
         let harness = Harness()
@@ -151,6 +161,7 @@ struct DMCRuleWaitTests {
         #expect(!harness.waits.isWaiting("a"))
     }
 
+    // dmc-case: dmc.wait_cancel.fires_after_delay_keeps_first_timer
     @Test("a second start of a waiting campaign keeps the first timer")
     func secondStartKeepsTimer() {
         let harness = Harness()
@@ -166,6 +177,7 @@ struct DMCRuleWaitTests {
         #expect(harness.elapsed.count == 1)
     }
 
+    // dmc-case: dmc.wait_cancel.parallel_waits_run_together
     @Test("waits of different campaigns run in parallel")
     func parallelWaits() {
         let harness = Harness()
@@ -181,6 +193,7 @@ struct DMCRuleWaitTests {
         #expect(harness.elapsed.last == ["a"])
     }
 
+    // dmc-case: dmc.wait_cancel.simultaneous_ends_compete_in_priority
     @Test("waits that end at the same moment come in priority order")
     func sameMomentPriorityOrder() {
         let harness = Harness()
@@ -193,6 +206,7 @@ struct DMCRuleWaitTests {
         #expect(harness.elapsed == [["high", "low"]])
     }
 
+    // dmc-case: dmc.wait_cancel.simultaneous_ends_compete_in_priority
     @Test("waits that already ended compete together, highest first")
     func alreadyEnded() {
         let harness = Harness()
@@ -202,6 +216,7 @@ struct DMCRuleWaitTests {
         #expect(harness.elapsed == [["high", "low"]])
     }
 
+    // dmc-case: dmc.wait_cancel.background_time_counts_fires_on_resume
     @Test("background time counts; an ended wait fires on resume")
     func backgroundTimeCounts() {
         let harness = Harness()
@@ -223,6 +238,7 @@ struct DMCRuleWaitTests {
         #expect(harness.elapsed.last == ["b"])
     }
 
+    // dmc-case: dmc.wait_cancel.event_cancel_needs_matching_props
     @Test("an event cancels only when its props match")
     func eventProps() {
         let harness = Harness()
@@ -253,6 +269,7 @@ struct DMCRuleWaitTests {
         #expect(harness.elapsed.isEmpty)
     }
 
+    // dmc-case: dmc.wait_cancel.screen_view_cancels_on_listed_screen
     @Test("a screen view cancels on a listed screen")
     func screenViewCancel() {
         let harness = Harness()
@@ -267,6 +284,7 @@ struct DMCRuleWaitTests {
         #expect(harness.waits.cancelMatching(.screenViewed("cart")).single?.1 == .screenViewed)
     }
 
+    // dmc-case: dmc.wait_cancel.screen_left_semantics
     @Test("screen_left without names compares with the start screen")
     func screenLeftStartScreen() {
         let harness = Harness()
@@ -279,6 +297,7 @@ struct DMCRuleWaitTests {
         #expect(harness.waits.cancelMatching(.screenViewed("home")).single?.1 == .screenLeft)
     }
 
+    // dmc-case: dmc.wait_cancel.screen_left_semantics
     @Test("screen_left with names cancels outside the names")
     func screenLeftNames() {
         let harness = Harness()
@@ -293,6 +312,7 @@ struct DMCRuleWaitTests {
         #expect(!harness.waits.cancelMatching(.screenViewed("home")).isEmpty)
     }
 
+    // dmc-case: dmc.wait_cancel.screen_left_semantics
     @Test("screen_left without names cancels on a different screen, and no screen counts as one")
     func screenLeftEmptyStart() {
         let harness = Harness()
@@ -304,6 +324,7 @@ struct DMCRuleWaitTests {
         #expect(harness.waits.cancelMatching(.screenViewed("home")).single?.1 == .screenLeft)
     }
 
+    // dmc-case: dmc.wait_cancel.first_cancel_wins_one_signal_ends_all
     @Test("the first cancel that matches decides the cause")
     func firstCancelWins() {
         let harness = Harness()
@@ -339,6 +360,7 @@ struct DMCRuleWaitTests {
         #expect(rest.single?.1 == .screenLeft)
     }
 
+    // dmc-case: dmc.wait_cancel.first_cancel_wins_one_signal_ends_all
     @Test("one signal ends every wait it cancels")
     func oneSignalManyWaits() {
         let harness = Harness()
@@ -357,6 +379,7 @@ struct DMCRuleWaitTests {
         #expect(harness.waits.isWaiting("b"))
     }
 
+    // dmc-case: dmc.wait_cancel.parallel_waits_run_together
     @Test("a new wait joins the pending ones in the same start call")
     func newWaitJoins() {
         let harness = Harness()
@@ -371,6 +394,7 @@ struct DMCRuleWaitTests {
         #expect(harness.waits.isWaiting("b"))
     }
 
+    // dmc-case: dmc.wait_cancel.thirty_minute_max_runs_intact
     @Test("a 30-minute wait is the dashboard maximum and runs intact")
     func maximumWait() {
         let harness = Harness()
@@ -392,6 +416,7 @@ struct DMCRuleWaitTests {
         #expect(harness.elapsed == [["a"]])
     }
 
+    // dmc-case: dmc.wait_cancel.cancel_all_ends_all_like_session_end
     @Test("cancelAll ends every wait, as on a session end")
     func cancelAll() {
         let harness = Harness()
