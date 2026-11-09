@@ -103,8 +103,8 @@ extension DigiaEngageTests {
             // The suppressed drop above must not have spent the single impression.
             let shown = PresentationRecorder(try sdk.deliver("once"))
             #expect(!shown.isSettled)
-            sdk.sdk.reportNudgeImpression()
-            sdk.sdk.markNudgeDismissed()
+            sdk.sdk.nudgeOrchestrator.reportNudgeImpression()
+            sdk.sdk.nudgeOrchestrator.markNudgeDismissed()
 
             // ...which this cap proves is working: the real impression spent it.
             #expect(PresentationRecorder(try sdk.deliver("once")).dropReason == .frequencyCapped)

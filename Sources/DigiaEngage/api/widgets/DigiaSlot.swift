@@ -33,7 +33,7 @@ public struct DigiaSlot<Placeholder: View>: View {
                         // No once-guard here: EngageEventEmitter dedupes the impression
                         // per campaign and resets it when the slot is cleared, so a
                         // redelivery of the same CEP campaign ID impresses again.
-                        if visible { SDKInstance.shared.reportSlotFirstRender(payload) }
+                        if visible { SDKInstance.shared.inlineReporter.reportSlotFirstRender(payload) }
                     }
             } else {
                 placeholder
