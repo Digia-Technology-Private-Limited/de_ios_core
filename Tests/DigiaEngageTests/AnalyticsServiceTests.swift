@@ -762,6 +762,7 @@ struct AnalyticsServiceTests {
             name: UIApplication.didEnterBackgroundNotification,
             object: nil
         )
+        defer { returnToForeground() }
         try await waitUntil { fakeSender.callCount == 1 && service.queue.size == 0 }
 
         #expect(service.queue.size == 0)

@@ -10,6 +10,9 @@ import Testing
 struct SDKInstanceSdkConfigTests {
 
     private let apiKey = "test_key"
+    /// Stamped on this test's health records. The analytics queue is one store shared by every
+    /// SDK instance in the process, so counting by event name alone also counts parallel suites'.
+    private let runKey = "sdk-config-\(UUID().uuidString)"
 
     private func makeDefaults() -> UserDefaults {
         UserDefaults(suiteName: "digia.test.\(UUID().uuidString)")!
@@ -34,14 +37,26 @@ struct SDKInstanceSdkConfigTests {
     private func healthRecord(_ key: String) -> TimelineRecord {
         TimelineRecord(
             timestamp: Date(timeIntervalSince1970: 0), severity: .error, tag: "DIGIA", message: "m",
-            stage: .parse, reason: TimelineReason.malformedCampaignSkipped, campaignKey: key, extras: [:])
+            stage: .parse, reason: TimelineReason.malformedCampaignSkipped, campaignKey: "\(runKey)-\(key)",
+            extras: [:])
     }
 
-    private func sentHealthEvents(_ sdk: SDKInstance) async throws -> Int {
+    /// This test's health events queued so far. With [expected], keeps looking for up to 3 s until
+    /// that many arrive, so a loaded simulator's slow enqueue is not read as nothing sent.
+    private func sentHealthEvents(_ sdk: SDKInstance, awaiting expected: Int = 0) async throws -> Int {
         try await Task.sleep(nanoseconds: 150_000_000)
         let analytics = try #require(sdk.services?.analyticsService)
-        return await analytics.queue.peek(maxCount: 100)
-            .filter { ($0.payload["event_name"] as? String) == HealthSink.eventName }.count
+        let deadline = Date().addingTimeInterval(3)
+        while true {
+            let count = await analytics.queue.peek(maxCount: 100)
+                .filter {
+                    ($0.payload["event_name"] as? String) == HealthSink.eventName
+                        && ($0.payload["campaign_key"] as? String)?.hasPrefix(runKey) == true
+                }
+                .count
+            if count >= expected || Date() > deadline { return count }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
     }
 
     @Test("the config call runs on every initialize, even with a cache")
@@ -81,7 +96,7 @@ struct SDKInstanceSdkConfigTests {
         try await sdk.initialize(DigiaConfig(apiKey: apiKey))
         sink.emit(healthRecord("a"))
 
-        #expect(try await sentHealthEvents(sdk) == 1)
+        #expect(try await sentHealthEvents(sdk, awaiting: 1) == 1)
         network.answer("{}")
     }
 
@@ -97,7 +112,7 @@ struct SDKInstanceSdkConfigTests {
 
         network.answer(#"{"sdkHealth":{"enabled":true}}"#)
         await sdk.sdkConfigFetchTask?.value
-        #expect(try await sentHealthEvents(sdk) == 1)
+        #expect(try await sentHealthEvents(sdk, awaiting: 1) == 1)
     }
 
     @Test("first install with switch-off in the answer drops the held health")
@@ -126,7 +141,7 @@ struct SDKInstanceSdkConfigTests {
         network.fail()
         await sdk.sdkConfigFetchTask?.value
 
-        #expect(try await sentHealthEvents(sdk) == 1)
+        #expect(try await sentHealthEvents(sdk, awaiting: 1) == 1)
     }
 
     @Test("a failed call leaves the cached switch-off in force")
@@ -160,7 +175,7 @@ struct SDKInstanceSdkConfigTests {
 
         #expect(sink.isRegistered)
         sink.emit(healthRecord("a"))
-        #expect(try await sentHealthEvents(sdk) == 1)
+        #expect(try await sentHealthEvents(sdk, awaiting: 1) == 1)
     }
 
     @Test("a fetched config replaces the cache for the next launch")

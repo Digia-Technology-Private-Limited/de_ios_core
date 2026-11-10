@@ -58,7 +58,7 @@ extension DigiaEngageTests {
             await settle()
 
             #expect(first.isSettled)
-            #expect(first.dismissReason == .userClose)
+            #expect(first.dismissReason == .cancelled, "a host clear is cancelled, as on Flutter and Android")
 
             // Deliver second presentation with SAME cepCampaignId
             let second = deliver("slot-test", "same-cep-id")
@@ -72,7 +72,7 @@ extension DigiaEngageTests {
             await settle()
 
             #expect(second.isSettled)
-            #expect(second.dismissReason == .userClose)
+            #expect(second.dismissReason == .cancelled)
             #expect(second.dropReason == nil)
 
             window.rootViewController = nil

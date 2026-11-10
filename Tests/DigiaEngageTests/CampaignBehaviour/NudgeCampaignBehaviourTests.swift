@@ -306,7 +306,9 @@ struct NudgeCampaignBehaviourTests {
         let sdk = try await SdkHarness.startWithoutHost(campaign)
         defer { sdk.tearDown() }
         let d = try sdk.deliverChain("test_nudge_dialog")
-        try await sdk.waitUntil("the acceptance watchdog", timeout: 20) { d.outcome != nil }
+        // The watchdog sleeps 15 s for real; the deadline leaves room for a loaded simulator, whose
+        // main actor can run it late. What it reports (`timeout_ms`) is asserted below.
+        try await sdk.waitUntil("the acceptance watchdog", timeout: 40) { d.outcome != nil }
 
         #expect(!sdk.isShowing("Dialog Test Nudge"))
         expectDroppedWire(
