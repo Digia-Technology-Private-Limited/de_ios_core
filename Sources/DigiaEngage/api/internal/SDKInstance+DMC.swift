@@ -193,7 +193,7 @@ extension SDKInstance {
         }
     }
 
-    /// A new session starts clean: no wait or visibility carries over.
+    /// A new session starts clean: no wait carries over.
     func sessionDidRotate() {
         // Rotation can fire from any thread; the engine lives on the main actor.
         if Thread.isMainThread {
@@ -204,17 +204,7 @@ extension SDKInstance {
     }
 
     private func endSession() {
-        visibleSent.removeAll()
         engine.reset()
-    }
-
-    /// Sends an anchor or slot signal once per session, after the frame that
-    /// mounted it, so routing sees the finished layout.
-    func sendVisibleOnce(_ id: String, _ signal: RuleSignal) {
-        guard visibleSent.insert(id).inserted else { return }
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated { self?.engine.send(signal) }
-        }
     }
 
     // MARK: Identity
@@ -323,7 +313,6 @@ extension SDKInstance {
         inBackground = false
         appOpenedDue = false
         appOpens = AppOpensCounter()
-        visibleSent.removeAll()
         selfTriggerCount = 0
     }
 }

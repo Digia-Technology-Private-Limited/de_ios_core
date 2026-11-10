@@ -23,6 +23,19 @@ public struct DigiaSlot<Placeholder: View>: View {
     }
 
     public var body: some View {
+        // The ZStack gives the exposure reader a view to sit behind even when
+        // the slot shows an EmptyView placeholder, and keeps one reader across
+        // empty → filled, so filling a slot already on screen is no new
+        // appearance. Empty, it is zero-size, but in a stack it is a child, so
+        // it takes the stack's spacing.
+        ZStack {
+            content
+        }
+        .background(SlotAppearanceReader(placementKey: placementKey))
+    }
+
+    @ViewBuilder
+    private var content: some View {
         Group {
             if let payload = inlineController.getCampaign(placementKey) {
                 let deliveryID = payload.presentationId ?? payload.cepCampaignId
@@ -73,6 +86,42 @@ public extension DigiaSlot where Placeholder == EmptyView {
     }
 }
 
+
+/// Sends `slot_visible` each time the slot, filled or empty, becomes exposed
+/// (`ExposureMonitor`). Zero-size while the slot is empty; an empty slot is
+/// exposed once its position is in view.
+struct SlotAppearanceReader: UIViewRepresentable {
+    let placementKey: String
+
+    final class Coordinator {
+        var tag: String?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        let tag = "slot:\(placementKey)"
+        if let previous = context.coordinator.tag, previous != tag {
+            ExposureMonitor.shared.untrack(view, tag: previous)
+        }
+        context.coordinator.tag = tag
+        let placementKey = placementKey
+        ExposureMonitor.shared.track(view, tag: tag) {
+            SDKInstance.shared.slotExposed(placementKey)
+        }
+    }
+
+    static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
+        guard let tag = coordinator.tag else { return }
+        ExposureMonitor.shared.untrack(view, tag: tag)
+    }
+}
 
 /// Reports whether the slot is on screen: in a window, with no hidden view
 /// above it, while the app is active. SwiftUI's appear events miss hidden

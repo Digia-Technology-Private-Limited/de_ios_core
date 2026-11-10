@@ -264,7 +264,7 @@ struct DMCRuleWaitSDKTests {
         ]
         let (sdk, release) = try await boot([nudge("cta_tip", 600, rule: anchorRule)], hold: true)
 
-        sdk.recordAnchorSeen("cta")
+        sdk.anchorExposed("cta")
         try await Task.sleep(nanoseconds: 50_000_000)
         try #require(sdk.services).sessionManager.reset()
         release()
@@ -284,12 +284,12 @@ struct DMCRuleWaitSDKTests {
         ]
         let (sdk, _) = try await boot([nudge("cta_tip", 600, rule: anchorRule)])
 
-        sdk.recordAnchorSeen("cta")
+        sdk.anchorExposed("cta")
         try await Task.sleep(nanoseconds: 50_000_000)
         #expect(shown(sdk) == "cta_tip")
         sdk.controller.dismissNudge()
 
-        sdk.recordAnchorSeen("cta")
+        sdk.anchorExposed("cta")
         try await Task.sleep(nanoseconds: 50_000_000)
         #expect(shown(sdk) == "cta_tip")
         sdk.controller.dismissNudge()

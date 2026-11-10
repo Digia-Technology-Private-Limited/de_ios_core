@@ -30,6 +30,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         AnchorRegistry.shared.setAnchorSeenHandler { [weak instance] key in
             instance?.recordAnchorSeen(key)
         }
+        AnchorRegistry.shared.setAnchorExposedHandler { [weak instance] key in
+            instance?.anchorExposed(key)
+        }
         return instance
     }()
 
@@ -168,8 +171,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     var appOpenedDue = false
     /// Cold starts on this phone, the `device.app_opens` rule fact.
     var appOpens = AppOpensCounter()
-    /// Anchor and slot keys that already sent their signal this session.
-    var visibleSent: Set<String> = []
     /// Firings of Digia-decided campaigns, so each gets its own `cepCampaignId`.
     var selfTriggerCount = 0
     private let defaults: UserDefaults
@@ -1285,20 +1286,26 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         dismiss()
     }
 
-    /// Called each time an anchor key appears (`AnchorRegistry.register`). An
-    /// anchor that leaves and comes back is a new exposure, so it signals again.
+    /// Called each time an anchor key appears (`AnchorRegistry.register`).
     func recordAnchorSeen(_ anchorKey: String) {
         componentRegistry.recordAnchor(anchorKey, screenName: _currentScreen)
-        // After the frame that mounted it, so routing sees the finished layout.
-        DispatchQueue.main.async { [weak self] in
-            MainActor.assumeIsolated { self?.engine.send(.anchorVisible(anchorKey)) }
-        }
     }
 
-    /// Called the first time a placement key appears (`DigiaSlot`).
+    /// Called when a placement key appears (`DigiaSlot`).
     func recordSlotSeen(_ placementKey: String) {
         componentRegistry.recordSlot(placementKey, screenName: _currentScreen)
-        sendVisibleOnce("slot:\(placementKey)", .slotVisible(placementKey))
+    }
+
+    /// Sends `anchor_visible` each time the anchor becomes exposed: a scroll
+    /// into view, a return to its screen, the app becoming active.
+    func anchorExposed(_ anchorKey: String) {
+        engine.send(.anchorVisible(anchorKey))
+    }
+
+    /// Sends `slot_visible` each time the slot, filled or empty, becomes
+    /// exposed: a scroll into view, a return to its screen, the app becoming active.
+    func slotExposed(_ placementKey: String) {
+        engine.send(.slotVisible(placementKey))
     }
 
     /// Exposes the recording toggle + control surface to `DigiaDebugSettingsView`.

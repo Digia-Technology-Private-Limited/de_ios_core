@@ -91,6 +91,10 @@ public final class AnchorRegistry: NSObject, ObservableObject {
     /// before. Set once by `SDKInstance.shared`
     /// (see `setAnchorSeenHandler`) rather than reached for from here.
     private var onAnchorSeen: ((String) -> Void)?
+    /// Told each time a registered anchor view becomes exposed (`ExposureMonitor`): a scroll into
+    /// view, a return to its screen, the app becoming active. Set once by `SDKInstance.shared`.
+    private var onAnchorExposed: ((String) -> Void)?
+    private let exposureMonitor = ExposureMonitor.shared
 
     private override init() {
         super.init()
@@ -105,6 +109,10 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         }
     }
 
+    func setAnchorExposedHandler(_ handler: @escaping (String) -> Void) {
+        onAnchorExposed = handler
+    }
+
     public func register(key: String, view: UIView, cornerRadius: CGFloat = 0) {
         let appeared = viewRegistry[key]?.contains(where: { $0.value != nil }) != true
             && rectRegistry[key] == nil
@@ -116,6 +124,10 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         cornerRadii.removeValue(forKey: key)
         version &+= 1
         if appeared { onAnchorSeen?(key) }
+        // Idempotent per (key, view): a host re-registering the same view keeps its exposure state.
+        exposureMonitor.track(view, tag: Self.exposureTag(key)) { [weak self] in
+            self?.onAnchorExposed?(key)
+        }
         guard activeKey == key, !isInStepDelay else { return }
         if !activeAnchorWasAvailable { startReadinessTimeout(for: key) }
         startSampling(key: key)
@@ -147,6 +159,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
             return
         }
         let remaining = views.filter { $0.value != nil && $0.value !== view }
+        exposureMonitor.untrack(view, tag: Self.exposureTag(key))
         if remaining.isEmpty {
             viewRegistry.removeValue(forKey: key)
             rectRegistry.removeValue(forKey: key)
@@ -173,6 +186,7 @@ public final class AnchorRegistry: NSObject, ObservableObject {
 
     private func remove(key: String) {
         guard viewRegistry[key] != nil || rectRegistry[key] != nil else { return }
+        untrackExposure(key: key)
         viewRegistry.removeValue(forKey: key)
         rectRegistry.removeValue(forKey: key)
         trackedRects.removeValue(forKey: key)
@@ -384,8 +398,17 @@ public final class AnchorRegistry: NSObject, ObservableObject {
         }
     }
 
+    private static func exposureTag(_ key: String) -> String { "anchor:\(key)" }
+
+    private func untrackExposure(key: String) {
+        for view in viewRegistry[key]?.compactMap(\.value) ?? [] {
+            exposureMonitor.untrack(view, tag: Self.exposureTag(key))
+        }
+    }
+
     func resetForTesting() {
         stopTracking()
+        for key in viewRegistry.keys { untrackExposure(key: key) }
         viewRegistry.removeAll()
         rectRegistry.removeAll()
         trackedRects.removeAll()
