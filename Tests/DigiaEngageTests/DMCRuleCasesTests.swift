@@ -111,10 +111,6 @@ private enum RuleCaseFiles {
     }
 }
 
-/// The corpus is unwalkable while a wait's timer owns the runloop, so a route
-/// the surface refuses throws instead of recording anything.
-private struct RouterDropped: Error {}
-
 @MainActor
 final class DMCRuleCasesTests: XCTestCase {
     /// Cases that fail against this SDK today without touching production
@@ -122,10 +118,7 @@ final class DMCRuleCasesTests: XCTestCase {
     /// suite stays green; the honest reasons live in
     /// `testkit/.../evidence/c-ios-missing.md` §2.
     private let knownRed: Set<String> = [
-        "identified_condition_follows_login_and_logout",
         "newline_inside_braces_is_whitespace",
-        "waits_end_together_dropped_lead_falls_through",
-        "waits_end_together_lead_routes",
         "zero_never_prints_a_sign",
     ]
 
@@ -392,8 +385,10 @@ private final class World: DecisionFacts {
         engine = DecisionEngine(
             facts: self,
             route: { [weak self] campaign, _, signal in
-                guard let self else { return }
-                if self.routerDrops.contains(campaign.campaignKey) { throw RouterDropped() }
+                guard let self else { return .dropped(reason: .notInitialized, detail: nil) }
+                if self.routerDrops.contains(campaign.campaignKey) {
+                    return .dropped(reason: .surfaceBusy, detail: nil)
+                }
                 self.routed.append((campaign, signal))
                 if let slot = campaign.inlineSlotKey { self.slots[slot] = campaign.campaignKey }
                 if let policy = campaign.frequency {
@@ -401,6 +396,7 @@ private final class World: DecisionFacts {
                         policy, self.frequency[campaign.campaignKey],
                         Int64(self.now), self.sessionId)
                 }
+                return routedVerdict(campaign)
             },
             nowMs: { [weak self] in self?.now ?? World.startMs })
         engine.ready()

@@ -64,6 +64,15 @@ private final class Facts: DecisionFacts {
     var audienceContext: String { "missing" }
 }
 
+/// An acceptance for a campaign a test router takes.
+func routedVerdict(_ campaign: CampaignModel) -> RoutingVerdict {
+    .accepted(
+        payload: CEPTriggerPayload(
+            cepCampaignId: "test:\(campaign.campaignKey)", campaignKey: campaign.campaignKey,
+            cepMetadata: [:]),
+        kind: .modal)
+}
+
 /// Flutter: `test/dmc_decision_engine_test.dart` — arbitration, the inline
 /// fan-out and the wait lifecycle through the engine itself (dmc-mvp-spec
 /// §3.3, §3.9–3.13). The SDK shell is replaced by a `Facts` double; the
@@ -77,6 +86,8 @@ struct DMCDecisionEngineTests {
     private let facts = Facts()
     private let sink = RecordSink()
     private var routed: Box<[String]>
+    /// Campaigns the router drops, as it does for a busy surface.
+    private let dropped = Box<Set<String>>([])
     private let engine: DecisionEngine
 
     private final class Box<T> { var value: T; init(_ value: T) { self.value = value } }
@@ -85,12 +96,17 @@ struct DMCDecisionEngineTests {
         let clock = clock
         let facts = facts
         let routed = Box<[String]>([])
+        let dropped = dropped
         self.routed = routed
         engine = DecisionEngine(
             facts: facts,
             route: { campaign, _, _ in
                 routed.value.append(campaign.campaignKey)
+                if dropped.value.contains(campaign.campaignKey) {
+                    return .dropped(reason: .surfaceBusy, detail: nil)
+                }
                 facts.frequency?.recordShow(campaign.campaignKey, campaign.frequency)
+                return routedVerdict(campaign)
             },
             nowMs: { clock.now }
         )
@@ -501,7 +517,7 @@ struct DMCDecisionEngineTests {
     }
 
     // dmc-case: dmc.wait_cancel.simultaneous_ends_router_outcome
-    @Test("two waits ending together: the loser finds the surface busy")
+    @Test("two waits ending together: the loser lost on priority")
     func twoWaitsEndTogether() {
         defer { finish() }
         facts.add(Self.campaign("high_tip", priority: 900, screen: "login", waitMs: 1000))
@@ -512,8 +528,26 @@ struct DMCDecisionEngineTests {
         advance(1000)
 
         #expect(routedKeys == ["high_tip"])
-        #expect(gating("low_tip", DropReason.surfaceBusy).first?.extras == ["blocking": "high_tip"])
+        #expect(gating("low_tip", TimelineReason.lowerPriority).first?.extras["lost_to"] == "high_tip")
+        #expect(gating("low_tip", DropReason.surfaceBusy).isEmpty)
         #expect(gating("low_tip", TimelineReason.waitEnded).isEmpty)
+    }
+
+    // dmc-case: dmc.wait_cancel.simultaneous_ends_router_outcome
+    @Test("two waits ending together: a dropped lead falls through")
+    func droppedLeadFallsThrough() {
+        defer { finish() }
+        facts.add(Self.campaign("high_tip", priority: 900, screen: "login", waitMs: 1000))
+        facts.add(Self.campaign("low_tip", priority: 800, screen: "login", waitMs: 1000))
+        engine.ready()
+        dropped.value.insert("high_tip")
+
+        engine.send(.screenViewed("login"))
+        advance(1000)
+
+        // The next one gets its turn.
+        #expect(routedKeys == ["high_tip", "low_tip"])
+        #expect(gating("low_tip", TimelineReason.lowerPriority).isEmpty)
     }
 
     // dmc-case: dmc.wait_cancel.background_time_counts_fires_on_resume

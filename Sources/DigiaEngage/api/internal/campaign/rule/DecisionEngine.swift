@@ -23,7 +23,8 @@ protocol DecisionFacts: AnyObject {
 }
 
 /// Shows a campaign the SDK fired itself; `firedBy` names the cause in logs.
-typealias RouteCampaign = (CampaignModel, String, RuleSignal) throws -> Void
+/// Returns what routing decided: taken, or dropped with its reason.
+typealias RouteCampaign = (CampaignModel, String, RuleSignal) throws -> RoutingVerdict
 
 /// Decides which Digia-owned campaign a signal shows: holds signals until
 /// `ready`, evaluates them one at a time, runs waits, and hands each winner to
@@ -141,7 +142,7 @@ final class DecisionEngine {
                 ]
             )
         }
-        try route(winner, signal.name, signal)
+        _ = try route(winner, signal.name, signal)
     }
 
     /// Routes each slot's winner as its own presentation, at once: an inline
@@ -180,7 +181,7 @@ final class DecisionEngine {
                     campaign: campaign.campaignKey)
             }
             guard !inSlot else { continue }
-            try route(campaign, signal.name, signal)
+            _ = try route(campaign, signal.name, signal)
         }
     }
 
@@ -249,52 +250,63 @@ final class DecisionEngine {
         }
     }
 
-    /// Waits that ended at the same moment, highest priority first: the first
-    /// that is still eligible routes, the rest find the surface busy (D4).
+    /// Waits that ended at the same moment, highest priority first (D4): each
+    /// that is no longer eligible, or that the router drops, logs its own reason
+    /// and the next one gets its turn. The first the router takes is the only
+    /// one that shows; the rest lost on priority.
     private func onWaitsElapsed(_ due: [PendingWait]) {
-        var winner: String?
+        var lead: PendingWait?
         for pending in due {
-            if let winner {
-                log.d(
-                    "Dropped — surface busy, \(winner) shows",
-                    campaign: pending.campaignKey,
-                    stage: .gating,
-                    reason: DropReason.surfaceBusy,
-                    extras: ["blocking": winner]
-                )
-            } else if onWaitElapsed(pending) {
-                winner = pending.campaignKey
+            guard let lead else {
+                if onWaitElapsed(pending)?.isAccepted == true { lead = pending }
+                continue
             }
+            let why =
+                pending.priority == lead.priority
+                ? "wins the tie by campaign key"
+                : "has a higher priority"
+            log.d(
+                "Not shown — \(lead.campaignKey) \(why) "
+                    + "(priority \(formatPriority(lead.priority)) vs \(formatPriority(pending.priority)))",
+                campaign: pending.campaignKey,
+                stage: .gating,
+                reason: TimelineReason.lowerPriority,
+                extras: [
+                    "verdict": "eligible",
+                    "outcome": "held_back",
+                    "lost_to": lead.campaignKey,
+                ]
+            )
         }
     }
 
     /// A wait ran its full time: check the campaign again with the trigger's
-    /// properties and current user values, then route it. Returns whether it
-    /// routed. Never throws.
-    private func onWaitElapsed(_ pending: PendingWait) -> Bool {
+    /// properties and current user values, then route it. Returns the router's
+    /// verdict, or nil when the campaign did not reach the router. Never throws.
+    private func onWaitElapsed(_ pending: PendingWait) -> RoutingVerdict? {
         let key = pending.campaignKey
         let campaign = facts.ready ? facts.find(key) : nil
         guard let campaign else {
             logWaitEnded(key, outcome: "gone")
-            return false
+            return nil
         }
         // Checked again, here: leaving the screen and coming back in time is fine.
         if case .valid(let validRule)? = campaign.rule, let screens = validRule.screens,
            !screens.contains(facts.currentScreen)
         {
             logWaitCancelled(pending, cause: .notOnTargetScreen)
-            return false
+            return nil
         }
         let verdict = evaluateOne(
             campaign, trigger: pending.trigger,
             attributes: facts.attributes, device: facts.device)
         guard let verdict else {
             logWaitEnded(key, outcome: "gone")
-            return false
+            return nil
         }
         if verdict.kind == .notTriggered {
             logWaitEnded(key, outcome: "rule_changed")
-            return false
+            return nil
         }
         // The time that passed, which a sleeping phone or a held signal makes
         // differ from the configured length.
@@ -310,12 +322,11 @@ final class DecisionEngine {
             campaign, verdict: verdict, inAudience: facts.inAudience, capped: facts.capped)
         {
             reportIneligible(campaign, reason: reason, detail: verdict.detail)
-            return false
+            return nil
         }
         // On a timer, routing must cost at most this campaign, never the app.
         do {
-            try route(campaign, "\(pending.trigger.name) after wait", pending.trigger)
-            return true
+            return try route(campaign, "\(pending.trigger.name) after wait", pending.trigger)
         } catch {
             log.e(
                 "Dropped — routing threw after the wait",
@@ -325,7 +336,7 @@ final class DecisionEngine {
                 reason: TimelineReason.internalError,
                 extras: ["exception_class": String(describing: type(of: error))]
             )
-            return false
+            return nil
         }
     }
 

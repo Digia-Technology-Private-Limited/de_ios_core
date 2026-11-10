@@ -141,10 +141,13 @@ final class Waits {
         }
         if let next = pending.values.map(\.endsAtMs).min() {
             let interval = max(0, next - now)
-            timer = Timer.scheduledTimer(withTimeInterval: Double(interval) / 1_000, repeats: false) {
+            let timer = Timer(timeInterval: Double(interval) / 1_000, repeats: false) {
                 [weak self] _ in
                 Task { @MainActor [weak self] in self?.schedule() }
             }
+            // Common modes, so a wait still ends on time while the user scrolls.
+            RunLoop.main.add(timer, forMode: .common)
+            self.timer = timer
         }
         if !due.isEmpty { onElapsed(due) }
     }

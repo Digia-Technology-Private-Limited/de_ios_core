@@ -853,12 +853,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// The state gate `deliver` and `triggerCampaign` share, as Flutter and Android: route when
     /// ready, otherwise settle at once as dropped so the CEP gets its slot back. Core never
     /// holds a trigger (SP5); the reason says which of the not-ready states it met.
-    func routeOrDrop(_ controller: PresentationController, driver: CampaignDriver) {
+    @discardableResult
+    func routeOrDrop(_ controller: PresentationController, driver: CampaignDriver) -> RoutingVerdict {
         let drop: (DropReason, String)
         switch sdkState {
         case .ready:
-            routeNow(controller, driver: driver)
-            return
+            return routeNow(controller, driver: driver)
         case .notInitialized:
             drop = (.notInitialized, "Digia.initialize() has not been called")
         case .initializing:
@@ -868,6 +868,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         log.w("Dropped — \(drop.1)", campaign: controller.trigger.campaignKey)
         controller.settle(.dropped(reason: drop.0, detail: drop.1))
+        return .dropped(reason: drop.0, detail: drop.1)
     }
 
     /// The `trigger_source` of a delivery: the CEP's id, or `host` when the host
@@ -877,12 +878,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     /// Routes a delivery against the store as it stands right now.
-    private func routeNow(_ controller: PresentationController, driver: CampaignDriver) {
+    private func routeNow(_ controller: PresentationController, driver: CampaignDriver) -> RoutingVerdict {
         recordDelivery(controller, source: Self.deliverySource(driver))
         // Routing must see the stamped payload: it is the instance every render
         // surface stores and hands back, and the only thing that leads an event
         // back to this presentation.
-        switch routeOrganicTrigger(controller.trigger, driver: driver) {
+        let verdict = routeOrganicTrigger(controller.trigger, driver: driver)
+        switch verdict {
         case .accepted(let payload, let kind):
             let campaign = findCampaign(payload)
             let dueDelay = Self.firstAppearanceDelay(campaign)
@@ -901,6 +903,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             if let cause { controller.noteDropDetail("cause", cause) }
             controller.settle(.dropped(reason: reason, detail: detail))
         }
+        return verdict
     }
 
     /// Records `Digia Experience Triggered` for a trigger whose campaign is in

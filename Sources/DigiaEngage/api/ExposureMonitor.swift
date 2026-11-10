@@ -25,8 +25,10 @@ enum ExposureGeometry {
 ///
 /// UIKit has no global scroll or layout callback, and a host can move, hide, clip or cover a view in
 /// many ways (scroll, push, tab switch, React Native layout). So one repeating timer polls every
-/// tracked view while anything is tracked; it stops when nothing is. A sheet or dialog presented over
-/// the view leaves it in its window, so closing one is no new appearance.
+/// tracked view while anything is tracked; it stops when nothing is. Scrolling is the common case, so
+/// the scroll views around tracked views are also observed and a scroll re-checks on the next turn
+/// instead of waiting for the poll. A sheet or dialog presented over the view leaves it in its window,
+/// so closing one is no new appearance.
 @MainActor
 final class ExposureMonitor {
     static let shared = ExposureMonitor()
@@ -55,6 +57,13 @@ final class ExposureMonitor {
     private var entries: [ID: Entry] = [:]
     private var timer: Timer?
     private var checkScheduled = false
+    /// One `contentOffset` observation per scroll view that holds a tracked view.
+    private var scrollObservers: [ObjectIdentifier: ScrollObserver] = [:]
+
+    private struct ScrollObserver {
+        weak var scroll: UIScrollView?
+        let observation: NSKeyValueObservation
+    }
 
     /// Starts tracking `view` under `tag`. Tracking the same view and tag again only replaces the
     /// callback: its exposure state is kept, so a re-register is no new appearance.
@@ -86,6 +95,7 @@ final class ExposureMonitor {
             entry.exposed = exposed
             if exposed { entry.onExposed() }
         }
+        observeScrollAncestors()
         stopTimerIfIdle()
     }
 
@@ -113,6 +123,30 @@ final class ExposureMonitor {
         }
     }
 
+    /// Keeps one observation on each scroll view around a tracked view, so a scroll re-checks at once.
+    /// Rebuilt on every check, so a view that moves to another scroll view is followed within a poll.
+    private func observeScrollAncestors() {
+        var current: [ObjectIdentifier: UIScrollView] = [:]
+        for entry in entries.values {
+            var ancestor = entry.view?.superview
+            while let view = ancestor {
+                if let scroll = view as? UIScrollView { current[ObjectIdentifier(scroll)] = scroll }
+                ancestor = view.superview
+            }
+        }
+        // Compared by instance too: a freed scroll view's address can be reused by a new one.
+        for (id, observer) in scrollObservers where current[id] == nil || current[id] !== observer.scroll {
+            observer.observation.invalidate()
+            scrollObservers.removeValue(forKey: id)
+        }
+        for (id, scroll) in current where scrollObservers[id] == nil {
+            let observation = scroll.observe(\.contentOffset) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.scheduleCheck() }
+            }
+            scrollObservers[id] = ScrollObserver(scroll: scroll, observation: observation)
+        }
+    }
+
     private func startTimerIfNeeded() {
         guard timer == nil else { return }
         let timer = Timer(timeInterval: Self.interval, repeats: true) { [weak self] _ in
@@ -128,6 +162,8 @@ final class ExposureMonitor {
         guard entries.isEmpty else { return }
         timer?.invalidate()
         timer = nil
+        scrollObservers.values.forEach { $0.observation.invalidate() }
+        scrollObservers.removeAll()
     }
 
     static func isExposed(_ view: UIView) -> Bool {

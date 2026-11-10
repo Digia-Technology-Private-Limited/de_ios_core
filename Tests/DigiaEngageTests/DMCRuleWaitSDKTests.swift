@@ -335,8 +335,8 @@ struct DMCRuleWaitSDKTests {
     }
 
     // dmc-case: dmc.wait_cancel.simultaneous_ends_router_outcome
-    @Test("of waits ending together, the losers find the surface busy")
-    func losersFindSurfaceBusy() async throws {
+    @Test("of waits ending together, the losers lost on priority")
+    func losersLostOnPriority() async throws {
         defer { DigiaLogger.unregisterSink(sink) }
         let (sdk, _) = try await boot([
             nudge("high_tip", 900, wait: ["type": "delay", "ms": 1_000]),
@@ -347,9 +347,34 @@ struct DMCRuleWaitSDKTests {
         advance(sdk, ms: 1_000)
 
         #expect(shown(sdk) == "high_tip")
-        try await Task.sleep(nanoseconds: 50_000_000)
-        #expect(busyDrops("low_tip").count == 1)
-        #expect(withReason("low_tip", .lowerPriority).isEmpty)
+        #expect(withReason("low_tip", .lowerPriority).count == 1)
+        #expect(busyDrops("low_tip").isEmpty)
+        sdk.controller.dismissNudge()
+    }
+
+    // dmc-case: dmc.user_context.clearing_user_drops_context
+    @Test("identified follows login and logout")
+    func identifiedFollowsLoginAndLogout() async throws {
+        defer { DigiaLogger.unregisterSink(sink) }
+        let loginPrompt: [String: Any] = [
+            "priority": 600,
+            "trigger": ["any": [["type": "event", "name": "add_to_cart"]]],
+            "conditions": ["all": [["type": "device", "key": "identified", "op": "eq", "value": false]]],
+        ]
+        let (sdk, _) = try await boot([nudge("login_prompt", 600, rule: loginPrompt)])
+
+        sdk.trackEvent("add_to_cart")
+        #expect(shown(sdk) == "login_prompt")
+        sdk.controller.dismissNudge()
+
+        sdk.setUserId("user-1")
+        sdk.trackEvent("add_to_cart")
+        #expect(shown(sdk) == nil)
+        #expect(withReason("login_prompt", .conditionFailed).count == 1)
+
+        sdk.clearUserId()
+        sdk.trackEvent("add_to_cart")
+        #expect(shown(sdk) == "login_prompt")
         sdk.controller.dismissNudge()
     }
 

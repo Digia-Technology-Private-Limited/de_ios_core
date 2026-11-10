@@ -33,6 +33,7 @@ let ruleDeviceKeys: Set<String> = [
     "sdk_version",
     "locale",
     "app_opens",
+    "identified",
 ]
 private let versionKeys: Set<String> = ["os_version", "app_version", "sdk_version"]
 
@@ -403,6 +404,10 @@ private func parseComparison(_ json: Any?, type: String) throws -> Comparison {
     let leaf = Comparison(source: source, key: key, op: op, value: json["value"])
     guard ruleValueFits(leaf) else {
         try malformed("\(type) \(key) \(rawOp) value")
+    }
+    // `device.identified` is "setUserId is in effect": true or false.
+    if source == .device, key == "identified", op != .eq || !ruleIsBool(leaf.value) {
+        try malformed("device identified needs eq with a boolean")
     }
     return leaf
 }

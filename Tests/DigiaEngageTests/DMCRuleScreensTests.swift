@@ -59,7 +59,10 @@ struct DMCRuleScreensTests {
         self.routed = routed
         engine = DecisionEngine(
             facts: facts,
-            route: { campaign, _, _ in routed.value.append(campaign.campaignKey) },
+            route: { campaign, _, _ in
+                routed.value.append(campaign.campaignKey)
+                return routedVerdict(campaign)
+            },
             nowMs: { clock.now }
         )
         DigiaLogger.registerSink(sink)

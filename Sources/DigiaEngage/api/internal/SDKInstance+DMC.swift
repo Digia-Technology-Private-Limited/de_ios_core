@@ -67,6 +67,7 @@ extension SDKInstance {
             facts: EngineFacts(self),
             route: { [weak self] campaign, firedBy, signal in
                 self?.routeSelfTriggered(campaign, firedBy: firedBy, signal: signal)
+                    ?? .dropped(reason: .notInitialized, detail: "The SDK was released")
             },
             nowMs: { [weak self] in self?.waitClock() ?? MonotonicClock.nowMs() }
         )
@@ -83,7 +84,9 @@ extension SDKInstance {
     /// an OR trigger, or the event a wait started from. Its properties feed the
     /// campaign's `{{ event.<key> }}` tokens; a non-event signal leaves the
     /// event scope empty, so those tokens use their fallback.
-    private func routeSelfTriggered(_ campaign: CampaignModel, firedBy: String, signal: RuleSignal) {
+    private func routeSelfTriggered(
+        _ campaign: CampaignModel, firedBy: String, signal: RuleSignal
+    ) -> RoutingVerdict {
         // No CEP hands us per-firing values, so the campaign interpolates what
         // is known about this user — imported attributes and whatever the app
         // set — over its dashboard defaults, plus the `user.` / `event.`
@@ -107,7 +110,7 @@ extension SDKInstance {
         )
         let controller = coordinator.open(payload, owner: driver.owner)
         observeDelivery(controller, firedBy: firedBy)
-        routeOrDrop(controller, driver: driver)
+        return routeOrDrop(controller, driver: driver)
     }
 
     /// The `device` values rules read. `os_version` is the bare version, or nil.
@@ -124,6 +127,8 @@ extension SDKInstance {
         snapshot["sdk_version"] = DigiaSdkVersion.value
         snapshot["locale"] = Locale.preferredLanguages.first
         snapshot["app_opens"] = appOpens.value
+        // Read at each evaluation, so a login or logout counts at once.
+        snapshot["identified"] = services?.identityManager.userId != nil
         return snapshot
     }
 
@@ -188,7 +193,9 @@ extension SDKInstance {
         } else {
             engine.send(.appForegrounded)
         }
-        if let manager = services?.userContextManager, manager.needsRefresh {
+        // Always ask: the manager skips the call unless the context expired or
+        // the user's attributes changed since the last send.
+        if let manager = services?.userContextManager {
             Task { @MainActor in await manager.refresh() }
         }
     }
