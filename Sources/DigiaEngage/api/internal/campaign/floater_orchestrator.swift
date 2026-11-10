@@ -341,10 +341,10 @@ final class FloaterOrchestrator: ObservableObject {
         let token = active.token
         let url = active.resolvedMediaUrl.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // A URL still carrying an unresolved `{{ token }}` would 404 loudly. With no
+        // A URL the wrappers cannot fetch (blank, an unresolved `{{ token }}`, no scheme). With no
         // poster to fall back to there is nothing this campaign could show, so drop
         // it rather than float an empty frame.
-        if url.isEmpty || url.contains("{{") {
+        if mediaUsableURL(url) == nil {
             abandonMedia(token: token, reason: "no usable media url", cause: "invalid_url")
             return
         }

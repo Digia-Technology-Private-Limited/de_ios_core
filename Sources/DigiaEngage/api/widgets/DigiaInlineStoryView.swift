@@ -961,8 +961,7 @@ struct StoryRemoteImage: View {
             MediaImage(
                 url: urlString,
                 fit: .fill,
-                onSuccess: { loaded = true },
-                errorContent: AnyView(storyImageGround)
+                onSuccess: { loaded = true }
             )
         }
         Group {

@@ -33,25 +33,19 @@ struct FloaterMediaView: View {
         }
     }
 
-    @ViewBuilder
     private var lottieView: some View {
-        if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{") {
-            MediaLottie(
-                url: resolvedUrl,
-                fit: cover ? .cover : .contain,
-                loop: media.loop,
-                autoplay: media.autoplay
-            )
-        }
+        MediaLottie(
+            url: resolvedUrl,
+            fit: cover ? .cover : .contain,
+            loop: media.loop,
+            autoplay: media.autoplay
+        )
     }
 
-    @ViewBuilder
     private var imageView: some View {
         // The orchestrator only reveals the window once its media has loaded into the cache
         // `MediaImage` reads, and drops the campaign outright when it could not, so a failure
-        // here is rare, and shows the flat black the window showed before the wrapper.
-        if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{") {
-            MediaImage(url: resolvedUrl, fit: cover ? .cover : .contain, errorContent: AnyView(Color.black))
-        }
+        // here is rare, and leaves the box empty.
+        MediaImage(url: resolvedUrl, fit: cover ? .cover : .contain)
     }
 }

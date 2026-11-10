@@ -8,39 +8,35 @@ internal import Lottie
 /// with the authored BlurHash as the still while the animation loads and no backdrop of its own,
 /// so a transparent animation stays transparent over the page.
 ///
-/// When the load fails, and when the URL is unusable, the box shows the error placeholder
-/// ("Lottie failed") and no BlurHash; `errorContent` replaces the placeholder.
+/// When the load fails, and when the URL is unusable, the still stays: the BlurHash if one is
+/// authored, else nothing, so the box is empty. There is no error look.
 /// `freezeAt` draws one frame at that progress instead of playing, for deterministic snapshots.
 ///
 /// Health is reported once per failure, for the campaign in the environment: `invalid_url` for an
 /// unusable URL (blank, an unresolved `{{variable}}`, no scheme), `http_4xx`, `decode`. A network
 /// failure, a timeout or a 5xx reports nothing.
 ///
-/// Never throws from the render path: an unusable URL shows the error placeholder without fetching.
+/// Never throws from the render path: an unusable URL shows the still without fetching.
 struct MediaLottie: View {
     let url: String
     var fit: MediaFit = .cover
     var blurHash: String? = nil
     var loop: Bool = true
     var autoplay: Bool = true
-    var errorContent: AnyView? = nil
     var freezeAt: CGFloat? = nil
 
     @Environment(\.digiaCampaignKey) private var campaignKey
     @Environment(\.mediaServices) private var services
     @State private var source: LottieAnimationSource?
-    @State private var failed = false
+    /// The URL `source` was loaded from, so a view that appears again keeps its animation.
+    @State private var loadedURL: String?
 
     var body: some View {
         ZStack {
             if let source {
                 animation(source)
             } else {
-                if failed {
-                    errorContent ?? AnyView(MediaErrorPlaceholder(label: "Lottie failed"))
-                } else {
-                    MediaStill(fit: fit, blurHash: blurHash)
-                }
+                MediaStill(fit: fit, blurHash: blurHash)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -66,22 +62,22 @@ struct MediaLottie: View {
     }
 
     private func load() async {
+        // `.task(id:)` runs again each time the view appears: an animation already loaded for this
+        // URL stays, so one scrolled off and back keeps playing instead of blinking to its still.
+        if source != nil, loadedURL == url { return }
         source = nil
-        failed = false
-        guard let url = mediaUsableURL(url) else {
-            failed = true
+        loadedURL = nil
+        guard let usable = mediaUsableURL(url) else {
             services.reportHealth(campaignKey, .lottie, "invalid_url")
             return
         }
-        let loaded = await services.loadLottie(url)
+        let loaded = await services.loadLottie(usable)
         guard !Task.isCancelled else { return }
         if let loadedSource = loaded.source {
             source = loadedSource
-        } else {
-            failed = true
-            if let cause = loaded.failureCause {
-                services.reportHealth(campaignKey, .lottie, cause)
-            }
+            loadedURL = url
+        } else if let cause = loaded.failureCause {
+            services.reportHealth(campaignKey, .lottie, cause)
         }
     }
 }

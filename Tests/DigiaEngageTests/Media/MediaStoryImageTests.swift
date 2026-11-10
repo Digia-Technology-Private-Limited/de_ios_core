@@ -7,8 +7,7 @@ import UIKit
 
 // A story picture (`StoryRemoteImage`: the inline story's preview card, rail card and viewer page,
 // and the canvas story's) draws through `MediaImage`. When it fails it reports once for the
-// surface's campaign, and shows the flat dark box the story always showed, not the wrapper's
-// "Image failed" placeholder.
+// surface's campaign, and shows the flat dark box the story always showed.
 
 extension RenderedUITests {
 @MainActor
@@ -32,10 +31,9 @@ struct MediaStoryImageTests {
                 HealthRecorder.Record(campaignKey: MediaStage.campaign, kind: .image, cause: "http_4xx")
             ])
         #expect(MediaOrigin.requests(for: target).count == 1)
-        #expect(!MediaStage.shows("Image failed", in: window))
 
         // The middle of the 240x120 box, which is centred on the 390x844 frame, is the story's
-        // #1A1A1A, not the wrapper's #F1F1F5 placeholder or the striped host behind the box.
+        // #1A1A1A, not the striped host behind the box.
         let drawn = ComponentTestHost.settledImage(of: window)
         let dark = UIColor(red: 0.10, green: 0.10, blue: 0.10, alpha: 1)
         for (x, y) in [(195, 422), (85, 372), (305, 472)] {

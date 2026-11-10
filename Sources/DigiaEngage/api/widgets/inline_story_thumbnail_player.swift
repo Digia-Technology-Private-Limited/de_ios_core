@@ -38,13 +38,7 @@ struct StoryThumbnailPlaceholderView: View {
             case let .image(source, fit, placeholder):
                 // A picture that cannot load keeps the authored BlurHash, as it always did.
                 let mediaFit = MediaFit(rawValue: (fitOverride ?? fit).rawValue) ?? .cover
-                let blurHash = placeholder?.stillBlurHash
-                MediaImage(
-                    url: source,
-                    fit: mediaFit,
-                    blurHash: blurHash,
-                    errorContent: AnyView(MediaStill(fit: mediaFit, blurHash: blurHash))
-                )
+                MediaImage(url: source, fit: mediaFit, blurHash: placeholder?.stillBlurHash)
             case nil:
                 EmptyView()
             }
