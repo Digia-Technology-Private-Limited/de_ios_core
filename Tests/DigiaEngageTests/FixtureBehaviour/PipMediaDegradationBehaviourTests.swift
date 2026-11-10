@@ -61,7 +61,7 @@ struct PipMediaDegradationBehaviourTests {
     }
 
     // Fails if: Sources/DigiaEngage/api/internal/campaign/floater_orchestrator.swift `prepareMedia`
-    // `if url.isEmpty || url.contains("{{") {` -> `if url.contains("{{") {` (the undeclared variable
+    // `if mediaUsableURL(url) == nil {` -> `if url.contains("{{") {` (the undeclared variable
     // resolves to ""; the empty url then reaches the loader and fails as something else).
     @Test("a url that is only an undeclared variable is never shown, and is reported as an invalid url rather than fetched")
     func undeclaredVariableUrlIsNeverShown() async throws {
@@ -78,7 +78,7 @@ struct PipMediaDegradationBehaviourTests {
         #expect(try await impressions(sdk, json) == 0)
     }
 
-    // Fails if: floater_orchestrator.swift `prepareMedia` `if url.isEmpty || url.contains("{{") {` ->
+    // Fails if: floater_orchestrator.swift `prepareMedia` `if mediaUsableURL(url) == nil {` ->
     // `if url.contains("{{") {`.
     @Test("a declared variable the trigger does not supply is never shown")
     func unsuppliedDeclaredVariableIsNeverShown() async throws {
@@ -93,6 +93,21 @@ struct PipMediaDegradationBehaviourTests {
         let failure = try #require(sdk.records(keyOf(json), reason: TimelineReason.mediaLoadFailed).first)
         #expect(failure.extras["cause"] == "invalid_url")
         #expect(try await impressions(sdk, json) == 0)
+    }
+
+    // Fails if: floater_orchestrator.swift `prepareMedia` `if mediaUsableURL(url) == nil {` ->
+    // `if url.isEmpty || url.contains("{{") {` (a url with no scheme is then fetched, fails with no
+    // HTTP status, and the campaign is dropped with no report).
+    @Test("a url with no scheme is dropped and reported as an invalid url, as a banner's is")
+    func schemelessUrlIsReportedAsInvalid() async throws {
+        let json = try floaterFixture(Self.missing, setting: [(["media", "url"], "cdn.example.com/a.png")])
+        let (sdk, _) = try await deliver(json)
+        defer { sdk.tearDown() }
+
+        #expect(sdk.pip.state == nil)
+        #expect(sdk.pip.lastStartFailureReason?.contains("no usable media url") == true)
+        let failure = try #require(sdk.records(keyOf(json), reason: TimelineReason.mediaLoadFailed).first)
+        #expect(failure.extras["cause"] == "invalid_url")
     }
 
     /// The control for the two above: the same campaign shows once its url is real.
