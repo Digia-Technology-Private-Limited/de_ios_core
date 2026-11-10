@@ -14,8 +14,11 @@ final class NudgeOrchestrator {
     private let ctx: SurfaceContext
 
     func reportNudgeImpression() {
-        guard let nudge = ctx.sdk.controller.activeNudge else { return }
-        ctx.sdk.controller.startNudgeAutoDismiss()
+        let controller = ctx.sdk.controller
+        guard let nudge = controller.activeNudge else { return }
+        controller.startNudgeAutoDismiss()
+        guard !controller.nudgeImpressed else { return }
+        controller.nudgeImpressed = true
         ctx.impressed(
             nudge.payload,
             campaignKey: nudge.payload.campaignKey,

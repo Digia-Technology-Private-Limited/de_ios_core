@@ -13,9 +13,13 @@ final class DigiaOverlayController: ObservableObject {
         didSet {
             nudgeAutoDismissTask?.cancel()
             nudgeAutoDismissTask = nil
+            nudgeImpressed = false
         }
     }
     private var nudgeAutoDismissTask: Task<Void, Never>?
+    /// Whether this presentation already reported its impression. SwiftUI can run
+    /// `onAppear` more than once for one presentation; Viewed is sent once.
+    var nudgeImpressed = false
     @Published private(set) var activeStoryOverlay: InlineStoryOverlayState?
 
     var onAction: ((_ actionType: String, _ url: String, _ payload: CEPTriggerPayload) -> Bool)?
