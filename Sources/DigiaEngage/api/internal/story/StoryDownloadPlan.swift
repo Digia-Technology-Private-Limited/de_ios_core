@@ -48,7 +48,7 @@ internal enum StoryDownloadPlan {
     ) -> [Action] {
         guard !stories.isEmpty, stories.indices.contains(currentIndex) else { return [] }
         var actions: [Action] = []
-        actions.append(playerOrWholeFile(stories: stories, index: currentIndex, priority: .onScreen))
+        actions.append(playerOrWholeFile(stories: stories, index: currentIndex, priority: .viewerPage))
         if !firstFrameShown { return actions }
         if slowNetwork {
             if let byte = byteOrWholeFile(
@@ -325,7 +325,7 @@ final class StoryPlanDriver {
             let key = keyOf(want.index)
             let current = held[want.index]
             if let current, current.key == key, current.priority == want.priority {
-                if want.priority != .onScreen { prepareNeighbour(current.player) }
+                if want.priority != .viewerPage { prepareNeighbour(current.player) }
                 continue
             }
             guard let url = mediaUsableURL(urlOf(want.index)),
@@ -334,7 +334,7 @@ final class StoryPlanDriver {
             if let current { pool.giveBack(key: current.key, player: current.player, priority: current.priority) }
             held[want.index] = Held(key: key, player: player, priority: want.priority)
             // The current page takes its own player over (sound, play); neighbours wait.
-            if want.priority != .onScreen { prepareNeighbour(player) }
+            if want.priority != .viewerPage { prepareNeighbour(player) }
         }
     }
 

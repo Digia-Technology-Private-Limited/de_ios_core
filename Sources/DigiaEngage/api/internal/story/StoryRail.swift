@@ -22,18 +22,17 @@ func storyPoolKey(namespace: String?, index: Int) -> String {
     return "\(namespace)/story-\(index)"
 }
 
-/// What the rail decided for one card. A lone video (or every video, in `simultaneous` mode)
-/// loops its window in place; a rotation hands over instead.
+/// What the rail decided for one card. A lone video loops its window in place; a rotation hands over instead.
 struct StoryRailDecision: Equatable {
     let play: Bool
     let repeatWindow: Bool
 }
 
 /// The rail's visibility, lifecycle, failure, restart and turn state. Pure, so the schedule is
-/// tested without a view. `sequential` cards take turns; `simultaneous` cards all play at once,
-/// as on `main`. Mirrors Android `StoryRailState`, plus the `simultaneous` mode `main` iOS had.
+/// tested without a view. The cards take turns, one at a time (continuous is the only mode, OD-24: a
+/// campaign that still sends `thumbnailVideoPlayback: "simultaneous"` plays the same way; the field
+/// is no longer parsed). Mirrors Android `StoryRailState`.
 struct StoryRailState: Equatable {
-    var mode: ThumbnailVideoPlaybackMode
     var lifecycleActive = false
     var overlayVisible = false
     var slotVisible = false
@@ -46,10 +45,6 @@ struct StoryRailState: Equatable {
     var skipped: Set<Int> = []
     var activeIndex: Int? = nil
     var restartGeneration = 0
-
-    init(mode: ThumbnailVideoPlaybackMode) {
-        self.mode = mode
-    }
 
     var playable: Set<Int> { eligible.subtracting(failed) }
 
@@ -93,7 +88,7 @@ struct StoryRailState: Equatable {
     /// A turn that played: the next card is up, and any card the pool refused earlier is tried
     /// again on its next turn.
     func complete(index: Int) -> StoryRailState {
-        guard mode == .sequential, activeIndex == index else { return self }
+        guard activeIndex == index else { return self }
         var updated = self
         updated.skipped = []
         updated.activeIndex = nextStoryRailIndex(eligible: playable, afterIndex: index)
@@ -105,41 +100,30 @@ struct StoryRailState: Equatable {
     /// playable card has been refused with no turn in between, nothing is scheduled until the
     /// next restart.
     func skip(index: Int) -> StoryRailState {
+        guard activeIndex == index else { return self }
         var updated = self
-        switch mode {
-        case .simultaneous:
-            updated.skipped.insert(index)
-        case .sequential:
-            guard activeIndex == index else { return self }
-            updated.skipped.insert(index)
-            updated.activeIndex = nextStoryRailIndex(eligible: updated.turnCandidates, afterIndex: index)
-        }
+        updated.skipped.insert(index)
+        updated.activeIndex = nextStoryRailIndex(eligible: updated.turnCandidates, afterIndex: index)
         return updated
     }
 
     func decision(index: Int) -> StoryRailDecision {
-        let scheduled: Bool = switch mode {
-        case .simultaneous: turnCandidates.contains(index)
-        case .sequential: playable.contains(index) && activeIndex == index
-        }
+        let scheduled = playable.contains(index) && activeIndex == index
         return StoryRailDecision(
             play: scheduled && lifecycleActive && !overlayVisible && slotVisible,
-            repeatWindow: mode == .simultaneous || playable.count == 1
+            repeatWindow: playable.count == 1
         )
     }
 
     private func restartFromFirst() -> StoryRailState {
         var updated = self
         updated.skipped = []
-        updated.activeIndex = mode == .sequential
-            ? nextStoryRailIndex(eligible: updated.playable, afterIndex: nil)
-            : nil
+        updated.activeIndex = nextStoryRailIndex(eligible: updated.playable, afterIndex: nil)
         updated.restartGeneration &+= 1
         return updated
     }
 
     private func reconcileActive() -> StoryRailState {
-        guard mode == .sequential else { return self }
         if let current = activeIndex, playable.contains(current) { return self }
         var updated = self
         updated.activeIndex = nextStoryRailIndex(eligible: turnCandidates, afterIndex: activeIndex)
@@ -263,7 +247,6 @@ struct StoryRailGeometryPreference: PreferenceKey {
 @MainActor
 struct StoryRail: View {
     let items: [StoryItemConfig]
-    let mode: ThumbnailVideoPlaybackMode
     let cardWidth: CGFloat
     let cardHeight: CGFloat
     let cardCornerRadius: CGFloat
@@ -281,7 +264,6 @@ struct StoryRail: View {
 
     init(
         items: [StoryItemConfig],
-        mode: ThumbnailVideoPlaybackMode,
         cardWidth: CGFloat,
         cardHeight: CGFloat,
         cardCornerRadius: CGFloat,
@@ -290,14 +272,13 @@ struct StoryRail: View {
         onOpen: @escaping @MainActor (Int, StoryHandover?) -> Void
     ) {
         self.items = items
-        self.mode = mode
         self.cardWidth = cardWidth
         self.cardHeight = cardHeight
         self.cardCornerRadius = cardCornerRadius
         self.cardSpacing = cardSpacing
         self.overlayOpen = overlayOpen
         self.onOpen = onOpen
-        _playback = State(initialValue: StoryRailState(mode: mode))
+        _playback = State(initialValue: StoryRailState())
     }
 
     var body: some View {
@@ -352,9 +333,9 @@ struct StoryRail: View {
             scrollSettleTask?.cancel()
             scrollSettleTask = nil
         }
-        .onChange(of: StoryRailConfigurationIdentity(items: items, mode: mode)) { _ in
+        .onChange(of: StoryRailConfigurationIdentity(items: items)) { _ in
             // New stories: a fresh schedule, keeping only what the host reports.
-            var fresh = StoryRailState(mode: mode)
+            var fresh = StoryRailState()
             fresh.lifecycleActive = playback.lifecycleActive
             fresh.overlayVisible = playback.overlayVisible
             fresh.restartGeneration = playback.restartGeneration &+ 1
@@ -417,7 +398,6 @@ struct StoryRail: View {
 
 private struct StoryRailConfigurationIdentity: Equatable {
     let items: [StoryItemConfig]
-    let mode: ThumbnailVideoPlaybackMode
 }
 
 private extension StoryRailVisibility {

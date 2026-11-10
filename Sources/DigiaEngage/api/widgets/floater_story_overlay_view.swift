@@ -340,7 +340,7 @@ private struct FloaterStorySessionView: View {
     @ViewBuilder
     private func storyViewer(safeAreaInsets: EdgeInsets, showsOverlays: Bool) -> some View {
         if case .story(
-            _, let pages, _, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
+            _, let pages, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
         ) = config.story {
             // The floater keeps its own `FloaterEvent` vocabulary rather than the inline story's,
             // so it maps only the one interaction that has no equivalent there: reaching the end.

@@ -82,7 +82,7 @@ struct SurfaceVideoGroundTests {
         item.thumbnailBoxFit = .contain
 
         let window = MediaStage.mount(StoryRail(
-            items: [item], mode: .simultaneous, cardWidth: MediaStage.size.width, cardHeight: MediaStage.size.height,
+            items: [item], cardWidth: MediaStage.size.width, cardHeight: MediaStage.size.height,
             cardCornerRadius: 0, cardSpacing: 0, overlayOpen: false, onOpen: { _, _ in }))
         defer { ComponentTestHost.unmount(window) }
         try await waitForFirstFrame(window)

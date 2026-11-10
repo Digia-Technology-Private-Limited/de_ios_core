@@ -12,14 +12,14 @@ struct CanvasStoryRendererTests {
 
     // MARK: - 1. Story Rail Parser & Properties Preservation
 
-    @Test("story rail parser preserves pages, playback mode, and chrome configuration")
+    @Test("story rail parser preserves pages and chrome configuration")
     func storyRailParserPreservesProperties() throws {
         let widget = try parsedStoryWidget([
             "cardAspectRatio": 0.75,
             "cardCornerRadius": 16,
             "cardSpacing": 14,
             "showRail": true,
-            "thumbnailVideoPlayback": "sequential",
+            "thumbnailVideoPlayback": "simultaneous", // an old payload: still parses, plays one at a time
             "restartOnCompleted": true,
             "startMuted": false,
             "defaultDurationSeconds": 6.5
@@ -30,7 +30,7 @@ struct CanvasStoryRendererTests {
 
         guard case .story(
             let box, let pages, let cardAspectRatio, let cardCornerRadius, let cardSpacing,
-            let showRail, let thumbnailVideoPlayback, let restartOnCompleted, let startMuted,
+            let showRail, let restartOnCompleted, let startMuted,
             let chrome
         ) = widget else {
             Issue.record("Expected .story widget")
@@ -51,7 +51,6 @@ struct CanvasStoryRendererTests {
         #expect(cardCornerRadius == 16)
         #expect(cardSpacing == 14)
         #expect(showRail == true)
-        #expect(thumbnailVideoPlayback == .sequential)
         #expect(restartOnCompleted == true)
         #expect(startMuted == false)
         #expect(chrome.width == 360)
@@ -61,20 +60,18 @@ struct CanvasStoryRendererTests {
     func storyRailParserClampingAndDefaults() throws {
         let widget = try parsedStoryWidget([
             "cardAspectRatio": -0.5, // <= 0 -> fallback 0.72
-            "thumbnailVideoPlayback": "unknown_mode", // -> .simultaneous
             "defaultDurationSeconds": -2.0 // <= 0 -> max(0.1, ...) fallback 5.0
         ])
 
         guard case .story(
             _, let pages, let ratio, _, _,
-            let showRail, let playbackMode, let restart, let muted, _
+            let showRail, let restart, let muted, _
         ) = widget else {
             Issue.record("Expected .story widget")
             return
         }
 
         #expect(ratio == 0.72)
-        #expect(playbackMode == .simultaneous)
         #expect(showRail == true) // Default
         #expect(restart == false) // Default
         #expect(muted == true) // Default
@@ -448,7 +445,7 @@ struct CanvasStoryRendererTests {
     ) throws -> (view: some View, pages: [CampaignCanvasStoryPage]) {
         let widget = try parsedStoryWidget([:], pages: pagesJSON)
         guard case .story(
-            _, let pages, _, _, _, _, _, _, _, let chrome
+            _, let pages, _, _, _, _, _, _, let chrome
         ) = widget else {
             throw DesignTokenError.invalid("Failed to parse story widget")
         }

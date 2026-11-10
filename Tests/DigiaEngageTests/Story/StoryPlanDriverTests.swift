@@ -57,15 +57,15 @@ struct StoryPlanDriverTests {
     func handoverKeepsTheCardsPlayer() throws {
         let pool = pool(size: 1)
         let card = stories[0]
-        let tile = try #require(pool.borrow(key: key(0), url: URL(string: card.url)!, priority: .railThumb))
+        let tile = try #require(pool.borrow(key: key(0), url: URL(string: card.url)!, priority: .onScreen))
         let item = tile.currentItem
 
         let handover = storyRailHandover(item: card, playing: true, key: key(0), pool: pool)
         // The card lets go as the viewer covers it, and something else asks for a player before
         // the page borrows.
-        pool.giveBack(key: key(0), player: tile, priority: .railThumb)
+        pool.giveBack(key: key(0), player: tile, priority: .onScreen)
         _ = pool.borrow(key: key(1), url: URL(string: stories[1].url)!, priority: .viewerNext)
-        let page = pool.borrow(key: key(0), url: URL(string: card.url)!, priority: .onScreen)
+        let page = pool.borrow(key: key(0), url: URL(string: card.url)!, priority: .viewerPage)
         handover?.release()
 
         #expect(handover != nil)
@@ -77,7 +77,7 @@ struct StoryPlanDriverTests {
     @Test("a tap on a card that is not playing opens the viewer with nothing handed over")
     func stillCardHandsNothingOver() throws {
         let pool = pool(size: 2)
-        _ = try #require(pool.borrow(key: key(0), url: URL(string: stories[0].url)!, priority: .railThumb))
+        _ = try #require(pool.borrow(key: key(0), url: URL(string: stories[0].url)!, priority: .onScreen))
 
         #expect(storyRailHandover(item: stories[0], playing: false, key: key(0), pool: pool) == nil)
         #expect(storyRailHandover(item: stories[1], playing: true, key: key(1), pool: pool) == nil, "no player to hand over")
@@ -119,10 +119,10 @@ struct StoryPlanDriverTests {
         update(driver, at: 2, firstFrameShown: true)
 
         // Swiping back borrows page 1's key: the same player, with the same item.
-        let back = pool.borrow(key: key(1), url: URL(string: stories[1].url)!, priority: .onScreen)
+        let back = pool.borrow(key: key(1), url: URL(string: stories[1].url)!, priority: .viewerPage)
         #expect(back === left)
         #expect(back?.currentItem === item)
-        #expect(pool.priority(of: key(1)) == .onScreen)
+        #expect(pool.priority(of: key(1)) == .viewerPage)
         driver.cancelAll()
     }
 

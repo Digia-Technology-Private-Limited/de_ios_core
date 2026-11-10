@@ -5,16 +5,23 @@ import Foundation
 // `DefaultPreloadManager`, Apache-2.0, notice kept on Android): the same four ranks in the same
 // order. Case names follow Swift lowerCamelCase (intended difference).
 
-/// Who a pooled player is held for, highest first. The rank gates eviction: a full pool takes
-/// back only a player ranked strictly below the newcomer.
+/// Who a pooled player is held for, highest first. Each hold keeps its rank; a rank's stage
+/// (`isStage1`) decides what happens at the live-player ceiling (OD-24): Stage 1 takes a Stage-2
+/// holder's player, Stage 2 is refused and shows its still.
 enum PoolPriority: Int, Sendable, Comparable {
-    /// On screen and wants to play now (a floater, PIP, a story page, a canvas or nudge video).
-    case onScreen = 0
-    case viewerNext = 1
-    case viewerPrev = 2
-    case railThumb = 3
+    /// The story viewer's page on screen (Stage 1).
+    case viewerPage = 0
+    /// On screen and wants to play now (a floater, PIP, a canvas or nudge video, a carousel
+    /// slide, a rail card). Stage 2.
+    case onScreen = 1
+    case viewerNext = 2
+    case viewerPrev = 3
 
     static func < (lhs: PoolPriority, rhs: PoolPriority) -> Bool { lhs.rawValue < rhs.rawValue }
+
+    /// The story viewer's own pages: the one on screen and the neighbours the plan keeps ready.
+    /// Never refused at the ceiling. Everything else is Stage 2.
+    var isStage1: Bool { self == .viewerPage || self == .viewerNext || self == .viewerPrev }
 }
 
 /// Coarse device bucket; only the pool size reads it.
@@ -32,6 +39,17 @@ func maxPoolPlayers(deviceClass: DeviceClass) -> Int {
     case .mid: 3
     case .high: 4
     }
+}
+
+/// What iOS is assumed to run at once (OD-24). iOS has no API for decoder limits; Apple DTS's only
+/// stated figure is four concurrent players, and a paused player keeps its decoder.
+let assumedDecoderSessions = 4
+
+/// The live-player ceiling (OD-24): the most players, pooled and extra, alive at once. The
+/// sessions this phone can count on, minus one left for the host app's own video, never below
+/// the pool size.
+func livePlayerCeiling(poolSize: Int, decoderSessions: Int = assumedDecoderSessions) -> Int {
+    max(poolSize, decoderSessions - 1)
 }
 
 /// Classifies `ProcessInfo.physicalMemory`; thresholds are heuristics. Unknown (0) is the middle.
@@ -63,10 +81,15 @@ func deviceClassFor(physicalMemoryBytes: UInt64) -> DeviceClass {
 ///   a key of its own and `discard`s it when it leaves, so nothing is left idle for a dead node.
 /// - A player whose item failed gets a new item on its next borrow: a borrow never inherits a
 ///   failure.
-/// - When the pool is full, a newcomer takes back the lowest-ranked, least recently borrowed
-///   player only if that one ranks strictly below it; the evicted holder is told and shows its
-///   still. Otherwise an on-screen borrow gets an extra player, destroyed when it is given back
-///   while the pool is over its size (OD-1, N7); any other borrow is refused and reports nothing.
+/// - Two stages (OD-24, replaces OD-1's rank gate). Stage 1 is the story viewer's own pages
+///   (`PoolPriority.isStage1`), Stage 2 is everything else. Up to `maxPlayers` players are
+///   pooled; above that every borrow gets an extra player until `ceiling` (live holders). At the
+///   ceiling Stage 2 is refused (its still, reported through `onCeilingRefused`) and Stage 1
+///   takes the player of the least recently borrowed holder with no Stage-1 hold, which is told
+///   and shows its still; with no such holder Stage 1 goes one over the ceiling.
+/// - An extra given back is parked, not destroyed, so a borrow in the next seconds reuses it;
+///   after `parkSeconds` it is destroyed while the pool is over its size. Memory pressure
+///   (`onMemoryPressure`) destroys idle players and the story's previous-page hold.
 /// - Bookkeeping is bounded by the live players (N8), plus eviction observers while their
 ///   surface is mounted.
 ///
@@ -79,7 +102,8 @@ final class VideoPlayerPool: @unchecked Sendable {
         /// One rank per current hold.
         var holds: [PoolPriority]
         /// The highest rank among the current holds.
-        var priority: PoolPriority { holds.min() ?? .railThumb }
+        /// No hold: a Stage-2 rank, so it never counts as a story page.
+        var priority: PoolPriority { holds.min() ?? .onScreen }
     }
 
     private struct FreePlayer {
@@ -88,12 +112,24 @@ final class VideoPlayerPool: @unchecked Sendable {
         let url: URL
         /// It was at its end when given back: a revisit restarts.
         let finished: Bool
+        /// When it was given back while the pool was over its size; nil when it is within it.
+        var parkedAt: TimeInterval?
     }
 
     /// A showing this close to its end counts as finished, as on Android.
     static let finishedWithin: TimeInterval = 0.5
 
+    /// How long an extra player given back is kept for reuse before it is destroyed (OD-24).
+    static let parkSeconds: TimeInterval = 8
+
     let maxPlayers: Int
+    /// The live-player ceiling in force: holders alive at once, pooled and extra (OD-24).
+    private(set) var ceiling: Int
+    /// Called when a Stage-2 borrow is refused at the ceiling; the SDK reports it as health.
+    var onCeilingRefused: (@MainActor () -> Void)?
+    private let clock: () -> TimeInterval
+    private let schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void
+    private var trimScheduled = false
     private let makeItem: @MainActor (URL) -> AVPlayerItem
     private let makePlayer: @MainActor (AVPlayerItem) -> AVPlayer
     private var holders: [String: Holder] = [:]
@@ -103,16 +139,26 @@ final class VideoPlayerPool: @unchecked Sendable {
 
     init(
         maxPlayers: Int = maxPoolPlayers(deviceClass: deviceClassFor(physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory)),
+        ceiling: Int? = nil,
+        onCeilingRefused: (@MainActor () -> Void)? = nil,
+        clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        schedule: @escaping (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, task in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { task() } }
+        },
         makeItem: @escaping @MainActor (URL) -> AVPlayerItem,
         makePlayer: @escaping @MainActor (AVPlayerItem) -> AVPlayer = { AVPlayer(playerItem: $0) }
     ) {
         self.maxPlayers = max(1, maxPlayers)
+        self.ceiling = max(self.maxPlayers, ceiling ?? livePlayerCeiling(poolSize: self.maxPlayers))
+        self.onCeilingRefused = onCeilingRefused
+        self.clock = clock
+        self.schedule = schedule
         self.makeItem = makeItem
         self.makePlayer = makePlayer
     }
 
-    /// One hold on the player for `key`, or nil when refused (pool full, nothing ranked below,
-    /// and not on screen). The caller shows its still and reports nothing on nil.
+    /// One hold on the player for `key`, or nil when refused (Stage 2 at the ceiling, which is
+    /// reported through `onCeilingRefused`). The caller shows its still on nil.
     @MainActor
     func borrow(key: String, url: URL, priority: PoolPriority) -> AVPlayer? {
         seq &+= 1
@@ -147,13 +193,18 @@ final class VideoPlayerPool: @unchecked Sendable {
             holders[key] = Holder(url: url, player: reused.player, seq: seq, holds: [priority])
             return reused.player
         }
-        if holders.count >= maxPlayers {
-            if let tail = evictableTail(), tail.value.priority > priority {
-                evict(key: tail.key)
-            } else if priority != .onScreen {
+        if holders.count >= ceiling {
+            if priority.isStage1 {
+                // Stage 1 is never refused (OD-24): it takes the player of the least recently
+                // borrowed holder with no Stage-1 hold. With none, it goes one over the ceiling.
+                if let victim = holders.filter({ $0.value.holds.allSatisfy { !$0.isStage1 } })
+                    .min(by: { $0.value.seq < $1.value.seq }) {
+                    evict(key: victim.key)
+                }
+            } else {
+                onCeilingRefused?()
                 return nil
             }
-            // On screen with nothing to take back: an extra player beyond the size (OD-1).
         }
         let player = makePlayer(makeItem(url))
         holders[key] = Holder(url: url, player: player, seq: seq, holds: [priority])
@@ -175,11 +226,11 @@ final class VideoPlayerPool: @unchecked Sendable {
         }
         holders[key] = nil
         player.pause()
-        if holders.count + free.count >= maxPlayers {
-            destroy(player)
-            return
-        }
-        free.append(FreePlayer(player: player, key: key, url: holder.url, finished: Self.isFinished(player)))
+        let parked = holders.count + free.count >= maxPlayers
+        free.append(FreePlayer(
+            player: player, key: key, url: holder.url, finished: Self.isFinished(player),
+            parkedAt: parked ? clock() : nil))
+        if parked { scheduleTrim(after: Self.parkSeconds) }
     }
 
     /// Ends the hold of a node whose key nobody else can borrow (OD-15): the player is destroyed,
@@ -206,6 +257,36 @@ final class VideoPlayerPool: @unchecked Sendable {
         if evictionObservers[key]?.isEmpty == true { evictionObservers[key] = nil }
     }
 
+    /// Memory pressure (OD-24): destroys every free and parked player, and takes back the players
+    /// held only as the story's previous page (the plan borrows it again when it next plans).
+    /// Players anything else holds stay. The SDK calls it on a memory warning and on entering the
+    /// background.
+    @MainActor
+    func onMemoryPressure() {
+        let idle = free
+        free.removeAll()
+        idle.forEach { destroy($0.player) }
+        let prevOnly = holders.filter { !$0.value.holds.isEmpty && $0.value.holds.allSatisfy { $0 == .viewerPrev } }
+        for key in prevOnly.keys { evict(key: key) }
+    }
+
+    /// Destroys parked players while the pool is over its size, oldest first, once each has been
+    /// parked `parkSeconds`; a younger one schedules the next pass. Never touches held players.
+    @MainActor
+    func trimParked() {
+        trimScheduled = false
+        let now = clock()
+        while holders.count + free.count > maxPlayers {
+            guard let oldest = free.indices.min(by: { (free[$0].parkedAt ?? -.infinity) < (free[$1].parkedAt ?? -.infinity) })
+            else { break }
+            if let since = free[oldest].parkedAt, now - since < Self.parkSeconds {
+                scheduleTrim(after: Self.parkSeconds - (now - since))
+                return
+            }
+            destroy(free.remove(at: oldest).player)
+        }
+    }
+
     /// Destroys every player, held or free. Later give-backs are no-ops.
     @MainActor
     func release() {
@@ -228,10 +309,11 @@ final class VideoPlayerPool: @unchecked Sendable {
 
     // MARK: - Private
 
-    private func evictableTail() -> (key: String, value: Holder)? {
-        holders.min { a, b in
-            a.value.priority != b.value.priority ? a.value.priority > b.value.priority : a.value.seq < b.value.seq
-        }.map { ($0.key, $0.value) }
+    @MainActor
+    private func scheduleTrim(after delay: TimeInterval) {
+        guard !trimScheduled else { return }
+        trimScheduled = true
+        schedule(delay) { [weak self] in self?.trimParked() }
     }
 
     @MainActor

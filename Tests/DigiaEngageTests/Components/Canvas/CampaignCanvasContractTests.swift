@@ -589,7 +589,6 @@ struct CampaignCanvasContractTests {
             cardCornerRadius: 8,
             cardSpacing: 8,
             showRail: true,
-            thumbnailVideoPlayback: .sequential,
             restartOnCompleted: false,
             startMuted: true,
             chrome: CampaignCanvas(version: 2, width: 100, height: 100, background: .none, children: [])

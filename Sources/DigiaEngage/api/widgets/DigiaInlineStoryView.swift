@@ -41,7 +41,6 @@ struct DigiaInlineStoryView: View {
     private var rail: some View {
         StoryRail(
             items: config.items,
-            mode: config.thumbnailVideoPlayback,
             cardWidth: CGFloat(config.card.width),
             cardHeight: CGFloat(config.card.height),
             cardCornerRadius: CGFloat(config.card.borderRadius),

@@ -33,7 +33,7 @@ struct StoryDownloadPlanTests {
 
         #expect(StoryDownloadPlan.plan(
             stories: stories, currentIndex: 0, firstFrameShown: false, slowNetwork: false
-        ) == [player(0, .onScreen)])
+        ) == [player(0, .viewerPage)])
     }
 
     // Fails if the forward window shape changes: `player(n+1)` /
@@ -44,7 +44,7 @@ struct StoryDownloadPlanTests {
 
         #expect(StoryDownloadPlan.plan(
             stories: stories, currentIndex: 0, firstFrameShown: true, slowNetwork: false
-        ) == [player(0, .onScreen), player(1, .viewerNext), firstBytes(2)])
+        ) == [player(0, .viewerPage), player(1, .viewerNext), firstBytes(2)])
     }
 
     // Fails if the middle order changes: current, next player, next bytes,
@@ -58,7 +58,7 @@ struct StoryDownloadPlanTests {
         #expect(StoryDownloadPlan.plan(
             stories: stories, currentIndex: 2, firstFrameShown: true, slowNetwork: false
         ) == [
-            player(2, .onScreen),
+            player(2, .viewerPage),
             player(3, .viewerNext),
             firstBytes(4),
             player(1, .viewerPrev),
@@ -75,7 +75,7 @@ struct StoryDownloadPlanTests {
         #expect(StoryDownloadPlan.plan(
             stories: stories, currentIndex: 4, firstFrameShown: true, slowNetwork: false
         ) == [
-            player(4, .onScreen),
+            player(4, .viewerPage),
             player(3, .viewerPrev),
             firstBytes(2),
         ])
@@ -89,7 +89,7 @@ struct StoryDownloadPlanTests {
 
         #expect(StoryDownloadPlan.plan(
             stories: stories, currentIndex: 2, firstFrameShown: true, slowNetwork: true
-        ) == [player(2, .onScreen), firstBytes(3)])
+        ) == [player(2, .viewerPage), firstBytes(3)])
     }
 
     // Fails if no-Range byte actions stay FirstBytes: without Range only n±1
@@ -103,14 +103,14 @@ struct StoryDownloadPlanTests {
             stories: stories, currentIndex: 2, firstFrameShown: true,
             slowNetwork: false, rangeSupported: false
         ) == [
-            player(2, .onScreen),
+            player(2, .viewerPage),
             player(3, .viewerNext),
             player(1, .viewerPrev),
         ])
         #expect(StoryDownloadPlan.plan(
             stories: stories, currentIndex: 2, firstFrameShown: true,
             slowNetwork: true, rangeSupported: false
-        ) == [player(2, .onScreen), wholeFile(3)])
+        ) == [player(2, .viewerPage), wholeFile(3)])
     }
 
     // Fails if images get players or first bytes: an image at any slot plans
@@ -121,7 +121,7 @@ struct StoryDownloadPlanTests {
 
         #expect(StoryDownloadPlan.plan(
             stories: stories, currentIndex: 0, firstFrameShown: true, slowNetwork: false
-        ) == [player(0, .onScreen), wholeFile(1), firstBytes(2)])
+        ) == [player(0, .viewerPage), wholeFile(1), firstBytes(2)])
         #expect(StoryDownloadPlan.plan(
             stories: [image, video], currentIndex: 0,
             firstFrameShown: false, slowNetwork: false
@@ -136,7 +136,7 @@ struct StoryDownloadPlanTests {
         #expect(StoryDownloadPlan.plan(
             stories: [video, video, video, video, video], currentIndex: 1, firstFrameShown: true, slowNetwork: false
         ) == [
-            player(1, .onScreen),
+            player(1, .viewerPage),
             player(2, .viewerNext),
             firstBytes(3),
             player(0, .viewerPrev),

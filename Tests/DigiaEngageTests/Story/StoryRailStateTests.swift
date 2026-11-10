@@ -3,10 +3,9 @@ import Testing
 
 @testable import DigiaEngage
 
-// The rail's schedule (T8), on `StoryRailState` alone: the cards on screen take turns, a
-// `simultaneous` rail plays them all, a refused or evicted card skips its turn and stays in the
-// rotation, a lone refused card waits for the next restart, and only a real failure removes a
-// card for the session.
+// The rail's schedule (T8), on `StoryRailState` alone: the cards on screen take turns, one at a
+// time; a refused or evicted card skips its turn and stays in the rotation, a lone refused card
+// waits for the next restart, and only a real failure removes a card for the session.
 
 @Suite("Story rail", .tags(.inline, .media, .unit))
 struct StoryRailStateTests {
@@ -15,9 +14,9 @@ struct StoryRailStateTests {
 
     /// A rail on screen with every listed card fully visible, in the foreground.
     private func rail(
-        _ mode: ThumbnailVideoPlaybackMode, items: [StoryItemConfig], visible: [Int]
+        items: [StoryItemConfig], visible: [Int]
     ) -> StoryRailState {
-        StoryRailState(mode: mode)
+        StoryRailState()
             .lifecycleChanged(active: true)
             .visibilityChanged(
                 items: items,
@@ -37,7 +36,7 @@ struct StoryRailStateTests {
     @Test("the cards on screen take turns and the rotation wraps past the last one")
     func cardsTakeTurns() {
         let items = [Self.video, Self.image, Self.video, Self.video]
-        var state = rail(.sequential, items: items, visible: [0, 1, 2, 3])
+        var state = rail(items: items, visible: [0, 1, 2, 3])
         var turns: [[Int]] = [playing(state, 4)]
         for _ in 0..<3 {
             state = state.complete(index: state.activeIndex ?? -1)
@@ -48,22 +47,12 @@ struct StoryRailStateTests {
         #expect(!state.decision(index: 0).repeatWindow, "a rotation hands over instead of looping")
     }
 
-    // Guards the `.simultaneous` arm of `StoryRailState.decision`.
-    @Test("a simultaneous rail plays every video on screen at once, each looping its window")
-    func simultaneousPlaysAll() {
-        let items = [Self.video, Self.video, Self.image, Self.video]
-        let state = rail(.simultaneous, items: items, visible: [0, 1, 2])
-
-        #expect(playing(state, 4) == [0, 1])
-        #expect(state.decision(index: 0).repeatWindow)
-    }
-
-    // Guards the `.sequential` arm of `StoryRailState.skip` (the turn moves on, the card stays
+    // Guards `StoryRailState.skip` (the turn moves on, the card stays
     // playable) and `updated.skipped = []` in `complete` (it gets its next turn).
     @Test("a card the pool refused skips its turn and stays in the rotation")
     func refusedCardSkipsItsTurn() {
         let items = [Self.video, Self.video, Self.video]
-        var state = rail(.sequential, items: items, visible: [0, 1, 2])
+        var state = rail(items: items, visible: [0, 1, 2])
 
         state = state.skip(index: 0)
         #expect(playing(state, 3) == [1], "the next card plays now")
@@ -79,7 +68,7 @@ struct StoryRailStateTests {
     @Test("a lone refused card waits for the next rail restart")
     func loneRefusedCardWaitsForRestart() {
         let items = [Self.video, Self.image]
-        var state = rail(.sequential, items: items, visible: [0, 1])
+        var state = rail(items: items, visible: [0, 1])
         #expect(playing(state, 2) == [0])
 
         state = state.skip(index: 0)
@@ -89,25 +78,12 @@ struct StoryRailStateTests {
         #expect(playing(state, 2) == [0], "the restart tries it again")
     }
 
-    // Guards `updated.skipped.insert(index)` in the `.simultaneous` arm of `StoryRailState.skip`.
-    @Test("a refused card on a simultaneous rail shows its still until the rail restarts")
-    func simultaneousRefusedCardWaits() {
-        let items = [Self.video, Self.video]
-        var state = rail(.simultaneous, items: items, visible: [0, 1])
-
-        state = state.skip(index: 1)
-        #expect(playing(state, 2) == [0])
-
-        state = state.overlayChanged(visible: true).overlayChanged(visible: false)
-        #expect(playing(state, 2) == [0, 1])
-    }
-
     // Guards `eligible.subtracting(failed)` in `StoryRailState.playable`: a failure outlives every
     // restart, a refusal does not.
     @Test("only a real playback failure removes a card for the session")
     func failureRemovesTheCard() {
         let items = [Self.video, Self.video]
-        var state = rail(.sequential, items: items, visible: [0, 1])
+        var state = rail(items: items, visible: [0, 1])
 
         state = state.fail(index: 0)
         #expect(playing(state, 2) == [1])

@@ -679,7 +679,7 @@ struct CanvasStoryRailRenderer: View {
     var body: some View {
         guard case .story(
             _, let pages, let cardAspectRatio, let cardCornerRadius, let cardSpacing,
-            let showRail, let thumbnailVideoPlayback, let restartOnCompleted, let startMuted, let chrome
+            let showRail, let restartOnCompleted, let startMuted, let chrome
         ) = widget, !pages.isEmpty else { return AnyView(EmptyView()) }
 
 
@@ -697,7 +697,6 @@ struct CanvasStoryRailRenderer: View {
                     let cardWidth = Self.cardWidth(railHeight: size.height, cardAspectRatio: cardAspectRatio)
                     StoryRail(
                         items: pages.map(canvasStoryItem),
-                        mode: thumbnailVideoPlayback.asInlineStoryMode,
                         cardWidth: cardWidth,
                         cardHeight: size.height,
                         cardCornerRadius: cardCornerRadius * scale,
@@ -736,15 +735,6 @@ struct CanvasStoryRailRenderer: View {
                 .ignoresSafeArea()
             }
         )
-    }
-}
-
-private extension CampaignCanvasStoryThumbnailPlaybackMode {
-    var asInlineStoryMode: ThumbnailVideoPlaybackMode {
-        switch self {
-        case .simultaneous: .simultaneous
-        case .sequential: .sequential
-        }
     }
 }
 

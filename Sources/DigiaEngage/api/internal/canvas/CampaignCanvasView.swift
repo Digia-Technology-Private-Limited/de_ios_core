@@ -613,7 +613,7 @@ struct CampaignCanvasStage: View {
             )
         ) {
             if case .story(
-                _, let pages, _, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
+                _, let pages, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
             ) = story, !pages.isEmpty {
                 CanvasStoryViewer(
                     pages: pages,

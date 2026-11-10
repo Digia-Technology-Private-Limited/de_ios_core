@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 internal import DigiaMediaCache
 internal import Lottie
@@ -25,6 +26,10 @@ struct MediaServices: Sendable {
 
     static let sdk: MediaServices = {
         let loader = MediaResourceLoader(store: MediaRangeCacheStore.shared())
+        let pool = VideoPlayerPool(
+            onCeilingRefused: reportVideoPoolCeiling,
+            makeItem: { mediaVideoItem(for: $0, loader: loader) })
+        observeMemoryPressure(of: pool)
         return MediaServices(
             reportHealth: { campaignKey, kind, cause in
                 reportMediaLoadFailed(kind, cause: cause, campaignKey: campaignKey)
@@ -32,7 +37,7 @@ struct MediaServices: Sendable {
             loadLottie: { await loadLottieSource($0) },
             videoLoader: loader,
             videoStore: MediaRangeCacheStore.shared(),
-            videoPool: VideoPlayerPool(makeItem: { mediaVideoItem(for: $0, loader: loader) })
+            videoPool: pool
         )
     }()
 
@@ -81,6 +86,35 @@ struct MediaServices: Sendable {
 
         func update(_ change: (inout MediaServices) -> Void) {
             lock.withLock { change(&services) }
+        }
+    }
+}
+
+private let mediaServicesLog = DigiaLogger()
+
+/// OD-24: a video on screen got no player because the phone is at its live-player ceiling.
+/// Campaignless, so the health sink sends it once per session; it tunes the ceilings. iOS has no
+/// media performance class, so it sends "0".
+@MainActor
+private func reportVideoPoolCeiling() {
+    let deviceClass = deviceClassFor(physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory)
+    mediaServicesLog.w(
+        "Video player ceiling reached; a video shows its still",
+        stage: .render,
+        reason: TimelineReason.videoPoolCeiling,
+        extras: [
+            "device_class": "\(deviceClass)",
+            "media_performance_class": "0",
+            "ceiling": "\(livePlayerCeiling(poolSize: maxPoolPlayers(deviceClass: deviceClass)))",
+        ])
+}
+
+/// A memory warning or the app entering the background releases idle video players (OD-24).
+/// Observed for the process: the SDK's pool lives as long as the process.
+private func observeMemoryPressure(of pool: VideoPlayerPool) {
+    for name in [UIApplication.didReceiveMemoryWarningNotification, UIApplication.didEnterBackgroundNotification] {
+        NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak pool] _ in
+            MainActor.assumeIsolated { pool?.onMemoryPressure() }
         }
     }
 }

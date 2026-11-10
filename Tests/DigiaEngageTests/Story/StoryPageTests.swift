@@ -119,9 +119,9 @@ struct StoryPageTests {
         )) { _ in EmptyView() }
     }
 
-    // Guards the `StoryVideoSurface(... priority: .railThumb ...)` in `StoryThumbnailVideo` (T3): a
-    // rail video tile plays through `MediaVideo`, on the pool, at the thumbnail rank.
-    @Test("a rail video tile plays through MediaVideo on the pool at the thumbnail rank")
+    // Guards the `StoryVideoSurface(... priority: .onScreen ...)` in `StoryThumbnailVideo` (T3, OD-24): a
+    // rail video tile plays through `MediaVideo`, on the pool, at a Stage-2 rank like any video on screen.
+    @Test("a rail video tile plays through MediaVideo on the pool at the on-screen rank")
     func railTileRoutesThroughMediaVideoOnThePool() async throws {
         install()
         defer { MediaOrigin.end() }
@@ -131,12 +131,12 @@ struct StoryPageTests {
         let item = StoryItemConfig(type: .video, url: video.absoluteString, duration: nil)
 
         let window = MediaStage.mount(StoryRail(
-            items: [item], mode: .simultaneous, cardWidth: 120, cardHeight: 120, cardCornerRadius: 8,
+            items: [item], cardWidth: 120, cardHeight: 120, cardCornerRadius: 8,
             cardSpacing: 8, overlayOpen: false, onOpen: { _, _ in }))
         defer { ComponentTestHost.unmount(window) }
 
         let key = storyPoolKey(namespace: MediaStage.campaign, index: 0)
-        #expect(await waitUntilMedia { pool.priority(of: key) == .railThumb })
+        #expect(await waitUntilMedia { pool.priority(of: key) == .onScreen })
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: video).isEmpty }, "read through the range cache")
     }
 
@@ -164,7 +164,7 @@ struct StoryPageTests {
         await player.seek(to: CMTime(seconds: duration - 0.4, preferredTimescale: 600))
 
         // Page 0's video ends and the viewer moves to page 1, whose video never shows a frame.
-        #expect(await waitUntilMedia { pool.priority(of: keySecond) == .onScreen }, "the viewer moved on")
+        #expect(await waitUntilMedia { pool.priority(of: keySecond) == .viewerPage }, "the viewer moved on")
         ComponentTestHost.drainRunLoop(for: 0.2)
 
         #expect(pool.heldPlayer(for: keyFirst) === player, "page 0's player is kept for a swipe back")
@@ -173,13 +173,13 @@ struct StoryPageTests {
 
     private func singleSlotPool() -> VideoPlayerPool {
         let loader = MediaServices.current.videoLoader
-        let pool = VideoPlayerPool(maxPlayers: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
+        let pool = VideoPlayerPool(maxPlayers: 1, ceiling: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
         MediaServices.override(videoPool: pool)
         return pool
     }
 
     // Guards `onLost: { stopDriver(); if !gone { onSkipped() } }` in `StoryThumbnailVideo`: a tile
-    // whose borrow the pool refuses (full, nothing ranked below the rail) skips its turn once; it
+    // whose borrow the pool refuses (at the ceiling, Stage 2) skips its turn once; it
     // is not a failure, so the card is not removed for the session.
     @Test("a rail tile the pool refuses skips its turn and does not fail")
     func railTileRefusalIsASkip() async throws {
@@ -221,13 +221,13 @@ struct StoryPageTests {
         let keys = (0 ..< 2).map { storyPoolKey(namespace: MediaStage.campaign, index: $0) }
 
         let window = MediaStage.mount(StoryRail(
-            items: items, mode: .sequential, cardWidth: 100, cardHeight: 100, cardCornerRadius: 0,
+            items: items, cardWidth: 100, cardHeight: 100, cardCornerRadius: 0,
             cardSpacing: 8, overlayOpen: false, onOpen: { _, _ in }))
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { pool.heldPlayer(for: keys[0]) != nil }, "card 0 has the first turn")
 
-        let taker = try #require(pool.borrow(key: "page", url: other, priority: .onScreen))
-        pool.giveBack(key: "page", player: taker, priority: .onScreen)
+        let taker = try #require(pool.borrow(key: "page", url: other, priority: .viewerPage))
+        pool.giveBack(key: "page", player: taker, priority: .viewerPage)
 
         #expect(await waitUntilMedia { pool.heldPlayer(for: keys[1]) != nil }, "card 1 took the turn")
         #expect(pool.heldPlayer(for: keys[0]) == nil)
@@ -248,7 +248,7 @@ struct StoryPageTests {
         let item = StoryItemConfig(type: .video, url: video.absoluteString, duration: nil)
         let key = storyPoolKey(namespace: MediaStage.campaign, index: 0)
         let url = try #require(URL(string: item.url))
-        let tile = try #require(pool.borrow(key: key, url: url, priority: .railThumb))
+        let tile = try #require(pool.borrow(key: key, url: url, priority: .onScreen))
         let handover = try #require(storyRailHandover(item: item, playing: true, key: key, pool: pool))
 
         let window = MediaStage.mount(viewer([item], handover: handover))

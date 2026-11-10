@@ -276,31 +276,45 @@ final class MediaVideoPlayback: ObservableObject {
         }
         let pool = services.videoPool
         let poolKey = key ?? ownKey
-        // Refused (pool full, not on screen): the still stays and nothing is reported.
-        guard let player = pool.borrow(key: poolKey, url: parsed, priority: priority) else {
-            onLost?()
-            return
-        }
-        let eviction = pool.observeEviction(of: poolKey) { [weak self] in self?.evicted() }
-        lease = (pool, poolKey, priority, eviction, key == nil)
-        player.isMuted = muted
-        player.volume = volume
-        player.actionAtItemEnd = .pause
-        if let startMs {
-            seekPending = true
-            pendingStartMs = max(startMs, 0)
-        }
-        if let item = player.currentItem { watch(item) }
-        self.player = player
-        seekToStartIfReady()
-        setPlaying(autoplay)
-        if let spinnerDelay {
-            spinnerTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(spinnerDelay * 1_000_000_000))
-                guard let self, !Task.isCancelled, !self.firstFrameShown, !self.failed else { return }
-                self.spinnerVisible = true
+        // A refused borrow is tried once more on the next main-queue turn (OD-24): a surface taking
+        // over from one that leaves in the same turn (the rail's next card) can ask before the
+        // leaving one's close has given its player back. Only a second refusal gives up: the still
+        // stays and `onLost` says so. The pool's health report on a refusal is not undone by a retry.
+        func attempt(retried: Bool) {
+            guard let player = pool.borrow(key: poolKey, url: parsed, priority: priority) else {
+                guard retried else {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.opened?.url == url, self.opened?.key == key,
+                              self.lease == nil, self.player == nil else { return }
+                        attempt(retried: true)
+                    }
+                    return
+                }
+                onLost?()
+                return
+            }
+            let eviction = pool.observeEviction(of: poolKey) { [weak self] in self?.evicted() }
+            lease = (pool, poolKey, priority, eviction, key == nil)
+            player.isMuted = muted
+            player.volume = volume
+            player.actionAtItemEnd = .pause
+            if let startMs {
+                seekPending = true
+                pendingStartMs = max(startMs, 0)
+            }
+            if let item = player.currentItem { watch(item) }
+            self.player = player
+            seekToStartIfReady()
+            setPlaying(autoplay)
+            if let spinnerDelay {
+                spinnerTask = Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: UInt64(spinnerDelay * 1_000_000_000))
+                    guard let self, !Task.isCancelled, !self.firstFrameShown, !self.failed else { return }
+                    self.spinnerVisible = true
+                }
             }
         }
+        attempt(retried: false)
     }
 
     /// Issues the `startMs` seek once the item is ready (a seek on an item still loading lands

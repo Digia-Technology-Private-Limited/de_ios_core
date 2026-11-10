@@ -84,7 +84,7 @@ private struct RailLikeHost: View {
     let lost: CallCount
 
     var body: some View {
-        MediaVideo(url: model.url, playerKey: "rail", poolPriority: .railThumb, onLost: { lost.value += 1 })
+        MediaVideo(url: model.url, playerKey: "rail", poolPriority: .onScreen, onLost: { lost.value += 1 })
     }
 }
 
@@ -348,14 +348,14 @@ struct MediaVideoComponentTests {
     }
 
     // Guards `evicted()` in `MediaVideoPlayback`: a holder whose player the pool takes back for a
-    // higher rank shows its still again (no player drawn) and says so once through `onLost`; it
+    // story page shows its still again (no player drawn) and says so once through `onLost`; it
     // borrows again when it next opens (here a URL change), not on its own.
     @Test("an evicted holder drops its player, calls onLost once and borrows again when it next opens")
     func evictedHolderLetsGoAndBorrowsAgain() async throws {
         install()
         defer { MediaOrigin.end() }
         let loader = MediaServices.current.videoLoader
-        let pool = VideoPlayerPool(maxPlayers: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
+        let pool = VideoPlayerPool(maxPlayers: 1, ceiling: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
         MediaServices.override(videoPool: pool)
         let first = MediaOrigin.url("evict-a.mp4")
         let second = MediaOrigin.url("evict-b.mp4")
@@ -369,7 +369,7 @@ struct MediaVideoComponentTests {
         #expect(await waitUntilMedia { pool.heldPlayer(for: "rail") != nil })
         #expect(await waitUntilMedia { !Self.drawnPlayers(in: window).isEmpty }, "drawn while held")
 
-        let taker = try #require(pool.borrow(key: "page", url: other, priority: .onScreen))
+        let taker = try #require(pool.borrow(key: "page", url: other, priority: .viewerPage))
 
         #expect(lost.value == 1)
         #expect(pool.heldPlayer(for: "rail") == nil)
@@ -378,7 +378,7 @@ struct MediaVideoComponentTests {
         #expect(lost.value == 1, "told once, and no borrow on its own")
         #expect(pool.heldKeys == ["page"])
 
-        pool.giveBack(key: "page", player: taker, priority: .onScreen)
+        pool.giveBack(key: "page", player: taker, priority: .viewerPage)
         model.url = second.absoluteString
         #expect(await waitUntilMedia { pool.heldPlayer(for: "rail") != nil }, "borrowed again on its next open")
     }

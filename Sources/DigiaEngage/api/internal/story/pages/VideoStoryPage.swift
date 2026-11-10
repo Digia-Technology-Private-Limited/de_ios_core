@@ -32,7 +32,7 @@ struct VideoStoryPage: View {
                 fit: item.boxFit,
                 stillFit: item.boxFit,
                 poolKey: pageKey,
-                priority: .onScreen,
+                priority: .viewerPage,
                 muted: muted,
                 playing: playing,
                 groundAfterFirstFrame: groundAfterFirstFrame,

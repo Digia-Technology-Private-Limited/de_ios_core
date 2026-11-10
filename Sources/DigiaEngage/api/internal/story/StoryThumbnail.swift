@@ -205,7 +205,8 @@ private struct StoryThumbnailVideo: View {
             item: item,
             fit: item.thumbnailBoxFit,
             poolKey: poolKey,
-            priority: .railThumb,
+            // A rail card is Stage 2 like any other video on screen (OD-24): no rank of its own.
+            priority: .onScreen,
             muted: true,
             playing: true,
             // A lone full window from 0 loops natively; any other window ends through the driver.

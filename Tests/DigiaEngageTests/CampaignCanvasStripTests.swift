@@ -113,7 +113,7 @@ struct CampaignCanvasStripTests {
     @Test("story parses its pages, chrome and viewer settings")
     func story() throws {
         let parsed = try CampaignCanvasParser().parse(canvas(with: storyWidget()))
-        guard case .story(_, let pages, _, _, _, _, _, let restart, let startMuted, _) =
+        guard case .story(_, let pages, _, _, _, _, let restart, let startMuted, _) =
             try #require(firstWidget(parsed)) else { return }
         #expect(pages.count == 1)
         #expect(pages[0].thumbnailUrl == "https://x/a.jpg")
@@ -146,7 +146,7 @@ struct CampaignCanvasStripTests {
     @Test("a hidden rail still carries its stories")
     func hiddenRail() throws {
         let parsed = try CampaignCanvasParser().parse(canvas(with: storyWidget(showRail: false)))
-        guard case .story(_, let pages, _, _, _, let showRail, _, _, _, _) =
+        guard case .story(_, let pages, _, _, _, let showRail, _, _, _) =
             try #require(firstWidget(parsed)) else { return }
         // Nothing renders, but the widget has to stay: it holds the stories and
         // the chrome, and an `Action.showStory` elsewhere opens them.

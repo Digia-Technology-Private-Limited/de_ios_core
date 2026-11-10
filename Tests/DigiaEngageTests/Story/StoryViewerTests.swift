@@ -119,9 +119,12 @@ struct StoryViewerTests {
 
     // MARK: Where a video starts
 
-    // Guards `leftIndices.contains(index)` in `StoryViewerSession.startMs`.
-    @Test("swiping back to a video page resumes it where it was left (N9)")
-    func swipeBackResumes() {
+    // Guards `arrivedIndex = next` in `StoryViewerSession.showPage` and `arrivedIndex != index` in
+    // `startMs` (OD-22): the page moved to starts from 0 although the pool kept its player part way.
+    // Guards `if arrivedIndex == index { arrivedIndex = nil }` in `pageReady`: once the page is up,
+    // a remount of it (a rotation) resumes its playhead again.
+    @Test("a page moved to starts from 0, and a remount of the page on screen resumes it (OD-22)")
+    func movedToPageStartsFromZeroAndRemountResumes() {
         let session = session([Self.video(), Self.video(), Self.video()])
         #expect(session.startMs(for: 0) == 0, "a first showing starts from the top")
         #expect(session.startMs(for: 1) == 0)
@@ -130,7 +133,10 @@ struct StoryViewerTests {
         session.goBack()
 
         #expect(session.currentIndex == 0)
-        #expect(session.startMs(for: 0) == nil, "the page left mid-play resumes its playhead")
+        #expect(session.startMs(for: 0) == 0, "swiping back starts the page over, not where it was left")
+
+        session.pageReady(index: 0)
+        #expect(session.startMs(for: 0) == nil, "a remount of the page on screen resumes its playhead")
     }
 
     // Guards `!endedIndices.contains(index)` and `replayedIndex != index` in `startMs`.

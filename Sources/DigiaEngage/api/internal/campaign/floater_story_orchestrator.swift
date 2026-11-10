@@ -175,7 +175,7 @@ final class FloaterStoryOrchestrator: ObservableObject {
     func openStory(initialIndex: Int = 0) {
         guard let active = state, !closing, !storyOpen, !isCoveredByBlockingCampaign()
         else { return }
-        if case .story(_, let pages, _, _, _, _, _, _, _, _) = active.config.story {
+        if case .story(_, let pages, _, _, _, _, _, _, _) = active.config.story {
             storyInitialIndex = min(max(0, initialIndex), pages.count - 1)
         }
         storyOpen = true

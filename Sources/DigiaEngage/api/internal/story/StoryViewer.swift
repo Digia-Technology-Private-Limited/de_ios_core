@@ -47,6 +47,10 @@ final class StoryViewerSession: ObservableObject {
     private var endedIndices: Set<Int> = []
     /// The page a replay restarted, until the viewer moves on.
     private var replayedIndex: Int?
+    /// The page the person just moved to (swipe, tap, auto-advance): it starts from 0 even when
+    /// the pool still holds its player where it was left (OD-22). Cleared once that page is ready,
+    /// so a later remount of it (a rotation) still resumes.
+    private var arrivedIndex: Int?
 
     init(
         stories: [StoryItemConfig],
@@ -83,12 +87,19 @@ final class StoryViewerSession: ObservableObject {
         return storyPoolKey(namespace: namespace, index: index)
     }
 
-    /// Where the page at `index` starts its video: nil resumes the playhead the pool kept (a swipe
-    /// back to a page left mid-play, N9); 0 for a first showing (also a rail handover: the story
-    /// starts from its top), a replay, or a page whose video ended.
+    /// Where the page at `index` starts its video: nil resumes the playhead the pool kept (a
+    /// remount of a page left mid-play, such as a rotation, N9); 0 for a first showing (also a
+    /// rail handover: the story starts from its top), a replay, a page whose video ended, or the
+    /// page the person just moved to (OD-22).
     func startMs(for index: Int) -> Int64? {
-        let resumes = leftIndices.contains(index) && !endedIndices.contains(index) && replayedIndex != index
+        let resumes = leftIndices.contains(index) && !endedIndices.contains(index)
+            && replayedIndex != index && arrivedIndex != index
         return resumes ? nil : 0
+    }
+
+    /// The page at `index` has its media up: a later remount of it may resume again.
+    func pageReady(index: Int) {
+        if arrivedIndex == index { arrivedIndex = nil }
     }
 
     func showPage(index: Int) {
@@ -102,6 +113,7 @@ final class StoryViewerSession: ObservableObject {
         }
         leftIndices.insert(currentIndex)
         if replayedIndex != next { replayedIndex = nil }
+        arrivedIndex = next
         currentIndex = next
     }
 
@@ -423,6 +435,7 @@ struct StoryViewer<Chrome: View>: View {
                 groundAfterFirstFrame: entry.videoGroundAfterFirstFrame,
                 onReady: { ready in
                     guard index == session.currentIndex else { return }
+                    session.pageReady(index: index)
                     player = (index, ready)
                     clock.videoFirstFrame()
                     pageHoldsItsPlayer()
