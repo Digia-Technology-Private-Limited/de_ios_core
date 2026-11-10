@@ -163,9 +163,15 @@ final class StoryViewerSession: ObservableObject {
         }
     }
 
-    /// Closing before the end is a dismissal; closing after the completion is not.
+    /// Whether this showing already reported its dismissal; a close and the teardown that follows
+    /// it are one dismissal.
+    private var dismissalReported = false
+
+    /// Closing before the end is a dismissal; closing after the completion is not. Reported once.
     func reportDismissalIfOpen() {
-        if !isCompleted { reporter.onDismissed(index: currentIndex) }
+        guard !isCompleted, !dismissalReported else { return }
+        dismissalReported = true
+        reporter.onDismissed(index: currentIndex)
     }
 
     func dismiss() {
@@ -402,6 +408,18 @@ struct StoryViewer<Chrome: View>: View {
             }
         }
         .ignoresSafeArea()
+        // Swipe down closes every story — classic, canvas and floater — as a dismissal. On the
+        // whole viewer and simultaneous, so it still sees a drag that starts on the page or the
+        // chrome, while their own taps keep working; mostly-downward only, so a sideways swipe
+        // inside a page never closes it. Off while navigation is (the floater's hero motion).
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 10)
+                .onEnded { value in
+                    let dy = value.translation.height
+                    guard entry.navigationEnabled, dy > 48, dy > abs(value.translation.width) else { return }
+                    session.dismiss()
+                }
+        )
         .onReceive(Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()) { _ in tick() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             applicationActive = false

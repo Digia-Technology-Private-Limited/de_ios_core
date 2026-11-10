@@ -662,7 +662,7 @@ private final class CarouselStripMotion {
 /// Draws a story rail, and opens the full-screen viewer when a card is tapped.
 ///
 /// The widget owns both halves of the interaction because both are its own: the
-/// rail is what it draws inside its rect, and the viewer is a sheet it presents.
+/// rail is what it draws inside its rect, and the viewer is the story layer it presents.
 struct CanvasStoryRailRenderer: View {
     let widget: CampaignCanvasWidget
     let isDark: Bool
@@ -670,7 +670,9 @@ struct CanvasStoryRailRenderer: View {
 
     @State private var openIndex: Int?
     @State private var openHandover: StoryHandover?
+    @State private var storyLayer = StoryLayer()
     @Environment(\.canvasInteractions) private var reportInteraction
+    @Environment(\.self) private var environment
 
     static func cardWidth(railHeight: CGFloat, cardAspectRatio: CGFloat) -> CGFloat {
         railHeight * cardAspectRatio
@@ -709,32 +711,44 @@ struct CanvasStoryRailRenderer: View {
                         reportInteraction(.storyOpened(index: index, total: pages.count))
                         openHandover = handover
                         openIndex = index
+                        openStory(
+                            at: index, handover: handover, pages: pages, chrome: chrome,
+                            restartOnCompleted: restartOnCompleted, startMuted: startMuted
+                        )
                     }
                 }
             }
-            .fullScreenCover(isPresented: Binding(
-                get: { openIndex != nil },
-                set: { if !$0 { openIndex = nil } }
-            )) {
+        )
+    }
+
+    private func openStory(
+        at index: Int, handover: StoryHandover?, pages: [CampaignCanvasStoryPage],
+        chrome: CampaignCanvas, restartOnCompleted: Bool, startMuted: Bool
+    ) {
+        let layer = storyLayer
+        let insets = activeFloaterWindowSafeAreaInsets
+        layer.present(fadeIn: true) {
+            StoryLayerEnvironment(environment).apply(to:
                 CanvasStoryViewer(
                     pages: pages,
                     chrome: chrome,
-                    initialIndex: openIndex ?? 0,
+                    initialIndex: index,
                     restartOnCompleted: restartOnCompleted,
                     startMuted: startMuted,
                     isDark: isDark,
                     onAction: onAction,
                     onDismiss: {
-                        openHandover?.release()
+                        handover?.release()
                         openHandover = nil
                         openIndex = nil
+                        layer.dismiss()
                     },
-                    safeAreaInsets: activeFloaterWindowSafeAreaInsets,
-                    handover: openHandover
+                    safeAreaInsets: insets,
+                    handover: handover
                 )
                 .ignoresSafeArea()
-            }
-        )
+            )
+        }
     }
 }
 

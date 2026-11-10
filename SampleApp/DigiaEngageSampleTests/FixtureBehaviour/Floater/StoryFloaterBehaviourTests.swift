@@ -184,6 +184,32 @@ struct StoryFloaterBehaviourTests {
         #expect(presentation.dismissReason == nil)
     }
 
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewer.swift `body`'s swipe-down gesture
+    // `session.dismiss()` -> `return` (every story, the floater's included, closes on it).
+    @Test("floater_window_clear_background_child_shadows: a downward swipe on the story returns to the window")
+    func swipeDownReturnsToTheWindow() async throws {
+        let (sdk, presentation) = try await boot("floater_window_clear_background_child_shadows")
+        defer { sdk.tearDown() }
+        try await sdk.waitForStoryWindow()
+        try await openStory(sdk)
+        try await sdk.settle(1)
+        let window = try #require(sdk.window)
+
+        try TouchSynthesizer.drag(
+            from: CGPoint(x: window.bounds.midX, y: window.bounds.height * 0.35),
+            by: CGVector(dx: 0, dy: 300),
+            in: window,
+            duration: 0.15,
+            steps: 10,
+            pauseAfterDown: 0.02
+        )
+
+        // Well inside the page's 5 s, so it is the swipe that closed it, not the story running out.
+        try await sdk.waitUntil("the story closes", timeout: 2) { !sdk.storyFloater.storyOpen }
+        #expect(sdk.storyFloater.isShowing)
+        #expect(presentation.dismissReason == nil)
+    }
+
     // Fails if: Sources/DigiaEngage/api/widgets/floater_story_overlay_view.swift `closeButton`
     // `orchestrator.dismiss(.userClose)` -> `orchestrator.dismiss(.autoTimeout)`.
     @Test("floater_window_clear_background_child_shadows: the window's × ends the showing as the user closing it")

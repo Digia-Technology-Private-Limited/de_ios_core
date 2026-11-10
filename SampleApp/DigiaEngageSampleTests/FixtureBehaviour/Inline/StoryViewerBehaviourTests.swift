@@ -161,8 +161,8 @@ struct StoryViewerBehaviourTests {
         try await sdk.closeStoryViewer()
     }
 
-    // Fails if: Sources/DigiaEngage/api/widgets/DigiaInlineStoryView.swift `InlineStoryOverlayContent`
-    // `let swipeDown = dy > 48 && dy > abs(dx)` -> `let swipeDown = false`
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewer.swift `body`'s swipe-down gesture
+    // `session.dismiss()` -> `return`
     @Test("swiping down closes the viewer and reports the frame it was left on as dismissed")
     func swipeDownDismisses() async throws {
         let (sdk, key) = try await openViewer("inline_story_swipe_next")

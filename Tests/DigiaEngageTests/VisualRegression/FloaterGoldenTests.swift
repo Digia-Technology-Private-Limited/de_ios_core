@@ -52,7 +52,11 @@ struct FloaterGoldenTests {
             EdgeInsets(top: insets.top, leading: insets.left, bottom: insets.bottom, trailing: insets.right)
         )
         let window = makeFloaterWindow(device: device)
+        // The story opens in the story layer; the bundle has no app, so the layer is added to the
+        // window's own controller, over the floater layer.
+        storyLayerContainerOverride = window.rootViewController
         defer {
+            storyLayerContainerOverride = nil
             activeFloaterWindowGeometryOverride = nil
             // SDKInstance is process-wide; end the showing so the next fixture can start.
             orchestrator.dismiss(.hostTeardown)

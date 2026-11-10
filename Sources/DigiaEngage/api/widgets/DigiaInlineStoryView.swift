@@ -78,91 +78,6 @@ private struct SingleImageStoryPreview: View {
 }
 
 
-// MARK: - Dedicated story presenter
-
-/// Presents the full-screen inline story as a modal `.overFullScreen`
-/// `UIHostingController` on the app's top-most view controller.
-///
-/// We deliberately do NOT spin up a separate `UIWindow` here. A raw secondary
-/// window works in a UIKit / React-Native host, but in a SwiftUI
-/// `App`/`WindowGroup` host it renders its first frame and then stays inert:
-/// SwiftUI never drives its update loop (frozen progress bar) and it never
-/// joins the active responder chain (dead tap zones, swipe-dismiss and CTA).
-/// A modal presentation is live and interactive in BOTH lifecycles. Being a
-/// UIKit modal layered above any React-Native Fabric surface, it still owns
-/// its touches outright — without competing with Fabric's
-/// `RCTSurfaceTouchHandler` — mirroring the isolation Android gets from
-/// presenting the story as a `Dialog`.
-@MainActor
-final class DigiaStoryPresenter {
-    static let shared = DigiaStoryPresenter()
-
-    /// The currently-presented story controller. Weak because UIKit retains a
-    /// presented controller for us; we only need it to drive dismissal.
-    private weak var presented: UIViewController?
-
-    private init() {}
-
-    func present(state: InlineStoryOverlayState) {
-        // Replace any story already showing (e.g. tapping another story).
-        // Tear the old one down without animation so it doesn't collide with
-        // the incoming present.
-        if let presented {
-            self.presented = nil
-            presented.presentingViewController?.dismiss(animated: false)
-        }
-
-        guard let presenter = ViewControllerUtil.topViewController() else { return }
-
-        let host = DigiaStoryHostingController(
-            rootView: InlineStoryOverlayContent(state: state)
-                .environment(\.digiaCampaignKey, state.payload.campaignKey)
-        )
-        // Opaque black so the full-bleed media has no seam during the fade.
-        host.view.backgroundColor = .black
-        host.modalPresentationStyle = .overFullScreen
-        host.modalTransitionStyle = .crossDissolve
-        presented = host
-        presenter.present(host, animated: true)
-    }
-
-    func dismiss() {
-        guard let presented else { return }
-        self.presented = nil
-        presented.presentingViewController?.dismiss(animated: true)
-    }
-}
-
-private final class DigiaStoryHostingController<Content: View>: UIHostingController<Content> {
-    // The interactive "back" (left-edge swipe) and swipe-down dismissals are
-    // handled inside the SwiftUI DragGesture in InlineStoryOverlayContent, not
-    // by a UIKit gesture recognizer here — a separate UIScreenEdgePanGesture on
-    // this view would be starved by SwiftUI's own pan recognizer. This
-    // controller only adds hardware-keyboard ESC dismissal (e.g. simulator).
-    override var canBecomeFirstResponder: Bool {
-        true
-    }
-
-    override var keyCommands: [UIKeyCommand]? {
-        [
-            UIKeyCommand(
-                input: UIKeyCommand.inputEscape,
-                modifierFlags: [],
-                action: #selector(dismissStoryOverlay)
-            )
-        ]
-    }
-
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        becomeFirstResponder()
-    }
-
-    @objc private func dismissStoryOverlay() {
-        SDKInstance.shared.controller.dismissStoryOverlay()
-    }
-}
-
 /// The inline campaign's analytics for the shared viewer: the classic story events, as on `main`.
 @MainActor
 private struct InlineStoryReporter: StoryViewerReporter {
@@ -178,8 +93,8 @@ private struct InlineStoryReporter: StoryViewerReporter {
 }
 
 /// The inline story viewer: the shared `StoryViewer` with the inline chrome (progress strip, mute
-/// and close buttons, the item's call to action), 88 pt edge strips to navigate, and the swipe
-/// down / edge swipe to close, as on `main`.
+/// and close buttons, the item's call to action), 88 pt edge strips to navigate, and the edge
+/// swipe to close (swipe down is the shared viewer's), as on `main`.
 @MainActor
 struct InlineStoryOverlayContent: View {
     let state: InlineStoryOverlayState
@@ -214,23 +129,20 @@ struct InlineStoryOverlayContent: View {
             chrome(context)
         }
         .contentShape(Rectangle())
-        // Dismissal gestures live in a single SwiftUI DragGesture so they don't fight a separate
-        // UIKit recognizer (which SwiftUI's own pan would starve). Two "back" affordances:
-        //   • swipe DOWN  — standard full-screen-cover dismissal
-        //   • swipe RIGHT from the left edge — iOS interactive "back"
-        // `simultaneousGesture`, so the edge taps beneath keep working.
+        // Swipe down is the shared viewer's own (every story has it). The inline story adds the
+        // iOS interactive "back": a swipe right from the left edge. `simultaneousGesture`, so the
+        // edge taps beneath keep working.
         .simultaneousGesture(
             DragGesture(minimumDistance: 10)
                 .onEnded { value in
                     let dy = value.translation.height
                     let dx = value.translation.width
                     let predictedDX = value.predictedEndTranslation.width
-                    let swipeDown = dy > 48 && dy > abs(dx)
                     let edgeBack =
                         value.startLocation.x < 40
                         && dx > abs(dy)
                         && (dx > 80 || predictedDX > 200)
-                    if swipeDown || edgeBack {
+                    if edgeBack {
                         SDKInstance.shared.controller.dismissStoryOverlay()
                     }
                 }

@@ -553,11 +553,12 @@ struct CampaignCanvasStage: View {
     /// The element that fires it is usually a *sibling* of the story rail rather
     /// than a descendant, so the rail can never hear the tap itself. The stage
     /// owns every child, which makes it the one place that sees both.
-    @State private var storyOpenIndex: Int?
+    @State private var storyLayer = StoryLayer()
+    @Environment(\.self) private var environment
 
     private func dispatch(_ request: CampaignCanvasActionRequest) {
         for action in request.actions {
-            if case .showStory(let index) = action { storyOpenIndex = index }
+            if case .showStory(let index) = action { openStory(at: index) }
         }
         // Forwarded whole, so the tap's analytics and any other actions on it
         // behave exactly as they would anywhere else; the runner has no case for
@@ -606,30 +607,32 @@ struct CampaignCanvasStage: View {
         }
         .frame(width: canvas.width, height: canvas.height, alignment: .topLeading)
         .clipShape(stageClipShape)
-        .fullScreenCover(
-            isPresented: Binding(
-                get: { storyOpenIndex != nil && story != nil },
-                set: { if !$0 { storyOpenIndex = nil } }
-            )
-        ) {
-            if case .story(
-                _, let pages, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
-            ) = story, !pages.isEmpty {
+    }
+
+    /// Opens the canvas's own story at `index` in the story layer, as the rail does.
+    private func openStory(at index: Int) {
+        guard case .story(
+            _, let pages, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
+        ) = story, !pages.isEmpty else { return }
+        let layer = storyLayer
+        let insets = activeFloaterWindowSafeAreaInsets
+        layer.present(fadeIn: true) {
+            StoryLayerEnvironment(environment).apply(to:
                 CanvasStoryViewer(
                     pages: pages,
                     chrome: chrome,
                     // Clamped rather than trusted: the authored number can outlive
                     // the story it named if the author later deletes one.
-                    initialIndex: min(max(0, storyOpenIndex ?? 0), pages.count - 1),
+                    initialIndex: min(max(0, index), pages.count - 1),
                     restartOnCompleted: restartOnCompleted,
                     startMuted: startMuted,
                     isDark: isDark,
                     onAction: onAction,
-                    onDismiss: { storyOpenIndex = nil },
-                    safeAreaInsets: activeFloaterWindowSafeAreaInsets
+                    onDismiss: { layer.dismiss() },
+                    safeAreaInsets: insets
                 )
                 .ignoresSafeArea()
-            }
+            )
         }
     }
 }

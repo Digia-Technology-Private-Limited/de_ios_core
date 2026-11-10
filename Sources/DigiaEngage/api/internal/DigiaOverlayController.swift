@@ -24,6 +24,8 @@ final class DigiaOverlayController: ObservableObject {
     }
     private var nudgeAutoDismissTask: Task<Void, Never>?
     @Published private(set) var activeStoryOverlay: InlineStoryOverlayState?
+    /// The classic inline story's own layer (the one `StoryLayer` every story opens in).
+    private let storyLayer = StoryLayer()
 
     var onAction: ((_ actionType: String, _ url: String, _ payload: CEPTriggerPayload) -> Bool)?
 
@@ -76,13 +78,16 @@ final class DigiaOverlayController: ObservableObject {
             handover: handover
         )
         activeStoryOverlay = state
-        DigiaStoryPresenter.shared.present(state: state)
+        storyLayer.present(fadeIn: true, onEscape: { [weak self] in self?.dismissStoryOverlay() }) {
+            InlineStoryOverlayContent(state: state)
+                .environment(\.digiaCampaignKey, state.payload.campaignKey)
+        }
     }
 
     func dismissStoryOverlay() {
         // Never left held if the viewer did not get to use it (no top controller to present on).
         activeStoryOverlay?.handover?.release()
         activeStoryOverlay = nil
-        DigiaStoryPresenter.shared.dismiss()
+        storyLayer.dismiss()
     }
 }

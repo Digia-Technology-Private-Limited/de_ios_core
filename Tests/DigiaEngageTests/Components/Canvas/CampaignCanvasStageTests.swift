@@ -86,16 +86,22 @@ struct CampaignCanvasStageTests {
         let (window, _) = ComponentTestHost.mountCanvas(canvas) { request in
             dispatchedRequests.append(request)
         }
-        defer { ComponentTestHost.unmount(window) }
+        // The story opens in the story layer, over the app's top controller; the bundle has no app,
+        // so the layer is added to the window's own controller.
+        storyLayerContainerOverride = window.rootViewController
+        defer {
+            storyLayerContainerOverride = nil
+            ComponentTestHost.unmount(window)
+        }
         ComponentTestHost.drainRunLoop(for: 0.1)
 
-        #expect(window.rootViewController?.presentedViewController == nil)
+        let childrenBefore = window.rootViewController?.children.count ?? 0
 
         activateButton(in: window)
         #expect(dispatchedRequests.count == 1)
 
         ComponentTestHost.drainRunLoop(for: 0.4)
-        #expect(window.rootViewController?.presentedViewController != nil)
+        #expect((window.rootViewController?.children.count ?? 0) == childrenBefore + 1)
     }
 
     @Test("stage showStory without story widget forwards action but does not present cover")
