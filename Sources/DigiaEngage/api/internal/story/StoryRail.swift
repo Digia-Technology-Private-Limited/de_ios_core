@@ -51,7 +51,8 @@ struct StoryRailState: Equatable {
     private var turnCandidates: Set<Int> { playable.subtracting(skipped) }
 
     /// A settled scroll: cards already in stay until they drop below the exit threshold, new ones
-    /// join above the entry threshold, and the rotation restarts from the first eligible card.
+    /// join above the entry threshold, and the playing card keeps its turn while it is still in
+    /// view; otherwise the turn moves to the next eligible card (as Flutter).
     func visibilityChanged(items: [StoryItemConfig], visibility: StoryRailVisibility) -> StoryRailState {
         var updated = self
         updated.slotVisible = visibility.slotVisible
@@ -61,7 +62,7 @@ struct StoryRailState: Equatable {
             visibleFractions: visibility.cardFractions,
             items: items
         )
-        return updated.restartFromFirst()
+        return updated.reconcileActive()
     }
 
     func lifecycleChanged(active: Bool) -> StoryRailState {

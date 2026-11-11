@@ -93,4 +93,21 @@ struct StoryRailStateTests {
         #expect(playing(state, 2) == [1], "the failed card never comes back, even after a restart")
         #expect(state.decision(index: 1).repeatWindow, "the one card left loops in place")
     }
+
+    // Guards `return updated.reconcileActive()` in `StoryRailState.visibilityChanged`.
+    @Test("a settled scroll keeps the playing card while it is still in view")
+    func settledScrollKeepsThePlayingCard() {
+        let items = Array(repeating: Self.video, count: 5)
+        let visibility = StoryRailVisibility(slotVisible: true, cardFractions: [0: 1, 1: 1, 2: 1, 3: 0, 4: 0])
+        let state = StoryRailState()
+            .lifecycleChanged(active: true)
+            .visibilityChanged(items: items, visibility: visibility)
+            .complete(index: 0)
+        #expect(playing(state, 5) == [1], "card 1 has the turn")
+
+        let settled = state.visibilityChanged(items: items, visibility: visibility)
+
+        #expect(playing(settled, 5) == [1], "card 1 keeps playing")
+        #expect(settled.restartGeneration == state.restartGeneration, "its window is not replayed")
+    }
 }
