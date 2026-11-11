@@ -3,9 +3,10 @@ import Testing
 
 @testable import DigiaEngage
 
-// The one slow rule (T8): slow = metered OR the last measured warm below 1500 kbps; an unknown
-// signal votes nothing. iOS has no link-rate API, so there is no third vote. Mirrors Android
-// `SlowNetwork` / `SlowNetworkThroughput`.
+// The slow rule's pure edges (T8) that no surface reaches: exactly 1500 kbps is not slow (a real
+// clock never lands on it), a NaN or negative rate votes nothing (`note` never produces one), and a
+// metered path is slow (`NWPath` cannot be built). The measured side, the unit, the cache and failed
+// warms, and the source's forward are proved through the viewer in `StoryPageTests`.
 
 @Suite("Slow network", .tags(.media, .unit, .inline))
 struct SlowNetworkTests {
@@ -32,38 +33,5 @@ struct SlowNetworkTests {
     func meteredIsSlow() {
         #expect(slowNetworkFor(isExpensive: true, isConstrained: false, measuredKbps: 50_000))
         #expect(slowNetworkFor(isExpensive: false, isConstrained: true, measuredKbps: nil))
-    }
-
-    // Fails if the rate is computed in the wrong unit: the `* 8 / 1_000 / elapsed` in `note`
-    // (512 KiB in 2 s is 2097.152 kbps).
-    @Test("a warm's throughput is kilobits per second")
-    func throughputUnit() {
-        let throughput = SlowNetworkThroughput()
-        throughput.note(bytes: 512 * 1_024, elapsed: 2)
-
-        #expect(abs((throughput.lastKbps ?? 0) - 2_097.152) < 0.001)
-    }
-
-    // Fails if a cache hit overwrites a real sample: the `elapsed >= minimumElapsed` guard in
-    // `note` (a warm served from disk returns at once and would read as a fast link, clearing
-    // a real slow verdict). Empty warms (a cancelled or failed one answers 0 bytes) vote nothing.
-    @Test("a warm served from the cache, or an empty one, is not a measurement")
-    func cacheHitsAndEmptyWarmsAreDiscarded() {
-        let throughput = SlowNetworkThroughput()
-        throughput.note(bytes: 512 * 1_024, elapsed: 10)       // 419 kbps: slow
-        throughput.note(bytes: 512 * 1_024, elapsed: 0.001)    // from the cache
-        throughput.note(bytes: 0, elapsed: 5)                  // cancelled
-
-        #expect(abs((throughput.lastKbps ?? 0) - 419.4304) < 0.001)
-    }
-
-    // Fails if the source ignores measurements: the `noteWarm` forward to the throughput
-    // (the verdict would stay "not slow" however slow the warms are).
-    @Test("a slow warm makes the live source slow")
-    func slowWarmMakesTheSourceSlow() {
-        let source = PathSlowNetworkSource()
-        source.noteWarm(bytes: 512 * 1_024, elapsed: 10)
-
-        #expect(source.isSlow)
     }
 }
