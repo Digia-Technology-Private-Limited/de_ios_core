@@ -68,6 +68,11 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
         lock.withLock { log.filter { $0.url == url } }
     }
 
+    /// Held requests for `url` still open: a request whose client cancelled it leaves.
+    static func heldOpen(for url: URL) -> Int {
+        lock.withLock { parked[url]?.count ?? 0 }
+    }
+
     static func totalRequestCount() -> Int {
         lock.withLock { log.count }
     }

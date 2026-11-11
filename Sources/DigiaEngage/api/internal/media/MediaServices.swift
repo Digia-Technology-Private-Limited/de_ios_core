@@ -28,7 +28,8 @@ struct MediaServices: Sendable {
         let loader = MediaResourceLoader(store: MediaRangeCacheStore.shared())
         let pool = VideoPlayerPool(
             onCeilingRefused: reportVideoPoolCeiling,
-            makeItem: { mediaVideoItem(for: $0, loader: loader) })
+            makeItem: { mediaVideoItem(for: $0, loader: loader) },
+            releaseItem: { loader.cancelLoading(for: $0) })
         observeMemoryPressure(of: pool)
         return MediaServices(
             reportHealth: { campaignKey, kind, cause in
@@ -65,7 +66,9 @@ struct MediaServices: Sendable {
                 let loader = MediaResourceLoader(store: videoStore)
                 services.videoStore = videoStore
                 services.videoLoader = loader
-                services.videoPool = VideoPlayerPool(makeItem: { mediaVideoItem(for: $0, loader: loader) })
+                services.videoPool = VideoPlayerPool(
+                    makeItem: { mediaVideoItem(for: $0, loader: loader) },
+                    releaseItem: { loader.cancelLoading(for: $0) })
             }
             if let videoPool { services.videoPool = videoPool }
         }

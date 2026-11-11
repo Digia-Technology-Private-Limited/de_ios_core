@@ -298,9 +298,11 @@ final class MediaVideoPlayback: ObservableObject {
             player.isMuted = muted
             player.volume = volume
             player.actionAtItemEnd = .pause
-            if let startMs {
+            // A surface's own start wins; otherwise a player whose idle item the pool let go
+            // resumes where it was.
+            if let start = startMs ?? pool.takeResumeMs(for: poolKey, player: player) {
                 seekPending = true
-                pendingStartMs = max(startMs, 0)
+                pendingStartMs = max(start, 0)
             }
             if let item = player.currentItem { watch(item) }
             self.player = player

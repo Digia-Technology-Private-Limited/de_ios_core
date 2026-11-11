@@ -424,6 +424,75 @@ struct VideoPlayerPoolMediaVideoTests {
         #expect(abs(player.currentTime().seconds - 3) < 0.1)
 }
 
+    /// The SDK's video services with a pool on a hand-wound clock, its items reading through the
+    /// range cache on `MediaOrigin`.
+    private func poolOnFakeTime() -> (VideoPlayerPool, VideoPlayerPoolTests.FakeTime) {
+        MediaOrigin.install()
+        MediaServices.override(videoSession: MediaOrigin.session())
+        let time = VideoPlayerPoolTests.FakeTime()
+        let loader = MediaServices.current.videoLoader
+        let pool = VideoPlayerPool(
+            maxPlayers: 2, clock: { time.now }, schedule: { time.schedule($0, $1) },
+            makeItem: { mediaVideoItem(for: $0, loader: loader) },
+            releaseItem: { loader.cancelLoading(for: $0) })
+        MediaServices.override(videoPool: pool)
+        return (pool, time)
+    }
+
+    // Guards `replaceItem(of: free[index].player, with: nil)` in `VideoPlayerPool.trimParked` and
+    // `releaseItem(old)` in `replaceItem`: an idle player's item keeps reading its file through the
+    // range cache, so a page the user left downloaded the whole video. Letting go of the item alone
+    // stops nothing (AVFoundation sends no `didCancel`); the pool cancels its requests.
+    @Test("a player given back stops downloading its video once it has been idle 8 s")
+    func idlePlayerStopsDownloading() async throws {
+        let (_, time) = poolOnFakeTime()
+        defer { MediaOrigin.end() }
+        let video = MediaOrigin.url("idle.mp4")
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video, held: true)
+        let model = PooledVideoModel(url: video.absoluteString)
+
+        let window = MediaStage.mount(PooledVideoHost(model: model))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { MediaOrigin.heldOpen(for: video) == 1 }, "the page is downloading")
+        model.shown = false
+        ComponentTestHost.drainRunLoop(for: 0.1)
+        #expect(MediaOrigin.heldOpen(for: video) == 1, "given back, the player keeps its item for a remount")
+        time.advance(to: VideoPlayerPool.parkSeconds)
+
+        #expect(await waitUntilMedia { MediaOrigin.heldOpen(for: video) == 0 }, "the download is cancelled")
+    }
+
+    // Guards `startMs ?? pool.takeResumeMs(...)` in `MediaVideoPlayback.open`: a player whose idle
+    // item was let go gets a new one, which must not restart at 0 (N2 past the 8 s).
+    @Test("a remount after the idle item was let go resumes at the old playhead")
+    func remountAfterIdleResumes() async throws {
+        let (pool, time) = poolOnFakeTime()
+        defer { MediaOrigin.end() }
+        let video = MediaOrigin.url("resume-idle.mp4")
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
+        let model = PooledVideoModel(url: video.absoluteString)
+
+        let window = MediaStage.mount(PooledVideoHost(model: model))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { model.frames == 1 })
+        let player = try #require(pool.heldPlayer(for: "card"))
+        var seeked = false
+        player.seek(to: CMTime(seconds: 3, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+            seeked = true
+        }
+        #expect(await waitUntilMedia { seeked })
+        model.shown = false
+        ComponentTestHost.drainRunLoop(for: 0.1)
+        time.advance(to: VideoPlayerPool.parkSeconds)
+        #expect(player.currentItem == nil, "the idle item was let go")
+
+        model.shown = true
+
+        #expect(await waitUntilMedia { model.frames == 2 })
+        #expect(pool.heldPlayer(for: "card") === player)
+        #expect(abs(player.currentTime().seconds - 3) < 0.1)
+    }
+
     // Guards the `hasFailed` checks in `VideoPlayerPool.borrow` (R2-02): an AVPlayerItem never
     // recovers, so a pooled player that failed must get a new item before the next holder.
     @Test("a keyed video that failed plays on its next mount once the origin serves again")

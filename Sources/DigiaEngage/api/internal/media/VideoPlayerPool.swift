@@ -71,7 +71,9 @@ func deviceClassFor(physicalMemoryBytes: UInt64) -> DeviceClass {
 ///   one's player is never decided up front (N6).
 /// - A freed player is paused and kept with its item: a remount under the same key and URL gets
 ///   it back where it was (rotation, swipe back; N2). A finished showing, or the same file under
-///   another key, restarts at 0.
+///   another key, restarts at 0. After `parkSeconds` free it lets go of its item, so the range
+///   cache stops downloading a file nobody shows; a later borrow gets a new item and the surface
+///   resumes at the old playhead (`takeResumeMs`).
 /// - Each hold carries its own rank; a key ranks as the highest of its current holds, so its
 ///   rank drops when a higher hold goes (OD-10, R2-06a).
 /// - A borrow of a held key with another URL re-points the player and tells every other holder
@@ -101,6 +103,8 @@ final class VideoPlayerPool: @unchecked Sendable {
         var seq: UInt64
         /// One rank per current hold.
         var holds: [PoolPriority]
+        /// Where the player resumes after its idle item was let go; taken once by `takeResumeMs`.
+        var resumeMs: Int64? = nil
         /// The highest rank among the current holds.
         /// No hold: a Stage-2 rank, so it never counts as a story page.
         var priority: PoolPriority { holds.min() ?? .onScreen }
@@ -114,12 +118,17 @@ final class VideoPlayerPool: @unchecked Sendable {
         let finished: Bool
         /// When it was given back while the pool was over its size; nil when it is within it.
         var parkedAt: TimeInterval?
+        /// When it was given back.
+        let freedAt: TimeInterval
+        /// Its playhead when its item was let go; nil while it keeps its item.
+        var resumeMs: Int64? = nil
     }
 
     /// A showing this close to its end counts as finished, as on Android.
     static let finishedWithin: TimeInterval = 0.5
 
-    /// How long an extra player given back is kept for reuse before it is destroyed (OD-24).
+    /// How long an extra player given back is kept for reuse before it is destroyed (OD-24), and
+    /// how long any player given back keeps its item before letting it go.
     static let parkSeconds: TimeInterval = 8
 
     let maxPlayers: Int
@@ -131,6 +140,7 @@ final class VideoPlayerPool: @unchecked Sendable {
     private let schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void
     private var trimScheduled = false
     private let makeItem: @MainActor (URL) -> AVPlayerItem
+    private let releaseItem: @MainActor (AVPlayerItem) -> Void
     private let makePlayer: @MainActor (AVPlayerItem) -> AVPlayer
     private var holders: [String: Holder] = [:]
     private var free: [FreePlayer] = []
@@ -146,6 +156,7 @@ final class VideoPlayerPool: @unchecked Sendable {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { task() } }
         },
         makeItem: @escaping @MainActor (URL) -> AVPlayerItem,
+        releaseItem: @escaping @MainActor (AVPlayerItem) -> Void = { _ in },
         makePlayer: @escaping @MainActor (AVPlayerItem) -> AVPlayer = { AVPlayer(playerItem: $0) }
     ) {
         self.maxPlayers = max(1, maxPlayers)
@@ -154,6 +165,7 @@ final class VideoPlayerPool: @unchecked Sendable {
         self.clock = clock
         self.schedule = schedule
         self.makeItem = makeItem
+        self.releaseItem = releaseItem
         self.makePlayer = makePlayer
     }
 
@@ -167,7 +179,8 @@ final class VideoPlayerPool: @unchecked Sendable {
             // A failed item never recovers: a borrow never inherits a failure, it retries.
             if repointed || Self.hasFailed(existing.player) {
                 existing.url = url
-                existing.player.replaceCurrentItem(with: makeItem(url))
+                existing.resumeMs = nil
+                replaceItem(of: existing.player, with: makeItem(url))
             }
             if repointed {
                 // The other holders' URL is gone: their holds end and they are told (R2-06c).
@@ -183,14 +196,17 @@ final class VideoPlayerPool: @unchecked Sendable {
         let match = free.lastIndex { $0.key == key && $0.url == url } ?? (free.isEmpty ? nil : free.count - 1)
         if let match {
             let reused = free.remove(at: match)
+            var resumeMs: Int64?
             if reused.url != url || reused.player.currentItem == nil || Self.hasFailed(reused.player) {
-                reused.player.replaceCurrentItem(with: makeItem(url))
+                replaceItem(of: reused.player, with: makeItem(url))
+                // Its idle item was let go: the new one resumes where the old one was.
+                if reused.url == url, reused.key == key, !reused.finished { resumeMs = reused.resumeMs }
             } else if reused.key != key || reused.finished {
                 // Same file under another key (two rail cards), or a finished showing: restart.
                 reused.player.seek(to: .zero)
             }
             // Otherwise the same key and URL: it resumes where it was (N2).
-            holders[key] = Holder(url: url, player: reused.player, seq: seq, holds: [priority])
+            holders[key] = Holder(url: url, player: reused.player, seq: seq, holds: [priority], resumeMs: resumeMs)
             return reused.player
         }
         if holders.count >= ceiling {
@@ -226,11 +242,22 @@ final class VideoPlayerPool: @unchecked Sendable {
         }
         holders[key] = nil
         player.pause()
+        let now = clock()
         let parked = holders.count + free.count >= maxPlayers
         free.append(FreePlayer(
             player: player, key: key, url: holder.url, finished: Self.isFinished(player),
-            parkedAt: parked ? clock() : nil))
-        if parked { scheduleTrim(after: Self.parkSeconds) }
+            parkedAt: parked ? now : nil, freedAt: now))
+        scheduleTrim(after: Self.parkSeconds)
+    }
+
+    /// Where `key`'s player should start because its idle item was let go and a new one made, in
+    /// ms; nil otherwise. Taken once: the first surface to open the player resumes it.
+    @MainActor
+    func takeResumeMs(for key: String, player: AVPlayer) -> Int64? {
+        guard var holder = holders[key], holder.player === player, let resumeMs = holder.resumeMs else { return nil }
+        holder.resumeMs = nil
+        holders[key] = holder
+        return resumeMs
     }
 
     /// Ends the hold of a node whose key nobody else can borrow (OD-15): the player is destroyed,
@@ -271,20 +298,37 @@ final class VideoPlayerPool: @unchecked Sendable {
     }
 
     /// Destroys parked players while the pool is over its size, oldest first, once each has been
-    /// parked `parkSeconds`; a younger one schedules the next pass. Never touches held players.
+    /// parked `parkSeconds`. Then every player free for `parkSeconds` lets go of its item, keeping
+    /// its playhead: an idle item keeps downloading its file through the range cache, and keeps a
+    /// decoder. A younger one schedules the next pass. Never touches held players.
     @MainActor
     func trimParked() {
         trimScheduled = false
         let now = clock()
+        var nextIn: TimeInterval?
         while holders.count + free.count > maxPlayers {
             guard let oldest = free.indices.min(by: { (free[$0].parkedAt ?? -.infinity) < (free[$1].parkedAt ?? -.infinity) })
             else { break }
             if let since = free[oldest].parkedAt, now - since < Self.parkSeconds {
-                scheduleTrim(after: Self.parkSeconds - (now - since))
-                return
+                nextIn = Self.parkSeconds - (now - since)
+                break
             }
             destroy(free.remove(at: oldest).player)
         }
+        for index in free.indices {
+            guard let item = free[index].player.currentItem else { continue }
+            let idle = now - free[index].freedAt
+            guard idle >= Self.parkSeconds else {
+                nextIn = min(nextIn ?? .infinity, Self.parkSeconds - idle)
+                continue
+            }
+            let playhead = item.currentTime()
+            if playhead.isNumeric, playhead.seconds > 0 {
+                free[index].resumeMs = Int64(playhead.seconds * 1_000)
+            }
+            replaceItem(of: free[index].player, with: nil)
+        }
+        if let nextIn { scheduleTrim(after: nextIn) }
     }
 
     /// Destroys every player, held or free. Later give-backs are no-ops.
@@ -328,9 +372,18 @@ final class VideoPlayerPool: @unchecked Sendable {
         evictionObservers[key]?.values.forEach { $0() }
     }
 
+    @MainActor
     private func destroy(_ player: AVPlayer) {
         player.pause()
-        player.replaceCurrentItem(with: nil)
+        replaceItem(of: player, with: nil)
+    }
+
+    /// Every item the pool drops or replaces is handed to `releaseItem` first: AVFoundation never
+    /// cancels the requests of an item it lets go, so the range cache would keep downloading it.
+    @MainActor
+    private func replaceItem(of player: AVPlayer, with item: AVPlayerItem?) {
+        if let old = player.currentItem { releaseItem(old) }
+        player.replaceCurrentItem(with: item)
     }
 
     private static func hasFailed(_ player: AVPlayer) -> Bool {
