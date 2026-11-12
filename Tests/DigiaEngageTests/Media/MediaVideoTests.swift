@@ -349,6 +349,53 @@ struct MediaVideoComponentTests {
         #expect(await waitUntilMedia { player.rate == 0 })
     }
 
+    // Guards `MediaVideoPlayback.setAppActive`: going inactive pauses a playing video, and coming
+    // back plays it only if it was playing; a user's pause and a non-opted-in surface are left alone.
+    @Test("a video that pauses in the background resumes only what was playing")
+    func backgroundPausesAndResumesWhatWasPlaying() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let video = MediaOrigin.url("background.mp4")
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
+        let pool = MediaServices.current.videoPool
+        func resign() { NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil) }
+        func become() { NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil) }
+
+        let window = MediaStage.mount(MediaVideo(
+            url: video.absoluteString, loop: true, pausesInBackground: true, playerKey: "background"))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "background")?.rate ?? 0) > 0 })
+        let player = try #require(pool.heldPlayer(for: "background"))
+        #expect(player.rate > 0)
+
+        resign()
+        #expect(await waitUntilMedia { player.rate == 0 }, "paused in the background")
+        become()
+        #expect(await waitUntilMedia { player.rate > 0 }, "plays again in the foreground")
+
+        player.pause()  // the user's own pause
+        resign()
+        become()
+        _ = await waitUntilMedia(timeout: 0.5) { player.rate > 0 }
+        #expect(player.rate == 0, "a user's pause survives a trip to the background")
+    }
+
+    @Test("a video that does not opt in keeps playing in the background")
+    func backgroundIsIgnoredWithoutOptIn() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let video = MediaOrigin.url("no-background.mp4")
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
+        let pool = MediaServices.current.videoPool
+
+        let window = MediaStage.mount(MediaVideo(url: video.absoluteString, loop: true, playerKey: "no-background"))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "no-background")?.rate ?? 0) > 0 })
+        NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
+        _ = await waitUntilMedia(timeout: 0.5) { pool.heldPlayer(for: "no-background")?.rate == 0 }
+        #expect((pool.heldPlayer(for: "no-background")?.rate ?? 0) > 0)
+    }
+
     // Guards the `startMs` seek in `MediaVideoPlayback.open` / `seekToStartIfReady`, and that a nil
     // `startMs` leaves the pool's playhead alone so a remount resumes.
     @Test("startMs puts the opened player at that position, and nil keeps the playhead")

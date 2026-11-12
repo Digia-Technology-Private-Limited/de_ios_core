@@ -476,23 +476,22 @@ private struct NudgeVideoView: View {
     private var url: String { interpolate(node.url, context: variables) }
 
     var body: some View {
-        if url.isEmpty {
-            EmptyView()
-        } else {
-            MediaVideo(
-                url: url,
-                fit: node.boxFit.mediaFit,
-                loop: node.loop,
-                muted: node.muted,
-                autoplay: node.autoplay,
-                showControls: node.showControls
-            )
-            .modifier(CanvasMediaFrame(
-                canvasMode: canvasMode,
-                aspectRatio: node.aspectRatio,
-                height: node.height
-            ))
-        }
+        // A blank URL goes to `MediaVideo` too: it reports `invalid_url` once, and the node keeps
+        // the box its authored size gives it, as the image node does.
+        MediaVideo(
+            url: url,
+            fit: node.boxFit.mediaFit,
+            loop: node.loop,
+            muted: node.muted,
+            autoplay: node.autoplay,
+            showControls: node.showControls,
+            pausesInBackground: true
+        )
+        .modifier(CanvasMediaFrame(
+            canvasMode: canvasMode,
+            aspectRatio: node.aspectRatio,
+            height: node.height
+        ))
     }
 }
 

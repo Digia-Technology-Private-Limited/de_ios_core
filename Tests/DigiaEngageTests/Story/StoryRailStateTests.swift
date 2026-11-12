@@ -48,6 +48,19 @@ struct StoryRailStateTests {
         #expect(playing(state, 2) == [0], "the restart tries it again")
     }
 
+    // Guards the two video checks in `updateStoryRailEligibility`: a video card with a blank URL
+    // takes its turn like one with `{{var}}`, so its player reports `invalid_url` and the card leaves
+    // the rotation. Skipped as ineligible, it sent no health at all.
+    @Test("a video card with a blank URL takes a turn so its failure is reported")
+    func blankURLVideoCardTakesATurn() {
+        let blank = StoryItemConfig(type: .video, url: "", duration: nil)
+        var state = rail(items: [blank, Self.video], visible: [0, 1])
+        #expect(playing(state, 2) == [0])
+
+        state = state.fail(index: 0)
+        #expect(playing(state, 2) == [1], "the failed card leaves the rotation")
+    }
+
     // Guards `return updated.reconcileActive()` in `StoryRailState.visibilityChanged`.
     @Test("a settled scroll keeps the playing card while it is still in view")
     func settledScrollKeepsThePlayingCard() {

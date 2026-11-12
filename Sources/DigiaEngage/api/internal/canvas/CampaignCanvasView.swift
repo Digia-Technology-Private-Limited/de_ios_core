@@ -1926,17 +1926,18 @@ private struct CanvasVideoRenderer: View {
     }
     var body: some View {
         CampaignCanvasBoxView(box: box, isDark: isDark) {
-            if !url.isEmpty {
-                MediaVideo(
-                    url: url,
-                    fit: fit == "contain" ? .contain : .cover,
-                    loop: loop,
-                    muted: muted,
-                    autoplay: autoplay,
-                    showControls: showControls,
-                    playerKey: playerKey
-                )
-            }
+            // A blank or unresolved URL goes to `MediaVideo` too: it reports `invalid_url` once and
+            // shows its failed box in the node's own box.
+            MediaVideo(
+                url: url,
+                fit: fit == "contain" ? .contain : .cover,
+                loop: loop,
+                muted: muted,
+                autoplay: autoplay,
+                showControls: showControls,
+                pausesInBackground: true,
+                playerKey: playerKey
+            )
         }
     }
 }

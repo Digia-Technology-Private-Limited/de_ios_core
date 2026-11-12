@@ -116,10 +116,10 @@ struct MediaVideoRoutingTests {
         #expect(recorder.all.isEmpty, "not reported as an unusable URL")
     }
 
-    // Guards `if !url.isEmpty` in `CanvasVideoRenderer.body`: a canvas video with no URL builds no
-    // player and reports nothing (an empty `MediaVideo` would report `invalid_url`).
-    @Test("a canvas video with an empty URL builds no player and reports nothing")
-    func canvasVideoWithAnEmptyURLBuildsNoPlayer() async {
+    // Guards `CanvasVideoRenderer.body` handing a blank URL to `MediaVideo` instead of skipping it:
+    // the canvas video reports `invalid_url` once, builds no player and fetches nothing.
+    @Test("a canvas video with an empty URL reports invalid_url once and builds no player")
+    func canvasVideoWithAnEmptyURLReportsInvalidURL() async {
         MediaOrigin.install()
         MediaServices.override(videoSession: MediaOrigin.session())
         defer { MediaOrigin.end() }
@@ -130,8 +130,38 @@ struct MediaVideoRoutingTests {
         defer { ComponentTestHost.unmount(window) }
         _ = await waitUntilMedia(timeout: 0.5) { false }
 
-        #expect(recorder.all.isEmpty)
+        #expect(recorder.all == [.init(campaignKey: MediaStage.campaign, kind: .video, cause: "invalid_url")])
         #expect(pool.livePlayerCount == 0)
+        #expect(MediaOrigin.totalRequestCount() == 0)
+    }
+
+    // Guards `NudgeVideoView.body` handing a blank URL to `MediaVideo` inside its frame (bugs 1, 8):
+    // the nudge video reports `invalid_url` once and keeps its authored 60 pt height, where it
+    // used to draw nothing and collapse the dialog.
+    @Test("a nudge video with an empty URL reports invalid_url once and keeps its authored height")
+    func nudgeVideoWithAnEmptyURLKeepsItsBox() async throws {
+        MediaOrigin.install()
+        MediaServices.override(videoSession: MediaOrigin.session())
+        defer { MediaOrigin.end() }
+        let recorder = HealthRecorder()
+        let column = try #require(NudgeParser().parse([
+            "layout": [
+                "type": "digia/column",
+                "children": [[
+                    "type": "digia/videoPlayer",
+                    "props": ["url": "", "height": 60],
+                ]],
+            ],
+        ]))
+
+        let window = MediaStage.mount(NudgeColumnContent(column: column, onDismiss: {}))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { !recorder.all.isEmpty })
+        _ = await waitUntilMedia(timeout: 0.3) { false }
+
+        #expect(recorder.all == [.init(campaignKey: MediaStage.campaign, kind: .video, cause: "invalid_url")])
+        let host = UIHostingController(rootView: NudgeColumnContent(column: column, onDismiss: {}))
+        #expect(host.sizeThatFits(in: CGSize(width: 300, height: 1_000)).height == 60)
         #expect(MediaOrigin.totalRequestCount() == 0)
     }
 

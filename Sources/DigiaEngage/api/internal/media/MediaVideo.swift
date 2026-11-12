@@ -76,6 +76,11 @@ let mediaVideoBackdrop = Color(red: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 
 /// and a rail tile pass it, so the window's own background or the tile's still shows through
 /// (OD-20, OD-18). A thumbnail or BlurHash given to the video still draws until the first frame.
 ///
+/// `pausesInBackground` pauses the player when the app resigns active and, on becoming active,
+/// plays it again only if it was playing (a user's pause or an authored `autoplay: false` stays),
+/// the same notifications the story rail and viewer pause on. Canvas and nudge video pass it; the
+/// PIP, story and rail surfaces have their own rule.
+///
 /// Callbacks (the same set on every stack): `onFirstFrame` once per opened URL (again after a
 /// handover to a new holder), `onEnded` when playback reaches the end and isn't looping,
 /// `onFailure` after health is reported.
@@ -95,6 +100,7 @@ struct MediaVideo: View {
     var volume: Float = 1
     var autoplay: Bool = true
     var showControls: Bool = false
+    var pausesInBackground: Bool = false
     var groundAfterFirstFrame: Color = .black
     var bare: Bool = false
     var playerKey: String? = nil
@@ -153,6 +159,12 @@ struct MediaVideo: View {
         .onChange(of: volume) { playback.player?.volume = $0 }
         .onChange(of: autoplay) { playback.setPlaying($0) }
         .onChange(of: loop) { playback.loop = $0 }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            if pausesInBackground { playback.setAppActive(false) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            if pausesInBackground { playback.setAppActive(true) }
+        }
     }
 
     @ViewBuilder
@@ -245,6 +257,10 @@ final class MediaVideoPlayback: ObservableObject {
     private var seekPending = false
     private var pendingStartMs: Int64?
     private var wantsPlaying = false
+    /// The app is not active and this video paused for it; `resumeWhenActive` is whether it was
+    /// playing, which is all that comes back.
+    private var appPaused = false
+    private var resumeWhenActive = false
 
     /// Keeps the latest closures, so a parent passing new ones for the same URL is heard.
     func updateCallbacks(
@@ -337,8 +353,29 @@ final class MediaVideoPlayback: ObservableObject {
     func setPlaying(_ playing: Bool) {
         wantsPlaying = playing
         guard let player, !failed else { return }
+        if appPaused {
+            resumeWhenActive = playing
+            return
+        }
         if playing, seekPending { return }
         if playing { player.play() } else { player.pause() }
+    }
+
+    /// The app resigned or became active (`MediaVideo.pausesInBackground`). Going inactive pauses
+    /// what is playing, or about to play once its start seek lands; coming back plays only that.
+    func setAppActive(_ active: Bool) {
+        if !active {
+            guard !appPaused else { return }
+            appPaused = true
+            resumeWhenActive = (player?.rate ?? 0) > 0 || (seekPending && wantsPlaying)
+            player?.pause()
+        } else {
+            guard appPaused else { return }
+            appPaused = false
+            let resume = resumeWhenActive
+            resumeWhenActive = false
+            if resume { setPlaying(true) }
+        }
     }
 
     /// Stops the player: gives it back to the pool, which keeps it for a remount, or destroys it
@@ -362,6 +399,7 @@ final class MediaVideoPlayback: ObservableObject {
         opened = nil
         seekPending = false
         pendingStartMs = nil
+        resumeWhenActive = false
         firstFrameShown = false
         failed = false
         spinnerVisible = false

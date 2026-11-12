@@ -166,12 +166,12 @@ func updateStoryRailEligibility(
     var next = current.filter { index in
         guard items.indices.contains(index) else { return false }
         let item = items[index]
-        return item.type == .video && !item.url.isEmpty && (visibleFractions[index] ?? 0) >= stopWhenBelow
+        return item.type == .video && (visibleFractions[index] ?? 0) >= stopWhenBelow
     }
     for (index, rawFraction) in visibleFractions {
         guard items.indices.contains(index) else { continue }
         let item = items[index]
-        guard item.type == .video, !item.url.isEmpty else { continue }
+        guard item.type == .video else { continue }
         if min(max(rawFraction, 0), 1) >= startWhenVisible { next.insert(index) }
     }
     return next
