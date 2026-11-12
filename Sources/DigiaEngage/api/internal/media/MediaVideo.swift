@@ -259,6 +259,8 @@ final class MediaVideoPlayback: ObservableObject {
     private let ownKey = "media-video-\(UUID().uuidString)"
     private var report: (String) -> Void = { _ in }
     private var statusObserver: NSKeyValueObservation?
+    /// Hears a play or pause that did not come from `setPlaying` (the native controls).
+    private var rateObserver: NSKeyValueObservation?
     private var endObserver: NSObjectProtocol?
     private var spinnerTask: Task<Void, Never>?
     /// A `startMs` seek is waiting for the item to be ready, or on its way: the player starts once
@@ -312,7 +314,9 @@ final class MediaVideoPlayback: ObservableObject {
         guard let request, lease == nil, player == nil else { return }
         let pool = request.pool
         guard let player = pool.borrow(
-            key: request.key, url: request.url, priority: request.priority, wantsPlay: wantsPlaying) else {
+            key: request.key, url: request.url, priority: request.priority,
+            // A surface that does not wait (the rail, the floater) never gives way, as on Android.
+            wantsPlay: request.waits ? wantsPlaying : true) else {
             if waitToken != nil { return }
             guard retried else {
                 let opened = opened
@@ -339,6 +343,7 @@ final class MediaVideoPlayback: ObservableObject {
             pendingStartMs = max(start, 0)
         }
         if let item = player.currentItem { watch(item) }
+        watchRate(of: player)
         self.player = player
         seekToStartIfReady()
         setPlaying(wantsPlaying)
@@ -386,7 +391,7 @@ final class MediaVideoPlayback: ObservableObject {
     func setPlaying(_ playing: Bool) {
         let changed = wantsPlaying != playing
         wantsPlaying = playing
-        if changed, let request {
+        if changed, let request, request.waits {
             if let waitToken {
                 request.pool.updateWait(waitToken, wantsPlay: playing)
                 // A waiting still asked to play borrows at once: it may take a paused holder's player.
@@ -456,7 +461,26 @@ final class MediaVideoPlayback: ObservableObject {
         }
     }
 
+    /// The user played or paused through the controls: tell the pool, so a video the user is
+    /// watching is not given way, and one the user paused can be. `rate` is the asked-for rate
+    /// (non-zero while it waits for data). Read on the next turn, so a pause the pool itself makes
+    /// on a player it takes back (the showing no longer holds it) is not heard.
+    private func watchRate(of player: AVPlayer) {
+        rateObserver = player.observe(\.rate, options: [.new]) { [weak self] player, _ in
+            Task { @MainActor in
+                guard let self, self.player === player, !self.failed, !self.seekPending,
+                      let request = self.request, request.waits else { return }
+                let playing = player.rate != 0
+                guard playing != self.wantsPlaying else { return }
+                self.wantsPlaying = playing
+                request.pool.setWantsPlay(key: request.key, player: player, wantsPlay: playing)
+            }
+        }
+    }
+
     private func unwatch() {
+        rateObserver?.invalidate()
+        rateObserver = nil
         spinnerTask?.cancel()
         spinnerTask = nil
         statusObserver?.invalidate()

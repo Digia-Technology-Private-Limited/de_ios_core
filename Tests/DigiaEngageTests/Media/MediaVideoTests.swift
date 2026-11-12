@@ -386,6 +386,60 @@ struct MediaVideoComponentTests {
         #expect(await waitUntilMedia { pool.heldPlayer(for: "rail") != nil }, "borrowed again on its next open")
     }
 
+    // Guards `watchRate(of:)` in `MediaVideoPlayback` (R1-02): a video authored not to play that
+    // the user starts through the controls is a video that wants to play, so a borrow at the
+    // ceiling that wants to play does not take its player.
+    @Test("a video the user starts by hand keeps its player at the ceiling")
+    func userStartedPlayKeepsThePlayer() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let loader = MediaServices.current.videoLoader
+        let pool = VideoPlayerPool(maxPlayers: 1, ceiling: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
+        MediaServices.override(videoPool: pool)
+        let video = MediaOrigin.url("user-play.mp4")
+        let other = MediaOrigin.url("user-play-other.mp4")
+        for url in [video, other] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
+
+        let window = MediaStage.mount(MediaVideo(url: video.absoluteString, autoplay: false, playerKey: "manual"))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "manual")?.currentItem?.status == .readyToPlay })
+        let player = try #require(pool.heldPlayer(for: "manual"))
+
+        player.play() // the native controls' play button
+        _ = await waitUntilMedia(timeout: 0.3) { false }
+
+        #expect(pool.borrow(key: "autoplay", url: other, priority: .onScreen, wantsPlay: true) == nil)
+        #expect(pool.heldPlayer(for: "manual") === player, "the user's video kept its player")
+    }
+
+    // Guards `waitsForPlayer: false` in `FloaterMediaView` and `wantsPlay: request.waits ? … : true`
+    // in `MediaVideoPlayback.attemptBorrow` (R1-03): the floater's window with autoplay off does
+    // not make the orchestrator's held player a paused one that an autoplay video takes.
+    @Test("a floater with autoplay off is not given way to an autoplay borrow at the ceiling")
+    func floaterNeverGivesWay() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let loader = MediaServices.current.videoLoader
+        let pool = VideoPlayerPool(maxPlayers: 1, ceiling: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
+        MediaServices.override(videoPool: pool)
+        let video = MediaOrigin.url("floater.mp4")
+        let other = MediaOrigin.url("floater-other.mp4")
+        for url in [video, other] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
+        let media = FloaterMediaConfig(
+            kind: .video, url: video.absoluteString, aspectRatio: 0, loop: true, autoplay: false, volume: 0.5,
+            startMuted: true)
+
+        let window = MediaStage.mount(FloaterMediaView(
+            media: media, videoPlayerKey: "floater", muted: true, cover: true,
+            resolvedUrl: video.absoluteString, preloadedImage: nil))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "floater") != nil })
+        let player = try #require(pool.heldPlayer(for: "floater"))
+
+        #expect(pool.borrow(key: "autoplay", url: other, priority: .onScreen, wantsPlay: true) == nil)
+        #expect(pool.heldPlayer(for: "floater") === player)
+    }
+
     // Guards `player.volume = volume` in `MediaVideoPlayback.open` (W8-03; Flutter Y8-02, Android
     // `configuredVolume...`): the authored level is on the player from the start, independent of
     // mute, so unmuting gives that level and not the player's default 1. Also when the player is a
