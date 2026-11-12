@@ -44,7 +44,7 @@ final class GameHaptics {
     func play(_ style: GameHapticStyle) -> Bool {
         guard sensors.contains("haptics") else { return false }
         let timestamp = now()
-        if let last = lastFiredAt, timestamp - last < Self.throttleInterval { return false }
+        if let last = lastFiredAt, timestamp - last <= Self.throttleInterval { return false }
         lastFiredAt = timestamp
         fire(style)
         return true
