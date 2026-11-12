@@ -153,6 +153,9 @@ struct StoryVideoSurface: View {
                     firstFrameShown = false
                     onLost()
                 },
+                // The rail skips a refused card's turn and the viewer's pages are Stage 1: neither
+                // joins the pool's wait queue.
+                waitsForPlayer: false,
                 onEnded: onEnded,
                 onFailure: {
                     failed = true

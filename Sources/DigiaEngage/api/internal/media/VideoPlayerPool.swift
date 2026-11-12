@@ -1,6 +1,8 @@
 import AVFoundation
 import Foundation
 
+private let log = DigiaLogger()
+
 // Ranking and sizes mirror Android's VideoPlayerPool (adapted there from Media3 1.9.0
 // `DefaultPreloadManager`, Apache-2.0, notice kept on Android): the same four ranks in the same
 // order. Case names follow Swift lowerCamelCase (intended difference).
@@ -87,13 +89,20 @@ func deviceClassFor(physicalMemoryBytes: UInt64) -> DeviceClass {
 ///   (`PoolPriority.isStage1`), Stage 2 is everything else. Up to `maxPlayers` players are
 ///   pooled; above that every borrow gets an extra player until `ceiling` (live holders). At the
 ///   ceiling Stage 2 is refused (its still, reported through `onCeilingRefused`) and Stage 1
-///   takes the player of the least recently borrowed holder with no Stage-1 hold, which is told
-///   and shows its still; with no such holder Stage 1 goes one over the ceiling.
+///   takes the player of the least recently borrowed holder with no Stage-1 hold, playing or
+///   paused; it is told and shows its still, and its playhead is kept so it resumes there when it
+///   gets a player again (`takeResumeMs`). With no such holder Stage 1 goes one over the ceiling.
+/// - Wait queue (2026-11-12, `testkit/contracts/video-pool.md`). A refused or evicted Stage-2
+///   surface `wait`s while it is mounted. Waiters that want to play come before paused ones, first
+///   come first served within each group. A freed slot is reserved for the first waiter, whose
+///   `onAvailable` runs on the next main-queue turn; a Stage-2 borrow by anyone else counts
+///   reserved slots as taken, Stage 1 ignores them (a reservation it overruns lapses). Nobody
+///   gives way inside Stage 2: a held video, playing or paused, keeps its player.
 /// - An extra given back is parked, not destroyed, so a borrow in the next seconds reuses it;
 ///   after `parkSeconds` it is destroyed while the pool is over its size. Memory pressure
 ///   (`onMemoryPressure`) destroys idle players and the story's previous-page hold.
-/// - Bookkeeping is bounded by the live players (N8), plus eviction observers while their
-///   surface is mounted.
+/// - Bookkeeping is bounded by the live players (N8), plus eviction observers, waiters and the
+///   playheads of evicted keys while their surface is mounted.
 ///
 /// All calls run on the main thread.
 final class VideoPlayerPool: @unchecked Sendable {
@@ -103,11 +112,22 @@ final class VideoPlayerPool: @unchecked Sendable {
         var seq: UInt64
         /// One rank per current hold.
         var holds: [PoolPriority]
-        /// Where the player resumes after its idle item was let go; taken once by `takeResumeMs`.
+        /// Where the player resumes after its idle item was let go, or after Stage 1 took the
+        /// key's last player; taken once by `takeResumeMs`.
         var resumeMs: Int64? = nil
         /// The highest rank among the current holds.
         /// No hold: a Stage-2 rank, so it never counts as a story page.
         var priority: PoolPriority { holds.min() ?? .onScreen }
+    }
+
+    private struct Waiter {
+        let token: UUID
+        let key: String
+        let url: URL
+        /// When it started waiting; `updateWait` keeps it.
+        let seq: UInt64
+        var wantsPlay: Bool
+        let onAvailable: @MainActor () -> Void
     }
 
     private struct FreePlayer {
@@ -138,6 +158,9 @@ final class VideoPlayerPool: @unchecked Sendable {
     var onCeilingRefused: (@MainActor () -> Void)?
     private let clock: () -> TimeInterval
     private let schedule: (TimeInterval, @escaping @MainActor () -> Void) -> Void
+    /// Runs a task on the next main-queue turn: a waiter's `onAvailable`, never inside the call
+    /// that freed its slot.
+    private let post: (@escaping @MainActor () -> Void) -> Void
     private var trimScheduled = false
     private let makeItem: @MainActor (URL) -> AVPlayerItem
     private let releaseItem: @MainActor (AVPlayerItem) -> Void
@@ -145,6 +168,14 @@ final class VideoPlayerPool: @unchecked Sendable {
     private var holders: [String: Holder] = [:]
     private var free: [FreePlayer] = []
     private var evictionObservers: [String: [UUID: @MainActor () -> Void]] = [:]
+    private var waiters: [Waiter] = []
+    /// Keys a freed slot is held for until they borrow, cancel, or Stage 1 takes the slot.
+    private var reserved: [String] = []
+    /// The playhead of a key whose player the pool took (decision 2a), for that key's next borrow
+    /// of the same URL while it waits. Dropped at that key's next borrow or when it stops waiting.
+    /// At most `ceiling` entries, the oldest dropped first (N8): a key that never waits keeps its
+    /// entry until it borrows again.
+    private var evictedResume: [String: (url: URL, ms: Int64, at: UInt64)] = [:]
     private var seq: UInt64 = 0
 
     init(
@@ -155,6 +186,9 @@ final class VideoPlayerPool: @unchecked Sendable {
         schedule: @escaping (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, task in
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { MainActor.assumeIsolated { task() } }
         },
+        post: @escaping (@escaping @MainActor () -> Void) -> Void = { task in
+            DispatchQueue.main.async { MainActor.assumeIsolated { task() } }
+        },
         makeItem: @escaping @MainActor (URL) -> AVPlayerItem,
         releaseItem: @escaping @MainActor (AVPlayerItem) -> Void = { _ in },
         makePlayer: @escaping @MainActor (AVPlayerItem) -> AVPlayer = { AVPlayer(playerItem: $0) }
@@ -164,13 +198,14 @@ final class VideoPlayerPool: @unchecked Sendable {
         self.onCeilingRefused = onCeilingRefused
         self.clock = clock
         self.schedule = schedule
+        self.post = post
         self.makeItem = makeItem
         self.releaseItem = releaseItem
         self.makePlayer = makePlayer
     }
 
     /// One hold on the player for `key`, or nil when refused (Stage 2 at the ceiling, which is
-    /// reported through `onCeilingRefused`). The caller shows its still on nil.
+    /// reported through `onCeilingRefused`). The caller shows its still on nil, and `wait`s.
     @MainActor
     func borrow(key: String, url: URL, priority: PoolPriority) -> AVPlayer? {
         seq &+= 1
@@ -189,9 +224,32 @@ final class VideoPlayerPool: @unchecked Sendable {
             existing.seq = seq
             existing.holds.append(priority)
             holders[key] = existing
+            leaveQueue(key)
             if repointed { notifyEvicted(key) }
             return existing.player
         }
+        var victim: String?
+        if !priority.isStage1, holders.count + reserved.filter({ $0 != key }).count >= ceiling {
+            // Stage 2 at the ceiling, counting the slots reserved for waiters: refused.
+            onCeilingRefused?()
+            return nil
+        } else if priority.isStage1, free.isEmpty, holders.count >= ceiling {
+            // Stage 1 is never refused (OD-24): it takes the player of the least recently borrowed
+            // holder with no Stage-1 hold. With none, it goes one over the ceiling.
+            victim = leastRecentStageTwo()
+        }
+        if let victim, let taken = holders.removeValue(forKey: victim) { take(taken, of: victim) }
+        // The victim is told once the borrower holds its slot, so a `wait` it starts sees the
+        // pool as it is.
+        defer {
+            leaveQueue(key)
+            if priority.isStage1 { lapseReservations() }
+            if let victim { notifyEvicted(victim) }
+        }
+        // Where the pool left this key's last player, if it took it (decision 2a). Only a showing
+        // that waits resumes there; otherwise the surface's own start wins (OD-22) (R3-01).
+        let waits = waiters.contains { $0.key == key }
+        let evictedMs = evictedResume.removeValue(forKey: key).flatMap { waits && $0.url == url ? $0.ms : nil }
         // Prefer the free player that last played this key and URL, so it resumes.
         let match = free.lastIndex { $0.key == key && $0.url == url } ?? (free.isEmpty ? nil : free.count - 1)
         if let match {
@@ -206,24 +264,11 @@ final class VideoPlayerPool: @unchecked Sendable {
                 reused.player.seek(to: .zero)
             }
             // Otherwise the same key and URL: it resumes where it was (N2).
-            holders[key] = Holder(url: url, player: reused.player, seq: seq, holds: [priority], resumeMs: resumeMs)
+            holders[key] = Holder(url: url, player: reused.player, seq: seq, holds: [priority], resumeMs: evictedMs ?? resumeMs)
             return reused.player
         }
-        if holders.count >= ceiling {
-            if priority.isStage1 {
-                // Stage 1 is never refused (OD-24): it takes the player of the least recently
-                // borrowed holder with no Stage-1 hold. With none, it goes one over the ceiling.
-                if let victim = holders.filter({ $0.value.holds.allSatisfy { !$0.isStage1 } })
-                    .min(by: { $0.value.seq < $1.value.seq }) {
-                    evict(key: victim.key)
-                }
-            } else {
-                onCeilingRefused?()
-                return nil
-            }
-        }
         let player = makePlayer(makeItem(url))
-        holders[key] = Holder(url: url, player: player, seq: seq, holds: [priority])
+        holders[key] = Holder(url: url, player: player, seq: seq, holds: [priority], resumeMs: evictedMs)
         return player
     }
 
@@ -248,10 +293,11 @@ final class VideoPlayerPool: @unchecked Sendable {
             player: player, key: key, url: holder.url, finished: Self.isFinished(player),
             parkedAt: parked ? now : nil, freedAt: now))
         scheduleTrim(after: Self.parkSeconds)
+        wakeWaiters()
     }
 
-    /// Where `key`'s player should start because its idle item was let go and a new one made, in
-    /// ms; nil otherwise. Taken once: the first surface to open the player resumes it.
+    /// Where `key`'s player should start because its idle item was let go and a new one made, or
+    /// because Stage 1 took the key's last player, in ms; nil otherwise. Taken once: the first surface to open the player resumes it.
     @MainActor
     func takeResumeMs(for key: String, player: AVPlayer) -> Int64? {
         guard var holder = holders[key], holder.player === player, let resumeMs = holder.resumeMs else { return nil }
@@ -268,6 +314,7 @@ final class VideoPlayerPool: @unchecked Sendable {
         guard let holder = holders[key], holder.player === player else { return }
         holders[key] = nil
         destroy(player)
+        wakeWaiters()
     }
 
     /// Calls `handler` if `key`'s player is evicted while the observer is registered.
@@ -295,6 +342,7 @@ final class VideoPlayerPool: @unchecked Sendable {
         idle.forEach { destroy($0.player) }
         let prevOnly = holders.filter { !$0.value.holds.isEmpty && $0.value.holds.allSatisfy { $0 == .viewerPrev } }
         for key in prevOnly.keys { evict(key: key) }
+        wakeWaiters()
     }
 
     /// Destroys parked players while the pool is over its size, oldest first, once each has been
@@ -338,18 +386,61 @@ final class VideoPlayerPool: @unchecked Sendable {
         free.forEach { destroy($0.player) }
         holders.removeAll()
         free.removeAll()
+        waiters.removeAll()
+        reserved.removeAll()
+        evictedResume.removeAll()
+    }
+
+    /// Queues a refused or evicted Stage-2 surface for the next free slot. `onAvailable` runs on a
+    /// later main-queue turn when a slot is reserved for it; the surface then borrows again. It
+    /// stays queued, with its place, until a borrow of `key` succeeds or it calls `cancelWait`.
+    @MainActor
+    func wait(
+        key: String, url: URL, priority: PoolPriority, wantsPlay: Bool, onAvailable: @escaping @MainActor () -> Void
+    ) -> UUID {
+        assert(!priority.isStage1, "Stage 1 is never refused, so it never waits")
+        seq &+= 1
+        let token = UUID()
+        waiters.append(Waiter(token: token, key: key, url: url, seq: seq, wantsPlay: wantsPlay, onAvailable: onAvailable))
+        wakeWaiters()
+        return token
+    }
+
+    /// Moves a waiter between the wants-to-play and paused groups; it keeps its wait time.
+    @MainActor
+    func updateWait(_ token: UUID, wantsPlay: Bool) {
+        guard let index = waiters.firstIndex(where: { $0.token == token }) else { return }
+        waiters[index].wantsPlay = wantsPlay
+    }
+
+    /// Leaves the queue (the surface closed). A slot reserved for it goes to the next waiter.
+    @MainActor
+    func cancelWait(_ token: UUID) {
+        guard let index = waiters.firstIndex(where: { $0.token == token }) else { return }
+        let key = waiters.remove(at: index).key
+        if !waiters.contains(where: { $0.key == key }) {
+            reserved.removeAll { $0 == key }
+            evictedResume[key] = nil
+        }
+        wakeWaiters()
     }
 
     // MARK: - Test seams
 
     @MainActor var heldKeys: Set<String> { Set(holders.keys) }
+    /// The waiting keys in the order they would be woken.
+    @MainActor var queuedKeys: [String] { queue().map(\.key) }
     @MainActor var livePlayerCount: Int { holders.count + free.count }
     @MainActor func heldPlayer(for key: String) -> AVPlayer? { holders[key]?.player }
     @MainActor func priority(of key: String) -> PoolPriority? { holders[key]?.priority }
     /// Every bookkeeping entry; bounded by the live players and the mounted surfaces (N8).
     @MainActor var bookkeepingCount: Int {
-        holders.count + free.count + evictionObservers.values.reduce(0) { $0 + $1.count }
+        holders.count + free.count + evictionObservers.values.reduce(0) { $0 + $1.count } + waiters.count
+            + evictedResume.count
     }
+
+    /// Playheads kept for keys Stage 1 took (decision 2a).
+    @MainActor var keptPlayheadCount: Int { evictedResume.count }
 
     // MARK: - Private
 
@@ -360,11 +451,80 @@ final class VideoPlayerPool: @unchecked Sendable {
         schedule(delay) { [weak self] in self?.trimParked() }
     }
 
+    /// Waiters in wake order: those that want to play first, then paused ones, each longest
+    /// waiting first.
+    private func queue() -> [Waiter] {
+        waiters.sorted { ($0.wantsPlay ? 0 : 1, $0.seq) < ($1.wantsPlay ? 0 : 1, $1.seq) }
+    }
+
+    /// Reserves each free slot for the first waiter not yet served and runs its `onAvailable` on
+    /// the next turn: one waiter per slot. A waiter whose key is held (re-pointed away, N5) waits
+    /// for that key to be let go, so two URLs never take turns re-pointing it.
+    @MainActor
+    private func wakeWaiters() {
+        for waiter in queue() where holders.count + reserved.count < ceiling {
+            guard holders[waiter.key] == nil, !reserved.contains(waiter.key) else { continue }
+            reserved.append(waiter.key)
+            log.d("Video player handed to a waiting video (key=\(waiter.key), url=\(waiter.url.lastPathComponent))")
+            let token = waiter.token
+            post { [weak self] in
+                // A surface that closed meanwhile has cancelled: nothing runs.
+                guard let self, let waiter = self.waiters.first(where: { $0.token == token }) else { return }
+                waiter.onAvailable()
+            }
+        }
+    }
+
+    /// A borrow of `key` succeeded: its waiters and its reservation are done.
+    @MainActor
+    private func leaveQueue(_ key: String) {
+        waiters.removeAll { $0.key == key }
+        reserved.removeAll { $0 == key }
+    }
+
+    /// Stage 1 ignores reservations: those it overran lapse, the reserved waiter last in queue
+    /// order first (the same rule on every core). The woken waiter's borrow is then refused and it
+    /// keeps its place.
+    @MainActor
+    private func lapseReservations() {
+        while !reserved.isEmpty, holders.count + reserved.count > ceiling {
+            let order = queue().map(\.key)
+            let last = reserved.max { (order.firstIndex(of: $0) ?? .max) < (order.firstIndex(of: $1) ?? .max) }
+            reserved.removeAll { $0 == last }
+        }
+    }
+
+    /// The least recently borrowed holder with no Stage-1 hold, playing or paused.
+    private func leastRecentStageTwo() -> String? {
+        holders.filter { $0.value.holds.allSatisfy { !$0.isStage1 } }
+            .min(by: { $0.value.seq < $1.value.seq })?.key
+    }
+
+    /// Memory pressure's eviction: keeps no playhead, since a story page always restarts (owner,
+    /// R4-02); a kept entry would only push a waiting video's out of the capped map.
     @MainActor
     private func evict(key: String) {
         guard let holder = holders.removeValue(forKey: key) else { return }
+        evictedResume[key] = nil
         destroy(holder.player)
         notifyEvicted(key)
+    }
+
+    /// Destroys a holder's player the pool takes back, keeping its playhead for the key's next
+    /// borrow of the same URL (decision 2a). A finished showing keeps nothing: it restarts.
+    @MainActor
+    private func take(_ holder: Holder, of key: String) {
+        let playhead = holder.player.currentTime()
+        if !Self.isFinished(holder.player), playhead.isNumeric, playhead.seconds > 0 {
+            seq &+= 1
+            evictedResume[key] = (holder.url, Int64(playhead.seconds * 1_000), seq)
+            if evictedResume.count > ceiling, let oldest = evictedResume.min(by: { $0.value.at < $1.value.at })?.key {
+                evictedResume[oldest] = nil
+            }
+        } else {
+            evictedResume[key] = nil
+        }
+        destroy(holder.player)
     }
 
     @MainActor
@@ -390,7 +550,8 @@ final class VideoPlayerPool: @unchecked Sendable {
         player.currentItem?.status == .failed
     }
 
-    private static func isFinished(_ player: AVPlayer) -> Bool {
+    /// Whether the player is at the end of its item (within `finishedWithin`).
+    static func isFinished(_ player: AVPlayer) -> Bool {
         guard let item = player.currentItem, item.duration.isNumeric else { return false }
         return item.currentTime().seconds >= item.duration.seconds - finishedWithin
     }

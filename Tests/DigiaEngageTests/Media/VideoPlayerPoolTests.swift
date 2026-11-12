@@ -257,6 +257,72 @@ struct VideoPlayerPoolTests {
         #expect(pool.livePlayerCount == 3)
     }
 
+    /// A bare player parked at a fixed playhead, so the pool keeps it when it takes the player.
+    private final class PlayheadPlayer: AVPlayer {
+        override func currentTime() -> CMTime { CMTime(seconds: 5, preferredTimescale: 600) }
+    }
+
+    private func playheadPool(size: Int, ceiling: Int) -> VideoPlayerPool {
+        VideoPlayerPool(
+            maxPlayers: size, ceiling: ceiling, clock: { 0 }, schedule: { _, _ in }, post: { _ in },
+            makeItem: { AVPlayerItem(url: $0) }, makePlayer: { PlayheadPlayer(playerItem: $0) })
+    }
+
+    // Guards `waits` in `borrow` (R3-01, OD-22): a story page whose previous-page hold memory
+    // pressure took starts from its own start when the user swipes back, not the kept playhead.
+    @Test("a previous page taken by memory pressure does not resume when it is borrowed again")
+    func keptPlayheadOnlyForAWaiter() throws {
+        let pool = playheadPool(size: 2, ceiling: 3)
+        _ = try #require(pool.borrow(key: "prev", url: url("v"), priority: .viewerPrev))
+        pool.onMemoryPressure()
+
+        let back = try #require(pool.borrow(key: "prev", url: url("v"), priority: .viewerPage))
+
+        #expect(pool.takeResumeMs(for: "prev", player: back) == nil)
+    }
+
+    // Guards the `ceiling` limit on `evictedResume` in `take(_:of:)` (R3-04, N8): kept playheads of
+    // keys that never wait or borrow again do not build up over a session.
+    @Test("kept playheads of keys that never wait are capped at the ceiling")
+    func keptPlayheadsAreCapped() throws {
+        let pool = playheadPool(size: 2, ceiling: 3)
+        for round in 0..<2 {
+            for index in 0..<3 {
+                _ = try #require(pool.borrow(key: "card-\(round)-\(index)", url: url("c\(round)\(index)"), priority: .onScreen))
+            }
+            // Stage 1 takes all three, then lets go.
+            let pages = try (0..<3).map { index in
+                ("page-\(round)-\(index)", try #require(pool.borrow(key: "page-\(round)-\(index)", url: url("p\(round)\(index)"), priority: .viewerPage)))
+            }
+            for (key, player) in pages { pool.giveBack(key: key, player: player, priority: .viewerPage) }
+        }
+
+        #expect(pool.keptPlayheadCount == 3)
+    }
+
+    // Guards `evict(key:)` in `onMemoryPressure` keeping no playhead (R4-02): a story page always
+    // restarts, so a kept entry for the previous page would only push the oldest taken video's
+    // playhead out of the capped map.
+    @Test("memory pressure on the previous page keeps the taken videos' playheads")
+    func memoryPressureKeepsTakenPlayheads() throws {
+        let pool = playheadPool(size: 3, ceiling: 3)
+        for key in ["a", "b", "c"] {
+            _ = try #require(pool.borrow(key: key, url: url(key), priority: .onScreen))
+        }
+        // The story viewer takes all three; each canvas video waits.
+        let pages: [(String, PoolPriority)] = [("prev", .viewerPrev), ("page", .viewerPage), ("next", .viewerNext)]
+        let held = try pages.map { key, rank in (key, rank, try #require(pool.borrow(key: key, url: url(key), priority: rank))) }
+        for key in ["a", "b", "c"] {
+            _ = pool.wait(key: key, url: url(key), priority: .onScreen, wantsPlay: true, onAvailable: {})
+        }
+
+        pool.onMemoryPressure()
+        for (key, rank, player) in held.dropFirst() { pool.giveBack(key: key, player: player, priority: rank) }
+        let back = try #require(pool.borrow(key: "a", url: url("a"), priority: .onScreen))
+
+        #expect(pool.takeResumeMs(for: "a", player: back) == 5_000)
+    }
+
     // Guards `notifyEvicted(key)` after a re-point in `borrow` (OD-10, R2-06c).
     @Test("a borrow of a held key with another URL tells the other holders")
     func repointTellsTheOtherHolders() throws {
@@ -323,22 +389,42 @@ struct VideoPlayerPoolTests {
         arriving.close()
     }
 
-    // Guards `guard retried else` in `MediaVideoPlayback.open`: a second refusal behaves as before, one
-    // `onLost` and no player.
-    @Test("a borrow refused again on the retry gives up once")
-    func secondRefusalGivesUp() async throws {
+    // Guards `waitOrGiveUp` after the retry in `MediaVideoPlayback.attemptBorrow`: a second refusal waits
+    // on its still instead of giving up, and borrows the player the holder gives back.
+    @Test("a borrow refused again on the retry waits and plays when the holder leaves")
+    func secondRefusalWaits() async throws {
         let pool = pool(size: 1, ceiling: 1)
         let lost = CallCount()
         let holder = MediaVideoPlayback(), refused = MediaVideoPlayback()
         open(holder, key: "card-0", pool: pool, lost: lost)
 
         open(refused, key: "card-1", pool: pool, lost: lost)
-        #expect(lost.value == 0, "not yet: the retry comes first")
-        #expect(await waitUntilMedia(timeout: 2) { lost.value > 0 })
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        #expect(lost.value == 1)
+        #expect(await waitUntilMedia(timeout: 2) { pool.queuedKeys == ["card-1"] }, "waits after the retry")
+        #expect(lost.value == 0)
         #expect(refused.player == nil)
+
+        holder.close()
+        #expect(await waitUntilMedia(timeout: 2) { refused.player != nil }, "woken with the freed player")
+        #expect(pool.queuedKeys.isEmpty)
+        #expect(lost.value == 0)
+        refused.close()
+    }
+
+    // Guards `cancelWait` in `MediaVideoPlayback.close`: a waiting surface that closes leaves the queue,
+    // so a freed slot is not reserved for a gone node.
+    @Test("a waiting surface that closes leaves the queue")
+    func closedWaiterLeavesTheQueue() async throws {
+        let pool = pool(size: 1, ceiling: 1)
+        let lost = CallCount()
+        let holder = MediaVideoPlayback(), waiting = MediaVideoPlayback()
+        open(holder, key: "card-0", pool: pool, lost: lost)
+        open(waiting, key: "card-1", pool: pool, lost: lost)
+        #expect(await waitUntilMedia(timeout: 2) { pool.queuedKeys == ["card-1"] })
+
+        waiting.close()
+
+        #expect(pool.queuedKeys.isEmpty)
+        #expect(pool.bookkeepingCount == pool.livePlayerCount + 1, "the holder's eviction observer, no waiter")
         holder.close()
     }
 }
@@ -517,4 +603,108 @@ struct VideoPlayerPoolMediaVideoTests {
         #expect(model.failures == 1)
     }
 }
+}
+
+// MARK: - Shared pool cases
+
+/// The Test Kit's pool decision table (`testkit/contracts/video-pool-cases.json`), run against the real
+/// pool with bare players, a turn queue run by hand, and every core's same expectations
+/// (`testkit/contracts/video-pool.md`).
+private enum VideoPoolCases {
+    nonisolated(unsafe) static let file: [String: Any]? = FixtureLoader.workspaceURL()
+        .flatMap { try? Data(contentsOf: $0.appendingPathComponent("testkit/contracts/video-pool-cases.json")) }
+        .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    static var cases: [[String: Any]] { file?["cases"] as? [[String: Any]] ?? [] }
+    static var ids: [String] { cases.compactMap { $0["id"] as? String } }
+}
+
+@MainActor
+@Suite("Video pool cases", .tags(.media, .unit), .enabled(if: testkitAvailable, testkitSkipReason))
+struct VideoPoolCasesTests {
+    private static func rank(_ name: String) -> PoolPriority {
+        switch name {
+        case "viewerPage": .viewerPage
+        case "viewerNext": .viewerNext
+        case "viewerPrev": .viewerPrev
+        default: .onScreen
+        }
+    }
+
+    @Test("every Test Kit pool case passes", arguments: VideoPoolCases.ids)
+    func poolCase(_ id: String) throws {
+        let defaults = try #require(VideoPoolCases.file?["defaults"] as? [String: Any])
+        let entry = try #require(VideoPoolCases.cases.first { $0["id"] as? String == id })
+        let poolConfig = (entry["pool"] ?? defaults["pool"]) as? [String: Int] ?? [:]
+        var playerIds: [ObjectIdentifier: String] = [:]
+        var pending: [@MainActor () -> Void] = []
+        var reports = 0
+        var evicted: [String] = []
+        var woken: [String] = []
+        var observed: Set<String> = []
+        var tokens: [String: UUID] = [:]
+        let pool = VideoPlayerPool(
+            maxPlayers: poolConfig["size"] ?? 3, ceiling: poolConfig["ceiling"] ?? 3, onCeilingRefused: { reports += 1 },
+            clock: { 0 }, schedule: { _, _ in }, post: { pending.append($0) },
+            makeItem: { AVPlayerItem(url: $0) },
+            makePlayer: { item in
+                let player = AVPlayer(playerItem: item)
+                playerIds[ObjectIdentifier(player)] = "p\(playerIds.count + 1)"
+                return player
+            })
+
+        for (index, step) in (entry["steps"] as? [[String: Any]] ?? []).enumerated() {
+            let op = step["op"] as? String ?? ""
+            let key = step["key"] as? String ?? ""
+            let at = "\(id) step \(index) \(op) \(key)"
+            let rank = Self.rank(step["rank"] as? String ?? defaults["rank"] as? String ?? "onScreen")
+            let wantsPlay = step["wantsPlay"] as? Bool ?? defaults["wantsPlay"] as? Bool ?? true
+            let template = defaults["url"] as? String ?? "https://pool.test/{key}.mp4"
+            let url = try #require(URL(string: step["url"] as? String ?? template.replacingOccurrences(of: "{key}", with: key)))
+            let expect = step["expect"] as? [String: Any] ?? [:]
+            evicted = []
+            switch op {
+            case "borrow":
+                if observed.insert(key).inserted { _ = pool.observeEviction(of: key) { evicted.append(key) } }
+                // `wantsPlay` on a borrow only orders a queue, and iOS queues through `wait`.
+                let player = pool.borrow(key: key, url: url, priority: rank)
+                if let result = expect["result"] as? String {
+                    #expect((player == nil ? "refused" : "granted") == result, "\(at)")
+                }
+                if let id = expect["player"] as? String {
+                    #expect(player.flatMap { playerIds[ObjectIdentifier($0)] } == id, "\(at)")
+                }
+            case "giveBack":
+                let player = try #require(pool.heldPlayer(for: key), "\(at)")
+                pool.giveBack(key: key, player: player, priority: rank)
+            case "setWantsPlay":
+                // Nobody gives way inside Stage 2 (decision 2): a holder's wish changes nothing in
+                // the pool, so iOS keeps no holder flag. The case's later steps check exactly that.
+                _ = try #require(pool.heldPlayer(for: key), "\(at)")
+            case "wait":
+                tokens[key] = pool.wait(key: key, url: url, priority: rank, wantsPlay: wantsPlay) { woken.append(key) }
+            case "updateWait":
+                pool.updateWait(try #require(tokens[key], "\(at)"), wantsPlay: wantsPlay)
+            case "cancelWait":
+                pool.cancelWait(try #require(tokens[key], "\(at)"))
+            case "memoryPressure":
+                pool.onMemoryPressure()
+            case "turn":
+                woken = []
+                let tasks = pending
+                pending = []
+                tasks.forEach { $0() }
+                if let expected = expect["woken"] as? [String] { #expect(woken == expected, "\(at)") }
+            case "check":
+                if let held = expect["held"] as? Int { #expect(pool.heldKeys.count == held, "\(at) held") }
+                if let live = expect["live"] as? Int { #expect(pool.livePlayerCount == live, "\(at) live") }
+                if let queue = expect["queue"] as? [String] { #expect(pool.queuedKeys == queue, "\(at) queue") }
+                if let count = expect["ceilingReports"] as? Int { #expect(reports == count, "\(at) reports") }
+            default:
+                Issue.record("unknown op \(op) in \(at)")
+            }
+            if let expected = expect["evicted"] as? [String], op != "check" {
+                #expect(evicted.sorted() == expected.sorted(), "\(at) evicted")
+            }
+        }
+    }
 }
