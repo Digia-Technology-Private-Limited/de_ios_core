@@ -182,10 +182,12 @@ public enum Digia {
     /// Leaving it out is not a degraded hit test but no hit test at all: a host that has not been
     /// told an overlay is active claims only the window's old rect and every tap on the story —
     /// advance, close, mute — falls through to the app behind it.
+    /// A dialog game renders inline in the same overlay, so an active game counts too.
     public static var hasActiveOverlay: Bool {
         let ctrl = SDKInstance.shared.controller
         return ctrl.activeStoryOverlay != nil
             || ctrl.activeNudge != nil
+            || ctrl.activeGame != nil
             || SDKInstance.shared.surveyOrchestrator.state != nil
             || SDKInstance.shared.floaterStoryOrchestrator.storyOverlayActive
             || SDKInstance.shared.guideOrchestrator.state != nil

@@ -29,6 +29,7 @@ final class GamePresentation: Identifiable, ObservableObject {
 
     private weak var coordinator: GameWebCoordinator?
     private var didFinish = false
+    private let haptics: GameHaptics
 
     init?(request: GameOpenRequest, safeArea: GameSafeArea) {
         self.request = request
@@ -47,12 +48,22 @@ final class GamePresentation: Identifiable, ObservableObject {
             self.bundleRoot = nil
             self.entryURL = url
         }
-        self.initPayload = GameInitPayload(
+        var payload = GameInitPayload(
             surface: request.container,
             safeArea: safeArea,
             locale: GameInitPayload.deviceLocale,
             showMute: request.showMute
         )
+        payload.extra["values"] = request.values.mapValues(Self.jsonObject)
+        payload.extra["sensors"] = request.sensors
+        if !request.slots.isEmpty {
+            payload.extra["slots"] = request.slots.map {
+                ["outcomeKey": $0.outcomeKey, "values": $0.values] as [String: Any]
+            }
+        }
+        self.initPayload = payload
+        self.haptics = GameHaptics(sensors: Set(request.sensors))
+        bridge.onUnhandled = { [weak self] type, object in self?.handleSkinMessage(type, object) }
         bridge.onReady = { [weak self] in self?.didBecomeReady() }
         bridge.onClosed = { [weak self] in self?.didClose() }
         bridge.onFailed = { [weak self] reason in self?.didFail(reason) }
@@ -67,6 +78,76 @@ final class GamePresentation: Identifiable, ObservableObject {
     func sendInit() {
         guard let script = bridge.script(for: initPayload.message()) else { return }
         coordinator?.view.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    private static func jsonObject(_ value: JSONValue) -> Any {
+        switch value {
+        case .string(let v): return v
+        case .int(let v): return v
+        case .double(let v): return v
+        case .bool(let v): return v
+        case .array(let v): return v.map(jsonObject)
+        case .object(let v): return v.mapValues(jsonObject)
+        case .null: return NSNull()
+        }
+    }
+
+    /// Skin messages the bridge leaves to us: a play request and haptics.
+    private func handleSkinMessage(_ type: String, _ object: [String: Any]) {
+        switch type {
+        case "playRequested":
+            startPlay()
+        case "haptic":
+            if let style = GameHapticStyle(rawValue: object["style"] as? String ?? "") {
+                haptics.play(style)
+            }
+        default:
+            break
+        }
+    }
+
+    /// One play per `idle` skin: calls the backend with a fresh play id and
+    /// hands the skin its `outcome` or `refused`.
+    private func startPlay() {
+        guard bridge.beginPlay() else { return }
+        let playId = UUID().uuidString
+        let play = request.play
+        Task { @MainActor [weak self] in
+            let result = await play?(playId) ?? .refused(.unavailable)
+            self?.deliver(result)
+        }
+    }
+
+    private func deliver(_ result: PlayResult) {
+        guard bridge.finishPlay(),
+              let script = bridge.script(for: Self.playResultMessage(result, slots: request.slots))
+        else { return }
+        coordinator?.view.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    /// The `outcome` / `refused` message for one play result. `slotIndex` is
+    /// random among the slots matching `outcomeKey` and omitted when none do.
+    /// `busy` and unknown refusals read as `unavailable`; a failure does too.
+    static func playResultMessage(
+        _ result: PlayResult, slots: [GamificationSlotConfig]
+    ) -> [String: Any] {
+        switch result {
+        case .outcome(let outcome):
+            var message: [String: Any] = [
+                "type": "outcome",
+                "outcomeKey": outcome.outcomeKey,
+                "kind": outcome.kind.rawValue,
+                "hasNextChance": outcome.nextChance != nil,
+            ]
+            let matches = slots.indices.filter { slots[$0].outcomeKey == outcome.outcomeKey }
+            if let index = matches.randomElement() { message["slotIndex"] = index }
+            return message
+        case .refused(let refusal):
+            let reason = refusal == .busy ? GamificationPlayRefusal.unavailable : refusal
+            return ["type": "refused", "reason": reason.rawValue]
+        case .failure:
+            return ["type": "refused", "reason": GamificationPlayRefusal.unavailable.rawValue]
+        }
     }
 
     /// Main page load failure before `ready`: close early without waiting for
@@ -139,6 +220,11 @@ enum GamePresenter {
         guard let presentation = GamePresentation(request: request, safeArea: safeArea) else {
             log.w("Game not opened — bundle entry missing", error: request.campaignKey)
             request.onFailure?(.bundleLoadFailed)
+            return
+        }
+        // One game owns the surface: a re-trigger must not restart the live one.
+        guard SDKInstance.shared.controller.activeGame == nil else {
+            log.w("Game not opened — another game is already open", error: request.campaignKey)
             return
         }
         log.d("Game opening", campaign: request.campaignKey)

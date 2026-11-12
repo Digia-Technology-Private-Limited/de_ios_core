@@ -106,6 +106,22 @@ final class GameBridge {
         onFailed?(.readyTimeout)
     }
 
+    /// `playRequested` accepted: `idle` → `playing`. False in any other state,
+    /// so a repeated request while a play is in flight or done is ignored.
+    func beginPlay() -> Bool {
+        guard state == .idle else { return false }
+        state = .playing
+        return true
+    }
+
+    /// The play result reached the skin: `playing` → `done`. False if the
+    /// session closed while the play was in flight.
+    func finishPlay() -> Bool {
+        guard state == .playing else { return false }
+        state = .done
+        return true
+    }
+
     /// Native close button, back, skin `close`, or teardown. First call wins;
     /// teardown after a failure is a no-op, never a second callback.
     func close() {

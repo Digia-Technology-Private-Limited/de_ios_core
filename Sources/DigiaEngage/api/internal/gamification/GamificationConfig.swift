@@ -31,6 +31,9 @@ struct GamificationConfig: Equatable, Sendable {
     /// Inline slot for the ERD 1b teaser entry. Parsed, not routed, until then.
     /// `teaser` is ignored entirely until ERD 1b.
     let slotKey: String?
+    /// `surface.height` as a fraction of the screen, valid only in (0, 1];
+    /// anything else is nil and the surface keeps its default height.
+    var heightFraction: Double? = nil
 
     /// Only `spinWheel` and `slotMachine` map slots; the ERD leaves `slots`
     /// out of `init` for `scratchCard` and `rewardChest`.
@@ -114,8 +117,18 @@ struct GamificationConfig: Equatable, Sendable {
             showMute: surface?.bool("showMute", default: false) ?? false,
             bundleUrl: bundleUrl,
             sensors: sensors,
-            slotKey: templateConfig.nonBlankString("slotKey")
+            slotKey: templateConfig.nonBlankString("slotKey"),
+            heightFraction: heightFraction(surface?["height"])
         )
+    }
+
+    /// A fraction in (0, 1] that is not a boolean; see ``positiveInt``.
+    private static func heightFraction(_ raw: Any?) -> Double? {
+        guard let number = raw as? NSNumber,
+              CFGetTypeID(number) != CFBooleanGetTypeID()
+        else { return nil }
+        let value = number.doubleValue
+        return value > 0 && value <= 1 ? value : nil
     }
 
     /// A positive integer that is not a boolean: JSON booleans bridge to

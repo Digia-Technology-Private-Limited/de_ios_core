@@ -2019,7 +2019,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             guard let self else { return }
             let result = await source.grantChance(request)
             self.handleGamificationGrant(
-                result, campaignKey: key, cepCampaignId: cepCampaignId, config: config)
+                result, campaignKey: key, cepCampaignId: cepCampaignId, config: config,
+                payload: payload, userId: userId)
         }
         return .accepted(payload: payload, kind: .modal)
     }
@@ -2031,7 +2032,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         _ result: GrantChanceResult,
         campaignKey: String,
         cepCampaignId: String,
-        config: GamificationConfig
+        config: GamificationConfig,
+        payload: CEPTriggerPayload,
+        userId: String
     ) {
         switch result {
         case .granted(let chance):
@@ -2043,7 +2046,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             if chance.show {
                 openGamificationSurface(
                     chance: chance, config: config, campaignKey: campaignKey,
-                    cepCampaignId: cepCampaignId)
+                    cepCampaignId: cepCampaignId, payload: payload, userId: userId)
             }
         case .denied(let reason):
             log.d(
@@ -2070,18 +2073,54 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         )
     }
 
-    /// Open hook: presents the game surface for a granted chance with show.
-    /// No-op until T7.
+    /// Presents the game for a granted chance with show: builds the open
+    /// request from the campaign config, plays through the outcome source, and
+    /// reports the impression once the container is up and dismissals after.
     private func openGamificationSurface(
         chance: GrantedChance,
         config: GamificationConfig,
         campaignKey: String,
-        cepCampaignId: String
+        cepCampaignId: String,
+        payload: CEPTriggerPayload,
+        userId: String
     ) {
-        log.d(
-            "Gamification open hook (chanceId=\(chance.chanceId), style=\(config.surfaceStyle.rawValue))",
-            campaign: campaignKey
+        guard let entry = URL(string: config.bundleUrl) else { return }
+        let container: GameContainerType
+        switch config.surfaceStyle {
+        case .dialog: container = .dialog
+        case .fullScreen: container = .fullScreen
+        default: container = .bottomSheet
+        }
+        // Fraction of the screen, coerced to 0.3...1; defaults match Android.
+        let fallback = container == .dialog ? 0.55 : 0.6
+        let fraction = min(max(config.heightFraction ?? fallback, 0.3), 1)
+        let source = gameOutcomeSource
+        let request = GameOpenRequest(
+            campaignKey: campaignKey,
+            container: container,
+            source: .remoteEntry(entry),
+            height: UIScreen.main.bounds.height * CGFloat(fraction),
+            showMute: config.showMute,
+            onClose: { [weak self] in
+                self?.coordinator.handle(.dismissed(reason: .userClose), payload: payload)
+            },
+            onFailure: { [weak self] _ in
+                self?.coordinator.handle(.dismissed(reason: .autoTimeout), payload: payload)
+            },
+            values: config.values,
+            slots: config.usesSlots ? config.slots : [],
+            sensors: config.sensors.map(\.rawValue),
+            play: { playId in
+                await source.play(
+                    PlayRequest(
+                        chanceId: chance.chanceId, userId: userId, userHash: nil, playId: playId))
+            }
         )
+        GamePresenter.open(request)
+        // On screen: count the impression so the acceptance watchdog stands down.
+        if controller.activeGame != nil {
+            coordinator.handle(.impressed, payload: payload)
+        }
     }
 
     /// Handles one `campaign_test` SSE event.

@@ -103,4 +103,13 @@ struct GameOpenRequest {
     var height: CGFloat = 480
     var showMute: Bool = false
     var onClose: (@MainActor () -> Void)?
-    var onFailure: (@MainActor (GameFailure) -> Void)?}
+    var onFailure: (@MainActor (GameFailure) -> Void)?
+    /// `init` extras: skin values, slots (only for slot-mapped formats), and
+    /// the sensor wire names the skin may use.
+    var values: [String: JSONValue] = [:]
+    var slots: [GamificationSlotConfig] = []
+    var sensors: [String] = []
+    /// Asks the backend to play the chance, given a fresh play id. Nil
+    /// answers `refused: unavailable`.
+    var play: (@MainActor (String) async -> PlayResult)?
+}
