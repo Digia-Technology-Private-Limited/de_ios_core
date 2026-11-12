@@ -233,6 +233,12 @@ final class VideoPlayerPool: @unchecked Sendable {
             // Stage 2 at the ceiling, counting the slots reserved for waiters: give way, or refuse.
             guard wantsPlay, !playingWaiterAhead(of: key), let paused = leastRecentStageTwo(paused: true) else {
                 onCeilingRefused?()
+                // A reserved waiter refused anyway (Stage 1 took its slot) lets go of the
+                // reservation and keeps its place, so it can be woken again.
+                if reserved.contains(key) {
+                    reserved.removeAll { $0 == key }
+                    wakeWaiters()
+                }
                 return nil
             }
             victim = paused
@@ -484,11 +490,16 @@ final class VideoPlayerPool: @unchecked Sendable {
         reserved.removeAll { $0 == key }
     }
 
-    /// Stage 1 ignores reservations: those it overran lapse, latest first. The woken waiter's
-    /// borrow is then refused and it keeps its place.
+    /// Stage 1 ignores reservations: those it overran lapse, the reserved waiter last in queue
+    /// order first (the same rule on every core). The woken waiter's borrow is then refused and it
+    /// keeps its place.
     @MainActor
     private func lapseReservations() {
-        while !reserved.isEmpty, holders.count + reserved.count > ceiling { reserved.removeLast() }
+        while !reserved.isEmpty, holders.count + reserved.count > ceiling {
+            let order = queue().map(\.key)
+            let last = reserved.max { (order.firstIndex(of: $0) ?? .max) < (order.firstIndex(of: $1) ?? .max) }
+            reserved.removeAll { $0 == last }
+        }
     }
 
     /// The least recently borrowed holder with no Stage-1 hold, paused (`paused`) or any.
