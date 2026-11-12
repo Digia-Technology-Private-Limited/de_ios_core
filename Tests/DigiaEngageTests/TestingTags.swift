@@ -72,6 +72,8 @@ extension Tag {
     @Tag static var media: Self
     /// Debug tooling: logger, debug overlay, debug deep link, test kit, live-test reliability.
     @Tag static var debug: Self
+    /// Gamification skins: prefetch, bundle cache, web-view host, bridge.
+    @Tag static var gami: Self
     /// Page capture: view-tree walk, capture envelope, capture upload.
     @Tag static var capture: Self
 }
