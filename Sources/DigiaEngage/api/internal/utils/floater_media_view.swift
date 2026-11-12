@@ -36,7 +36,7 @@ struct FloaterMediaView: View {
                 playerKey: videoPlayerKey,
                 poolPriority: .onScreen,
                 // The orchestrator drives the held player: the window never waits for another one
-                // and never gives its player way (OD-24).
+                // (OD-24).
                 waitsForPlayer: false
             )
         case .lottie:

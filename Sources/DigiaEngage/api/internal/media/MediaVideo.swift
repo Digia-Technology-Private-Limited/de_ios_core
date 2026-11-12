@@ -313,10 +313,7 @@ final class MediaVideoPlayback: ObservableObject {
     private func attemptBorrow(retried: Bool) {
         guard let request, lease == nil, player == nil else { return }
         let pool = request.pool
-        guard let player = pool.borrow(
-            key: request.key, url: request.url, priority: request.priority,
-            // A surface that does not wait (the rail, the floater) never gives way, as on Android.
-            wantsPlay: request.waits ? wantsPlaying : true) else {
+        guard let player = pool.borrow(key: request.key, url: request.url, priority: request.priority) else {
             if waitToken != nil { return }
             guard retried else {
                 let opened = opened
@@ -336,8 +333,8 @@ final class MediaVideoPlayback: ObservableObject {
         player.isMuted = request.muted
         player.volume = request.volume
         player.actionAtItemEnd = .pause
-        // A surface's own start wins; otherwise a player whose idle item the pool let go
-        // resumes where it was.
+        // A surface's own start wins; otherwise a player whose idle item the pool let go, or whose
+        // player Stage 1 took, resumes where it was.
         if let start = request.startMs ?? pool.takeResumeMs(for: request.key, player: player) {
             seekPending = true
             pendingStartMs = max(start, 0)
@@ -391,14 +388,10 @@ final class MediaVideoPlayback: ObservableObject {
     func setPlaying(_ playing: Bool) {
         let changed = wantsPlaying != playing
         wantsPlaying = playing
-        if changed, let request, request.waits {
-            if let waitToken {
-                request.pool.updateWait(waitToken, wantsPlay: playing)
-                // A waiting still asked to play borrows at once: it may take a paused holder's player.
-                if playing { attemptBorrow(retried: true) }
-            } else if let player {
-                request.pool.setWantsPlay(key: request.key, player: player, wantsPlay: playing)
-            }
+        if changed, let request, request.waits, let waitToken {
+            request.pool.updateWait(waitToken, wantsPlay: playing)
+            // A waiting still asked to play tries to borrow at once.
+            if playing { attemptBorrow(retried: true) }
         }
         guard let player, !failed else { return }
         if playing, seekPending { return }
@@ -461,19 +454,21 @@ final class MediaVideoPlayback: ObservableObject {
         }
     }
 
-    /// The user played or paused through the controls: tell the pool, so a video the user is
-    /// watching is not given way, and one the user paused can be. `rate` is the asked-for rate
-    /// (non-zero while it waits for data). Read on the next turn, so a pause the pool itself makes
-    /// on a player it takes back (the showing no longer holds it) is not heard.
+    /// The user played or paused through the controls: the showing now wants to play, or not
+    /// (decision 2b). That sets the queue group it waits in if Stage 1 takes its player, and
+    /// whether it plays when it gets one back. `rate` is the asked-for rate (non-zero while it
+    /// waits for data). Read on the next turn, so a pause the pool itself makes on a player it
+    /// takes back (the showing no longer holds it) is not heard. The drop to 0 at the end of the
+    /// item (`actionAtItemEnd = .pause`, and each loop before `noteEnded` plays again) is not a
+    /// pause: an ended video still wants to play, as on Android.
     private func watchRate(of player: AVPlayer) {
         rateObserver = player.observe(\.rate, options: [.new]) { [weak self] player, _ in
             Task { @MainActor in
                 guard let self, self.player === player, !self.failed, !self.seekPending,
                       let request = self.request, request.waits else { return }
                 let playing = player.rate != 0
-                guard playing != self.wantsPlaying else { return }
+                if !playing, VideoPlayerPool.isFinished(player) { return }
                 self.wantsPlaying = playing
-                request.pool.setWantsPlay(key: request.key, player: player, wantsPlay: playing)
             }
         }
     }
@@ -489,8 +484,8 @@ final class MediaVideoPlayback: ObservableObject {
         endObserver = nil
     }
 
-    /// The pool took the player back (for Stage 1, or for a video that wants to play while this
-    /// one is paused), or re-pointed it at another URL for another holder: show the still again
+    /// The pool took the player back for Stage 1, or re-pointed it at another URL for another
+    /// holder: show the still again
     /// and wait in the pool's queue, or say so through `onLost` for a surface that doesn't wait.
     private func evicted() {
         unwatch()

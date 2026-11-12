@@ -599,7 +599,8 @@ struct VideoPoolCasesTests {
             switch op {
             case "borrow":
                 if observed.insert(key).inserted { _ = pool.observeEviction(of: key) { evicted.append(key) } }
-                let player = pool.borrow(key: key, url: url, priority: rank, wantsPlay: wantsPlay)
+                // `wantsPlay` on a borrow only orders a queue, and iOS queues through `wait`.
+                let player = pool.borrow(key: key, url: url, priority: rank)
                 if let result = expect["result"] as? String {
                     #expect((player == nil ? "refused" : "granted") == result, "\(at)")
                 }
@@ -610,8 +611,9 @@ struct VideoPoolCasesTests {
                 let player = try #require(pool.heldPlayer(for: key), "\(at)")
                 pool.giveBack(key: key, player: player, priority: rank)
             case "setWantsPlay":
-                let player = try #require(pool.heldPlayer(for: key), "\(at)")
-                pool.setWantsPlay(key: key, player: player, wantsPlay: wantsPlay)
+                // Nobody gives way inside Stage 2 (decision 2): a holder's wish changes nothing in
+                // the pool, so iOS keeps no holder flag. The case's later steps check exactly that.
+                _ = try #require(pool.heldPlayer(for: key), "\(at)")
             case "wait":
                 tokens[key] = pool.wait(key: key, url: url, priority: rank, wantsPlay: wantsPlay) { woken.append(key) }
             case "updateWait":

@@ -386,58 +386,129 @@ struct MediaVideoComponentTests {
         #expect(await waitUntilMedia { pool.heldPlayer(for: "rail") != nil }, "borrowed again on its next open")
     }
 
-    // Guards `watchRate(of:)` in `MediaVideoPlayback` (R1-02): a video authored not to play that
-    // the user starts through the controls is a video that wants to play, so a borrow at the
-    // ceiling that wants to play does not take its player.
-    @Test("a video the user starts by hand keeps its player at the ceiling")
-    func userStartedPlayKeepsThePlayer() async throws {
-        install()
-        defer { MediaOrigin.end() }
+    /// A pool with ceiling 1 reading through the fake origin, for every video the test draws.
+    private func onePlayerPool() -> VideoPlayerPool {
         let loader = MediaServices.current.videoLoader
         let pool = VideoPlayerPool(maxPlayers: 1, ceiling: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
         MediaServices.override(videoPool: pool)
+        return pool
+    }
+
+    // Guards `self.wantsPlaying = playing` in `MediaVideoPlayback.watchRate(of:)` (decision 2b,
+    // R1-10, R2-01): a video authored not to play that the user starts through the controls wants
+    // to play. When Stage 1 takes its player it waits ahead of an older paused waiter, and it plays
+    // when it gets a player back.
+    @Test("a video the user started through the controls waits as playing and plays again after Stage 1")
+    func userStartedPlayWaitsAsPlaying() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let pool = onePlayerPool()
         let video = MediaOrigin.url("user-play.mp4")
-        let other = MediaOrigin.url("user-play-other.mp4")
-        for url in [video, other] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
+        let page = MediaOrigin.url("user-play-page.mp4")
+        for url in [video, page] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
 
         let window = MediaStage.mount(MediaVideo(url: video.absoluteString, autoplay: false, playerKey: "manual"))
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { pool.heldPlayer(for: "manual")?.currentItem?.status == .readyToPlay })
         let player = try #require(pool.heldPlayer(for: "manual"))
-
         player.play() // the native controls' play button
         _ = await waitUntilMedia(timeout: 0.3) { false }
+        let older = pool.wait(key: "older", url: page, priority: .onScreen, wantsPlay: false) {}
+        defer { pool.cancelWait(older) }
 
-        #expect(pool.borrow(key: "autoplay", url: other, priority: .onScreen, wantsPlay: true) == nil)
-        #expect(pool.heldPlayer(for: "manual") === player, "the user's video kept its player")
+        let taker = try #require(pool.borrow(key: "page", url: page, priority: .viewerPage))
+        #expect(pool.queuedKeys == ["manual", "older"], "the user's video waits ahead of the paused one")
+
+        pool.giveBack(key: "page", player: taker, priority: .viewerPage)
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "manual")?.rate ?? 0) > 0 }, "back and playing")
     }
 
-    // Guards `waitsForPlayer: false` in `FloaterMediaView` and `wantsPlay: request.waits ? … : true`
-    // in `MediaVideoPlayback.attemptBorrow` (R1-03): the floater's window with autoplay off does
-    // not make the orchestrator's held player a paused one that an autoplay video takes.
-    @Test("a floater with autoplay off is not given way to an autoplay borrow at the ceiling")
-    func floaterNeverGivesWay() async throws {
+    // Guards `self.wantsPlaying = playing` in `MediaVideoPlayback.watchRate(of:)` (decision 2b,
+    // R1-10, R2-01): an autoplay video the user paused through the controls does not want to play.
+    // When Stage 1 takes its player it waits behind a waiter that wants to play, and it stays
+    // paused when it gets a player back.
+    @Test("an autoplay video the user paused waits as paused and stays paused after Stage 1")
+    func userPausedAutoplayWaitsAsPaused() async throws {
         install()
         defer { MediaOrigin.end() }
-        let loader = MediaServices.current.videoLoader
-        let pool = VideoPlayerPool(maxPlayers: 1, ceiling: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
-        MediaServices.override(videoPool: pool)
-        let video = MediaOrigin.url("floater.mp4")
-        let other = MediaOrigin.url("floater-other.mp4")
-        for url in [video, other] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
-        let media = FloaterMediaConfig(
-            kind: .video, url: video.absoluteString, aspectRatio: 0, loop: true, autoplay: false, volume: 0.5,
-            startMuted: true)
+        let pool = onePlayerPool()
+        let video = MediaOrigin.url("user-pause.mp4")
+        let page = MediaOrigin.url("user-pause-page.mp4")
+        for url in [video, page] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
 
-        let window = MediaStage.mount(FloaterMediaView(
-            media: media, videoPlayerKey: "floater", muted: true, cover: true,
-            resolvedUrl: video.absoluteString, preloadedImage: nil))
+        let window = MediaStage.mount(MediaVideo(url: video.absoluteString, autoplay: true, playerKey: "paused"))
         defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "floater") != nil })
-        let player = try #require(pool.heldPlayer(for: "floater"))
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "paused")?.rate ?? 0) > 0 })
+        let player = try #require(pool.heldPlayer(for: "paused"))
+        player.pause() // the native controls' pause button
+        _ = await waitUntilMedia(timeout: 0.3) { false }
+        let newer = pool.wait(key: "newer", url: page, priority: .onScreen, wantsPlay: true) {}
 
-        #expect(pool.borrow(key: "autoplay", url: other, priority: .onScreen, wantsPlay: true) == nil)
-        #expect(pool.heldPlayer(for: "floater") === player)
+        let taker = try #require(pool.borrow(key: "page", url: page, priority: .viewerPage))
+        #expect(pool.queuedKeys == ["newer", "paused"], "the paused video waits behind one that wants to play")
+
+        pool.cancelWait(newer)
+        pool.giveBack(key: "page", player: taker, priority: .viewerPage)
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "paused")?.currentItem?.status == .readyToPlay })
+        _ = await waitUntilMedia(timeout: 0.5) { (pool.heldPlayer(for: "paused")?.rate ?? 0) > 0 }
+        #expect(pool.heldPlayer(for: "paused")?.rate == 0, "back, and still paused")
+    }
+
+    // Guards the at-end check in `MediaVideoPlayback.watchRate(of:)` (R2-02): the rate drops to 0
+    // when a video reaches its end, and that is not a pause. An ended autoplay video still wants to
+    // play, so when Stage 1 takes its player it waits ahead of an older paused waiter.
+    @Test("an autoplay video that reached its end waits as playing when Stage 1 takes its player")
+    func endedAutoplayWaitsAsPlaying() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let pool = onePlayerPool()
+        let video = MediaOrigin.url("ended.mp4")
+        let page = MediaOrigin.url("ended-page.mp4")
+        for url in [video, page] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
+
+        // movie.mp4 is 12.6 s: from 11.8 s it ends in under a second.
+        let window = MediaStage.mount(MediaVideo(
+            url: video.absoluteString, autoplay: true, playerKey: "ended", startMs: 11_800))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "ended")?.rate ?? 0) > 0 })
+        let player = try #require(pool.heldPlayer(for: "ended"))
+        #expect(await waitUntilMedia { player.rate == 0 && VideoPlayerPool.isFinished(player) }, "played to its end")
+        _ = await waitUntilMedia(timeout: 0.3) { false }
+        let older = pool.wait(key: "older", url: page, priority: .onScreen, wantsPlay: false) {}
+        defer { pool.cancelWait(older) }
+
+        let taker = try #require(pool.borrow(key: "page", url: page, priority: .viewerPage))
+        defer { pool.giveBack(key: "page", player: taker, priority: .viewerPage) }
+
+        #expect(pool.queuedKeys == ["ended", "older"], "the ended video still wants to play")
+    }
+
+    // Guards `evictedResume` in `VideoPlayerPool` (`take(_:of:)` keeps the playhead, `borrow` hands
+    // it to the next holder of the key) and `takeResumeMs` in `MediaVideoPlayback.attemptBorrow`
+    // (decision 2a, R1-16): a video whose player Stage 1 took gets one back through the queue when
+    // the viewer gives back, and plays on from where it was, not from 0.
+    @Test("a video Stage 1 took resumes where it was when it gets a player back")
+    func stageOneEvictedVideoResumes() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let pool = onePlayerPool()
+        let video = MediaOrigin.url("resume.mp4")
+        let page = MediaOrigin.url("resume-page.mp4")
+        for url in [video, page] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
+
+        let window = MediaStage.mount(MediaVideo(url: video.absoluteString, autoplay: true, playerKey: "resume"))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "resume")?.currentTime().seconds ?? 0) >= 2 })
+        let playhead = try #require(pool.heldPlayer(for: "resume")).currentTime().seconds
+
+        let taker = try #require(pool.borrow(key: "page", url: page, priority: .viewerPage))
+        #expect(pool.queuedKeys == ["resume"])
+        pool.giveBack(key: "page", player: taker, priority: .viewerPage)
+
+        // From 0 it would need more than 2 s of playback to get there.
+        #expect(await waitUntilMedia(timeout: 1.5) {
+            (pool.heldPlayer(for: "resume")?.currentTime().seconds ?? 0) >= playhead - 0.25
+        }, "resumed near \(playhead) s")
     }
 
     // Guards `player.volume = volume` in `MediaVideoPlayback.open` (W8-03; Flutter Y8-02, Android
