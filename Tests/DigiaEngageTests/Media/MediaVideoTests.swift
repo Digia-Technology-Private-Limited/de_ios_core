@@ -274,6 +274,36 @@ struct MediaVideoComponentTests {
         MediaOrigin.release(video)
     }
 
+    // Guards the `.fileFailedToParse` case in `mediaFailureCause(playerItem:)`: random bytes in an
+    // mp4 fail AVFoundation with -11829 (underlying OSStatus -12848), which used to be unmapped,
+    // so a corrupt video showed the failed box and reported nothing. Local file and range cache.
+    @Test("a corrupt mp4 reports decode once", arguments: ["file", "http"])
+    func corruptMP4ReportsDecode(source: String) async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let bytes = Data((0..<8192).map { UInt8(truncatingIfNeeded: ($0 &* 2654435761) >> 7) })
+        let url: String
+        if source == "file" {
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("corrupt-\(UUID().uuidString).mp4")
+            try bytes.write(to: file)
+            url = file.absoluteString
+        } else {
+            let video = MediaOrigin.url("corrupt.mp4")
+            MediaOrigin.set(.status(200, bytes), for: video)
+            url = video.absoluteString
+        }
+        let recorder = HealthRecorder()
+        let failures = CallCount()
+
+        let window = MediaStage.mount(MediaVideo(url: url, onFailure: { failures.value += 1 }))
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { failures.value > 0 })
+        _ = await waitUntilMedia(timeout: 0.3) { false }
+
+        #expect(recorder.all == [.init(campaignKey: MediaStage.campaign, kind: .video, cause: "decode")])
+        #expect(failures.value == 1)
+    }
+
     // Guards the `mediaUsableURL` guard in `MediaVideoPlayback.open`: a blank or schemeless URL is
     // unusable, reported once as `invalid_url`, and never borrows a player or fetches.
     @Test("a blank or schemeless URL reports invalid_url and builds no player",

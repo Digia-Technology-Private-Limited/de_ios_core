@@ -56,8 +56,14 @@ func mediaFailureCause(playerItem: AVPlayerItem) -> String? {
     if let status = mediaCacheHTTPStatus(in: playerItem.error) {
         return mediaFailureCause(httpStatus: status) == "http_4xx" ? "http_4xx" : nil
     }
+    // The codes that say the bytes are not a playable video. Random bytes in an mp4 fail with
+    // AVFoundation -11829 `.fileFailedToParse` over an OSStatus -12848. The server codes -11849
+    // `.failedToLoadMediaData` and -11850 `.serverIncorrectlyConfigured` stay unreported, as
+    // network faults do.
     switch (playerItem.error as? AVError)?.code {
-    case .decodeFailed?, .fileFormatNotRecognized?, .failedToParse?: return "decode"
+    case .decodeFailed?, .fileFormatNotRecognized?, .fileFailedToParse?, .failedToParse?,
+         .undecodableMediaData?, .invalidSourceMedia?:
+        return "decode"
     default: return nil
     }
 }
