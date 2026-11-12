@@ -70,6 +70,8 @@ extension Tag {
     @Tag static var registry: Self
     /// Media: video streaming, aspect ratio/fit, images, fonts, color.
     @Tag static var media: Self
+    /// Gamification game surfaces: container slots, web view host, bridge.
+    @Tag static var game: Self
     /// Debug tooling: logger, debug overlay, debug deep link, test kit, live-test reliability.
     @Tag static var debug: Self
     /// Page capture: view-tree walk, capture envelope, capture upload.

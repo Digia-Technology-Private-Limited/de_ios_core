@@ -27,6 +27,29 @@ struct DigiaBottomSheetConfig {
     var cardMaxWidth: CGFloat? = nil
 }
 
+extension DigiaBottomSheetConfig {
+    /// Locked chrome for games (bottom-sheet gesture rule): no handle, no
+    /// drag dismiss, no backdrop dismiss. The sheet closes through the native
+    /// close button or the skin only, so a drag inside the game never fights
+    /// the sheet.
+    static var game: DigiaBottomSheetConfig {
+        DigiaBottomSheetConfig(
+            cornerRadius: 18,
+            background: .white,
+            scrimColor: Color.black.opacity(0.4),
+            showHandle: false,
+            allowBackdropDismiss: false,
+            allowDragDismiss: false,
+            heightCapFraction: 1,
+            handleOverlaysContent: false,
+            bottomPadding: 0,
+            bottomSafeAreaMode: .none,
+            bottomSafeAreaInset: 0,
+            cardMaxWidth: nil
+        )
+    }
+}
+
 /// A bottom sheet whose card attaches flush to the screen edges (the system
 /// `.sheet` reserves an unremovable bottom safe-area strip). Present it from a
 /// `fullScreenCover` with a clear background and disabled cover animation.
