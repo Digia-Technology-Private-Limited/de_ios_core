@@ -439,6 +439,9 @@ final class VideoPlayerPool: @unchecked Sendable {
             + evictedResume.count
     }
 
+    /// Playheads kept for keys Stage 1 took (decision 2a).
+    @MainActor var keptPlayheadCount: Int { evictedResume.count }
+
     // MARK: - Private
 
     @MainActor
@@ -497,10 +500,13 @@ final class VideoPlayerPool: @unchecked Sendable {
             .min(by: { $0.value.seq < $1.value.seq })?.key
     }
 
+    /// Memory pressure's eviction: keeps no playhead, since a story page always restarts (owner,
+    /// R4-02); a kept entry would only push a waiting video's out of the capped map.
     @MainActor
     private func evict(key: String) {
         guard let holder = holders.removeValue(forKey: key) else { return }
-        take(holder, of: key)
+        evictedResume[key] = nil
+        destroy(holder.player)
         notifyEvicted(key)
     }
 

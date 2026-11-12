@@ -286,12 +286,41 @@ struct VideoPlayerPoolTests {
     @Test("kept playheads of keys that never wait are capped at the ceiling")
     func keptPlayheadsAreCapped() throws {
         let pool = playheadPool(size: 2, ceiling: 3)
-        for index in 0..<6 {
-            _ = try #require(pool.borrow(key: "prev-\(index)", url: url("v\(index)"), priority: .viewerPrev))
-            pool.onMemoryPressure()
+        for round in 0..<2 {
+            for index in 0..<3 {
+                _ = try #require(pool.borrow(key: "card-\(round)-\(index)", url: url("c\(round)\(index)"), priority: .onScreen))
+            }
+            // Stage 1 takes all three, then lets go.
+            let pages = try (0..<3).map { index in
+                ("page-\(round)-\(index)", try #require(pool.borrow(key: "page-\(round)-\(index)", url: url("p\(round)\(index)"), priority: .viewerPage)))
+            }
+            for (key, player) in pages { pool.giveBack(key: key, player: player, priority: .viewerPage) }
         }
 
-        #expect(pool.bookkeepingCount == 3)
+        #expect(pool.keptPlayheadCount == 3)
+    }
+
+    // Guards `evict(key:)` in `onMemoryPressure` keeping no playhead (R4-02): a story page always
+    // restarts, so a kept entry for the previous page would only push the oldest taken video's
+    // playhead out of the capped map.
+    @Test("memory pressure on the previous page keeps the taken videos' playheads")
+    func memoryPressureKeepsTakenPlayheads() throws {
+        let pool = playheadPool(size: 3, ceiling: 3)
+        for key in ["a", "b", "c"] {
+            _ = try #require(pool.borrow(key: key, url: url(key), priority: .onScreen))
+        }
+        // The story viewer takes all three; each canvas video waits.
+        let pages: [(String, PoolPriority)] = [("prev", .viewerPrev), ("page", .viewerPage), ("next", .viewerNext)]
+        let held = try pages.map { key, rank in (key, rank, try #require(pool.borrow(key: key, url: url(key), priority: rank))) }
+        for key in ["a", "b", "c"] {
+            _ = pool.wait(key: key, url: url(key), priority: .onScreen, wantsPlay: true, onAvailable: {})
+        }
+
+        pool.onMemoryPressure()
+        for (key, rank, player) in held.dropFirst() { pool.giveBack(key: key, player: player, priority: rank) }
+        let back = try #require(pool.borrow(key: "a", url: url("a"), priority: .onScreen))
+
+        #expect(pool.takeResumeMs(for: "a", player: back) == 5_000)
     }
 
     // Guards `notifyEvicted(key)` after a re-point in `borrow` (OD-10, R2-06c).
