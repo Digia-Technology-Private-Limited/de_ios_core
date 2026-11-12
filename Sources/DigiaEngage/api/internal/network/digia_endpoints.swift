@@ -41,6 +41,12 @@ enum DigiaEndpoints {
     static var recordPageCapture: String { "\(baseUrl)/api/v1/engage/sdk/recordPageCapture" }
     static var liveTestConnect: String { "\(baseUrl)/api/v1/engage/sdk/live/connect" }
     static var liveTestAck: String { "\(baseUrl)/api/v1/engage/sdk/testInvocation/ack" }
+    static var gamificationGrantChance: String {
+        "\(baseUrl)/api/v1/engage/sdk/gamification/grantChance"
+    }
+    static var gamificationPlay: String {
+        "\(baseUrl)/api/v1/engage/sdk/gamification/play"
+    }
     /// Live-only colour for an in-flight test — a survey's answers, how a
     /// nudge was dismissed. Stored nowhere; relayed to the dashboard that
     /// started the test and dropped if nobody is watching.

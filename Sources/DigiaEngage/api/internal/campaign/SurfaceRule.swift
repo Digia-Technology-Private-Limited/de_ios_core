@@ -9,6 +9,7 @@ enum SurfaceKind: Equatable {
     case nudge
     case survey
     case guide
+    case gamification
     case floaterExpanded
     case floaterCollapsed
     case inline(slot: String)
@@ -16,7 +17,7 @@ enum SurfaceKind: Equatable {
     /// Blocking kinds own the screen; the rest share it.
     var isBlocking: Bool {
         switch self {
-        case .nudge, .survey, .guide, .floaterExpanded: return true
+        case .nudge, .survey, .guide, .gamification, .floaterExpanded: return true
         case .floaterCollapsed, .inline: return false
         }
     }
@@ -27,6 +28,7 @@ enum SurfaceKind: Equatable {
         case .nudge: return "nudge"
         case .survey: return "survey"
         case .guide: return "guide"
+        case .gamification: return "gamification"
         case .floaterExpanded: return "floater_expanded"
         case .floaterCollapsed: return "floater_collapsed"
         case .inline: return "inline"
@@ -69,41 +71,46 @@ enum SurfaceRule {
     }
 
     enum Row: CaseIterable {
-        case nudge, survey, guide, floater, inline
+        case nudge, survey, guide, gamification, floater, inline
     }
 
     /// Ordered by precedence: with several occupants, the first busy column is
     /// the one reported (§2.5 — a floater over a nudge plus a collapsed floater
     /// names the nudge).
     enum Column: CaseIterable {
-        case nothing, nudge, survey, guide, floaterExpanded, floaterCollapsed
+        case nothing, nudge, gamification, survey, guide, floaterExpanded, floaterCollapsed
         case inlineSameSlot, inlineOtherSlot
     }
 
     /// §2.1, row = arriving, column = occupant.
     static let table: [Row: [Column: Cell]] = [
         .nudge: [
-            .nothing: .show, .nudge: .busy, .survey: .busy, .guide: .busy,
+            .nothing: .show, .nudge: .busy, .gamification: .busy, .survey: .busy, .guide: .busy,
             .floaterExpanded: .busy, .floaterCollapsed: .show,
             .inlineSameSlot: .show, .inlineOtherSlot: .show,
         ],
         .survey: [
-            .nothing: .show, .nudge: .busy, .survey: .busy, .guide: .busy,
+            .nothing: .show, .nudge: .busy, .gamification: .busy, .survey: .busy, .guide: .busy,
             .floaterExpanded: .busy, .floaterCollapsed: .show,
             .inlineSameSlot: .show, .inlineOtherSlot: .show,
         ],
         .guide: [
-            .nothing: .show, .nudge: .busy, .survey: .busy, .guide: .busy,
+            .nothing: .show, .nudge: .busy, .gamification: .busy, .survey: .busy, .guide: .busy,
+            .floaterExpanded: .busy, .floaterCollapsed: .show,
+            .inlineSameSlot: .show, .inlineOtherSlot: .show,
+        ],
+        .gamification: [
+            .nothing: .show, .nudge: .busy, .gamification: .busy, .survey: .busy, .guide: .busy,
             .floaterExpanded: .busy, .floaterCollapsed: .show,
             .inlineSameSlot: .show, .inlineOtherSlot: .show,
         ],
         .floater: [
-            .nothing: .show, .nudge: .busy, .survey: .busy, .guide: .busy,
+            .nothing: .show, .nudge: .busy, .gamification: .busy, .survey: .busy, .guide: .busy,
             .floaterExpanded: .busy, .floaterCollapsed: .busy,
             .inlineSameSlot: .show, .inlineOtherSlot: .show,
         ],
         .inline: [
-            .nothing: .show, .nudge: .show, .survey: .show, .guide: .show,
+            .nothing: .show, .nudge: .show, .gamification: .show, .survey: .show, .guide: .show,
             .floaterExpanded: .show, .floaterCollapsed: .show,
             .inlineSameSlot: .sameSlot, .inlineOtherSlot: .show,
         ],
@@ -114,6 +121,7 @@ enum SurfaceRule {
         case .nudge: return .nudge
         case .survey: return .survey
         case .guide: return .guide
+        case .gamification: return .gamification
         case .floaterExpanded, .floaterCollapsed: return .floater
         case .inline: return .inline
         }
@@ -122,6 +130,7 @@ enum SurfaceRule {
     static func column(_ occupant: SurfaceKind, incoming: SurfaceKind) -> Column {
         switch occupant {
         case .nudge: return .nudge
+        case .gamification: return .gamification
         case .survey: return .survey
         case .guide: return .guide
         case .floaterExpanded: return .floaterExpanded

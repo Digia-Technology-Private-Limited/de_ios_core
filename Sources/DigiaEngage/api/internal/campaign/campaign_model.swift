@@ -19,6 +19,7 @@ enum CampaignConfigModel: Equatable {
     case story(InlineStoryConfig)
     case survey(SurveyConfigModel)
     case floater(FloaterConfig)
+    case gamification(GamificationConfig)
     /// The floater family's second member: a small floating **canvas** window that opens
     /// a full-screen story on tap. Shares the PiP's window vocabulary and none of its media.
     case floaterStory(FloaterStoryConfig)
@@ -74,6 +75,11 @@ struct CampaignModel: Equatable {
 
     var floaterConfig: FloaterConfig? {
         if case let .floater(value) = config { return value }
+        return nil
+    }
+
+    var gamificationConfig: GamificationConfig? {
+        if case let .gamification(value) = config { return value }
         return nil
     }
 
@@ -181,6 +187,12 @@ struct CampaignModel: Equatable {
                 ) else { return nil }
                 config = .floater(floaterConfig)
             }
+        case "gamification":
+            guard let templateConfig = selectedJson.object("templateConfig"),
+                  let gamificationConfig = GamificationConfig.fromJson(
+                      templateConfig, campaignLevel: selectedJson)
+            else { return nil }
+            config = .gamification(gamificationConfig)
         default:
             throw CampaignParseScope.report(
                 "Campaign skipped — unknown campaign type (type=\(campaignType))",

@@ -145,6 +145,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// The capture toggles `SDKInstance` itself persists.
     private let captureStorage: LocalStorage
     let networkClient: any NetworkClient
+    /// Gamification backend calls (`grantChance`, `play`). Wraps the same
+    /// client so tests drive it through `MockNetworkClient` with no second seam.
+    let gameOutcomeSource: any GameOutcomeSource
     /// Where `networkClient` reads `X-Digia-Session-Id` from, per request.
     private let currentSession = CurrentSessionRef()
     let campaignStore: CampaignStore
@@ -245,6 +248,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         self.debugOverlayController = defaultDebugOverlay
         self.storage = defaultStorage
         self.networkClient = defaultNetworkClient
+        self.gameOutcomeSource = HttpGameOutcomeSource(networkClient: defaultNetworkClient)
         self.campaignStore = CampaignStore()
         self.componentRegistry = ComponentRegistryService(
             storage: defaultStorage.scoped("registry"),
@@ -928,6 +932,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .floater, .floaterStory:
             return campaign.floaterStoryConfig != nil ? "story_floater" : "pip"
         case .inline, .banner, .inlineCanvas, .story: return nil
+        case .gamification: return "gamification"
         }
     }
 
@@ -1641,6 +1646,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
         case .inline(let slot):
             inlineController.dismissCampaign(slot, reason: .superseded)
+        case .gamification:
+            // No game surface exists until T7, so no gamification occupant can
+            // be on screen yet; T7 dismisses the game surface here.
+            break
         }
     }
 
@@ -1935,7 +1944,144 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     cause: "start_failed")
             }
             return .accepted(payload: payload, kind: .floating)
+        case .gamification(let gamificationConfig):
+            return routeGamification(
+                gamificationConfig, campaign: campaign, payload: payload, context: context)
         }
+    }
+
+    /// Gamification routing (ERD 1, T1–T2): no surface yet. The branch admits
+    /// to the surface, asks the server for a chance, and stays `accepted` while
+    /// the answer is in flight — the T7 open hook presents the game, and the
+    /// acceptance watchdog settles the no-show otherwise. A denial or a
+    /// failure logs and leaves the chance unplayed; the live test still hears
+    /// its terminal answer through its context.
+    private func routeGamification(
+        _ config: GamificationConfig,
+        campaign: CampaignModel,
+        payload: CEPTriggerPayload,
+        context: RoutingContext
+    ) -> RoutingVerdict {
+        let key = campaign.campaignKey
+        // The SDK never invents a trigger id: without one the server cannot
+        // dedup repeats, so the trigger is dropped, not guessed.
+        let triggerId = payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !triggerId.isEmpty else {
+            let detail = "gamification skipped — no trigger id"
+            lastCampaignDropReason = detail
+            log.d("Dropped — \(detail)", campaign: key)
+            context.onDropped(DropReason.invalidConfig, message: detail)
+            return .dropped(reason: .invalidConfig, detail: detail)
+        }
+        guard let userId = services?.identityManager.userId, !userId.isEmpty else {
+            let detail = "gamification skipped — no user id"
+            lastCampaignDropReason = detail
+            log.d("Dropped — \(detail)", campaign: key)
+            context.onDropped(DropReason.invalidConfig, message: detail)
+            return .dropped(reason: .invalidConfig, detail: detail)
+        }
+        let testInvocationId =
+            context.isLiveTest ? testInvocationIdOf(payload.cepCampaignId) : nil
+        if context.isLiveTest, testInvocationId == nil {
+            let detail = "gamification skipped — live test id missing"
+            lastCampaignDropReason = detail
+            log.d("Dropped — \(detail)", campaign: key)
+            context.onDropped(DropReason.invalidConfig, message: detail)
+            return .dropped(reason: .invalidConfig, detail: detail)
+        }
+        if let cap = context.frequencyCapReason(campaignKey: key, policy: campaign.frequency) {
+            lastCampaignDropReason = "frequency capped"
+            return frequencyCapped(cap, policy: campaign.frequency)
+        }
+        // Organic only: a live test must not displace visible content before
+        // the server grants a chance, so T7 admits it at open instead.
+        if !context.isLiveTest,
+           let busy = admitToSurface(.gamification, campaignKey: key, context: context)
+        {
+            return busy
+        }
+        // `showNow` is CEP-mode only; a live test carries `testInvocationId`
+        // (with the `x-digia-device-id` header) instead. The host trigger path
+        // is CEP-mode shaped — an explicit ask to show — so it sends `true`.
+        let request = GrantChanceRequest(
+            campaignKey: key,
+            userId: userId,
+            userHash: nil,
+            triggerId: triggerId,
+            showNow: context.isLiveTest ? nil : true,
+            testInvocationId: testInvocationId,
+            deviceId: context.isLiveTest ? services?.identityManager.deviceId : nil
+        )
+        logVerbose("routeByCampaignKey GAMIFICATION key='\(key)' triggerId='\(triggerId)'")
+        let source = gameOutcomeSource
+        let cepCampaignId = payload.cepCampaignId
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await source.grantChance(request)
+            self.handleGamificationGrant(
+                result, campaignKey: key, cepCampaignId: cepCampaignId, config: config)
+        }
+        return .accepted(payload: payload, kind: .modal)
+    }
+
+    /// Settles one `grantChance` answer: logs, prefetches on granted, and
+    /// opens on granted with show. Organic no-shows stay pending for the
+    /// acceptance watchdog; a live test is answered at once.
+    private func handleGamificationGrant(
+        _ result: GrantChanceResult,
+        campaignKey: String,
+        cepCampaignId: String,
+        config: GamificationConfig
+    ) {
+        switch result {
+        case .granted(let chance):
+            log.d(
+                "Gamification chance granted (chanceId=\(chance.chanceId), show=\(chance.show))",
+                campaign: campaignKey
+            )
+            prefetchGamificationBundle(config, campaignKey: campaignKey)
+            if chance.show {
+                openGamificationSurface(
+                    chance: chance, config: config, campaignKey: campaignKey,
+                    cepCampaignId: cepCampaignId)
+            }
+        case .denied(let reason):
+            log.d(
+                "Gamification chance not granted (reason=\(reason ?? "held_out"))",
+                campaign: campaignKey
+            )
+            liveTestContexts[cepCampaignId]?.reportFailed(
+                DropReason.error,
+                message: "chance not granted (\(reason ?? "no reason"))"
+            )
+        case .failure(let error):
+            log.e("Gamification grantChance failed", campaign: campaignKey, error: "\(error)")
+            liveTestContexts[cepCampaignId]?.reportFailed(
+                DropReason.error, message: "grantChance failed"
+            )
+        }
+    }
+
+    /// Prefetch hook: downloads the skin bundle when granted. No-op until T11.
+    private func prefetchGamificationBundle(_ config: GamificationConfig, campaignKey: String) {
+        log.d(
+            "Gamification prefetch hook (skinId=\(config.skinId), skinVersion=\(config.skinVersion))",
+            campaign: campaignKey
+        )
+    }
+
+    /// Open hook: presents the game surface for a granted chance with show.
+    /// No-op until T7.
+    private func openGamificationSurface(
+        chance: GrantedChance,
+        config: GamificationConfig,
+        campaignKey: String,
+        cepCampaignId: String
+    ) {
+        log.d(
+            "Gamification open hook (chanceId=\(chance.chanceId), style=\(config.surfaceStyle.rawValue))",
+            campaign: campaignKey
+        )
     }
 
     /// Handles one `campaign_test` SSE event.
@@ -2007,8 +2153,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
         let supportsLiveTest: Bool
         switch campaign.config {
-        case .guide, .floater, .floaterStory: supportsLiveTest = true
-        case .nudge, .survey, .inline, .inlineCanvas: supportsLiveTest = true
+        case .guide, .floater, .floaterStory,
+             .nudge, .survey, .inline, .inlineCanvas, .gamification:
+            supportsLiveTest = true
         case .banner, .story: supportsLiveTest = false
         }
         guard supportsLiveTest else {

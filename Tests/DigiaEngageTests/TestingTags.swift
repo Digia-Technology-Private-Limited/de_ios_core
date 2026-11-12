@@ -34,6 +34,8 @@ extension Tag {
 
     /// Nudge surfaces: dialog, bottom sheet, full screen, close button, nudge video.
     @Tag static var nudge: Self
+    /// Gamification: game surfaces, bridge, outcome calls, bundle cache.
+    @Tag static var gamification: Self
     /// Floater surfaces: story floater window, PiP.
     @Tag static var floater: Self
     /// Survey surfaces: dialog and bottom-sheet surveys and their scenes.
