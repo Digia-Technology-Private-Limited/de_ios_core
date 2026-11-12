@@ -76,6 +76,8 @@ extension Tag {
     @Tag static var debug: Self
     /// Gamification skins: prefetch, bundle cache, web-view host, bridge.
     @Tag static var gami: Self
+    /// Gamification games: haptics, motion, pause/resume, device facts, bridge.
+    @Tag static var gamification: Self
     /// Page capture: view-tree walk, capture envelope, capture upload.
     @Tag static var capture: Self
 }
