@@ -84,7 +84,10 @@ private struct RailLikeHost: View {
     let lost: CallCount
 
     var body: some View {
-        MediaVideo(url: model.url, playerKey: "rail", poolPriority: .onScreen, onLost: { lost.value += 1 })
+        // The rail does not wait in the pool's queue: an evicted card says so through `onLost`.
+        MediaVideo(
+            url: model.url, playerKey: "rail", poolPriority: .onScreen, onLost: { lost.value += 1 },
+            waitsForPlayer: false)
     }
 }
 
