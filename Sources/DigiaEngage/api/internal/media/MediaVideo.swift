@@ -83,7 +83,9 @@ let mediaVideoBackdrop = Color(red: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 
 /// Story surfaces (T8) also use: `startMs`, where an opened player is put (nil keeps the pool's
 /// playhead, so a remount resumes); `onReady`, the player at its first frame (the story reads
 /// its playhead); `onLost`, a keyed borrow that was refused or a holder that was evicted, which
-/// says nothing about the video.
+/// says nothing about the video. `onLost` fires only for a surface that does not wait
+/// (`waitsForPlayer` false, the story rail) or a Stage-1 one: every other video refused at the
+/// ceiling, or evicted, waits in the pool's queue on its still and plays when a player frees up.
 struct MediaVideo: View {
     let url: String
     var fit: MediaFit = .cover
@@ -103,6 +105,9 @@ struct MediaVideo: View {
     var onFirstFrame: (() -> Void)? = nil
     var onReady: ((AVPlayer) -> Void)? = nil
     var onLost: (() -> Void)? = nil
+    /// Whether a refused or evicted Stage-2 borrow waits in the pool's queue. The story rail passes
+    /// false: it keeps its own turn-skipping rule, so no card is retried by two mechanisms.
+    var waitsForPlayer: Bool = true
     var onEnded: (() -> Void)? = nil
     var onFailure: (() -> Void)? = nil
     /// How long a bare backdrop waits for the first frame before showing a spinner. Tests
@@ -168,7 +173,7 @@ struct MediaVideo: View {
         let canShow = MediaVideoStill.canShow(thumbnailUrl: thumbnailUrl, blurHash: blurHash)
         playback.open(
             url: url, key: key, priority: poolPriority, loop: loop, muted: muted, volume: volume,
-            autoplay: autoplay,
+            autoplay: autoplay, waitsForPlayer: waitsForPlayer,
             startMs: startMs, spinnerDelay: canShow || bare ? nil : spinnerDelay,
             services: services,
             report: { [services, campaignKey] cause in services.reportHealth(campaignKey, .video, cause) })
@@ -234,6 +239,22 @@ final class MediaVideoPlayback: ObservableObject {
 
     private var opened: (url: String, key: String?)?
     private var lease: (pool: VideoPlayerPool, key: String, priority: PoolPriority, eviction: UUID, own: Bool)?
+    /// What the opened showing borrows, kept so a woken waiter can borrow again.
+    private struct BorrowRequest {
+        let pool: VideoPlayerPool
+        let key: String
+        let url: URL
+        let priority: PoolPriority
+        let own: Bool
+        let muted: Bool
+        let volume: Float
+        let startMs: Int64?
+        let spinnerDelay: TimeInterval?
+        let waits: Bool
+    }
+    private var request: BorrowRequest?
+    /// Set while the showing waits in the pool's queue for a player.
+    private var waitToken: UUID?
     /// The pool key of this node when the surface gives none (OD-15), stable while it is mounted.
     private let ownKey = "media-video-\(UUID().uuidString)"
     private var report: (String) -> Void = { _ in }
@@ -262,8 +283,8 @@ final class MediaVideoPlayback: ObservableObject {
     /// the old player first.
     func open(
         url: String, key: String?, priority: PoolPriority, loop: Bool, muted: Bool, volume: Float,
-        autoplay: Bool, startMs: Int64? = nil, spinnerDelay: TimeInterval?, services: MediaServices,
-        report: @escaping (String) -> Void
+        autoplay: Bool, waitsForPlayer: Bool = true, startMs: Int64? = nil, spinnerDelay: TimeInterval?,
+        services: MediaServices, report: @escaping (String) -> Void
     ) {
         if let opened, opened.url == url, opened.key == key { return }
         close()
@@ -274,49 +295,77 @@ final class MediaVideoPlayback: ObservableObject {
             fail(cause: "invalid_url")
             return
         }
-        let pool = services.videoPool
-        let poolKey = key ?? ownKey
-        // A refused borrow is tried once more on the next main-queue turn (OD-24): a surface taking
-        // over from one that leaves in the same turn (the rail's next card) can ask before the
-        // leaving one's close has given its player back. Only a second refusal gives up: the still
-        // stays and `onLost` says so. The pool's health report on a refusal is not undone by a retry.
-        func attempt(retried: Bool) {
-            guard let player = pool.borrow(key: poolKey, url: parsed, priority: priority) else {
-                guard retried else {
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self, self.opened?.url == url, self.opened?.key == key,
-                              self.lease == nil, self.player == nil else { return }
-                        attempt(retried: true)
-                    }
-                    return
+        wantsPlaying = autoplay
+        request = BorrowRequest(
+            pool: services.videoPool, key: key ?? ownKey, url: parsed, priority: priority, own: key == nil,
+            muted: muted, volume: volume, startMs: startMs, spinnerDelay: spinnerDelay,
+            waits: waitsForPlayer && !priority.isStage1)
+        attemptBorrow(retried: false)
+    }
+
+    /// A refused borrow is tried once more on the next main-queue turn (OD-24): a surface taking
+    /// over from one that leaves in the same turn (the rail's next card) can ask before the
+    /// leaving one's close has given its player back. A second refusal waits in the pool's queue
+    /// on the still, or, for a surface that doesn't wait, gives up through `onLost`. A woken waiter
+    /// refused again keeps its place. The pool's health report on a refusal is not undone.
+    private func attemptBorrow(retried: Bool) {
+        guard let request, lease == nil, player == nil else { return }
+        let pool = request.pool
+        guard let player = pool.borrow(
+            key: request.key, url: request.url, priority: request.priority, wantsPlay: wantsPlaying) else {
+            if waitToken != nil { return }
+            guard retried else {
+                let opened = opened
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.opened?.url == opened?.url, self.opened?.key == opened?.key else { return }
+                    self.attemptBorrow(retried: true)
                 }
-                onLost?()
                 return
             }
-            let eviction = pool.observeEviction(of: poolKey) { [weak self] in self?.evicted() }
-            lease = (pool, poolKey, priority, eviction, key == nil)
-            player.isMuted = muted
-            player.volume = volume
-            player.actionAtItemEnd = .pause
-            // A surface's own start wins; otherwise a player whose idle item the pool let go
-            // resumes where it was.
-            if let start = startMs ?? pool.takeResumeMs(for: poolKey, player: player) {
-                seekPending = true
-                pendingStartMs = max(start, 0)
-            }
-            if let item = player.currentItem { watch(item) }
-            self.player = player
-            seekToStartIfReady()
-            setPlaying(autoplay)
-            if let spinnerDelay {
-                spinnerTask = Task { @MainActor [weak self] in
-                    try? await Task.sleep(nanoseconds: UInt64(spinnerDelay * 1_000_000_000))
-                    guard let self, !Task.isCancelled, !self.firstFrameShown, !self.failed else { return }
-                    self.spinnerVisible = true
-                }
+            waitOrGiveUp()
+            return
+        }
+        // The pool took this showing out of its queue with the borrow.
+        waitToken = nil
+        let eviction = pool.observeEviction(of: request.key) { [weak self] in self?.evicted() }
+        lease = (pool, request.key, request.priority, eviction, request.own)
+        player.isMuted = request.muted
+        player.volume = request.volume
+        player.actionAtItemEnd = .pause
+        // A surface's own start wins; otherwise a player whose idle item the pool let go
+        // resumes where it was.
+        if let start = request.startMs ?? pool.takeResumeMs(for: request.key, player: player) {
+            seekPending = true
+            pendingStartMs = max(start, 0)
+        }
+        if let item = player.currentItem { watch(item) }
+        self.player = player
+        seekToStartIfReady()
+        setPlaying(wantsPlaying)
+        if let spinnerDelay = request.spinnerDelay {
+            spinnerTask = Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(spinnerDelay * 1_000_000_000))
+                guard let self, !Task.isCancelled, !self.firstFrameShown, !self.failed else { return }
+                self.spinnerVisible = true
             }
         }
-        attempt(retried: false)
+    }
+
+    /// No player for now: a Stage-2 surface that waits joins the pool's queue and borrows again
+    /// when woken; any other says so through `onLost`.
+    private func waitOrGiveUp() {
+        guard let request, request.waits else {
+            onLost?()
+            return
+        }
+        guard waitToken == nil else { return }
+        waitToken = request.pool.wait(
+            key: request.key, url: request.url, priority: request.priority, wantsPlay: wantsPlaying
+        ) { [weak self] in
+            // A wake after the showing closed or got a player does nothing.
+            guard let self, self.waitToken != nil else { return }
+            self.attemptBorrow(retried: true)
+        }
     }
 
     /// Issues the `startMs` seek once the item is ready (a seek on an item still loading lands
@@ -335,7 +384,17 @@ final class MediaVideoPlayback: ObservableObject {
     }
 
     func setPlaying(_ playing: Bool) {
+        let changed = wantsPlaying != playing
         wantsPlaying = playing
+        if changed, let request {
+            if let waitToken {
+                request.pool.updateWait(waitToken, wantsPlay: playing)
+                // A waiting still asked to play borrows at once: it may take a paused holder's player.
+                if playing { attemptBorrow(retried: true) }
+            } else if let player {
+                request.pool.setWantsPlay(key: request.key, player: player, wantsPlay: playing)
+            }
+        }
         guard let player, !failed else { return }
         if playing, seekPending { return }
         if playing { player.play() } else { player.pause() }
@@ -357,6 +416,9 @@ final class MediaVideoPlayback: ObservableObject {
                 }
             }
         }
+        if let waitToken, let request { request.pool.cancelWait(waitToken) }
+        waitToken = nil
+        request = nil
         lease = nil
         player = nil
         opened = nil
@@ -403,17 +465,19 @@ final class MediaVideoPlayback: ObservableObject {
         endObserver = nil
     }
 
-    /// The pool took the player back for a higher-ranked holder, or re-pointed it at another
-    /// URL for another holder: show the still again. The showing stays opened, so it isn't
-    /// re-borrowed every frame; it borrows again when it next opens.
+    /// The pool took the player back (for Stage 1, or for a video that wants to play while this
+    /// one is paused), or re-pointed it at another URL for another holder: show the still again
+    /// and wait in the pool's queue, or say so through `onLost` for a surface that doesn't wait.
     private func evicted() {
         unwatch()
         if let lease { lease.pool.removeEvictionObserver(lease.eviction, for: lease.key) }
         lease = nil
         player = nil
+        seekPending = false
+        pendingStartMs = nil
         firstFrameShown = false
         spinnerVisible = false
-        onLost?()
+        waitOrGiveUp()
     }
 
     /// Shows the failed box once per opened URL. Only a cause the author can fix is health: a
