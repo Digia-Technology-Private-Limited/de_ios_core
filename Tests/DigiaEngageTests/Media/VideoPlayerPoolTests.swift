@@ -323,22 +323,42 @@ struct VideoPlayerPoolTests {
         arriving.close()
     }
 
-    // Guards `guard retried else` in `MediaVideoPlayback.open`: a second refusal behaves as before, one
-    // `onLost` and no player.
-    @Test("a borrow refused again on the retry gives up once")
-    func secondRefusalGivesUp() async throws {
+    // Guards `waitOrGiveUp` after the retry in `MediaVideoPlayback.attemptBorrow`: a second refusal waits
+    // on its still instead of giving up, and borrows the player the holder gives back.
+    @Test("a borrow refused again on the retry waits and plays when the holder leaves")
+    func secondRefusalWaits() async throws {
         let pool = pool(size: 1, ceiling: 1)
         let lost = CallCount()
         let holder = MediaVideoPlayback(), refused = MediaVideoPlayback()
         open(holder, key: "card-0", pool: pool, lost: lost)
 
         open(refused, key: "card-1", pool: pool, lost: lost)
-        #expect(lost.value == 0, "not yet: the retry comes first")
-        #expect(await waitUntilMedia(timeout: 2) { lost.value > 0 })
-        ComponentTestHost.drainRunLoop(for: 0.1)
-
-        #expect(lost.value == 1)
+        #expect(await waitUntilMedia(timeout: 2) { pool.queuedKeys == ["card-1"] }, "waits after the retry")
+        #expect(lost.value == 0)
         #expect(refused.player == nil)
+
+        holder.close()
+        #expect(await waitUntilMedia(timeout: 2) { refused.player != nil }, "woken with the freed player")
+        #expect(pool.queuedKeys.isEmpty)
+        #expect(lost.value == 0)
+        refused.close()
+    }
+
+    // Guards `cancelWait` in `MediaVideoPlayback.close`: a waiting surface that closes leaves the queue,
+    // so a freed slot is not reserved for a gone node.
+    @Test("a waiting surface that closes leaves the queue")
+    func closedWaiterLeavesTheQueue() async throws {
+        let pool = pool(size: 1, ceiling: 1)
+        let lost = CallCount()
+        let holder = MediaVideoPlayback(), waiting = MediaVideoPlayback()
+        open(holder, key: "card-0", pool: pool, lost: lost)
+        open(waiting, key: "card-1", pool: pool, lost: lost)
+        #expect(await waitUntilMedia(timeout: 2) { pool.queuedKeys == ["card-1"] })
+
+        waiting.close()
+
+        #expect(pool.queuedKeys.isEmpty)
+        #expect(pool.bookkeepingCount == pool.livePlayerCount + 1, "the holder's eviction observer, no waiter")
         holder.close()
     }
 }
@@ -517,4 +537,106 @@ struct VideoPlayerPoolMediaVideoTests {
         #expect(model.failures == 1)
     }
 }
+}
+
+// MARK: - Shared pool cases
+
+/// The Test Kit's pool decision table (`testkit/contracts/video-pool-cases.json`), run against the real
+/// pool with bare players, a turn queue run by hand, and every core's same expectations
+/// (`testkit/contracts/video-pool.md`).
+private enum VideoPoolCases {
+    nonisolated(unsafe) static let file: [String: Any]? = FixtureLoader.workspaceURL()
+        .flatMap { try? Data(contentsOf: $0.appendingPathComponent("testkit/contracts/video-pool-cases.json")) }
+        .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+    static var cases: [[String: Any]] { file?["cases"] as? [[String: Any]] ?? [] }
+    static var ids: [String] { cases.compactMap { $0["id"] as? String } }
+}
+
+@MainActor
+@Suite("Video pool cases", .tags(.media, .unit), .enabled(if: testkitAvailable, testkitSkipReason))
+struct VideoPoolCasesTests {
+    private static func rank(_ name: String) -> PoolPriority {
+        switch name {
+        case "viewerPage": .viewerPage
+        case "viewerNext": .viewerNext
+        case "viewerPrev": .viewerPrev
+        default: .onScreen
+        }
+    }
+
+    @Test("every Test Kit pool case passes", arguments: VideoPoolCases.ids)
+    func poolCase(_ id: String) throws {
+        let defaults = try #require(VideoPoolCases.file?["defaults"] as? [String: Any])
+        let entry = try #require(VideoPoolCases.cases.first { $0["id"] as? String == id })
+        let poolConfig = (entry["pool"] ?? defaults["pool"]) as? [String: Int] ?? [:]
+        var playerIds: [ObjectIdentifier: String] = [:]
+        var pending: [@MainActor () -> Void] = []
+        var reports = 0
+        var evicted: [String] = []
+        var woken: [String] = []
+        var observed: Set<String> = []
+        var tokens: [String: UUID] = [:]
+        let pool = VideoPlayerPool(
+            maxPlayers: poolConfig["size"] ?? 3, ceiling: poolConfig["ceiling"] ?? 3, onCeilingRefused: { reports += 1 },
+            clock: { 0 }, schedule: { _, _ in }, post: { pending.append($0) },
+            makeItem: { AVPlayerItem(url: $0) },
+            makePlayer: { item in
+                let player = AVPlayer(playerItem: item)
+                playerIds[ObjectIdentifier(player)] = "p\(playerIds.count + 1)"
+                return player
+            })
+
+        for (index, step) in (entry["steps"] as? [[String: Any]] ?? []).enumerated() {
+            let op = step["op"] as? String ?? ""
+            let key = step["key"] as? String ?? ""
+            let at = "\(id) step \(index) \(op) \(key)"
+            let rank = Self.rank(step["rank"] as? String ?? defaults["rank"] as? String ?? "onScreen")
+            let wantsPlay = step["wantsPlay"] as? Bool ?? defaults["wantsPlay"] as? Bool ?? true
+            let template = defaults["url"] as? String ?? "https://pool.test/{key}.mp4"
+            let url = try #require(URL(string: step["url"] as? String ?? template.replacingOccurrences(of: "{key}", with: key)))
+            let expect = step["expect"] as? [String: Any] ?? [:]
+            evicted = []
+            switch op {
+            case "borrow":
+                if observed.insert(key).inserted { _ = pool.observeEviction(of: key) { evicted.append(key) } }
+                let player = pool.borrow(key: key, url: url, priority: rank, wantsPlay: wantsPlay)
+                if let result = expect["result"] as? String {
+                    #expect((player == nil ? "refused" : "granted") == result, "\(at)")
+                }
+                if let id = expect["player"] as? String {
+                    #expect(player.flatMap { playerIds[ObjectIdentifier($0)] } == id, "\(at)")
+                }
+            case "giveBack":
+                let player = try #require(pool.heldPlayer(for: key), "\(at)")
+                pool.giveBack(key: key, player: player, priority: rank)
+            case "setWantsPlay":
+                let player = try #require(pool.heldPlayer(for: key), "\(at)")
+                pool.setWantsPlay(key: key, player: player, wantsPlay: wantsPlay)
+            case "wait":
+                tokens[key] = pool.wait(key: key, url: url, priority: rank, wantsPlay: wantsPlay) { woken.append(key) }
+            case "updateWait":
+                pool.updateWait(try #require(tokens[key], "\(at)"), wantsPlay: wantsPlay)
+            case "cancelWait":
+                pool.cancelWait(try #require(tokens[key], "\(at)"))
+            case "memoryPressure":
+                pool.onMemoryPressure()
+            case "turn":
+                woken = []
+                let tasks = pending
+                pending = []
+                tasks.forEach { $0() }
+                if let expected = expect["woken"] as? [String] { #expect(woken == expected, "\(at)") }
+            case "check":
+                if let held = expect["held"] as? Int { #expect(pool.heldKeys.count == held, "\(at) held") }
+                if let live = expect["live"] as? Int { #expect(pool.livePlayerCount == live, "\(at) live") }
+                if let queue = expect["queue"] as? [String] { #expect(pool.queuedKeys == queue, "\(at) queue") }
+                if let count = expect["ceilingReports"] as? Int { #expect(reports == count, "\(at) reports") }
+            default:
+                Issue.record("unknown op \(op) in \(at)")
+            }
+            if let expected = expect["evicted"] as? [String], op != "check" {
+                #expect(evicted.sorted() == expected.sorted(), "\(at) evicted")
+            }
+        }
+    }
 }
