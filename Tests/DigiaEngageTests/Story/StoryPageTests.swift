@@ -5,6 +5,7 @@ import Testing
 import UIKit
 
 @testable import DigiaEngage
+@testable import DigiaVideoEngine
 
 // The story rules (T8) that need a page on screen: a video page plays through `MediaVideo` with
 // its spinner rule (T2), a failed video page shows its still and reports health (never the "Video

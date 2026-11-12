@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 internal import DigiaMediaCache
+internal import DigiaVideoEngine
 internal import Lottie
 
 /// The media layer's process-wide services: the health reporter, the Lottie loader and the video
@@ -29,8 +30,9 @@ struct MediaServices: Sendable {
         let pool = VideoPlayerPool(
             onCeilingRefused: reportVideoPoolCeiling,
             makeItem: { mediaVideoItem(for: $0, loader: loader) },
-            releaseItem: { loader.cancelLoading(for: $0) })
-        observeMemoryPressure(of: pool)
+            releaseItem: { loader.cancelLoading(for: $0) },
+            log: { mediaServicesLog.d($0) })
+        pool.observeMemoryPressure()
         return MediaServices(
             reportHealth: { campaignKey, kind, cause in
                 reportMediaLoadFailed(kind, cause: cause, campaignKey: campaignKey)
@@ -68,7 +70,8 @@ struct MediaServices: Sendable {
                 services.videoLoader = loader
                 services.videoPool = VideoPlayerPool(
                     makeItem: { mediaVideoItem(for: $0, loader: loader) },
-                    releaseItem: { loader.cancelLoading(for: $0) })
+                    releaseItem: { loader.cancelLoading(for: $0) },
+                    log: { mediaServicesLog.d($0) })
             }
             if let videoPool { services.videoPool = videoPool }
         }
@@ -110,16 +113,6 @@ private func reportVideoPoolCeiling() {
             "media_performance_class": "0",
             "ceiling": "\(livePlayerCeiling(poolSize: maxPoolPlayers(deviceClass: deviceClass)))",
         ])
-}
-
-/// A memory warning or the app entering the background releases idle video players (OD-24).
-/// Observed for the process: the SDK's pool lives as long as the process.
-private func observeMemoryPressure(of pool: VideoPlayerPool) {
-    for name in [UIApplication.didReceiveMemoryWarningNotification, UIApplication.didEnterBackgroundNotification] {
-        NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { [weak pool] _ in
-            MainActor.assumeIsolated { pool?.onMemoryPressure() }
-        }
-    }
 }
 
 private struct MediaServicesKey: EnvironmentKey {

@@ -5,6 +5,7 @@ import Testing
 import UIKit
 
 @testable import DigiaEngage
+@testable import DigiaVideoEngine
 
 // The wrapper over a fake origin (`MediaOrigin`): `MediaImage` renders through the real SDWebImage
 // downloader and cache, and only the HTTP layer is faked, so what is asserted is what the SDK

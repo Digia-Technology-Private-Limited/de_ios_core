@@ -2,6 +2,7 @@ import AVFoundation
 import SwiftUI
 import Testing
 @testable import DigiaEngage
+@testable import DigiaVideoEngine
 
 /// The app page for the wait-queue suite: optional side cards above the main card, and the story
 /// viewer opened over them when the test says so.

@@ -1,6 +1,7 @@
 import AVFoundation
 import SwiftUI
 import UIKit
+internal import DigiaVideoEngine
 
 // The one story rail (T8): the inline story and the canvas story rail draw this view. It owns the
 // visibility rule and the take-turns schedule; each `StoryThumbnail` only obeys play/pause.

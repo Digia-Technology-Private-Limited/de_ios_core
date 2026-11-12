@@ -28,6 +28,7 @@ let package = Package(
                 .product(name: "SDWebImageSwiftUI", package: "SDWebImageSwiftUI"),
                 .product(name: "SDWebImageSVGCoder", package: "SDWebImageSVGCoder"),
                 .product(name: "DigiaMediaCache", package: "DigiaMediaCache"),
+                .product(name: "DigiaVideoEngine", package: "DigiaMediaCache"),
             ],
             path: "Sources/DigiaEngage",
             resources: [
@@ -38,6 +39,7 @@ let package = Package(
             name: "DigiaEngageTests",
             dependencies: [
                 "DigiaEngage",
+                .product(name: "DigiaVideoEngine", package: "DigiaMediaCache"),
                 .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
             ],
             path: "Tests/DigiaEngageTests"

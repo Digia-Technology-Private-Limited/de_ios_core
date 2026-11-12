@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 internal import Lottie
+internal import DigiaVideoEngine
 
 /// The one Lottie wrapper the non-story surfaces render through: the platform composition
 /// loaded through Lottie's own cache (Lottie bytes are never routed through the image cache),

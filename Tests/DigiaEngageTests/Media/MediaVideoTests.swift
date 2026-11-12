@@ -6,6 +6,7 @@ import Testing
 import UIKit
 
 @testable import DigiaEngage
+@testable import DigiaVideoEngine
 
 // `MediaVideo` over the fake origin: the video item reads through the real range cache, whose
 // session is routed to `MediaOrigin`. What is on screen before the first frame is proved by the

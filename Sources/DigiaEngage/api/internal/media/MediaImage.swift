@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 internal import SDWebImageSwiftUI
+internal import DigiaVideoEngine
 
 /// The one image wrapper the non-story surfaces render through: SDWebImage via the shared cache
 /// and downloader (GIF and SVG decoding as before), with the authored BlurHash drawn through

@@ -60,4 +60,5 @@ Pod::Spec.new do |s|
   s.dependency 'SDWebImageSwiftUI', '~> 3.1'
   s.dependency 'SDWebImageSVGCoder', '>= 1.7.0'
   s.dependency 'DigiaMediaCache', '~> 1.0'
+  s.dependency 'DigiaVideoEngine', '~> 0.1'
 end

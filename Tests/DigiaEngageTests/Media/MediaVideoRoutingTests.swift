@@ -5,6 +5,7 @@ import Testing
 import UIKit
 
 @testable import DigiaEngage
+@testable import DigiaVideoEngine
 
 // T3: each legacy video surface plays through `MediaVideo`. The proof is the request log: only
 // `MediaVideo`'s range-cache loader reads through `MediaServices`' video session, which the fake

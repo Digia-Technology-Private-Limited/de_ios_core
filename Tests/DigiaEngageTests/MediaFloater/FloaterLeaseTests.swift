@@ -5,6 +5,7 @@ import Testing
 import UIKit
 
 @testable import DigiaEngage
+@testable import DigiaVideoEngine
 
 extension RenderedUITests {
 /// T9: the PiP's video and the shared window around it. The orchestrator borrows the showing's

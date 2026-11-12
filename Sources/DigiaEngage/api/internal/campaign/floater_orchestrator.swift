@@ -5,6 +5,7 @@ import Foundation
 import Combine
 import ImageIO
 import UIKit
+internal import DigiaVideoEngine
 
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger()

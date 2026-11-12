@@ -7,6 +7,7 @@ import Testing
 import UIKit
 
 @testable import DigiaEngage
+@testable import DigiaVideoEngine
 
 extension RenderedUITests {
 /// Pixel goldens for every Test Kit PiP fixture: one each, of the collapsed window.

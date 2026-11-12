@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+internal import DigiaVideoEngine
 
 /// How long a story opened from a rail takes to fade in; the same on every stack.
 let storyFadeInDuration: TimeInterval = 0.2

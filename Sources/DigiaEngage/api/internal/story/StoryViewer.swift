@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import SwiftUI
 import UIKit
+internal import DigiaVideoEngine
 
 // The one full-screen story viewer (T8): inline, canvas and floater all open this view. An entry
 // point passes only the stories, the start index, its reporter, the rail's handover and its

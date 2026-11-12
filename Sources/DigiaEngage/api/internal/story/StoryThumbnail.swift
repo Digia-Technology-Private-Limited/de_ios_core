@@ -1,6 +1,7 @@
 import AVFoundation
 import SwiftUI
 import UIKit
+internal import DigiaVideoEngine
 
 extension StoryMediaFit {
     var toMediaFit: MediaFit {

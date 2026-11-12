@@ -4,6 +4,7 @@ import SwiftUI
 import UIKit
 
 internal import DigiaMediaCache
+internal import DigiaVideoEngine
 
 extension MediaFit {
     /// The `AVPlayerLayer` gravity for the fit: cover crops, contain letterboxes, fill stretches.
@@ -223,14 +224,6 @@ struct MediaVideoFailedBox: View {
         }
         .foregroundStyle(.white)
     }
-}
-
-/// A remote item reads through the range cache (one download serves playback and the cache);
-/// `file://` and URLs the cache scheme can't carry play directly.
-@MainActor
-func mediaVideoItem(for url: URL, loader: MediaResourceLoader) -> AVPlayerItem {
-    if url.isFileURL { return AVPlayerItem(url: url) }
-    return loader.playerItem(for: url) ?? AVPlayerItem(url: url)
 }
 
 /// One showing's player: leases it from the pool, watches its item, and publishes first frame

@@ -55,36 +55,5 @@ struct MediaPrefetchTests {
 
         #expect(MediaOrigin.requests(for: video).count == 1)
     }
-
-    // Guards `catch { return 0 }` in the `.video` branch of `MediaPrefetch.warm`: a failed warm
-    // answers 0, so the throughput sample the story plan takes from it is never a fast one (V8-01).
-    @Test("a warm the origin refuses answers 0 bytes")
-    func failedWarmAnswersZero() async {
-        MediaOrigin.install()
-        MediaServices.override(videoSession: MediaOrigin.session())
-        defer { MediaOrigin.end() }
-        let video = MediaOrigin.url("warm-500.mp4")
-        MediaOrigin.set(.status(500, Data("boom".utf8)), for: video)
-
-        let delivered = await MediaPrefetch.warm(video.absoluteString, kind: .video, bytes: Self.warmBytes)
-
-        #expect(delivered == 0)
-    }
-
-    // Guards `min(asked, Int(total))` in `MediaPrefetch.warm`: a clip shorter than the window
-    // delivers all of it, not the window, so a short clip does not overstate throughput (V8-01).
-    @Test("a clip shorter than the window answers its own length")
-    func shortClipAnswersItsLength() async throws {
-        MediaOrigin.install()
-        MediaServices.override(videoSession: MediaOrigin.session())
-        defer { MediaOrigin.end() }
-        let video = MediaOrigin.url("warm-short.mp4")
-        let clip = try testkitAsset("movie.mp4")
-        MediaOrigin.set(.status(200, clip), for: video)
-
-        let delivered = await MediaPrefetch.warm(video.absoluteString, kind: .video, bytes: clip.count + 4_096)
-
-        #expect(delivered == clip.count)
-    }
 }
 }

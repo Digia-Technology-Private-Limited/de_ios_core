@@ -5,6 +5,7 @@ import Testing
 import UIKit
 
 @testable import DigiaEngage
+@testable import DigiaVideoEngine
 
 // T5: a story video's bytes are downloaded once. `main` streamed the item from the network while
 // `DigiaVideoFileCache` downloaded the whole file again for its cache (`StoryVideoPlayback`), and
