@@ -72,6 +72,8 @@ extension Tag {
     @Tag static var media: Self
     /// Debug tooling: logger, debug overlay, debug deep link, test kit, live-test reliability.
     @Tag static var debug: Self
+    /// Gamification games: haptics, motion, pause/resume, device facts, bridge.
+    @Tag static var gamification: Self
     /// Page capture: view-tree walk, capture envelope, capture upload.
     @Tag static var capture: Self
 }
