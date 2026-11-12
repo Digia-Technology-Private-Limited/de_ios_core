@@ -160,10 +160,11 @@ struct LegacyNudgeBehaviourTests {
 
     // MARK: - Bottom sheet
 
-    // Fails if `NudgeImageView` / `NudgeLottieView` / `NudgeCarouselView` stop falling back to
-    // `nudgePlaceholder` for an empty source, or `NudgeParser.extractChildren` stops reading the
+    // Fails if `NudgeImageView` / `NudgeLottieView` / `NudgeCarouselView` draw a labelled grey box
+    // for an empty source again (they hand it to `MediaImage` / `MediaLottie`, which draw the
+    // still or nothing), or `NudgeParser.extractChildren` stops reading the
     // `{ "children": { "children": [...] } }` wrapper (nothing would show).
-    @Test("a legacy sheet draws its media nodes, with placeholders for the empty ones")
+    @Test("a legacy sheet draws its media nodes, with no grey box for the empty ones")
     func sheetDrawsMedia() async throws {
         let (sdk, presentation) = try await showSheet()
         defer { sdk.tearDown() }
@@ -172,8 +173,8 @@ struct LegacyNudgeBehaviourTests {
         #expect(nudge.config.surface.displayType == .bottomSheet)
         #expect(nudge.config.layout.children.count == 13)
         #expect(sdk.isShowing("T&C apply"))
-        #expect(sdk.legacyIsShowingExact("Image"), "the empty image and carousel show a placeholder")
-        #expect(sdk.legacyIsShowingExact("Lottie"), "the empty Lottie shows a placeholder")
+        #expect(!sdk.legacyIsShowingExact("Image"), "the empty image and carousel draw no labelled box")
+        #expect(!sdk.legacyIsShowingExact("Lottie"), "the empty Lottie draws no labelled box")
         #expect(sdk.legacyIsShowingExact("Shop the sale"))
         #expect(presentation.outcome.settledValue == nil)
     }
