@@ -171,9 +171,11 @@ final class VideoPlayerPool: @unchecked Sendable {
     private var waiters: [Waiter] = []
     /// Keys a freed slot is held for until they borrow, cancel, or Stage 1 takes the slot.
     private var reserved: [String] = []
-    /// The playhead of a key whose player Stage 1 took (decision 2a), for that key's next borrow
-    /// of the same URL. Dropped when that borrow takes it or the key stops waiting.
-    private var evictedResume: [String: (url: URL, ms: Int64)] = [:]
+    /// The playhead of a key whose player the pool took (decision 2a), for that key's next borrow
+    /// of the same URL while it waits. Dropped at that key's next borrow or when it stops waiting.
+    /// At most `ceiling` entries, the oldest dropped first (N8): a key that never waits keeps its
+    /// entry until it borrows again.
+    private var evictedResume: [String: (url: URL, ms: Int64, at: UInt64)] = [:]
     private var seq: UInt64 = 0
 
     init(
@@ -244,8 +246,10 @@ final class VideoPlayerPool: @unchecked Sendable {
             if priority.isStage1 { lapseReservations() }
             if let victim { notifyEvicted(victim) }
         }
-        // Where Stage 1 left this key's last player, if it took it (decision 2a).
-        let evictedMs = evictedResume.removeValue(forKey: key).flatMap { $0.url == url ? $0.ms : nil }
+        // Where the pool left this key's last player, if it took it (decision 2a). Only a showing
+        // that waits resumes there; otherwise the surface's own start wins (OD-22) (R3-01).
+        let waits = waiters.contains { $0.key == key }
+        let evictedMs = evictedResume.removeValue(forKey: key).flatMap { waits && $0.url == url ? $0.ms : nil }
         // Prefer the free player that last played this key and URL, so it resumes.
         let match = free.lastIndex { $0.key == key && $0.url == url } ?? (free.isEmpty ? nil : free.count - 1)
         if let match {
@@ -506,7 +510,11 @@ final class VideoPlayerPool: @unchecked Sendable {
     private func take(_ holder: Holder, of key: String) {
         let playhead = holder.player.currentTime()
         if !Self.isFinished(holder.player), playhead.isNumeric, playhead.seconds > 0 {
-            evictedResume[key] = (holder.url, Int64(playhead.seconds * 1_000))
+            seq &+= 1
+            evictedResume[key] = (holder.url, Int64(playhead.seconds * 1_000), seq)
+            if evictedResume.count > ceiling, let oldest = evictedResume.min(by: { $0.value.at < $1.value.at })?.key {
+                evictedResume[oldest] = nil
+            }
         } else {
             evictedResume[key] = nil
         }

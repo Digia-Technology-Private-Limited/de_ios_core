@@ -257,6 +257,43 @@ struct VideoPlayerPoolTests {
         #expect(pool.livePlayerCount == 3)
     }
 
+    /// A bare player parked at a fixed playhead, so the pool keeps it when it takes the player.
+    private final class PlayheadPlayer: AVPlayer {
+        override func currentTime() -> CMTime { CMTime(seconds: 5, preferredTimescale: 600) }
+    }
+
+    private func playheadPool(size: Int, ceiling: Int) -> VideoPlayerPool {
+        VideoPlayerPool(
+            maxPlayers: size, ceiling: ceiling, clock: { 0 }, schedule: { _, _ in }, post: { _ in },
+            makeItem: { AVPlayerItem(url: $0) }, makePlayer: { PlayheadPlayer(playerItem: $0) })
+    }
+
+    // Guards `waits` in `borrow` (R3-01, OD-22): a story page whose previous-page hold memory
+    // pressure took starts from its own start when the user swipes back, not the kept playhead.
+    @Test("a previous page taken by memory pressure does not resume when it is borrowed again")
+    func keptPlayheadOnlyForAWaiter() throws {
+        let pool = playheadPool(size: 2, ceiling: 3)
+        _ = try #require(pool.borrow(key: "prev", url: url("v"), priority: .viewerPrev))
+        pool.onMemoryPressure()
+
+        let back = try #require(pool.borrow(key: "prev", url: url("v"), priority: .viewerPage))
+
+        #expect(pool.takeResumeMs(for: "prev", player: back) == nil)
+    }
+
+    // Guards the `ceiling` limit on `evictedResume` in `take(_:of:)` (R3-04, N8): kept playheads of
+    // keys that never wait or borrow again do not build up over a session.
+    @Test("kept playheads of keys that never wait are capped at the ceiling")
+    func keptPlayheadsAreCapped() throws {
+        let pool = playheadPool(size: 2, ceiling: 3)
+        for index in 0..<6 {
+            _ = try #require(pool.borrow(key: "prev-\(index)", url: url("v\(index)"), priority: .viewerPrev))
+            pool.onMemoryPressure()
+        }
+
+        #expect(pool.bookkeepingCount == 3)
+    }
+
     // Guards `notifyEvicted(key)` after a re-point in `borrow` (OD-10, R2-06c).
     @Test("a borrow of a held key with another URL tells the other holders")
     func repointTellsTheOtherHolders() throws {
