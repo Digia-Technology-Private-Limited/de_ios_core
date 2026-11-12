@@ -433,9 +433,9 @@ private struct StoryThumbnailCard: View {
                     player: thumbnailPlayerIdentity(item)
                 ))
             } else if item.type == .video {
-                StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
+                StoryThumbnailPlaceholderView(thumbnail: item.thumbnail, ground: storyRailFailureGround)
             } else {
-                StoryRemoteImage(urlString: item.url, fit: item.thumbnailBoxFit)
+                StoryRemoteImage(urlString: item.url, fit: item.thumbnailBoxFit, ground: storyRailFailureGround)
             }
         }
         .frame(width: width, height: height)
@@ -949,15 +949,17 @@ struct StoryRemoteImage: View {
     let urlString: String
     let fit: StoryMediaFit
 
-    /// The dark ground shows while the picture loads and after a failure; once the picture has
+    /// Drawn while the picture loads and after a failure, when given: the rail card passes the
+    /// failure fill, every other story surface none (its own ground shows). Once the picture has
     /// drawn, a letterbox shows what is behind the card, as it always did.
+    var ground: Color? = nil
     @State private var loaded = false
 
     var body: some View {
         // The picture is stretched to the box it is given (`.fill`): this view applies the story's
         // own aspect rule below, as it did around the cached image view.
         let image = ZStack {
-            if !loaded { storyImageGround }
+            if !loaded, let ground { ground }
             MediaImage(
                 url: urlString,
                 fit: .fill,
@@ -973,8 +975,6 @@ struct StoryRemoteImage: View {
         }
         .onChange(of: urlString) { _ in loaded = false }
     }
-
-    private var storyImageGround: Color { Color(red: 0.10, green: 0.10, blue: 0.10) }
 }
 
 @MainActor
