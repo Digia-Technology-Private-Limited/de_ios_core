@@ -25,49 +25,31 @@ func shouldComposeThumbnailPlayer(
     !hasExplicitThumbnail || scheduled
 }
 
+/// The fill a story rail card shows when its media failed and there is no BlurHash (#1A1A1A).
+/// Only the rail uses it: every other story surface follows the still-or-empty contract.
+let storyRailFailureGround = Color(red: 0.10, green: 0.10, blue: 0.10)
+
 struct StoryThumbnailPlaceholderView: View {
     let thumbnail: StoryThumbnailConfig?
     var fitOverride: StoryMediaFit? = nil
+    /// Drawn under the still; the rail passes `storyRailFailureGround`, the viewer none.
+    var ground: Color? = nil
 
     var body: some View {
         ZStack {
-            Color(red: 0.10, green: 0.10, blue: 0.10)
+            ground ?? Color.clear
             switch thumbnail {
             case let .color(value):
-                Color(hex: value) ?? Color(red: 0.10, green: 0.10, blue: 0.10)
+                Color(hex: value) ?? ground ?? Color.clear
             case let .image(source, fit, placeholder):
-                if let url = URL(string: source) {
-                    let effectiveFit = fitOverride ?? fit
-                    fitted(
-                        DigiaCachedImageView(
-                            url: url,
-                            placeholder: AnyView(
-                                BlurHashPlaceholderView(placeholder: placeholder, fit: effectiveFit.rawValue)
-                            )
-                        ),
-                        fit: effectiveFit
-                    )
-                }
+                // A picture that cannot load keeps the authored BlurHash, as it always did.
+                let mediaFit = MediaFit(rawValue: (fitOverride ?? fit).rawValue) ?? .cover
+                MediaImage(url: source, fit: mediaFit, blurHash: placeholder?.stillBlurHash)
             case nil:
                 EmptyView()
             }
         }
         .clipped()
-    }
-
-    @ViewBuilder
-    private func fitted<Content: View>(
-        _ content: Content,
-        fit: StoryMediaFit
-    ) -> some View {
-        switch fit {
-        case .cover:
-            content.aspectRatio(contentMode: .fill)
-        case .contain:
-            content.aspectRatio(contentMode: .fit)
-        case .fill:
-            content.frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
     }
 }
 
@@ -118,7 +100,7 @@ struct StoryThumbnailVideoView: View {
     var body: some View {
         ZStack {
             Color.black
-            StoryThumbnailPlaceholderView(thumbnail: item.thumbnail)
+            StoryThumbnailPlaceholderView(thumbnail: item.thumbnail, ground: storyRailFailureGround)
             if item.thumbnail == nil, let poster = playback.poster {
                 StoryPosterImage(image: poster, fit: item.thumbnailBoxFit)
             }

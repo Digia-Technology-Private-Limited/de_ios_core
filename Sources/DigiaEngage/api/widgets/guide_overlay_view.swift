@@ -1,48 +1,18 @@
 import SwiftUI
 import Combine
 import UIKit
-internal import SDWebImageSVGCoder
+internal import SDWebImageSwiftUI
 
-/// SVG data as a bitmap image, or nil when it is not a drawable SVG.
-///
-/// Without a pixel size the SVG coder returns a vector-backed image, which `Image(uiImage:)`
-/// draws as an empty box. Asking for a pixel size makes the coder rasterize it, like PNG and WebP.
-private func svgBitmap(from data: Data) -> UIImage? {
-    let coder = SDImageSVGCoder.shared
-    guard let vector = coder.decodedImage(with: data, options: nil),
-          vector.size.width > 0, vector.size.height > 0
-    else { return nil }
-    let scale = UIScreen.main.scale
-    let pixelSize = CGSize(width: vector.size.width * scale, height: vector.size.height * scale)
-    return coder.decodedImage(with: data, options: [.decodeThumbnailPixelSize: pixelSize]) ?? vector
-}
+/// The spotlight image is drawn by `MediaImage`; the guide shows only once it has drawn, and is
+/// dropped when it has not within this long.
+private let anchorlessImageLoadTimeout: TimeInterval = 3
 
+/// Warms the image cache `MediaImage` reads, so the next step's picture is ready when it starts.
 @MainActor
-private enum AnchorlessImageLoader {
-    private static let cache = NSCache<NSURL, UIImage>()
-    private static let imageLoadTimeout: TimeInterval = 3
-
-    /// On failure, returns the health cause from the HTTP status.
-    static func image(for url: URL) async -> (image: UIImage?, failureCause: String?) {
-        DigiaImagePipeline.configureIfNeeded()
-        if let cached = cache.object(forKey: url as NSURL) { return (cached, nil) }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = imageLoadTimeout
-        guard let (data, response) = try? await URLSession.shared.data(for: request),
-              !Task.isCancelled
-        else { return (nil, nil) }
-        let status = (response as? HTTPURLResponse)?.statusCode
-        guard let status, (200..<300).contains(status),
-              let image = UIImage(data: data) ?? svgBitmap(from: data)
-        else { return (nil, mediaFailureCause(httpStatus: status)) }
-        cache.setObject(image, forKey: url as NSURL)
-        return (image, nil)
-    }
-
-    static func prefetch(_ url: URL?) {
-        guard let url else { return }
-        Task { _ = await image(for: url) }
-    }
+private func prefetchAnchorlessImage(_ url: URL?) {
+    guard let url else { return }
+    DigiaImagePipeline.configureIfNeeded()
+    SDWebImagePrefetcher.shared.prefetchURLs([url])
 }
 
 @MainActor
@@ -165,10 +135,8 @@ private struct GuideStepOverlay: View {
     let onOutsideTap: () -> Void
     let onDismiss: () -> Void
 
-    @Environment(\.digiaCampaignKey) private var campaignKey
     @Environment(\.digiaVariables) private var variables
     @State private var bubbleSize: CGSize = .zero
-    @State private var targetImage: UIImage?
     @State private var imageLoaded = false
     @State private var delayElapsedForStep: Int?
 
@@ -280,10 +248,21 @@ private struct GuideStepOverlay: View {
                         .ignoresSafeArea()
                 }
 
-                if let targetImage {
-                    Image(uiImage: targetImage)
-                    .resizable()
-                    .scaledToFill()
+                if let imageURL {
+                    // Hidden with the rest of the layer until the picture has drawn, so the
+                    // placeholder it shows while loading or after a failure is never seen.
+                    MediaImage(
+                        url: imageURL.absoluteString,
+                        fit: .cover,
+                        onSuccess: { imageLoaded = true },
+                        onFailure: {
+                            SDKInstance.shared.reportGuideRenderFailure(
+                                nil,
+                                guideToken: guideToken,
+                                stepIndex: stepIndex
+                            )
+                        }
+                    )
                     .frame(width: anchorRect.width, height: anchorRect.height)
                     .clipShape(
                         GuideCutoutShape(
@@ -320,24 +299,15 @@ private struct GuideStepOverlay: View {
             if ready { SDKInstance.shared.reportGuideShown() }
         }
         .task(id: imageURL) {
-            targetImage = nil
-            imageLoaded = false
-            guard let imageURL else { return }
-            AnchorlessImageLoader.prefetch(nextImageURL)
-            let loaded = await AnchorlessImageLoader.image(for: imageURL)
-            guard let decoded = loaded.image else {
-                guard !Task.isCancelled else { return }
-                reportMediaLoadFailed(.image, cause: loaded.failureCause, campaignKey: campaignKey)
-                SDKInstance.shared.reportGuideRenderFailure(
-                    nil,
-                    guideToken: guideToken,
-                    stepIndex: stepIndex
-                )
-                return
-            }
-            guard !Task.isCancelled else { return }
-            targetImage = decoded
-            imageLoaded = true
+            guard imageURL != nil else { return }
+            prefetchAnchorlessImage(nextImageURL)
+            try? await Task.sleep(nanoseconds: UInt64(anchorlessImageLoadTimeout * 1_000_000_000))
+            guard !Task.isCancelled, !imageLoaded else { return }
+            SDKInstance.shared.reportGuideRenderFailure(
+                nil,
+                guideToken: guideToken,
+                stepIndex: stepIndex
+            )
         }
         .task(id: stepIndex) {
             delayElapsedForStep = nil

@@ -1,6 +1,5 @@
 import AVFoundation
 import AVKit
-internal import Lottie
 internal import SDWebImageSwiftUI
 import SwiftUI
 import UIKit
@@ -59,23 +58,15 @@ enum CanvasLottiePlaybackMode: Sendable, Equatable {
 /// The runtime abstraction for Canvas Lottie animations.
 ///
 /// In tests, playback can be frozen at a deterministic progress (e.g. 0.5) so snapshots
-/// don't race against continuous CADisplayLink rendering, or custom animation loaders can be supplied.
-struct CanvasLottieRuntime: @unchecked Sendable {
-    var loadSource: (@Sendable (URL) async throws -> LottieAnimationSource?)?
+/// don't race against continuous CADisplayLink rendering.
+struct CanvasLottieRuntime: Sendable {
     var playbackMode: CanvasLottiePlaybackMode
 
-    init(
-        loadSource: (@Sendable (URL) async throws -> LottieAnimationSource?)? = nil,
-        playbackMode: CanvasLottiePlaybackMode = .live
-    ) {
-        self.loadSource = loadSource
+    init(playbackMode: CanvasLottiePlaybackMode = .live) {
         self.playbackMode = playbackMode
     }
 
-    static let live = CanvasLottieRuntime(
-        loadSource: nil,
-        playbackMode: .live
-    )
+    static let live = CanvasLottieRuntime(playbackMode: .live)
 }
 
 private struct CanvasLottieRuntimeKey: EnvironmentKey {
@@ -1589,7 +1580,7 @@ private struct CanvasImageRenderer: View {
             CampaignCanvasBoxView(box: boxWithoutContentShadow, isDark: isDark) {
                 FocalCanvasImage(
                     source: source, isDark: isDark, fit: fit, x: positionX, y: positionY,
-                    scale: scale, tint: tint, failureLabel: "Image")
+                    scale: scale, tint: tint)
             }
         }
     }
@@ -1859,9 +1850,14 @@ private struct CanvasLottieRenderer: View {
         value.shadow = nil
         return value
     }
+    /// With no visible background or border the shadow follows the drawn animation's alpha,
+    /// as the image widget's does; otherwise it stays a ring around the box.
+    private var contentShadow: CampaignCanvasShadow? {
+        box.hasVisibleSurface(isDark: isDark) ? nil : box.shadow
+    }
     var body: some View {
         ZStack {
-            if let shadow = box.shadow {
+            if let shadow = box.shadow, contentShadow == nil {
                 CampaignCanvasShadowView(
                     shadow: shadow,
                     cornerRadius: box.cornerRadius,
@@ -1869,21 +1865,17 @@ private struct CanvasLottieRenderer: View {
                     outsideOnly: true
                 )
             }
-            CampaignCanvasBoxView(box: boxWithoutShadow, isDark: isDark) {
-                let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
-                let resolved = interpolate(raw, context: variables)
-                if resolved.isEmpty {
-                    CanvasPlaceholder(label: "Lottie")
-                } else if let url = URL(string: resolved) {
+            CanvasAlphaContentShadow(shadow: contentShadow, isDark: isDark) {
+                CampaignCanvasBoxView(box: boxWithoutShadow, isDark: isDark) {
+                    let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
+                    let resolved = interpolate(raw, context: variables)
                     CanvasRemoteLottie(
-                        url: url, placeholder: source.placeholder, autoplay: autoplay, loop: loop,
-                        fit: fit
+                        url: resolved, placeholder: source.placeholder, autoplay: autoplay,
+                        loop: loop, fit: fit
                     )
                     .id(resolved)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .clipped()
-                } else {
-                    CanvasPlaceholder(label: "Lottie")
                 }
             }
         }
@@ -1891,62 +1883,27 @@ private struct CanvasLottieRenderer: View {
 }
 
 private struct CanvasRemoteLottie: View {
-    let url: URL
+    let url: String
     let placeholder: ImagePlaceholder?
     let autoplay: Bool
     let loop: Bool
     let fit: String
     @Environment(\.canvasLottieRuntime) private var runtime
-    @Environment(\.digiaCampaignKey) private var campaignKey
-    @State private var failed = false
-    var body: some View {
-        Group {
-            switch runtime.playbackMode {
-            case .frozen(let progress):
-                lottie.paused(at: .progress(progress))
-                    .resizable()
-                    .configure(\.contentMode, to: fit.uiContentMode)
-            case .live:
-                if autoplay {
-                    lottie.playing(loopMode: loop ? .loop : .playOnce)
-                        .resizable()
-                        .configure(\.contentMode, to: fit.uiContentMode)
-                } else {
-                    lottie.resizable().configure(\.contentMode, to: fit.uiContentMode)
-                }
-            }
-        }
-    }
-    private var lottie: LottieView<CanvasLottiePlaceholder> {
-        LottieView {
-            if let customLoader = runtime.loadSource {
-                if let source = try? await customLoader(url) { return source }
-                failed = true
-                return nil
-            }
-            let loaded = await loadLottieSource(url)
-            if loaded.source == nil {
-                failed = true
-                reportMediaLoadFailed(.lottie, cause: loaded.failureCause, campaignKey: campaignKey)
-            }
-            return loaded.source
-        } placeholder: {
-            CanvasLottiePlaceholder(failed: failed, placeholder: placeholder, fit: fit)
-        }
-        .reloadAnimationTrigger(url)
-    }
-}
 
-private struct CanvasLottiePlaceholder: View {
-    let failed: Bool
-    let placeholder: ImagePlaceholder?
-    let fit: String
     var body: some View {
-        if failed {
-            CanvasPlaceholder(label: "Lottie")
-        } else {
-            BlurHashPlaceholderView(placeholder: placeholder, fit: fit)
-        }
+        MediaLottie(
+            url: url,
+            fit: canvasMediaFit(fit),
+            blurHash: placeholder?.stillBlurHash,
+            loop: loop,
+            autoplay: autoplay,
+            freezeAt: frozenProgress
+        )
+    }
+
+    private var frozenProgress: CGFloat? {
+        if case .frozen(let progress) = runtime.playbackMode { return progress }
+        return nil
     }
 }
 
@@ -2326,6 +2283,9 @@ private struct CampaignCanvasGradientView: View {
     }
 }
 
+/// A canvas picture. The light/dark choice and `{{variable}}` interpolation are the canvas's own;
+/// the picture, its BlurHash still, the focal point, the zoom, the tint, the unusable-URL check and
+/// the health report (for the canvas's campaign) are `MediaImage`'s.
 private struct FocalCanvasImage: View {
     let source: CampaignCanvasMediaSource
     let isDark: Bool
@@ -2334,78 +2294,34 @@ private struct FocalCanvasImage: View {
     let y: CGFloat
     let scale: CGFloat
     var tint: CampaignColor? = nil
-    var failureLabel: String? = nil
     @Environment(\.digiaVariables) private var variables
-    @Environment(\.digiaCampaignKey) private var campaignKey
-    @State private var failedURL: String?
-
-    init(
-        source: CampaignCanvasMediaSource,
-        isDark: Bool,
-        fit: String,
-        x: CGFloat,
-        y: CGFloat,
-        scale: CGFloat,
-        tint: CampaignColor? = nil,
-        failureLabel: String? = nil
-    ) {
-        DigiaImagePipeline.configureIfNeeded()
-        self.source = source
-        self.isDark = isDark
-        self.fit = fit
-        self.x = x
-        self.y = y
-        self.scale = scale
-        self.tint = tint
-        self.failureLabel = failureLabel
-    }
 
     var body: some View {
         let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
         let resolved = interpolate(raw, context: variables)
-        if resolved.isEmpty || failedURL == resolved {
-            if let failureLabel { CanvasPlaceholder(label: failureLabel) }
-        } else if URL(string: resolved) == nil {
-            if let failureLabel { CanvasPlaceholder(label: failureLabel) }
-        } else {
-            GeometryReader { geometry in
-                WebImage(url: URL(string: resolved)) { image in
-                    image.resizable().renderingMode(tint == nil ? .original : .template)
-                } placeholder: {
-                    BlurHashPlaceholderView(placeholder: source.placeholder, fit: fit)
-                }
-                .onFailure { error in
-                    failedURL = resolved
-                    reportMediaLoadFailed(
-                        .image, cause: mediaFailureCause(imageError: error),
-                        campaignKey: campaignKey)
-                }
-                .modifier(CanvasImageFit(fit: fit))
-                .foregroundStyle(
-                    tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) } ?? .clear
-                )
-                .frame(
-                    width: geometry.size.width, height: geometry.size.height,
-                    alignment: focalAlignment(x: x, y: y)
-                )
-                .scaleEffect(
-                    max(0.1, scale), anchor: focalAnchorPoint(x: x, y: y)
-                )
-                .clipped()
-            }
-            .onChange(of: resolved) { _ in failedURL = nil }
+        GeometryReader { geometry in
+            MediaImage(
+                url: resolved,
+                fit: canvasMediaFit(fit),
+                blurHash: source.placeholder?.stillBlurHash,
+                tintColor: tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) },
+                focalX: x,
+                focalY: y,
+                zoom: scale
+            )
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
         }
     }
 }
 
-private struct CanvasImageFit: ViewModifier {
-    let fit: String
-    @ViewBuilder func body(content: Content) -> some View {
-        switch fit {
-        case "contain": content.scaledToFit()
-        case "fill": content
-        default: content.scaledToFill()
-        }
+/// The wrapper fit for a canvas-authored fit value: `contain` letterboxes, `fill` stretches,
+/// anything else covers.
+private func canvasMediaFit(_ fit: String) -> MediaFit {
+    switch fit {
+    case "contain": .contain
+    case "fill": .fill
+    default: .cover
     }
 }
 
@@ -2519,16 +2435,6 @@ private struct CanvasChildBoundsModifier: ViewModifier {
     }
 }
 
-private struct CanvasPlaceholder: View {
-    let label: String
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#F1F1F5") ?? Color(.systemGray6))
-            Text(label).font(digiaFont(size: 11)).foregroundStyle(Color(hex: "#9A9AAD") ?? .secondary)
-        }
-    }
-}
-
 extension CampaignCanvasHorizontalAlign {
     internal var uiTextAlignment: NSTextAlignment {
         switch self {
@@ -2557,10 +2463,6 @@ extension CampaignCanvasStrokeCap {
     }
 }
 extension String {
-    fileprivate var uiContentMode: UIView.ContentMode {
-        canvasUIContentMode
-    }
-
     internal var canvasUIContentMode: UIView.ContentMode {
         switch self {
         case "contain": .scaleAspectFit
@@ -2568,16 +2470,6 @@ extension String {
         default: .scaleAspectFill
         }
     }
-}
-
-internal func focalAlignment(x: CGFloat, y: CGFloat) -> Alignment {
-    Alignment(
-        horizontal: x < 0.34 ? .leading : (x > 0.66 ? .trailing : .center),
-        vertical: y < 0.34 ? .top : (y > 0.66 ? .bottom : .center))
-}
-
-internal func focalAnchorPoint(x: CGFloat, y: CGFloat) -> UnitPoint {
-    UnitPoint(x: min(max(x, 0), 1), y: min(max(y, 0), 1))
 }
 
 internal func canvasGlyphShadowBlurRadius(blur: CGFloat, spread: CGFloat) -> CGFloat {
