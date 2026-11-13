@@ -397,42 +397,68 @@ final class FloaterOrchestrator: ObservableObject {
         // mutation of this @MainActor-isolated orchestrator must hop explicitly.
         // Only the initial load is handled here (OD-4): `abandonMedia` acts only while
         // the window is still waiting, and a failure after it shows is `MediaVideo`'s.
-        if let item = p.avPlayer.currentItem {
-            statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
-                Task { @MainActor in
-                    guard let self, self.state?.token == token else { return }
-                    switch item.status {
-                    case .readyToPlay:
-                        self.markVisible(token: token)
-                        if config.media.autoplay { self.player?.play() }
-                    case .failed:
-                        self.abandonMedia(
-                            token: token, reason: "video failed to load",
-                            cause: mediaFailureCause(videoFailure: videoFailure(of: item))
-                        )
-                    default:
-                        break
-                    }
-                }
-            }
-        }
+        replacedForBusy = false
+        observeStatus(of: p.avPlayer.currentItem, config: config, token: token, pool: pool, key: key)
 
         // A looping video starts over inside `MediaVideo`; only a video that ends is the
         // orchestrator's business (`onMediaEnd`).
-        if !config.media.loop {
-            endTimeObserverToken = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime, object: p.avPlayer.currentItem, queue: .main
-            ) { [weak self] _ in
-                MainActor.assumeIsolated {
-                    self?.onVideoEnded(token: token)
-                }
-            }
-        }
+        if !config.media.loop { observeEnd(of: p.avPlayer.currentItem, token: token) }
 
         p.avPlayer.publisher(for: \.rate)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] rate in self?.isPlaying = rate > 0 }
             .store(in: &playingCancellables)
+    }
+
+    private func observeEnd(of item: AVPlayerItem?, token: Int64) {
+        if let endTimeObserverToken { NotificationCenter.default.removeObserver(endTimeObserverToken) }
+        endTimeObserverToken = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.onVideoEnded(token: token)
+            }
+        }
+    }
+
+    /// The player's item failed with decoder busy and nothing was replaced yet for this showing.
+    private var replacedForBusy = false
+
+    /// Watches the initial load of `item`. A decoder-busy failure takes another video's player once
+    /// (the pool's `replaceForDecoderBusy`, default prop) and watches the player's new item; with
+    /// nothing to take, or busy again, the media is abandoned as for any failure.
+    private func observeStatus(
+        of item: AVPlayerItem?, config: FloaterConfig, token: Int64, pool: VideoPlayerPool, key: String
+    ) {
+        statusObservation?.invalidate()
+        statusObservation = nil
+        guard let item else { return }
+        statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
+            Task { @MainActor in
+                guard let self, self.state?.token == token else { return }
+                switch item.status {
+                case .readyToPlay:
+                    self.markVisible(token: token)
+                    if config.media.autoplay { self.player?.play() }
+                case .failed:
+                    let failure = videoFailure(of: item)
+                    if failure == .decoderBusy, !self.replacedForBusy {
+                        self.replacedForBusy = true
+                        if let fresh = pool.replaceForDecoderBusy(key: key, priority: .onScreen, replace: true) {
+                            if !config.media.loop { self.observeEnd(of: fresh.avPlayer.currentItem, token: token) }
+                            self.observeStatus(of: fresh.avPlayer.currentItem, config: config, token: token, pool: pool, key: key)
+                            return
+                        }
+                    }
+                    self.abandonMedia(
+                        token: token, reason: "video failed to load",
+                        cause: mediaFailureCause(videoFailure: failure)
+                    )
+                default:
+                    break
+                }
+            }
+        }
     }
 
     /// Gives the showing's player back to the pool. Both teardown paths run here.
