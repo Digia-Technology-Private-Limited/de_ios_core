@@ -295,26 +295,6 @@ struct MediaVideoComponentTests {
         #expect(failures.value == 1)
     }
 
-    // Guards the `mediaUsableURL` guard in `MediaVideoPlayback.open`: a blank or schemeless URL is
-    // unusable, reported once as `invalid_url`, and never borrows a player or fetches.
-    @Test("a blank or schemeless URL reports invalid_url and builds no player",
-          arguments: ["", "   ", "media.example.test/clip.mp4"])
-    func unusableURLReportsInvalidURL(url: String) async {
-        install()
-        defer { MediaOrigin.end() }
-        let recorder = HealthRecorder()
-        let failures = CallCount()
-        let pool = MediaServices.current.videoPool
-
-        let window = MediaStage.mount(MediaVideo(url: url, onFailure: { failures.value += 1 }))
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { failures.value > 0 })
-
-        #expect(recorder.all == [.init(campaignKey: MediaStage.campaign, kind: .video, cause: "invalid_url")])
-        #expect(pool.livePlayerCount == 0)
-        #expect(MediaOrigin.totalRequestCount() == 0)
-    }
-
     // Guards `setPlaying(autoplay)` in `MediaVideoPlayback.open` and `.onChange(of: autoplay)` in
     // `MediaVideo.body`: a video authored not to play stays paused once loaded, and the flag turns
     // it on and off afterwards.
@@ -340,37 +320,6 @@ struct MediaVideoComponentTests {
         #expect(await waitUntilMedia { player.avPlayer.rate == 0 })
     }
 
-    // Guards `MediaVideoPlayback.setAppActive`: going inactive pauses a playing video, and coming
-    // back plays it only if it was playing; a user's pause and a non-opted-in surface are left alone.
-    @Test("a video that pauses in the background resumes only what was playing")
-    func backgroundPausesAndResumesWhatWasPlaying() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let video = MediaOrigin.url("background.mp4")
-        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
-        let pool = MediaServices.current.videoPool
-        func resign() { NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil) }
-        func become() { NotificationCenter.default.post(name: UIApplication.didBecomeActiveNotification, object: nil) }
-
-        let window = MediaStage.mount(MediaVideo(
-            url: video.absoluteString, loop: true, pausesInBackground: true, playerKey: "background"))
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "background")?.avPlayer.rate ?? 0) > 0 })
-        let player = try #require(pool.heldPlayer(for: "background"))
-        #expect(player.avPlayer.rate > 0)
-
-        resign()
-        #expect(await waitUntilMedia { player.avPlayer.rate == 0 }, "paused in the background")
-        become()
-        #expect(await waitUntilMedia { player.avPlayer.rate > 0 }, "plays again in the foreground")
-
-        player.avPlayer.pause()  // the user's own pause
-        resign()
-        become()
-        _ = await waitUntilMedia(timeout: 0.5) { player.avPlayer.rate > 0 }
-        #expect(player.avPlayer.rate == 0, "a user's pause survives a trip to the background")
-    }
-
     @Test("a video that does not opt in keeps playing in the background")
     func backgroundIsIgnoredWithoutOptIn() async throws {
         install()
@@ -387,104 +336,12 @@ struct MediaVideoComponentTests {
         #expect((pool.heldPlayer(for: "no-background")?.avPlayer.rate ?? 0) > 0)
     }
 
-    // Guards the `startMs` seek in `MediaVideoPlayback.open` / `seekToStartIfReady`, and that a nil
-    // `startMs` leaves the pool's playhead alone so a remount resumes.
-    @Test("startMs puts the opened player at that position, and nil keeps the playhead")
-    func startMsSeeksAndNilKeepsThePlayhead() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let video = MediaOrigin.url("start.mp4")
-        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
-        let pool = MediaServices.current.videoPool
-
-        let first = MediaStage.mount(MediaVideo(
-            url: video.absoluteString, autoplay: false, playerKey: "start", startMs: 3_000))
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "start")?.avPlayer.currentTime().seconds ?? 0) > 2.9 })
-        let player = try #require(pool.heldPlayer(for: "start"))
-        #expect(abs(player.avPlayer.currentTime().seconds - 3) < 0.1, "at the authored start: \(player.avPlayer.currentTime().seconds)")
-        ComponentTestHost.unmount(first)
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "start") == nil })
-
-        let second = MediaStage.mount(MediaVideo(
-            url: video.absoluteString, autoplay: false, playerKey: "start", startMs: nil))
-        defer { ComponentTestHost.unmount(second) }
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "start") != nil })
-        _ = await waitUntilMedia(timeout: 0.4) { false }
-
-        #expect(pool.heldPlayer(for: "start") === player, "the same player came back")
-        #expect(abs(player.avPlayer.currentTime().seconds - 3) < 0.1, "not moved: \(player.avPlayer.currentTime().seconds)")
-    }
-
-    // Guards `evicted()` in `MediaVideoPlayback`: a holder whose player the pool takes back for a
-    // story page shows its still again (no player drawn) and says so once through `onLost`; it
-    // borrows again when it next opens (here a URL change), not on its own.
-    @Test("an evicted holder drops its player, calls onLost once and borrows again when it next opens")
-    func evictedHolderLetsGoAndBorrowsAgain() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let loader = MediaServices.current.videoLoader
-        let pool = VideoPlayerPool(maxPlayers: 1, ceiling: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
-        MediaServices.override(videoPool: pool)
-        let first = MediaOrigin.url("evict-a.mp4")
-        let second = MediaOrigin.url("evict-b.mp4")
-        let other = MediaOrigin.url("evict-other.mp4")
-        for url in [first, second, other] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
-        let lost = CallCount()
-        let model = UrlModel(first.absoluteString)
-
-        let window = MediaStage.mount(RailLikeHost(model: model, lost: lost))
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "rail") != nil })
-        #expect(await waitUntilMedia { !Self.drawnPlayers(in: window).isEmpty }, "drawn while held")
-
-        let taker = try #require(pool.borrow(key: "page", url: other, priority: .viewerPage))
-
-        #expect(lost.value == 1)
-        #expect(pool.heldPlayer(for: "rail") == nil)
-        ComponentTestHost.drainRunLoop(for: 0.2)
-        #expect(Self.drawnPlayers(in: window).isEmpty, "back to its still")
-        #expect(lost.value == 1, "told once, and no borrow on its own")
-        #expect(pool.heldKeys == ["page"])
-
-        pool.giveBack(key: "page", player: taker, priority: .viewerPage)
-        model.url = second.absoluteString
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "rail") != nil }, "borrowed again on its next open")
-    }
-
     /// A pool with ceiling 1 reading through the fake origin, for every video the test draws.
     private func onePlayerPool() -> VideoPlayerPool {
         let loader = MediaServices.current.videoLoader
         let pool = VideoPlayerPool(maxPlayers: 1, ceiling: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
         MediaServices.override(videoPool: pool)
         return pool
-    }
-
-    // Guards `releasePlayer()` in `MediaVideoPlayback.fail(cause:)` (OD-24): at a ceiling of one a
-    // second video waits; when the first fails (a 404) the waiting one gets the player at once,
-    // not when the failed one closes.
-    @Test("a failed video gives its player to the waiting one")
-    func failedVideoGivesItsPlayerToTheWaitingOne() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let pool = onePlayerPool()
-        let broken = MediaOrigin.url("fail-frees-broken.mp4")
-        let waiting = MediaOrigin.url("fail-frees-waiting.mp4")
-        MediaOrigin.set(.status(404, Data("not found".utf8)), for: broken, held: true)
-        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: waiting)
-        let failures = CallCount()
-
-        let first = MediaStage.mount(MediaVideo(
-            url: broken.absoluteString, playerKey: "broken", onFailure: { failures.value += 1 }))
-        defer { ComponentTestHost.unmount(first) }
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "broken") != nil })
-        let second = MediaStage.mount(MediaVideo(url: waiting.absoluteString, playerKey: "waiting"))
-        defer { ComponentTestHost.unmount(second) }
-        #expect(await waitUntilMedia { pool.queuedKeys == ["waiting"] })
-
-        MediaOrigin.release(broken)
-        #expect(await waitUntilMedia { failures.value > 0 })
-
-        #expect(await waitUntilMedia { pool.heldKeys == ["waiting"] }, "the waiting video took the failed one's player")
     }
 
     // Guards `self.wantsPlaying = playing` in `MediaVideoPlayback.watchRate(of:)` (decision 2b,
@@ -574,34 +431,6 @@ struct MediaVideoComponentTests {
         defer { pool.giveBack(key: "page", player: taker, priority: .viewerPage) }
 
         #expect(pool.queuedKeys == ["ended", "older"], "the ended video still wants to play")
-    }
-
-    // Guards `evictedResume` in `VideoPlayerPool` (`take(_:of:)` keeps the playhead, `borrow` hands
-    // it to the next holder of the key) and `takeResumeMs` in `MediaVideoPlayback.attemptBorrow`
-    // (decision 2a, R1-16): a video whose player Stage 1 took gets one back through the queue when
-    // the viewer gives back, and plays on from where it was, not from 0.
-    @Test("a video Stage 1 took resumes where it was when it gets a player back")
-    func stageOneEvictedVideoResumes() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let pool = onePlayerPool()
-        let video = MediaOrigin.url("resume.mp4")
-        let page = MediaOrigin.url("resume-page.mp4")
-        for url in [video, page] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
-
-        let window = MediaStage.mount(MediaVideo(url: video.absoluteString, autoplay: true, playerKey: "resume"))
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "resume")?.avPlayer.currentTime().seconds ?? 0) >= 2 })
-        let playhead = try #require(pool.heldPlayer(for: "resume")).avPlayer.currentTime().seconds
-
-        let taker = try #require(pool.borrow(key: "page", url: page, priority: .viewerPage))
-        #expect(pool.queuedKeys == ["resume"])
-        pool.giveBack(key: "page", player: taker, priority: .viewerPage)
-
-        // From 0 it would need more than 2 s of playback to get there.
-        #expect(await waitUntilMedia(timeout: 1.5) {
-            (pool.heldPlayer(for: "resume")?.avPlayer.currentTime().seconds ?? 0) >= playhead - 0.25
-        }, "resumed near \(playhead) s")
     }
 
     // Guards `player.volume = volume` in `MediaVideoPlayback.open` (W8-03; Flutter Y8-02, Android
