@@ -459,9 +459,10 @@ struct NudgeDialogContainer: View {
                                         .onTapGesture { if surface.backdropDismissible { dismiss() } }
                                 )
                         }
-                        // Scroll only when the card really overflows. A card that fits
-                        // otherwise still arms the vertical scroll view's pan, which
-                        // swallows horizontal drags meant for a carousel on the card.
+                        // Fixes carousel swipes in this dialog: without this line the
+                        // vertical scroll view claims drags even when the card fits on
+                        // screen, so a carousel on the card never gets the swipe. Now it
+                        // only scrolls (and bounces) when the card is taller than the screen.
                         .modifier(ScrollBouncesOnlyWhenOverflowing())
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
