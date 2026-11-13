@@ -459,6 +459,10 @@ struct NudgeDialogContainer: View {
                                         .onTapGesture { if surface.backdropDismissible { dismiss() } }
                                 )
                         }
+                        // Scroll only when the card really overflows. A card that fits
+                        // otherwise still arms the vertical scroll view's pan, which
+                        // swallows horizontal drags meant for a carousel on the card.
+                        .modifier(ScrollBouncesOnlyWhenOverflowing())
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         panel.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -678,5 +682,17 @@ struct NudgeCloseButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel ?? "Close")
+    }
+}
+
+/// `scrollBounceBehavior(.basedOnSize)` where available (iOS 16.4+); a no-op below,
+/// where the SDK does not initialize anyway.
+private struct ScrollBouncesOnlyWhenOverflowing: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 16.4, *) {
+            content.scrollBounceBehavior(.basedOnSize)
+        } else {
+            content
+        }
     }
 }
