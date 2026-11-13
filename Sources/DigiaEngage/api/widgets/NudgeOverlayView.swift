@@ -459,6 +459,11 @@ struct NudgeDialogContainer: View {
                                         .onTapGesture { if surface.backdropDismissible { dismiss() } }
                                 )
                         }
+                        // Fixes carousel swipes in this dialog: without this line the
+                        // vertical scroll view claims drags even when the card fits on
+                        // screen, so a carousel on the card never gets the swipe. Now it
+                        // only scrolls (and bounces) when the card is taller than the screen.
+                        .modifier(ScrollBouncesOnlyWhenOverflowing())
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         panel.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -678,5 +683,17 @@ struct NudgeCloseButton: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel ?? "Close")
+    }
+}
+
+/// `scrollBounceBehavior(.basedOnSize)` where available (iOS 16.4+); a no-op below,
+/// where the SDK does not initialize anyway.
+private struct ScrollBouncesOnlyWhenOverflowing: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 16.4, *) {
+            content.scrollBounceBehavior(.basedOnSize)
+        } else {
+            content
+        }
     }
 }
