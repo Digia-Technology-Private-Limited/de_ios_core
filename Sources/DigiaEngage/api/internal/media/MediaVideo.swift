@@ -634,7 +634,7 @@ private struct MediaPlayerLayerView: UIViewRepresentable {
     }
 }
 
-private final class PlayerLayerView: UIView {
+final class PlayerLayerView: UIView {
     override static var layerClass: AnyClass { AVPlayerLayer.self }
 
     private var playerLayer: AVPlayerLayer? { layer as? AVPlayerLayer }

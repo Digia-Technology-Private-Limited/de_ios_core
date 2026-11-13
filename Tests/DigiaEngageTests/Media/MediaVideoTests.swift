@@ -671,3 +671,35 @@ struct MediaVideoComponentTests {
     }
 }
 }
+
+// R2-02 / R3-02: the video must animate with its view when the PIP or the floater expands and
+// collapses. Guards `PlayerLayerView.layerClass = AVPlayerLayer`: a sublayer framed in
+// `layoutSubviews` with actions disabled gets no `bounds` animation and jumps to its end size.
+@MainActor
+@Suite("MediaVideo layer view", .tags(.media, .component))
+struct PlayerLayerViewAnimationTests {
+    @Test("a frame change inside UIView.animate animates the video layer's bounds")
+    func videoLayerFollowsTheViewsAnimation() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 400, height: 800))
+        window.isHidden = false
+        defer { window.isHidden = true }
+        let view = PlayerLayerView(frame: CGRect(x: 0, y: 0, width: 120, height: 200))
+        window.addSubview(view)
+        let player = DigiaVideoPlayer()
+        defer { player.release() }
+        view.apply(player: player, gravity: .resizeAspectFill, onReady: {})
+        window.layoutIfNeeded()
+
+        UIView.animate(withDuration: 1) {
+            view.frame = CGRect(x: 0, y: 0, width: 400, height: 800)
+            view.layoutIfNeeded()
+        }
+
+        let video = try #require(
+            (view.layer as? AVPlayerLayer) ?? view.layer.sublayers?.compactMap { $0 as? AVPlayerLayer }.first
+        )
+        #expect(video.player === player.avPlayer)
+        #expect(video.animation(forKey: "bounds") != nil || video.animation(forKey: "bounds.size") != nil)
+        view.layer.removeAllAnimations()
+    }
+}
