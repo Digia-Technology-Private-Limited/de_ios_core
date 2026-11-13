@@ -472,6 +472,34 @@ struct MediaVideoComponentTests {
         return pool
     }
 
+    // Guards `releasePlayer()` in `MediaVideoPlayback.fail(cause:)` (OD-24): at a ceiling of one a
+    // second video waits; when the first fails (a 404) the waiting one gets the player at once,
+    // not when the failed one closes.
+    @Test("a failed video gives its player to the waiting one")
+    func failedVideoGivesItsPlayerToTheWaitingOne() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let pool = onePlayerPool()
+        let broken = MediaOrigin.url("fail-frees-broken.mp4")
+        let waiting = MediaOrigin.url("fail-frees-waiting.mp4")
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: broken, held: true)
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: waiting)
+        let failures = CallCount()
+
+        let first = MediaStage.mount(MediaVideo(
+            url: broken.absoluteString, playerKey: "broken", onFailure: { failures.value += 1 }))
+        defer { ComponentTestHost.unmount(first) }
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "broken") != nil })
+        let second = MediaStage.mount(MediaVideo(url: waiting.absoluteString, playerKey: "waiting"))
+        defer { ComponentTestHost.unmount(second) }
+        #expect(await waitUntilMedia { pool.queuedKeys == ["waiting"] })
+
+        MediaOrigin.release(broken)
+        #expect(await waitUntilMedia { failures.value > 0 })
+
+        #expect(await waitUntilMedia { pool.heldKeys == ["waiting"] }, "the waiting video took the failed one's player")
+    }
+
     // Guards `self.wantsPlaying = playing` in `MediaVideoPlayback.watchRate(of:)` (decision 2b,
     // R1-10, R2-01): a video authored not to play that the user starts through the controls wants
     // to play. When Stage 1 takes its player it waits ahead of an older paused waiter, and it plays
