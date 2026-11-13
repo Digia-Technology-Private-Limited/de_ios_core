@@ -94,8 +94,8 @@ struct MediaLottieComponentTests {
         MediaOrigin.release(target)
     }
 
-    @Test("shows the error placeholder, not the blur, when the animation cannot load", .tags(.golden))
-    func placeholderWhenItCannotLoad() async {
+    @Test("keeps the blur when the animation cannot load", .tags(.golden))
+    func blurStaysWhenItCannotLoad() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("nope.json")
@@ -109,8 +109,23 @@ struct MediaLottieComponentTests {
         MediaStage.assertGolden(window, named: "lottie_error_placeholder")
     }
 
-    @Test("a blank url shows the error placeholder, not the blur", .tags(.golden))
-    func blankURLShowsPlaceholder() async {
+    @Test("draws nothing when the animation cannot load and no blur is authored", .tags(.golden))
+    func nothingWhenItCannotLoadWithoutBlur() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("nope-no-blur.json")
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
+        let recorder = HealthRecorder()
+
+        let window = mount(url: target.absoluteString, autoplay: false)
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { !recorder.all.isEmpty })
+
+        MediaStage.assertGolden(window, named: "lottie_loading_no_blur")
+    }
+
+    @Test("a blank url keeps the blur", .tags(.golden))
+    func blankURLKeepsTheBlur() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let recorder = HealthRecorder()
@@ -122,8 +137,8 @@ struct MediaLottieComponentTests {
         MediaStage.assertGolden(window, named: "lottie_blank_url")
     }
 
-    @Test("a blank url shows the error placeholder when no blur is authored", .tags(.golden))
-    func blankURLShowsPlaceholderWithoutBlur() async {
+    @Test("a blank url draws nothing when no blur is authored", .tags(.golden))
+    func blankURLDrawsNothingWithoutBlur() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let recorder = HealthRecorder()
@@ -249,6 +264,50 @@ struct MediaLottieComponentTests {
         defer { ComponentTestHost.unmount(second) }
         #expect(await waitForAnimation(in: second) != nil)
 
+        #expect(MediaOrigin.requests(for: target).count == 1)
+    }
+
+    /// Two tabs, the animation on the first: showing the second takes the first off screen, and
+    /// showing the first again puts it back, with the view's state kept.
+    private struct TabsHost: View {
+        @ObservedObject var tabs: Tabs
+        let url: String
+
+        var body: some View {
+            TabView(selection: $tabs.selection) {
+                MediaLottie(url: url, blurHash: MediaLottieComponentTests.blurHash)
+                    .tag(0)
+                Color.clear.tag(1)
+            }
+        }
+    }
+
+    private final class Tabs: ObservableObject {
+        @Published var selection = 0
+    }
+
+    // Fails if: MediaLottie.swift `load()` `if source != nil, loadedURL == url { return }` is deleted:
+    // the animation is thrown away each time the view appears, so it blinks to its still and
+    // restarts, and the view on screen is a new one.
+    @Test("an animation that is taken off screen and put back is the same one, still playing")
+    func animationSurvivesAppearingAgain() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("tabs.json")
+        MediaOrigin.set(.status(200, Self.animation), for: target)
+        let tabs = Tabs()
+
+        let window = MediaStage.mount(TabsHost(tabs: tabs, url: target.absoluteString))
+        defer { ComponentTestHost.unmount(window) }
+        let before = await waitForAnimation(in: window)
+        #expect(before != nil)
+
+        tabs.selection = 1
+        ComponentTestHost.drainRunLoop(for: 0.5)
+        tabs.selection = 0
+        ComponentTestHost.drainRunLoop(for: 0.5)
+
+        #expect(await waitForAnimation(in: window) === before)
         #expect(MediaOrigin.requests(for: target).count == 1)
     }
 

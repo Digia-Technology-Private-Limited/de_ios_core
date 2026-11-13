@@ -60,8 +60,8 @@ struct MediaImageComponentTests {
         MediaOrigin.release(target)
     }
 
-    @Test("shows the error placeholder, not the blur, when the picture was never uploaded", .tags(.golden))
-    func placeholderWhenNeverUploaded() async {
+    @Test("keeps the blur when the picture was never uploaded", .tags(.golden))
+    func blurStaysWhenNeverUploaded() async {
         MediaOrigin.install()
         defer { MediaOrigin.end() }
         let target = MediaOrigin.url("never-uploaded.jpg")
@@ -75,6 +75,21 @@ struct MediaImageComponentTests {
 
         #expect(MediaOrigin.requests(for: target).count == 1)
         MediaStage.assertGolden(window, named: "image_error_placeholder")
+    }
+
+    @Test("draws nothing when the picture fails and no blur is authored", .tags(.golden))
+    func nothingWhenFailingWithoutBlur() async {
+        MediaOrigin.install()
+        defer { MediaOrigin.end() }
+        let target = MediaOrigin.url("never-uploaded-no-blur.jpg")
+        MediaOrigin.set(.status(404, Data("not found".utf8)), for: target)
+        let failures = CallCount()
+
+        let window = mount(url: target.absoluteString, onFailure: { failures.value += 1 })
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { failures.value > 0 })
+
+        MediaStage.assertGolden(window, named: "image_loading_no_blur")
     }
 
     @Test("leaves no blur behind a loaded picture", .tags(.golden))
@@ -270,8 +285,8 @@ struct MediaImageDecisionTests {
     @Test("a blurhash decodes once")
     func blurHashDecodesOnce() {
         let hash = "LEHV6nWB2yk8pyo0adR*.7kCMdnj"
-        let first = BlurHashCache.image(for: hash, size: BlurHashPlaceholderView.decodeSize)
-        let second = BlurHashCache.image(for: hash, size: BlurHashPlaceholderView.decodeSize)
+        let first = BlurHashCache.image(for: hash, size: BlurHashCache.decodeSize)
+        let second = BlurHashCache.image(for: hash, size: BlurHashCache.decodeSize)
         #expect(first != nil && first === second)
     }
 }

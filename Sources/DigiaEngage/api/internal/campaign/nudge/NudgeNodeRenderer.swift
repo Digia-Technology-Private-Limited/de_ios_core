@@ -164,12 +164,14 @@ private struct NudgeImageView: View {
 
     @ViewBuilder
     private var content: some View {
-        if url.isEmpty {
-            nudgePlaceholder(label: "Image", height: node.box.fixedHeight ?? 120)
-        } else if canvasMode {
+        if canvasMode {
             canvasImage
         } else if node.aspectRatio > 0 {
             aspectRatioImage
+        } else if mediaUsableURL(url) == nil {
+            // A blank or unresolved URL: MediaImage draws the still (or nothing) and reports
+            // invalid_url. The box keeps the height the node would have had.
+            fixedImage.frame(height: node.box.fixedHeight ?? 120)
         } else {
             fixedImage
         }
@@ -375,24 +377,19 @@ private struct NudgeLottieView: View {
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
-        let resolved = interpolate(node.url, context: variables)
-        if resolved.isEmpty {
-            nudgePlaceholder(label: "Lottie", height: node.height)
-        } else {
-            // The wire carries no placeholder for Lottie, so the still below the animation
-            // is empty.
-            MediaLottie(
-                url: resolved,
-                fit: MediaFit(rawValue: node.fit.rawValue) ?? .cover,
-                loop: node.loop,
-                autoplay: node.autoplay
-            )
-            .modifier(CanvasMediaFrame(
-                canvasMode: canvasMode,
-                aspectRatio: node.aspectRatio,
-                height: node.height
-            ))
-        }
+        // The wire carries no placeholder for Lottie, so the still below the animation is
+        // empty. A blank or unresolved URL reports invalid_url from the wrapper.
+        MediaLottie(
+            url: interpolate(node.url, context: variables),
+            fit: MediaFit(rawValue: node.fit.rawValue) ?? .cover,
+            loop: node.loop,
+            autoplay: node.autoplay
+        )
+        .modifier(CanvasMediaFrame(
+            canvasMode: canvasMode,
+            aspectRatio: node.aspectRatio,
+            height: node.height
+        ))
     }
 }
 
@@ -406,14 +403,15 @@ private struct NudgeCarouselView: View {
     @State private var autoPlayTimer: Timer? = nil
 
     private var images: [String] {
-        node.images.map { interpolate($0, context: variables) }.filter { !$0.isEmpty }
+        node.images.map { interpolate($0, context: variables) }
     }
     private var pageCount: Int { node.loop ? 9999 : images.count }
 
     var body: some View {
         let images = self.images
         if images.isEmpty {
-            nudgePlaceholder(label: "Image", height: node.height)
+            // No slides authored at all: nothing to load or report, the box keeps its height.
+            Color.clear.frame(height: node.height)
         } else {
             VStack(spacing: 0) {
                 TabView(selection: $currentIndex) {
@@ -517,25 +515,6 @@ extension NudgeVideoFit {
         case .contain: .contain
         }
     }
-}
-
-// MARK: - Placeholder
-
-@MainActor
-private func nudgePlaceholder(label: String, height: CGFloat) -> some View {
-    ZStack {
-        RoundedRectangle(cornerRadius: 8)
-            .fill(Color(hex: "#F1F1F5") ?? Color(.systemGray6))
-        Text(label)
-            .font(
-                Font(SDKInstance.shared.font.resolve(
-                    size: 11, weight: 400, italic: false
-                ))
-            )
-            .foregroundStyle(Color(hex: "#9A9AAD") ?? .secondary)
-    }
-    .frame(maxWidth: .infinity)
-    .frame(height: height)
 }
 
 // MARK: - Modifier

@@ -232,14 +232,31 @@ struct CanvasImageRendererTests {
         #expect(anchorlessDesignScale(hostWidth: .infinity, designWidth: 375) == nil)
     }
 
-    @Test("empty or invalid image URL renders placeholder rather than blank view", arguments: ["", "http://[invalid"])
-    func emptyOrInvalidImageURLRendersPlaceholder(url: String) {
-        let widget = imageWidget(url: url)
-        let window = mount(image: widget)
+    // Fails if: CampaignCanvasView.swift `FocalCanvasImage` checks the URL itself and skips `MediaImage`
+    // for a blank one: nothing is reported and nothing is drawn but a label or a hole.
+    @Test("a blank, unresolved or malformed canvas image url reaches the wrapper: it draws nothing and reports invalid_url once", arguments: ["", "{{img}}", "http://[invalid"])
+    func unusableCanvasImageURLReportsInvalidURL(url: String) async {
+        let recorder = HealthRecorder()
+        defer { MediaOrigin.end() }
+        let stage = ComponentTestHost.CanvasStageHost(
+            canvas: CampaignCanvas(
+                version: 2, width: 320, height: 200, background: .solid(.literal("#FFFFFFFF")),
+                children: [
+                    .widget(
+                        id: "image", rect: CampaignCanvasRect(x: 0, y: 0, width: 320, height: 200),
+                        widget: imageWidget(url: url))
+                ]))
+        let (window, _) = ComponentTestHost.mount(
+            rootView: AnyView(stage.environment(\.digiaCampaignKey, "canvas-campaign")),
+            size: CGSize(width: 320, height: 200))
         defer { unmount(window) }
-        ComponentTestHost.drainRunLoop(for: 0.05)
+
+        #expect(await waitUntilMedia { !recorder.all.isEmpty })
+        ComponentTestHost.drainRunLoop(for: 0.3)
+        #expect(
+            recorder.all == [.init(campaignKey: "canvas-campaign", kind: .image, cause: "invalid_url")])
         let image = ComponentTestHost.renderImage(of: window.rootViewController!.view)
-        #expect(Self.hasMoreThanOneColor(image))
+        #expect(!Self.hasMoreThanOneColor(image))
     }
 
     private func mount(

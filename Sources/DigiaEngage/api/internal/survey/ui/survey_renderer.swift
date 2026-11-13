@@ -1136,8 +1136,7 @@ struct SurveyMediaImage: View {
                 url: url,
                 fit: fit,
                 blurHash: placeholder?.stillBlurHash,
-                onSuccess: { loaded = true },
-                errorContent: AnyView(Color.clear)
+                onSuccess: { loaded = true }
             )
         }
         .onChange(of: url) { _ in loaded = false }

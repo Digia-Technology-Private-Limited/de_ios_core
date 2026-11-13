@@ -10,9 +10,8 @@ internal import SDWebImageSwiftUI
 /// before that. There is no spinner.
 ///
 /// When the load fails, and when the URL is unusable (blank, an unresolved `{{variable}}`, no
-/// scheme), the box shows the error placeholder ("Image failed") and no BlurHash: `errorContent`
-/// replaces the placeholder, for surfaces that draw their own failure look. The BlurHash is for
-/// loading only. The tint applies to the picture only.
+/// scheme), the still stays: the BlurHash if one is authored, else nothing, so the box is empty.
+/// There is no error look. The tint applies to the picture only.
 ///
 /// `focalX` and `focalY` (0-1) say where the picture sits in its box: the overflow of a cropped
 /// picture, or the free space around a letterboxed one, is split so that the picture's offset is
@@ -21,13 +20,17 @@ internal import SDWebImageSwiftUI
 /// picture is fitted and cropped to the box first, then that box is scaled and clipped again, so
 /// below 1 the page shows around a smaller cropped picture. All three are clamped
 /// (focal 0-1, zoom 0.1-10, anything non-finite is the default), and at their defaults (0.5, 0.5,
-/// 1) the picture is drawn exactly as without them. The failure look is not zoomed or placed.
+/// 1) the picture is drawn exactly as without them.
 ///
 /// Health is reported once per failure, for the campaign in the environment: `invalid_url` for
 /// an unusable URL, `http_4xx`, `decode`. A network failure, a timeout or a 5xx reports nothing.
 ///
-/// Never throws from the render path: an unusable URL shows the error placeholder without fetching.
+/// Never throws from the render path: an unusable URL shows the still without fetching.
 struct MediaImage: View {
+    /// The options every load of a wrapper picture uses. A preload (the floater's) passes the same
+    /// set, so its picture lands in the cache entry this wrapper reads instead of being fetched again.
+    static let loadOptions: SDWebImageOptions = [.retryFailed, .scaleDownLargeImages]
+
     let url: String
     var fit: MediaFit = .cover
     var blurHash: String? = nil
@@ -39,11 +42,9 @@ struct MediaImage: View {
     var onSuccess: (() -> Void)? = nil
     /// The load failed or the URL is unusable (health is already reported).
     var onFailure: (() -> Void)? = nil
-    var errorContent: AnyView? = nil
 
     @Environment(\.digiaCampaignKey) private var campaignKey
     @Environment(\.mediaServices) private var services
-    @State private var failedURL: String?
     @State private var reported = ReportedURL()
 
     init(
@@ -55,8 +56,7 @@ struct MediaImage: View {
         focalY: CGFloat = 0.5,
         zoom: CGFloat = 1,
         onSuccess: (() -> Void)? = nil,
-        onFailure: (() -> Void)? = nil,
-        errorContent: AnyView? = nil
+        onFailure: (() -> Void)? = nil
     ) {
         DigiaImagePipeline.configureIfNeeded()
         self.url = url
@@ -68,28 +68,28 @@ struct MediaImage: View {
         self.zoom = zoom
         self.onSuccess = onSuccess
         self.onFailure = onFailure
-        self.errorContent = errorContent
     }
 
     var body: some View {
         if let target = mediaUsableURL(url) {
             if let cached = Self.memoryCachedPicture(for: target) {
-                // Already decoded in memory: drawn from the first body evaluation. WebImage would
-                // complete this load inside the view update, where SwiftUI drops its invalidation
-                // and the picture never appears.
+                // Already decoded in memory: drawn from the first body evaluation. WebImage completes
+                // this load inside the view update, where SwiftUI drops its invalidation: the picture
+                // never draws and `onSuccess` never fires (seen in the sample app, where a view
+                // that gates on `onSuccess`, like the guide's crop, stays hidden the second time it
+                // shows the same picture).
                 placed(fitted(Image(uiImage: cached)))
                     .task(id: url) { reportSuccess() }
             } else {
-                WebImage(url: target, options: [.retryFailed, .scaleDownLargeImages]) { image in
+                WebImage(url: target, options: Self.loadOptions) { image in
                     placed(fitted(image))
                 } placeholder: {
-                    still(failed: failedURL == url)
+                    still
                 }
                 .onSuccess { _, _, _ in
                     reportSuccess()
                 }
                 .onFailure { error in
-                    failedURL = url
                     // Only a cause the author can fix is health: no cause (network, timeout, 5xx)
                     // reports nothing.
                     if let cause = mediaFailureCause(imageError: error) {
@@ -99,7 +99,7 @@ struct MediaImage: View {
                 }
             }
         } else {
-            still(failed: true)
+            still
                 .task(id: url) {
                     services.reportHealth(campaignKey, .image, "invalid_url")
                     onFailure?()
@@ -125,18 +125,12 @@ struct MediaImage: View {
         return image
     }
 
-    /// What shows until the picture draws (the still), and after a failure (the error look, with no
-    /// still behind it).
-    /// The wrapper ZStack stays the same view in both states: the image library re-runs its load when
-    /// the placeholder slot's root view is replaced, which would fetch a failed URL again.
-    @ViewBuilder
-    private func still(failed: Bool) -> some View {
+    /// What shows until the picture draws, and after a failure: the still, or nothing without a
+    /// BlurHash. The wrapper ZStack stays the same view whatever the state: the image library re-runs
+    /// its load when the placeholder slot's root view is replaced, which would fetch a failed URL again.
+    private var still: some View {
         ZStack {
-            if failed {
-                errorContent ?? AnyView(MediaErrorPlaceholder(label: "Image failed"))
-            } else {
-                placed(MediaStill(fit: fit, blurHash: blurHash))
-            }
+            placed(MediaStill(fit: fit, blurHash: blurHash))
         }
     }
 
@@ -199,4 +193,15 @@ struct MediaImage: View {
 /// The URL whose success was reported. A class so recording it never invalidates the view.
 private final class ReportedURL {
     var url: String?
+}
+
+/// URLs a wrapper may fetch: non-blank, fully resolved (no `{{variable}}` template tokens left),
+/// parseable and with a scheme. Anything else is an unusable URL: the wrapper draws its still
+/// without fetching and reports `invalid_url`.
+func mediaUsableURL(_ raw: String) -> URL? {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty, !trimmed.contains("{{"),
+        let url = URL(string: trimmed), url.scheme != nil
+    else { return nil }
+    return url
 }

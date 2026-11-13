@@ -12,6 +12,11 @@ extension StoryMediaFit {
     }
 }
 
+/// The fill a story rail card shows when its picture is still loading or failed (#1A1A1A). Only the
+/// rail uses it: every other story surface follows the still-or-empty contract, so a failed picture
+/// there keeps its BlurHash or draws nothing.
+let storyRailFailureGround = Color(red: 0.10, green: 0.10, blue: 0.10)
+
 /// One rail card (T8): obeys play/pause only. A playing video card borrows its player from the
 /// pool at the rail rank under `poolKey`, the key the viewer's page borrows under, so a tap hands
 /// the same player over. Whenever it has no player it shows its still. Mirrors Android
@@ -43,7 +48,7 @@ struct StoryThumbnail: View {
                 // A rail restart starts every card's window again.
                 .id(restartGeneration)
             } else {
-                StoryThumbnailStill(item: item)
+                StoryThumbnailStill(item: item, ground: storyRailFailureGround)
             }
         }
     }
@@ -52,16 +57,18 @@ struct StoryThumbnail: View {
 /// What a story card or page shows when its video is not playing (or not yet): an image story
 /// its picture, a video story its authored thumbnail (image or colour), else the dark backdrop.
 /// No frame is cut from the video (Q1). `fitOverride` is the page's fit, which the viewer draws
-/// the thumbnail in, as `main` did.
+/// the thumbnail in, as `main` did. `ground` is drawn under a story picture while it loads and
+/// after it failed: the rail passes `storyRailFailureGround`, the viewer none.
 @MainActor
 struct StoryThumbnailStill: View {
     let item: StoryItemConfig
     var fitOverride: StoryMediaFit? = nil
+    var ground: Color? = nil
 
     var body: some View {
         ZStack {
             if item.type == .image {
-                StoryImage(url: item.url, fit: (fitOverride ?? item.thumbnailBoxFit).toMediaFit)
+                StoryImage(url: item.url, fit: (fitOverride ?? item.thumbnailBoxFit).toMediaFit, ground: ground)
             } else {
                 mediaVideoBackdrop
                 switch item.thumbnail {
@@ -71,10 +78,7 @@ struct StoryThumbnailStill: View {
                     MediaImage(
                         url: source,
                         fit: (fitOverride ?? fit).toMediaFit,
-                        blurHash: placeholder?.type == .blurhash ? placeholder?.blurHash : nil,
-                        errorContent: AnyView(MediaStill(
-                            fit: (fitOverride ?? fit).toMediaFit,
-                            blurHash: placeholder?.type == .blurhash ? placeholder?.blurHash : nil))
+                        blurHash: placeholder?.stillBlurHash
                     )
                 case nil:
                     EmptyView()
@@ -85,19 +89,21 @@ struct StoryThumbnailStill: View {
     }
 }
 
-/// A story picture through `MediaImage`, on the dark ground only while it loads: once drawn, a
-/// letterbox shows the black behind it, as `main`'s story image did.
+/// A story picture through `MediaImage`. With a `ground` (the rail card's) it shows under the
+/// picture while it loads and after a failure; once drawn, a letterbox shows the black behind it,
+/// as `main`'s story image did. Without one (the viewer) a failed picture draws nothing.
 @MainActor
 struct StoryImage: View {
     let url: String
     let fit: MediaFit
+    var ground: Color? = nil
 
     @State private var loaded = false
 
     var body: some View {
         ZStack {
-            if !loaded { mediaVideoBackdrop }
-            MediaImage(url: url, fit: fit, onSuccess: { loaded = true }, errorContent: AnyView(EmptyView()))
+            if !loaded, let ground { ground }
+            MediaImage(url: url, fit: fit, onSuccess: { loaded = true })
         }
     }
 }
@@ -134,7 +140,7 @@ struct StoryVideoSurface: View {
     var body: some View {
         ZStack {
             if bare {
-                StoryThumbnailStill(item: item, fitOverride: stillFit)
+                StoryThumbnailStill(item: item, fitOverride: stillFit, ground: bare ? storyRailFailureGround : nil)
             }
             MediaVideo(
                 url: item.url,
@@ -163,7 +169,7 @@ struct StoryVideoSurface: View {
                 }
             )
             if failed || (!bare && !firstFrameShown && item.thumbnail != nil) {
-                StoryThumbnailStill(item: item, fitOverride: stillFit)
+                StoryThumbnailStill(item: item, fitOverride: stillFit, ground: bare ? storyRailFailureGround : nil)
             }
         }
     }

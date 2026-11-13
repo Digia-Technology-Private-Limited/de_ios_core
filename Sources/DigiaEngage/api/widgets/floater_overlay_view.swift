@@ -34,6 +34,9 @@ struct FloaterOverlayView: View {
     var body: some View {
         if let state = orchestrator.state, !orchestrator.awaitingMedia {
             FloaterSessionView(state: state, orchestrator: orchestrator)
+                // The media's health reports carry this key; the expanded content sets it again
+                // for itself below.
+                .environment(\.digiaCampaignKey, state.payload.campaignKey)
                 .id(state.token)
                 // Full-bleed in both states, and placed inside the real window insets below, as
                 // the story floater is. Respecting the container's safe area as well inset the
@@ -277,8 +280,7 @@ private struct FloaterSessionView: View {
                         videoPlayerKey: floaterVideoPlayerKey(state),
                         muted: orchestrator.muted,
                         cover: !expanded || config.expanded.cover,
-                        resolvedUrl: state.resolvedMediaUrl,
-                        preloadedImage: orchestrator.preloadedImage
+                        resolvedUrl: state.resolvedMediaUrl
                     )
                     .environment(\.digiaCampaignKey, state.campaign.campaignKey)
                     .allowsHitTesting(false)

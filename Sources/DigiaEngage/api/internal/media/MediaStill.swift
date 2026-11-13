@@ -10,7 +10,7 @@ struct MediaStill: View {
 
     var body: some View {
         if let hash = blurHash,
-            let image = BlurHashCache.image(for: hash, size: BlurHashPlaceholderView.decodeSize)
+            let image = BlurHashCache.image(for: hash, size: BlurHashCache.decodeSize)
         {
             if let mode = fit.contentMode {
                 Image(uiImage: image)

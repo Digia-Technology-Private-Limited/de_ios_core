@@ -16,8 +16,6 @@ struct FloaterMediaView: View {
     let muted: Bool
     let cover: Bool
     let resolvedUrl: String
-    /// The orchestrator's already-decoded image, drawn in place of a `WebImage` load.
-    let preloadedImage: UIImage?
 
     var body: some View {
         switch media.kind {
@@ -46,31 +44,19 @@ struct FloaterMediaView: View {
         }
     }
 
-    @ViewBuilder
     private var lottieView: some View {
-        if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{") {
-            MediaLottie(
-                url: resolvedUrl,
-                fit: cover ? .cover : .contain,
-                loop: media.loop,
-                autoplay: media.autoplay
-            )
-        }
+        MediaLottie(
+            url: resolvedUrl,
+            fit: cover ? .cover : .contain,
+            loop: media.loop,
+            autoplay: media.autoplay
+        )
     }
 
-    @ViewBuilder
     private var imageView: some View {
-        // Nothing here handles a load failure, by design. The orchestrator only
-        // reveals the window once its media is decoded, and drops the campaign
-        // outright when it is not — so by the time this composes, the asset is
-        // already fetchable (though not necessarily SDWebImage-cache-warm; see
-        // FloaterOrchestrator.preloadImage's kdoc on the plain-URLSession trade-off).
-        if let preloadedImage {
-            Image(uiImage: preloadedImage)
-                .resizable()
-                .aspectRatio(contentMode: cover ? .fill : .fit)
-        } else if !resolvedUrl.isEmpty, !resolvedUrl.contains("{{") {
-            MediaImage(url: resolvedUrl, fit: cover ? .cover : .contain)
-        }
+        // The orchestrator only reveals the window once its media has loaded into the cache
+        // `MediaImage` reads, and drops the campaign outright when it could not, so a failure
+        // here is rare, and leaves the box empty.
+        MediaImage(url: resolvedUrl, fit: cover ? .cover : .contain)
     }
 }

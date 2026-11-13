@@ -32,6 +32,7 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
 
     private static let lock = NSLock()
     nonisolated(unsafe) private static var replies: [URL: Reply] = [:]
+    nonisolated(unsafe) private static var queued: [URL: [Reply]] = [:]
     nonisolated(unsafe) private static var held: Set<URL> = []
     nonisolated(unsafe) private static var parked: [URL: [MediaOrigin]] = [:]
     nonisolated(unsafe) private static var log: [Request] = []
@@ -53,6 +54,12 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
             replies[url] = reply
             if isHeld { held.insert(url) }
         }
+    }
+
+    /// Answers the next requests for `url` with `replies`, one each, in order; later requests get
+    /// the reply set with `set(_:for:)`.
+    static func queue(_ replies: [Reply], for url: URL) {
+        lock.withLock { queued[url] = replies }
     }
 
     /// Delivers the responses held for `url` and stops holding it.
@@ -80,6 +87,7 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
     static func reset() {
         lock.withLock {
             replies = [:]
+            queued = [:]
             held = []
             parked = [:]
             log = []
@@ -162,7 +170,15 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
     private func deliver() {
         guard let url = request.url, let client, !finished else { return }
         finished = true
-        switch Self.lock.withLock({ Self.replies[url] }) ?? .fail(.notConnectedToInternet) {
+        let reply = Self.lock.withLock { () -> Reply? in
+            if var next = Self.queued[url], !next.isEmpty {
+                let first = next.removeFirst()
+                Self.queued[url] = next
+                return first
+            }
+            return Self.replies[url]
+        }
+        switch reply ?? .fail(.notConnectedToInternet) {
         case let .status(code, body):
             // A 200 honours a `Range: bytes=a-b` request with a 206, as a CDN does, so the
             // video range cache can read through this origin.
@@ -411,41 +427,28 @@ extension MediaStage {
     static func image(
         url: String, fit: MediaFit = .cover, blurHash: String? = nil, tintColor: Color? = nil,
         focalX: CGFloat = 0.5, focalY: CGFloat = 0.5, zoom: CGFloat = 1,
-        onSuccess: (() -> Void)? = nil, onFailure: (() -> Void)? = nil, errorContent: AnyView? = nil
+        onSuccess: (() -> Void)? = nil, onFailure: (() -> Void)? = nil
     ) -> UIWindow {
         mount(
             MediaImage(
                 url: url, fit: fit, blurHash: blurHash, tintColor: tintColor, focalX: focalX,
-                focalY: focalY, zoom: zoom, onSuccess: onSuccess, onFailure: onFailure,
-                errorContent: errorContent))
+                focalY: focalY, zoom: zoom, onSuccess: onSuccess, onFailure: onFailure))
     }
 
     /// An animation on the stage.
     @MainActor
     static func lottie(
         url: String, fit: MediaFit = .cover, blurHash: String? = nil, loop: Bool = true,
-        autoplay: Bool = true, freezeAt: CGFloat? = nil, errorContent: AnyView? = nil
+        autoplay: Bool = true, freezeAt: CGFloat? = nil
     ) -> UIWindow {
         mount(
             MediaLottie(
                 url: url, fit: fit, blurHash: blurHash, loop: loop, autoplay: autoplay,
-                errorContent: errorContent, freezeAt: freezeAt))
+                freezeAt: freezeAt))
     }
 }
 
 extension MediaStage {
-    /// The text of the caller's own failure look, for the tests that pass an `errorContent`.
-    static let errorMarker = "caller's error content"
-
-    static var errorContent: AnyView { AnyView(Text(errorMarker)) }
-
-    /// Whether `text` is on screen, read from the accessibility tree (what a user could see).
-    @MainActor
-    static func shows(_ text: String, in window: UIWindow) -> Bool {
-        guard let root = window.rootViewController?.view else { return false }
-        return SdkHarness.find(in: root) { SdkHarness.shownText(of: $0) == text } != nil
-    }
-
     /// Every Lottie animation view on the stage.
     @MainActor
     static func lottieViews(in window: UIWindow) -> [LottieAnimationView] {

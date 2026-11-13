@@ -1,6 +1,5 @@
 import AVFoundation
 import AVKit
-internal import Lottie
 internal import SDWebImageSwiftUI
 import SwiftUI
 import UIKit
@@ -29,23 +28,15 @@ enum CanvasLottiePlaybackMode: Sendable, Equatable {
 /// The runtime abstraction for Canvas Lottie animations.
 ///
 /// In tests, playback can be frozen at a deterministic progress (e.g. 0.5) so snapshots
-/// don't race against continuous CADisplayLink rendering, or custom animation loaders can be supplied.
-struct CanvasLottieRuntime: @unchecked Sendable {
-    var loadSource: (@Sendable (URL) async throws -> LottieAnimationSource?)?
+/// don't race against continuous CADisplayLink rendering.
+struct CanvasLottieRuntime: Sendable {
     var playbackMode: CanvasLottiePlaybackMode
 
-    init(
-        loadSource: (@Sendable (URL) async throws -> LottieAnimationSource?)? = nil,
-        playbackMode: CanvasLottiePlaybackMode = .live
-    ) {
-        self.loadSource = loadSource
+    init(playbackMode: CanvasLottiePlaybackMode = .live) {
         self.playbackMode = playbackMode
     }
 
-    static let live = CanvasLottieRuntime(
-        loadSource: nil,
-        playbackMode: .live
-    )
+    static let live = CanvasLottieRuntime(playbackMode: .live)
 }
 
 private struct CanvasLottieRuntimeKey: EnvironmentKey {
@@ -1553,7 +1544,7 @@ private struct CanvasImageRenderer: View {
             CampaignCanvasBoxView(box: boxWithoutContentShadow, isDark: isDark) {
                 FocalCanvasImage(
                     source: source, isDark: isDark, fit: fit, x: positionX, y: positionY,
-                    scale: scale, tint: tint, failureLabel: "Image")
+                    scale: scale, tint: tint)
             }
         }
     }
@@ -1842,19 +1833,13 @@ private struct CanvasLottieRenderer: View {
                 CampaignCanvasBoxView(box: boxWithoutShadow, isDark: isDark) {
                     let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
                     let resolved = interpolate(raw, context: variables)
-                    if resolved.isEmpty {
-                        CanvasPlaceholder(label: "Lottie")
-                    } else if let url = URL(string: resolved) {
-                        CanvasRemoteLottie(
-                            url: url, placeholder: source.placeholder, autoplay: autoplay,
-                            loop: loop, fit: fit
-                        )
-                        .id(resolved)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipped()
-                    } else {
-                        CanvasPlaceholder(label: "Lottie")
-                    }
+                    CanvasRemoteLottie(
+                        url: resolved, placeholder: source.placeholder, autoplay: autoplay,
+                        loop: loop, fit: fit
+                    )
+                    .id(resolved)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
                 }
             }
         }
@@ -1862,40 +1847,27 @@ private struct CanvasLottieRenderer: View {
 }
 
 private struct CanvasRemoteLottie: View {
-    let url: URL
+    let url: String
     let placeholder: ImagePlaceholder?
     let autoplay: Bool
     let loop: Bool
     let fit: String
     @Environment(\.canvasLottieRuntime) private var runtime
-    @Environment(\.mediaServices) private var baseServices
 
     var body: some View {
         MediaLottie(
-            url: url.absoluteString,
+            url: url,
             fit: canvasMediaFit(fit),
             blurHash: placeholder?.stillBlurHash,
             loop: loop,
             autoplay: autoplay,
-            errorContent: AnyView(CanvasPlaceholder(label: "Lottie")),
             freezeAt: frozenProgress
         )
-        .environment(\.mediaServices, services)
     }
 
     private var frozenProgress: CGFloat? {
         if case .frozen(let progress) = runtime.playbackMode { return progress }
         return nil
-    }
-
-    /// The runtime's custom loader, when it has one, in place of the SDK's.
-    private var services: MediaServices {
-        guard let customLoader = runtime.loadSource else { return baseServices }
-        var services = baseServices
-        services.loadLottie = { url in
-            (try? await customLoader(url), nil)
-        }
-        return services
     }
 }
 
@@ -2192,8 +2164,8 @@ private struct CampaignCanvasGradientView: View {
     }
 }
 
-/// A canvas picture. The light/dark choice, `{{variable}}` interpolation and the failure label
-/// are the canvas's own; the picture, its BlurHash still, the focal point, the zoom, the tint and
+/// A canvas picture. The light/dark choice and `{{variable}}` interpolation are the canvas's own;
+/// the picture, its BlurHash still, the focal point, the zoom, the tint, the unusable-URL check and
 /// the health report (for the canvas's campaign) are `MediaImage`'s.
 private struct FocalCanvasImage: View {
     let source: CampaignCanvasMediaSource
@@ -2203,32 +2175,23 @@ private struct FocalCanvasImage: View {
     let y: CGFloat
     let scale: CGFloat
     var tint: CampaignColor? = nil
-    var failureLabel: String? = nil
     @Environment(\.digiaVariables) private var variables
 
     var body: some View {
         let raw = CampaignCanvasTheme.shared.mediaURL(source, isDark: isDark)
         let resolved = interpolate(raw, context: variables)
-        if resolved.isEmpty || URL(string: resolved) == nil {
-            if let failureLabel { CanvasPlaceholder(label: failureLabel) }
-        } else {
-            GeometryReader { geometry in
-                MediaImage(
-                    url: resolved,
-                    fit: canvasMediaFit(fit),
-                    blurHash: source.placeholder?.stillBlurHash,
-                    tintColor: tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) },
-                    focalX: x,
-                    focalY: y,
-                    zoom: scale,
-                    errorContent: failureLabel.map { AnyView(CanvasPlaceholder(label: $0)) } ?? AnyView(Color.clear)
-                )
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                // Kept as before: the picture is drawn through a scale layer even at 1, which
-                // resamples it at its fractional offset and so keeps the canvas goldens unchanged.
-                .scaleEffect(1)
-                .clipped()
-            }
+        GeometryReader { geometry in
+            MediaImage(
+                url: resolved,
+                fit: canvasMediaFit(fit),
+                blurHash: source.placeholder?.stillBlurHash,
+                tintColor: tint.map { CampaignCanvasTheme.shared.color($0, isDark: isDark) },
+                focalX: x,
+                focalY: y,
+                zoom: scale
+            )
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
         }
     }
 }
@@ -2350,16 +2313,6 @@ private struct CanvasChildBoundsModifier: ViewModifier {
     let clips: Bool
     @ViewBuilder func body(content: Content) -> some View {
         if clips { content.clipped() } else { content }
-    }
-}
-
-private struct CanvasPlaceholder: View {
-    let label: String
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 8).fill(Color(hex: "#F1F1F5") ?? Color(.systemGray6))
-            Text(label).font(digiaFont(size: 11)).foregroundStyle(Color(hex: "#9A9AAD") ?? .secondary)
-        }
     }
 }
 

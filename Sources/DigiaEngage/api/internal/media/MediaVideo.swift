@@ -195,11 +195,9 @@ struct MediaVideo: View {
     private func stillView(_ still: MediaVideoStill) -> some View {
         switch still {
         case let .thumbnail(thumbnail):
-            MediaImage(
-                url: thumbnail, fit: fit, blurHash: blurHash,
-                errorContent: AnyView(MediaStill(fit: fit, blurHash: blurHash)))
+            MediaImage(url: thumbnail, fit: fit, blurHash: blurHash)
         case let .blurHash(hash):
-            if let image = BlurHashCache.image(for: hash, size: BlurHashPlaceholderView.decodeSize) {
+            if let image = BlurHashCache.image(for: hash, size: BlurHashCache.decodeSize) {
                 if let mode = fit.contentMode {
                     Image(uiImage: image).resizable().aspectRatio(contentMode: mode)
                 } else {

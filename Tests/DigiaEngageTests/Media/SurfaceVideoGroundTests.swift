@@ -108,7 +108,7 @@ struct SurfaceVideoGroundTests {
             Color(uiColor: .red)
             FloaterMediaView(
                 media: media, videoPlayerKey: "pip-ground-\(UUID().uuidString)", muted: true, cover: true,
-                resolvedUrl: video.absoluteString, preloadedImage: nil)
+                resolvedUrl: video.absoluteString)
         })
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { !MediaOrigin.requests(for: video).isEmpty })

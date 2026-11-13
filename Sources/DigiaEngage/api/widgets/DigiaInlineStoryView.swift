@@ -243,21 +243,31 @@ struct StoryRemoteImage: View {
     let urlString: String
     let fit: StoryMediaFit
 
-    @ViewBuilder
+    /// Drawn while the picture loads and after a failure, when given: the rail card passes the
+    /// failure fill, every other story surface none. Once the picture has drawn, a letterbox
+    /// shows what is behind the card, as it always did.
+    var ground: Color? = nil
+    @State private var loaded = false
+
     var body: some View {
-        if let url = URL(string: urlString) {
-            let image = DigiaCachedImageView(
-                url: url,
-                placeholder: AnyView(Color(red: 0.10, green: 0.10, blue: 0.10))
+        // The picture is stretched to the box it is given (`.fill`): this view applies the story's
+        // own aspect rule below.
+        let image = ZStack {
+            if !loaded, let ground { ground }
+            MediaImage(
+                url: urlString,
+                fit: .fill,
+                onSuccess: { loaded = true }
             )
+        }
+        Group {
             if fit.stretchesImage {
                 image.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 image.aspectRatio(contentMode: fit.imageContentMode)
             }
-        } else {
-            Color(red: 0.16, green: 0.16, blue: 0.16)
         }
+        .onChange(of: urlString) { _ in loaded = false }
     }
 }
 

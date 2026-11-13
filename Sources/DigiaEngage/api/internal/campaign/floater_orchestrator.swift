@@ -1,9 +1,8 @@
 import AVFoundation
 internal import Lottie
-internal import SDWebImageSVGCoder
+internal import SDWebImageSwiftUI
 import Foundation
 import Combine
-import ImageIO
 import UIKit
 
 /// The SDK's one logging style — see ``DigiaLogger``.
@@ -154,11 +153,6 @@ final class FloaterOrchestrator: ObservableObject {
     private(set) var player: AVPlayer?
     /// The pool and key `player` is held under, given back on every teardown path.
     private var lease: (pool: VideoPlayerPool, key: String)?
-    /// The image `preloadImage` decoded, drawn by the window on its first frame. A second
-    /// load through `WebImage` showed its black placeholder and could drop the update that
-    /// swaps the image in, leaving the window black. `nil` for every other kind, and for an
-    /// SVG or animated image, which `WebImage` still loads so it renders and animates.
-    @Published private(set) var preloadedImage: UIImage?
 
     /// `true` while another campaign or a host modal covers the window. Playback
     /// pauses (if configured) and visible-time accounting stops, but the floater is
@@ -350,10 +344,10 @@ final class FloaterOrchestrator: ObservableObject {
         let token = active.token
         let url = active.resolvedMediaUrl.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // A URL still carrying an unresolved `{{ token }}` would 404 loudly. With no
+        // A URL the wrappers cannot fetch (blank, an unresolved `{{ token }}`, no scheme). With no
         // poster to fall back to there is nothing this campaign could show, so drop
         // it rather than float an empty frame.
-        if url.isEmpty || url.contains("{{") {
+        if mediaUsableURL(url) == nil {
             abandonMedia(token: token, reason: "no usable media url", cause: "invalid_url")
             return
         }
@@ -449,31 +443,23 @@ final class FloaterOrchestrator: ObservableObject {
             abandonMedia(token: token, reason: "invalid media url", cause: "invalid_url")
             return
         }
-        // Plain URLSession, not SDWebImage's imperative loader — the latter's core
-        // (non-SwiftUI) module isn't an explicit Package.swift product dependency
-        // today, only SDWebImageSwiftUI is, and importing it unverified risks a
-        // build break with no way to catch it before a device build. The decoded
-        // image is kept in `preloadedImage` for the window to draw; only an SVG or
-        // animated image is fetched again by the renderer's `WebImage`.
-        var request = URLRequest(url: parsed)
-        request.setValue(DIGIA_IMAGE_USER_AGENT, forHTTPHeaderField: "User-Agent")
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
-            let status = (response as? HTTPURLResponse)?.statusCode
+        // Through the image library's own loader, with the options the window's `MediaImage` loads
+        // with, so the picture is in the cache that wrapper reads from its first frame instead of
+        // being fetched a second time. The window is revealed once this has decoded it.
+        SDWebImageManager.shared.loadImage(
+            with: parsed, options: MediaImage.loadOptions, progress: nil
+        ) { [weak self] image, _, error, _, _, _ in
+            let decoded = image != nil
+            let cause = error.flatMap { mediaFailureCause(imageError: $0) }
             Task { @MainActor in
                 guard let self, self.state?.token == token else { return }
-                if let data, let image = UIImage(data: data) {
-                    if !isAnimatedImage(data) { self.preloadedImage = image }
-                    self.markVisible(token: token)
-                } else if let data, SDImageSVGCoder.shared.decodedImage(with: data, options: nil) != nil {
+                if decoded {
                     self.markVisible(token: token)
                 } else {
-                    self.abandonMedia(
-                        token: token, reason: "image failed to load", cause: mediaFailureCause(httpStatus: status)
-                    )
+                    self.abandonMedia(token: token, reason: "image failed to load", cause: cause)
                 }
             }
         }
-        task.resume()
     }
 
     private func preloadLottie(url: String, token: Int64) {
@@ -703,7 +689,6 @@ final class FloaterOrchestrator: ObservableObject {
         player?.pause()
         releaseLease()
         player = nil
-        preloadedImage = nil
     }
 
     /// Called when the host reports a new current screen. A floater belongs to one
@@ -766,7 +751,6 @@ final class FloaterOrchestrator: ObservableObject {
         player?.pause()
         releaseLease()
         player = nil
-        preloadedImage = nil
         state = nil
         surface = .collapsed
         dragFraction = nil
@@ -787,11 +771,4 @@ final class FloaterOrchestrator: ObservableObject {
 /// the same campaign starts at 0 rather than resuming where the last one was left.
 func floaterVideoPlayerKey(_ state: ActiveFloaterState) -> String {
     "pip-\(state.campaign.campaignKey)-\(state.token)"
-}
-
-/// Whether `data` holds more than one frame (an animated GIF, APNG or WebP). `UIImage(data:)`
-/// keeps only the first, so such an image is left to `WebImage`, which animates it.
-private func isAnimatedImage(_ data: Data) -> Bool {
-    guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return false }
-    return CGImageSourceGetCount(source) > 1
 }
