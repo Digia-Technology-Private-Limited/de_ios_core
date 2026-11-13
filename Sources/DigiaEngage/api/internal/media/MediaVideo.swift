@@ -438,6 +438,19 @@ final class MediaVideoPlayback: ObservableObject {
     /// Stops the player: gives it back to the pool, which keeps it for a remount, or destroys it
     /// when the key was this node's own (OD-15).
     func close() {
+        releasePlayer()
+        opened = nil
+        seekPending = false
+        pendingStartMs = nil
+        resumeWhenActive = false
+        firstFrameShown = false
+        failed = false
+        spinnerVisible = false
+    }
+
+    /// Gives the player back (or destroys it when the key was this node's own) and leaves the
+    /// queue; nothing borrows again until the next `open`.
+    private func releasePlayer() {
         let leaving = player
         unwatch()
         if let lease {
@@ -456,13 +469,6 @@ final class MediaVideoPlayback: ObservableObject {
         request = nil
         lease = nil
         player = nil
-        opened = nil
-        seekPending = false
-        pendingStartMs = nil
-        resumeWhenActive = false
-        firstFrameShown = false
-        failed = false
-        spinnerVisible = false
     }
 
     func noteFirstFrame() {
@@ -544,7 +550,9 @@ final class MediaVideoPlayback: ObservableObject {
         failed = true
         spinnerVisible = false
         spinnerTask?.cancel()
-        player?.pause()
+        // A failed showing plays nothing: its player goes back now, so a waiting video starts
+        // instead of waiting until this one closes (OD-24).
+        releasePlayer()
         if let cause { report(cause) }
         onFailure?()
     }
