@@ -152,7 +152,7 @@ final class FloaterOrchestrator: ObservableObject {
 
     /// The showing's leased player (the one the window's `MediaVideo` joins), for the
     /// play/pause chrome, the progress bar and lifecycle pauses. `nil` for other kinds.
-    private(set) var player: AVPlayer?
+    private(set) var player: DigiaVideoPlayer?
     /// The pool and key `player` is held under, given back on every teardown path.
     private var lease: (pool: VideoPlayerPool, key: String)?
     /// The image `preloadImage` decoded, drawn by the window on its first frame. A second
@@ -389,8 +389,9 @@ final class FloaterOrchestrator: ObservableObject {
         lease = (pool, key)
         // The starting spec for the warm-up. Once the window shows, its `MediaVideo` owns mute,
         // volume and loop; this orchestrator never writes them again.
-        p.isMuted = muted
-        p.volume = config.media.volume
+        // The volume first: setting it clears a mute.
+        p.setVolume(config.media.volume)
+        p.setMuted(muted)
         player = p
 
         // Attach the observer BEFORE anything else can race it — mirrors
@@ -399,7 +400,7 @@ final class FloaterOrchestrator: ObservableObject {
         // mutation of this @MainActor-isolated orchestrator must hop explicitly.
         // Only the initial load is handled here (OD-4): `abandonMedia` acts only while
         // the window is still waiting, and a failure after it shows is `MediaVideo`'s.
-        if let item = p.currentItem {
+        if let item = p.avPlayer.currentItem {
             statusObservation = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
                 Task { @MainActor in
                     guard let self, self.state?.token == token else { return }
@@ -409,7 +410,8 @@ final class FloaterOrchestrator: ObservableObject {
                         if config.media.autoplay { self.player?.play() }
                     case .failed:
                         self.abandonMedia(
-                            token: token, reason: "video failed to load", cause: mediaFailureCause(playerItem: item)
+                            token: token, reason: "video failed to load",
+                            cause: mediaFailureCause(videoFailure: videoFailure(of: item))
                         )
                     default:
                         break
@@ -422,7 +424,7 @@ final class FloaterOrchestrator: ObservableObject {
         // orchestrator's business (`onMediaEnd`).
         if !config.media.loop {
             endTimeObserverToken = NotificationCenter.default.addObserver(
-                forName: .AVPlayerItemDidPlayToEndTime, object: p.currentItem, queue: .main
+                forName: .AVPlayerItemDidPlayToEndTime, object: p.avPlayer.currentItem, queue: .main
             ) { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.onVideoEnded(token: token)
@@ -430,7 +432,7 @@ final class FloaterOrchestrator: ObservableObject {
             }
         }
 
-        p.publisher(for: \.rate)
+        p.avPlayer.publisher(for: \.rate)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] rate in self?.isPlaying = rate > 0 }
             .store(in: &playingCancellables)
@@ -564,7 +566,7 @@ final class FloaterOrchestrator: ObservableObject {
     /// non-playable media (image/GIF have no `player` to toggle).
     func togglePlayback() {
         guard let player else { return }
-        if player.rate > 0 { player.pause() } else { player.play() }
+        if player.avPlayer.rate > 0 { player.pause() } else { player.play() }
     }
 
     /// Records where the user left the window. Called once per drag release, not per

@@ -109,7 +109,9 @@ extension SdkHarness {
         guard let window else { return [] }
         var found: [(Int?, AVPlayer)] = []
         func walk(_ view: UIView) {
-            if let layer = view.layer as? AVPlayerLayer, let player = layer.player {
+            // A video view draws through the engine player's layer, a sublayer of its own.
+            let layers = [view.layer] + (view.layer.sublayers ?? [])
+            if let player = layers.lazy.compactMap({ ($0 as? AVPlayerLayer)?.player }).first {
                 let frame = view.convert(view.bounds, to: window)
                 let stride = CGFloat(card.width + Double(card.spacing))
                 let index = frame.width < window.bounds.width * 0.9

@@ -98,7 +98,7 @@ struct VideoPlayerPoolMediaVideoTests {
         #expect(await waitUntilMedia { model.frames == 1 })
         let player = try #require(pool.heldPlayer(for: "card"))
         var seeked = false
-        player.seek(to: CMTime(seconds: 3, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+        player.avPlayer.seek(to: CMTime(seconds: 3, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { _ in
             seeked = true
         }
         #expect(await waitUntilMedia { seeked })
@@ -109,7 +109,7 @@ struct VideoPlayerPoolMediaVideoTests {
         #expect(await waitUntilMedia { model.frames == 2 })
 
         #expect(pool.heldPlayer(for: "card") === player)
-        #expect(abs(player.currentTime().seconds - 3) < 0.1)
+        #expect(abs(player.avPlayer.currentTime().seconds - 3) < 0.1)
 }
 
     /// The SDK's video services with a pool on a hand-wound clock, its items reading through the
@@ -165,20 +165,20 @@ struct VideoPlayerPoolMediaVideoTests {
         #expect(await waitUntilMedia { model.frames == 1 })
         let player = try #require(pool.heldPlayer(for: "card"))
         var seeked = false
-        player.seek(to: CMTime(seconds: 3, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+        player.avPlayer.seek(to: CMTime(seconds: 3, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { _ in
             seeked = true
         }
         #expect(await waitUntilMedia { seeked })
         model.shown = false
         ComponentTestHost.drainRunLoop(for: 0.1)
         time.advance(to: VideoPlayerPool.parkSeconds)
-        #expect(player.currentItem == nil, "the idle item was let go")
+        #expect(player.avPlayer.currentItem == nil, "the idle item was let go")
 
         model.shown = true
 
         #expect(await waitUntilMedia { model.frames == 2 })
         #expect(pool.heldPlayer(for: "card") === player)
-        #expect(abs(player.currentTime().seconds - 3) < 0.1)
+        #expect(abs(player.avPlayer.currentTime().seconds - 3) < 0.1)
     }
 
     // Guards the `hasFailed` checks in `VideoPlayerPool.borrow` (R2-02): an AVPlayerItem never

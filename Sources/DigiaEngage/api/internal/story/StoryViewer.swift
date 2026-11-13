@@ -342,7 +342,7 @@ struct StoryViewer<Chrome: View>: View {
 
     @StateObject private var session: StoryViewerSession
     @State private var clock: StoryPageClock
-    @State private var player: (index: Int, player: AVPlayer)?
+    @State private var player: (index: Int, player: DigiaVideoPlayer)?
     @State private var applicationActive = UIApplication.shared.applicationState == .active
     @State private var held = false
     @State private var driver: StoryPlanDriver?
@@ -533,12 +533,12 @@ struct StoryViewer<Chrome: View>: View {
         if slowSource().isSlow != plannedSlow { drivePlan() }
         guard session.currentItem != nil else { return }
         if !clock.runsOwnTime, let current = player, current.index == session.currentIndex {
-            let item = current.player.currentItem
-            let duration = item?.duration.seconds ?? 0
+            let player = current.player.avPlayer
+            let duration = player.currentItem?.duration.seconds ?? 0
             if duration.isFinite, duration > 0 {
-                clock.videoMoved(to: current.player.currentTime().seconds / duration)
+                clock.videoMoved(to: player.currentTime().seconds / duration)
             }
-            clock.playerPlaying = current.player.timeControlStatus == .playing
+            clock.playerPlaying = player.timeControlStatus == .playing
         }
         if clock.tick(now: StoryPageTimer.clock, running: running) { next() }
     }

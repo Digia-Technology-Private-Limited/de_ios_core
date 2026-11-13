@@ -28,20 +28,6 @@ struct MediaVideoRuleTests {
         #expect(MediaVideoStill.canShow(thumbnailUrl: "{{thumb}}", blurHash: "LEHV"))
         #expect(MediaVideoStill.canShow(thumbnailUrl: "https://a.test/t.jpg", blurHash: nil))
     }
-
-    // R7-03: guards the CoreMedia -12938 line in `mediaCacheHTTPStatus`. The error shapes are the
-    // ones a simulator run logged for a stream playlist answered 404 and 500 (the error log was empty).
-    @Test("a stream playlist's 404 reports http_4xx and its 5xx reports nothing")
-    func streamNotFoundIsHttp4xx() {
-        func itemError(_ urlCode: Int, _ coreMediaCode: Int) -> NSError {
-            NSError(domain: NSURLErrorDomain, code: urlCode, userInfo: [
-                NSUnderlyingErrorKey: NSError(domain: "CoreMediaErrorDomain", code: coreMediaCode),
-            ])
-        }
-        #expect(mediaCacheHTTPStatus(in: itemError(-1100, -12938)) == 404)
-        #expect(mediaFailureCause(httpStatus: mediaCacheHTTPStatus(in: itemError(-1100, -12938))) == "http_4xx")
-        #expect(mediaCacheHTTPStatus(in: itemError(-1008, -16847)) == nil)
-    }
 }
 
 @MainActor
@@ -278,7 +264,8 @@ struct MediaVideoComponentTests {
         MediaOrigin.release(video)
     }
 
-    // Guards the `.fileFailedToParse` case in `mediaFailureCause(playerItem:)`: random bytes in an
+    // Guards the `.fileFailedToParse` case in the engine's `videoFailure(error:errorLogStatus:)` and
+    // the `.decode` mapping in `mediaFailureCause(videoFailure:)`: random bytes in an
     // mp4 fail AVFoundation with -11829 (underlying OSStatus -12848), which used to be unmapped,
     // so a corrupt video showed the failed box and reported nothing. Local file and range cache.
     @Test("a corrupt mp4 reports decode once", arguments: ["file", "http"])
@@ -342,15 +329,15 @@ struct MediaVideoComponentTests {
 
         let window = MediaStage.mount(AutoplayHost(model: model, url: video.absoluteString))
         defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "autoplay")?.currentItem?.status == .readyToPlay })
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "autoplay")?.avPlayer.currentItem?.status == .readyToPlay })
         let player = try #require(pool.heldPlayer(for: "autoplay"))
-        _ = await waitUntilMedia(timeout: 0.5) { player.rate > 0 }
-        #expect(player.rate == 0, "authored not to play")
+        _ = await waitUntilMedia(timeout: 0.5) { player.avPlayer.rate > 0 }
+        #expect(player.avPlayer.rate == 0, "authored not to play")
 
         model.autoplay = true
-        #expect(await waitUntilMedia { player.rate > 0 })
+        #expect(await waitUntilMedia { player.avPlayer.rate > 0 })
         model.autoplay = false
-        #expect(await waitUntilMedia { player.rate == 0 })
+        #expect(await waitUntilMedia { player.avPlayer.rate == 0 })
     }
 
     // Guards `MediaVideoPlayback.setAppActive`: going inactive pauses a playing video, and coming
@@ -368,20 +355,20 @@ struct MediaVideoComponentTests {
         let window = MediaStage.mount(MediaVideo(
             url: video.absoluteString, loop: true, pausesInBackground: true, playerKey: "background"))
         defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "background")?.rate ?? 0) > 0 })
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "background")?.avPlayer.rate ?? 0) > 0 })
         let player = try #require(pool.heldPlayer(for: "background"))
-        #expect(player.rate > 0)
+        #expect(player.avPlayer.rate > 0)
 
         resign()
-        #expect(await waitUntilMedia { player.rate == 0 }, "paused in the background")
+        #expect(await waitUntilMedia { player.avPlayer.rate == 0 }, "paused in the background")
         become()
-        #expect(await waitUntilMedia { player.rate > 0 }, "plays again in the foreground")
+        #expect(await waitUntilMedia { player.avPlayer.rate > 0 }, "plays again in the foreground")
 
         player.pause()  // the user's own pause
         resign()
         become()
-        _ = await waitUntilMedia(timeout: 0.5) { player.rate > 0 }
-        #expect(player.rate == 0, "a user's pause survives a trip to the background")
+        _ = await waitUntilMedia(timeout: 0.5) { player.avPlayer.rate > 0 }
+        #expect(player.avPlayer.rate == 0, "a user's pause survives a trip to the background")
     }
 
     @Test("a video that does not opt in keeps playing in the background")
@@ -394,10 +381,10 @@ struct MediaVideoComponentTests {
 
         let window = MediaStage.mount(MediaVideo(url: video.absoluteString, loop: true, playerKey: "no-background"))
         defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "no-background")?.rate ?? 0) > 0 })
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "no-background")?.avPlayer.rate ?? 0) > 0 })
         NotificationCenter.default.post(name: UIApplication.willResignActiveNotification, object: nil)
-        _ = await waitUntilMedia(timeout: 0.5) { pool.heldPlayer(for: "no-background")?.rate == 0 }
-        #expect((pool.heldPlayer(for: "no-background")?.rate ?? 0) > 0)
+        _ = await waitUntilMedia(timeout: 0.5) { pool.heldPlayer(for: "no-background")?.avPlayer.rate == 0 }
+        #expect((pool.heldPlayer(for: "no-background")?.avPlayer.rate ?? 0) > 0)
     }
 
     // Guards the `startMs` seek in `MediaVideoPlayback.open` / `seekToStartIfReady`, and that a nil
@@ -412,9 +399,9 @@ struct MediaVideoComponentTests {
 
         let first = MediaStage.mount(MediaVideo(
             url: video.absoluteString, autoplay: false, playerKey: "start", startMs: 3_000))
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "start")?.currentTime().seconds ?? 0) > 2.9 })
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "start")?.avPlayer.currentTime().seconds ?? 0) > 2.9 })
         let player = try #require(pool.heldPlayer(for: "start"))
-        #expect(abs(player.currentTime().seconds - 3) < 0.1, "at the authored start: \(player.currentTime().seconds)")
+        #expect(abs(player.avPlayer.currentTime().seconds - 3) < 0.1, "at the authored start: \(player.avPlayer.currentTime().seconds)")
         ComponentTestHost.unmount(first)
         #expect(await waitUntilMedia { pool.heldPlayer(for: "start") == nil })
 
@@ -425,7 +412,7 @@ struct MediaVideoComponentTests {
         _ = await waitUntilMedia(timeout: 0.4) { false }
 
         #expect(pool.heldPlayer(for: "start") === player, "the same player came back")
-        #expect(abs(player.currentTime().seconds - 3) < 0.1, "not moved: \(player.currentTime().seconds)")
+        #expect(abs(player.avPlayer.currentTime().seconds - 3) < 0.1, "not moved: \(player.avPlayer.currentTime().seconds)")
     }
 
     // Guards `evicted()` in `MediaVideoPlayback`: a holder whose player the pool takes back for a
@@ -515,7 +502,7 @@ struct MediaVideoComponentTests {
 
         let window = MediaStage.mount(MediaVideo(url: video.absoluteString, autoplay: false, playerKey: "manual"))
         defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "manual")?.currentItem?.status == .readyToPlay })
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "manual")?.avPlayer.currentItem?.status == .readyToPlay })
         let player = try #require(pool.heldPlayer(for: "manual"))
         player.play() // the native controls' play button
         _ = await waitUntilMedia(timeout: 0.3) { false }
@@ -526,7 +513,7 @@ struct MediaVideoComponentTests {
         #expect(pool.queuedKeys == ["manual", "older"], "the user's video waits ahead of the paused one")
 
         pool.giveBack(key: "page", player: taker, priority: .viewerPage)
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "manual")?.rate ?? 0) > 0 }, "back and playing")
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "manual")?.avPlayer.rate ?? 0) > 0 }, "back and playing")
     }
 
     // Guards `self.wantsPlaying = playing` in `MediaVideoPlayback.watchRate(of:)` (decision 2b,
@@ -544,7 +531,7 @@ struct MediaVideoComponentTests {
 
         let window = MediaStage.mount(MediaVideo(url: video.absoluteString, autoplay: true, playerKey: "paused"))
         defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "paused")?.rate ?? 0) > 0 })
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "paused")?.avPlayer.rate ?? 0) > 0 })
         let player = try #require(pool.heldPlayer(for: "paused"))
         player.pause() // the native controls' pause button
         _ = await waitUntilMedia(timeout: 0.3) { false }
@@ -555,9 +542,9 @@ struct MediaVideoComponentTests {
 
         pool.cancelWait(newer)
         pool.giveBack(key: "page", player: taker, priority: .viewerPage)
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "paused")?.currentItem?.status == .readyToPlay })
-        _ = await waitUntilMedia(timeout: 0.5) { (pool.heldPlayer(for: "paused")?.rate ?? 0) > 0 }
-        #expect(pool.heldPlayer(for: "paused")?.rate == 0, "back, and still paused")
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "paused")?.avPlayer.currentItem?.status == .readyToPlay })
+        _ = await waitUntilMedia(timeout: 0.5) { (pool.heldPlayer(for: "paused")?.avPlayer.rate ?? 0) > 0 }
+        #expect(pool.heldPlayer(for: "paused")?.avPlayer.rate == 0, "back, and still paused")
     }
 
     // Guards the at-end check in `MediaVideoPlayback.watchRate(of:)` (R2-02): the rate drops to 0
@@ -576,9 +563,9 @@ struct MediaVideoComponentTests {
         let window = MediaStage.mount(MediaVideo(
             url: video.absoluteString, autoplay: true, playerKey: "ended", startMs: 11_800))
         defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "ended")?.rate ?? 0) > 0 })
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "ended")?.avPlayer.rate ?? 0) > 0 })
         let player = try #require(pool.heldPlayer(for: "ended"))
-        #expect(await waitUntilMedia { player.rate == 0 && VideoPlayerPool.isFinished(player) }, "played to its end")
+        #expect(await waitUntilMedia { player.avPlayer.rate == 0 && VideoPlayerPool.isFinished(player.avPlayer) }, "played to its end")
         _ = await waitUntilMedia(timeout: 0.3) { false }
         let older = pool.wait(key: "older", url: page, priority: .onScreen, wantsPlay: false) {}
         defer { pool.cancelWait(older) }
@@ -604,8 +591,8 @@ struct MediaVideoComponentTests {
 
         let window = MediaStage.mount(MediaVideo(url: video.absoluteString, autoplay: true, playerKey: "resume"))
         defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "resume")?.currentTime().seconds ?? 0) >= 2 })
-        let playhead = try #require(pool.heldPlayer(for: "resume")).currentTime().seconds
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "resume")?.avPlayer.currentTime().seconds ?? 0) >= 2 })
+        let playhead = try #require(pool.heldPlayer(for: "resume")).avPlayer.currentTime().seconds
 
         let taker = try #require(pool.borrow(key: "page", url: page, priority: .viewerPage))
         #expect(pool.queuedKeys == ["resume"])
@@ -613,7 +600,7 @@ struct MediaVideoComponentTests {
 
         // From 0 it would need more than 2 s of playback to get there.
         #expect(await waitUntilMedia(timeout: 1.5) {
-            (pool.heldPlayer(for: "resume")?.currentTime().seconds ?? 0) >= playhead - 0.25
+            (pool.heldPlayer(for: "resume")?.avPlayer.currentTime().seconds ?? 0) >= playhead - 0.25
         }, "resumed near \(playhead) s")
     }
 
@@ -634,19 +621,19 @@ struct MediaVideoComponentTests {
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { pool.heldPlayer(for: "pip") != nil })
         let player = try #require(pool.heldPlayer(for: "pip"))
-        #expect(player.isMuted)
-        #expect(player.volume == 0.5, "set while muted")
+        #expect(player.avPlayer.isMuted)
+        #expect(player.avPlayer.volume == 0.5, "set while muted")
 
         model.muted = false
-        #expect(await waitUntilMedia { !player.isMuted })
-        #expect(player.volume == 0.5, "audible at the authored level")
+        #expect(await waitUntilMedia { !player.avPlayer.isMuted })
+        #expect(player.avPlayer.volume == 0.5, "audible at the authored level")
 
         // A freed player that last played at 0.8 is taken over by a new holder authored at 0.25.
         let reuse = MediaOrigin.url("volume-reuse.mp4")
         MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: reuse)
         let url = try #require(URL(string: reuse.absoluteString))
         let freed = try #require(pool.borrow(key: "story", url: url, priority: .onScreen))
-        freed.volume = 0.8
+        freed.avPlayer.volume = 0.8
         pool.giveBack(key: "story", player: freed, priority: .onScreen)
 
         let second = MediaStage.mount(VolumeHost(model: MuteModel(), url: reuse.absoluteString, key: "pip-2", volume: 0.25))
@@ -654,12 +641,13 @@ struct MediaVideoComponentTests {
         #expect(await waitUntilMedia { pool.heldPlayer(for: "pip-2") != nil })
 
         #expect(pool.heldPlayer(for: "pip-2") === freed, "the freed player was reused")
-        #expect(freed.volume == 0.25)
+        #expect(freed.avPlayer.volume == 0.25)
     }
 
     /// The players the window's layers draw.
     private static func drawnPlayers(in view: UIView) -> [AVPlayer] {
-        let own = (view.layer as? AVPlayerLayer)?.player.map { [$0] } ?? []
+        // A video view draws through the engine player's layer, a sublayer of its own.
+        let own = ([view.layer] + (view.layer.sublayers ?? [])).compactMap { ($0 as? AVPlayerLayer)?.player }
         return own + view.subviews.flatMap { drawnPlayers(in: $0) }
     }
 

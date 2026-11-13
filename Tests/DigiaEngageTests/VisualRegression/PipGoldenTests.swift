@@ -42,7 +42,7 @@ struct PipGoldenTests {
         // `readyToPlay` (which is what reveals the window) without the network, and autoplay
         // cannot move it. The window's `MediaVideo` joins the same pool.
         MediaServices.override(videoPool: VideoPlayerPool(
-            makeItem: { AVPlayerItem(url: $0) }, makePlayer: { NeverPlayingPlayer(playerItem: $0) }))
+            makeItem: { AVPlayerItem(url: $0) }, makePlayer: { DigiaVideoPlayer(player: NeverPlayingPlayer(playerItem: $0)) }))
         // Each cleanup is registered as soon as its state is set, so a failed `#require` below
         // cannot leave it for the next test, of this suite or another.
         defer { MediaServices.reset() }
@@ -229,4 +229,9 @@ struct PipGoldenTests {
 /// would put its progress and its play/pause glyph at a different point in every run.
 private final class NeverPlayingPlayer: AVPlayer {
     override func play() {}
+    /// The engine player starts playback by setting the rate.
+    override var rate: Float {
+        get { 0 }
+        set {}
+    }
 }

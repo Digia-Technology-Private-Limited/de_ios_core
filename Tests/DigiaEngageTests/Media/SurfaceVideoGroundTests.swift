@@ -41,8 +41,9 @@ struct SurfaceVideoGroundTests {
     }
 
     private static func playerLayers(in view: UIView) -> [AVPlayerLayer] {
-        let own = (view.layer as? AVPlayerLayer).map { [$0] } ?? []
-        return own + view.subviews.flatMap { playerLayers(in: $0) }
+        // A video view draws through the engine player's layer, a sublayer of its own.
+        let own = [view.layer] + (view.layer.sublayers ?? [])
+        return own.compactMap { $0 as? AVPlayerLayer } + view.subviews.flatMap { playerLayers(in: $0) }
     }
 
     // Fails if `videoGroundAfterFirstFrame: mediaVideoBackdrop` is dropped from the inline story's

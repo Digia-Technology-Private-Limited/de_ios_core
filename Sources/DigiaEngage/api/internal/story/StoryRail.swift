@@ -193,11 +193,11 @@ func nextStoryRailIndex(eligible: Set<Int>, afterIndex: Int?) -> Int? {
 @MainActor
 final class StoryHandover {
     let key: String
-    let player: AVPlayer
+    let player: DigiaVideoPlayer
     private let pool: VideoPlayerPool
     private var released = false
 
-    init(key: String, player: AVPlayer, pool: VideoPlayerPool) {
+    init(key: String, player: DigiaVideoPlayer, pool: VideoPlayerPool) {
         self.key = key
         self.player = player
         self.pool = pool

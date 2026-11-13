@@ -1017,7 +1017,7 @@ private struct FloaterProgressBarView: View {
             .frame(height: 2)
         }
         .onReceive(timer) { _ in
-            guard let player = orchestrator.player,
+            guard let player = orchestrator.player?.avPlayer,
                 let duration = player.currentItem?.duration.seconds,
                 duration.isFinite, duration > 0
             else {

@@ -113,7 +113,7 @@ struct CanvasVideoWaitBehaviourTests {
     }
 
     private func playing(_ pool: VideoPlayerPool, _ key: String) -> Bool {
-        (pool.heldPlayer(for: key)?.rate ?? 0) > 0
+        (pool.heldPlayer(for: key)?.avPlayer.rate ?? 0) > 0
     }
 
     private func start(

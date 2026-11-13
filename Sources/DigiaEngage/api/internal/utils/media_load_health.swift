@@ -1,7 +1,6 @@
-import AVFoundation
 import Foundation
 
-internal import DigiaMediaCache
+internal import DigiaVideoEngine
 internal import Lottie
 internal import SDWebImageSwiftUI
 
@@ -47,43 +46,16 @@ func mediaFailureCause(imageError: Error) -> String? {
     }
 }
 
-/// The cause for a failed `AVPlayerItem`, from its HTTP error log or its decode error.
-func mediaFailureCause(playerItem: AVPlayerItem) -> String? {
-    if let status = playerItem.errorLog()?.events.last?.errorStatusCode, (400..<500).contains(status) {
-        return "http_4xx"
+/// The cause for a failed video, from the engine's `VideoFailure`: only a 4xx and a decode
+/// failure are the author's to fix. Any other status (a 5xx, or a 2xx the range cache kept) and a
+/// network fault report nothing. It does not go through `mediaFailureCause(httpStatus:)`, which
+/// would turn a 2xx into `decode`.
+func mediaFailureCause(videoFailure: VideoFailure) -> String? {
+    switch videoFailure {
+    case let .http(status): (400..<500).contains(status) ? "http_4xx" : nil
+    case .decode: "decode"
+    case .network: nil
     }
-    // Through the range cache the HTTP status arrives as an underlying error of the item's.
-    if let status = mediaCacheHTTPStatus(in: playerItem.error) {
-        return mediaFailureCause(httpStatus: status) == "http_4xx" ? "http_4xx" : nil
-    }
-    // The codes that say the bytes are not a playable video. Random bytes in an mp4 fail with
-    // AVFoundation -11829 `.fileFailedToParse` over an OSStatus -12848. The server codes -11849
-    // `.failedToLoadMediaData` and -11850 `.serverIncorrectlyConfigured` stay unreported, as
-    // network faults do.
-    switch (playerItem.error as? AVError)?.code {
-    case .decodeFailed?, .fileFormatNotRecognized?, .fileFailedToParse?, .failedToParse?,
-         .undecodableMediaData?, .invalidSourceMedia?:
-        return "decode"
-    default: return nil
-    }
-}
-
-/// The HTTP status the range cache failed a loading request with, searched through the
-/// error's underlying errors. AVFoundation keeps the code but re-wraps it as an OSStatus, so a
-/// positive OSStatus in the HTTP range counts too (real OSStatus errors are negative).
-///
-/// A stream bypasses the cache, and its playlist's 4xx leaves the item's error log empty. Only a
-/// 404 is mapped: CoreMedia's "HTTP 404: File Not Found" (-12938). A 400, 403 or 410 arrives as
-/// another CoreMedia code (-16845, -12660, -12668) and stays silent, the same rule as Flutter iOS.
-func mediaCacheHTTPStatus(in error: Error?) -> Int? {
-    var current = error.map { $0 as NSError }
-    while let nsError = current {
-        if nsError.domain == MediaResourceLoader.httpStatusErrorDomain { return nsError.code }
-        if nsError.domain == NSOSStatusErrorDomain, (100..<600).contains(nsError.code) { return nsError.code }
-        if nsError.domain == "CoreMediaErrorDomain", nsError.code == -12938 { return 404 }
-        current = nsError.userInfo[NSUnderlyingErrorKey] as? NSError
-    }
-    return nil
 }
 
 /// Loads a remote Lottie or dotLottie file through Lottie's own cache.

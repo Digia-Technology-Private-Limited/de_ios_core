@@ -110,7 +110,7 @@ struct MediaVideo: View {
     var poolPriority: PoolPriority = .onScreen
     var startMs: Int64? = nil
     var onFirstFrame: (() -> Void)? = nil
-    var onReady: ((AVPlayer) -> Void)? = nil
+    var onReady: ((DigiaVideoPlayer) -> Void)? = nil
     var onLost: (() -> Void)? = nil
     /// Whether a refused or evicted Stage-2 borrow waits in the pool's queue. The story rail passes
     /// false: it keeps its own turn-skipping rule, so no card is retried by two mechanisms.
@@ -161,8 +161,8 @@ struct MediaVideo: View {
         // The new value comes in the argument: the closure may still see the old properties.
         .onChange(of: url) { open(url: $0, key: playerKey) }
         .onChange(of: playerKey) { open(url: url, key: $0) }
-        .onChange(of: muted) { playback.player?.isMuted = $0 }
-        .onChange(of: volume) { playback.player?.volume = $0 }
+        .onChange(of: muted) { playback.player?.setMuted($0) }
+        .onChange(of: volume) { playback.setVolume($0, muted: muted) }
         .onChange(of: autoplay) { playback.setPlaying($0) }
         .onChange(of: loop) { playback.loop = $0 }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
@@ -174,9 +174,9 @@ struct MediaVideo: View {
     }
 
     @ViewBuilder
-    private func playerView(_ player: AVPlayer) -> some View {
+    private func playerView(_ player: DigiaVideoPlayer) -> some View {
         if showControls {
-            MediaPlayerControllerView(player: player, gravity: fit.videoGravity) { playback.noteFirstFrame() }
+            MediaPlayerControllerView(player: player.avPlayer, gravity: fit.videoGravity) { playback.noteFirstFrame() }
         } else {
             MediaPlayerLayerView(player: player, gravity: fit.videoGravity) { playback.noteFirstFrame() }
         }
@@ -226,20 +226,26 @@ struct MediaVideoFailedBox: View {
     }
 }
 
-/// One showing's player: leases it from the pool, watches its item, and publishes first frame
-/// and failure. All on the main actor.
+/// One showing's player: leases it from the pool, observes it, and publishes first frame and
+/// failure. All on the main actor.
+///
+/// The engine player owns the end of the item, looping and the failure cause; this showing
+/// observes it for failure and end. The first frame stays per view (each view's layer or
+/// controller reports its own readiness), so a remounted or joined view gets its own.
 @MainActor
-final class MediaVideoPlayback: ObservableObject {
-    @Published private(set) var player: AVPlayer?
+final class MediaVideoPlayback: ObservableObject, DigiaVideoPlayerObserver {
+    @Published private(set) var player: DigiaVideoPlayer?
     @Published private(set) var firstFrameShown = false
     @Published private(set) var failed = false
     @Published private(set) var spinnerVisible = false
 
-    var loop = false
+    var loop = false {
+        didSet { player?.setLooping(loop) }
+    }
     private var onFirstFrame: (() -> Void)?
     private var onFailure: (() -> Void)?
     private var onEnded: (() -> Void)?
-    private var onReady: ((AVPlayer) -> Void)?
+    private var onReady: ((DigiaVideoPlayer) -> Void)?
     private var onLost: (() -> Void)?
 
     private var opened: (url: String, key: String?)?
@@ -263,10 +269,11 @@ final class MediaVideoPlayback: ObservableObject {
     /// The pool key of this node when the surface gives none (OD-15), stable while it is mounted.
     private let ownKey = "media-video-\(UUID().uuidString)"
     private var report: (String) -> Void = { _ in }
+    /// Only for the `startMs` seek, which waits for the item to be ready: the engine player
+    /// sends no ready event.
     private var statusObserver: NSKeyValueObservation?
     /// Hears a play or pause that did not come from `setPlaying` (the native controls).
     private var rateObserver: NSKeyValueObservation?
-    private var endObserver: NSObjectProtocol?
     private var spinnerTask: Task<Void, Never>?
     /// A `startMs` seek is waiting for the item to be ready, or on its way: the player starts once
     /// it lands, so it never plays on from where the pool left it, nor from 0.
@@ -281,7 +288,7 @@ final class MediaVideoPlayback: ObservableObject {
     /// Keeps the latest closures, so a parent passing new ones for the same URL is heard.
     func updateCallbacks(
         onFirstFrame: (() -> Void)?, onEnded: (() -> Void)?, onFailure: (() -> Void)?,
-        onReady: ((AVPlayer) -> Void)? = nil, onLost: (() -> Void)? = nil
+        onReady: ((DigiaVideoPlayer) -> Void)? = nil, onLost: (() -> Void)? = nil
     ) {
         self.onFirstFrame = onFirstFrame
         self.onEnded = onEnded
@@ -339,17 +346,19 @@ final class MediaVideoPlayback: ObservableObject {
         waitToken = nil
         let eviction = pool.observeEviction(of: request.key) { [weak self] in self?.evicted() }
         lease = (pool, request.key, request.priority, eviction, request.own)
-        player.isMuted = request.muted
-        player.volume = request.volume
-        player.actionAtItemEnd = .pause
+        player.add(observer: self)
+        // The volume first: setting it clears a mute.
+        player.setVolume(request.volume)
+        player.setMuted(request.muted)
+        player.setLooping(loop)
         // A surface's own start wins; otherwise a player whose idle item the pool let go, or whose
         // player Stage 1 took, resumes where it was.
         if let start = request.startMs ?? pool.takeResumeMs(for: request.key, player: player) {
             seekPending = true
             pendingStartMs = max(start, 0)
         }
-        if let item = player.currentItem { watch(item) }
-        watchRate(of: player)
+        if let item = player.avPlayer.currentItem { watch(item) }
+        watchRate(of: player.avPlayer)
         self.player = player
         seekToStartIfReady()
         setPlaying(wantsPlaying)
@@ -382,12 +391,14 @@ final class MediaVideoPlayback: ObservableObject {
     /// Issues the `startMs` seek once the item is ready (a seek on an item still loading lands
     /// nowhere), then starts the player if it should play.
     private func seekToStartIfReady() {
-        guard let player, let startMs = pendingStartMs, player.currentItem?.status == .readyToPlay else { return }
+        guard let video = player, let startMs = pendingStartMs, video.avPlayer.currentItem?.status == .readyToPlay
+        else { return }
+        let player = video.avPlayer
         pendingStartMs = nil
         player.seek(to: CMTime(value: startMs, timescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero) {
             [weak self] _ in
             Task { @MainActor in
-                guard let self, self.player === player, self.seekPending else { return }
+                guard let self, self.player === video, self.seekPending else { return }
                 self.seekPending = false
                 self.setPlaying(self.wantsPlaying)
             }
@@ -417,7 +428,7 @@ final class MediaVideoPlayback: ObservableObject {
         if !active {
             guard !appPaused else { return }
             appPaused = true
-            resumeWhenActive = (player?.rate ?? 0) > 0 || (seekPending && wantsPlaying)
+            resumeWhenActive = (player?.avPlayer.rate ?? 0) > 0 || (seekPending && wantsPlaying)
             player?.pause()
         } else {
             guard appPaused else { return }
@@ -441,10 +452,17 @@ final class MediaVideoPlayback: ObservableObject {
         spinnerVisible = false
     }
 
+    /// The volume, with the showing's mute kept (setting a volume clears a mute).
+    func setVolume(_ volume: Float, muted: Bool) {
+        player?.setVolume(volume)
+        player?.setMuted(muted)
+    }
+
     /// Gives the player back (or destroys it when the key was this node's own) and leaves the
     /// queue; nothing borrows again until the next `open`.
     private func releasePlayer() {
         let leaving = player
+        leaving?.remove(observer: self)
         unwatch()
         if let lease {
             lease.pool.removeEvictionObserver(lease.eviction, for: lease.key)
@@ -475,20 +493,22 @@ final class MediaVideoPlayback: ObservableObject {
 
     private func watch(_ item: AVPlayerItem) {
         statusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
-            switch item.status {
-            case .failed:
-                Task { @MainActor in self?.fail(cause: mediaFailureCause(playerItem: item)) }
-            case .readyToPlay:
-                Task { @MainActor in self?.seekToStartIfReady() }
-            default:
-                break
-            }
+            guard item.status == .readyToPlay else { return }
+            Task { @MainActor in self?.seekToStartIfReady() }
         }
-        endObserver = NotificationCenter.default.addObserver(
-            forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.noteEnded() }
-        }
+    }
+
+    // MARK: DigiaVideoPlayerObserver
+
+    func videoPlayer(_ player: DigiaVideoPlayer, didFail failure: VideoFailure, error: Error?) {
+        guard player === self.player else { return }
+        fail(cause: mediaFailureCause(videoFailure: failure))
+    }
+
+    /// Played to the end without looping: the engine player is paused there.
+    func videoPlayerDidEnd(_ player: DigiaVideoPlayer) {
+        guard player === self.player else { return }
+        onEnded?()
     }
 
     /// The user played or paused through the controls: the showing now wants to play, or not
@@ -496,12 +516,12 @@ final class MediaVideoPlayback: ObservableObject {
     /// whether it plays when it gets one back. `rate` is the asked-for rate (non-zero while it
     /// waits for data). Read on the next turn, so a pause the pool itself makes on a player it
     /// takes back (the showing no longer holds it) is not heard. The drop to 0 at the end of the
-    /// item (`actionAtItemEnd = .pause`, and each loop before `noteEnded` plays again) is not a
-    /// pause: an ended video still wants to play, as on Android.
+    /// item (the engine pauses there) is not a pause: an ended video still wants to play, as on
+    /// Android.
     private func watchRate(of player: AVPlayer) {
         rateObserver = player.observe(\.rate, options: [.new]) { [weak self] player, _ in
             Task { @MainActor in
-                guard let self, self.player === player, !self.failed, !self.seekPending,
+                guard let self, self.player?.avPlayer === player, !self.failed, !self.seekPending,
                       let request = self.request, request.waits else { return }
                 let playing = player.rate != 0
                 if !playing, VideoPlayerPool.isFinished(player) { return }
@@ -517,14 +537,13 @@ final class MediaVideoPlayback: ObservableObject {
         spinnerTask = nil
         statusObserver?.invalidate()
         statusObserver = nil
-        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
-        endObserver = nil
     }
 
     /// The pool took the player back for Stage 1, or re-pointed it at another URL for another
     /// holder: show the still again
     /// and wait in the pool's queue, or say so through `onLost` for a surface that doesn't wait.
     private func evicted() {
+        player?.remove(observer: self)
         unwatch()
         if let lease { lease.pool.removeEvictionObserver(lease.eviction, for: lease.key) }
         lease = nil
@@ -548,16 +567,6 @@ final class MediaVideoPlayback: ObservableObject {
         releasePlayer()
         if let cause { report(cause) }
         onFailure?()
-    }
-
-    private func noteEnded() {
-        guard let player else { return }
-        if loop {
-            player.seek(to: .zero)
-            player.play()
-        } else {
-            onEnded?()
-        }
     }
 }
 
@@ -602,10 +611,10 @@ private struct MediaPlayerControllerView: UIViewControllerRepresentable {
     }
 }
 
-/// The `AVPlayerLayer` a video draws into. Reports when the layer is ready to display, which is
-/// the first frame.
+/// The engine player's layer a video draws into (`makeLayer()`, one per view). Reports when
+/// that layer is ready to display, which is this view's first frame.
 private struct MediaPlayerLayerView: UIViewRepresentable {
-    let player: AVPlayer
+    let player: DigiaVideoPlayer
     let gravity: AVLayerVideoGravity
     let onReadyForDisplay: () -> Void
 
@@ -625,35 +634,44 @@ private struct MediaPlayerLayerView: UIViewRepresentable {
 }
 
 private final class PlayerLayerView: UIView {
-    override static var layerClass: AnyClass { AVPlayerLayer.self }
-
+    private var playerLayer: AVPlayerLayer?
+    private weak var video: DigiaVideoPlayer?
     private var readyObserver: NSKeyValueObservation?
     private var onReady: (() -> Void)?
 
-    private var playerLayer: AVPlayerLayer? { layer as? AVPlayerLayer }
-
-    private weak var boundItem: AVPlayerItem?
-
-    func apply(player: AVPlayer, gravity: AVLayerVideoGravity, onReady: @escaping () -> Void) {
-        guard let playerLayer else { return }
+    func apply(player: DigiaVideoPlayer, gravity: AVLayerVideoGravity, onReady: @escaping () -> Void) {
         self.onReady = onReady
-        playerLayer.videoGravity = gravity
-        // A pooled player re-pointed at a new URL keeps the old frame ready: re-attach it so
-        // readiness, and so the first frame, is the new item's.
-        guard playerLayer.player !== player || boundItem !== player.currentItem else { return }
-        boundItem = player.currentItem
-        playerLayer.player = nil
-        playerLayer.player = player
-        readyObserver = playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) {
-            [weak self] layer, _ in
-            guard layer.isReadyForDisplay else { return }
-            DispatchQueue.main.async { self?.onReady?() }
+        if video !== player || playerLayer == nil {
+            detach()
+            video = player
+            // The engine re-attaches its layers when the player is given another item, so
+            // readiness, and so the first frame, is the new item's.
+            let layer = player.makeLayer()
+            layer.frame = bounds
+            self.layer.addSublayer(layer)
+            playerLayer = layer
+            readyObserver = layer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
+                guard layer.isReadyForDisplay else { return }
+                DispatchQueue.main.async { self?.onReady?() }
+            }
         }
+        playerLayer?.videoGravity = gravity
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayer?.frame = bounds
+        CATransaction.commit()
     }
 
     func detach() {
         readyObserver?.invalidate()
         readyObserver = nil
         playerLayer?.player = nil
+        playerLayer?.removeFromSuperlayer()
+        playerLayer = nil
+        video = nil
     }
 }

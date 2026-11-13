@@ -1,6 +1,8 @@
 import AVFoundation
 import SwiftUI
 
+internal import DigiaVideoEngine
+
 /// One video story in the viewer (T8): the page's player through `MediaVideo` on the pool, at the
 /// on-screen rank, over the page's still.
 ///
@@ -19,7 +21,7 @@ struct VideoStoryPage: View {
     let startMs: Int64?
     /// What a letterbox shows after the first frame (OD-18).
     var groundAfterFirstFrame: Color = .black
-    let onReady: (AVPlayer) -> Void
+    let onReady: (DigiaVideoPlayer) -> Void
     let onEnded: () -> Void
     let onFailure: () -> Void
     let onLost: () -> Void

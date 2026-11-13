@@ -92,7 +92,7 @@ struct FloaterLeaseTests {
 
         try await waitFor("the window is drawn") { !orchestrator.awaitingMedia && orchestrator.activeRect != nil }
         try await waitFor("the video plays past \(playedPast) s") {
-            (orchestrator.player?.currentTime().seconds ?? 0) > playedPast && (orchestrator.player?.rate ?? 0) > 0
+            (orchestrator.player?.avPlayer.currentTime().seconds ?? 0) > playedPast && (orchestrator.player?.avPlayer.rate ?? 0) > 0
         }
         return Showing(orchestrator: orchestrator, pool: pool, window: window, mount: mount, key: key)
     }
@@ -135,7 +135,7 @@ struct FloaterLeaseTests {
 
         let layers = playerLayers(in: showing.window)
         #expect(layers.count == 1, "one video drawn")
-        #expect(layers.first?.player === leased, "the window draws the leased player")
+        #expect(layers.first?.player === leased.avPlayer, "the window draws the leased player")
         #expect(showing.pool.heldKeys == [showing.key])
         #expect(showing.pool.livePlayerCount == 1, "no second player")
     }
@@ -166,7 +166,7 @@ struct FloaterLeaseTests {
 
         let after = try #require(playerLayers(in: showing.window).first)
         #expect(after === layer, "the same layer back in the window")
-        #expect(after.player === orchestrator.player)
+        #expect(after.player === orchestrator.player?.avPlayer)
         #expect((after.player?.currentTime().seconds ?? 0) > before, "the video carried on")
         let rect = try #require(orchestrator.activeRect)
         #expect(rect.origin == CGPoint(x: 16, y: 16), "back in the corner it was dragged to: \(rect)")
@@ -184,7 +184,7 @@ struct FloaterLeaseTests {
         let token = try #require(orchestrator.state?.token)
         orchestrator.moveTo(FloaterFraction(x: 0, y: 0))
         let leased = try #require(orchestrator.player)
-        let before = leased.currentTime().seconds
+        let before = leased.avPlayer.currentTime().seconds
 
         setGeometry(Self.landscape)
         showing.window.frame = CGRect(origin: .zero, size: Self.landscape)
@@ -192,14 +192,14 @@ struct FloaterLeaseTests {
         try await waitFor("the window is sized for the landscape screen") {
             abs((orchestrator.activeRect?.width ?? 0) - Self.landscape.width * 0.35) < 0.5
         }
-        try await waitFor("the video carried on") { leased.currentTime().seconds > before }
+        try await waitFor("the video carried on") { leased.avPlayer.currentTime().seconds > before }
 
         #expect(orchestrator.state?.token == token, "the same showing")
         let rect = try #require(orchestrator.activeRect)
         #expect(rect.origin == CGPoint(x: 16, y: 16), "top-left of the landscape screen: \(rect)")
         #expect(abs(rect.width - Self.landscape.width * 0.35) < 0.5, "sized for the new screen")
-        #expect(playerLayers(in: showing.window).first?.player === leased)
-        #expect(leased.currentTime().seconds > before, "not restarted")
+        #expect(playerLayers(in: showing.window).first?.player === leased.avPlayer)
+        #expect(leased.avPlayer.currentTime().seconds > before, "not restarted")
     }
 
     // Fails if a remount restarts the video (N2): floater_media_view.swift
@@ -215,13 +215,13 @@ struct FloaterLeaseTests {
         showing.mount.shown = false
         try await Task.sleep(nanoseconds: 300_000_000)
         #expect(playerLayers(in: showing.window).isEmpty, "the overlay went")
-        let before = leased.currentTime().seconds
+        let before = leased.avPlayer.currentTime().seconds
         showing.mount.shown = true
         try await waitFor("the window is drawn again") { !playerLayers(in: showing.window).isEmpty }
         try await Task.sleep(nanoseconds: 300_000_000)
 
         let player = try #require(playerLayers(in: showing.window).first?.player)
-        #expect(player === leased, "the same player")
+        #expect(player === leased.avPlayer, "the same player")
         #expect(player.currentTime().seconds >= before, "resumed, not restarted at 0")
         #expect(showing.pool.livePlayerCount == 1)
     }
@@ -289,14 +289,14 @@ struct FloaterLeaseTests {
         let showing = try await show(
             [(["collapsed", "exitAnimation"], ["type": exit])], cleanups: &cleanups)
         let leased = try #require(showing.orchestrator.player)
-        #expect(leased.rate > 0, "it was playing")
+        #expect(leased.avPlayer.rate > 0, "it was playing")
 
         showing.orchestrator.dismiss(.userClose)
 
-        #expect(leased.rate == 0, "paused as the dismissal begins, before the window lets go")
+        #expect(leased.avPlayer.rate == 0, "paused as the dismissal begins, before the window lets go")
         try await waitFor("the showing ends") { showing.orchestrator.state == nil }
         try await waitFor("the window lets go") { showing.pool.heldKeys.isEmpty }
-        #expect(leased.rate == 0, "and it stays paused once the lease is back in the pool")
+        #expect(leased.avPlayer.rate == 0, "and it stays paused once the lease is back in the pool")
     }
 
     // Fails if a video that cannot load is shown anyway or keeps its player (OD-4):
@@ -331,8 +331,8 @@ struct FloaterLeaseTests {
         let showing = try await show(
             [(["media", "loop"], false), (["behavior", "onMediaEnd"], "dismiss")], cleanups: &cleanups)
         let player = try #require(showing.orchestrator.player)
-        let duration = try #require(player.currentItem?.duration.seconds)
-        await player.seek(to: CMTime(seconds: duration - 0.6, preferredTimescale: 600))
+        let duration = try #require(player.avPlayer.currentItem?.duration.seconds)
+        await player.avPlayer.seek(to: CMTime(seconds: duration - 0.6, preferredTimescale: 600))
 
         try await waitFor("the showing ends at the video's end", timeout: 6) { showing.orchestrator.state == nil }
     }
@@ -345,11 +345,11 @@ struct FloaterLeaseTests {
         defer { cleanups.reversed().forEach { $0() } }
         let showing = try await show([(["media", "loop"], true)], cleanups: &cleanups)
         let player = try #require(showing.orchestrator.player)
-        let duration = try #require(player.currentItem?.duration.seconds)
-        await player.seek(to: CMTime(seconds: duration - 0.6, preferredTimescale: 600))
+        let duration = try #require(player.avPlayer.currentItem?.duration.seconds)
+        await player.avPlayer.seek(to: CMTime(seconds: duration - 0.6, preferredTimescale: 600))
 
         try await waitFor("the video starts over", timeout: 6) {
-            player.currentTime().seconds < 1 && player.rate > 0
+            player.avPlayer.currentTime().seconds < 1 && player.avPlayer.rate > 0
         }
         #expect(showing.orchestrator.isShowing)
     }

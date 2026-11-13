@@ -98,7 +98,7 @@ struct PipSurfaceBehaviourTests {
         try await sdk.waitForPipWindow()
         #expect(sdk.pip.muted, "authored startMuted")
         let player = try #require(sdk.pip.player)
-        #expect(player.isMuted)
+        #expect(player.avPlayer.isMuted)
 
         // The mute pill sits bottom-right, whatever `mutePlacement` says: iOS fixes the corners.
         let rect = try sdk.pipRect()
@@ -106,13 +106,13 @@ struct PipSurfaceBehaviourTests {
         try sdk.tapFloater(at: mute)
 
         #expect(!sdk.pip.muted)
-        try await sdk.waitUntil("the window unmutes its video") { !player.isMuted }
-        #expect(player.volume > 0)
+        try await sdk.waitUntil("the window unmutes its video") { !player.avPlayer.isMuted }
+        #expect(player.avPlayer.volume > 0)
 
         try sdk.tapFloater(at: mute)
 
         #expect(sdk.pip.muted)
-        try await sdk.waitUntil("the window mutes its video") { player.isMuted }
+        try await sdk.waitUntil("the window mutes its video") { player.avPlayer.isMuted }
     }
 
     // MARK: - pip_media_expand
@@ -287,7 +287,7 @@ struct PipSurfaceBehaviourTests {
         try sdk.tapFloater(at: pill[0])
 
         try await sdk.waitUntil("the video pauses", timeout: 6) { !sdk.pip.isPlaying }
-        #expect(sdk.pip.player?.rate == 0)
+        #expect(sdk.pip.player?.avPlayer.rate == 0)
 
         try sdk.tapFloater(at: pill[0])
 

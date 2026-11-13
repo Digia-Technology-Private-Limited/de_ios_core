@@ -198,8 +198,8 @@ struct StoryPageTests {
         let keySecond = storyPoolKey(namespace: MediaStage.campaign, index: 1)
         #expect(await waitUntilMedia { pool.heldPlayer(for: keySecond) != nil }, "page 0 showed its first frame, so page 1 is held")
         let player = try #require(pool.heldPlayer(for: keyFirst))
-        let duration = try #require(player.currentItem?.duration.seconds)
-        await player.seek(to: CMTime(seconds: duration - 0.4, preferredTimescale: 600))
+        let duration = try #require(player.avPlayer.currentItem?.duration.seconds)
+        await player.avPlayer.seek(to: CMTime(seconds: duration - 0.4, preferredTimescale: 600))
 
         // Page 0's video ends and the viewer moves to page 1, whose video never shows a frame.
         #expect(await waitUntilMedia { pool.priority(of: keySecond) == .viewerPage }, "the viewer moved on")
@@ -594,7 +594,7 @@ struct StoryPageTests {
         // Its 400 ms window ends, and it plays again from the top: the playhead jumps back.
         var peak = 0.0, jumpedBack = false
         _ = await waitUntilMedia(timeout: 6) {
-            let now = player.currentTime().seconds
+            let now = player.avPlayer.currentTime().seconds
             if now < peak - 0.2 { jumpedBack = true }
             peak = max(peak, now)
             return jumpedBack

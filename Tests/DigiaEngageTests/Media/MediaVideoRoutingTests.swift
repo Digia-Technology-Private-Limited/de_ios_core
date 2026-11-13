@@ -198,16 +198,16 @@ struct MediaVideoRoutingTests {
         #expect(await waitUntilMedia { pool.heldKeys.count == 2 })
         let players = pool.heldKeys.sorted().compactMap { pool.heldPlayer(for: $0) }
         let (ending, other) = (players[0], players[1])
-        #expect(await waitUntilMedia { players.allSatisfy { $0.currentTime().seconds > 0.3 } }, "both are playing")
+        #expect(await waitUntilMedia { players.allSatisfy { $0.avPlayer.currentTime().seconds > 0.3 } }, "both are playing")
         // Exact, so the neighbour sits mid-video rather than snapping to the last keyframe, which is
         // near the end.
-        #expect(await other.seek(
+        #expect(await other.avPlayer.seek(
             to: CMTime(seconds: 4, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero))
-        let duration = try #require(ending.currentItem?.duration.seconds)
-        #expect(await ending.seek(to: CMTime(seconds: duration - 0.4, preferredTimescale: 600)))
+        let duration = try #require(ending.avPlayer.currentItem?.duration.seconds)
+        #expect(await ending.avPlayer.seek(to: CMTime(seconds: duration - 0.4, preferredTimescale: 600)))
 
-        #expect(await waitUntilMedia(timeout: 6) { ending.currentTime().seconds < 2 && ending.rate > 0 }, "the ended one started over")
-        #expect(other.currentTime().seconds >= 4, "its neighbour carried on from 4 s: \(other.currentTime().seconds)")
+        #expect(await waitUntilMedia(timeout: 6) { ending.avPlayer.currentTime().seconds < 2 && ending.avPlayer.rate > 0 }, "the ended one started over")
+        #expect(other.avPlayer.currentTime().seconds >= 4, "its neighbour carried on from 4 s: \(other.avPlayer.currentTime().seconds)")
     }
 
     // Guards `key ?? ownKey` in `MediaVideoPlayback.open` and the `own` discard in `close` (OD-15):

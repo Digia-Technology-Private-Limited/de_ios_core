@@ -124,7 +124,7 @@ struct StoryVideoSurface: View {
     var groundAfterFirstFrame: Color = .black
     var bare = false
     let startMs: Int64?
-    var onReady: (AVPlayer) -> Void = { _ in }
+    var onReady: (DigiaVideoPlayer) -> Void = { _ in }
     var onEnded: () -> Void = {}
     var onFailure: () -> Void = {}
     var onLost: () -> Void = {}
@@ -189,7 +189,7 @@ private struct StoryThumbnailVideo: View {
     let onSkipped: @MainActor () -> Void
 
     @State private var driver: Task<Void, Never>?
-    @State private var player: AVPlayer?
+    @State private var player: DigiaVideoPlayer?
     @State private var startMs: Int64 = 0
     @State private var startRevalidated = false
     @State private var retriedAtZero = false
@@ -259,8 +259,9 @@ private struct StoryThumbnailVideo: View {
         onWindowCompleted()
     }
 
-    private func startDriver(_ player: AVPlayer) {
+    private func startDriver(_ video: DigiaVideoPlayer) {
         stopDriver()
+        let player = video.avPlayer
         driver = Task { @MainActor in
             var lastPosition = milliseconds(player.currentTime())
             var lastProgressAt = ProcessInfo.processInfo.systemUptime
@@ -275,7 +276,7 @@ private struct StoryThumbnailVideo: View {
                     if startMs > 0, startMs >= duration, !retriedAtZero {
                         retriedAtZero = true
                         startMs = 0
-                        seek(player, to: 0, thenPlay: true)
+                        seek(video, to: 0, thenPlay: true)
                         lastProgressAt = ProcessInfo.processInfo.systemUptime
                         continue
                     }
@@ -291,7 +292,7 @@ private struct StoryThumbnailVideo: View {
                         // A start the video never reaches (deeper than its frames): from the top.
                         retriedAtZero = true
                         startMs = 0
-                        seek(player, to: 0, thenPlay: true)
+                        seek(video, to: 0, thenPlay: true)
                         lastProgressAt = now
                         continue
                     }
@@ -308,12 +309,12 @@ private struct StoryThumbnailVideo: View {
         }
     }
 
-    private func seek(_ player: AVPlayer, to ms: Int64, thenPlay: Bool) {
+    private func seek(_ video: DigiaVideoPlayer, to ms: Int64, thenPlay: Bool) {
         seeking = true
-        player.seek(to: CMTime(value: ms, timescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+        video.avPlayer.seek(to: CMTime(value: ms, timescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero) { _ in
             Task { @MainActor in
                 seeking = false
-                if thenPlay, !gone { player.play() }
+                if thenPlay, !gone { video.play() }
             }
         }
     }
