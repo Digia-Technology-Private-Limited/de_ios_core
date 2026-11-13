@@ -54,7 +54,7 @@ func mediaFailureCause(videoFailure: VideoFailure) -> String? {
     switch videoFailure {
     case let .http(status): (400..<500).contains(status) ? "http_4xx" : nil
     case .decode: "decode"
-    case .network: nil
+    case .network, .decoderBusy: nil
     }
 }
 

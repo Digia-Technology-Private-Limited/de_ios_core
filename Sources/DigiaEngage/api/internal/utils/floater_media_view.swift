@@ -34,10 +34,7 @@ struct FloaterMediaView: View {
                 // it (the expanded background), as on `main`.
                 bare: true,
                 playerKey: videoPlayerKey,
-                poolPriority: .onScreen,
-                // The orchestrator drives the held player: the window never waits for another one
-                // (OD-24).
-                waitsForPlayer: false
+                poolPriority: .onScreen
             )
         case .lottie:
             lottieView

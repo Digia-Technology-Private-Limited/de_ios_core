@@ -88,10 +88,11 @@ let mediaVideoBackdrop = Color(red: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 
 ///
 /// Story surfaces (T8) also use: `startMs`, where an opened player is put (nil keeps the pool's
 /// playhead, so a remount resumes); `onReady`, the player at its first frame (the story reads
-/// its playhead); `onLost`, a keyed borrow that was refused or a holder that was evicted, which
-/// says nothing about the video. `onLost` fires only for a surface that does not wait
-/// (`waitsForPlayer` false, the story rail) or a Stage-1 one: every other video refused at the
-/// ceiling, or evicted, waits in the pool's queue on its still and plays when a player frees up.
+/// its playhead); `onLost`, kept for the story surfaces, which the engine no longer calls (a
+/// taken video shows its still until shown again or tapped).
+///
+/// `replaceOnDecoderBusy` (default true): on a decoder-busy failure the video takes another
+/// video's player; false shows its still instead.
 struct MediaVideo: View {
     let url: String
     var fit: MediaFit = .cover
@@ -112,9 +113,7 @@ struct MediaVideo: View {
     var onFirstFrame: (() -> Void)? = nil
     var onReady: ((DigiaVideoPlayer) -> Void)? = nil
     var onLost: (() -> Void)? = nil
-    /// Whether a refused or evicted Stage-2 borrow waits in the pool's queue. The story rail passes
-    /// false: it keeps its own turn-skipping rule, so no card is retried by two mechanisms.
-    var waitsForPlayer: Bool = true
+    var replaceOnDecoderBusy: Bool = true
     var onEnded: (() -> Void)? = nil
     var onFailure: (() -> Void)? = nil
     /// How long a bare backdrop waits for the first frame before showing a spinner. Tests
@@ -138,7 +137,7 @@ struct MediaVideo: View {
     func spec(url: String, key: String?) -> VideoShowingSpec {
         VideoShowingSpec(
             url: url, key: key, priority: poolPriority, loop: loop, muted: muted, volume: volume,
-            autoplay: autoplay, waitsForPlayer: waitsForPlayer, startMs: startMs,
+            autoplay: autoplay, replaceOnDecoderBusy: replaceOnDecoderBusy, startMs: startMs,
             hasStill: bare || MediaVideoStill.canShow(thumbnailUrl: thumbnailUrl, blurHash: blurHash))
     }
 
@@ -244,7 +243,6 @@ private struct MediaVideoContent: View {
         showing.onFirstFrame = video.onFirstFrame
         showing.onReady = video.onReady
         showing.onEnded = video.onEnded
-        showing.onGiveUp = video.onLost
         let onFailure = video.onFailure
         showing.onFailure = { [report] failure in
             let cause: String? = switch failure {

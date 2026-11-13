@@ -28,7 +28,7 @@ struct MediaServices: Sendable {
     static let sdk: MediaServices = {
         let loader = MediaResourceLoader(store: MediaRangeCacheStore.shared())
         let pool = VideoPlayerPool(
-            onCeilingRefused: reportVideoPoolCeiling,
+            onDecoderBusy: reportVideoDecoderBusy,
             makeItem: { mediaVideoItem(for: $0, loader: loader) },
             releaseItem: { loader.cancelLoading(for: $0) },
             log: { mediaServicesLog.d($0) })
@@ -98,20 +98,21 @@ struct MediaServices: Sendable {
 
 private let mediaServicesLog = DigiaLogger()
 
-/// OD-24: a video on screen got no player because the phone is at its live-player ceiling.
-/// Campaignless, so the health sink sends it once per session; it tunes the ceilings. iOS has no
-/// media performance class, so it sends "0".
+/// A video's player failed because no hardware decoder was free (`replaced`: another video's
+/// player was taken). Campaignless, so the health sink sends it once per session. iOS has no media
+/// performance class, so it sends "0".
 @MainActor
-private func reportVideoPoolCeiling() {
+private func reportVideoDecoderBusy(livePlayers: Int, replaced: Bool) {
     let deviceClass = deviceClassFor(physicalMemoryBytes: ProcessInfo.processInfo.physicalMemory)
     mediaServicesLog.w(
-        "Video player ceiling reached; a video shows its still",
+        "Video decoder busy; a video \(replaced ? "took another's player" : "shows its still")",
         stage: .render,
-        reason: TimelineReason.videoPoolCeiling,
+        reason: TimelineReason.videoDecoderBusy,
         extras: [
             "device_class": "\(deviceClass)",
             "media_performance_class": "0",
-            "ceiling": "\(livePlayerCeiling(poolSize: maxPoolPlayers(deviceClass: deviceClass)))",
+            "live_players": "\(livePlayers)",
+            "replaced": "\(replaced)",
         ])
 }
 

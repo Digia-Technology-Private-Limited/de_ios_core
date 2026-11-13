@@ -380,12 +380,9 @@ final class FloaterOrchestrator: ObservableObject {
         let config = active.config
         let pool = MediaServices.current.videoPool
         let key = floaterVideoPlayerKey(active)
-        // On screen: a full pool makes an extra player rather than refuse (OD-1), so this
-        // only fails to return a player if the pool itself changed its rule.
-        guard let p = pool.borrow(key: key, url: parsed, priority: .onScreen) else {
-            abandonMedia(token: token, reason: "no player")
-            return
-        }
+        // On screen: a full pool makes an extra player rather than refuse, and there is no live
+        // player ceiling.
+        let p = pool.borrow(key: key, url: parsed, priority: .onScreen)
         lease = (pool, key)
         // The starting spec for the warm-up. Once the window shows, its `MediaVideo` owns mute,
         // volume and loop; this orchestrator never writes them again.

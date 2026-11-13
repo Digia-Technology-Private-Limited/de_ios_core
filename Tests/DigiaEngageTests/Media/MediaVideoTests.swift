@@ -60,24 +60,6 @@ private struct AutoplayHost: View {
     }
 }
 
-@MainActor
-private final class UrlModel: ObservableObject {
-    @Published var url: String
-    init(_ url: String) { self.url = url }
-}
-
-private struct RailLikeHost: View {
-    @ObservedObject var model: UrlModel
-    let lost: CallCount
-
-    var body: some View {
-        // The rail does not wait in the pool's queue: an evicted card says so through `onLost`.
-        MediaVideo(
-            url: model.url, playerKey: "rail", poolPriority: .onScreen, onLost: { lost.value += 1 },
-            waitsForPlayer: false)
-    }
-}
-
 extension RenderedUITests {
 @MainActor
 @Suite("MediaVideo wrapper", .serialized, .tags(.media, .component))
@@ -336,101 +318,93 @@ struct MediaVideoComponentTests {
         #expect((pool.heldPlayer(for: "no-background")?.avPlayer.rate ?? 0) > 0)
     }
 
-    /// A pool with ceiling 1 reading through the fake origin, for every video the test draws.
+    /// A pool of one player reading through the fake origin, for every video the test draws.
     private func onePlayerPool() -> VideoPlayerPool {
         let loader = MediaServices.current.videoLoader
-        let pool = VideoPlayerPool(maxPlayers: 1, ceiling: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
+        let pool = VideoPlayerPool(
+            maxPlayers: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) },
+            releaseItem: { loader.cancelLoading(for: $0) })
         MediaServices.override(videoPool: pool)
         return pool
     }
 
-    // Guards `self.wantsPlaying = playing` in `MediaVideoPlayback.watchRate(of:)` (decision 2b,
-    // R1-10, R2-01): a video authored not to play that the user starts through the controls wants
-    // to play. When Stage 1 takes its player it waits ahead of an older paused waiter, and it plays
-    // when it gets a player back.
-    @Test("a video the user started through the controls waits as playing and plays again after Stage 1")
-    func userStartedPlayWaitsAsPlaying() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let pool = onePlayerPool()
-        let video = MediaOrigin.url("user-play.mp4")
-        let page = MediaOrigin.url("user-play-page.mp4")
-        for url in [video, page] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
-
-        let window = MediaStage.mount(MediaVideo(url: video.absoluteString, autoplay: false, playerKey: "manual"))
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "manual")?.avPlayer.currentItem?.status == .readyToPlay })
-        let player = try #require(pool.heldPlayer(for: "manual"))
-        player.avPlayer.play() // the native controls' play button
-        _ = await waitUntilMedia(timeout: 0.3) { false }
-        let older = pool.wait(key: "older", url: page, priority: .onScreen, wantsPlay: false) {}
-        defer { pool.cancelWait(older) }
-
-        let taker = try #require(pool.borrow(key: "page", url: page, priority: .viewerPage))
-        #expect(pool.queuedKeys == ["manual", "older"], "the user's video waits ahead of the paused one")
-
-        pool.giveBack(key: "page", player: taker, priority: .viewerPage)
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "manual")?.avPlayer.rate ?? 0) > 0 }, "back and playing")
+    /// A playing video under `key`, and a second one under "busy" whose bytes never arrive, so its
+    /// item is not ready when the OS says no decoder is free.
+    private func mountPlayingAndBusy(
+        _ pool: VideoPlayerPool, replaceOnDecoderBusy: Bool = true, failed: CallCount = CallCount()
+    ) async throws -> (playing: UIWindow, busy: UIWindow, busyPlayer: DigiaVideoPlayer, playingURL: URL) {
+        let playing = MediaOrigin.url("playing.mp4")
+        let stuck = MediaOrigin.url("busy.mp4")
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: playing)
+        MediaOrigin.set(.status(200, Data()), for: stuck, held: true)
+        let first = MediaStage.mount(MediaVideo(url: playing.absoluteString, autoplay: true, playerKey: "playing"))
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "playing")?.avPlayer.currentTime().seconds ?? 0) > 0.5 })
+        let second = MediaStage.mount(MediaVideo(
+            url: stuck.absoluteString, autoplay: true, playerKey: "busy",
+            replaceOnDecoderBusy: replaceOnDecoderBusy, onFailure: { failed.value += 1 }))
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "busy") != nil })
+        return (first, second, try #require(pool.heldPlayer(for: "busy")), playing)
     }
 
-    // Guards `self.wantsPlaying = playing` in `MediaVideoPlayback.watchRate(of:)` (decision 2b,
-    // R1-10, R2-01): an autoplay video the user paused through the controls does not want to play.
-    // When Stage 1 takes its player it waits behind a waiter that wants to play, and it stays
-    // paused when it gets a player back.
-    @Test("an autoplay video the user paused waits as paused and stays paused after Stage 1")
-    func userPausedAutoplayWaitsAsPaused() async throws {
+    // Guards `replaceOnDecoderBusy` reaching the showing's spec in `MediaVideo.spec` (decoder-driven
+    // capacity, D3, D4): a video whose decoder is busy takes the playing video's player, which shows
+    // its still, with no failed box and no `onFailure` on either, and does not take one back by itself.
+    @Test("a decoder-busy video takes another's player, which shows its still and does not fail")
+    func decoderBusyReplacesAndTheTakenShowsItsStill() async throws {
         install()
         defer { MediaOrigin.end() }
         let pool = onePlayerPool()
-        let video = MediaOrigin.url("user-pause.mp4")
-        let page = MediaOrigin.url("user-pause-page.mp4")
-        for url in [video, page] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
+        let failed = CallCount()
+        let (first, second, busyPlayer, _) = try await mountPlayingAndBusy(pool, failed: failed)
+        defer { ComponentTestHost.unmount(first); ComponentTestHost.unmount(second) }
 
-        let window = MediaStage.mount(MediaVideo(url: video.absoluteString, autoplay: true, playerKey: "paused"))
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "paused")?.avPlayer.rate ?? 0) > 0 })
-        let player = try #require(pool.heldPlayer(for: "paused"))
-        player.avPlayer.pause() // the native controls' pause button
-        _ = await waitUntilMedia(timeout: 0.3) { false }
-        let newer = pool.wait(key: "newer", url: page, priority: .onScreen, wantsPlay: true) {}
+        simulateDecoderBusy(busyPlayer)
 
-        let taker = try #require(pool.borrow(key: "page", url: page, priority: .viewerPage))
-        #expect(pool.queuedKeys == ["newer", "paused"], "the paused video waits behind one that wants to play")
-
-        pool.cancelWait(newer)
-        pool.giveBack(key: "page", player: taker, priority: .viewerPage)
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "paused")?.avPlayer.currentItem?.status == .readyToPlay })
-        _ = await waitUntilMedia(timeout: 0.5) { (pool.heldPlayer(for: "paused")?.avPlayer.rate ?? 0) > 0 }
-        #expect(pool.heldPlayer(for: "paused")?.avPlayer.rate == 0, "back, and still paused")
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "playing") == nil }, "the playing video was taken")
+        #expect(pool.heldPlayer(for: "busy") != nil, "the busy video keeps a player")
+        _ = await waitUntilMedia(timeout: 0.8) { pool.heldPlayer(for: "playing") != nil }
+        #expect(pool.heldPlayer(for: "playing") == nil, "the taken video does not take one back")
+        #expect(failed.value == 0, "decoder busy is not a failure")
     }
 
-    // Guards the at-end check in `MediaVideoPlayback.watchRate(of:)` (R2-02): the rate drops to 0
-    // when a video reaches its end, and that is not a pause. An ended autoplay video still wants to
-    // play, so when Stage 1 takes its player it waits ahead of an older paused waiter.
-    @Test("an autoplay video that reached its end waits as playing when Stage 1 takes its player")
-    func endedAutoplayWaitsAsPlaying() async throws {
+    // Guards `replaceOnDecoderBusy: replaceOnDecoderBusy` in `MediaVideo.spec`: with the prop off a
+    // decoder-busy video takes nobody's player. It shows its still, and the playing video plays on.
+    @Test("with replaceOnDecoderBusy off a decoder-busy video takes nobody's player")
+    func decoderBusyWithThePropOffTakesNobody() async throws {
         install()
         defer { MediaOrigin.end() }
         let pool = onePlayerPool()
-        let video = MediaOrigin.url("ended.mp4")
-        let page = MediaOrigin.url("ended-page.mp4")
-        for url in [video, page] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
+        let failed = CallCount()
+        let (first, second, busyPlayer, _) = try await mountPlayingAndBusy(pool, replaceOnDecoderBusy: false, failed: failed)
+        defer { ComponentTestHost.unmount(first); ComponentTestHost.unmount(second) }
 
-        // movie.mp4 is 12.6 s: from 11.8 s it ends in under a second.
-        let window = MediaStage.mount(MediaVideo(
-            url: video.absoluteString, autoplay: true, playerKey: "ended", startMs: 11_800))
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "ended")?.avPlayer.rate ?? 0) > 0 })
-        let player = try #require(pool.heldPlayer(for: "ended"))
-        #expect(await waitUntilMedia { player.avPlayer.rate == 0 && VideoPlayerPool.isFinished(player.avPlayer) }, "played to its end")
-        _ = await waitUntilMedia(timeout: 0.3) { false }
-        let older = pool.wait(key: "older", url: page, priority: .onScreen, wantsPlay: false) {}
-        defer { pool.cancelWait(older) }
+        simulateDecoderBusy(busyPlayer)
 
-        let taker = try #require(pool.borrow(key: "page", url: page, priority: .viewerPage))
-        defer { pool.giveBack(key: "page", player: taker, priority: .viewerPage) }
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "busy") == nil }, "the busy video shows its still")
+        #expect((pool.heldPlayer(for: "playing")?.avPlayer.rate ?? 0) > 0, "the playing video plays on")
+        #expect(failed.value == 0, "decoder busy is not a failure")
+    }
 
-        #expect(pool.queuedKeys == ["ended", "older"], "the ended video still wants to play")
+    // Guards the re-borrow on show in `VideoShowing` as `MediaVideo` drives it (D4, decision 2a): a
+    // taken video that is shown again plays again from its kept playhead, not from the start.
+    @Test("a taken video shown again plays from where it was")
+    func takenVideoResumesWhenShownAgain() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let pool = onePlayerPool()
+        let (first, second, busyPlayer, playing) = try await mountPlayingAndBusy(pool)
+        defer { ComponentTestHost.unmount(second) }
+        let keptAt = try #require(pool.heldPlayer(for: "playing")).avPlayer.currentTime().seconds
+        simulateDecoderBusy(busyPlayer)
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "playing") == nil })
+        ComponentTestHost.unmount(first)
+
+        let again = MediaStage.mount(MediaVideo(url: playing.absoluteString, autoplay: true, playerKey: "playing"))
+        defer { ComponentTestHost.unmount(again) }
+
+        #expect(await waitUntilMedia { (pool.heldPlayer(for: "playing")?.avPlayer.rate ?? 0) > 0 }, "plays again")
+        let resumed = try #require(pool.heldPlayer(for: "playing")).avPlayer.currentTime().seconds
+        #expect(resumed >= keptAt - 0.1 && resumed < keptAt + 3, "from its playhead (\(resumed) vs \(keptAt)), not 0")
     }
 
     // Guards `player.volume = volume` in `MediaVideoPlayback.open` (W8-03; Flutter Y8-02, Android
@@ -461,7 +435,7 @@ struct MediaVideoComponentTests {
         let reuse = MediaOrigin.url("volume-reuse.mp4")
         MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: reuse)
         let url = try #require(URL(string: reuse.absoluteString))
-        let freed = try #require(pool.borrow(key: "story", url: url, priority: .onScreen))
+        let freed = pool.borrow(key: "story", url: url, priority: .onScreen)
         freed.avPlayer.volume = 0.8
         pool.giveBack(key: "story", player: freed, priority: .onScreen)
 

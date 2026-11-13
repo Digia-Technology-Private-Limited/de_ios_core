@@ -377,23 +377,23 @@ struct StoryPageTests {
 
     private func singleSlotPool() -> VideoPlayerPool {
         let loader = MediaServices.current.videoLoader
-        let pool = VideoPlayerPool(maxPlayers: 1, ceiling: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
+        let pool = VideoPlayerPool(maxPlayers: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
         MediaServices.override(videoPool: pool)
         return pool
     }
 
-    // Guards `onLost: { stopDriver(); if !gone { onSkipped() } }` in `StoryThumbnailVideo`: a tile
-    // whose borrow the pool refuses (at the ceiling, Stage 2) skips its turn once; it
-    // is not a failure, so the card is not removed for the session.
-    @Test("a rail tile the pool refuses skips its turn and does not fail")
-    func railTileRefusalIsASkip() async throws {
+    // Guards "no live-player ceiling" through `StoryThumbnail` (decoder-driven capacity): a rail
+    // tile borrows a player even when the pool's one slot is held by a story page, and neither
+    // skips its turn nor fails.
+    @Test("a rail tile gets a player past the pool size, and neither skips nor fails")
+    func railTileIsNeverRefused() async throws {
         install()
         defer { MediaOrigin.end() }
         let pool = singleSlotPool()
         let blocking = MediaOrigin.url("rail-blocker.mp4")
         let video = MediaOrigin.url("rail-refused.mp4")
         for url in [blocking, video] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
-        let blocker = try #require(pool.borrow(key: "page", url: blocking, priority: .onScreen))
+        let blocker = pool.borrow(key: "page", url: blocking, priority: .onScreen)
         let skipped = CallCount(), failed = CallCount()
 
         let window = MediaStage.mount(StoryThumbnail(
@@ -401,40 +401,13 @@ struct StoryPageTests {
             poolKey: "tile", playing: true, repeatWindow: false, restartGeneration: 0,
             onWindowCompleted: {}, onFailed: { failed.value += 1 }, onSkipped: { skipped.value += 1 }))
         defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { skipped.value > 0 })
+        #expect(await waitUntilMedia { pool.heldPlayer(for: "tile") != nil })
         ComponentTestHost.drainRunLoop(for: 0.3)
 
-        #expect(skipped.value == 1)
+        #expect(skipped.value == 0)
         #expect(failed.value == 0)
-        #expect(pool.heldKeys == ["page"], "nothing borrowed for the tile")
+        #expect(Set(pool.heldKeys) == ["page", "tile"], "the tile has a player of its own")
         pool.giveBack(key: "page", player: blocker, priority: .onScreen)
-    }
-
-    // Guards `onSkipped: { playback = playback.skip(index: index) }` in `StoryRail.card`: when the
-    // pool takes a playing card's player back, the turn passes to the next card (here taking the
-    // slot the other holder frees at once), instead of staying with the card that lost its player.
-    @Test("a rail card whose player is evicted passes its turn to the next card")
-    func evictedRailCardPassesTheTurn() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let pool = singleSlotPool()
-        let videos = [MediaOrigin.url("rail-turn-0.mp4"), MediaOrigin.url("rail-turn-1.mp4")]
-        let other = MediaOrigin.url("rail-turn-other.mp4")
-        for url in videos + [other] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
-        let items = videos.map { StoryItemConfig(type: .video, url: $0.absoluteString, duration: nil) }
-        let keys = (0 ..< 2).map { storyPoolKey(namespace: MediaStage.campaign, index: $0) }
-
-        let window = MediaStage.mount(StoryRail(
-            items: items, cardWidth: 100, cardHeight: 100, cardCornerRadius: 0,
-            cardSpacing: 8, overlayOpen: false, onOpen: { _, _ in }))
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { pool.heldPlayer(for: keys[0]) != nil }, "card 0 has the first turn")
-
-        let taker = try #require(pool.borrow(key: "page", url: other, priority: .viewerPage))
-        pool.giveBack(key: "page", player: taker, priority: .viewerPage)
-
-        #expect(await waitUntilMedia { pool.heldPlayer(for: keys[1]) != nil }, "card 1 took the turn")
-        #expect(pool.heldPlayer(for: keys[0]) == nil)
     }
 
     // Guards the `mediaVideoBackdrop` branch of `playback.firstFrameShown ? groundAfterFirstFrame :
@@ -452,7 +425,7 @@ struct StoryPageTests {
         let item = StoryItemConfig(type: .video, url: video.absoluteString, duration: nil)
         let key = storyPoolKey(namespace: MediaStage.campaign, index: 0)
         let url = try #require(URL(string: item.url))
-        let tile = try #require(pool.borrow(key: key, url: url, priority: .onScreen))
+        let tile = pool.borrow(key: key, url: url, priority: .onScreen)
         let handover = try #require(storyRailHandover(item: item, playing: true, key: key, pool: pool))
 
         let window = MediaStage.mount(viewer([item], handover: handover))
@@ -550,27 +523,6 @@ struct StoryPageTests {
         }
 
         #expect(Array(turns.prefix(4)) == [0, 2, 3, 0])
-    }
-
-    // Guards `eligible: playable` (not `turnCandidates`) in `StoryRailState.complete`: a card the
-    // pool took the player of keeps its place, so once the card that took its turn has played its
-    // window the turn comes back to it.
-    @Test("a rail card whose player was evicted gets its turn again after the next card's")
-    func evictedRailCardStaysInTheRotation() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let pool = singleSlotPool()
-        let urls = try serveVideos(3)
-        let keys = (0 ..< 2).map { poolKey($0) }
-
-        let window = mountRail([windowOf(400, urls[0]), windowOf(400, urls[1])])
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { pool.heldPlayer(for: keys[0]) != nil }, "card 0 has the first turn")
-        let taker = try #require(pool.borrow(key: "page", url: urls[2], priority: .viewerPage))
-        pool.giveBack(key: "page", player: taker, priority: .viewerPage)
-        #expect(await waitUntilMedia { pool.heldPlayer(for: keys[1]) != nil }, "card 1 took the turn")
-
-        #expect(await waitUntilMedia(timeout: 10) { pool.heldPlayer(for: keys[0]) != nil }, "the turn came back to card 0")
     }
 
     // Guards `eligible.subtracting(failed)` in `StoryRailState.playable`: a card whose video

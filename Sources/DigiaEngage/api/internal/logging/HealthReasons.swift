@@ -61,9 +61,9 @@ enum HealthReasons {
         "plugin_not_registered",
         "survey_submission_failed",
         "media_load_failed",
-        // A video on screen got no player: the phone is at its live-player ceiling. Campaignless
-        // (the pool knows no campaign), so once per session; it tunes the ceilings.
-        "video_pool_ceiling",
+        // A video's player failed because no hardware decoder was free. Campaignless (the pool
+        // knows no campaign), so once per session; it shows how often phones run out of decoders.
+        "video_decoder_busy",
         "cep_bridge_unavailable",
     ]
 
@@ -110,7 +110,7 @@ enum HealthReasons {
         "plugin_not_registered": [],
         "survey_submission_failed": ["http_status"],
         "media_load_failed": ["media_kind", "cause"],
-        "video_pool_ceiling": ["device_class", "media_performance_class", "ceiling"],
+        "video_decoder_busy": ["device_class", "media_performance_class", "live_players", "replaced"],
         "cep_bridge_unavailable": ["selector"],
     ]
 
@@ -124,7 +124,7 @@ enum HealthReasons {
         "fetch_failed_auth",
         "fetch_failed_response",
         "plugin_not_registered",
-        "video_pool_ceiling",
+        "video_decoder_busy",
     ]
 
     /// The extra that makes one campaign's several instances of a reason

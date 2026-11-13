@@ -47,7 +47,7 @@ struct TimelineWireStringsTests {
         #expect(TimelineReason.pluginNotRegistered.wire == "plugin_not_registered")
         #expect(TimelineReason.unsupportedActionType.wire == "unsupported_action_type")
         #expect(TimelineReason.mediaLoadFailed.wire == "media_load_failed")
-        #expect(TimelineReason.videoPoolCeiling.wire == "video_pool_ceiling")
+        #expect(TimelineReason.videoDecoderBusy.wire == "video_decoder_busy")
         #expect(TimelineReason.actionHandlerMissing.wire == "action_handler_missing")
         #expect(TimelineReason.surveySubmissionFailed.wire == "survey_submission_failed")
         #expect(CEPPluginReason.bridgeUnavailable.wire == "cep_bridge_unavailable")
@@ -97,7 +97,7 @@ struct TimelineWireStringsTests {
                 "plugin_not_registered",
                 "survey_submission_failed",
                 "media_load_failed",
-                "video_pool_ceiling",
+                "video_decoder_busy",
                 "cep_bridge_unavailable",
             ])
     }
@@ -126,7 +126,7 @@ struct TimelineWireStringsTests {
         #expect(HealthReasons.detailKeys["plugin_not_registered"] == [])
         #expect(HealthReasons.detailKeys["survey_submission_failed"] == ["http_status"])
         #expect(HealthReasons.detailKeys["media_load_failed"] == ["media_kind", "cause"])
-        #expect(HealthReasons.detailKeys["video_pool_ceiling"] == ["device_class", "media_performance_class", "ceiling"])
+        #expect(HealthReasons.detailKeys["video_decoder_busy"] == ["device_class", "media_performance_class", "live_players", "replaced"])
         #expect(HealthReasons.detailKeys["cep_bridge_unavailable"] == ["selector"])
         // Every allowlisted reason has an explicit projection, even if empty —
         // an absent entry and an empty list must never be conflated.
@@ -139,7 +139,7 @@ struct TimelineWireStringsTests {
     func healthReasonsDedupShape() {
         #expect(HealthReasons.campaignlessReasons == [
             "design_tokens_unreadable", "fetch_failed_auth", "fetch_failed_response",
-            "plugin_not_registered", "video_pool_ceiling",
+            "plugin_not_registered", "video_decoder_busy",
         ])
         #expect(HealthReasons.dedupExtraKeys == [
             "unknown_design_token": ["token"],

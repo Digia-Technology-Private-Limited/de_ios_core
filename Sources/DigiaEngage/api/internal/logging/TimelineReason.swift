@@ -103,8 +103,8 @@ enum TimelineReason: String, CaseIterable, DiagnosticReason {
     /// Campaign media could not load (4xx, invalid URL, or undecodable).
     case mediaLoadFailed = "media_load_failed"
 
-    /// A video on screen could not get a player: the phone is at its live-player ceiling.
-    case videoPoolCeiling = "video_pool_ceiling"
+    /// A video's player failed because no hardware decoder was free.
+    case videoDecoderBusy = "video_decoder_busy"
 
     // MARK: interaction
 

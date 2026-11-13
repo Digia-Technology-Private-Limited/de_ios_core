@@ -4,7 +4,7 @@ import Testing
 @testable import DigiaEngage
 @testable import DigiaVideoEngine
 
-/// The app page for the wait-queue suite: optional side cards above the main card, and the story
+/// The app page for the capacity suite: optional side cards above the main card, and the story
 /// viewer opened over them when the test says so.
 @MainActor
 private final class CanvasVideoWaitPage: ObservableObject {
@@ -44,27 +44,27 @@ private final class SilentStoryReporter: StoryViewerReporter {
 }
 
 extension RenderedUITests {
-/// A canvas card authored with more videos than the live-player ceiling (the pool's wait queue,
-/// OD-24 as amended 2026-11-12), driven from the shared fixture `canvas/canvas_video_player` with its
-/// one video widget copied past the ceiling. Videos that cannot get a player show their still and
-/// wait; they start when a player frees, longest waiting first; a video that wants to play waits
-/// like any other, as nobody gives way inside Stage 2; and a video the story viewer took a player from plays again when the viewer
-/// closes. Real `AVPlayer`s over the media suites' fake origin, on a pool with ceiling 3.
+/// A canvas card authored with more videos than the pool's size, driven from the shared fixture
+/// `canvas/canvas_video_player` with its one video widget copied. There is no live-player ceiling
+/// (decoder-driven capacity, 2026-11-13): every video gets a player, the story viewer takes none,
+/// and capacity is met only when the OS says no decoder is free, then the busy video takes another's
+/// player and that one shows its still. Real `AVPlayer`s over the media suites' fake origin, on a
+/// pool of 3.
 @Suite(
-    "Canvas videos past the ceiling wait",
+    "Canvas videos with no live-player ceiling",
     .serialized,
     .tags(.integration, .behaviour, .inline, .media),
     .enabled(if: testkitAvailable, testkitSkipReason)
 )
 @MainActor
 struct CanvasVideoWaitBehaviourTests {
-    private static let ceiling = 3
+    private static let poolSize = 3
 
     /// The canvas fixture with its video widget copied `count` times (`v0`, `v1`, …), each with its
     /// own URL on the fake origin; `autoplay` decides each copy's autoplay.
     private func canvas(
         _ count: Int, campaignKey: String = "test_canvas_video_player", slotKey: String = "home_banner",
-        autoplay: (Int) -> Bool = { _ in true }
+        held: Set<Int> = [], autoplay: (Int) -> Bool = { _ in true }
     ) throws -> [String: Any] {
         var campaign = try fixture("canvas/canvas_video_player")
         campaign["campaignKey"] = campaignKey
@@ -82,7 +82,7 @@ struct CanvasVideoWaitBehaviourTests {
             var widget = try #require(copy["widget"] as? [String: Any])
             var props = try #require(widget["props"] as? [String: Any])
             let url = MediaOrigin.url("\(campaignKey)-\(index).mp4")
-            MediaOrigin.set(.status(200, movie), for: url)
+            MediaOrigin.set(.status(200, held.contains(index) ? Data() : movie), for: url, held: held.contains(index))
             props["source"] = ["url": url.absoluteString]
             props["autoplay"] = autoplay(index)
             props["showControls"] = false
@@ -100,13 +100,13 @@ struct CanvasVideoWaitBehaviourTests {
         "canvas-video-\(campaignKey)-v\(index)"
     }
 
-    /// A pool with ceiling 3 reading through the fake origin, for every video the SDK draws.
+    /// A pool of 3 reading through the fake origin, for every video the SDK draws.
     private func install() -> VideoPlayerPool {
         MediaOrigin.install()
         MediaServices.override(videoSession: MediaOrigin.session())
         let loader = MediaServices.current.videoLoader
         let pool = VideoPlayerPool(
-            maxPlayers: Self.ceiling, ceiling: Self.ceiling,
+            maxPlayers: Self.poolSize,
             makeItem: { mediaVideoItem(for: $0, loader: loader) },
             releaseItem: { loader.cancelLoading(for: $0) })
         MediaServices.override(videoPool: pool)
@@ -125,11 +125,10 @@ struct CanvasVideoWaitBehaviourTests {
         return sdk
     }
 
-    // Fails if a refused video gives up instead of waiting: `waitOrGiveUp()` after the retry in
-    // `VideoShowing.attemptBorrow`. Fails if a freed slot wakes nobody: `wakeWaiters()` in
-    // `VideoPlayerPool.giveBack`.
-    @Test("videos past the ceiling show their still, and the longest waiting starts when a playing one goes")
-    func videosPastTheCeilingWaitInOrder() async throws {
+    // Fails if a ceiling comes back: a borrow past the pool's size that is refused or queued instead of
+    // given a player (`VideoPlayerPool.borrow`).
+    @Test("every video of a card plays, past the pool's size")
+    func everyVideoPlaysPastThePoolSize() async throws {
         let pool = install()
         defer { MediaOrigin.end() }
         let side = try canvas(1, campaignKey: "side_canvas_video", slotKey: "side_banner")
@@ -139,61 +138,19 @@ struct CanvasVideoWaitBehaviourTests {
         defer { sdk.tearDown() }
 
         try sdk.deliver(keyOf(side))
-        try await sdk.waitUntil("the side video plays", timeout: 5) { playing(pool, key(0, of: "side_canvas_video")) }
         try sdk.deliver(keyOf(main))
-        try await sdk.waitUntil("two waiters", timeout: 5) { pool.queuedKeys.count == 2 }
 
-        // SwiftUI mounts the card's videos in its own order; the queue keeps that order.
-        let waiting = pool.queuedKeys
-        let held = (0 ..< 4).map { key($0) }.filter { !waiting.contains($0) }
-        #expect(held.count == 2 && held.allSatisfy { playing(pool, $0) }, "two of the card's videos play")
-        #expect(pool.heldKeys.count == Self.ceiling)
-        #expect(waiting.allSatisfy { pool.heldPlayer(for: $0) == nil }, "a waiting video shows its still")
-
-        page.sideShown = false
-
-        try await sdk.waitUntil("the longest-waiting video starts", timeout: 5) { playing(pool, waiting[0]) }
-        #expect(pool.queuedKeys == [waiting[1]], "the other keeps waiting")
-        #expect(pool.heldKeys.count == Self.ceiling)
-    }
-
-    // Fails if a Stage-2 borrow at the ceiling takes a paused holder's player again (decision 2,
-    // R1-15): the refusal in `VideoPlayerPool.borrow`. Fails if the waiting video is not woken when
-    // a paused one leaves: `wakeWaiters()` in `VideoPlayerPool.giveBack`.
-    @Test("a video that plays on its own waits behind paused holders, and starts when one leaves")
-    func autoplayWaitsForAPausedPlayer() async throws {
-        let pool = install()
-        defer { MediaOrigin.end() }
-        // Three paused videos fill the ceiling; then a card whose video plays on its own appears.
-        let main = try canvas(2) { _ in false }
-        let side = try canvas(1, campaignKey: "side_canvas_video", slotKey: "side_banner") { _ in false }
-        let top = try canvas(1, campaignKey: "top_canvas_video", slotKey: "top_banner")
-        let page = CanvasVideoWaitPage()
-        let sdk = try await start([main, side, top], page: page, sideSlot: "side_banner", topSlot: "top_banner")
-        defer { sdk.tearDown() }
-        try sdk.deliver(keyOf(main))
-        try sdk.deliver(keyOf(side))
-        try await sdk.waitUntil("the paused videos hold the ceiling", timeout: 5) { pool.heldKeys.count == Self.ceiling }
-        let paused = pool.heldKeys
-        let autoplay = key(0, of: "top_canvas_video")
-
-        try sdk.deliver(keyOf(top))
-
-        try await sdk.waitUntil("the autoplaying video waits", timeout: 5) { pool.queuedKeys == [autoplay] }
-        #expect(pool.heldPlayer(for: autoplay) == nil, "it shows its still")
-        #expect(pool.heldKeys == paused, "the paused videos keep their players")
-
-        page.sideShown = false
-
-        try await sdk.waitUntil("the autoplaying video plays", timeout: 5) { playing(pool, autoplay) }
+        try await sdk.waitUntil("all five videos play", timeout: 5) {
+            playing(pool, key(0, of: "side_canvas_video")) && (0 ..< 4).allSatisfy { playing(pool, key($0)) }
+        }
+        #expect(pool.heldKeys.count == 5, "five holders on a pool of \(Self.poolSize)")
         #expect(pool.queuedKeys.isEmpty)
     }
 
-    // Fails if an evicted video gives up instead of waiting: `waitOrGiveUp()` in
-    // `VideoShowing.evicted`. Fails if Stage 1 giving back wakes nobody: `wakeWaiters()` in
-    // `VideoPlayerPool.giveBack`.
-    @Test("a video the story viewer took a player from plays again when the viewer closes")
-    func viewerEvictedVideoPlaysAgain() async throws {
+    // Fails if Stage 1 takes a player when nothing is busy (the old "take at the ceiling" rule):
+    // a story page borrowing in `VideoPlayerPool.borrow`.
+    @Test("the story viewer opening takes no player from the card's videos")
+    func viewerTakesNothing() async throws {
         let pool = install()
         defer { MediaOrigin.end() }
         let main = try canvas(3)
@@ -209,88 +166,79 @@ struct CanvasVideoWaitBehaviourTests {
 
         let storyKey = storyPoolKey(namespace: "wait_stories", index: 0)
         try await sdk.waitUntil("the viewer's page holds a player", timeout: 5) { pool.priority(of: storyKey) == .viewerPage }
-        try await sdk.waitUntil("a canvas video waits", timeout: 5) { !pool.queuedKeys.isEmpty }
-        let evicted = try #require(pool.queuedKeys.first)
-        #expect(evicted.hasPrefix("canvas-video-"))
-        #expect(pool.heldPlayer(for: evicted) == nil, "the evicted video shows its still")
-
-        page.stories = nil
-
-        try await sdk.waitUntil("the evicted video plays again", timeout: 5) { playing(pool, evicted) }
-        #expect(pool.queuedKeys.isEmpty)
+        #expect((0 ..< 3).allSatisfy { playing(pool, key($0)) }, "the card's videos still play")
     }
 
-    // The 3 surface rules lost in phase 1 (T7), through the campaign: two card videos and a top
-    // card's video hold the ceiling of 3.
-    private func fillWithTop(hideSide: Bool) async throws -> (SdkHarness, VideoPlayerPool, CanvasVideoWaitPage) {
+    // Fails if a decoder-busy canvas video does not take a player, or the taken one retakes by itself:
+    // `replaceForDecoderBusy` as `VideoShowing` calls it for a canvas `MediaVideo`.
+    @Test("a decoder-busy canvas video takes another's player, which shows its still")
+    func decoderBusyVideoTakesAnothersPlayer() async throws {
         let pool = install()
+        defer { MediaOrigin.end() }
+        let main = try canvas(3, held: [2])
+        let page = CanvasVideoWaitPage()
+        let sdk = try await start([main], page: page)
+        defer { sdk.tearDown() }
+        try sdk.deliver(keyOf(main))
+        try await sdk.waitUntil("two play and the third holds an unready player", timeout: 5) {
+            playing(pool, key(0)) && playing(pool, key(1)) && pool.heldPlayer(for: key(2)) != nil
+        }
+        let busy = try #require(pool.heldPlayer(for: key(2)))
+
+        simulateDecoderBusy(busy)
+
+        try await sdk.waitUntil("one of the playing videos was taken", timeout: 5) {
+            [key(0), key(1)].filter { pool.heldPlayer(for: $0) == nil }.count == 1
+        }
+        #expect(pool.heldPlayer(for: key(2)) != nil, "the busy video holds a player")
+        try await Task.sleep(nanoseconds: 800_000_000)
+        #expect([key(0), key(1)].filter { pool.heldPlayer(for: $0) == nil }.count == 1, "the taken one stays on its still")
+        #expect(pool.heldKeys.count == 2)
+    }
+
+    // The restored surface rule, through the campaign: a card replacing another in the same turn
+    // gets a player at once, with no retry and no waiting.
+    @Test("a card replacing another in the same turn gets a player")
+    func sameTurnReplacementGetsAPlayer() async throws {
+        let pool = install()
+        defer { MediaOrigin.end() }
         let main = try canvas(2)
         let top = try canvas(1, campaignKey: "top_canvas_video", slotKey: "top_banner")
         let side = try canvas(1, campaignKey: "side_canvas_video", slotKey: "side_banner")
         let page = CanvasVideoWaitPage()
-        page.sideShown = !hideSide
-        page.topShown = hideSide
+        page.topShown = false
         let sdk = try await start([main, top, side], page: page, sideSlot: "side_banner", topSlot: "top_banner")
+        defer { sdk.tearDown() }
         try sdk.deliver(keyOf(main))
         try sdk.deliver(keyOf(top))
         try sdk.deliver(keyOf(side))
-        try await sdk.waitUntil("the ceiling is held", timeout: 5) { pool.heldKeys.count == Self.ceiling }
-        return (sdk, pool, page)
-    }
-
-    // Fails if a video refused again on its retry gives up instead of waiting: `waitOrGiveUp()`
-    // after the retry in `VideoShowing.attemptBorrow`.
-    @Test("a video refused again on its retry waits on its still, and plays when the holder leaves")
-    func refusedOnRetryWaitsThenPlays() async throws {
-        let (sdk, pool, page) = try await fillWithTop(hideSide: true)
-        defer { MediaOrigin.end() }
-        defer { sdk.tearDown() }
-        let waiter = key(0, of: "side_canvas_video")
-
-        page.sideShown = true
-
-        try await sdk.waitUntil("the side video waits after its retry", timeout: 5) { pool.queuedKeys == [waiter] }
-        #expect(pool.heldPlayer(for: waiter) == nil, "it shows its still")
-
-        page.topShown = false
-
-        try await sdk.waitUntil("the side video plays", timeout: 5) { playing(pool, waiter) }
-        #expect(pool.queuedKeys.isEmpty)
-    }
-
-    // Fails if the retry after the frame never runs: the `post` of the retry in
-    // `VideoShowing.attemptBorrow`. Without it the new card asks before the leaving one gave its
-    // player back, and is never asked again.
-    @Test("a card replacing another in the same turn at the ceiling gets the freed player")
-    func sameTurnReplacementGetsTheFreedPlayer() async throws {
-        let (sdk, pool, page) = try await fillWithTop(hideSide: false)
-        defer { MediaOrigin.end() }
-        defer { sdk.tearDown() }
+        try await sdk.waitUntil("the side and card videos play", timeout: 5) {
+            playing(pool, key(0, of: "side_canvas_video")) && playing(pool, key(0))
+        }
         let replacing = key(0, of: "top_canvas_video")
 
         page.sideShown = false
         page.topShown = true
 
         try await sdk.waitUntil("the replacing video plays", timeout: 5) { playing(pool, replacing) }
-        #expect(pool.queuedKeys.isEmpty)
-        #expect(pool.heldKeys.count == Self.ceiling)
+        #expect(pool.heldPlayer(for: key(0, of: "side_canvas_video")) == nil, "the leaving card gave its player back")
     }
 
-    // Fails if a closed waiter stays in the queue: `pool.cancelWait` in `VideoShowing.releasePlayer`.
-    @Test("a waiting video that closes leaves the queue")
-    func closedWaiterLeavesTheQueue() async throws {
-        let (sdk, pool, page) = try await fillWithTop(hideSide: true)
+    // Fails if a card that goes away keeps its players: the give-back in `VideoShowing.close`.
+    @Test("a card that closes gives its players back")
+    func closedCardGivesItsPlayersBack() async throws {
+        let pool = install()
         defer { MediaOrigin.end() }
+        let side = try canvas(2, campaignKey: "side_canvas_video", slotKey: "side_banner")
+        let page = CanvasVideoWaitPage()
+        let sdk = try await start([side], page: page, sideSlot: "side_banner")
         defer { sdk.tearDown() }
-        page.sideShown = true
-        try await sdk.waitUntil("the side video waits", timeout: 5) { pool.queuedKeys == [key(0, of: "side_canvas_video")] }
+        try sdk.deliver(keyOf(side))
+        try await sdk.waitUntil("the videos hold players", timeout: 5) { pool.heldKeys.count == 2 }
 
         page.sideShown = false
 
-        try await sdk.waitUntil("the queue is empty", timeout: 5) { pool.queuedKeys.isEmpty }
-        page.topShown = false
-        try await sdk.waitUntil("the freed player stays free", timeout: 5) { pool.heldKeys.count == Self.ceiling - 1 }
-        #expect(pool.heldPlayer(for: key(0, of: "side_canvas_video")) == nil)
+        try await sdk.waitUntil("the players are given back", timeout: 5) { pool.heldKeys.isEmpty }
     }
 }
 }

@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Lottie
 import SDWebImage
@@ -7,6 +8,7 @@ import Testing
 import UIKit
 
 @testable import DigiaEngage
+@testable import DigiaVideoEngine
 
 /// The fake HTTP origin for the media suites: a `URLProtocol` that logs every request (URL and
 /// `User-Agent`), answers a scripted reply, and can hold a response until the test releases it.
@@ -214,6 +216,17 @@ final class HealthRecorder: @unchecked Sendable {
 }
 
 /// Counts callbacks. A class so a closure can bump it.
+/// Makes the OS say no hardware decoder is free for `player`'s current item: AVFoundation's
+/// failed-to-play notification with `AVError.decoderTemporarilyUnavailable`, which the engine
+/// reads as `VideoFailure.decoderBusy`. On an item that is not yet ready (a held origin) the
+/// showing replaces another video's player; on a ready one it is the OS reclaiming the decoder.
+@MainActor
+func simulateDecoderBusy(_ player: DigiaVideoPlayer) {
+    NotificationCenter.default.post(
+        name: .AVPlayerItemFailedToPlayToEndTime, object: player.avPlayer.currentItem,
+        userInfo: [AVPlayerItemFailedToPlayToEndTimeErrorKey: AVError(.decoderTemporarilyUnavailable)])
+}
+
 final class CallCount: @unchecked Sendable {
     var value = 0
 }
