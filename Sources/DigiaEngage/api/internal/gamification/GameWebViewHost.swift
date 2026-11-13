@@ -149,6 +149,9 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         // owns its own pinch-free layout; the scroll view's recognizers would
         // only fight it.
         webView.scrollView.bounces = false
+        // The skin pads itself from `safeArea` in `init`; letting the scroll
+        // view inset too leaves a blank band above the home indicator.
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.minimumZoomScale = 1
         webView.scrollView.maximumZoomScale = 1
         if let pinch = webView.scrollView.pinchGestureRecognizer {
