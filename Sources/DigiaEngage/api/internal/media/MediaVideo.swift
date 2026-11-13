@@ -611,8 +611,9 @@ private struct MediaPlayerControllerView: UIViewControllerRepresentable {
     }
 }
 
-/// The engine player's layer a video draws into (`makeLayer()`, one per view). Reports when
-/// that layer is ready to display, which is this view's first frame.
+/// The view's own backing `AVPlayerLayer`, attached to the engine player (`attach(layer:)`, one
+/// per view), so the video animates with the view's frame (PIP and floater expand and collapse).
+/// Reports when that layer is ready to display, which is this view's first frame.
 private struct MediaPlayerLayerView: UIViewRepresentable {
     let player: DigiaVideoPlayer
     let gravity: AVLayerVideoGravity
@@ -634,44 +635,33 @@ private struct MediaPlayerLayerView: UIViewRepresentable {
 }
 
 private final class PlayerLayerView: UIView {
-    private var playerLayer: AVPlayerLayer?
+    override static var layerClass: AnyClass { AVPlayerLayer.self }
+
+    private var playerLayer: AVPlayerLayer? { layer as? AVPlayerLayer }
     private weak var video: DigiaVideoPlayer?
     private var readyObserver: NSKeyValueObservation?
     private var onReady: (() -> Void)?
 
     func apply(player: DigiaVideoPlayer, gravity: AVLayerVideoGravity, onReady: @escaping () -> Void) {
+        guard let playerLayer else { return }
         self.onReady = onReady
-        if video !== player || playerLayer == nil {
-            detach()
-            video = player
-            // The engine re-attaches its layers when the player is given another item, so
-            // readiness, and so the first frame, is the new item's.
-            let layer = player.makeLayer()
-            layer.frame = bounds
-            self.layer.addSublayer(layer)
-            playerLayer = layer
-            readyObserver = layer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
-                guard layer.isReadyForDisplay else { return }
-                DispatchQueue.main.async { self?.onReady?() }
-            }
+        playerLayer.videoGravity = gravity
+        guard video !== player || playerLayer.player !== player.avPlayer else { return }
+        detach()
+        video = player
+        // The engine re-attaches its layers when the player is given another item, so
+        // readiness, and so the first frame, is the new item's.
+        player.attach(layer: playerLayer)
+        readyObserver = playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] layer, _ in
+            guard layer.isReadyForDisplay else { return }
+            DispatchQueue.main.async { self?.onReady?() }
         }
-        playerLayer?.videoGravity = gravity
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        playerLayer?.frame = bounds
-        CATransaction.commit()
     }
 
     func detach() {
         readyObserver?.invalidate()
         readyObserver = nil
         playerLayer?.player = nil
-        playerLayer?.removeFromSuperlayer()
-        playerLayer = nil
         video = nil
     }
 }
