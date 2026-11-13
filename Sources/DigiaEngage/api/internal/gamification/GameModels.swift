@@ -94,8 +94,8 @@ struct GameOpenRequest {
     var values: [String: JSONValue] = [:]
     var slots: [GamificationSlotConfig] = []
     var sensors: [String] = []
-    /// Reward call-to-action labels from the campaign bundle, keyed by outcome
-    /// key or reward id; copied into `outcome.reward.ctaText`.
+    /// Reward call-to-action text from `templateConfig.rewards`, keyed by
+    /// `rewardId`; matched against `grant.rewardId` into `outcome.reward.ctaText`.
     var rewardCtaTexts: [String: String] = [:]
     /// Asks the backend to play the chance, given a fresh play id. Nil
     /// answers `refused: unavailable`.

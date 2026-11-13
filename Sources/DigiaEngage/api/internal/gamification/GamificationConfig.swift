@@ -40,7 +40,7 @@ struct GamificationConfig: Equatable {
     let sensors: [GamificationSkinSensor]
     /// The inline slot of the `inlineTeaser` entry.
     let slotKey: String?
-    /// Reward `ctaText` from the bundle, keyed by outcome key or reward id.
+    /// Reward `ctaText` from `templateConfig.rewards`, keyed by `rewardId`.
     let rewardCtaTexts: [String: String]
 
     /// Only `spinWheel` and `slotMachine` map slots; the ERD leaves `slots`
@@ -142,33 +142,20 @@ struct GamificationConfig: Equatable {
             bundleUrl: bundleUrl,
             sensors: sensors,
             slotKey: slotKey,
-            rewardCtaTexts: rewardCtaTexts(templateConfig: templateConfig, config: config)
+            rewardCtaTexts: rewardCtaTexts(templateConfig: templateConfig)
         )
     }
 
-    /// The bundle's reward config: `rewards` (on `config` or `templateConfig`)
-    /// as a list of `{ outcomeKey? | rewardId?, ctaText | cta.label }` or as an
-    /// object keyed by outcome key / reward id. Entries without a readable
-    /// label are skipped, so the skin falls back to "Use now".
-    private static func rewardCtaTexts(
-        templateConfig: [String: Any], config: [String: Any]
-    ) -> [String: String] {
-        let raw = config["rewards"] ?? templateConfig["rewards"]
-        func label(_ reward: [String: Any]) -> String? {
-            reward.nonBlankString("ctaText") ?? reward.object("cta")?.nonBlankString("label")
-        }
+    /// `templateConfig.rewards`, a sibling of `bundleUrl`: a list of
+    /// `{ rewardId, ctaText }`. Entries missing either field are skipped, so the
+    /// skin falls back to "Use now". No other shape is read.
+    private static func rewardCtaTexts(templateConfig: [String: Any]) -> [String: String] {
         var texts: [String: String] = [:]
-        if let list = raw as? [[String: Any]] {
-            for reward in list {
-                guard let text = label(reward),
-                      let key = reward.nonBlankString("outcomeKey") ?? reward.nonBlankString("rewardId")
-                else { continue }
-                texts[key] = text
-            }
-        } else if let keyed = raw as? [String: Any] {
-            for (key, value) in keyed {
-                if let reward = value as? [String: Any], let text = label(reward) { texts[key] = text }
-            }
+        for reward in templateConfig.objectArray("rewards") {
+            guard let rewardId = reward.nonBlankString("rewardId"),
+                  let text = reward.nonBlankString("ctaText")
+            else { continue }
+            texts[rewardId] = text
         }
         return texts
     }

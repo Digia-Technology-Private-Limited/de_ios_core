@@ -158,9 +158,8 @@ final class GamePresentation: Identifiable, ObservableObject {
 
     /// The skin-facing `reward` object, built from the play's `grant`. The skin
     /// never sees the deep link, only whether one exists (`useReward` opens it).
-    /// `ctaText` comes from the campaign bundle (keyed by outcome key or reward
-    /// id), falling back to the grant's own `cta.label`; omitted when neither
-    /// is set so the skin shows "Use now".
+    /// `ctaText` comes from `templateConfig.rewards`, matched by `grant.rewardId`;
+    /// omitted when there is no match so the skin shows "Use now".
     static func rewardObject(
         _ outcome: PlayOutcome, rewardCtaTexts: [String: String]
     ) -> [String: Any] {
@@ -199,11 +198,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         }
         if let expiresAt = text("expiresAt") { reward["expiresAt"] = expiresAt }
         reward["hasDeepLink"] = (text("deepLink") ?? text("deepLink", in: cta)) != nil
-        let ctaText =
-            rewardCtaTexts[outcome.outcomeKey]
-            ?? text("rewardId").flatMap { rewardCtaTexts[$0] }
-            ?? text("label", in: cta)
-        if let ctaText { reward["ctaText"] = ctaText }
+        if let ctaText = text("rewardId").flatMap({ rewardCtaTexts[$0] }) { reward["ctaText"] = ctaText }
         return reward
     }
 
