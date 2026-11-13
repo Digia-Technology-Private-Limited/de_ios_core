@@ -166,7 +166,6 @@ struct GameBridgeTests {
     func initScriptShape() throws {
         let bridge = makeBridge()
         let payload = GameInitPayload(
-            surface: .bottomSheet,
             safeArea: GameSafeArea(top: 0, right: 0, bottom: 34, left: 0),
             locale: "en-IN"
         )
@@ -181,7 +180,7 @@ struct GameBridgeTests {
             try JSONSerialization.jsonObject(
                 with: Data(jsonText.utf8)) as? [String: Any])
         #expect(decoded["type"] as? String == "init")
-        #expect(decoded["surface"] as? String == "bottomSheet")
+        #expect(decoded["surface"] as? String == "fullScreen")
         #expect(decoded["bridgeVersion"] as? Int == GameBridge.bridgeVersion)
     }
 }

@@ -173,7 +173,9 @@ final class FloaterStoryOrchestrator: ObservableObject {
     var isCoveredByBlockingCampaign: () -> Bool = { false }
 
     func openStory(initialIndex: Int = 0) {
-        guard let active = state, !closing, !storyOpen, !isCoveredByBlockingCampaign()
+        guard let active = state, !closing, !storyOpen, !isCoveredByBlockingCampaign(),
+              // A story-less window (a gamification entry) has nothing to open.
+              active.config.story != nil
         else { return }
         if case .story(_, let pages, _, _, _, _, _, _, _, _) = active.config.story {
             storyInitialIndex = min(max(0, initialIndex), pages.count - 1)

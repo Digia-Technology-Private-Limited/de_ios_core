@@ -8,11 +8,19 @@ struct GamificationSlotConfig: Equatable, Sendable {
     let values: [String: String]
 }
 
-/// A parsed gamification campaign: the skin reference, its config, and the
-/// surface it opens on. Parsed in `CampaignModel.fromJson` ("gamification").
-/// A nil return skips the campaign; `CampaignBundle` already logs every skip
-/// with the campaign key, so no log here.
-struct GamificationConfig: Equatable, Sendable {
+/// The entry canvas of a non-direct campaign: the card the host draws in an
+/// inline slot, or the window the story floater draws over the app. Either
+/// way its tap runs canvas actions, and `Action.openGame` opens the game.
+enum GamificationEntryCanvas: Equatable {
+    case inline(InlineCanvasConfig)
+    case floating(FloaterStoryConfig)
+}
+
+/// A parsed gamification campaign: the skin reference, its config, and how
+/// the player gets to the full-screen game. Parsed in `CampaignModel.fromJson`
+/// ("gamification"). A nil return skips the campaign; `CampaignBundle` already
+/// logs every skip with the campaign key, so no log here.
+struct GamificationConfig: Equatable {
     let skinId: String
     let skinVersion: Int
     /// The skin's declared `bridgeVersion`. Compared against the SDK's in T10;
@@ -23,17 +31,17 @@ struct GamificationConfig: Equatable, Sendable {
     let values: [String: JSONValue]
     /// `config.slots`, kept only for formats that map outcomes to slots.
     let slots: [GamificationSlotConfig]
+    /// Never `.unknown`: an unrecognised or missing entry opens the game directly.
     let entryKind: GamificationEntryKind
-    let surfaceStyle: GamificationSurfaceStyle
+    /// The entry canvas for `inlineTeaser` / `floating`; nil for `direct`.
+    let entryCanvas: GamificationEntryCanvas?
     let showMute: Bool
     let bundleUrl: String
     let sensors: [GamificationSkinSensor]
-    /// Inline slot for the ERD 1b teaser entry. Parsed, not routed, until then.
-    /// `teaser` is ignored entirely until ERD 1b.
+    /// The inline slot of the `inlineTeaser` entry.
     let slotKey: String?
-    /// `surface.height` as a fraction of the screen, valid only in (0, 1];
-    /// anything else is nil and the surface keeps its default height.
-    var heightFraction: Double? = nil
+    /// Reward `ctaText` from the bundle, keyed by outcome key or reward id.
+    let rewardCtaTexts: [String: String]
 
     /// Only `spinWheel` and `slotMachine` map slots; the ERD leaves `slots`
     /// out of `init` for `scratchCard` and `rewardChest`.
@@ -45,7 +53,8 @@ struct GamificationConfig: Equatable, Sendable {
     /// object, read only for `bundleUrl`/`sensors` as a fallback — the backend
     /// adds them next to `templateConfig`, and either placement is accepted.
     static func fromJson(
-        _ templateConfig: [String: Any], campaignLevel: [String: Any]? = nil
+        _ templateConfig: [String: Any], campaignLevel: [String: Any]? = nil,
+        designTokens: DesignTokenCatalog = .empty
     ) -> GamificationConfig? {
         guard let skinId = templateConfig.nonBlankString("skinId"),
               let skinVersion = positiveInt(templateConfig["skinVersion"])
@@ -58,12 +67,27 @@ struct GamificationConfig: Equatable, Sendable {
         let format = GamificationFormat(wire: templateConfig.string("templateType"))
         guard format != .unknown else { return nil }
 
-        let entryKind = GamificationEntryKind(wire: templateConfig.object("entry")?.string("kind"))
-        guard entryKind == .direct else { return nil }
-
+        // `entry` is `{ kind }` on the wire; a bare string is accepted too. An
+        // unknown or missing kind degrades to a direct open — never a failure.
+        let entryKind = entryKind(templateConfig["entry"])
+        // The surface is always full screen; any legacy `surface.style` is ignored.
         let surface = templateConfig.object("surface")
-        let surfaceStyle = GamificationSurfaceStyle(wire: surface?.string("style"))
-        guard surfaceStyle != .unknown else { return nil }
+        let slotKey = templateConfig.nonBlankString("slotKey")
+
+        var entryCanvas: GamificationEntryCanvas?
+        switch entryKind {
+        case .inlineTeaser, .floating:
+            entryCanvas = parseEntryCanvas(
+                kind: entryKind, templateConfig: templateConfig, slotKey: slotKey,
+                designTokens: designTokens)
+            // No readable entry canvas means the player has nothing to tap.
+            guard entryCanvas != nil else {
+                log.w("Gamification campaign skipped — entry canvas unreadable (entry=\(entryKind.rawValue))")
+                return nil
+            }
+        case .direct, .unknown:
+            break
+        }
 
         let rawSensors =
             (templateConfig["sensors"] as? [Any])
@@ -113,22 +137,83 @@ struct GamificationConfig: Equatable, Sendable {
             values: values,
             slots: slots,
             entryKind: entryKind,
-            surfaceStyle: surfaceStyle,
+            entryCanvas: entryCanvas,
             showMute: surface?.bool("showMute", default: false) ?? false,
             bundleUrl: bundleUrl,
             sensors: sensors,
-            slotKey: templateConfig.nonBlankString("slotKey"),
-            heightFraction: heightFraction(surface?["height"])
+            slotKey: slotKey,
+            rewardCtaTexts: rewardCtaTexts(templateConfig: templateConfig, config: config)
         )
     }
 
-    /// A fraction in (0, 1] that is not a boolean; see ``positiveInt``.
-    private static func heightFraction(_ raw: Any?) -> Double? {
-        guard let number = raw as? NSNumber,
-              CFGetTypeID(number) != CFBooleanGetTypeID()
+    /// The bundle's reward config: `rewards` (on `config` or `templateConfig`)
+    /// as a list of `{ outcomeKey? | rewardId?, ctaText | cta.label }` or as an
+    /// object keyed by outcome key / reward id. Entries without a readable
+    /// label are skipped, so the skin falls back to "Use now".
+    private static func rewardCtaTexts(
+        templateConfig: [String: Any], config: [String: Any]
+    ) -> [String: String] {
+        let raw = config["rewards"] ?? templateConfig["rewards"]
+        func label(_ reward: [String: Any]) -> String? {
+            reward.nonBlankString("ctaText") ?? reward.object("cta")?.nonBlankString("label")
+        }
+        var texts: [String: String] = [:]
+        if let list = raw as? [[String: Any]] {
+            for reward in list {
+                guard let text = label(reward),
+                      let key = reward.nonBlankString("outcomeKey") ?? reward.nonBlankString("rewardId")
+                else { continue }
+                texts[key] = text
+            }
+        } else if let keyed = raw as? [String: Any] {
+            for (key, value) in keyed {
+                if let reward = value as? [String: Any], let text = label(reward) { texts[key] = text }
+            }
+        }
+        return texts
+    }
+
+    private static func entryKind(_ raw: Any?) -> GamificationEntryKind {
+        let wire = (raw as? [String: Any])?.string("kind") ?? (raw as? String)
+        let kind = GamificationEntryKind(wire: wire)
+        return kind == .unknown ? .direct : kind
+    }
+
+    /// The teaser is the entry's canvas design, in the same shape the canvas
+    /// editor saves for the matching surface: an inline card for `inlineTeaser`,
+    /// a floater window for `floating`. The floater placement (`collapsed`,
+    /// `controls`, `behavior`, `designWidth`) may sit on `templateConfig` or on
+    /// the teaser; the teaser wins. A floating entry opens no story, so its
+    /// tap runs canvas actions instead.
+    private static func parseEntryCanvas(
+        kind: GamificationEntryKind,
+        templateConfig: [String: Any],
+        slotKey: String?,
+        designTokens: DesignTokenCatalog
+    ) -> GamificationEntryCanvas? {
+        guard let teaser = templateConfig.object("teaser"), teaser.object("canvas") != nil
         else { return nil }
-        let value = number.doubleValue
-        return value > 0 && value <= 1 ? value : nil
+        switch kind {
+        case .inlineTeaser:
+            var json = teaser
+            if json.nonBlankString("slotKey") == nil, let slotKey { json["slotKey"] = slotKey }
+            guard var config = (try? InlineCanvasConfig.fromJson(json, designTokens: designTokens)) ?? nil
+            else { return nil }
+            config.variableSchemas = NudgeConfig.parseVariableSchemas(templateConfig)
+            return .inline(config)
+        case .floating:
+            var json = teaser
+            for key in ["designWidth", "collapsed", "controls", "behavior"]
+            where json[key] == nil {
+                json[key] = templateConfig[key]
+            }
+            guard let config = (try? FloaterStoryConfig.fromJson(
+                json, designTokens: designTokens, requiresStory: false)) ?? nil
+            else { return nil }
+            return .floating(config)
+        case .direct, .unknown:
+            return nil
+        }
     }
 
     /// A positive integer that is not a boolean: JSON booleans bridge to

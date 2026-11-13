@@ -4,17 +4,9 @@ import UIKit
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger()
 
-/// Which nudge-style container a game opens in. Wire strings match the web
-/// view contract's `surface` values (`dialog` | `bottomSheet` | `fullScreen`).
-enum GameContainerType: String, Equatable, Sendable {
-    case bottomSheet
-    case dialog
-    case fullScreen
-}
-
-/// `safeArea` sent in `init`, in CSS px (== points). Full screen reports the
-/// system insets, a bottom sheet the bottom inset only, a dialog zero — the
-/// skin pads itself and never reads `env()`.
+/// `safeArea` sent in `init`, in CSS px (== points). The game is always full
+/// screen, so it reports the system insets — the skin pads itself and never
+/// reads `env()`.
 struct GameSafeArea: Equatable, Sendable {
     var top: CGFloat
     var right: CGFloat
@@ -23,17 +15,10 @@ struct GameSafeArea: Equatable, Sendable {
 
     static let zero = GameSafeArea(top: 0, right: 0, bottom: 0, left: 0)
 
-    static func forContainer(_ container: GameContainerType, system: UIEdgeInsets) -> GameSafeArea {
-        switch container {
-        case .fullScreen:
-            return GameSafeArea(
-                top: system.top, right: system.right,
-                bottom: system.bottom, left: system.left)
-        case .bottomSheet:
-            return GameSafeArea(top: 0, right: 0, bottom: system.bottom, left: 0)
-        case .dialog:
-            return .zero
-        }
+    static func fullScreen(system: UIEdgeInsets) -> GameSafeArea {
+        GameSafeArea(
+            top: system.top, right: system.right,
+            bottom: system.bottom, left: system.left)
     }
 }
 
@@ -54,11 +39,13 @@ enum GameFailure: String, Equatable, Sendable {
     case unsupportedWebView
 }
 
-/// The `init` message body. T7 fills what it knows (surface, safe area,
-/// locale, bridge version); T8 merges `extra` (`values`, `slots`, `sensors`,
-/// `device`) without touching this file's shape.
+/// The `init` message body. T7 fills what it knows (safe area, locale, bridge
+/// version); T8 merges `extra` (`values`, `slots`, `sensors`, `device`) without
+/// touching this file's shape. `surface` is always `fullScreen`.
 struct GameInitPayload {
-    var surface: GameContainerType
+    /// The one surface value the skin ever sees.
+    static let surface = "fullScreen"
+
     var safeArea: GameSafeArea
     var locale: String
     var showMute: Bool = false
@@ -75,7 +62,7 @@ struct GameInitPayload {
     func message() -> [String: Any] {
         var payload: [String: Any] = [
             "type": "init",
-            "surface": surface.rawValue,
+            "surface": Self.surface,
             // CGFloat does not bridge to JSON; encode as Double explicitly so
             // script(for:) never silently returns nil on a real payload.
             "safeArea": [
@@ -91,24 +78,25 @@ struct GameInitPayload {
     }
 }
 
-/// The plain input routing calls to open a game: bundle location, container
-/// plus sizing, campaign id, and outcome/close/failure callbacks. T8 adds the
-/// play outcome delivery on this same input; nothing here changes shape.
+/// The plain input routing calls to open a game: bundle location, campaign id,
+/// and outcome/close/failure callbacks. The game is always full screen.
 struct GameOpenRequest {
     var campaignKey: String
-    var container: GameContainerType
     var source: GameBundleSource
-    /// Fixed content height for the sheet and dialog surfaces. Full screen
-    /// ignores it and fills the window.
-    var height: CGFloat = 480
     var showMute: Bool = false
     var onClose: (@MainActor () -> Void)?
+    /// Fires once when the skin's `playRequested` is accepted — the moment the
+    /// chance is committed. Entry canvases use it to go away after a real play.
+    var onPlayCommitted: (@MainActor () -> Void)?
     var onFailure: (@MainActor (GameFailure) -> Void)?
     /// `init` extras: skin values, slots (only for slot-mapped formats), and
     /// the sensor wire names the skin may use.
     var values: [String: JSONValue] = [:]
     var slots: [GamificationSlotConfig] = []
     var sensors: [String] = []
+    /// Reward call-to-action labels from the campaign bundle, keyed by outcome
+    /// key or reward id; copied into `outcome.reward.ctaText`.
+    var rewardCtaTexts: [String: String] = [:]
     /// Asks the backend to play the chance, given a fresh play id. Nil
     /// answers `refused: unavailable`.
     var play: (@MainActor (String) async -> PlayResult)?

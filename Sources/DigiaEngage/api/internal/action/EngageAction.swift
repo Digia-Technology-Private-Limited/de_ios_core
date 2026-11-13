@@ -19,6 +19,11 @@ enum EngageAction: Equatable {
     /// stories instead. Handled by the canvas stage rather than the shared
     /// action runner — it is the only thing that knows which stories to open.
     case showStory(Int)
+    /// Open the game of the gamification campaign whose entry canvas this is.
+    ///
+    /// Handled by the canvas host, like `showStory`: only it knows which
+    /// campaign the canvas belongs to. Anywhere else it is a no-op.
+    case openGame
 
     var analyticsType: String {
         switch self {
@@ -32,6 +37,7 @@ enum EngageAction: Equatable {
         case .previous: "previous"
         case .requestReview: "request_review"
         case .showStory: "show_story"
+        case .openGame: "open_game"
         }
     }
 
@@ -110,6 +116,7 @@ struct EngageActionParser {
             let raw = data["index"] ?? step["index"]
             let index = (raw as? NSNumber)?.intValue ?? Int("\(raw ?? "")") ?? 0
             return .showStory(max(0, index))
+        case "Action.openGame": return .openGame
         case "Action.customKV":
             guard let action = (data["payload"] as? [String: Any]).flatMap(customKV(from:)) else {
                 return unsupported(type)

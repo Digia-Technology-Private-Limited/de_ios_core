@@ -49,7 +49,6 @@ final class GamePresentation: Identifiable, ObservableObject {
             self.entryURL = url
         }
         var payload = GameInitPayload(
-            surface: request.container,
             safeArea: safeArea,
             locale: GameInitPayload.deviceLocale,
             showMute: request.showMute
@@ -110,6 +109,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// hands the skin its `outcome` or `refused`.
     private func startPlay() {
         guard bridge.beginPlay() else { return }
+        request.onPlayCommitted?()
         let playId = UUID().uuidString
         let play = request.play
         Task { @MainActor [weak self] in
@@ -120,7 +120,9 @@ final class GamePresentation: Identifiable, ObservableObject {
 
     private func deliver(_ result: PlayResult) {
         guard bridge.finishPlay(),
-              let script = bridge.script(for: Self.playResultMessage(result, slots: request.slots))
+              let script = bridge.script(
+                  for: Self.playResultMessage(
+                      result, slots: request.slots, rewardCtaTexts: request.rewardCtaTexts))
         else { return }
         coordinator?.view.evaluateJavaScript(script, completionHandler: nil)
     }
@@ -129,7 +131,8 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// random among the slots matching `outcomeKey` and omitted when none do.
     /// `busy` and unknown refusals read as `unavailable`; a failure does too.
     static func playResultMessage(
-        _ result: PlayResult, slots: [GamificationSlotConfig]
+        _ result: PlayResult, slots: [GamificationSlotConfig],
+        rewardCtaTexts: [String: String] = [:]
     ) -> [String: Any] {
         switch result {
         case .outcome(let outcome):
@@ -141,6 +144,9 @@ final class GamePresentation: Identifiable, ObservableObject {
             ]
             let matches = slots.indices.filter { slots[$0].outcomeKey == outcome.outcomeKey }
             if let index = matches.randomElement() { message["slotIndex"] = index }
+            if outcome.kind == .reward {
+                message["reward"] = rewardObject(outcome, rewardCtaTexts: rewardCtaTexts)
+            }
             return message
         case .refused(let refusal):
             let reason = refusal == .busy ? GamificationPlayRefusal.unavailable : refusal
@@ -148,6 +154,57 @@ final class GamePresentation: Identifiable, ObservableObject {
         case .failure:
             return ["type": "refused", "reason": GamificationPlayRefusal.unavailable.rawValue]
         }
+    }
+
+    /// The skin-facing `reward` object, built from the play's `grant`. The skin
+    /// never sees the deep link, only whether one exists (`useReward` opens it).
+    /// `ctaText` comes from the campaign bundle (keyed by outcome key or reward
+    /// id), falling back to the grant's own `cta.label`; omitted when neither
+    /// is set so the skin shows "Use now".
+    static func rewardObject(
+        _ outcome: PlayOutcome, rewardCtaTexts: [String: String]
+    ) -> [String: Any] {
+        let grant = outcome.grant ?? [:]
+        func text(_ key: String, in object: [String: JSONValue] = grant) -> String? {
+            guard case .string(let value)? = object[key] else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        var cta: [String: JSONValue] = [:]
+        if case .object(let nested)? = grant["cta"] { cta = nested }
+
+        let type = outcome.rewardType ?? .perk
+        var reward: [String: Any] = [
+            "type": type.rawValue,
+            "name": text("name") ?? text("displayText") ?? outcome.outcomeKey,
+        ]
+        if let imageUrl = text("imageUrl"), imageUrl.lowercased().hasPrefix("https://") {
+            reward["imageUrl"] = imageUrl
+        }
+        switch type {
+        case .coupon:
+            if let code = text("code") { reward["code"] = code }
+        case .currency:
+            if let valueText = text("valueText") {
+                reward["valueText"] = valueText
+            } else if let unit = text("unit") {
+                switch grant["amount"] {
+                case .int(let amount)?: reward["valueText"] = "\(amount) \(unit)"
+                case .double(let amount)?: reward["valueText"] = "\(amount) \(unit)"
+                default: break
+                }
+            }
+        case .perk, .unknown:
+            if let perkText = text("displayText") { reward["perkText"] = perkText }
+        }
+        if let expiresAt = text("expiresAt") { reward["expiresAt"] = expiresAt }
+        reward["hasDeepLink"] = (text("deepLink") ?? text("deepLink", in: cta)) != nil
+        let ctaText =
+            rewardCtaTexts[outcome.outcomeKey]
+            ?? text("rewardId").flatMap { rewardCtaTexts[$0] }
+            ?? text("label", in: cta)
+        if let ctaText { reward["ctaText"] = ctaText }
+        return reward
     }
 
     /// Main page load failure before `ready`: close early without waiting for
@@ -215,8 +272,7 @@ enum GamePresenter {
             request.onFailure?(.renderError)
             return
         }
-        let safeArea = GameSafeArea.forContainer(
-            request.container, system: activeWindowSafeAreaInsets)
+        let safeArea = GameSafeArea.fullScreen(system: activeWindowSafeAreaInsets)
         guard let presentation = GamePresentation(request: request, safeArea: safeArea) else {
             log.w("Game not opened — bundle entry missing", error: request.campaignKey)
             request.onFailure?(.bundleLoadFailed)

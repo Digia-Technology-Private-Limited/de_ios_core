@@ -44,17 +44,20 @@ struct LocalActionExecutor {
     private let next: (() -> Void)?
     private let previous: (() -> Void)?
     private let showStory: ((Int) -> Void)?
+    private let openGame: (() -> Void)?
 
     init(
         dismiss: (() -> Void)? = nil,
         next: (() -> Void)? = nil,
         previous: (() -> Void)? = nil,
-        showStory: ((Int) -> Void)? = nil
+        showStory: ((Int) -> Void)? = nil,
+        openGame: (() -> Void)? = nil
     ) {
         self.dismiss = dismiss
         self.next = next
         self.previous = previous
         self.showStory = showStory
+        self.openGame = openGame
     }
 
     func execute(_ action: EngageAction) -> Bool {
@@ -64,8 +67,20 @@ struct LocalActionExecutor {
         case .previous: execute("previous", callback: previous)
         case .showStory(let index):
             execute("show_story", callback: showStory.map { callback in { callback(index) } })
+        case .openGame: executeOpenGame()
         default: false
         }
+    }
+
+    /// Only a gamification entry canvas wires this; elsewhere it is a harmless
+    /// no-op with a debug log, not an error.
+    private func executeOpenGame() -> Bool {
+        if let openGame {
+            openGame()
+        } else {
+            log.d("Action.openGame ignored — not a gamification entry canvas")
+        }
+        return true
     }
 
     private func execute(_ name: String, callback: (() -> Void)?) -> Bool {

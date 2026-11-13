@@ -56,18 +56,6 @@ struct NudgeOverlayView: View {
                     .transition(.opacity)
                 }
 
-                // T6 game slot: a dialog game renders inline like a dialog
-                // nudge; sheet and full-screen games ride the cover presenter.
-                if let game = controller.activeGame, game.request.container == .dialog {
-                    GameContainerView(
-                        game: game,
-                        viewportSize: geometry.size,
-                        safeAreaInsets: activeWindowSafeAreaInsets
-                    )
-                    .id(game.id)
-                    .transition(.opacity)
-                }
-
                 NudgeCoverPresenter(presentation: coverBinding)
                 GameCoverPresenter(presentation: gameCoverBinding)
             }
@@ -95,16 +83,12 @@ struct NudgeOverlayView: View {
         )
     }
 
-    /// Drives the game cover from the controller's active game, but only for
-    /// bottom-sheet and full-screen games. Clearing it routes through
-    /// `GamePresenter.dismiss()` so the session settles exactly once.
+    /// Drives the game cover from the controller's active game. Clearing it
+    /// routes through `GamePresenter.dismiss()` so the session settles exactly once.
     private var gameCoverBinding: Binding<GamePresentation?> {
         Binding(
             get: {
-                guard let game = controller.activeGame,
-                    game.request.container != .dialog
-                else { return nil }
-                return game
+                controller.activeGame
             },
             set: { newValue in
                 if newValue == nil { GamePresenter.dismiss() }
@@ -156,9 +140,9 @@ private struct NudgeCoverPresenter: View {
 }
 
 /// Isolates the game full-screen-cover transaction like `NudgeCoverPresenter`
-/// does for nudges. Sheet games are not draggable and ignore backdrop taps;
-/// full-screen games fill the window; both close through the native button or
-/// the skin, never through a gesture.
+/// does for nudges. The game fills the window over a clear presentation
+/// background and closes through the native button or the skin, never through
+/// a gesture.
 private struct GameCoverPresenter: View {
     let presentation: Binding<GamePresentation?>
 
@@ -168,11 +152,11 @@ private struct GameCoverPresenter: View {
                 // `.id(game.id)`: a direct swap between two games (no nil in
                 // between) must still create a fresh presentation view.
                 if #available(iOS 16.4, *) {
-                    GameContainerView(game: game)
+                    GameContainerView(game: game, safeAreaInsets: activeWindowSafeAreaInsets)
                         .presentationBackground(.clear)
                         .id(game.id)
                 } else {
-                    GameContainerView(game: game).id(game.id)
+                    GameContainerView(game: game, safeAreaInsets: activeWindowSafeAreaInsets).id(game.id)
                 }
             }
             .transaction { $0.disablesAnimations = true }

@@ -83,6 +83,21 @@ struct CampaignModel: Equatable {
         return nil
     }
 
+    /// A gamification campaign's floating entry, shaped as the story floater it
+    /// reuses (same key, so payloads, caps and analytics stay the campaign's own).
+    /// Nil unless this campaign carries a floating entry canvas.
+    var floatingEntryCampaign: CampaignModel? {
+        guard case .floating(let floater)? = gamificationConfig?.entryCanvas else { return nil }
+        return CampaignModel(
+            id: id,
+            campaignKey: campaignKey,
+            campaignType: "floater",
+            config: .floaterStory(floater),
+            targetScreenNames: targetScreenNames,
+            frequency: frequency
+        )
+    }
+
     static func fromJson(
         _ json: [String: Any],
         designTokens: DesignTokenCatalog = .empty,
@@ -190,7 +205,7 @@ struct CampaignModel: Equatable {
         case "gamification":
             guard let templateConfig = selectedJson.object("templateConfig"),
                   let gamificationConfig = GamificationConfig.fromJson(
-                      templateConfig, campaignLevel: selectedJson)
+                      templateConfig, campaignLevel: selectedJson, designTokens: designTokens)
             else { return nil }
             config = .gamification(gamificationConfig)
         default:

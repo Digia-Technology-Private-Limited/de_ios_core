@@ -158,6 +158,11 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
             pinch.isEnabled = false
         }
         webView.allowsLinkPreview = false
+        // Transparent surface: the host app shows through wherever the skin
+        // draws nothing, so no layer here may paint an opaque background.
+        webView.isOpaque = false
+        webView.backgroundColor = .clear
+        webView.scrollView.backgroundColor = .clear
     }
 
     var view: WKWebView { webView }

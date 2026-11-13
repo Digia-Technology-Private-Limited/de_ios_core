@@ -17,16 +17,12 @@ struct GamificationEnumsTests {
         #expect(GamificationFormat(wire: nil).rawValue == "unknown")
     }
 
-    @Test("entry, surface and sensors")
-    func entrySurfaceSensors() {
+    @Test("entry and sensors")
+    func entrySensors() {
         #expect(GamificationEntryKind(wire: "direct") == .direct)
         #expect(GamificationEntryKind(wire: "inlineTeaser") == .inlineTeaser)
         #expect(GamificationEntryKind(wire: "floating") == .floating)
         #expect(GamificationEntryKind(wire: "banner").rawValue == "unknown")
-        #expect(GamificationSurfaceStyle(wire: "dialog") == .dialog)
-        #expect(GamificationSurfaceStyle(wire: "bottomSheet") == .bottomSheet)
-        #expect(GamificationSurfaceStyle(wire: "fullScreen") == .fullScreen)
-        #expect(GamificationSurfaceStyle(wire: "sheet").rawValue == "unknown")
         #expect(GamificationSkinSensor(wire: "haptics") == .haptics)
         #expect(GamificationSkinSensor(wire: "gyroscope") == .gyroscope)
         #expect(GamificationSkinSensor(wire: "accelerometer") == .accelerometer)

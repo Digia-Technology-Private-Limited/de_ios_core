@@ -29,17 +29,6 @@ enum GamificationEntryKind: String, Equatable, Sendable {
     }
 }
 
-enum GamificationSurfaceStyle: String, Equatable, Sendable {
-    case dialog = "dialog"
-    case bottomSheet = "bottomSheet"
-    case fullScreen = "fullScreen"
-    case unknown = "unknown"
-
-    init(wire value: String?) {
-        self = GamificationSurfaceStyle(rawValue: value ?? "") ?? .unknown
-    }
-}
-
 enum GamificationSkinSensor: String, Equatable, Sendable {
     case haptics = "haptics"
     case gyroscope = "gyroscope"
