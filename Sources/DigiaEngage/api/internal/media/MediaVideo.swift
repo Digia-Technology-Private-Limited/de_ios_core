@@ -3,7 +3,6 @@ import AVKit
 import SwiftUI
 import UIKit
 
-internal import DigiaMediaCache
 internal import DigiaVideoEngine
 
 extension MediaFit {
