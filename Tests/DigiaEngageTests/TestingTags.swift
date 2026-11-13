@@ -34,6 +34,8 @@ extension Tag {
 
     /// Nudge surfaces: dialog, bottom sheet, full screen, close button, nudge video.
     @Tag static var nudge: Self
+    /// Gamification: game surfaces, bridge, outcome calls, bundle cache, haptics, motion, pause/resume, device facts.
+    @Tag static var gamification: Self
     /// Floater surfaces: story floater window, PiP.
     @Tag static var floater: Self
     /// Survey surfaces: dialog and bottom-sheet surveys and their scenes.
@@ -70,8 +72,12 @@ extension Tag {
     @Tag static var registry: Self
     /// Media: video streaming, aspect ratio/fit, images, fonts, color.
     @Tag static var media: Self
+    /// Gamification game surfaces: container slots, web view host, bridge.
+    @Tag static var game: Self
     /// Debug tooling: logger, debug overlay, debug deep link, test kit, live-test reliability.
     @Tag static var debug: Self
+    /// Gamification skins: prefetch, bundle cache, web-view host, bridge.
+    @Tag static var gami: Self
     /// Page capture: view-tree walk, capture envelope, capture upload.
     @Tag static var capture: Self
 }

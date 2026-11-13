@@ -57,6 +57,7 @@ struct NudgeOverlayView: View {
                 }
 
                 NudgeCoverPresenter(presentation: coverBinding)
+                GameCoverPresenter(presentation: gameCoverBinding)
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
         }
@@ -78,6 +79,19 @@ struct NudgeOverlayView: View {
             },
             set: { newValue in
                 if newValue == nil { SDKInstance.shared.markNudgeDismissed() }
+            }
+        )
+    }
+
+    /// Drives the game cover from the controller's active game. Clearing it
+    /// routes through `GamePresenter.dismiss()` so the session settles exactly once.
+    private var gameCoverBinding: Binding<GamePresentation?> {
+        Binding(
+            get: {
+                controller.activeGame
+            },
+            set: { newValue in
+                if newValue == nil { GamePresenter.dismiss() }
             }
         )
     }
@@ -122,6 +136,30 @@ private struct NudgeCoverPresenter: View {
         } else {
             NudgeSheetView(presentation: nudge)
         }
+    }
+}
+
+/// Isolates the game full-screen-cover transaction like `NudgeCoverPresenter`
+/// does for nudges. The game fills the window over a clear presentation
+/// background and closes through the native button or the skin, never through
+/// a gesture.
+private struct GameCoverPresenter: View {
+    let presentation: Binding<GamePresentation?>
+
+    var body: some View {
+        Color.clear
+            .fullScreenCover(item: presentation) { game in
+                // `.id(game.id)`: a direct swap between two games (no nil in
+                // between) must still create a fresh presentation view.
+                if #available(iOS 16.4, *) {
+                    GameContainerView(game: game, safeAreaInsets: activeWindowSafeAreaInsets)
+                        .presentationBackground(.clear)
+                        .id(game.id)
+                } else {
+                    GameContainerView(game: game, safeAreaInsets: activeWindowSafeAreaInsets).id(game.id)
+                }
+            }
+            .transaction { $0.disablesAnimations = true }
     }
 }
 

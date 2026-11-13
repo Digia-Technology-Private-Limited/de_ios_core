@@ -425,6 +425,9 @@ private struct FloaterStorySessionView: View {
             SDKInstance.shared.reportFloaterStoryClicked(
                 elementId: "floater_close", actionType: "close", ctaRole: "secondary"
             )
+            // A gamification entry stays hidden for the rest of the session; the
+            // chance is untouched because only `playRequested` consumes it.
+            SDKInstance.shared.hideGamificationEntry(payload: state.payload)
             orchestrator.dismiss(.userClose)
         } label: {
             FloaterVectorIcon(glyph: .close)
@@ -445,6 +448,14 @@ private struct FloaterStorySessionView: View {
 
     private func openStory() {
         guard !orchestrator.storyOpen, !orchestrator.closing else { return }
+        // A story-less window is a gamification entry: its tap opens the game.
+        guard config.story != nil else {
+            SDKInstance.shared.reportFloaterStoryClicked(
+                elementId: "floater_window", actionType: "open_game", ctaRole: "primary"
+            )
+            SDKInstance.shared.openGame(forPayload: state.payload)
+            return
+        }
         SDKInstance.shared.reportFloaterStoryClicked(
             elementId: "floater_window", actionType: "show_story", ctaRole: "primary"
         )
