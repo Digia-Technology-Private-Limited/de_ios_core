@@ -410,6 +410,50 @@ struct StoryPageTests {
         pool.giveBack(key: "page", player: blocker, priority: .onScreen)
     }
 
+    // Guards `showing.onGiveUp = video.onLost` in `MediaVideoContent.bindCallbacks` and `onSkipped:
+    // { playback = playback.skip(index: index) }` in `StoryRail.card`: when a decoder-busy video takes
+    // a playing card's player, the turn passes to the next card.
+    @Test("a rail card whose player is taken passes its turn to the next card")
+    func takenRailCardPassesTheTurn() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let pool = singleSlotPool()
+        let urls = try serveVideos(3)
+        let keys = (0 ..< 2).map { poolKey($0) }
+
+        let window = mountRail([windowOf(400, urls[0]), windowOf(400, urls[1])])
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { pool.heldPlayer(for: keys[0]) != nil }, "card 0 has the first turn")
+        let page = pool.borrow(key: "page", url: urls[2], priority: .viewerPage)
+        _ = pool.replaceForDecoderBusy(key: "page", priority: .viewerPage)
+
+        #expect(await waitUntilMedia { pool.heldPlayer(for: keys[1]) != nil }, "card 1 took the turn")
+        #expect(pool.heldPlayer(for: keys[0]) == nil)
+        pool.giveBack(key: "page", player: page, priority: .viewerPage)
+    }
+
+    // Guards `eligible: playable` (not `turnCandidates`) in `StoryRailState.complete`: a card whose
+    // player was taken keeps its place, so once the card that took its turn has played its window the
+    // turn comes back to it.
+    @Test("a rail card whose player was taken gets its turn again after the next card's")
+    func takenRailCardStaysInTheRotation() async throws {
+        install()
+        defer { MediaOrigin.end() }
+        let pool = singleSlotPool()
+        let urls = try serveVideos(3)
+        let keys = (0 ..< 2).map { poolKey($0) }
+
+        let window = mountRail([windowOf(400, urls[0]), windowOf(400, urls[1])])
+        defer { ComponentTestHost.unmount(window) }
+        #expect(await waitUntilMedia { pool.heldPlayer(for: keys[0]) != nil }, "card 0 has the first turn")
+        let page = pool.borrow(key: "page", url: urls[2], priority: .viewerPage)
+        _ = pool.replaceForDecoderBusy(key: "page", priority: .viewerPage)
+        pool.giveBack(key: "page", player: page, priority: .viewerPage)
+        #expect(await waitUntilMedia { pool.heldPlayer(for: keys[1]) != nil }, "card 1 took the turn")
+
+        #expect(await waitUntilMedia(timeout: 10) { pool.heldPlayer(for: keys[0]) != nil }, "the turn came back to card 0")
+    }
+
     // Guards the `mediaVideoBackdrop` branch of `playback.firstFrameShown ? groundAfterFirstFrame :
     // mediaVideoBackdrop` in `MediaVideo.body` as a handed-over player reaches it (V8-04; Android
     // X8-05): the viewer page over a player the rail card already holds shows the dark backdrop

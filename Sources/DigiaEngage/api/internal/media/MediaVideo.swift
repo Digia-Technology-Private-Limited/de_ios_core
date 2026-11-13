@@ -88,8 +88,8 @@ let mediaVideoBackdrop = Color(red: 0x1A / 255, green: 0x1A / 255, blue: 0x1A / 
 ///
 /// Story surfaces (T8) also use: `startMs`, where an opened player is put (nil keeps the pool's
 /// playhead, so a remount resumes); `onReady`, the player at its first frame (the story reads
-/// its playhead); `onLost`, kept for the story surfaces, which the engine no longer calls (a
-/// taken video shows its still until shown again or tapped).
+/// its playhead); `onLost`, when a video that had a player is on its still without one (taken,
+/// decoder busy, or reclaimed); a rail card passes its turn then.
 ///
 /// `replaceOnDecoderBusy` (default true): on a decoder-busy failure the video takes another
 /// video's player; false shows its still instead.
@@ -243,6 +243,7 @@ private struct MediaVideoContent: View {
         showing.onFirstFrame = video.onFirstFrame
         showing.onReady = video.onReady
         showing.onEnded = video.onEnded
+        showing.onGiveUp = video.onLost
         let onFailure = video.onFailure
         showing.onFailure = { [report] failure in
             let cause: String? = switch failure {
