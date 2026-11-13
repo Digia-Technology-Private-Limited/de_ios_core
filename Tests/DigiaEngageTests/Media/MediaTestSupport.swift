@@ -113,11 +113,12 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
         return URLSession(configuration: configuration)
     }
 
-    /// Ends a test that installed the origin: unroutes it, clears its state and puts the SDK's
-    /// media services back.
+    /// Ends a test that installed the origin: unroutes it, clears its state and unregisters the health recorders and puts
+    /// the SDK's media services back.
     static func end() {
         uninstall()
         reset()
+        HealthRecorder.stopAll()
         MediaServices.reset()
     }
 
@@ -207,14 +208,27 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
     }
 }
 
-/// Records every health report the media layer makes, off the main actor. Creating one replaces
-/// the process-wide reporter in `MediaServices`, so the report of any path reaches it (the
-/// wrappers and the floater alike) until `MediaOrigin.end()`.
-final class HealthRecorder: @unchecked Sendable {
+/// Records every `media_load_failed` record the real logger emits, off the main actor. A
+/// `DiagnosticSink` on `DigiaLogger`, so production's own guard (no campaign key or cause, no
+/// report) decides what arrives, and the report of any path reaches it (the wrappers and the
+/// floater alike) until `MediaOrigin.end()` unregisters it.
+final class HealthRecorder: DiagnosticSink, @unchecked Sendable {
     struct Record: Equatable {
         let campaignKey: String?
         let kind: HealthMediaKind
         let cause: String
+    }
+
+    private static let activeLock = NSLock()
+    nonisolated(unsafe) private static var active: [HealthRecorder] = []
+
+    /// Unregisters every recorder created since the last call.
+    static func stopAll() {
+        let recorders = activeLock.withLock { () -> [HealthRecorder] in
+            defer { active = [] }
+            return active
+        }
+        recorders.forEach { DigiaLogger.unregisterSink($0) }
     }
 
     private let lock = NSLock()
@@ -223,9 +237,19 @@ final class HealthRecorder: @unchecked Sendable {
     var all: [Record] { lock.withLock { records } }
 
     init() {
-        MediaServices.override(reportHealth: { [self] key, kind, cause in
-            lock.withLock { records.append(Record(campaignKey: key, kind: kind, cause: cause)) }
-        })
+        Self.activeLock.withLock { Self.active.append(self) }
+        DigiaLogger.registerSink(self)
+    }
+
+    func accepts(_ record: TimelineRecord) -> Bool {
+        record.reason?.wire == TimelineReason.mediaLoadFailed.wire
+    }
+
+    func emit(_ record: TimelineRecord) {
+        guard let kind = record.extras["media_kind"].flatMap(HealthMediaKind.init(rawValue:)),
+            let cause = record.extras["cause"]
+        else { return }
+        lock.withLock { records.append(Record(campaignKey: record.campaignKey, kind: kind, cause: cause)) }
     }
 }
 
