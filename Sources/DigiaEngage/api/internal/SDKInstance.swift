@@ -2114,7 +2114,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             log.d("Action.openGame ignored — no trigger or user id", campaign: key)
             return
         }
-        guard controller.activeGame == nil else { return }
+        guard !GamePresenter.isBusy else { return }
         let isLiveTest = isLiveTestCepId(payload.cepCampaignId)
         let testInvocationId = isLiveTest ? testInvocationIdOf(payload.cepCampaignId) : nil
         let request = GrantChanceRequest(
@@ -2244,6 +2244,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 if isEntryTap { return }
                 self?.coordinator.handle(.dismissed(reason: .autoTimeout), payload: payload)
             },
+            onShown: { [weak self] in
+                // On screen: count the impression so the acceptance watchdog stands down.
+                self?.coordinator.handle(.impressed, payload: payload)
+            },
             values: config.values,
             slots: config.usesSlots ? config.slots : [],
             sensors: config.sensors.map(\.rawValue),
@@ -2260,10 +2264,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             }
         )
         GamePresenter.open(request)
-        // On screen: count the impression so the acceptance watchdog stands down.
-        if controller.activeGame != nil {
-            coordinator.handle(.impressed, payload: payload)
-        }
     }
 
     /// Handles one `campaign_test` SSE event.

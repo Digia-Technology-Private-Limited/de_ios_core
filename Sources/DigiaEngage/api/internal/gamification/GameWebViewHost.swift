@@ -270,25 +270,24 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
 struct GameWebViewHost: UIViewRepresentable {
     let game: GamePresentation
 
+    /// The game is presented only after `ready`, so the coordinator already
+    /// exists and its page is loaded; this view adopts it without reloading.
     func makeCoordinator() -> GameWebCoordinator {
+        if let existing = game.webCoordinator { return existing }
+        // Unreachable in practice: `GamePresenter.open` always preloads.
+        assertionFailure("Game presented without a preloaded web view")
         let coordinator = GameWebCoordinator(
-            game: game,
-            entryURL: game.entryURL,
-            bundleRoot: game.bundleRoot
-        )
-        game.attach(coordinator: coordinator)
+            game: game, entryURL: game.entryURL, bundleRoot: game.bundleRoot)
+        coordinator.start()
         return coordinator
     }
 
     func makeUIView(context: Context) -> WKWebView {
-        let view = context.coordinator.view
-        context.coordinator.start()
-        return view
+        context.coordinator.view
     }
 
     func updateUIView(_ uiView: WKWebView, context: Context) {
-        // Loads once in makeUIView. State changes (`ready`) flow through the
-        // observed presentation, never through a reload.
+        // Loaded once in `GamePresentation.preload()`; never reloaded here.
     }
 
     static func dismantleUIView(_ uiView: WKWebView, coordinator: GameWebCoordinator) {

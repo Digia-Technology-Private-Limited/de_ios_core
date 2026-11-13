@@ -89,6 +89,8 @@ struct GameOpenRequest {
     /// chance is committed. Entry canvases use it to go away after a real play.
     var onPlayCommitted: (@MainActor () -> Void)?
     var onFailure: (@MainActor (GameFailure) -> Void)?
+    /// Fires once when the skin sends `ready` and the game becomes visible.
+    var onShown: (@MainActor () -> Void)?
     /// `init` extras: skin values, slots (only for slot-mapped formats), and
     /// the sensor wire names the skin may use.
     var values: [String: JSONValue] = [:]

@@ -70,7 +70,7 @@ struct FloaterStoryWindowConfig: Equatable {
             // Clamped, not trusted: a window wider than the screen cannot be dragged
             // back into it, and one under ~30dp cannot be reliably tapped.
             widthFraction: CGFloat(j.double("widthFraction", default: 0.32))
-                .clampedToFloaterStoryRange(0.08, 0.9),
+                .clampedToFloaterStoryRange(0.08, 1.0),
             aspectRatio: ratio > 0 ? ratio : 0.72,
             position: FloaterCorner.from(j.nonBlankString("position")),
             margin: FloaterMargin.fromJson(j.object("marginDp")),

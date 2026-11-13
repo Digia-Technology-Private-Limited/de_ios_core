@@ -24,11 +24,9 @@ final class GamePresentation: Identifiable, ObservableObject {
     let initPayload: GameInitPayload
     let bridge = GameBridge()
 
-    /// Set when `ready` arrives; the container hides its loader and shows the
-    /// web view. Published so the container animates with it.
-    @Published private(set) var isReady = false
+    /// Set when `ready` arrives; the game is presented only after this.
+    private(set) var isReady = false
 
-    private weak var coordinator: GameWebCoordinator?
     private var didFinish = false
     private let haptics: GameHaptics
     /// The delivered reward's deep link, opened on `useReward`; never sent to the skin.
@@ -71,15 +69,32 @@ final class GamePresentation: Identifiable, ObservableObject {
         bridge.onFailed = { [weak self] reason in self?.didFail(reason) }
     }
 
-    func attach(coordinator: GameWebCoordinator) {
-        self.coordinator = coordinator
+    /// The web view's owner, created once in `preload()` and reused by the
+    /// container once the game is shown.
+    private(set) var webCoordinator: GameWebCoordinator?
+
+    /// Loads the skin before anything is shown. The web view sits in the key
+    /// window fully transparent and ignoring touches, so the host app stays
+    /// usable; `ready` presents the game, and a missing `ready` closes it
+    /// silently on the bridge's 5 s timer.
+    func preload() {
+        let coordinator = GameWebCoordinator(game: self, entryURL: entryURL, bundleRoot: bundleRoot)
+        webCoordinator = coordinator
+        let view = coordinator.view
+        view.alpha = 0
+        view.isUserInteractionEnabled = false
+        if let window = ViewControllerUtil.keyWindow() {
+            view.frame = window.bounds
+            window.addSubview(view)
+        }
+        coordinator.start()
     }
 
     /// Sends `init` after the page loads, and again after `playNext`. Each
     /// `init` fully resets the skin.
     func sendInit() {
         guard let script = bridge.script(for: initPayload.message()) else { return }
-        coordinator?.view.evaluateJavaScript(script, completionHandler: nil)
+        webCoordinator?.view.evaluateJavaScript(script, completionHandler: nil)
     }
 
     private static func jsonObject(_ value: JSONValue) -> Any {
@@ -137,7 +152,7 @@ final class GamePresentation: Identifiable, ObservableObject {
                       result, slots: request.slots, rewardCtaTexts: request.rewardCtaTexts))
         else { return }
         rewardLink = Self.rewardDeepLink(result)
-        coordinator?.view.evaluateJavaScript(script, completionHandler: nil)
+        webCoordinator?.view.evaluateJavaScript(script, completionHandler: nil)
     }
 
     /// The grant's deep link (top level or under `cta`), when it parses as a URL.
@@ -256,13 +271,32 @@ final class GamePresentation: Identifiable, ObservableObject {
     }
 
     private func didBecomeReady() {
+        guard !didFinish, !isReady else { return }
         isReady = true
+        // Hand the loaded web view to the container; it is never reloaded.
+        webCoordinator?.view.removeFromSuperview()
+        webCoordinator?.view.alpha = 1
+        webCoordinator?.view.isUserInteractionEnabled = true
+        GamePresenter.loading = nil
+        SDKInstance.shared.controller.showGame(self)
+        request.onShown?()
+    }
+
+    /// Ends the session on every path. A game that never became visible has no
+    /// container to tear the web view down, so it is torn down here.
+    private func finish() {
+        didFinish = true
+        if GamePresenter.loading === self { GamePresenter.loading = nil }
+        if !isReady {
+            webCoordinator?.view.removeFromSuperview()
+            webCoordinator?.teardown()
+        }
+        SDKInstance.shared.controller.dismissGame()
     }
 
     private func didClose() {
         guard !didFinish else { return }
-        didFinish = true
-        SDKInstance.shared.controller.dismissGame()
+        finish()
         request.onClose?()
     }
 
@@ -272,9 +306,8 @@ final class GamePresentation: Identifiable, ObservableObject {
 
     private func finishAsFailure(_ reason: GameFailure) {
         guard !didFinish else { return }
-        didFinish = true
         log.w("Game closed", error: reason.rawValue)
-        SDKInstance.shared.controller.dismissGame()
+        finish()
         request.onFailure?(reason)
     }
 }
@@ -284,6 +317,15 @@ final class GamePresentation: Identifiable, ObservableObject {
 /// skin `close` funnel back through `dismiss()`.
 @MainActor
 enum GamePresenter {
+    /// The game loading out of sight, before its `ready`. Counts as the one
+    /// open game so a re-trigger cannot start a second load.
+    static var loading: GamePresentation?
+
+    /// True while a game is loading or on screen.
+    static var isBusy: Bool {
+        loading != nil || SDKInstance.shared.controller.activeGame != nil
+    }
+
     /// Opens the container for `request`. Failures that are known before the
     /// container exists (unsupported runtime, games off, missing bundle) call
     /// `onFailure` directly and open nothing.
@@ -305,18 +347,19 @@ enum GamePresenter {
             return
         }
         // One game owns the surface: a re-trigger must not restart the live one.
-        guard SDKInstance.shared.controller.activeGame == nil else {
+        guard !isBusy else {
             log.w("Game not opened — another game is already open", error: request.campaignKey)
             return
         }
-        log.d("Game opening", campaign: request.campaignKey)
-        SDKInstance.shared.controller.showGame(presentation)
+        log.d("Game loading", campaign: request.campaignKey)
+        loading = presentation
+        presentation.preload()
     }
 
     /// Closes the open game, if any. Fires `onClose` exactly once; a failure
     /// already reported stays reported.
     static func dismiss() {
-        guard let game = SDKInstance.shared.controller.activeGame else { return }
+        guard let game = SDKInstance.shared.controller.activeGame ?? loading else { return }
         game.dismiss()
     }
 }

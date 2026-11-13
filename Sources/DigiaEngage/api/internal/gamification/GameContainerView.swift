@@ -1,28 +1,21 @@
 import SwiftUI
 
-/// The game surface: always full screen and transparent. The web view is
-/// non-opaque, so once the skin is `ready` only the skin and the native close
-/// button are visible over the host app. Until then a dim scrim, a small
-/// spinner and "Loading game…" cover the window. The native close button is
-/// pinned top-right inside the safe area at all times — including while
-/// loading. Taps never pass through to the host app.
+/// The game surface: always full screen and transparent. It is presented only
+/// after the skin sends `ready` (see `GamePresentation.preload()`), so there is
+/// no loading state: the skin and the native close button fade in together.
+/// Taps never pass through to the host app while the game is on screen.
 @MainActor
 struct GameContainerView: View {
     @ObservedObject var game: GamePresentation
     var safeAreaInsets: UIEdgeInsets = .zero
 
-    /// rgba(10, 12, 40, 0.85)
-    private static let scrim = Color(red: 10 / 255, green: 12 / 255, blue: 40 / 255).opacity(0.85)
+    @State private var revealed = false
 
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 GameWebViewHost(game: game)
                     .frame(width: geometry.size.width, height: geometry.size.height)
-                if !game.isReady {
-                    loader
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                }
                 NudgeCloseButton(
                     config: .defaults,
                     action: { GamePresenter.dismiss() }
@@ -37,24 +30,11 @@ struct GameContainerView: View {
             .frame(width: geometry.size.width, height: geometry.size.height)
             .contentShape(Rectangle())
             .onTapGesture {}
-        }
-        .ignoresSafeArea()
-    }
-
-    private var loader: some View {
-        ZStack {
-            Self.scrim
-            VStack(spacing: 12) {
-                ProgressView()
-                    .progressViewStyle(.circular)
-                    .tint(.white)
-                    .scaleEffect(0.9)
-                Text("Loading game…")
-                    .font(.system(size: 14))
-                    .foregroundColor(.white.opacity(0.85))
+            .opacity(revealed ? 1 : 0)
+            .onAppear {
+                withAnimation(.easeOut(duration: 0.18)) { revealed = true }
             }
         }
-        .contentShape(Rectangle())
-        .onTapGesture {}
+        .ignoresSafeArea()
     }
 }
