@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+internal import DigiaVideoEngine
 
 struct InlineStoryOverlayState: Equatable {
     let config: InlineStoryConfig

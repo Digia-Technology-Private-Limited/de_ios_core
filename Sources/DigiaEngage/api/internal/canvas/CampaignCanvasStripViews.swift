@@ -1,6 +1,7 @@
 internal import SDWebImageSwiftUI
 import AVKit
 import SwiftUI
+internal import DigiaVideoEngine
 
 /// What the viewer's chrome elements read to draw themselves.
 ///

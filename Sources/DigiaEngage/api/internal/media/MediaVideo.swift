@@ -125,75 +125,25 @@ struct MediaVideo: View {
 
     @Environment(\.digiaCampaignKey) private var campaignKey
     @Environment(\.mediaServices) private var services
-    @StateObject private var playback = MediaVideoPlayback()
+    @StateObject private var box = MediaVideoShowingBox()
 
     var body: some View {
-        let still = MediaVideoStill(thumbnailUrl: thumbnailUrl, blurHash: blurHash)
-        let _ = playback.updateCallbacks(
-            onFirstFrame: onFirstFrame, onEnded: onEnded, onFailure: onFailure, onReady: onReady, onLost: onLost)
-        ZStack {
-            if playback.failed {
-                Color.black
-                MediaVideoFailedBox()
-            } else {
-                if !bare {
-                    playback.firstFrameShown ? groundAfterFirstFrame : mediaVideoBackdrop
-                }
-                if !playback.firstFrameShown {
-                    stillView(still)
-                }
-                // Hidden until the first frame, also with controls: the still shows, not the
-                // controller's black backdrop, and the controls come on top with the frame (OD-7).
-                if let player = playback.player {
-                    playerView(player)
-                        .opacity(playback.firstFrameShown ? 1 : 0)
-                }
-                if playback.spinnerVisible {
-                    ProgressView()
-                        .progressViewStyle(.circular)
-                        .tint(.white)
-                }
-            }
-        }
-        .clipped()
-        .onAppear { open(url: url, key: playerKey) }
-        .onDisappear { playback.close() }
-        // The new value comes in the argument: the closure may still see the old properties.
-        .onChange(of: url) { open(url: $0, key: playerKey) }
-        .onChange(of: playerKey) { open(url: url, key: $0) }
-        .onChange(of: muted) { playback.player?.setMuted($0) }
-        .onChange(of: volume) { playback.setVolume($0, muted: muted) }
-        .onChange(of: autoplay) { playback.setPlaying($0) }
-        .onChange(of: loop) { playback.loop = $0 }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-            if pausesInBackground { playback.setAppActive(false) }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-            if pausesInBackground { playback.setAppActive(true) }
-        }
+        let showing = box.showing(pool: services.videoPool, spinnerDelay: spinnerDelay)
+        MediaVideoContent(video: self, showing: showing, report: { [services, campaignKey] cause in
+            services.reportHealth(campaignKey, .video, cause)
+        })
     }
 
-    @ViewBuilder
-    private func playerView(_ player: DigiaVideoPlayer) -> some View {
-        if showControls {
-            MediaPlayerControllerView(player: player.avPlayer, gravity: fit.videoGravity) { playback.noteFirstFrame() }
-        } else {
-            MediaPlayerLayerView(player: player, gravity: fit.videoGravity) { playback.noteFirstFrame() }
-        }
-    }
-
-    private func open(url: String, key: String?) {
-        let canShow = MediaVideoStill.canShow(thumbnailUrl: thumbnailUrl, blurHash: blurHash)
-        playback.open(
+    /// What the engine's `VideoShowing` is given on every update.
+    func spec(url: String, key: String?) -> VideoShowingSpec {
+        VideoShowingSpec(
             url: url, key: key, priority: poolPriority, loop: loop, muted: muted, volume: volume,
-            autoplay: autoplay, waitsForPlayer: waitsForPlayer,
-            startMs: startMs, spinnerDelay: canShow || bare ? nil : spinnerDelay,
-            services: services,
-            report: { [services, campaignKey] cause in services.reportHealth(campaignKey, .video, cause) })
+            autoplay: autoplay, waitsForPlayer: waitsForPlayer, startMs: startMs,
+            hasStill: bare || MediaVideoStill.canShow(thumbnailUrl: thumbnailUrl, blurHash: blurHash))
     }
 
     @ViewBuilder
-    private func stillView(_ still: MediaVideoStill) -> some View {
+    func stillView(_ still: MediaVideoStill) -> some View {
         switch still {
         case let .thumbnail(thumbnail):
             MediaImage(
@@ -226,347 +176,93 @@ struct MediaVideoFailedBox: View {
     }
 }
 
-/// One showing's player: leases it from the pool, observes it, and publishes first frame and
-/// failure. All on the main actor.
-///
-/// The engine player owns the end of the item, looping and the failure cause; this showing
-/// observes it for failure and end. The first frame stays per view (each view's layer or
-/// controller reports its own readiness), so a remounted or joined view gets its own.
+/// Keeps one engine `VideoShowing` for a `MediaVideo` node, made on first use from the
+/// environment's pool. All the decisions live in the showing; the view only draws.
 @MainActor
-final class MediaVideoPlayback: ObservableObject, DigiaVideoPlayerObserver {
-    @Published private(set) var player: DigiaVideoPlayer?
-    @Published private(set) var firstFrameShown = false
-    @Published private(set) var failed = false
-    @Published private(set) var spinnerVisible = false
+final class MediaVideoShowingBox: ObservableObject {
+    private var current: (pool: VideoPlayerPool, showing: VideoShowing)?
 
-    var loop = false {
-        didSet { player?.setLooping(loop) }
+    func showing(pool: VideoPlayerPool, spinnerDelay: TimeInterval) -> VideoShowing {
+        if let current, current.pool === pool { return current.showing }
+        current?.showing.close()
+        let showing = VideoShowing(pool: pool, spinnerDelay: spinnerDelay)
+        current = (pool, showing)
+        return showing
     }
-    private var onFirstFrame: (() -> Void)?
-    private var onFailure: (() -> Void)?
-    private var onEnded: (() -> Void)?
-    private var onReady: ((DigiaVideoPlayer) -> Void)?
-    private var onLost: (() -> Void)?
+}
 
-    private var opened: (url: String, key: String?)?
-    private var lease: (pool: VideoPlayerPool, key: String, priority: PoolPriority, eviction: UUID, own: Bool)?
-    /// What the opened showing borrows, kept so a woken waiter can borrow again.
-    private struct BorrowRequest {
-        let pool: VideoPlayerPool
-        let key: String
-        let url: URL
-        let priority: PoolPriority
-        let own: Bool
-        let muted: Bool
-        let volume: Float
-        let startMs: Int64?
-        let spinnerDelay: TimeInterval?
-        let waits: Bool
-    }
-    private var request: BorrowRequest?
-    /// Set while the showing waits in the pool's queue for a player.
-    private var waitToken: UUID?
-    /// The pool key of this node when the surface gives none (OD-15), stable while it is mounted.
-    private let ownKey = "media-video-\(UUID().uuidString)"
-    private var report: (String) -> Void = { _ in }
-    /// Only for the `startMs` seek, which waits for the item to be ready: the engine player
-    /// sends no ready event.
-    private var statusObserver: NSKeyValueObservation?
-    /// Hears a play or pause that did not come from `setPlaying` (the native controls).
-    private var rateObserver: NSKeyValueObservation?
-    private var spinnerTask: Task<Void, Never>?
-    /// A `startMs` seek is waiting for the item to be ready, or on its way: the player starts once
-    /// it lands, so it never plays on from where the pool left it, nor from 0.
-    private var seekPending = false
-    private var pendingStartMs: Int64?
-    private var wantsPlaying = false
-    /// The app is not active and this video paused for it; `resumeWhenActive` is whether it was
-    /// playing, which is all that comes back.
-    private var appPaused = false
-    private var resumeWhenActive = false
+/// Draws one `VideoShowing`: the still until the first frame, the player, the spinner, the
+/// failed box. Passes the view's inputs and moments on to the showing.
+private struct MediaVideoContent: View {
+    let video: MediaVideo
+    @ObservedObject var showing: VideoShowing
+    let report: (String) -> Void
 
-    /// Keeps the latest closures, so a parent passing new ones for the same URL is heard.
-    func updateCallbacks(
-        onFirstFrame: (() -> Void)?, onEnded: (() -> Void)?, onFailure: (() -> Void)?,
-        onReady: ((DigiaVideoPlayer) -> Void)? = nil, onLost: (() -> Void)? = nil
-    ) {
-        self.onFirstFrame = onFirstFrame
-        self.onEnded = onEnded
-        self.onFailure = onFailure
-        self.onReady = onReady
-        self.onLost = onLost
-    }
-
-    /// Starts showing `url`. Re-opening what is already open is a no-op; anything else frees
-    /// the old player first.
-    func open(
-        url: String, key: String?, priority: PoolPriority, loop: Bool, muted: Bool, volume: Float,
-        autoplay: Bool, waitsForPlayer: Bool = true, startMs: Int64? = nil, spinnerDelay: TimeInterval?,
-        services: MediaServices, report: @escaping (String) -> Void
-    ) {
-        if let opened, opened.url == url, opened.key == key { return }
-        close()
-        opened = (url, key)
-        self.loop = loop
-        self.report = report
-        guard let parsed = mediaUsableURL(url) else {
-            fail(cause: "invalid_url")
-            return
-        }
-        wantsPlaying = autoplay
-        request = BorrowRequest(
-            pool: services.videoPool, key: key ?? ownKey, url: parsed, priority: priority, own: key == nil,
-            muted: muted, volume: volume, startMs: startMs, spinnerDelay: spinnerDelay,
-            waits: waitsForPlayer && !priority.isStage1)
-        attemptBorrow(retried: false)
-    }
-
-    /// A refused borrow is tried once more on the next main-queue turn (OD-24): a surface taking
-    /// over from one that leaves in the same turn (the rail's next card) can ask before the
-    /// leaving one's close has given its player back. A second refusal waits in the pool's queue
-    /// on the still, or, for a surface that doesn't wait, gives up through `onLost`. A woken waiter
-    /// refused again keeps its place. The pool's health report on a refusal is not undone.
-    private func attemptBorrow(retried: Bool) {
-        guard let request, lease == nil, player == nil else { return }
-        let pool = request.pool
-        guard let player = pool.borrow(key: request.key, url: request.url, priority: request.priority) else {
-            if waitToken != nil { return }
-            guard retried else {
-                let opened = opened
-                DispatchQueue.main.async { [weak self] in
-                    guard let self, self.opened?.url == opened?.url, self.opened?.key == opened?.key else { return }
-                    self.attemptBorrow(retried: true)
+    var body: some View {
+        let still = MediaVideoStill(thumbnailUrl: video.thumbnailUrl, blurHash: video.blurHash)
+        let _ = bindCallbacks()
+        ZStack {
+            if showing.failure != nil {
+                Color.black
+                MediaVideoFailedBox()
+            } else {
+                if !video.bare {
+                    showing.firstFrameShown ? video.groundAfterFirstFrame : mediaVideoBackdrop
                 }
-                return
-            }
-            waitOrGiveUp()
-            return
-        }
-        // The pool took this showing out of its queue with the borrow.
-        waitToken = nil
-        let eviction = pool.observeEviction(of: request.key) { [weak self] in self?.evicted() }
-        lease = (pool, request.key, request.priority, eviction, request.own)
-        player.add(observer: self)
-        // The volume first: setting it clears a mute.
-        player.setVolume(request.volume)
-        player.setMuted(request.muted)
-        player.setLooping(loop)
-        // A surface's own start wins; otherwise a player whose idle item the pool let go, or whose
-        // player Stage 1 took, resumes where it was.
-        if let start = request.startMs ?? pool.takeResumeMs(for: request.key, player: player) {
-            seekPending = true
-            pendingStartMs = max(start, 0)
-        }
-        if let item = player.avPlayer.currentItem { watch(item) }
-        watchRate(of: player.avPlayer)
-        self.player = player
-        seekToStartIfReady()
-        setPlaying(wantsPlaying)
-        if let spinnerDelay = request.spinnerDelay {
-            spinnerTask = Task { @MainActor [weak self] in
-                try? await Task.sleep(nanoseconds: UInt64(spinnerDelay * 1_000_000_000))
-                guard let self, !Task.isCancelled, !self.firstFrameShown, !self.failed else { return }
-                self.spinnerVisible = true
+                if !showing.firstFrameShown {
+                    video.stillView(still)
+                }
+                // Hidden until the first frame, also with controls: the still shows, not the
+                // controller's black backdrop, and the controls come on top with the frame (OD-7).
+                if let player = showing.player {
+                    playerView(player)
+                        .opacity(showing.firstFrameShown ? 1 : 0)
+                }
+                if showing.showSpinner {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(.white)
+                }
             }
         }
-    }
-
-    /// No player for now: a Stage-2 surface that waits joins the pool's queue and borrows again
-    /// when woken; any other says so through `onLost`.
-    private func waitOrGiveUp() {
-        guard let request, request.waits else {
-            onLost?()
-            return
+        .clipped()
+        .onAppear { showing.show(video.spec(url: video.url, key: video.playerKey)) }
+        .onDisappear { showing.close() }
+        // The new spec comes in the argument: the closure may still see the old properties.
+        .onChange(of: video.spec(url: video.url, key: video.playerKey)) { showing.show($0) }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            if video.pausesInBackground { showing.setAppActive(false) }
         }
-        guard waitToken == nil else { return }
-        waitToken = request.pool.wait(
-            key: request.key, url: request.url, priority: request.priority, wantsPlay: wantsPlaying
-        ) { [weak self] in
-            // A wake after the showing closed or got a player does nothing.
-            guard let self, self.waitToken != nil else { return }
-            self.attemptBorrow(retried: true)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            if video.pausesInBackground { showing.setAppActive(true) }
         }
     }
 
-    /// Issues the `startMs` seek once the item is ready (a seek on an item still loading lands
-    /// nowhere), then starts the player if it should play.
-    private func seekToStartIfReady() {
-        guard let video = player, let startMs = pendingStartMs, video.avPlayer.currentItem?.status == .readyToPlay
-        else { return }
-        let player = video.avPlayer
-        pendingStartMs = nil
-        player.seek(to: CMTime(value: startMs, timescale: 1_000), toleranceBefore: .zero, toleranceAfter: .zero) {
-            [weak self] _ in
-            Task { @MainActor in
-                guard let self, self.player === video, self.seekPending else { return }
-                self.seekPending = false
-                self.setPlaying(self.wantsPlaying)
+    /// Keeps the latest closures, so a parent passing new ones for the same URL is heard. Only a
+    /// cause the author can fix is health: network, timeout and 5xx report nothing.
+    private func bindCallbacks() {
+        showing.onFirstFrame = video.onFirstFrame
+        showing.onReady = video.onReady
+        showing.onEnded = video.onEnded
+        showing.onGiveUp = video.onLost
+        let onFailure = video.onFailure
+        showing.onFailure = { [report] failure in
+            let cause: String? = switch failure {
+            case .invalidURL: "invalid_url"
+            case let .player(cause): mediaFailureCause(videoFailure: cause)
             }
+            if let cause { report(cause) }
+            onFailure?()
         }
     }
 
-    func setPlaying(_ playing: Bool) {
-        let changed = wantsPlaying != playing
-        wantsPlaying = playing
-        if changed, let request, request.waits, let waitToken {
-            request.pool.updateWait(waitToken, wantsPlay: playing)
-            // A waiting still asked to play tries to borrow at once.
-            if playing { attemptBorrow(retried: true) }
-        }
-        guard let player, !failed else { return }
-        if appPaused {
-            resumeWhenActive = playing
-            return
-        }
-        if playing, seekPending { return }
-        if playing { player.play() } else { player.pause() }
-    }
-
-    /// The app resigned or became active (`MediaVideo.pausesInBackground`). Going inactive pauses
-    /// what is playing, or about to play once its start seek lands; coming back plays only that.
-    func setAppActive(_ active: Bool) {
-        if !active {
-            guard !appPaused else { return }
-            appPaused = true
-            resumeWhenActive = (player?.avPlayer.rate ?? 0) > 0 || (seekPending && wantsPlaying)
-            player?.pause()
+    @ViewBuilder
+    private func playerView(_ player: DigiaVideoPlayer) -> some View {
+        if video.showControls {
+            MediaPlayerControllerView(player: player.avPlayer, gravity: video.fit.videoGravity) { showing.frameShown() }
         } else {
-            guard appPaused else { return }
-            appPaused = false
-            let resume = resumeWhenActive
-            resumeWhenActive = false
-            if resume { setPlaying(true) }
+            MediaPlayerLayerView(player: player, gravity: video.fit.videoGravity) { showing.frameShown() }
         }
-    }
-
-    /// Stops the player: gives it back to the pool, which keeps it for a remount, or destroys it
-    /// when the key was this node's own (OD-15).
-    func close() {
-        releasePlayer()
-        opened = nil
-        seekPending = false
-        pendingStartMs = nil
-        resumeWhenActive = false
-        firstFrameShown = false
-        failed = false
-        spinnerVisible = false
-    }
-
-    /// The volume, with the showing's mute kept (setting a volume clears a mute).
-    func setVolume(_ volume: Float, muted: Bool) {
-        player?.setVolume(volume)
-        player?.setMuted(muted)
-    }
-
-    /// Gives the player back (or destroys it when the key was this node's own) and leaves the
-    /// queue; nothing borrows again until the next `open`.
-    private func releasePlayer() {
-        let leaving = player
-        leaving?.remove(observer: self)
-        unwatch()
-        if let lease {
-            lease.pool.removeEvictionObserver(lease.eviction, for: lease.key)
-            if let leaving {
-                if lease.own {
-                    leaving.pause()
-                    lease.pool.discard(key: lease.key, player: leaving)
-                } else {
-                    lease.pool.giveBack(key: lease.key, player: leaving, priority: lease.priority)
-                }
-            }
-        }
-        if let waitToken, let request { request.pool.cancelWait(waitToken) }
-        waitToken = nil
-        request = nil
-        lease = nil
-        player = nil
-    }
-
-    func noteFirstFrame() {
-        guard !firstFrameShown, !failed, let player else { return }
-        firstFrameShown = true
-        spinnerVisible = false
-        spinnerTask?.cancel()
-        onFirstFrame?()
-        onReady?(player)
-    }
-
-    private func watch(_ item: AVPlayerItem) {
-        statusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self] item, _ in
-            guard item.status == .readyToPlay else { return }
-            Task { @MainActor in self?.seekToStartIfReady() }
-        }
-    }
-
-    // MARK: DigiaVideoPlayerObserver
-
-    func videoPlayer(_ player: DigiaVideoPlayer, didFail failure: VideoFailure, error: Error?) {
-        guard player === self.player else { return }
-        fail(cause: mediaFailureCause(videoFailure: failure))
-    }
-
-    /// Played to the end without looping: the engine player is paused there.
-    func videoPlayerDidEnd(_ player: DigiaVideoPlayer) {
-        guard player === self.player else { return }
-        onEnded?()
-    }
-
-    /// The user played or paused through the controls: the showing now wants to play, or not
-    /// (decision 2b). That sets the queue group it waits in if Stage 1 takes its player, and
-    /// whether it plays when it gets one back. `rate` is the asked-for rate (non-zero while it
-    /// waits for data). Read on the next turn, so a pause the pool itself makes on a player it
-    /// takes back (the showing no longer holds it) is not heard. The drop to 0 at the end of the
-    /// item (the engine pauses there) is not a pause: an ended video still wants to play, as on
-    /// Android.
-    private func watchRate(of player: AVPlayer) {
-        rateObserver = player.observe(\.rate, options: [.new]) { [weak self] player, _ in
-            Task { @MainActor in
-                guard let self, self.player?.avPlayer === player, !self.failed, !self.seekPending,
-                      let request = self.request, request.waits else { return }
-                let playing = player.rate != 0
-                if !playing, VideoPlayerPool.isFinished(player) { return }
-                self.wantsPlaying = playing
-            }
-        }
-    }
-
-    private func unwatch() {
-        rateObserver?.invalidate()
-        rateObserver = nil
-        spinnerTask?.cancel()
-        spinnerTask = nil
-        statusObserver?.invalidate()
-        statusObserver = nil
-    }
-
-    /// The pool took the player back for Stage 1, or re-pointed it at another URL for another
-    /// holder: show the still again
-    /// and wait in the pool's queue, or say so through `onLost` for a surface that doesn't wait.
-    private func evicted() {
-        player?.remove(observer: self)
-        unwatch()
-        if let lease { lease.pool.removeEvictionObserver(lease.eviction, for: lease.key) }
-        lease = nil
-        player = nil
-        seekPending = false
-        pendingStartMs = nil
-        firstFrameShown = false
-        spinnerVisible = false
-        waitOrGiveUp()
-    }
-
-    /// Shows the failed box once per opened URL. Only a cause the author can fix is health: a
-    /// nil cause (network, timeout, 5xx) reports nothing.
-    private func fail(cause: String?) {
-        guard !failed else { return }
-        failed = true
-        spinnerVisible = false
-        spinnerTask?.cancel()
-        // A failed showing plays nothing: its player goes back now, so a waiting video starts
-        // instead of waiting until this one closes (OD-24).
-        releasePlayer()
-        if let cause { report(cause) }
-        onFailure?()
     }
 }
 

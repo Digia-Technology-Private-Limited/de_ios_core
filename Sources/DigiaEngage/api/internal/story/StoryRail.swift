@@ -187,42 +187,12 @@ func nextStoryRailIndex(eligible: Set<Int>, afterIndex: Int?) -> Int? {
 
 // MARK: - Handover
 
-/// A playing card's player on its way to the viewer: one on-screen hold, taken in the tap, so the
-/// player is never freed (or reused for another key) between the card letting go and the viewer's
-/// page borrowing it under the same key. The viewer gives it back once its page holds the player.
-@MainActor
-final class StoryHandover {
-    let key: String
-    let player: DigiaVideoPlayer
-    private let pool: VideoPlayerPool
-    private var released = false
-
-    init(key: String, player: DigiaVideoPlayer, pool: VideoPlayerPool) {
-        self.key = key
-        self.player = player
-        self.pool = pool
-    }
-
-    func release() {
-        guard !released else { return }
-        released = true
-        pool.giveBack(key: key, player: player, priority: .onScreen)
-    }
-}
-
-/// The handover a tap on a rail card starts: only a video card that is playing and holds its
-/// player hands it over; any other tap opens the viewer fresh.
+/// The handover a tap on a rail card starts (the engine's `storyRailHandover`): only a video card
+/// that is playing and holds its player hands it over; any other tap opens the viewer fresh.
 @MainActor
 func storyRailHandover(item: StoryItemConfig, playing: Bool, key: String, pool: VideoPlayerPool) -> StoryHandover? {
-    guard item.type == .video, playing, let url = mediaUsableURL(item.url),
-          let held = pool.heldPlayer(for: key),
-          let player = pool.borrow(key: key, url: url, priority: .onScreen) else { return nil }
-    guard player === held else {
-        // Not the card's player any more (re-pointed): nothing to hand over.
-        pool.giveBack(key: key, player: player, priority: .onScreen)
-        return nil
-    }
-    return StoryHandover(key: key, player: player, pool: pool)
+    storyRailHandover(
+        url: item.type == .video ? mediaUsableURL(item.url) : nil, playing: playing, key: key, pool: pool)
 }
 
 // MARK: - The rail view

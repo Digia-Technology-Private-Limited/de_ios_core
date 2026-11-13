@@ -1,6 +1,7 @@
 import AVFoundation
 import SwiftUI
 import UIKit
+internal import DigiaVideoEngine
 
 // The inline story's entry points (T8): the rail in the slot and the full-screen viewer it opens.
 // Both are thin wrappers over the one `story/` package (`StoryRail`, `StoryViewer`); what stays
