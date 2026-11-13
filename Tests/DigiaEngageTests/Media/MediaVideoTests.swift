@@ -364,7 +364,7 @@ struct MediaVideoComponentTests {
         become()
         #expect(await waitUntilMedia { player.avPlayer.rate > 0 }, "plays again in the foreground")
 
-        player.pause()  // the user's own pause
+        player.avPlayer.pause()  // the user's own pause
         resign()
         become()
         _ = await waitUntilMedia(timeout: 0.5) { player.avPlayer.rate > 0 }
@@ -504,7 +504,7 @@ struct MediaVideoComponentTests {
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { pool.heldPlayer(for: "manual")?.avPlayer.currentItem?.status == .readyToPlay })
         let player = try #require(pool.heldPlayer(for: "manual"))
-        player.play() // the native controls' play button
+        player.avPlayer.play() // the native controls' play button
         _ = await waitUntilMedia(timeout: 0.3) { false }
         let older = pool.wait(key: "older", url: page, priority: .onScreen, wantsPlay: false) {}
         defer { pool.cancelWait(older) }
@@ -533,7 +533,7 @@ struct MediaVideoComponentTests {
         defer { ComponentTestHost.unmount(window) }
         #expect(await waitUntilMedia { (pool.heldPlayer(for: "paused")?.avPlayer.rate ?? 0) > 0 })
         let player = try #require(pool.heldPlayer(for: "paused"))
-        player.pause() // the native controls' pause button
+        player.avPlayer.pause() // the native controls' pause button
         _ = await waitUntilMedia(timeout: 0.3) { false }
         let newer = pool.wait(key: "newer", url: page, priority: .onScreen, wantsPlay: true) {}
 
