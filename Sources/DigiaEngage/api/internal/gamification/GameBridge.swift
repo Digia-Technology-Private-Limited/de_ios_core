@@ -122,6 +122,14 @@ final class GameBridge {
         return true
     }
 
+    /// `playNext` after an outcome: `done` → `idle`, so the next
+    /// `playRequested` plays the next chance in the same web view.
+    func playNext() -> Bool {
+        guard state == .done else { return false }
+        state = .idle
+        return true
+    }
+
     /// Native close button, back, skin `close`, or teardown. First call wins;
     /// teardown after a failure is a no-op, never a second callback.
     func close() {

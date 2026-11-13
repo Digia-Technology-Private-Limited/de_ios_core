@@ -1,4 +1,5 @@
 import Foundation
+import UIKit
 
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger()
@@ -30,6 +31,8 @@ final class GamePresentation: Identifiable, ObservableObject {
     private weak var coordinator: GameWebCoordinator?
     private var didFinish = false
     private let haptics: GameHaptics
+    /// The delivered reward's deep link, opened on `useReward`; never sent to the skin.
+    private var rewardLink: URL?
 
     init?(request: GameOpenRequest, safeArea: GameSafeArea) {
         self.request = request
@@ -72,8 +75,8 @@ final class GamePresentation: Identifiable, ObservableObject {
         self.coordinator = coordinator
     }
 
-    /// Sends `init` after the page loads. Each `init` fully resets the skin;
-    /// T8 re-sends it after `playNext` with a new play id.
+    /// Sends `init` after the page loads, and again after `playNext`. Each
+    /// `init` fully resets the skin.
     func sendInit() {
         guard let script = bridge.script(for: initPayload.message()) else { return }
         coordinator?.view.evaluateJavaScript(script, completionHandler: nil)
@@ -91,7 +94,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         }
     }
 
-    /// Skin messages the bridge leaves to us: a play request and haptics.
+    /// Skin messages the bridge leaves to us: a play request, haptics, `useReward` and `playNext`.
     private func handleSkinMessage(_ type: String, _ object: [String: Any]) {
         switch type {
         case "playRequested":
@@ -100,6 +103,15 @@ final class GamePresentation: Identifiable, ObservableObject {
             if let style = GameHapticStyle(rawValue: object["style"] as? String ?? "") {
                 haptics.play(style)
             }
+        case "useReward":
+            guard let link = rewardLink else { return }
+            UIApplication.shared.open(link)
+            dismiss()
+        case "playNext":
+            // Same web view, fresh `init`; the next `playRequested` spends `nextChance`.
+            guard bridge.playNext() else { return }
+            rewardLink = nil
+            sendInit()
         default:
             break
         }
@@ -124,7 +136,24 @@ final class GamePresentation: Identifiable, ObservableObject {
                   for: Self.playResultMessage(
                       result, slots: request.slots, rewardCtaTexts: request.rewardCtaTexts))
         else { return }
+        rewardLink = Self.rewardDeepLink(result)
         coordinator?.view.evaluateJavaScript(script, completionHandler: nil)
+    }
+
+    /// The grant's deep link (top level or under `cta`), when it parses as a URL.
+    static func rewardDeepLink(_ result: PlayResult) -> URL? {
+        guard case .outcome(let outcome) = result, outcome.kind == .reward,
+              let grant = outcome.grant else { return nil }
+        var cta: [String: JSONValue] = [:]
+        if case .object(let nested)? = grant["cta"] { cta = nested }
+        for object in [grant, cta] {
+            if case .string(let value)? = object["deepLink"],
+               let url = URL(string: value.trimmingCharacters(in: .whitespacesAndNewlines)),
+               url.scheme != nil {
+                return url
+            }
+        }
+        return nil
     }
 
     /// The `outcome` / `refused` message for one play result. `slotIndex` is
@@ -194,11 +223,13 @@ final class GamePresentation: Identifiable, ObservableObject {
                 }
             }
         case .perk, .unknown:
-            if let perkText = text("displayText") { reward["perkText"] = perkText }
+            if let perkText = text("perkText") ?? text("displayText") { reward["perkText"] = perkText }
         }
         if let expiresAt = text("expiresAt") { reward["expiresAt"] = expiresAt }
-        reward["hasDeepLink"] = (text("deepLink") ?? text("deepLink", in: cta)) != nil
-        if let ctaText = text("rewardId").flatMap({ rewardCtaTexts[$0] }) { reward["ctaText"] = ctaText }
+        reward["hasDeepLink"] = rewardDeepLink(.outcome(outcome)) != nil
+        if let ctaText = text("rewardId").flatMap({ rewardCtaTexts[$0] }) ?? text("label", in: cta) {
+            reward["ctaText"] = ctaText
+        }
         return reward
     }
 

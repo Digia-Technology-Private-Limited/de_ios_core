@@ -2226,6 +2226,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         guard let entry = URL(string: config.bundleUrl) else { return }
         let source = gameOutcomeSource
         let isEntryTap = config.entryKind == .inlineTeaser || config.entryKind == .floating
+        // An extra-play outcome hands over `nextChance`; `playNext` spends it.
+        var chanceId = chance.chanceId
         let request = GameOpenRequest(
             campaignKey: campaignKey,
             source: .remoteEntry(entry),
@@ -2247,9 +2249,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             sensors: config.sensors.map(\.rawValue),
             rewardCtaTexts: config.rewardCtaTexts,
             play: { playId in
-                await source.play(
+                let result = await source.play(
                     PlayRequest(
-                        chanceId: chance.chanceId, userId: userId, userHash: nil, playId: playId))
+                        chanceId: chanceId, userId: userId, userHash: nil, playId: playId))
+                if case .outcome(let outcome) = result,
+                   case .string(let next)? = outcome.nextChance?["chanceId"], !next.isEmpty {
+                    chanceId = next
+                }
+                return result
             }
         )
         GamePresenter.open(request)
