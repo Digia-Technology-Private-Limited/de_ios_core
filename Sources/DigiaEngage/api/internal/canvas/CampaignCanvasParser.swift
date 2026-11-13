@@ -143,9 +143,6 @@ struct CampaignCanvasParser {
             cardCornerRadius: CGFloat(propertyNumber(props["cardCornerRadius"]) ?? 12),
             cardSpacing: CGFloat(propertyNumber(props["cardSpacing"]) ?? 12),
             showRail: props["showRail"] as? Bool ?? true,
-            thumbnailVideoPlayback: props["thumbnailVideoPlayback"] as? String == "sequential"
-                ? .sequential
-                : .simultaneous,
             restartOnCompleted: props["restartOnCompleted"] as? Bool ?? false,
             startMuted: props["startMuted"] as? Bool ?? true,
             chrome: chrome

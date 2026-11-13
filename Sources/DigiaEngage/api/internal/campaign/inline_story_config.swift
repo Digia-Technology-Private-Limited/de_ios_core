@@ -184,10 +184,6 @@ struct StoryThumbnailPlaybackConfig: Equatable {
     }
 }
 
-enum ThumbnailVideoPlaybackMode: String, Equatable {
-    case simultaneous
-    case sequential
-}
 struct StoryCardConfig: Equatable {
     var height: Int = 220
     var aspectRatio: Double = 0.6
@@ -287,7 +283,6 @@ struct StoryOverlayButtonConfig: Equatable {
 
 struct InlineStoryConfig: Equatable {
     let slotKey: String
-    var thumbnailVideoPlayback: ThumbnailVideoPlaybackMode = .simultaneous
     var defaultDuration: Int = 5000
     var restartOnCompleted: Bool = false
     var startMuted: Bool = false
@@ -306,10 +301,6 @@ struct InlineStoryConfig: Equatable {
         if items.isEmpty { return nil }
         return InlineStoryConfig(
             slotKey: slotKey,
-            thumbnailVideoPlayback:
-                json.string("thumbnailVideoPlayback", default: "simultaneous") == "sequential"
-                    ? .sequential
-                    : .simultaneous,
             defaultDuration: json.positiveInt("defaultDuration") ?? 5000,
             restartOnCompleted: json.bool("restartOnCompleted", default: false),
             startMuted: json.bool("startMuted", default: false),

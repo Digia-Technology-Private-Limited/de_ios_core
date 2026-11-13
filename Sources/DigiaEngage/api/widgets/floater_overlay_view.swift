@@ -8,8 +8,10 @@ import UIKit
 // container view, growing — never two subtrees swapping.** The collapsed window and
 // the full-screen state are the same positioned+sized container, with
 // `FloaterMediaView` inside it the whole time; that is what keeps playback
-// continuous, since `FloaterOrchestrator` owns the `AVPlayer` and this view never
-// disposes it mid-transition. See `ai_docs/pip-campaign-design.md` §4.4.
+// continuous: its `MediaVideo` joins the player `FloaterOrchestrator` leased, and
+// is never remounted mid-transition. See `ai_docs/pip-campaign-design.md` §4.4.
+// The window around it (drag, fling, snap, entry/exit, shadow) is the shared
+// `FloatingWindow` the story floater floats in too (T9).
 //
 // Mounted as a plain SwiftUI sibling directly in `DigiaHost`'s own `ZStack`, not
 // wrapped in a `UIViewControllerRepresentable`/nested `UIHostingController` (an
@@ -17,8 +19,8 @@ import UIKit
 // one, and touches through it were resolved inconsistently by Apple's private
 // representable-hosting hit-test dispatch: the same tap coordinates, moments apart,
 // sometimes correctly reached this content and sometimes silently didn't, with no
-// code-level trigger for which happened. `FloaterSessionView`'s own drag/tap
-// shield (`FloaterCollapsedInteractionView`, further down) and its chrome buttons
+// code-level trigger for which happened. `FloaterSessionView`'s drag/tap
+// shield (the shared `FloaterCollapsedInteractionView`) and its chrome buttons
 // scope themselves to the collapsed rect (or the full screen when expanded) using
 // plain SwiftUI layout and an ordinary `UIViewRepresentable` with no nested hosting
 // controller inside it, so there's no need for a UIKit-level "claims this point"
@@ -94,23 +96,6 @@ struct FloaterOverlayView: View {
     )
 }
 
-/// `SpringDescription(mass: 1, stiffness: 210, damping: 24)` in the Flutter
-/// reference — `interpolatingSpring` takes these same physical units directly, so
-/// unlike the Android port this needs no dampingRatio conversion.
-private let settleSpring = Animation.interpolatingSpring(mass: 1, stiffness: 210, damping: 24)
-
-/// Same curve as Flutter's `Curves.easeOutBack` (`Cubic(0.34, 1.56, 0.64, 1.0)`) —
-/// the y-overshoot past 1.0 is what makes a fly-in arrival bounce.
-private func easeOutBackCurve(duration: Double) -> Animation {
-    .timingCurve(0.34, 1.56, 0.64, 1, duration: duration)
-}
-private func easeOutCubicCurve(duration: Double) -> Animation {
-    .timingCurve(0.215, 0.61, 0.355, 1, duration: duration)
-}
-private func easeInCurve(duration: Double) -> Animation {
-    .timingCurve(0.42, 0, 1, 1, duration: duration)
-}
-
 /// The collapsed chrome buttons' rects, in the SAME local coordinate space `activeRect`/
 /// `FloaterCollapsedInteractionView`'s gesture handling already uses — so a tap that lands on a
 /// button can be told apart from a tap on the plain media surface. Without this, the shield's
@@ -180,11 +165,9 @@ private struct FloaterSessionView: View {
     @ObservedObject private var canvasTheme = CampaignCanvasTheme.shared
     @Environment(\.colorScheme) private var colorScheme
 
-    @State private var dragTranslation: CGSize = .zero
-    @State private var isDragging = false
-    @State private var settleResidual: CGSize = .zero
-    @State private var flyOffsetFraction: CGSize = .zero
-    @State private var alpha: Double = 1
+    /// The shared floating window: drag, fling, snap and entry/exit (T9). One per showing,
+    /// kept across expand and collapse, so a content swap never rebuilds it.
+    @StateObject private var window = FloatingWindow()
     @State private var expandedContentVisible = false
 
     private var config: FloaterConfig { state.config }
@@ -198,26 +181,29 @@ private struct FloaterSessionView: View {
             // safe-area insets. Keep media edge-to-edge, but source the real window insets
             // for the collapsed window, chrome and canvas overlays.
             let safe = activeFloaterWindowSafeAreaInsets
-            let resting = collapsedRect(
-                config: config, screenSize: screenSize, safeInsets: safe,
-                dragFraction: orchestrator.dragFraction
-            )
-            let delta = isDragging ? dragTranslation : settleResidual
+            let windowSize = collapsedWindowSize(config: config, screenSize: screenSize)
+            let bounds = FloatingWindowBounds(
+                screenSize: screenSize, safeInsets: safe, margin: config.collapsed.margin,
+                windowSize: windowSize)
+            let resting = floatingRestingRect(
+                windowSize: windowSize, bounds: bounds, position: config.collapsed.position,
+                dragFraction: orchestrator.dragFraction)
+            let delta = window.delta
             let width = expanded ? screenSize.width : resting.width
             let height = expanded ? screenSize.height : resting.height
             // Deliberately unclamped during an active drag — a fast flick can carry
             // the box past the safe area (or screen edge) while the finger is still
             // moving, the same rubber-band feel Android's PIP already has, rather
-            // than hitting a hard wall mid-gesture. `commitDrag`, at drag end, is
-            // what snaps it back to a safe-area-respecting corner (via the existing
-            // `settleResidual` spring) — that clamp is real and unchanged; it's just
-            // not also duplicated here for every frame of the gesture itself.
+            // than hitting a hard wall mid-gesture. `FloatingWindow.dragEnded`, at drag
+            // end, is what snaps it back to a safe-area-respecting corner (via its
+            // settle spring) — that clamp is real; it's just not also duplicated here
+            // for every frame of the gesture itself.
             let left =
                 (expanded ? 0 : resting.minX + delta.width)
-                + flyOffsetFraction.width * width
+                + window.flyOffsetFraction.width * width
             let top =
                 (expanded ? 0 : resting.minY + delta.height)
-                + flyOffsetFraction.height * height
+                + window.flyOffsetFraction.height * height
             let cornerRadius = expanded ? 0 : config.collapsed.cornerRadiusDp
 
             // The rect to publish to `orchestrator.activeRect` (see the `.background`
@@ -264,16 +250,17 @@ private struct FloaterSessionView: View {
                         tapExpands: config.behavior.tapExpands,
                         closing: orchestrator.closing,
                         onDragChanged: { translation in
-                            handleDragChanged(translation)
+                            window.dragChanged(
+                                translation, draggable: config.controls.draggable,
+                                closing: expanded || orchestrator.closing)
                         },
-                        onDragEnded: { translation, predictedEndTranslation in
-                            handleDragEnded(
-                                translation: translation,
-                                predictedEndTranslation: predictedEndTranslation,
-                                resting: resting,
-                                screenSize: screenSize,
-                                safe: safe
-                            )
+                        onDragEnded: { translation, velocity in
+                            window.dragEnded(
+                                translation: translation, velocity: velocity, resting: resting,
+                                bounds: bounds, draggable: config.controls.draggable,
+                                closing: expanded || orchestrator.closing,
+                                snapToCorner: config.controls.snapToCorner,
+                                onCommit: { orchestrator.moveTo($0) })
                         },
                         onTap: {
                             expandFromCollapsedMediaTap()
@@ -285,11 +272,17 @@ private struct FloaterSessionView: View {
                 }
 
                 ZStack {
+                    // The window's content. Mounted once for the showing and never inside a
+                    // branch on `expanded`, so growing to full screen (a content swap) keeps the
+                    // same video layer and player instead of rebuilding them.
                     FloaterMediaView(
-                        media: config.media, player: orchestrator.player,
+                        media: config.media,
+                        videoPlayerKey: floaterVideoPlayerKey(state),
+                        muted: orchestrator.muted,
                         cover: !expanded || config.expanded.cover,
                         resolvedUrl: state.resolvedMediaUrl
                     )
+                    .environment(\.digiaCampaignKey, state.campaign.campaignKey)
                     .allowsHitTesting(false)
                     .zIndex(0)
                     if expanded, config.expanded.scrimOpacity > 0 {
@@ -303,19 +296,7 @@ private struct FloaterSessionView: View {
                 }
                 .frame(width: width, height: height)
                 .clipShape(ClampedRoundedRectangle(cornerRadius: cornerRadius))
-                // Flutter's `BoxShadow(color: Color(0x73000000), blurRadius: 24, offset:
-                // Offset(0, 8))`. Unlike Compose (no directly-offset drop-shadow modifier),
-                // SwiftUI's `.shadow` takes an explicit `x`/`y` offset directly, so this can
-                // match Flutter's shadow more closely than the Android port's
-                // elevation-based approximation could. `radius: 0` when inapplicable is a
-                // cheap no-op rather than branching to a different view.
-                .shadow(
-                    color: (!expanded && config.collapsed.shadow)
-                        ? Color.black.opacity(0.45) : .clear,
-                    radius: (!expanded && config.collapsed.shadow) ? 12 : 0,
-                    x: 0,
-                    y: (!expanded && config.collapsed.shadow) ? 8 : 0
-                )
+                .floatingWindowShadow(!expanded && config.collapsed.shadow)
                 // Same "cheap no-op instead of a different view" shape as the shadow above,
                 // and for the same reason: switching between `AnyView(RoundedRectangle...)`
                 // and `AnyView(EmptyView())` on `expanded` is a discrete view-identity swap,
@@ -352,7 +333,7 @@ private struct FloaterSessionView: View {
                     .zIndex(3)
                 }
                 .position(x: left + width / 2, y: top + height / 2)
-                .opacity(alpha)
+                .opacity(window.alpha)
             }
             // Publishes this window's real on-screen frame to `orchestrator.activeRect`
             // — `.global` coordinate space to match what a host's `hitTest(_:with:)`
@@ -384,8 +365,7 @@ private struct FloaterSessionView: View {
             // (cubic vs quartic) entirely, not a Quart/Cubic naming slip — so the
             // transition visibly read differently from Flutter's.
             .animation(
-                .timingCurve(
-                    0.77, 0, 0.175, 1, duration: Double(config.expanded.transitionMs) / 1000),
+                floatingEaseInOutQuart(duration: Double(config.expanded.transitionMs) / 1000),
                 value: orchestrator.surface
             )
             .onChange(of: orchestrator.surface) { newSurface in
@@ -404,56 +384,17 @@ private struct FloaterSessionView: View {
             // `.onChange(of: orchestrator.surface)` never fires for it and its canvas would
             // never mount. There is no grow transition to wait for: show it from the first frame.
             if expanded { expandedContentVisible = true }
-            runEntryAnimation()
+            window.runEntry(config.collapsed.entryAnimation, fullscreen: expanded)
             // The impression is the first drawn frame, not the media load (SR62).
             orchestrator.markDrawn(token: state.token)
         }
         .onChange(of: orchestrator.closing) { closing in
-            if closing { runExitAnimation() }
+            if closing { window.runExit(config.collapsed.exitAnimation, fullscreen: expanded) }
         }
         .onDisappear { orchestrator.activeRect = nil }
     }
 
     // MARK: - Gesture
-
-    private func handleDragChanged(_ translation: CGSize) {
-        guard !expanded, config.controls.draggable, !orchestrator.closing else { return }
-        if !isDragging {
-            let dist = hypot(translation.width, translation.height)
-            guard dist > 6 else { return }
-            // A new touch beats an in-flight spring: grabbing the window
-            // mid-bounce must take control immediately, not fight it.
-            isDragging = true
-            settleResidual = .zero
-        }
-        // A plain, unclamped mirror of the finger the whole gesture — see `body`'s
-        // `left`/`top` computation for where the safe-area/margin clamp actually
-        // lives, and why it isn't here.
-        dragTranslation = translation
-    }
-
-    private func handleDragEnded(
-        translation: CGSize,
-        predictedEndTranslation: CGSize,
-        resting: CGRect,
-        screenSize: CGSize,
-        safe: EdgeInsets
-    ) {
-        guard !expanded, !orchestrator.closing else { return }
-        let dist = hypot(translation.width, translation.height)
-        guard isDragging, dist > 6, config.controls.draggable else {
-            isDragging = false
-            dragTranslation = .zero
-            return
-        }
-        commitDrag(
-            translation: translation,
-            predictedEndTranslation: predictedEndTranslation,
-            resting: resting,
-            screenSize: screenSize,
-            safe: safe
-        )
-    }
 
     private func expandFromCollapsedMediaTap() {
         guard !expanded, config.behavior.tapExpands, !orchestrator.closing else { return }
@@ -462,326 +403,16 @@ private struct FloaterSessionView: View {
         )
         orchestrator.expand()
     }
-
-    private func commitDrag(
-        translation: CGSize,
-        predictedEndTranslation: CGSize,
-        resting: CGRect,
-        screenSize: CGSize,
-        safe: EdgeInsets
-    ) {
-        let margin = config.collapsed.margin
-        let minX = safe.leading + margin.left
-        let maxX = screenSize.width - safe.trailing - margin.right - resting.width
-        let minY = safe.top + margin.top
-        let maxY = screenSize.height - safe.bottom - margin.bottom - resting.height
-        let spanX = maxX - minX
-        let spanY = maxY - minY
-
-        let visualLeft = resting.minX + translation.width
-        let visualTop = resting.minY + translation.height
-
-        var fx: CGFloat = spanX <= 0 ? 0 : ((visualLeft - minX) / spanX).clamped(0, 1)
-        var fy: CGFloat = spanY <= 0 ? 0 : ((visualTop - minY) / spanY).clamped(0, 1)
-        if config.controls.snapToCorner {
-            let projectedLeft = resting.minX + predictedEndTranslation.width
-            let projectedTop = resting.minY + predictedEndTranslation.height
-            let projectedFx: CGFloat =
-                spanX <= 0 ? 0 : ((projectedLeft - minX) / spanX).clamped(0, 1)
-            let projectedFy: CGFloat =
-                spanY <= 0 ? 0 : ((projectedTop - minY) / spanY).clamped(0, 1)
-            fx = projectedFx >= 0.5 ? 1 : 0
-            fy = projectedFy >= 0.5 ? 1 : 0
-        }
-        let landingX = spanX <= 0 ? minX : minX + spanX * fx
-        let landingY = spanY <= 0 ? minY : minY + spanY * fy
-
-        orchestrator.moveTo(FloaterFraction(x: fx, y: fy))
-        isDragging = false
-        dragTranslation = .zero
-        // The resting rect has just jumped to the corner, so carry the visual
-        // position across as a residual and let the spring pull it in — otherwise
-        // the window would teleport and only then animate.
-        settleResidual = CGSize(width: visualLeft - landingX, height: visualTop - landingY)
-        withAnimation(settleSpring) {
-            settleResidual = .zero
-        }
-    }
-
-    // MARK: - Entry/exit
-
-    private func runEntryAnimation() {
-        let entry = config.collapsed.entryAnimation
-        if expanded || entry.type == .appear {
-            alpha = 1
-            return
-        }
-        alpha = 0
-        let flies = entry.type == .flyIn
-        flyOffsetFraction = flies ? flyOffset(entry.from) : .zero
-        let duration = Double(entry.durationMs) / 1000
-        withAnimation(
-            flies ? easeOutBackCurve(duration: duration) : easeOutCubicCurve(duration: duration)
-        ) {
-            alpha = 1
-            flyOffsetFraction = .zero
-        }
-    }
-
-    private func runExitAnimation() {
-        let exit = config.collapsed.exitAnimation
-        guard exit.type != .none, !expanded else { return }
-        let flies = exit.type == .flyOut
-        let duration = Double(exit.durationMs) / 1000
-        withAnimation(
-            flies ? easeOutCubicCurve(duration: duration) : easeInCurve(duration: duration)
-        ) {
-            alpha = 0
-            if flies { flyOffsetFraction = flyOffset(exit.to) }
-        }
-    }
-
-    /// One window-length in the given direction, as a fraction of the window's own
-    /// current size — mirrors Flutter's `_flyOffset`. 1.4, not 1.0, so the window
-    /// clears its own footprint before the fade finishes rather than arriving
-    /// edge-to-edge with the screen boundary.
-    private func flyOffset(_ direction: FloaterFlyDirection) -> CGSize {
-        switch direction {
-        case .left: return CGSize(width: -1.4, height: 0)
-        case .right: return CGSize(width: 1.4, height: 0)
-        case .top: return CGSize(width: 0, height: -1.4)
-        case .bottom: return CGSize(width: 0, height: 1.4)
-        }
-    }
 }
 
-/// Shared with the story floater's own window (`floater_story_overlay_view.swift`) —
-/// the gesture contract is identical, and a second copy of a `UIPanGestureRecognizer`
-/// shield tuned this carefully is the last thing this SDK needs.
-struct FloaterCollapsedInteractionView: UIViewRepresentable {
-    let activeRect: CGRect
-    let draggable: Bool
-    let tapExpands: Bool
-    let closing: Bool
-    let onDragChanged: (CGSize) -> Void
-    let onDragEnded: (CGSize, CGSize) -> Void
-    let onTap: () -> Void
-    let chromeButtonBounds: [CGRect]
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-
-    func makeUIView(context: Context) -> FloaterTouchShieldView {
-        let view = FloaterTouchShieldView()
-
-        let pan = UIPanGestureRecognizer(
-            target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
-        pan.cancelsTouchesInView = true
-        pan.delaysTouchesBegan = true
-        pan.delegate = context.coordinator
-        view.addGestureRecognizer(pan)
-        context.coordinator.pan = pan
-
-        let tap = UITapGestureRecognizer(
-            target: context.coordinator, action: #selector(Coordinator.handleTap(_:)))
-        tap.cancelsTouchesInView = true
-        tap.delaysTouchesBegan = true
-        tap.delegate = context.coordinator
-        tap.require(toFail: pan)
-        view.addGestureRecognizer(tap)
-        context.coordinator.tap = tap
-
-        return view
-    }
-
-    func updateUIView(_ uiView: FloaterTouchShieldView, context: Context) {
-        uiView.isUserInteractionEnabled = draggable || tapExpands
-        uiView.activeRect = activeRect
-        uiView.excludedRects = chromeButtonBounds
-        context.coordinator.update(
-            draggable: draggable,
-            tapExpands: tapExpands,
-            closing: closing,
-            onDragChanged: onDragChanged,
-            onDragEnded: onDragEnded,
-            onTap: onTap
-        )
-    }
-
-    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
-        weak var pan: UIPanGestureRecognizer?
-        weak var tap: UITapGestureRecognizer?
-
-        private var draggable = false
-        private var tapExpands = false
-        private var closing = false
-        private var onDragChanged: (CGSize) -> Void = { _ in }
-        private var onDragEnded: (CGSize, CGSize) -> Void = { _, _ in }
-        private var onTap: () -> Void = {}
-
-        func update(
-            draggable: Bool,
-            tapExpands: Bool,
-            closing: Bool,
-            onDragChanged: @escaping (CGSize) -> Void,
-            onDragEnded: @escaping (CGSize, CGSize) -> Void,
-            onTap: @escaping () -> Void
-        ) {
-            self.draggable = draggable
-            self.tapExpands = tapExpands
-            self.closing = closing
-            self.onDragChanged = onDragChanged
-            self.onDragEnded = onDragEnded
-            self.onTap = onTap
-        }
-
-        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            guard draggable, !closing else { return }
-            let translationPoint = recognizer.translation(in: recognizer.view)
-            let translation = CGSize(width: translationPoint.x, height: translationPoint.y)
-            switch recognizer.state {
-            case .began, .changed:
-                onDragChanged(translation)
-            case .ended:
-                let velocity = recognizer.velocity(in: recognizer.view)
-                let projected = CGSize(
-                    width: translation.width + velocity.x * 0.18,
-                    height: translation.height + velocity.y * 0.18
-                )
-                onDragEnded(translation, projected)
-            case .cancelled, .failed:
-                onDragEnded(translation, translation)
-            default:
-                break
-            }
-        }
-
-        @objc func handleTap(_ recognizer: UITapGestureRecognizer) {
-            guard recognizer.state == .ended, tapExpands, !closing else { return }
-            onTap()
-        }
-
-        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-            if gestureRecognizer === pan {
-                return draggable && !closing
-            }
-            if gestureRecognizer === tap {
-                return tapExpands && !closing
-            }
-            return true
-        }
-
-        func gestureRecognizer(
-            _ gestureRecognizer: UIGestureRecognizer,
-            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
-        ) -> Bool {
-            false
-        }
-    }
-}
-
-final class FloaterTouchShieldView: UIView {
-    var activeRect: CGRect = .null
-    // Chrome button pill rects (mute/expand/close) this shield must never resolve as
-    // its own hit target for. Checked here, not just inside `handleTap`'s own
-    // suppression of `onTap()` — a check that runs only *after* a recognizer has
-    // already claimed the touch does nothing to stop `cancelsTouchesInView`/
-    // `delaysTouchesBegan` from having already intercepted and delayed it, starving
-    // the real SwiftUI `Button` underneath (mute/expand/close) of ever receiving it.
-    // Rejecting these points at `hitTest` itself means the shield is never even a
-    // candidate over a button, so whatever's genuinely on top there resolves instead.
-    var excludedRects: [CGRect] = []
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = .clear
-        isOpaque = false
-        isUserInteractionEnabled = true
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        nil
-    }
-
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard isUserInteractionEnabled, !activeRect.isNull, activeRect.contains(point),
-            !excludedRects.contains(where: { $0.contains(point) })
-        else {
-            return nil
-        }
-        return super.hitTest(point, with: event)
-    }
-}
-
-/// The collapsed window's rect for the given screen size. Height is derived from
-/// the media aspect ratio, else a 9:16 fallback.
-private struct FloaterLayoutInsets {
-    let top: CGFloat
-    let bottom: CGFloat
-    let leading: CGFloat
-    let trailing: CGFloat
-
-    init(_ insets: EdgeInsets) {
-        top = insets.top
-        bottom = insets.bottom
-        leading = insets.leading
-        trailing = insets.trailing
-    }
-
-    init(_ insets: UIEdgeInsets) {
-        top = insets.top
-        bottom = insets.bottom
-        leading = insets.left
-        trailing = insets.right
-    }
-}
-
-private func collapsedRect(
-    config: FloaterConfig, screenSize: CGSize, safeInsets: EdgeInsets,
-    dragFraction: FloaterFraction?
-) -> CGRect {
-    collapsedRect(
-        config: config,
-        screenSize: screenSize,
-        safeInsets: FloaterLayoutInsets(safeInsets),
-        dragFraction: dragFraction
-    )
-}
-
-private func collapsedRect(
-    config: FloaterConfig, screenSize: CGSize, safeInsets: FloaterLayoutInsets,
-    dragFraction: FloaterFraction?
-) -> CGRect {
+/// The collapsed window's size for the given screen. Height comes from exactly one source, in the
+/// order the wire contract defines: an explicit `heightDp`, else the media aspect ratio, else a 9:16
+/// fallback — matches Flutter's `_collapsedRect` / Android's `FloatingWindowSize.VideoAspect`.
+private func collapsedWindowSize(config: FloaterConfig, screenSize: CGSize) -> CGSize {
     let width = screenSize.width * config.collapsed.widthFraction
     let ratio = config.media.aspectRatio > 0 ? config.media.aspectRatio : 0.5625
-    // Height comes from exactly one source, in the order the wire contract defines: an
-    // explicit `heightDp`, else the media aspect ratio, else the 9:16 fallback above —
-    // matches Flutter's `_collapsedRect` / Android's `collapsedRect`.
     let height = config.collapsed.hasFixedHeight ? config.collapsed.heightDp : width / ratio
-    let margin = config.collapsed.margin
-
-    let minX = safeInsets.leading + margin.left
-    let maxX = screenSize.width - safeInsets.trailing - margin.right - width
-    let minY = safeInsets.top + margin.top
-    let maxY = screenSize.height - safeInsets.bottom - margin.bottom - height
-
-    let left: CGFloat
-    let top: CGFloat
-    if let drag = dragFraction {
-        left = minX + (maxX - minX) * drag.x
-        top = minY + (maxY - minY) * drag.y
-    } else {
-        left = config.collapsed.position.isRight ? maxX : minX
-        top = config.collapsed.position.isBottom ? maxY : minY
-    }
-    let clampedMaxX = maxX < minX ? minX : maxX
-    let clampedMaxY = maxY < minY ? minY : maxY
-    return CGRect(
-        x: left.clamped(minX, clampedMaxX), y: top.clamped(minY, clampedMaxY),
-        width: width, height: height
-    )
+    return CGSize(width: width, height: height)
 }
 
 extension Comparable {

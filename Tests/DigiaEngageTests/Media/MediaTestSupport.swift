@@ -25,6 +25,7 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
     struct Request: Sendable, Equatable {
         let url: URL
         let userAgent: String?
+        var range: String? = nil
     }
 
     static let host = "media-fake.origin.test"
@@ -74,6 +75,11 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
         lock.withLock { log.filter { $0.url == url } }
     }
 
+    /// Held requests for `url` still open: a request whose client cancelled it leaves.
+    static func heldOpen(for url: URL) -> Int {
+        lock.withLock { parked[url]?.count ?? 0 }
+    }
+
     static func totalRequestCount() -> Int {
         lock.withLock { log.count }
     }
@@ -99,11 +105,20 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
 
     static func uninstall() { URLProtocol.unregisterClass(MediaOrigin.self) }
 
-    /// Ends a test that installed the origin: unroutes it, clears its state and puts the SDK's
-    /// media services back.
+    /// A session routed to this origin, for the video range cache (`MediaServices.override(videoSession:)`),
+    /// whose own session the global registry doesn't reach.
+    static func session() -> URLSession {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MediaOrigin.self]
+        return URLSession(configuration: configuration)
+    }
+
+    /// Ends a test that installed the origin: unroutes it, clears its state and unregisters the health recorders and puts
+    /// the SDK's media services back.
     static func end() {
         uninstall()
         reset()
+        HealthRecorder.stopAll()
         MediaServices.reset()
     }
 
@@ -125,10 +140,21 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
 
     private var finished = false
 
+    /// The satisfiable slice of a `bytes=a-b` or `bytes=a-` header, nil without one.
+    private static func byteRange(_ header: String?, count: Int) -> Range<Int>? {
+        guard let header, header.hasPrefix("bytes=") else { return nil }
+        let bounds = header.dropFirst("bytes=".count).split(separator: "-", omittingEmptySubsequences: false)
+        guard bounds.count == 2, let lower = Int(bounds[0]), lower < count else { return nil }
+        let upper = Int(bounds[1]).map { min($0 + 1, count) } ?? count
+        return lower < upper ? lower ..< upper : nil
+    }
+
     override func startLoading() {
         guard let url = request.url else { return }
         let isHeld = Self.lock.withLock { () -> Bool in
-            Self.log.append(Request(url: url, userAgent: request.value(forHTTPHeaderField: "User-Agent")))
+            Self.log.append(Request(
+                url: url, userAgent: request.value(forHTTPHeaderField: "User-Agent"),
+                range: request.value(forHTTPHeaderField: "Range")))
             guard Self.held.contains(url) else { return false }
             Self.parked[url, default: []].append(self)
             return true
@@ -155,6 +181,21 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
         }
         switch reply ?? .fail(.notConnectedToInternet) {
         case let .status(code, body):
+            // A 200 honours a `Range: bytes=a-b` request with a 206, as a CDN does, so the
+            // video range cache can read through this origin.
+            if code == 200, let range = Self.byteRange(request.value(forHTTPHeaderField: "Range"), count: body.count) {
+                let slice = body.subdata(in: range)
+                let response = HTTPURLResponse(
+                    url: url, statusCode: 206, httpVersion: "HTTP/1.1",
+                    headerFields: [
+                        "Content-Length": "\(slice.count)", "Content-Type": "video/mp4",
+                        "Content-Range": "bytes \(range.lowerBound)-\(range.upperBound - 1)/\(body.count)",
+                    ])!
+                client.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client.urlProtocol(self, didLoad: slice)
+                client.urlProtocolDidFinishLoading(self)
+                return
+            }
             let response = HTTPURLResponse(
                 url: url, statusCode: code, httpVersion: "HTTP/1.1",
                 headerFields: ["Content-Length": "\(body.count)"])!
@@ -167,14 +208,27 @@ final class MediaOrigin: URLProtocol, @unchecked Sendable {
     }
 }
 
-/// Records every health report the media layer makes, off the main actor. Creating one replaces
-/// the process-wide reporter in `MediaServices`, so the report of any path reaches it (the
-/// wrappers and the floater alike) until `MediaOrigin.end()`.
-final class HealthRecorder: @unchecked Sendable {
+/// Records every `media_load_failed` record the real logger emits, off the main actor. A
+/// `DiagnosticSink` on `DigiaLogger`, so production's own guard (no campaign key or cause, no
+/// report) decides what arrives, and the report of any path reaches it (the wrappers and the
+/// floater alike) until `MediaOrigin.end()` unregisters it.
+final class HealthRecorder: DiagnosticSink, @unchecked Sendable {
     struct Record: Equatable {
         let campaignKey: String?
         let kind: HealthMediaKind
         let cause: String
+    }
+
+    private static let activeLock = NSLock()
+    nonisolated(unsafe) private static var active: [HealthRecorder] = []
+
+    /// Unregisters every recorder created since the last call.
+    static func stopAll() {
+        let recorders = activeLock.withLock { () -> [HealthRecorder] in
+            defer { active = [] }
+            return active
+        }
+        recorders.forEach { DigiaLogger.unregisterSink($0) }
     }
 
     private let lock = NSLock()
@@ -183,9 +237,19 @@ final class HealthRecorder: @unchecked Sendable {
     var all: [Record] { lock.withLock { records } }
 
     init() {
-        MediaServices.override(reportHealth: { [self] key, kind, cause in
-            lock.withLock { records.append(Record(campaignKey: key, kind: kind, cause: cause)) }
-        })
+        Self.activeLock.withLock { Self.active.append(self) }
+        DigiaLogger.registerSink(self)
+    }
+
+    func accepts(_ record: TimelineRecord) -> Bool {
+        record.reason?.wire == TimelineReason.mediaLoadFailed.wire
+    }
+
+    func emit(_ record: TimelineRecord) {
+        guard let kind = record.extras["media_kind"].flatMap(HealthMediaKind.init(rawValue:)),
+            let cause = record.extras["cause"]
+        else { return }
+        lock.withLock { records.append(Record(campaignKey: record.campaignKey, kind: kind, cause: cause)) }
     }
 }
 

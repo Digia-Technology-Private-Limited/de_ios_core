@@ -25,3 +25,16 @@ extension EnvironmentValues {
         set { self[DigiaCampaignKeyKey.self] = newValue }
     }
 }
+
+struct DigiaCanvasChildIdKey: EnvironmentKey {
+    static let defaultValue: String? = nil
+}
+
+extension EnvironmentValues {
+    /// The id of the canvas child being rendered, so a widget that needs a stable identity for its
+    /// node (a video's pool key, OD-15) can build one. Android's `LocalCanvasChildId`.
+    var digiaCanvasChildId: String? {
+        get { self[DigiaCanvasChildIdKey.self] }
+        set { self[DigiaCanvasChildIdKey.self] = newValue }
+    }
+}

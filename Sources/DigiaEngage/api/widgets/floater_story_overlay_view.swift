@@ -5,17 +5,19 @@ import UIKit
 // The story floater's window: a small canvas floating over the host app, and the
 // full-screen story a tap on it opens.
 //
-// Mounted as a plain SwiftUI sibling in `DigiaHost`'s own `ZStack`, beside
+// The window is a plain SwiftUI sibling in `DigiaHost`'s own `ZStack`, beside
 // `FloaterOverlayView`. Its own view rather than a branch inside that one: the two
 // floater subtypes are separate campaigns with separate orchestrators, and neither knows
-// anything about the other's state.
+// anything about the other's state. The story it opens is not drawn there: hero and viewer
+// open in the one `StoryLayer` every story uses, so a story opens the same way from a rail or
+// from this window, and above a nudge's own modal.
 //
-// The drag shield, the settle spring and the entry/exit curves below are the PiP's —
-// `FloaterCollapsedInteractionView` is shared outright, and the constants are copied with
-// the same values, because the gesture is the same gesture. What is NOT here is
-// everything only a media window has: no `AVPlayer`, no playback chrome, and no continuous
-// media surface. The story still uses the same hero shape: mount the viewer first, clip it
-// through the floating window's aperture, then grow that aperture to the screen.
+// The window itself — drag, fling, snap, entry/exit, shadow — is the shared `FloatingWindow`
+// (`api/internal/floating/FloatingWindow.swift`), the same one the PiP floats in. What this
+// surface passes in is its own: the window's size, its content (the author's canvas, and the
+// story a tap opens), its × and what each reports. The story uses the same hero shape as the
+// PiP's grow: mount the viewer first, clip it through the floating window's aperture, then grow
+// that aperture to the screen — from the window's rect on the screen, inside the story layer.
 
 @MainActor
 struct FloaterStoryOverlayView: View {
@@ -36,25 +38,6 @@ struct FloaterStoryOverlayView: View {
     }
 }
 
-/// The PiP's settle spring, in the same physical units.
-private let storySettleSpring = Animation.interpolatingSpring(mass: 1, stiffness: 210, damping: 24)
-
-private func storyEaseOutBack(duration: Double) -> Animation {
-    .timingCurve(0.34, 1.56, 0.64, 1, duration: duration)
-}
-private func storyEaseOutCubic(duration: Double) -> Animation {
-    .timingCurve(0.215, 0.61, 0.355, 1, duration: duration)
-}
-private func storyEaseIn(duration: Double) -> Animation {
-    .timingCurve(0.42, 0, 1, 1, duration: duration)
-}
-/// Flutter's `Curves.easeInOutQuart`, the curve `pip_renderer.dart` grows and collapses on — and
-/// the one the PiP's own expand already uses here. The story floater's hero shares it so the two
-/// floaters expand identically.
-private func storyEaseInOutQuart(duration: Double) -> Animation {
-    .timingCurve(0.77, 0, 0.175, 1, duration: duration)
-}
-
 @MainActor
 private struct FloaterStorySessionView: View {
     let state: ActiveFloaterStoryState
@@ -62,11 +45,9 @@ private struct FloaterStorySessionView: View {
     @ObservedObject private var canvasTheme = CampaignCanvasTheme.shared
     @Environment(\.colorScheme) private var colorScheme
 
-    @State private var dragTranslation: CGSize = .zero
-    @State private var isDragging = false
-    @State private var settleResidual: CGSize = .zero
-    @State private var flyOffsetFraction: CGSize = .zero
-    @State private var alpha: Double = 1
+    /// The shared floating window (T9), kept for the whole showing: opening and closing the story
+    /// swaps what is drawn, never the window.
+    @StateObject private var window = FloatingWindow()
     /// 0 is "still the window", 1 is "full screen". One value for both directions, because the two
     /// are the same journey — a collapse interrupted by a re-open resumes from where it had got to
     /// rather than snapping back to the window first.
@@ -75,8 +56,10 @@ private struct FloaterStorySessionView: View {
     /// but the viewer has to stay mounted until the collapse has finished running.
     @State private var viewerMounted = false
     /// The page overlay and full-screen chrome appear only after the media aperture has landed.
-    @State private var storyOverlaysVisible = false
     @State private var storyOverlayRevealToken = 0
+    /// The story layer the hero and viewer are drawn in, and what drives them from here.
+    @State private var storyLayer = StoryLayer()
+    @State private var hero = FloaterStoryHeroModel()
 
     private var config: FloaterStoryConfig { state.config }
     private var isDark: Bool { canvasTheme.isDark(colorScheme) }
@@ -93,11 +76,14 @@ private struct FloaterStorySessionView: View {
             let safe = deviceGeometry.safeArea
             // In the device's own coordinates, so it means the same thing wherever the host app
             // put `DigiaHost`.
-            let resting = storyWindowRect(
-                config: config, screenSize: screenSize, safeInsets: safe,
-                dragFraction: orchestrator.dragFraction
-            )
-            let delta = isDragging ? dragTranslation : settleResidual
+            let windowSize = storyWindowSize(config: config, screenSize: screenSize)
+            let bounds = FloatingWindowBounds(
+                screenSize: screenSize, safeInsets: safe, margin: config.window.margin,
+                windowSize: windowSize)
+            let resting = floatingRestingRect(
+                windowSize: windowSize, bounds: bounds, position: config.window.position,
+                dragFraction: orchestrator.dragFraction)
+            let delta = window.delta
             // This reader's offset within the screen. Zero in the ordinary case — the view above
             // is full-bleed — but subtracted rather than assumed, so a host that nests `DigiaHost`
             // somewhere smaller still draws the window where the screen coordinates say it is
@@ -105,19 +91,15 @@ private struct FloaterStorySessionView: View {
             let globalOrigin = geo.frame(in: .global).origin
             // Deliberately unclamped during an active drag — a fast flick can carry the
             // box past the safe area while the finger is still moving, the same
-            // rubber-band feel the PiP has. `commitDrag` is what snaps it back.
+            // rubber-band feel the PiP has. `FloatingWindow.dragEnded` is what snaps it back.
             let left = resting.minX - globalOrigin.x
-                + delta.width + flyOffsetFraction.width * resting.width
+                + delta.width + window.flyOffsetFraction.width * resting.width
             let top = resting.minY - globalOrigin.y
-                + delta.height + flyOffsetFraction.height * resting.height
+                + delta.height + window.flyOffsetFraction.height * resting.height
             let activeTransition = orchestrator.storyOpen
                 ? config.behavior.expandTransition
                 : config.behavior.collapseTransition
             let windowAlpha = floaterStoryWindowAlpha(
-                type: activeTransition.type,
-                phase: storyPhase
-            )
-            let heroAlpha = floaterStoryHeroAlpha(
                 type: activeTransition.type,
                 phase: storyPhase
             )
@@ -133,14 +115,20 @@ private struct FloaterStorySessionView: View {
                     x: left + globalOrigin.x, y: top + globalOrigin.y,
                     width: resting.width, height: resting.height
                 )
-            // The window's box in this reader's own space, which is what the shield below and the
-            // hero's growing box are both positioned in.
+            // The window's box in this reader's own space, which is what the shield below is
+            // positioned in.
             let localWindowRect = CGRect(
                 x: left, y: top, width: resting.width, height: resting.height
             )
+            // The same box on the screen, which is where the hero in the story layer starts from:
+            // the layer is a controller of its own, so it has no use for this reader's space.
+            let screenWindowRect = CGRect(
+                x: left + globalOrigin.x, y: top + globalOrigin.y,
+                width: resting.width, height: resting.height
+            )
 
-            // The story draws inline inside the same full-bleed host layer as the window. The
-            // `@State` above stays put, so the window returns exactly where the user left it.
+            // Only the window draws here; the story opens in the story layer. The `@State` above
+            // stays put, so the window returns exactly where the user left it.
             ZStack {
                 // Drag-to-reposition and tap-to-open, through the PiP's own UIKit shield:
                 // a SwiftUI `DragGesture` re-evaluates this whole body on every touch-move
@@ -152,15 +140,18 @@ private struct FloaterStorySessionView: View {
                         draggable: config.controls.draggable,
                         tapExpands: true,
                         closing: orchestrator.closing,
-                        onDragChanged: handleDragChanged,
-                        onDragEnded: { translation, predicted in
-                            handleDragEnded(
-                                translation: translation,
-                                predictedEndTranslation: predicted,
-                                resting: resting,
-                                screenSize: screenSize,
-                                safe: safe
-                            )
+                        onDragChanged: { translation in
+                            window.dragChanged(
+                                translation, draggable: config.controls.draggable,
+                                closing: orchestrator.closing || orchestrator.storyOpen)
+                        },
+                        onDragEnded: { translation, velocity in
+                            window.dragEnded(
+                                translation: translation, velocity: velocity, resting: resting,
+                                bounds: bounds, draggable: config.controls.draggable,
+                                closing: orchestrator.closing,
+                                snapToCorner: config.controls.snapToCorner,
+                                onCommit: { orchestrator.moveTo($0) })
                         },
                         onTap: openStory,
                         chromeButtonBounds: closeButtonRects(activeRect: activeRect)
@@ -175,12 +166,7 @@ private struct FloaterStorySessionView: View {
                     windowBox(width: resting.width)
                         .frame(width: resting.width, height: resting.height, alignment: .topLeading)
                         .clipShape(ClampedRoundedRectangle(cornerRadius: config.window.cornerRadiusDp))
-                        .shadow(
-                            color: config.window.shadow ? Color.black.opacity(0.45) : .clear,
-                            radius: config.window.shadow ? 12 : 0,
-                            x: 0,
-                            y: config.window.shadow ? 8 : 0
-                        )
+                        .floatingWindowShadow(config.window.shadow)
                         .overlay(
                             ClampedRoundedRectangle(cornerRadius: config.window.cornerRadiusDp)
                                 .stroke(
@@ -203,39 +189,7 @@ private struct FloaterStorySessionView: View {
                         // it. Keyed on the phase rather than on `storyOpen` because a hero grows
                         // *out of* this box: cutting it the instant the flag flips would leave the
                         // story rising from a hole.
-                        .opacity(alpha * windowAlpha)
-                }
-
-                if viewerMounted {
-                    let heroRect = floaterStoryHeroRect(
-                        window: localWindowRect,
-                        screen: screenSize,
-                        phase: storyPhase
-                    )
-                    let heroRadius = floaterStoryHeroCornerRadius(
-                        windowRadius: config.window.cornerRadiusDp,
-                        phase: storyPhase
-                    )
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture {}
-                        .frame(width: screenSize.width, height: screenSize.height)
-                        .zIndex(1)
-
-                    ZStack(alignment: .topLeading) {
-                        Color.black
-                        storyViewer(
-                            safeAreaInsets: safe,
-                            showsOverlays: storyOverlaysVisible
-                        )
-                        .frame(width: screenSize.width, height: screenSize.height)
-                        .transition(.identity)
-                    }
-                    .frame(width: heroRect.width, height: heroRect.height, alignment: .topLeading)
-                    .clipShape(RoundedRectangle(cornerRadius: heroRadius))
-                    .position(x: heroRect.midX, y: heroRect.midY)
-                    .opacity(heroAlpha)
-                    .zIndex(2)
+                        .opacity(window.alpha * windowAlpha)
                 }
             }
             // Publishes this window's real on-screen frame so an RN/UIKit host's
@@ -243,14 +197,16 @@ private struct FloaterStorySessionView: View {
             // `left`/`top` directly rather than read back after `.position(...)`, which
             // reports the whole available space — see the PiP's own note.
             .onAppear {
+                hero.windowRect = screenWindowRect
                 DispatchQueue.main.async { orchestrator.activeRect = publishedActiveRect }
             }
             .onChange(of: publishedActiveRect) { newRect in
                 orchestrator.activeRect = newRect
             }
+            .onChange(of: screenWindowRect) { hero.windowRect = $0 }
         }
         .onAppear {
-            runEntryAnimation()
+            window.runEntry(config.window.entryAnimation, fullscreen: false)
             // The impression is the first painted frame, not the routing decision.
             orchestrator.markVisible(token: state.token)
             // A start-expanded showing is already open, so `onChange(of: storyOpen)` below never
@@ -258,11 +214,12 @@ private struct FloaterStorySessionView: View {
             if orchestrator.storyOpen { runStoryTransition(opening: true) }
         }
         .onChange(of: orchestrator.closing) { closing in
-            if closing { runExitAnimation() }
+            if closing { window.runExit(config.window.exitAnimation, fullscreen: false) }
         }
         .onDisappear {
             orchestrator.activeRect = nil
             orchestrator.setStoryOverlayActive(false)
+            storyLayer.dismiss()
         }
         .onChange(of: orchestrator.storyOpen) { open in runStoryTransition(opening: open) }
     }
@@ -281,37 +238,57 @@ private struct FloaterStorySessionView: View {
             let expand = config.behavior.expandTransition
             viewerMounted = true
             orchestrator.setStoryOverlayActive(true)
-            storyOverlaysVisible = false
+            hero.overlaysVisible = false
+            presentStoryLayerIfNeeded()
             if expand.isInstant {
                 storyPhase = 1
-                storyOverlaysVisible = true
+                hero.run(to: 1, duration: 0)
+                hero.overlaysVisible = true
                 return
             }
-            withAnimation(storyEaseInOutQuart(duration: expand.duration)) { storyPhase = 1 }
+            withAnimation(floatingEaseInOutQuart(duration: expand.duration)) { storyPhase = 1 }
+            hero.run(to: 1, duration: expand.duration)
             DispatchQueue.main.asyncAfter(deadline: .now() + expand.duration) {
                 if storyOverlayRevealToken == revealToken, orchestrator.storyOpen {
-                    storyOverlaysVisible = true
+                    hero.overlaysVisible = true
                 }
             }
             return
         }
         let collapse = config.behavior.collapseTransition
-        storyOverlaysVisible = false
+        hero.overlaysVisible = false
         if collapse.isInstant {
             storyPhase = 0
+            hero.run(to: 0, duration: 0)
             viewerMounted = false
             orchestrator.setStoryOverlayActive(false)
+            storyLayer.dismiss()
             return
         }
         // Mirror image of the expand: the story stays mounted inside the aperture while the
-        // aperture shrinks back to the window behind it, then unmounts.
-        withAnimation(storyEaseInOutQuart(duration: collapse.duration)) { storyPhase = 0 }
+        // aperture shrinks back to the window behind it, then unmounts — the layer stays
+        // presented until then.
+        withAnimation(floatingEaseInOutQuart(duration: collapse.duration)) { storyPhase = 0 }
+        hero.run(to: 0, duration: collapse.duration)
         DispatchQueue.main.asyncAfter(deadline: .now() + collapse.duration) {
             // Only if the user has not re-opened it in the meantime.
             if !orchestrator.storyOpen {
                 viewerMounted = false
                 orchestrator.setStoryOverlayActive(false)
+                storyLayer.dismiss()
             }
+        }
+    }
+
+    /// Presents the hero and viewer in the story layer, unless they are already up (a re-open
+    /// during the collapse). No fade: the hero growing out of the window is the transition.
+    private func presentStoryLayerIfNeeded() {
+        guard !storyLayer.isPresented else { return }
+        storyLayer.present(fadeIn: false) {
+            FloaterStoryHeroLayer(
+                state: state, orchestrator: orchestrator, hero: hero,
+                onAction: runCanvasAction
+            )
         }
     }
 
@@ -351,69 +328,6 @@ private struct FloaterStorySessionView: View {
         )
         .environment(\.digiaVariables, state.variableContext)
         .environment(\.digiaCampaignKey, state.payload.campaignKey)
-        .environment(\.canvasVideoUsesStoryPlayback, true)
-    }
-
-    /// The story itself.
-    ///
-    /// Every story host uses full-bleed bounds and supplies the device insets so media can cover
-    /// the screen while authored chrome and page content remain inside the safe area.
-    @ViewBuilder
-    private func storyViewer(safeAreaInsets: EdgeInsets, showsOverlays: Bool) -> some View {
-        if case .story(
-            _, let pages, _, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
-        ) = config.story {
-            // The floater keeps its own `FloaterEvent` vocabulary rather than the inline story's,
-            // so it maps only the one interaction that has no equivalent there: reaching the end.
-            // Everything else it already reports from the orchestrator.
-            CanvasStoryViewer(
-                pages: pages,
-                chrome: chrome,
-                initialIndex: orchestrator.storyInitialIndex,
-                restartOnCompleted: restartOnCompleted,
-                startMuted: startMuted,
-                isDark: isDark,
-                onAction: runCanvasAction,
-                onDismiss: { orchestrator.closeStory() },
-                showsOverlays: showsOverlays,
-                safeAreaInsets: safeAreaInsets
-            )
-            .environment(\.digiaVariables, state.variableContext)
-            .environment(\.digiaCampaignKey, state.payload.campaignKey)
-            // Two vocabularies, and the split is by subject rather than by campaign type.
-            //
-            // `FloaterEvent` describes the *window's* life — it appeared, it was tapped, it was
-            // dragged, the showing ended. `StoriesEvent` describes the *story's* — which page is
-            // showing, which one the viewer left on, whether they reached the end. A story opened
-            // from a floating window is the same story a rail opens, so it reports the same way,
-            // and the two funnels stay comparable.
-            //
-            // The wire event names are unchanged by this: "Digia Step Viewed" already fired once
-            // when the story opened, and now fires once per page — the first of which is that same
-            // open. So this adds granularity rather than replacing a signal.
-            .environment(\.canvasInteractions, CanvasInteractionReporter { interaction in
-                let payload = state.payload
-                switch interaction {
-                case let .storyPageViewed(index, total):
-                    SDKInstance.shared.reportStoryStepViewed(
-                        payload, itemIndex: index + 1, itemTotal: total
-                    )
-                case let .storyPageDismissed(index, _):
-                    SDKInstance.shared.reportStoryStepDismissed(payload, itemIndex: index + 1)
-                case let .storyCompleted(total, ms):
-                    SDKInstance.shared.reportStoryCompleted(
-                        payload, itemTotal: total, timeToCompleteMs: ms.map(Int64.init)
-                    )
-                    // And the floater's own serving signal, which is what a
-                    // `stopOn: experienceCompleted` frequency rule retires on.
-                    SDKInstance.shared.floaterStoryOrchestrator.complete()
-                // The window's tap already reports the open as an experience click, so a second
-                // one here would double-count it.
-                case .storyOpened, .carouselSlideViewed:
-                    break
-                }
-            })
-        }
     }
 
     /// The built-in ×, pinned top-right.
@@ -488,115 +402,6 @@ private struct FloaterStorySessionView: View {
         SDKInstance.shared.runFloaterStoryAction(state: state, request: request)
     }
 
-    private func handleDragChanged(_ translation: CGSize) {
-        guard config.controls.draggable, !orchestrator.closing, !orchestrator.storyOpen
-        else { return }
-        if !isDragging {
-            guard hypot(translation.width, translation.height) > 6 else { return }
-            // A new touch beats an in-flight spring: grabbing the window mid-bounce must
-            // take control immediately, not fight it.
-            isDragging = true
-            settleResidual = .zero
-        }
-        dragTranslation = translation
-    }
-
-    private func handleDragEnded(
-        translation: CGSize,
-        predictedEndTranslation: CGSize,
-        resting: CGRect,
-        screenSize: CGSize,
-        safe: EdgeInsets
-    ) {
-        guard !orchestrator.closing else { return }
-        guard isDragging, hypot(translation.width, translation.height) > 6,
-              config.controls.draggable
-        else {
-            isDragging = false
-            dragTranslation = .zero
-            return
-        }
-
-        let margin = config.window.margin
-        let minX = safe.leading + margin.left
-        let maxX = screenSize.width - safe.trailing - margin.right - resting.width
-        let minY = safe.top + margin.top
-        let maxY = screenSize.height - safe.bottom - margin.bottom - resting.height
-        let spanX = maxX - minX
-        let spanY = maxY - minY
-
-        let visualLeft = resting.minX + translation.width
-        let visualTop = resting.minY + translation.height
-
-        var fx: CGFloat = spanX <= 0 ? 0 : ((visualLeft - minX) / spanX).clampedToStoryRange(0, 1)
-        var fy: CGFloat = spanY <= 0 ? 0 : ((visualTop - minY) / spanY).clampedToStoryRange(0, 1)
-        if config.controls.snapToCorner {
-            // The *projected* end of the flick, not where the finger left off — a quick
-            // flick often releases before the window visually crosses the half-way line.
-            let projectedLeft = resting.minX + predictedEndTranslation.width
-            let projectedTop = resting.minY + predictedEndTranslation.height
-            let projectedFx: CGFloat =
-                spanX <= 0 ? 0 : ((projectedLeft - minX) / spanX).clampedToStoryRange(0, 1)
-            let projectedFy: CGFloat =
-                spanY <= 0 ? 0 : ((projectedTop - minY) / spanY).clampedToStoryRange(0, 1)
-            fx = projectedFx >= 0.5 ? 1 : 0
-            fy = projectedFy >= 0.5 ? 1 : 0
-        }
-        let landingX = spanX <= 0 ? minX : minX + spanX * fx
-        let landingY = spanY <= 0 ? minY : minY + spanY * fy
-
-        orchestrator.moveTo(FloaterFraction(x: fx, y: fy))
-        isDragging = false
-        dragTranslation = .zero
-        // The resting rect has just jumped to the corner, so carry the visual position
-        // across as a residual and let the spring pull it in — otherwise the window
-        // teleports and only then animates.
-        settleResidual = CGSize(width: visualLeft - landingX, height: visualTop - landingY)
-        withAnimation(storySettleSpring) { settleResidual = .zero }
-    }
-
-    // MARK: - Entry/exit
-
-    private func runEntryAnimation() {
-        let entry = config.window.entryAnimation
-        guard entry.type != .appear else {
-            alpha = 1
-            return
-        }
-        alpha = 0
-        let flies = entry.type == .flyIn
-        flyOffsetFraction = flies ? storyFlyOffset(entry.from) : .zero
-        let duration = Double(entry.durationMs) / 1000
-        // Arriving overshoots and settles, matching how releasing a drag feels.
-        withAnimation(flies ? storyEaseOutBack(duration: duration) : storyEaseOutCubic(duration: duration)) {
-            alpha = 1
-            flyOffsetFraction = .zero
-        }
-    }
-
-    private func runExitAnimation() {
-        let exit = config.window.exitAnimation
-        guard exit.type != .none else { return }
-        let flies = exit.type == .flyOut
-        let duration = Double(exit.durationMs) / 1000
-        // Leaving accelerates away: an overshoot on exit reads as a glitch, since there
-        // is nothing left on screen for it to settle against.
-        withAnimation(flies ? storyEaseOutCubic(duration: duration) : storyEaseIn(duration: duration)) {
-            alpha = 0
-            if flies { flyOffsetFraction = storyFlyOffset(exit.to) }
-        }
-    }
-
-    /// One window-length in the given direction, as a fraction of the window's own size.
-    private func storyFlyOffset(_ direction: FloaterFlyDirection) -> CGSize {
-        switch direction {
-        case .left: return CGSize(width: -1.4, height: 0)
-        case .right: return CGSize(width: 1.4, height: 0)
-        case .top: return CGSize(width: 0, height: -1.4)
-        case .bottom: return CGSize(width: 0, height: 1.4)
-        }
-    }
-
     /// The × button's box, so the shield's tap does not also fire when the × is tapped.
     private func closeButtonRects(activeRect: CGRect) -> [CGRect] {
         guard config.controls.showClose else { return [] }
@@ -611,49 +416,174 @@ private struct FloaterStorySessionView: View {
     }
 }
 
-/// The window's rect for the given screen size.
+/// The window's size for the given screen.
 ///
 /// Width is a fraction of the screen (capped on a large screen, see
 /// `floaterStoryWindowWidth`) and height follows the authored aspect ratio — which
 /// the dashboard derives from the window canvas's own shape, so the box is always the box
-/// the author drew. Margins apply inside the safe area, so a top-corner window clears the
-/// status bar and notch and a bottom one clears the home indicator.
-private func storyWindowRect(
-    config: FloaterStoryConfig, screenSize: CGSize, safeInsets: EdgeInsets,
-    dragFraction: FloaterFraction?
-) -> CGRect {
+/// the author drew. Where it rests is the shared window's `floatingRestingRect`.
+private func storyWindowSize(config: FloaterStoryConfig, screenSize: CGSize) -> CGSize {
     let width = floaterStoryWindowWidth(
         screenWidth: screenSize.width,
         widthFraction: config.window.widthFraction,
         canvasWidth: config.canvas.width,
         largeScreen: isLargeScreen(shortestSide: min(screenSize.width, screenSize.height))
     )
-    let height = width / config.window.aspectRatio
-    let margin = config.window.margin
-
-    let minX = safeInsets.leading + margin.left
-    let maxX = screenSize.width - safeInsets.trailing - margin.right - width
-    let minY = safeInsets.top + margin.top
-    let maxY = screenSize.height - safeInsets.bottom - margin.bottom - height
-
-    let left: CGFloat
-    let top: CGFloat
-    if let drag = dragFraction {
-        left = minX + (maxX - minX) * drag.x
-        top = minY + (maxY - minY) * drag.y
-    } else {
-        left = config.window.position.isRight ? maxX : minX
-        top = config.window.position.isBottom ? maxY : minY
-    }
-    return CGRect(
-        x: left.clampedToStoryRange(minX, maxX < minX ? minX : maxX),
-        y: top.clampedToStoryRange(minY, maxY < minY ? minY : maxY),
-        width: width, height: height
-    )
+    return CGSize(width: width, height: width / config.window.aspectRatio)
 }
 
-extension Comparable {
-    fileprivate func clampedToStoryRange(_ lower: Self, _ upper: Self) -> Self {
-        min(max(self, lower), upper)
+/// What drives the hero in the story layer from the window: where the window is on the screen,
+/// where the grow/collapse is heading, and whether the page overlay and chrome are showing.
+///
+/// The layer is a hosting controller of its own, so a static snapshot would freeze the hero; the
+/// layer observes this instead. The target phase is run by the layer itself, with the same
+/// duration and curve as the window's own phase, rather than animated here: an animation
+/// belongs to the view tree that draws it.
+@MainActor
+final class FloaterStoryHeroModel: ObservableObject {
+    /// The window's box in screen (global) coordinates.
+    @Published var windowRect: CGRect = .zero
+    @Published var overlaysVisible = false
+    /// 0 is "still the window", 1 is "full screen".
+    @Published private(set) var target: CGFloat = 0
+    private(set) var duration: TimeInterval = 0
+
+    /// Heads for `phase` over `duration` seconds; zero is instant.
+    func run(to phase: CGFloat, duration: TimeInterval) {
+        self.duration = duration
+        target = phase
+    }
+}
+
+/// The story floater's hero and viewer, drawn inside the story layer.
+///
+/// A box grown from the window's rect on the screen to the whole screen (phase 0 to 1) with the
+/// viewer inside, clipped through it. The layer stays presented until the collapse has finished,
+/// which the window's session decides.
+@MainActor
+private struct FloaterStoryHeroLayer: View {
+    let state: ActiveFloaterStoryState
+    @ObservedObject var orchestrator: FloaterStoryOrchestrator
+    @ObservedObject var hero: FloaterStoryHeroModel
+    let onAction: (CampaignCanvasActionRequest) -> Void
+    @ObservedObject private var canvasTheme = CampaignCanvasTheme.shared
+    @Environment(\.colorScheme) private var colorScheme
+
+    /// This layer's own copy of the story phase, run from `hero`.
+    @State private var phase: CGFloat = 0
+
+    private var config: FloaterStoryConfig { state.config }
+    private var isDark: Bool { canvasTheme.isDark(colorScheme) }
+
+    var body: some View {
+        GeometryReader { geo in
+            // The device's screen and insets, as the window computes them.
+            let deviceGeometry = activeFloaterWindowGeometry
+            let screenSize = deviceGeometry.bounds.size
+            // The window's screen rect in this layer's own space. The layer is full-bleed, so the
+            // origin is zero in the ordinary case, but it is subtracted rather than assumed.
+            let layerOrigin = geo.frame(in: .global).origin
+            let window = hero.windowRect.offsetBy(dx: -layerOrigin.x, dy: -layerOrigin.y)
+            let heroRect = floaterStoryHeroRect(window: window, screen: screenSize, phase: phase)
+            let heroRadius = floaterStoryHeroCornerRadius(
+                windowRadius: config.window.cornerRadiusDp, phase: phase)
+            let activeTransition = orchestrator.storyOpen
+                ? config.behavior.expandTransition
+                : config.behavior.collapseTransition
+            let heroAlpha = floaterStoryHeroAlpha(type: activeTransition.type, phase: phase)
+
+            ZStack {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture {}
+
+                ZStack(alignment: .topLeading) {
+                    Color.black
+                    storyViewer(
+                        safeAreaInsets: deviceGeometry.safeArea,
+                        showsOverlays: hero.overlaysVisible
+                    )
+                    .frame(width: screenSize.width, height: screenSize.height)
+                    .transition(.identity)
+                }
+                .frame(width: heroRect.width, height: heroRect.height, alignment: .topLeading)
+                .clipShape(RoundedRectangle(cornerRadius: heroRadius))
+                .position(x: heroRect.midX, y: heroRect.midY)
+                .opacity(heroAlpha)
+            }
+        }
+        .ignoresSafeArea()
+        .onAppear(perform: runPhase)
+        .onChange(of: hero.target) { _ in runPhase() }
+    }
+
+    private func runPhase() {
+        if hero.duration <= 0 {
+            phase = hero.target
+        } else {
+            withAnimation(floatingEaseInOutQuart(duration: hero.duration)) { phase = hero.target }
+        }
+    }
+
+    /// The story itself.
+    ///
+    /// Every story host uses full-bleed bounds and supplies the device insets so media can cover
+    /// the screen while authored chrome and page content remain inside the safe area.
+    @ViewBuilder
+    private func storyViewer(safeAreaInsets: EdgeInsets, showsOverlays: Bool) -> some View {
+        if case .story(
+            _, let pages, _, _, _, _, let restartOnCompleted, let startMuted, let chrome
+        ) = state.config.story {
+            // The floater keeps its own `FloaterEvent` vocabulary rather than the inline story's,
+            // so it maps only the one interaction that has no equivalent there: reaching the end.
+            // Everything else it already reports from the orchestrator.
+            CanvasStoryViewer(
+                pages: pages,
+                chrome: chrome,
+                initialIndex: orchestrator.storyInitialIndex,
+                restartOnCompleted: restartOnCompleted,
+                startMuted: startMuted,
+                isDark: isDark,
+                onAction: onAction,
+                onDismiss: { orchestrator.closeStory() },
+                showsOverlays: showsOverlays,
+                safeAreaInsets: safeAreaInsets
+            )
+            .environment(\.digiaVariables, state.variableContext)
+            .environment(\.digiaCampaignKey, state.payload.campaignKey)
+            // Two vocabularies, and the split is by subject rather than by campaign type.
+            //
+            // `FloaterEvent` describes the *window's* life — it appeared, it was tapped, it was
+            // dragged, the showing ended. `StoriesEvent` describes the *story's* — which page is
+            // showing, which one the viewer left on, whether they reached the end. A story opened
+            // from a floating window is the same story a rail opens, so it reports the same way,
+            // and the two funnels stay comparable.
+            //
+            // The wire event names are unchanged by this: "Digia Step Viewed" already fired once
+            // when the story opened, and now fires once per page — the first of which is that same
+            // open. So this adds granularity rather than replacing a signal.
+            .environment(\.canvasInteractions, CanvasInteractionReporter { interaction in
+                let payload = state.payload
+                switch interaction {
+                case let .storyPageViewed(index, total):
+                    SDKInstance.shared.reportStoryStepViewed(
+                        payload, itemIndex: index + 1, itemTotal: total
+                    )
+                case let .storyPageDismissed(index, _):
+                    SDKInstance.shared.reportStoryStepDismissed(payload, itemIndex: index + 1)
+                case let .storyCompleted(total, ms):
+                    SDKInstance.shared.reportStoryCompleted(
+                        payload, itemTotal: total, timeToCompleteMs: ms.map(Int64.init)
+                    )
+                    // And the floater's own serving signal, which is what a
+                    // `stopOn: experienceCompleted` frequency rule retires on.
+                    SDKInstance.shared.floaterStoryOrchestrator.complete()
+                // The window's tap already reports the open as an experience click, so a second
+                // one here would double-count it.
+                case .storyOpened, .carouselSlideViewed:
+                    break
+                }
+            })
+        }
     }
 }

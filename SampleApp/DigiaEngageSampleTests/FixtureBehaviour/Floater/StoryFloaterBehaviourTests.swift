@@ -92,20 +92,14 @@ struct StoryFloaterBehaviourTests {
 
     // MARK: - floater_story_video_pages_mute_restart
 
-    /// Known gap, not a test problem: the story chrome's mute flips the viewer's state — its glyph
-    /// turns to "Mute" — but the video that is playing keeps its sound. The viewer hands the new
-    /// state to `InlineStoryVideoView(muted:)` (`CampaignCanvasStripViews.swift`), whose
-    /// `.onChange(of: muted)` should reach `StoryVideoPlayback.update`
-    /// (`inline_story_video_playback.swift`, `player?.isMuted = nextState.muted`); the live
-    /// `AVPlayer` drawn on screen still reports `isMuted == false`. Flutter mutes the live player.
-    /// The next video a page opens does start muted, so the choice still outlives the page. Marked
-    /// with `withKnownIssue`, so it fails the day the live player mutes, as the cue to drop it.
-    // Fails if: Sources/DigiaEngage/api/internal/canvas/CampaignCanvasStripViews.swift
-    // `CanvasStoryViewer.toggleMute` `muted.toggle()` is deleted.
-    // Fails if: CampaignCanvasStripViews.swift `CanvasStoryViewer` video `onFailed`
-    // `startAuthoredTimer()` is deleted (the unplayable page then never ends).
-    // Fails if: CampaignCanvasStripViews.swift `CanvasStoryViewer.step`
-    // `if loopToStart { index = 0; start() } else { onDismiss() }` -> `onDismiss()` only.
+    /// Since T8 the page plays through `MediaVideo`, whose `.onChange(of: muted)` mutes the live
+    /// player, so the mute is asserted on the player that is playing.
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewer.swift `StoryViewer`
+    // `toggleMute: { session.muted.toggle() }` -> `toggleMute: {}`.
+    // Fails if: StoryViewer.swift `giveUp(_:)` `clock.giveUp(now: StoryPageTimer.clock)` is deleted
+    // (the unplayable page then never ends).
+    // Fails if: StoryViewer.swift `StoryViewerSession.advance`
+    // `if restartOnCompleted { showPage(index: 0) } else { onDismiss() }` -> `onDismiss()`.
     @Test("floater_story_video_pages_mute_restart: mute follows the viewer to the next video, an unplayable one runs its authored 3 s, and the story starts over once it has ended")
     func videoPagesMuteAndRestart() async throws {
         let (sdk, _) = try await boot("floater_story_video_pages_mute_restart")
@@ -127,9 +121,7 @@ struct StoryFloaterBehaviourTests {
         try await sdk.tap(id: "mute")
 
         try await sdk.waitUntil("the mute glyph flips") { sdk.floaterLabels(underId: "mute").contains("Mute") }
-        await withKnownIssue("iOS's story mute flips its glyph but not the playing video's sound") {
-            try await sdk.waitUntil("the live player is muted", timeout: 1.5) { first.isMuted }
-        }
+        try await sdk.waitUntil("the live player is muted", timeout: 1.5) { first.isMuted }
 
         // The clip plays to its end (seeked there): the page ends with it.
         let duration = try #require(first.currentItem?.duration.seconds)
@@ -148,10 +140,11 @@ struct StoryFloaterBehaviourTests {
         let third = floaterElapsed(since: thirdStart)
         #expect(third > 3.6 && third < 4.8, "the last page lasted \(third) s, authored 4 s")
         #expect(sdk.storyFloater.storyOpen, "restartOnCompleted: the story starts over")
+        // Page 0 plays again (through the pool, possibly on the same player), still muted.
         try await sdk.waitUntil("page 0 plays again", timeout: 5) {
-            sdk.floaterPlayers(playing: "movie.mp4").contains { $0 !== first }
+            sdk.floaterPlayers(playing: "movie.mp4").contains { $0.rate > 0 }
         }
-        let again = try #require(sdk.floaterPlayers(playing: "movie.mp4").first { $0 !== first })
+        let again = try #require(sdk.floaterPlayers(playing: "movie.mp4").first { $0.rate > 0 })
         #expect(again.isMuted, "the choice outlives the page")
     }
 
@@ -188,6 +181,32 @@ struct StoryFloaterBehaviourTests {
         try await sdk.waitUntil("the story closes", timeout: 6) { !sdk.storyFloater.storyOpen }
         #expect(sdk.storyFloater.isShowing)
         try await sdk.waitUntil("the window is back", timeout: 6) { sdk.storyFloater.activeRect != nil }
+        #expect(presentation.dismissReason == nil)
+    }
+
+    // Fails if: Sources/DigiaEngage/api/internal/story/StoryViewer.swift `body`'s swipe-down gesture
+    // `session.dismiss()` -> `return` (every story, the floater's included, closes on it).
+    @Test("floater_window_clear_background_child_shadows: a downward swipe on the story returns to the window")
+    func swipeDownReturnsToTheWindow() async throws {
+        let (sdk, presentation) = try await boot("floater_window_clear_background_child_shadows")
+        defer { sdk.tearDown() }
+        try await sdk.waitForStoryWindow()
+        try await openStory(sdk)
+        try await sdk.settle(1)
+        let window = try #require(sdk.window)
+
+        try TouchSynthesizer.drag(
+            from: CGPoint(x: window.bounds.midX, y: window.bounds.height * 0.35),
+            by: CGVector(dx: 0, dy: 300),
+            in: window,
+            duration: 0.15,
+            steps: 10,
+            pauseAfterDown: 0.02
+        )
+
+        // Well inside the page's 5 s, so it is the swipe that closed it, not the story running out.
+        try await sdk.waitUntil("the story closes", timeout: 2) { !sdk.storyFloater.storyOpen }
+        #expect(sdk.storyFloater.isShowing)
         #expect(presentation.dismissReason == nil)
     }
 

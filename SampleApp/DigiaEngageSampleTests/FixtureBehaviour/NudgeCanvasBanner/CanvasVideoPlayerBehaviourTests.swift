@@ -7,9 +7,8 @@ extension HostedUITests {
 /// What a canvas card's embedded video does, driven from the shared fixture
 /// `canvas/canvas_video_player`: a muted, looping, non-autoplaying player with controls, fitted to
 /// contain. The fixture is served by the scripted bundle, delivered the way a CEP does and drawn by
-/// the app's own `DigiaSlot`. Only the AVPlayer side effects are replaced, through the SDK's own
-/// seam (`CanvasVideoRuntime`, set on the app's environment): the renderer and its
-/// `AVPlayerViewController` stay real. A test that changes how the video is authored edits that
+/// the app's own `DigiaSlot`. Nothing is replaced: the card draws `MediaVideo`, and the tests read
+/// the real `AVPlayer` from its `AVPlayerViewController`. A test that changes how the video is authored edits that
 /// one widget's props in the loaded fixture.
 ///
 /// Not ported: Flutter's "a player that fails while the card is up" needs a player that errors on
@@ -23,36 +22,10 @@ extension HostedUITests {
 @MainActor
 struct CanvasVideoPlayerBehaviourTests {
 
-    /// Records what the card asks of its player; hands back an empty `AVPlayer`, so nothing plays.
-    @MainActor
-    final class Probe {
-        private(set) var items: [AVPlayerItem] = []
-        private(set) var players: [AVPlayer] = []
-        private(set) var urls: [URL] = []
-        var plays = 0
-        var pauses = 0
-        var restarts = 0
-
-        var runtime: CanvasVideoRuntime {
-            CanvasVideoRuntime(
-                makePlayer: { item in
-                    self.items.append(item)
-                    if let asset = item.asset as? AVURLAsset { self.urls.append(asset.url) }
-                    let player = AVPlayer()
-                    self.players.append(player)
-                    return player
-                },
-                play: { _ in self.plays += 1 },
-                pause: { _ in self.pauses += 1 },
-                restart: { _ in self.restarts += 1 }
-            )
-        }
-    }
-
-    /// Delivers the fixture, with [author] changing its video's props, over a card whose players go
-    /// to [probe] (the live runtime when nil). Returns the harness and the authored video URL.
+    /// Delivers the fixture, with [author] changing its video's props. With [waitForPlayer], waits
+    /// until the card has its player. Returns the harness and the authored video URL.
     private func show(
-        probe: Probe?, author: (inout [String: Any]) -> Void = { _ in }
+        waitForPlayer: Bool = true, author: (inout [String: Any]) -> Void = { _ in }
     ) async throws -> (SdkHarness, String) {
         var campaign = try fixture("canvas/canvas_video_player")
         var template = try #require(campaign["templateConfig"] as? [String: Any])
@@ -72,68 +45,68 @@ struct CanvasVideoPlayerBehaviourTests {
 
         let sdk = try await SdkHarness.start(campaign)
         try sdk.mount {
-            if let probe {
-                DigiaSlot("home_banner") { EmptyView() }.environment(\.canvasVideoRuntime, probe.runtime)
-            } else {
-                DigiaSlot("home_banner") { EmptyView() }
-            }
+            DigiaSlot("home_banner") { EmptyView() }
         }
         try sdk.deliver(keyOf(campaign))
         try await sdk.waitUntil("the card is on screen") { sdk.isShowing("Embedded Video Player") }
-        if let probe {
-            try await sdk.waitUntil("the card's player is made") { !probe.players.isEmpty }
+        if waitForPlayer {
+            try await sdk.waitUntil("the card's player is made") { Self.player(sdk) != nil }
         }
         return (sdk, url)
     }
 
-    /// Ends the item the card's player is on, as AVFoundation does when the video reaches its end.
-    private func playToEnd(_ probe: Probe) throws {
+    /// The player the card's `AVPlayerViewController` shows, if it has one.
+    private static func player(_ sdk: SdkHarness) -> AVPlayer? {
+        playerController(in: sdk.window?.rootViewController)?.player
+    }
+
+    /// Pauses the card's player and ends its item, as AVFoundation does when the video reaches its
+    /// end; a looping card plays again.
+    private func playToEnd(_ player: AVPlayer) throws {
+        player.pause()
         NotificationCenter.default.post(
-            name: .AVPlayerItemDidPlayToEndTime, object: try #require(probe.items.last))
+            name: .AVPlayerItemDidPlayToEndTime, object: try #require(player.currentItem))
         TouchSynthesizer.drainRunLoop(for: 0.1)
     }
 
-    // Fails if: CampaignCanvasView.swift `CanvasVideoRenderer.setup` drops `value.isMuted = muted`.
+    // Fails if: MediaVideo.swift `MediaVideoPlayback.open` drops `player.isMuted = muted`.
     @Test("the authored mute, loop and autoplay reach the player: this card opens silent, looping and waiting to be played")
     func authoredPlaybackReachesThePlayer() async throws {
-        let probe = Probe()
-        let (sdk, url) = try await show(probe: probe)
+        let (sdk, url) = try await show()
         defer { sdk.tearDown() }
 
-        #expect(probe.urls.map(\.absoluteString) == [url])
-        #expect(probe.players.count == 1)
-        #expect(probe.players.first?.isMuted == true)
-        #expect(probe.plays == 0, "autoplay is off")
-        try playToEnd(probe)
-        #expect(probe.restarts == 1, "it loops")
+        let player = try #require(Self.player(sdk))
+        #expect((player.currentItem?.asset as? AVURLAsset)?.url.absoluteString == url)
+        #expect(player.isMuted == true)
+        #expect(player.rate == 0, "autoplay is off")
+        try playToEnd(player)
+        #expect(player.rate > 0, "it loops")
     }
 
-    // Fails if: CampaignCanvasView.swift `setup` stops gating its end-of-item observer on `if loop`
-    // (a non-looping card would restart), or drops `if autoplay { runtime.play(value) }`.
+    // Fails if: MediaVideo.swift `noteEnded` stops gating its restart on `if loop` (a non-looping
+    // card would play again), or the open stops playing when `autoplay` is on.
     @Test("an autoplaying, unmuted, non-looping card starts playing at full volume")
     func autoplayUnmutedOnce() async throws {
-        let probe = Probe()
-        let (sdk, _) = try await show(probe: probe) { props in
+        let (sdk, _) = try await show { props in
             props["autoplay"] = true
             props["muted"] = false
             props["loop"] = false
         }
         defer { sdk.tearDown() }
 
-        #expect(probe.plays == 1)
-        #expect(probe.players.first?.isMuted == false)
-        try playToEnd(probe)
-        #expect(probe.restarts == 0, "it does not loop")
+        let player = try #require(Self.player(sdk))
+        #expect(player.rate > 0)
+        #expect(player.isMuted == false)
+        try playToEnd(player)
+        #expect(player.rate == 0, "it does not loop")
     }
 
-    // Fails if: CampaignCanvasView.swift `CanvasVideoRenderer` stops mapping `fit == "contain"` to
-    // `.resizeAspect` (cover would crop a contained video, or contain letterbox a covered one).
+    // Fails if: MediaFit.swift stops mapping `.contain` to `.resizeAspect` (cover would crop a contained video, or contain letterbox a covered one).
     @Test("contain shows the whole video; cover fills the frame and crops what spills over",
           arguments: [("contain", AVLayerVideoGravity.resizeAspect),
                       ("cover", AVLayerVideoGravity.resizeAspectFill)])
     func fit(_ fit: String, gravity: AVLayerVideoGravity) async throws {
-        let probe = Probe()
-        let (sdk, _) = try await show(probe: probe) { $0["fit"] = fit }
+        let (sdk, _) = try await show { $0["fit"] = fit }
         defer { sdk.tearDown() }
 
         let controller = try #require(Self.playerController(in: sdk.window?.rootViewController))
@@ -156,51 +129,48 @@ struct CanvasVideoPlayerBehaviourTests {
         TouchSynthesizer.drainRunLoop(for: 0.5)
     }
 
-    // Fails if: CampaignCanvasView.swift `CanvasVideoRenderer` loses `.onDisappear { teardown() }`
-    // (nothing pauses it behind the Cart) or `.onAppear { setup(url: url) }` (it stays silent after).
+    // Fails if: MediaVideo.swift loses `.onDisappear { playback.close() }` (nothing pauses it
+    // behind the Cart) or `.onAppear { open(…) }` (it stays silent after).
     @Test("pauses a playing video behind another screen, and plays it again once uncovered")
     func coveredPausesAndResumes() async throws {
-        let probe = Probe()
-        let (sdk, _) = try await show(probe: probe) { $0["autoplay"] = true }
+        let (sdk, _) = try await show { $0["autoplay"] = true }
         defer { sdk.tearDown() }
-        #expect(probe.plays == 1)
+        let first = try #require(Self.player(sdk))
+        #expect(first.rate > 0)
 
         try cover(sdk)
         #expect(sdk.isShowing("Cart"))
         // SwiftUI sends `onDisappear` once UIKit has taken the covered screen out of the window,
         // which can land after the cover's own run-loop turn.
-        try await sdk.waitUntil("silent behind the Cart") { probe.pauses >= 1 }
+        try await sdk.waitUntil("silent behind the Cart") { first.rate == 0 }
 
-        let playsBefore = probe.plays
         try uncover(sdk)
-        try await sdk.waitUntil("it plays again") { probe.plays > playsBefore }
+        try await sdk.waitUntil("it plays again") { (Self.player(sdk)?.rate ?? 0) > 0 }
     }
 
-    // Fails if: CampaignCanvasView.swift `setup` plays without `if autoplay`.
+    // Fails if: MediaVideo.swift `MediaVideoPlayback.open` plays without `if autoplay`.
     @Test("leaves a card that is not set to autoplay alone when it is uncovered")
     func coveredNonAutoplayStaysPaused() async throws {
-        let probe = Probe()
-        let (sdk, _) = try await show(probe: probe)
+        let (sdk, _) = try await show()
         defer { sdk.tearDown() }
 
         try cover(sdk)
         try uncover(sdk)
-        // Uncovered, the card builds its player again; an unwanted play would land with it.
-        try await sdk.waitUntil("the card's player is made again") { probe.players.count >= 2 }
+        try await sdk.waitUntil("the card's player is back") { Self.player(sdk) != nil }
         try await sdk.settle(0.3)
 
-        #expect(probe.plays == 0)
+        #expect(Self.player(sdk)?.rate == 0)
     }
 
     /// Flutter replaces a video it cannot open with a "Couldn't load video" surface. iOS keeps the
-    /// card and its black player frame and reports the failure to the health timeline
-    /// (`media_load_failed`); the missing error surface is the known gap.
-    // Fails if: CampaignCanvasView.swift `setup` stops observing the item's `status` and calling
-    // `reportMediaLoadFailed(.video, …)` on `.failed`.
+    /// card, shows `MediaVideo`'s "Video failed" box and reports the failure to the health timeline
+    /// (`media_load_failed`); Flutter's own label is the known gap.
+    // Fails if: MediaVideo.swift `watch` stops observing the item's `status` and failing on
+    // `.failed`.
     @Test("a video that cannot be opened keeps the card and reports the failure")
     func brokenVideoDegrades() async throws {
         // A file that is there but is not a video: AVFoundation fails to parse it.
-        let (sdk, _) = try await show(probe: nil) { props in
+        let (sdk, _) = try await show(waitForPlayer: false) { props in
             var source = props["source"] as? [String: Any] ?? [:]
             source["url"] = (source["url"] as? String ?? "")
                 .replacingOccurrences(of: "big-buck-bunny.mp4", with: "testkit-badge.svg")

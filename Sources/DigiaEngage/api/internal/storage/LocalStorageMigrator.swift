@@ -33,6 +33,12 @@ enum LocalStorageMigrator {
         standardDefaults: MigrationStore,
         cachesDirectory: URL? = LocalStorageMigrator.defaultCachesDirectory
     ) {
+        // Every start, not behind the version marker below: `main` already set the marker, and
+        // its whole-file story video cache is dead weight (T5, R10-06). Off the main thread: it
+        // can hold hundreds of MB.
+        if let cachesDirectory {
+            DispatchQueue.global(qos: .utility).async { deleteLegacyStoryVideoCache(in: cachesDirectory) }
+        }
         let currentVersion = targetDefaults.integer(forKey: keyStorageVersion)
         guard currentVersion < currentStorageVersion else { return }
 
@@ -156,6 +162,13 @@ enum LocalStorageMigrator {
             let legacyDir = cachesDirectory.appendingPathComponent("digia-engage-story-video-files")
             try? FileManager.default.removeItem(at: legacyDir)
         }
+    }
+
+    /// Deletes the folder `main`'s story video cache downloaded whole files into, and nothing
+    /// beside it. Nothing downloads whole story videos any more: they read through the range cache.
+    static func deleteLegacyStoryVideoCache(in cachesDirectory: URL) {
+        let legacyDir = cachesDirectory.appendingPathComponent("tech.digia.engage.video", isDirectory: true)
+        try? FileManager.default.removeItem(at: legacyDir)
     }
 
     /// Copies a legacy identity value unless the new location already holds

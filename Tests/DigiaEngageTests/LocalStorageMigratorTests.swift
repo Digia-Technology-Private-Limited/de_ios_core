@@ -213,6 +213,48 @@ struct LocalStorageMigratorTests {
         #expect(!FileManager.default.fileExists(atPath: legacyDir.path))
         try? FileManager.default.removeItem(at: caches)
     }
+
+    // Guards the `tech.digia.engage.video` folder name in `deleteLegacyStoryVideoCache` (T5,
+    // R10-06): an empty name would delete the caches directory itself.
+    @Test("main's whole-file story video cache is deleted, and nothing beside it")
+    func legacyStoryVideoCacheIsDeleted() throws {
+        let legacy = caches.appendingPathComponent("tech.digia.engage.video", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try Data("video".utf8).write(to: legacy.appendingPathComponent("clip.mp4"))
+        let sibling = caches.appendingPathComponent("keep.txt")
+        try Data("keep".utf8).write(to: sibling)
+        defer { try? FileManager.default.removeItem(at: caches) }
+
+        LocalStorageMigrator.deleteLegacyStoryVideoCache(in: caches)
+
+        #expect(!FileManager.default.fileExists(atPath: legacy.path))
+        #expect(FileManager.default.fileExists(atPath: sibling.path), "only the cache folder goes")
+        // Running again with nothing to delete is fine.
+        LocalStorageMigrator.deleteLegacyStoryVideoCache(in: caches)
+    }
+
+    // Guards the placement of the `deleteLegacyStoryVideoCache` call before
+    // `guard currentVersion < currentStorageVersion` in `migrateIfNeeded` (T5, R10-06): `main`
+    // already set the marker, so a delete behind it would never run on those devices.
+    @Test("main's story video cache is deleted on every start, also with the version marker set")
+    func legacyStoryVideoCacheGoesEvenWhenTheMarkerIsCurrent() async throws {
+        let (targetDefaults, standardDefaults) = makeIsolatedDefaults()
+        targetDefaults.set(1, forKey: "storage.version")
+        let legacy = caches.appendingPathComponent("tech.digia.engage.video", isDirectory: true)
+        try FileManager.default.createDirectory(at: legacy, withIntermediateDirectories: true)
+        try Data("video".utf8).write(to: legacy.appendingPathComponent("clip.mp4"))
+        defer { try? FileManager.default.removeItem(at: caches) }
+
+        LocalStorageMigrator.migrateIfNeeded(targetDefaults: targetDefaults, standardDefaults: standardDefaults, cachesDirectory: caches)
+
+        // The delete runs off the main thread: poll for it.
+        var gone = false
+        for _ in 0..<100 where !gone {
+            gone = !FileManager.default.fileExists(atPath: legacy.path)
+            if !gone { try await Task.sleep(nanoseconds: 50_000_000) }
+        }
+        #expect(gone)
+    }
 }
 
 /// Drops writes to `identity.*` while `failIdentityWrites` is set, standing in

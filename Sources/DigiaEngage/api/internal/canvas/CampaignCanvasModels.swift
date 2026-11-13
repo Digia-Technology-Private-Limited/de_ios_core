@@ -174,9 +174,6 @@ struct CampaignCanvasStoryPage: Equatable, Sendable {
     let canvas: CampaignCanvas
 }
 
-/// Whether video rail cards all play at once or take turns.
-enum CampaignCanvasStoryThumbnailPlaybackMode: Equatable, Sendable { case simultaneous, sequential }
-
 /// `Sendable` is declared rather than inferred, and has to be.
 ///
 /// A carousel slide and a story page are themselves `CampaignCanvas`es, so this
@@ -235,7 +232,7 @@ enum CampaignCanvasWidget: Equatable, Sendable {
         // No card height: a card is as tall as this widget's own rect, which the
         // canvas already carries. Duplicating it would let the two disagree.
         cardAspectRatio: CGFloat, cardCornerRadius: CGFloat, cardSpacing: CGFloat,
-        showRail: Bool, thumbnailVideoPlayback: CampaignCanvasStoryThumbnailPlaybackMode,
+        showRail: Bool,
         restartOnCompleted: Bool, startMuted: Bool,
         /// The chrome, as a canvas drawn over every story: a progress strip, a
         /// close button and a mute button, on a transparent layer.
@@ -273,7 +270,7 @@ enum CampaignCanvasWidget: Equatable, Sendable {
              .lottie(let box, _, _, _, _), .video(let box, _, _, _, _, _, _),
              .divider(let box, _, _, _, _, _, _),
              .carousel(let box, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _),
-             .story(let box, _, _, _, _, _, _, _, _, _),
+             .story(let box, _, _, _, _, _, _, _, _),
              .storyProgress(let box, _, _, _, _, _),
              .storyClose(let box, _, _, _),
              .storyMute(let box, _, _, _): box
@@ -306,7 +303,7 @@ enum CampaignCanvasChild: Equatable, Identifiable, Sendable {
         // A strip is swiped and a rail is scrolled and tapped, so both must take
         // the pointer rather than pass it to whatever sits beneath them.
         case .widget(_, _, .carousel): true
-        case .widget(_, _, .story(_, _, _, _, _, let showRail, _, _, _, _)): showRail
+        case .widget(_, _, .story(_, _, _, _, _, let showRail, _, _, _)): showRail
         case .widget(_, _, .storyClose(_, let visible, _, _)): visible
         case .widget(_, _, .storyMute(_, let visible, _, _)): visible
         case .widget(_, _, .timer): false
