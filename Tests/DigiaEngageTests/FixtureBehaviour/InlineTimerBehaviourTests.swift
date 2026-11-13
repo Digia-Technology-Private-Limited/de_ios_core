@@ -56,6 +56,7 @@ struct InlineTimerBehaviourTests {
 
     // Fails if: Sources/DigiaEngage/api/internal/campaign/inline_canvas_config.swift:85
     // `remainingSeconds <= urgentBelowSeconds` -> `remainingSeconds < urgentBelowSeconds`
+    // dmc-case: dmc.render_safety.renderable_timer_fills_slot_with_deadline
     @Test("urgent starts at exactly the threshold and only its first rule shows")
     func urgentStartsAtTheThreshold() async throws {
         // 186313 s is the authored threshold; the countdown rounds up to whole seconds, so
@@ -74,6 +75,7 @@ struct InlineTimerBehaviourTests {
 
     // Fails if: Sources/DigiaEngage/api/internal/campaign/inline_canvas_config.swift:81
     // `let remainingSeconds = (max(0, remainingMs) + 999) / 1_000` -> `let remainingSeconds = max(0, remainingMs) / 1_000`
+    // dmc-case: dmc.render_safety.renderable_timer_fills_slot_with_deadline
     @Test("half a second above the threshold it is still running")
     func aboveTheThresholdItIsRunning() async throws {
         let sdk = try await showTimer(
@@ -89,6 +91,7 @@ struct InlineTimerBehaviourTests {
 
     // Fails if: Sources/DigiaEngage/api/internal/campaign/inline_canvas_config.swift:144
     // `else { continue }` (a rule for an unknown state) -> `else { return nil }`
+    // dmc-case: dmc.render_safety.renderable_timer_fills_slot_with_deadline
     @Test("before its start a timer shows the fallback, never a rule for an unknown state or one written after the fallback")
     func beforeItsStartTheFallbackShows() async throws {
         let sdk = try await showTimer(
@@ -113,6 +116,7 @@ struct InlineTimerBehaviourTests {
     // `let offsetSeconds = (hours * 3_600 + minutes * 60) * (offset.first == "-" ? -1 : 1)` -> `let offsetSeconds = 0`
     // The first half also fails if `StatefulTimerConfig.resolve` drops `variableDefaults`, or
     // `parseSource` stops trimming the `fromVariable` token.
+    // dmc-case: dmc.context_vars.timer_variable_falls_back_then_sent_wins
     @Test("dashboard date formats are read, offset and all, from fallbacks and trigger variables")
     func dashboardDateFormatsAreRead() async throws {
         let clock = inlineUTC("2029-12-30T10:00:00Z")
@@ -159,6 +163,7 @@ struct InlineTimerBehaviourTests {
     // Fails if: Sources/DigiaEngage/api/internal/SDKInstance.swift:1680
     // `if let runtime = cfg.statefulTimer, runtime.resolve(payload.variables) == nil {` -> `if false {`
     // (the slot then takes a campaign with no deadline instead of dropping it).
+    // dmc-case: dmc.render_safety.unresolvable_timer_dropped_before_slot
     @Test("a deadline variable the trigger did not supply shows nothing at all")
     func missingDeadlineShowsNothing() async throws {
         let (sdk, delivery) = try await deliverTimer()
@@ -168,6 +173,7 @@ struct InlineTimerBehaviourTests {
         #expect(delivery.dropReason == .invalidConfig)
     }
 
+    // dmc-case: dmc.render_safety.renderable_timer_fills_slot_with_deadline
     @Test("the same timer shows once the trigger supplies the deadline")
     func suppliedDeadlineShows() async throws {
         let (sdk, delivery) = try await deliverTimer(variables: ["sale_ends": "2030-01-01T00:00:00Z"])

@@ -36,12 +36,14 @@ struct FrequencyManagerTests {
         return allowed
     }
 
+    // dmc-case: dmc.freq.unrecognised_policy_uncapped_unknown_window_unsupported
     @Test("1 — no-constraint policy is treated as uncapped")
     func noConstraint() {
         #expect(!FrequencyPolicy().hasConstraint)
         #expect(FrequencyPolicy(maxTotal: 1).hasConstraint)
     }
 
+    // dmc-case: dmc.freq.max_total_lifetime_blocks
     @Test("2 — maxTotal 3 allows three then blocks")
     func maxTotal() {
         let p = FrequencyPolicy(maxTotal: 3)
@@ -49,6 +51,7 @@ struct FrequencyManagerTests {
             == [true, true, true, false])
     }
 
+    // dmc-case: dmc.freq.session_window_same_session_blocks_rotated_allows
     @Test("3 — session window same session blocks second")
     func sessionSame() {
         let p = FrequencyPolicy(maxPerWindow: win(1, "session"))
@@ -56,6 +59,7 @@ struct FrequencyManagerTests {
             == [true, false])
     }
 
+    // dmc-case: dmc.freq.session_window_same_session_blocks_rotated_allows
     @Test("4 — session window rotated session allows both")
     func sessionRotated() {
         let p = FrequencyPolicy(maxPerWindow: win(1, "session"))
@@ -63,6 +67,7 @@ struct FrequencyManagerTests {
             == [true, true])
     }
 
+    // dmc-case: dmc.freq.window_caps_day_week_month_rollover
     @Test("5 — two per day blocks third within 24h")
     func twoPerDay() {
         let p = FrequencyPolicy(maxPerWindow: win(2, "day"))
@@ -70,12 +75,14 @@ struct FrequencyManagerTests {
             == [true, true, false])
     }
 
+    // dmc-case: dmc.freq.window_caps_day_week_month_rollover
     @Test("6 — one per day rolls over after 25h")
     func dayRollover() {
         let p = FrequencyPolicy(maxPerWindow: win(1, "day"))
         #expect(run(p, [Attempt(now: 0), Attempt(now: 25 * hour)]) == [true, true])
     }
 
+    // dmc-case: dmc.freq.window_caps_day_week_month_rollover
     @Test("7 — weekly and monthly roll over after their window")
     func weekMonth() {
         let week = FrequencyPolicy(maxPerWindow: win(1, "week"))
@@ -86,6 +93,7 @@ struct FrequencyManagerTests {
         #expect(run(month, [Attempt(now: 0), Attempt(now: 29 * day)]) == [true, false])
     }
 
+    // dmc-case: dmc.freq.stop_on_completed_blocks_forever
     @Test("8 — stopOn experienceCompleted blocks forever after completion")
     func stopOn() {
         let p = FrequencyPolicy(stopOn: "experienceCompleted")
@@ -97,12 +105,14 @@ struct FrequencyManagerTests {
         #expect(allowed == [true, false, false])
     }
 
+    // dmc-case: dmc.freq.window_caps_day_week_month_rollover
     @Test("9 — maxTotal plus per-day: per-day wins same day")
     func combined() {
         let p = FrequencyPolicy(maxTotal: 5, maxPerWindow: win(1, "day"))
         #expect(run(p, [Attempt(now: 0), Attempt(now: hour)]) == [true, false])
     }
 
+    // dmc-case: dmc.freq.max_total_lifetime_blocks
     @Test("10 — maxTotal ignores session rotation")
     func maxTotalIgnoresSession() {
         let p = FrequencyPolicy(maxTotal: 2)
@@ -113,6 +123,7 @@ struct FrequencyManagerTests {
         ]) == [true, true, false])
     }
 
+    // dmc-case: dmc.freq.session_window_same_session_blocks_rotated_allows
     @Test("11 — session window cold start allows both")
     func coldStart() {
         let p = FrequencyPolicy(maxPerWindow: win(1, "session"))
@@ -120,6 +131,7 @@ struct FrequencyManagerTests {
             == [true, true])
     }
 
+    // dmc-case: dmc.freq.max_total_lifetime_blocks
     @Test("12 — blocked attempt does not advance state")
     func blockedNoAdvance() {
         let p = FrequencyPolicy(maxTotal: 1)
@@ -131,6 +143,7 @@ struct FrequencyManagerTests {
         #expect(state?.total == 1)
     }
 
+    // dmc-case: dmc.freq.window_caps_day_week_month_rollover
     @Test("recordShow re-anchors time window only on rollover")
     func reanchor() {
         let p = FrequencyPolicy(maxPerWindow: win(5, "day"))
@@ -142,6 +155,7 @@ struct FrequencyManagerTests {
         #expect(s.total == 3 && s.windowCount == 1 && s.windowAnchorAt == 1000 + 25 * hour)
     }
 
+    // dmc-case: dmc.freq.stop_on_completed_blocks_forever
     @Test("recordStop is idempotent")
     func recordStopIdempotent() {
         var s = FrequencyEvaluator.recordStop(nil, 500)
@@ -156,6 +170,7 @@ struct FrequencyManagerTests {
         UserDefaults(suiteName: "digia.freq.test.\(UUID().uuidString)")!
     }
 
+    // dmc-case: dmc.freq.state_persists_across_reloads_and_launches
     @Test("manager persists state across reloads and caps")
     func persistence() {
         let defaults = makeDefaults()
@@ -177,6 +192,7 @@ struct FrequencyManagerTests {
         #expect(mgr2.isAllowed(campaignKey: "camp", policy: policy))
     }
 
+    // dmc-case: dmc.freq.stop_on_completed_blocks_forever
     @Test("manager recordCompleted stops only for experienceCompleted policies")
     func recordCompletedGate() {
         let defaults = makeDefaults()
@@ -205,5 +221,59 @@ struct FrequencyManagerTests {
         #expect(p?.stopOn == "experienceCompleted")
         // Old snake_case payload has no recognised keys → uncapped (nil).
         #expect(FrequencyPolicy.fromJson(["max_total": 3, "stop_on": "click"]) == nil)
+        // A cap of 0 is kept: it means never shown.
+        #expect(FrequencyPolicy.fromJson(["maxTotal": 0])?.maxTotal == 0)
+        #expect(
+            FrequencyPolicy.fromJson(["maxPerWindow": ["count": 0, "window": "day"]])?.maxPerWindow
+                == FrequencyWindow(count: 0, window: "day"))
+    }
+
+    @Test("a zero cap blocks an unseen Digia-decided campaign but not a CEP one")
+    func zeroCapUnseen() {
+        let total = FrequencyPolicy(maxTotal: 0)
+        #expect(FrequencyEvaluator.evaluate(total, nil, 0, "s1").allow)
+        #expect(!FrequencyEvaluator.evaluate(total, nil, 0, "s1", unseenCountsAsZero: true).allow)
+        let window = FrequencyPolicy(maxPerWindow: win(0, "day"))
+        #expect(FrequencyEvaluator.evaluate(window, nil, 0, "s1").allow)
+        #expect(!FrequencyEvaluator.evaluate(window, nil, 0, "s1", unseenCountsAsZero: true).allow)
+    }
+
+    private func campaign(window: String, withRule: Bool = true) throws -> CampaignModel? {
+        var json: [String: Any] = [
+            "id": "id-c1", "campaignKey": "c1", "campaignType": "nudge", "status": "active",
+            "frequency": ["maxPerWindow": ["count": 5, "window": window]],
+            "templateConfig": [
+                "templateType": "nudge", "layoutMode": "canvas",
+                "container": ["displayType": "dialog"],
+                "canvas": ["version": 2, "canvasWidth": 320, "canvasHeight": 200, "children": [Any]()],
+            ] as [String: Any],
+        ]
+        if withRule {
+            json["rule"] = [
+                "priority": 2,
+                "trigger": ["any": [["type": "app_opened"]]],
+                "conditions": ["all": [Any]()],
+            ] as [String: Any]
+        }
+        return try CampaignModel.fromJson(json)
+    }
+
+    @Test("a window this SDK cannot count makes a Digia-decided campaign unsupported")
+    func unknownWindowIsUnsupported() throws {
+        let hour = try #require(try campaign(window: "hour"))
+        guard case .invalid(let invalid)? = hour.rule else {
+            Issue.record("expected an invalid rule, got \(String(describing: hour.rule))")
+            return
+        }
+        #expect(invalid.reason == .unsupportedFeature)
+        #expect(invalid.detail == "frequency window hour")
+
+        let day = try #require(try campaign(window: "day"))
+        guard case .valid? = day.rule else {
+            Issue.record("a known window keeps the rule valid")
+            return
+        }
+        // A CEP-decided campaign has no rule to mark.
+        #expect(try campaign(window: "hour", withRule: false)?.rule == nil)
     }
 }

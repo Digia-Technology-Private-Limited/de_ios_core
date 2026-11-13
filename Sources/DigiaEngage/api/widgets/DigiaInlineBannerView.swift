@@ -73,7 +73,7 @@ struct DigiaInlineBannerView: View {
     private func handleTap() {
         let tappable = actions
         let reportedAction = tappable.first?.resolved(with: variables)
-        SDKInstance.shared.reportBannerClicked(payload: payload, action: reportedAction)
+        SDKInstance.shared.inlineReporter.reportBannerClicked(payload: payload, action: reportedAction)
         Task {
             await SDKInstance.shared.executeActionFlow(
                 tappable,

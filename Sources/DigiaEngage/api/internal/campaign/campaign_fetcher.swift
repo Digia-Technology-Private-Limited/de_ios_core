@@ -41,6 +41,7 @@ struct CampaignFetcher {
         let request = NetworkRequest(
             url: url,
             method: .post,
+            headers: [campaignSchemaVersionHeader: String(campaignSchemaVersion)],
             body: Data("{}".utf8),
             connectTimeout: 10,
             readTimeout: 10
@@ -107,7 +108,33 @@ struct CampaignFetcher {
             devicePlatform: devicePlatform,
             serverTimeMs: serverTimeMs ?? (acceptBridgedServerTime
                 ? (root["serverTimeMs"] as? NSNumber)?.int64Value
-                : nil)
+                : nil),
+            appEventUploadPolicy: AppEventUploadPolicy(
+                enabled: strictBool(bundle["appEventUpload"]) ?? true,
+                ratePerMinute: nonNegativeInt(bundle["appEventRatePerMinute"]),
+                burst: nonNegativeInt(bundle["appEventBurst"]),
+                blockedNames: appEventBlockedNames(bundle["appEventBlockedNames"])
+            )
         )
+    }
+
+    /// A boolean bundle flag, read strictly: only a JSON boolean counts, so `0` or `"false"` cannot flip it.
+    private static func strictBool(_ raw: Any?) -> Bool? {
+        guard let number = raw as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+
+    /// A non-negative integer bundle setting, or 0 when the server said nothing usable.
+    private static func nonNegativeInt(_ raw: Any?) -> Int {
+        guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+              number.doubleValue.isFinite, number.doubleValue >= 0
+        else { return 0 }
+        return number.intValue
+    }
+
+    /// The app-event name blocklist; anything but a list of strings is empty.
+    private static func appEventBlockedNames(_ raw: Any?) -> Set<String> {
+        guard let list = raw as? [Any] else { return [] }
+        return Set(list.compactMap { $0 as? String })
     }
 }

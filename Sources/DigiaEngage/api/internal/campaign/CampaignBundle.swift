@@ -9,11 +9,16 @@ struct CampaignBundle {
     let timeAnchor: TrustedTimeAnchor?
     let campaigns: [CampaignModel]
 
+    /// The bundle's app-event upload settings. Absent keys mean upload on and
+    /// unlimited.
+    let appEventUploadPolicy: AppEventUploadPolicy
+
     static func create(
         rawCampaigns: [[String: Any]],
         designTokensJSON: [String: Any]?,
         devicePlatform: String? = nil,
-        serverTimeMs: Int64? = nil
+        serverTimeMs: Int64? = nil,
+        appEventUploadPolicy: AppEventUploadPolicy = .unlimited
     ) -> CampaignBundle {
         let catalog: DesignTokenCatalog
         do { catalog = try designTokensJSON.map(DesignTokenCatalog.fromJson) ?? .empty }
@@ -45,7 +50,18 @@ struct CampaignBundle {
             } catch {
                 parsed = nil
             }
-            if let parsed { return parsed }
+            if let parsed {
+                if case .unsupported = parsed.config {
+                    log.i(
+                        "Campaign type is not supported by this SDK (type=\(parsed.campaignType))",
+                        campaign: parsed.campaignKey,
+                        stage: .parse,
+                        reason: TimelineReason.campaignUnsupported,
+                        extras: ["type": parsed.campaignType]
+                    )
+                }
+                return parsed
+            }
             log.e(
                 "Campaign skipped — could not be read (index=\(index))",
                 campaign: scope.campaignKey,
@@ -58,7 +74,8 @@ struct CampaignBundle {
             rawCampaigns: rawCampaigns,
             designTokens: catalog,
             timeAnchor: timeAnchor,
-            campaigns: campaigns
+            campaigns: campaigns,
+            appEventUploadPolicy: appEventUploadPolicy
         )
     }
 }

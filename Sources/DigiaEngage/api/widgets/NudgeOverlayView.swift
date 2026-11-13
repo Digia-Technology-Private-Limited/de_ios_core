@@ -3,7 +3,7 @@ import SwiftUI
 
 @MainActor
 func dismissNudgeFromCta() {
-    SDKInstance.shared.markNudgeDismissed(reason: .ctaAction)
+    SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed(reason: .ctaAction)
 }
 
 @MainActor
@@ -13,13 +13,13 @@ func performCanvasAction(
     dismiss: @escaping () -> Void
 ) {
     defer {
-        SDKInstance.shared.reportPrimaryCTAClick(
+        SDKInstance.shared.nudgeOrchestrator.reportPrimaryCTAClick(
             elementId: request.elementId, isPrimary: request.isPrimary
         )
     }
     guard !request.actions.isEmpty else { return }
     let action = request.actions.first?.resolved(with: variables)
-    SDKInstance.shared.emitNudgeClick(
+    SDKInstance.shared.nudgeOrchestrator.emitNudgeClick(
         elementId: request.elementId,
         ctaLabel: request.label,
         actionType: action?.analyticsType,
@@ -77,7 +77,7 @@ struct NudgeOverlayView: View {
                 return nudge
             },
             set: { newValue in
-                if newValue == nil { SDKInstance.shared.markNudgeDismissed() }
+                if newValue == nil { SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed() }
             }
         )
     }
@@ -134,7 +134,7 @@ struct NudgeFullScreenView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var surface: NudgeSurface { presentation.config.surface }
-    private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
+    private func dismiss() { SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed() }
 
     /// Tablets fit the whole canvas instead of covering the window with it.
     private var largeScreen: Bool {
@@ -224,7 +224,7 @@ struct NudgeFullScreenView: View {
         .ignoresSafeArea()
         .environment(\.digiaVariables, presentation.variables)
         .environment(\.digiaCampaignKey, presentation.payload.campaignKey)
-        .onAppear { SDKInstance.shared.reportNudgeImpression() }
+        .onAppear { SDKInstance.shared.nudgeOrchestrator.reportNudgeImpression() }
     }
 
     func safeCloseButton(bounds: CGSize) -> NudgeCloseButtonConfig {
@@ -276,7 +276,7 @@ struct NudgeSheetView: View {
     private var hostPaintsCanvasBackground: Bool {
         canvas != nil && surface.bottomSafeAreaMode == .insetContent
     }
-    private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
+    private func dismiss() { SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed() }
 
     var body: some View {
         DigiaBottomSheet(
@@ -349,7 +349,7 @@ struct NudgeSheetView: View {
         )
         // The cover presents this content once per nudge, so `onAppear` is the
         // impression signal (Impressed → CEP + Digia "Viewed").
-        .onAppear { SDKInstance.shared.reportNudgeImpression() }
+        .onAppear { SDKInstance.shared.nudgeOrchestrator.reportNudgeImpression() }
     }
 
     var cardCloseButton: AnyView? {
@@ -398,7 +398,7 @@ struct NudgeDialogContainer: View {
     private var surface: NudgeSurface { authoredSurface }
     private var scrimColor: Color { nudgeScrimColor(surface, colorScheme) }
     private var backgroundColor: Color { surface.backgroundColor ?? .white }
-    private func dismiss() { SDKInstance.shared.markNudgeDismissed() }
+    private func dismiss() { SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed() }
 
     func handleBackdropTap() {
         if surface.backdropDismissible { dismiss() }
@@ -501,7 +501,7 @@ struct NudgeDialogContainer: View {
         .onPreferenceChange(DialogHeightKey.self) { contentHeight = $0 }
         // Fires once per presentation: the `.id(nudge.id)` on the container gives
         // each nudge a fresh view identity, so `onAppear` runs once.
-        .onAppear { SDKInstance.shared.reportNudgeImpression() }
+        .onAppear { SDKInstance.shared.nudgeOrchestrator.reportNudgeImpression() }
     }
 
     private func canvasDialogPanel(

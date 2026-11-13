@@ -16,9 +16,15 @@ final class SDKServices {
     /// The session-and-identity rules; already attached by `init`.
     let sessionIdentityWiring: SessionIdentityWiring
     let analyticsService: AnalyticsService?
+    /// Host-app events, on their own queue, cap and upload policy.
+    let appEventsService: AppEventsService?
+    /// The current user's attributes and server-side context (audience, imports).
+    let userContextManager: UserContextManager
     let frequencyManager: FrequencyManager
     let submissionReporter: SubmissionReporter
     let requestHeaders: [String: String]
+    /// What every analytics event carries: platform, OS, app and SDK versions.
+    let staticContext: [String: Any]
 
     init(
         config: DigiaConfig,
@@ -26,6 +32,7 @@ final class SDKServices {
         networkClient: any NetworkClient,
         clock: @escaping () -> Int64 = SessionManager.systemClock,
         analyticsQueue: any AnalyticsQueueProtocol,
+        appEventQueue: any AnalyticsQueueProtocol = MemoryAnalyticsQueue(limit: appEventQueueMaxEvents),
         networkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor()
     ) {
         let identityManager = IdentityManager(
@@ -46,6 +53,7 @@ final class SDKServices {
             wrapperBinding: config.wrapperBinding,
             wrapperVersion: config.wrapperVersion
         )
+        self.staticContext = staticContext
         let sessionReporter = SessionReporter(
             sessionId: { [weak sessionManager] in sessionManager?.sessionId ?? "" },
             anonymousId: { [weak identityManager] in identityManager?.deviceId ?? "" },
@@ -68,6 +76,7 @@ final class SDKServices {
             storage: storage.scoped("frequency"),
             sessionIdProvider: { [weak sessionManager] in sessionManager?.sessionId }
         )
+        self.userContextManager = UserContextManager(storage: storage.scoped("user"), networkClient: networkClient)
         let ac = config.analyticsConfig
         if ac.enabled {
             let analyticsConfig = DigiaEndpoints.isTestMode
@@ -90,9 +99,22 @@ final class SDKServices {
                 networkClient: networkClient,
                 networkMonitor: networkMonitor
             )
+            self.appEventsService = AppEventsService(
+                AnalyticsService(
+                    config: analyticsConfig,
+                    identityManager: identityManager,
+                    sessionManager: sessionManager,
+                    queue: appEventQueue,
+                    staticContext: staticContext,
+                    networkClient: networkClient,
+                    networkMonitor: networkMonitor,
+                    maxQueueEvents: appEventQueueMaxEvents
+                )
+            )
         } else {
             log.i("Analytics disabled in DigiaConfig — no events will be captured")
             self.analyticsService = nil
+            self.appEventsService = nil
         }
         self.submissionReporter = SubmissionReporter(
             sessionIdProvider: { [weak sessionManager] in sessionManager?.sessionId },
@@ -100,8 +122,15 @@ final class SDKServices {
         )
     }
 
+    /// Sends whatever both analytics queues hold now, one request per queue.
+    func flushAnalytics() {
+        analyticsService?.flush()
+        appEventsService?.flush()
+    }
+
     /// Stops everything this container started. Called before it is dropped.
     func tearDown() {
         analyticsService?.clear()
+        appEventsService?.clear()
     }
 }

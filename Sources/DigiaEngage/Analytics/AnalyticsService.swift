@@ -4,6 +4,9 @@ import UIKit
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger("analytics")
 
+/// Marks a queued entry as a host-app event. Local only — stripped before sending.
+private let appEventMarker = "_digia_app_event"
+
 // MARK: - AnalyticsService
 
 @MainActor
@@ -11,6 +14,8 @@ final class AnalyticsService {
     private let config: AnalyticsConfig
     /// [AnalyticsConfig.maxBatchSize] clamped to 1...``AnalyticsConfig/maxBatchSizeLimit``.
     private let maxBatchSize: Int
+    /// This queue's storage cap. Both instances otherwise share one config.
+    private let maxQueueEvents: Int
     var isEnabled: Bool { config.enabled }
     let identityManager: IdentityManager
     let sessionManager: SessionManager
@@ -68,12 +73,14 @@ final class AnalyticsService {
         staticContext: [String: Any],
         networkClient: any NetworkClient,
         networkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor(),
-        backgroundTime: BackgroundTimeProvider = UIKitBackgroundTime()
+        backgroundTime: BackgroundTimeProvider = UIKitBackgroundTime(),
+        maxQueueEvents: Int? = nil
     ) {
         self.config = config
         self.networkMonitor = networkMonitor
         self.backgroundTime = backgroundTime
         self.maxBatchSize = Self.boundedBatchSize(config.maxBatchSize)
+        self.maxQueueEvents = maxQueueEvents ?? config.queueMaxEvents
         self.identityManager = identityManager
         self.sessionManager = sessionManager
         self.queue = queue
@@ -170,6 +177,22 @@ final class AnalyticsService {
         )
     }
 
+    /// Records a host-app event, sent under `appEvents`.
+    ///
+    /// Returns how many older events the queue cap evicted to make room.
+    @discardableResult
+    func trackAppEvent(_ eventName: String, properties: [String: Any] = [:]) -> Int {
+        guard config.enabled else { return 0 }
+        return enqueue(
+            eventName: eventName,
+            campaignId: nil,
+            campaignKey: nil,
+            campaignType: nil,
+            properties: properties,
+            isAppEvent: true
+        )
+    }
+
     func flush() {
         cancelTimer()
         Task { await dispatchPending() }
@@ -201,14 +224,16 @@ final class AnalyticsService {
 
     // MARK: - Private
 
+    @discardableResult
     private func enqueue(
         eventName: String,
         campaignId: String?,
         campaignKey: String?,
         campaignType: String?,
         impressionId: String? = nil,
-        properties: [String: Any] = [:]
-    ) {
+        properties: [String: Any] = [:],
+        isAppEvent: Bool = false
+    ) -> Int {
         let eventId = UUID().uuidString
         sessionManager.touch()
 
@@ -238,13 +263,16 @@ final class AnalyticsService {
         }
 
         payloadMap["properties"] = mergedProperties
+        if isAppEvent { payloadMap[appEventMarker] = true }
 
+        let sizeBefore = queue.size
         queue.append(
             QueueEntry(
                 eventId: eventId, payload: payloadMap, createdAt: Date().timeIntervalSince1970,
                 attempts: 0),
-            maxEvents: config.queueMaxEvents
+            maxEvents: maxQueueEvents
         )
+        let evicted = max(0, sizeBefore + 1 - queue.size)
         log.d(
             "Event enqueued (event='\(eventName)', eventId=\(eventId), queueSize=\(queue.size), flushBatchSize=\(config.flushBatchSize))"
         )
@@ -255,7 +283,7 @@ final class AnalyticsService {
             // jump the queue and flush early just because new events pushed
             // us past the threshold.
             log.d("Dispatch deferred — a retry is already scheduled")
-            return
+            return evicted
         }
 
         if queue.size >= config.flushBatchSize {
@@ -266,6 +294,23 @@ final class AnalyticsService {
             log.d("Flush timer scheduled (interval=\(config.flushIntervalMs)ms)")
             scheduleTimer()
         }
+        return evicted
+    }
+
+    /// `events` for the experience queue, `appEvents` for host-app events. The
+    /// marker is stripped here rather than stored separately, so the persisted
+    /// queue format is unchanged.
+    nonisolated static func trackBody(_ batch: [QueueEntry]) -> [String: Any] {
+        var events: [[String: Any]] = []
+        var appEvents: [[String: Any]] = []
+        for entry in batch {
+            var payload = entry.payload
+            let isAppEvent = (payload.removeValue(forKey: appEventMarker) as? Bool) == true
+            if isAppEvent { appEvents.append(payload) } else { events.append(payload) }
+        }
+        var body: [String: Any] = ["events": events]
+        if !appEvents.isEmpty { body["appEvents"] = appEvents }
+        return body
     }
 
     /// Offline: nothing is sent and nothing is scheduled — the network's
@@ -323,7 +368,7 @@ final class AnalyticsService {
             // Built off the main actor. Every stored payload was validated as
             // JSON when it was queued.
             let body = try await Task.detached(priority: .utility) {
-                try JSONSerialization.data(withJSONObject: ["events": batch.map { $0.payload }])
+                try JSONSerialization.data(withJSONObject: Self.trackBody(batch))
             }.value
             guard let url = URL(string: DigiaEndpoints.track) else { return }
             let request = NetworkRequest(url: url, method: .post, headers: jsonHeaders, body: body)
@@ -521,7 +566,7 @@ final class AnalyticsService {
         } else if let arr = value as? [Any] {
             return arr.map { deepClone($0) }
         } else if let set = value as? Set<AnyHashable> {
-            return Set(set.map { deepClone($0) as! AnyHashable })
+            return Set(set.map { deepClone($0) as? AnyHashable ?? $0 })
         }
         return value
     }

@@ -45,11 +45,12 @@ extension DigiaEngageTests {
 
         // MARK: - SR44 supersede analytics
 
+        // dmc-case: dmc.drop_reason.supersede_settles_once_iff_displayed
         @Test("displayed nudge superseded by a test → CEP superseded + Digia dismiss with dwell")
         func displayedNudgeSuperseded() async throws {
             let sdk = try await makeSdk([nudgeJson("real")])
             let real = deliver(sdk, "real", "cep-1")
-            sdk.reportNudgeImpression()
+            sdk.nudgeOrchestrator.reportNudgeImpression()
             #expect(try await digiaEvents(sdk).map(\.name).contains("Digia Experience Viewed"))
 
             liveTest(sdk, "inv-1", nudgeJson("t1"))
@@ -61,6 +62,7 @@ extension DigiaEngageTests {
             #expect(dismissed.first?.props["dwell_ms"] != nil)
         }
 
+        // dmc-case: dmc.drop_reason.supersede_settles_once_iff_displayed
         @Test("never-displayed nudge superseded by a test → CEP superseded only, no Digia dismiss")
         func undisplayedNudgeSuperseded() async throws {
             let sdk = try await makeSdk([nudgeJson("real")])
@@ -76,11 +78,12 @@ extension DigiaEngageTests {
             #expect(sdk.controller.activeNudge?.payload.cepCampaignId == liveTestCepId("inv-1"))
         }
 
+        // dmc-case: dmc.drop_reason.supersede_settles_once_iff_displayed
         @Test("displayed guide superseded by a test → CEP superseded + Digia dismiss")
         func displayedGuideSuperseded() async throws {
             let sdk = try await makeSdk([guideJson("g")])
             let guide = deliver(sdk, "g", "cep-1")
-            sdk.reportGuideShown()
+            sdk.guideOrchestrator.reportGuideShown()
 
             liveTest(sdk, "inv-1", nudgeJson("t1"))
 
@@ -92,6 +95,7 @@ extension DigiaEngageTests {
             #expect(dismissed.first?.props["dismiss_reason"] as? String == "superseded")
         }
 
+        // dmc-case: dmc.drop_reason.supersede_settles_once_iff_displayed
         @Test("never-displayed guide superseded by a test → CEP superseded only")
         func undisplayedGuideSuperseded() async throws {
             let sdk = try await makeSdk([guideJson("g")])
@@ -108,6 +112,7 @@ extension DigiaEngageTests {
 
         // MARK: - SR48 precondition before displacement
 
+        // dmc-case: dmc.drop_reason.supersede_settles_once_iff_displayed
         @Test("a test that fails a config precondition leaves the occupant on screen")
         func liveTestFailingConfigKeepsOccupant() async throws {
             let sdk = try await makeSdk([nudgeJson("real")])
@@ -122,6 +127,7 @@ extension DigiaEngageTests {
 
         // MARK: - SR43 same-campaign redelivery
 
+        // dmc-case: dmc.drop_reason.same_campaign_redelivery_dropped_quietly
         @Test("same campaign redelivered to its displayed slot → dropped quietly, never to HealthSink")
         func sameCampaignRedelivery() async throws {
             let recorder = TimelineCapture()
@@ -129,7 +135,7 @@ extension DigiaEngageTests {
             defer { DigiaLogger.unregisterSink(recorder) }
             let sdk = try await makeSdk([inlineJson("i1")])
             let first = deliver(sdk, "i1", "cep-1")
-            sdk.reportSlotFirstRender(first.payload)
+            sdk.inlineReporter.reportSlotFirstRender(first.payload)
 
             let again = deliver(sdk, "i1", "cep-2")
 
@@ -149,6 +155,7 @@ extension DigiaEngageTests {
             #expect(!HealthSink().accepts(busy))
         }
 
+        // dmc-case: dmc.drop_reason.replace_vs_busy_with_priority
         @Test("same campaign over a never-displayed occupant → the normal replace")
         func sameCampaignReplacesUndisplayed() async throws {
             let sdk = try await makeSdk([inlineJson("i1")])
