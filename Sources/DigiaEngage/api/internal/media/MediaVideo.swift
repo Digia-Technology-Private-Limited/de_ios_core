@@ -104,10 +104,17 @@ struct MediaVideo: View {
     var autoplay: Bool = true
     var showControls: Bool = false
     var pausesInBackground: Bool = false
+    /// A tap on the still of a video whose player was taken (or whose decoder was busy) borrows
+    /// again and plays (rule 4). Off by default: other surfaces own their taps (the story pages,
+    /// the rail opening the viewer, the PIP expanding).
+    var tapToPlayWhenLost: Bool = false
     var groundAfterFirstFrame: Color = .black
     var bare: Bool = false
     var playerKey: String? = nil
     var poolPriority: PoolPriority = .onScreen
+    /// Bumped by a surface that shows a video again after its player was taken (the PIP's tap,
+    /// expand or play): a still borrows again and plays.
+    var showAgain: Int = 0
     var startMs: Int64? = nil
     var onFirstFrame: (() -> Void)? = nil
     var onReady: ((DigiaVideoPlayer) -> Void)? = nil
@@ -221,6 +228,12 @@ private struct MediaVideoContent: View {
                         .progressViewStyle(.circular)
                         .tint(.white)
                 }
+                // Only on a still with no player: a playing video and its controls keep their taps.
+                if video.tapToPlayWhenLost, showing.player == nil {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { showing.setPlaying(true) }
+                }
             }
         }
         .clipped()
@@ -228,6 +241,7 @@ private struct MediaVideoContent: View {
         .onDisappear { showing.close() }
         // The new spec comes in the argument: the closure may still see the old properties.
         .onChange(of: video.spec(url: video.url, key: video.playerKey)) { showing.show($0) }
+        .onChange(of: video.showAgain) { _ in showing.setPlaying(true) }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
             if video.pausesInBackground { showing.setAppActive(false) }
         }

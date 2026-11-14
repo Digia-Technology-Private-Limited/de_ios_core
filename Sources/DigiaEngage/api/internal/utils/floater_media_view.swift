@@ -13,6 +13,8 @@ import SwiftUI
 struct FloaterMediaView: View {
     let media: FloaterMediaConfig
     let videoPlayerKey: String
+    /// Bumped when the video's player was taken and it is shown again: the `MediaVideo` borrows.
+    var videoShowAgain: Int = 0
     let muted: Bool
     let cover: Bool
     let resolvedUrl: String
@@ -34,7 +36,8 @@ struct FloaterMediaView: View {
                 // it (the expanded background), as on `main`.
                 bare: true,
                 playerKey: videoPlayerKey,
-                poolPriority: .onScreen
+                poolPriority: .onScreen,
+                showAgain: videoShowAgain
             )
         case .lottie:
             lottieView

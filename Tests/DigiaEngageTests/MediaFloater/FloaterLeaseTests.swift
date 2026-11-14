@@ -229,6 +229,35 @@ struct FloaterLeaseTests {
     // Fails if a teardown path keeps the lease held: floater_orchestrator.swift `finishDismiss`
     // `releaseLease()` -> removed (and `dispose` likewise for its half). A held key keeps its
     // player counted in the pool for the life of the process.
+    // Fails if a PiP whose player another video took stays dead (device test v5, bug 1):
+    // floater_orchestrator.swift `expand()` without `showVideoAgainIfLost()`, or the window's
+    // `MediaVideo` without `.onChange(of: video.showAgain)`.
+    @Test("a PiP another video took plays again from its playhead when it is expanded")
+    func aTakenPipPlaysAgainWhenExpanded() async throws {
+        var cleanups: [() -> Void] = []
+        defer { cleanups.reversed().forEach { $0() } }
+        let showing = try await show(playedPast: 1, cleanups: &cleanups)
+        let pool = showing.pool
+        let takenAt = try #require(showing.orchestrator.player).avPlayer.currentTime().seconds
+        let other = pool.borrow(key: "other", url: URL(fileURLWithPath: "/nonexistent.mp4"), priority: .onScreen)
+        cleanups.append { pool.giveBack(key: "other", player: other, priority: .onScreen) }
+
+        _ = try #require(pool.replaceForDecoderBusy(key: "other", priority: .onScreen))
+        try await waitFor("the window loses its player") {
+            showing.orchestrator.player == nil && playerLayers(in: showing.window).isEmpty
+        }
+        #expect(showing.orchestrator.isShowing, "the window stays on its still")
+
+        showing.orchestrator.expand()
+
+        try await waitFor("the window plays again") {
+            guard let player = showing.orchestrator.player?.avPlayer else { return false }
+            return player.rate > 0 && playerLayers(in: showing.window).first?.player === player
+        }
+        let resumedAt = try #require(showing.orchestrator.player).avPlayer.currentTime().seconds
+        #expect(resumedAt >= takenAt - 0.1, "resumes at its kept playhead, not from 0")
+    }
+
     @Test("teardown releases the lease on both paths")
     func teardownReleasesTheLeaseOnBothPaths() async throws {
         var cleanups: [() -> Void] = []

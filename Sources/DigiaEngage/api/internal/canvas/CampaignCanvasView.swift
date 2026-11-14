@@ -1936,6 +1936,7 @@ private struct CanvasVideoRenderer: View {
                 autoplay: autoplay,
                 showControls: showControls,
                 pausesInBackground: true,
+                tapToPlayWhenLost: true,
                 playerKey: playerKey
             )
         }

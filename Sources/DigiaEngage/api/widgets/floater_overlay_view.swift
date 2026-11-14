@@ -275,6 +275,7 @@ private struct FloaterSessionView: View {
                     FloaterMediaView(
                         media: config.media,
                         videoPlayerKey: floaterVideoPlayerKey(state),
+                        videoShowAgain: orchestrator.videoShowAgain,
                         muted: orchestrator.muted,
                         cover: !expanded || config.expanded.cover,
                         resolvedUrl: state.resolvedMediaUrl,
@@ -395,6 +396,8 @@ private struct FloaterSessionView: View {
     // MARK: - Gesture
 
     private func expandFromCollapsedMediaTap() {
+        // A window whose player another video took plays again on a tap, expanding or not.
+        if !config.behavior.tapExpands { orchestrator.showVideoAgainIfLost() }
         guard !expanded, config.behavior.tapExpands, !orchestrator.closing else { return }
         SDKInstance.shared.reportFloaterClicked(
             elementId: "pip_media", actionType: "expand", ctaRole: "primary"

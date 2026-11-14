@@ -155,6 +155,13 @@ final class FloaterOrchestrator: ObservableObject {
     private(set) var player: DigiaVideoPlayer?
     /// The pool and key `player` is held under, given back on every teardown path.
     private var lease: (pool: VideoPlayerPool, key: String)?
+    /// Hears the pool take `lease`'s player (another video's decoder busy, option C).
+    private var evictionObserver: UUID?
+    /// Where the video was held when another video took its player; set until it is shown again.
+    private var lostVideo: (pool: VideoPlayerPool, key: String, url: URL)?
+    /// Bumped when a video whose player was taken is shown again: the window's `MediaVideo`
+    /// borrows again then (`showAgain`).
+    @Published private(set) var videoShowAgain = 0
     /// The image `preloadImage` decoded, drawn by the window on its first frame. A second
     /// load through `WebImage` showed its black placeholder and could drop the update that
     /// swaps the image in, leaving the window black. `nil` for every other kind, and for an
@@ -384,6 +391,7 @@ final class FloaterOrchestrator: ObservableObject {
         // player ceiling.
         let p = pool.borrow(key: key, url: parsed, priority: .onScreen)
         lease = (pool, key)
+        observeLoss(pool: pool, key: key, url: parsed)
         // The starting spec for the warm-up. Once the window shows, its `MediaVideo` owns mute,
         // volume and loop; this orchestrator never writes them again.
         // The volume first: setting it clears a mute.
@@ -404,10 +412,53 @@ final class FloaterOrchestrator: ObservableObject {
         // orchestrator's business (`onMediaEnd`).
         if !config.media.loop { observeEnd(of: p.avPlayer.currentItem, token: token) }
 
-        p.avPlayer.publisher(for: \.rate)
+        observeRate(of: p)
+    }
+
+    private func observeRate(of player: DigiaVideoPlayer) {
+        playingCancellables.removeAll()
+        player.avPlayer.publisher(for: \.rate)
             .receive(on: DispatchQueue.main)
             .sink { [weak self] rate in self?.isPlaying = rate > 0 }
             .store(in: &playingCancellables)
+    }
+
+    private func observeLoss(pool: VideoPlayerPool, key: String, url: URL) {
+        if let evictionObserver { pool.removeEvictionObserver(evictionObserver, for: key) }
+        evictionObserver = pool.observeEviction(of: key) { [weak self] in
+            self?.videoLost(pool: pool, key: key, url: url)
+        }
+    }
+
+    /// Another video took the player (decoder busy, option C), or memory pressure did: the
+    /// window stays on its still and nothing is retried by itself; a tap, expand or play shows it
+    /// again (`showVideoAgainIfLost`). The pool already ended the hold, so there is nothing to give back.
+    private func videoLost(pool: VideoPlayerPool, key: String, url: URL) {
+        if let evictionObserver { pool.removeEvictionObserver(evictionObserver, for: key) }
+        evictionObserver = nil
+        guard state != nil, lease?.key == key else { return }
+        log.d("Video player taken from the floater (key=\(key))", campaign: state?.campaign.campaignKey)
+        lease = nil
+        player = nil
+        playingCancellables.removeAll()
+        isPlaying = false
+        lostVideo = (pool, key, url)
+    }
+
+    /// A tap, expand or play on a window whose player another video took: borrows again under the
+    /// same key, so it resumes at its kept playhead (decision 2a), and tells the window's
+    /// `MediaVideo` to borrow too. A decoder busy then is the `MediaVideo`'s (one replacement per
+    /// grant); with nothing to take it stays on its still until the next tap.
+    func showVideoAgainIfLost() {
+        guard let lost = lostVideo, let active = state, !closing, !awaitingMedia else { return }
+        lostVideo = nil
+        let p = lost.pool.borrow(key: lost.key, url: lost.url, priority: .onScreen)
+        lease = (lost.pool, lost.key)
+        player = p
+        observeLoss(pool: lost.pool, key: lost.key, url: lost.url)
+        if !active.config.media.loop { observeEnd(of: p.avPlayer.currentItem, token: active.token) }
+        observeRate(of: p)
+        videoShowAgain += 1
     }
 
     private func observeEnd(of item: AVPlayerItem?, token: Int64) {
@@ -463,6 +514,9 @@ final class FloaterOrchestrator: ObservableObject {
 
     /// Gives the showing's player back to the pool. Both teardown paths run here.
     private func releaseLease() {
+        if let lease, let evictionObserver { lease.pool.removeEvictionObserver(evictionObserver, for: lease.key) }
+        evictionObserver = nil
+        lostVideo = nil
         if let lease, let player { lease.pool.giveBack(key: lease.key, player: player, priority: .onScreen) }
         lease = nil
     }
@@ -559,6 +613,7 @@ final class FloaterOrchestrator: ObservableObject {
         guard let active = state, !closing, surface != .expanded,
               !isCoveredByBlockingCampaign()
         else { return }
+        showVideoAgainIfLost()
         surface = .expanded
         expandCount += 1
         everExpanded = true
@@ -588,6 +643,10 @@ final class FloaterOrchestrator: ObservableObject {
     /// Play/pause, for the optional playback-controls chrome button. No-op for
     /// non-playable media (image/GIF have no `player` to toggle).
     func togglePlayback() {
+        if lostVideo != nil {
+            showVideoAgainIfLost()
+            return
+        }
         guard let player else { return }
         if player.avPlayer.rate > 0 { player.pause() } else { player.play() }
     }
