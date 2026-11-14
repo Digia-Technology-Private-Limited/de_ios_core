@@ -134,6 +134,53 @@ struct IdentityManagerTests {
         }
     }
 
+    @Test("userHash is stored with the user and restored on the next launch")
+    func userHashStoredAndRestored() {
+        let (storage, _) = makeIsolatedStorage()
+        let scopedStorage = storage.scoped("identity")
+        let manager = IdentityManager(storage: scopedStorage)
+
+        manager.setUserId("dana", userHash: "h1")
+
+        #expect(manager.userHash == "h1")
+        #expect(scopedStorage.string(forKey: "user_hash") == "h1")
+        let restored = IdentityManager(storage: scopedStorage)
+        #expect(restored.userId == "dana")
+        #expect(restored.userHash == "h1")
+    }
+
+    @Test("For the same user a new userHash replaces it; no userHash keeps it")
+    func userHashSameUser() {
+        let (storage, _) = makeIsolatedStorage()
+        let scopedStorage = storage.scoped("identity")
+        let manager = IdentityManager(storage: scopedStorage)
+        manager.setUserId("dana", userHash: "h1")
+
+        manager.setUserId("dana")
+        #expect(manager.userHash == "h1")
+
+        manager.setUserId("dana", userHash: "h2")
+        #expect(manager.userHash == "h2")
+        #expect(scopedStorage.string(forKey: "user_hash") == "h2")
+    }
+
+    @Test("A user switch or clearUserId clears the userHash")
+    func userHashClearedOnSwitchAndClear() {
+        let (storage, _) = makeIsolatedStorage()
+        let scopedStorage = storage.scoped("identity")
+        let manager = IdentityManager(storage: scopedStorage)
+        manager.setUserId("dana", userHash: "h1")
+
+        manager.setUserId("erin")
+        #expect(manager.userHash == nil)
+        #expect(scopedStorage.string(forKey: "user_hash") == nil)
+
+        manager.setUserId("erin", userHash: "h3")
+        manager.clearUserId()
+        #expect(manager.userHash == nil)
+        #expect(scopedStorage.string(forKey: "user_hash") == nil)
+    }
+
     @Test("Domain isolation: only device_id and user_id keys are written, NEVER anonymous_id")
     func domainIsolationNoAnonymousIdKey() {
         let (storage, defaults) = makeIsolatedStorage()

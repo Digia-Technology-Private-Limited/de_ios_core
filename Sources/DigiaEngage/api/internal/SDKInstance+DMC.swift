@@ -165,7 +165,10 @@ extension SDKInstance {
         guard let services, initGeneration == generation else { return }
         services.appEventsService?.applyPolicy(policy)
         let manager = services.userContextManager
-        manager.configure(restoredUserId: services.identityManager.userId)
+        manager.configure(
+            restoredUserId: services.identityManager.userId,
+            restoredUserHash: services.identityManager.userHash
+        )
         await manager.refresh()
         guard self.services === services, initGeneration == generation else { return }
         engine.ready()
@@ -217,14 +220,20 @@ extension SDKInstance {
     // MARK: Identity
 
     /// The one path a user change takes, buffered or not. `nil` clears.
-    func applyUserId(_ services: SDKServices, _ userId: String?, refreshContext: Bool = true) {
+    /// Identity owns the change and the hash.
+    func applyUserId(
+        _ services: SDKServices,
+        _ userId: String?,
+        userHash: String? = nil,
+        refreshContext: Bool = true
+    ) {
         let identity = services.identityManager
         let trimmed = userId?.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed?.isEmpty == true { return }
         services.userContextManager.dropPreviousUser(trimmed)
         if trimmed != identity.userId { clearDigiaInlineContent() }
         if let trimmed {
-            identity.setUserId(trimmed)
+            identity.setUserId(trimmed, userHash: userHash)
         } else {
             identity.clearUserId()
         }
@@ -233,7 +242,8 @@ extension SDKInstance {
         // A set that identity refused leaves nothing to tell the context.
         if trimmed != nil, current == nil { return }
         let manager = services.userContextManager
-        Task { @MainActor in await manager.onUserIdChanged(current) }
+        let currentHash = identity.userHash
+        Task { @MainActor in await manager.onUserIdChanged(current, userHash: currentHash) }
     }
 
     /// Clears the inline content Digia decided for the user who is leaving, so

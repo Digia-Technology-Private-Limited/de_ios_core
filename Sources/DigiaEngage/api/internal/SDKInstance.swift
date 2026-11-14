@@ -147,7 +147,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// A `setUserId` / `clearUserId` that arrived before `services` existed.
     /// Only the last one matters; it is applied once, when services are built.
     private enum PendingUserChange {
-        case set(String)
+        case set(String, userHash: String?)
         case clear
     }
     private var pendingUserChange: PendingUserChange?
@@ -435,8 +435,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // context is configured from the resulting identity once the bundle
         // lands, so this change needs no refresh of its own.
         switch pendingUserChange {
-        case let .set(userId):
-            applyUserId(services, userId, refreshContext: false)
+        case let .set(userId, userHash):
+            applyUserId(services, userId, userHash: userHash, refreshContext: false)
         case .clear:
             applyUserId(services, nil, refreshContext: false)
         case nil:
@@ -1753,15 +1753,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         sdkState = .ready
     }
 
-    func setUserId(_ userId: String) {
+    func setUserId(_ userId: String, userHash: String? = nil) {
         guard let services else {
             // A blank ID is ignored here exactly as `IdentityManager` ignores
             // it after init, so it can't overwrite a buffered clear.
             guard !userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            pendingUserChange = .set(userId)
+            pendingUserChange = .set(userId, userHash: userHash)
             return
         }
-        applyUserId(services, userId)
+        applyUserId(services, userId, userHash: userHash)
     }
 
     func clearUserId() {
