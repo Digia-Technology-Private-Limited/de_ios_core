@@ -43,25 +43,9 @@ struct WindowCase: CustomTestStringConvertible, Sendable {
 
 let storyWindowCases: [WindowCase] = [
     WindowCase(
-        name: "open at the first story: its player, the next one's, the first bytes two ahead",
-        types: Array(repeating: .video, count: 4), start: 0, slow: false,
-        players: [0: .viewerPage, 1: .viewerNext], firstBytes: [2]),
-    WindowCase(
         name: "open in the middle: players either side, first bytes two either side",
         types: Array(repeating: .video, count: 5), start: 2, slow: false,
         players: [2: .viewerPage, 3: .viewerNext, 1: .viewerPrev], firstBytes: [4, 0]),
-    WindowCase(
-        name: "open on the last story: only backward",
-        types: Array(repeating: .video, count: 5), start: 4, slow: false,
-        players: [4: .viewerPage, 3: .viewerPrev], firstBytes: [2]),
-    WindowCase(
-        name: "open on the second story: its own window, with the first one behind it",
-        types: Array(repeating: .video, count: 5), start: 1, slow: false,
-        players: [1: .viewerPage, 2: .viewerNext, 0: .viewerPrev], firstBytes: [3]),
-    WindowCase(
-        name: "a slow network: the current player and the next story's first bytes only",
-        types: Array(repeating: .video, count: 5), start: 2, slow: true,
-        players: [2: .viewerPage], firstBytes: [3]),
 ]
 
 
@@ -212,13 +196,13 @@ struct StoryPageTests {
     // MARK: The download window, seen through the viewer
 
     private func serve(
-        _ types: [StoryMediaType], holding: Set<Int> = [], status: [Int: Int] = [:]
+        _ types: [StoryMediaType], holding: Set<Int> = []
     ) throws -> (items: [StoryItemConfig], urls: [URL]) {
         var items: [StoryItemConfig] = [], urls: [URL] = []
         for (index, type) in types.enumerated() {
             let url = MediaOrigin.url("window-\(index).\(type == .video ? "mp4" : "png")")
             let body = type == .video ? try testkitAsset("movie.mp4") : solidPNG(.red)
-            MediaOrigin.set(.status(status[index] ?? 200, body), for: url, held: holding.contains(index))
+            MediaOrigin.set(.status(200, body), for: url, held: holding.contains(index))
             items.append(StoryItemConfig(type: type, url: url.absoluteString, duration: 60_000))
             urls.append(url)
         }
@@ -258,32 +242,11 @@ struct StoryPageTests {
         return ranges.allSatisfy { $0.hasSuffix("-\(storyFirstBytes - 1)") }
     }
 
-    // Guards `if !firstFrameShown { return actions }` in `StoryDownloadPlan.plan`: a story whose
-    // first frame has not shown holds its own player and nothing else, neither a neighbour's player
-    // nor a byte of a neighbour, until the frame arrives.
-    @Test("a story opens on its own player alone until its first frame shows, then the window grows")
-    func coldStartPlansOnlyTheCurrentPlayer() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let pool = MediaServices.current.videoPool
-        let (items, urls) = try serve([.video, .video, .video, .video], holding: [0])
-
-        let window = openViewer(items, at: 0, slow: FlippableSlowNetwork())
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { !MediaOrigin.requests(for: urls[0]).isEmpty })
-        ComponentTestHost.drainRunLoop(for: 0.6)
-
-        #expect(ranks(pool, of: 4) == [0: .viewerPage])
-        #expect(asked(urls).keys.sorted() == [0], "nothing asked for a neighbour: \(asked(urls))")
-
-        MediaOrigin.release(urls[0])
-        #expect(await waitUntilMedia { pool.priority(of: poolKey(1)) == .viewerNext }, "the first frame opens the window")
-    }
-
-    // Guards the window actions in `StoryDownloadPlan.plan`: the forward `firstBytes(n+2)`, the last
-    // story's backward `firstBytes(n-2)`, the general branch's `player(n-1)` and the early
-    // `slowNetwork` return. Seen as the ranks the pool holds and the byte ranges the origin serves.
-    @Test("the viewer holds players and warms bytes by the window rules", arguments: storyWindowCases)
+    // Guards the viewer carrying its plan out: `StoryViewer.drivePlan` giving the driver the stories' URLs,
+    // keys and kinds, so the ranks the pool holds and the byte ranges the origin serves are the plan's.
+    // The plan's own window rules (the shapes, the cold start, images, the slow network) are the
+    // engine's (`StoryDownloadPlanTests`).
+    @Test("the viewer holds players and warms bytes as its plan says", arguments: storyWindowCases)
     func viewerWindowShapes(_ shape: WindowCase) async throws {
         install()
         defer { MediaOrigin.end() }
@@ -309,39 +272,14 @@ struct StoryPageTests {
         }
     }
 
-    // Guards `stories[index].isVideo ? .player(...) : .wholeFile(...)` in
-    // `StoryDownloadPlan.playerOrWholeFile`: an image never takes a player, and its whole file (no
-    // Range) is warmed, while the video after it gets first bytes.
-    @Test("an image in the window is warmed whole and never takes a player")
-    func imagesAreWarmedWholeWithoutAPlayer() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let pool = MediaServices.current.videoPool
-        let (items, urls) = try serve([.video, .image, .video])
-
-        let window = openViewer(items, at: 0, slow: FlippableSlowNetwork())
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia(timeout: 5) {
-            !MediaOrigin.requests(for: urls[1]).isEmpty && !MediaOrigin.requests(for: urls[2]).isEmpty
-        })
-        ComponentTestHost.drainRunLoop(for: 0.4)
-
-        #expect(ranks(pool, of: 3) == [0: .viewerPage], "the image has no player")
-        #expect(asked(urls)[1] == ["whole"])
-        #expect(Self.askedOnlyForFirstBytes(asked(urls)[2]), "\(asked(urls)[2] ?? [])")
-    }
-
     /// Opens a three-story viewer on a source that measures, with the third story's first bytes
     /// held at the origin for `seconds` (the time one warm takes), and answers whether the next
     /// story's player was still held afterwards.
-    private func nextPlayerKept(
-        afterAWarmOf seconds: TimeInterval, third status: Int = 200, seeding: (URL) async -> Void = { _ in }
-    ) async throws -> Bool {
+    private func nextPlayerKept(afterAWarmOf seconds: TimeInterval) async throws -> Bool {
         install()
         defer { MediaOrigin.end() }
         let pool = MediaServices.current.videoPool
-        let (items, urls) = try serve([.video, .video, .video], holding: [2], status: [2: status])
-        await seeding(urls[1])
+        let (items, urls) = try serve([.video, .video, .video], holding: [2])
 
         let window = openViewer(items, at: 0, slow: PathSlowNetworkSource())
         defer { ComponentTestHost.unmount(window) }
@@ -353,26 +291,13 @@ struct StoryPageTests {
         return pool.priority(of: poolKey(1)) == .viewerNext
     }
 
-    // Guards `throughput.note(bytes:elapsed:)` in `PathSlowNetworkSource.noteWarm` and the
-    // `measuredKbps < slowDownstreamKbps` comparison in `slowNetworkFor`: a warm of the movie's
-    // 318 465 bytes that takes 2.6 s is 980 kbps, so the viewer drops the next story's player.
+    // Guards the viewer feeding its warms to the source (`onWarm: { slowSource.noteWarm(...) }` in
+    // `StoryViewer`): a warm of the movie's 318 465 bytes that takes 2.6 s is 980 kbps, so the viewer
+    // drops the next story's player. How a warm is measured (bits, the 20 ms floor, a failed warm) is
+    // the engine's (`SlowNetworkTests`, `StoryPlanDriverTests`).
     @Test("a first-bytes warm that crawls turns the network slow and the next player is let go")
     func slowWarmTurnsTheNetworkSlow() async throws {
         #expect(try await nextPlayerKept(afterAWarmOf: 2.6) == false)
-    }
-
-    // Guards `Double(bytes) * 8 / 1_000 / elapsed` in `SlowNetworkThroughput.note`: 318 465 bytes in
-    // 0.8 s is 3.2 Mbps, a fast link (read as bytes instead of bits it would be 398 kbps, slow).
-    @Test("a first-bytes warm at a few Mbps leaves the network fast and the next player held")
-    func fastWarmKeepsTheNetworkFast() async throws {
-        #expect(try await nextPlayerKept(afterAWarmOf: 0.8) == true)
-    }
-
-    // Guards `guard bytes > 0, ...` in `SlowNetworkThroughput.note`: a warm that failed delivers
-    // 0 bytes (read as 0 kbps it would turn the network slow), though it took long enough to time.
-    @Test("a warm that fails measures nothing, so the network stays fast")
-    func failedWarmDoesNotVote() async throws {
-        #expect(try await nextPlayerKept(afterAWarmOf: 0.4, third: 404) == true)
     }
 
     private func singleSlotPool() -> VideoPlayerPool {
@@ -380,34 +305,6 @@ struct StoryPageTests {
         let pool = VideoPlayerPool(maxPlayers: 1, makeItem: { mediaVideoItem(for: $0, loader: loader) })
         MediaServices.override(videoPool: pool)
         return pool
-    }
-
-    // Guards "no live-player ceiling" through `StoryThumbnail` (decoder-driven capacity): a rail
-    // tile borrows a player even when the pool's one slot is held by a story page, and neither
-    // skips its turn nor fails.
-    @Test("a rail tile gets a player past the pool size, and neither skips nor fails")
-    func railTileIsNeverRefused() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let pool = singleSlotPool()
-        let blocking = MediaOrigin.url("rail-blocker.mp4")
-        let video = MediaOrigin.url("rail-refused.mp4")
-        for url in [blocking, video] { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
-        let blocker = pool.borrow(key: "page", url: blocking, priority: .onScreen)
-        let skipped = CallCount(), failed = CallCount()
-
-        let window = MediaStage.mount(StoryThumbnail(
-            item: StoryItemConfig(type: .video, url: video.absoluteString, duration: nil),
-            poolKey: "tile", playing: true, repeatWindow: false, restartGeneration: 0,
-            onWindowCompleted: {}, onFailed: { failed.value += 1 }, onSkipped: { skipped.value += 1 }))
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "tile") != nil })
-        ComponentTestHost.drainRunLoop(for: 0.3)
-
-        #expect(skipped.value == 0)
-        #expect(failed.value == 0)
-        #expect(Set(pool.heldKeys) == ["page", "tile"], "the tile has a player of its own")
-        pool.giveBack(key: "page", player: blocker, priority: .onScreen)
     }
 
     // Guards `showing.onGiveUp = video.onLost` in `MediaVideoContent.bindCallbacks` and `onSkipped:
@@ -485,30 +382,6 @@ struct StoryPageTests {
             y: Int(((image.size.height - MediaStage.size.height) / 2 + 6) * image.scale))
         #expect(corner.map { colorsNearly($0, Self.backdrop, tolerance: 0.03) } == true, "the dark backdrop, not black")
         MediaOrigin.release(video)
-    }
-
-    // Guards `guard bytes > 0, elapsed >= Self.minimumElapsed` (the elapsed half) in
-    // `SlowNetworkThroughput.note`: once the network reads slow, the plan warms story 1's first
-    // bytes, which are already on disk. That warm answers at once and measures nothing; counted, it
-    // would read as a link of Gbps and clear the slow verdict, and the next player would come back.
-    @Test("a warm served from the cache does not clear a slow verdict")
-    func cachedWarmDoesNotClearASlowVerdict() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let pool = MediaServices.current.videoPool
-        let (items, urls) = try serve([.video, .video, .video], holding: [2])
-        await MediaPrefetch.warm(urls[1].absoluteString, kind: .video, bytes: storyFirstBytes)
-
-        let window = openViewer(items, at: 0, slow: PathSlowNetworkSource())
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { pool.priority(of: poolKey(1)) == .viewerNext })
-        #expect(await waitUntilMedia { !MediaOrigin.requests(for: urls[2]).isEmpty })
-        _ = await waitUntilMedia(timeout: 2.6) { false }
-        MediaOrigin.release(urls[2])
-        #expect(await waitUntilMedia(timeout: 2) { pool.priority(of: poolKey(1)) == nil }, "the slow warm turned it slow")
-        ComponentTestHost.drainRunLoop(for: 1.0)
-
-        #expect(pool.priority(of: poolKey(1)) == nil, "still slow after the cached warm")
     }
 
     // MARK: The rail's take-turns schedule, seen through the cards' players

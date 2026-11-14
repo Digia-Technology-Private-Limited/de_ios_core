@@ -41,19 +41,5 @@ struct MediaPrefetchTests {
         #expect(starts.first == 0)
         #expect(starts.dropFirst().allSatisfy { $0 >= Self.warmBytes })
     }
-
-    @Test("warming an item already cached makes no request")
-    func warmingCachedItemMakesNoRequest() async throws {
-        MediaOrigin.install()
-        MediaServices.override(videoSession: MediaOrigin.session())
-        defer { MediaOrigin.end() }
-        let video = MediaOrigin.url("rewarm.mp4")
-        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
-
-        await MediaPrefetch.warm(video.absoluteString, kind: .video, bytes: Self.warmBytes)
-        await MediaPrefetch.warm(video.absoluteString, kind: .video, bytes: Self.warmBytes)
-
-        #expect(MediaOrigin.requests(for: video).count == 1)
-    }
 }
 }

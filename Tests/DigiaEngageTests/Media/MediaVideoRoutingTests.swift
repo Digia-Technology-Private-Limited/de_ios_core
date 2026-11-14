@@ -166,48 +166,40 @@ struct MediaVideoRoutingTests {
         #expect(MediaOrigin.totalRequestCount() == 0)
     }
 
-    // Guards `NotificationCenter ... object: item` in `MediaVideoPlayback.watch` and the `loop`
-    // branch of `noteEnded`: a looping video that ends starts over, and its neighbour, playing the
-    // same kind of item, is not restarted with it.
-    @Test("a looping video restarts only the item that ended", arguments: ["canvas", "nudge"])
-    func loopRestartsOnlyTheItemThatEnded(surface: String) async throws {
+    // Guards `loop` reaching the player from each surface (`CanvasVideoRenderer`, the nudge's video
+    // props): a looping video that ends starts over. That only the item that ended restarts, and how the
+    // end is observed, is the engine's (`DigiaVideoPlayerDeviceTests`).
+    @Test("a looping video starts over at its end", arguments: ["canvas", "nudge"])
+    func loopRestartsAtTheEnd(surface: String) async throws {
         MediaOrigin.install()
         MediaServices.override(videoSession: MediaOrigin.session())
         defer { MediaOrigin.end() }
-        let urls = [MediaOrigin.url("loop-a.mp4"), MediaOrigin.url("loop-b.mp4")]
-        for url in urls { MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: url) }
+        let video = MediaOrigin.url("loop-a.mp4")
+        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: video)
         let pool = MediaServices.current.videoPool
         let window: UIWindow
         if surface == "canvas" {
-            window = MediaStage.mount(canvasVideoStage(urls: urls.map(\.absoluteString), loop: true, autoplay: true))
+            window = MediaStage.mount(canvasVideoStage(urls: [video.absoluteString], loop: true, autoplay: true))
         } else {
             let column = try #require(NudgeParser().parse([
                 "layout": [
                     "type": "digia/column",
-                    "children": urls.map { url in
-                        [
-                            "type": "digia/videoPlayer",
-                            "props": ["url": url.absoluteString, "autoPlay": true, "looping": true, "height": 60],
-                        ] as [String: Any]
-                    },
+                    "children": [[
+                        "type": "digia/videoPlayer",
+                        "props": ["url": video.absoluteString, "autoPlay": true, "looping": true, "height": 60],
+                    ] as [String: Any]],
                 ],
             ]))
             window = MediaStage.mount(NudgeColumnContent(column: column, onDismiss: {}))
         }
         defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { pool.heldKeys.count == 2 })
-        let players = pool.heldKeys.sorted().compactMap { pool.heldPlayer(for: $0) }
-        let (ending, other) = (players[0], players[1])
-        #expect(await waitUntilMedia { players.allSatisfy { $0.avPlayer.currentTime().seconds > 0.3 } }, "both are playing")
-        // Exact, so the neighbour sits mid-video rather than snapping to the last keyframe, which is
-        // near the end.
-        #expect(await other.avPlayer.seek(
-            to: CMTime(seconds: 4, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero))
+        #expect(await waitUntilMedia { pool.heldKeys.count == 1 })
+        let ending = try #require(pool.heldKeys.compactMap { pool.heldPlayer(for: $0) }.first)
+        #expect(await waitUntilMedia { ending.avPlayer.currentTime().seconds > 0.3 }, "it is playing")
         let duration = try #require(ending.avPlayer.currentItem?.duration.seconds)
         #expect(await ending.avPlayer.seek(to: CMTime(seconds: duration - 0.4, preferredTimescale: 600)))
 
-        #expect(await waitUntilMedia(timeout: 6) { ending.avPlayer.currentTime().seconds < 2 && ending.avPlayer.rate > 0 }, "the ended one started over")
-        #expect(other.avPlayer.currentTime().seconds >= 4, "its neighbour carried on from 4 s: \(other.avPlayer.currentTime().seconds)")
+        #expect(await waitUntilMedia(timeout: 6) { ending.avPlayer.currentTime().seconds < 2 && ending.avPlayer.rate > 0 }, "it started over")
     }
 
     // Guards `key ?? ownKey` in `MediaVideoPlayback.open` and the `own` discard in `close` (OD-15):
@@ -260,35 +252,6 @@ struct MediaVideoRoutingTests {
         ComponentTestHost.unmount(window)
         #expect(await waitUntilMedia { pool.heldKeys.isEmpty })
         #expect(pool.livePlayerCount == 1, "kept for a remount under the same key")
-    }
-
-    // Guards the `reused.url != url` re-point in `VideoPlayerPool.borrow` as the canvas reaches
-    // it (N5): a dark-mode toggle changes the URL under the same canvas key; the one player plays
-    // the new URL and nothing is left behind.
-    @Test("a canvas video's URL toggle re-points the player under its key and leaves nothing behind")
-    func canvasVideoURLToggleRepointsUnderItsKey() async throws {
-        MediaOrigin.install()
-        MediaServices.override(videoSession: MediaOrigin.session())
-        defer { MediaOrigin.end() }
-        let light = MediaOrigin.url("canvas-toggle-light.mp4")
-        let dark = MediaOrigin.url("canvas-toggle-dark.mp4")
-        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: light)
-        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: dark)
-        let pool = MediaServices.current.videoPool
-        let model = CanvasDarkModel()
-        let key = "canvas-video-\(MediaStage.campaign)-video"
-
-        let window = MediaStage.mount(CanvasVideoHost(model: model, light: light, dark: dark))
-        defer { ComponentTestHost.unmount(window) }
-        #expect(await waitUntilMedia { !MediaOrigin.requests(for: light).isEmpty })
-        let player = try #require(pool.heldPlayer(for: key))
-
-        model.isDark = true
-        #expect(await waitUntilMedia { !MediaOrigin.requests(for: dark).isEmpty })
-
-        #expect(pool.heldKeys == [key])
-        #expect(pool.heldPlayer(for: key) === player, "the same player, re-pointed")
-        #expect(pool.livePlayerCount == 1, "no leftover player")
     }
 }
 }

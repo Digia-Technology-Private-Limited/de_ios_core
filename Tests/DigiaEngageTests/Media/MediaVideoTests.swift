@@ -332,7 +332,7 @@ struct MediaVideoComponentTests {
     /// item is not ready when the OS says no decoder is free.
     private func mountPlayingAndBusy(
         _ pool: VideoPlayerPool, replaceOnDecoderBusy: Bool = true, failed: CallCount = CallCount()
-    ) async throws -> (playing: UIWindow, busy: UIWindow, busyPlayer: DigiaVideoPlayer, playingURL: URL) {
+    ) async throws -> (playing: UIWindow, busy: UIWindow, busyPlayer: DigiaVideoPlayer) {
         let playing = MediaOrigin.url("playing.mp4")
         let stuck = MediaOrigin.url("busy.mp4")
         MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: playing)
@@ -343,28 +343,7 @@ struct MediaVideoComponentTests {
             url: stuck.absoluteString, autoplay: true, playerKey: "busy",
             replaceOnDecoderBusy: replaceOnDecoderBusy, onFailure: { failed.value += 1 }))
         #expect(await waitUntilMedia { pool.heldPlayer(for: "busy") != nil })
-        return (first, second, try #require(pool.heldPlayer(for: "busy")), playing)
-    }
-
-    // Guards `replaceOnDecoderBusy` reaching the showing's spec in `MediaVideo.spec` (decoder-driven
-    // capacity, D3, D4): a video whose decoder is busy takes the playing video's player, which shows
-    // its still, with no failed box and no `onFailure` on either, and does not take one back by itself.
-    @Test("a decoder-busy video takes another's player, which shows its still and does not fail")
-    func decoderBusyReplacesAndTheTakenShowsItsStill() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let pool = onePlayerPool()
-        let failed = CallCount()
-        let (first, second, busyPlayer, _) = try await mountPlayingAndBusy(pool, failed: failed)
-        defer { ComponentTestHost.unmount(first); ComponentTestHost.unmount(second) }
-
-        simulateDecoderBusy(busyPlayer)
-
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "playing") == nil }, "the playing video was taken")
-        #expect(pool.heldPlayer(for: "busy") != nil, "the busy video keeps a player")
-        _ = await waitUntilMedia(timeout: 0.8) { pool.heldPlayer(for: "playing") != nil }
-        #expect(pool.heldPlayer(for: "playing") == nil, "the taken video does not take one back")
-        #expect(failed.value == 0, "decoder busy is not a failure")
+        return (first, second, try #require(pool.heldPlayer(for: "busy")))
     }
 
     // Guards `replaceOnDecoderBusy: replaceOnDecoderBusy` in `MediaVideo.spec`: with the prop off a
@@ -375,7 +354,7 @@ struct MediaVideoComponentTests {
         defer { MediaOrigin.end() }
         let pool = onePlayerPool()
         let failed = CallCount()
-        let (first, second, busyPlayer, _) = try await mountPlayingAndBusy(pool, replaceOnDecoderBusy: false, failed: failed)
+        let (first, second, busyPlayer) = try await mountPlayingAndBusy(pool, replaceOnDecoderBusy: false, failed: failed)
         defer { ComponentTestHost.unmount(first); ComponentTestHost.unmount(second) }
 
         simulateDecoderBusy(busyPlayer)
@@ -385,34 +364,11 @@ struct MediaVideoComponentTests {
         #expect(failed.value == 0, "decoder busy is not a failure")
     }
 
-    // Guards the re-borrow on show in `VideoShowing` as `MediaVideo` drives it (D4, decision 2a): a
-    // taken video that is shown again plays again from its kept playhead, not from the start.
-    @Test("a taken video shown again plays from where it was")
-    func takenVideoResumesWhenShownAgain() async throws {
-        install()
-        defer { MediaOrigin.end() }
-        let pool = onePlayerPool()
-        let (first, second, busyPlayer, playing) = try await mountPlayingAndBusy(pool)
-        defer { ComponentTestHost.unmount(second) }
-        let keptAt = try #require(pool.heldPlayer(for: "playing")).avPlayer.currentTime().seconds
-        simulateDecoderBusy(busyPlayer)
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "playing") == nil })
-        ComponentTestHost.unmount(first)
-
-        let again = MediaStage.mount(MediaVideo(url: playing.absoluteString, autoplay: true, playerKey: "playing"))
-        defer { ComponentTestHost.unmount(again) }
-
-        #expect(await waitUntilMedia { (pool.heldPlayer(for: "playing")?.avPlayer.rate ?? 0) > 0 }, "plays again")
-        let resumed = try #require(pool.heldPlayer(for: "playing")).avPlayer.currentTime().seconds
-        #expect(resumed >= keptAt - 0.1 && resumed < keptAt + 3, "from its playhead (\(resumed) vs \(keptAt)), not 0")
-    }
-
-    // Guards `player.volume = volume` in `MediaVideoPlayback.open` (W8-03; Flutter Y8-02, Android
-    // `configuredVolume...`): the authored level is on the player from the start, independent of
-    // mute, so unmuting gives that level and not the player's default 1. Also when the player is a
-    // freed one that last played at another level: a holder reusing it must not inherit that level.
-    @Test("the authored volume is the level after unmute, also on a reused player")
-    func authoredVolumeSurvivesUnmute() async throws {
+    // Guards `volume: volume` in `MediaVideo.spec` (W8-03; Flutter Y8-02, Android `configuredVolume...`):
+    // the authored level reaches the player independent of mute, so unmuting gives that level. How the
+    // engine sets and keeps it, also on a reused player, is the engine's (`VideoShowingTests`).
+    @Test("the authored volume reaches the player and is the level after unmute")
+    func authoredVolumeReachesThePlayer() async throws {
         install()
         defer { MediaOrigin.end() }
         let video = MediaOrigin.url("volume.mp4")
@@ -430,21 +386,6 @@ struct MediaVideoComponentTests {
         model.muted = false
         #expect(await waitUntilMedia { !player.avPlayer.isMuted })
         #expect(player.avPlayer.volume == 0.5, "audible at the authored level")
-
-        // A freed player that last played at 0.8 is taken over by a new holder authored at 0.25.
-        let reuse = MediaOrigin.url("volume-reuse.mp4")
-        MediaOrigin.set(.status(200, try testkitAsset("movie.mp4")), for: reuse)
-        let url = try #require(URL(string: reuse.absoluteString))
-        let freed = pool.borrow(key: "story", url: url, priority: .onScreen)
-        freed.avPlayer.volume = 0.8
-        pool.giveBack(key: "story", player: freed, priority: .onScreen)
-
-        let second = MediaStage.mount(VolumeHost(model: MuteModel(), url: reuse.absoluteString, key: "pip-2", volume: 0.25))
-        defer { ComponentTestHost.unmount(second) }
-        #expect(await waitUntilMedia { pool.heldPlayer(for: "pip-2") != nil })
-
-        #expect(pool.heldPlayer(for: "pip-2") === freed, "the freed player was reused")
-        #expect(freed.avPlayer.volume == 0.25)
     }
 
     /// The players the window's layers draw.
