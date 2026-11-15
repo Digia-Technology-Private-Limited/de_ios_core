@@ -15,6 +15,7 @@
 		D10000000000000000000025 /* GoldenFonts.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000015 /* GoldenFonts.swift */; };
 		D10000000000000000000026 /* GoldenScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = D10000000000000000000016 /* GoldenScreen.swift */; };
 		D10000000000000000000003 /* SnapshotTesting in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000002 /* SnapshotTesting */; };
+		D10000000000000000000032 /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = D10000000000000000000031 /* Yams */; };
 		F20000000000000000000100 /* MockNetworkClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000100 /* MockNetworkClient.swift */; };
 		F20000000000000000000101 /* SdkHarness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000101 /* SdkHarness.swift */; };
 		F20000000000000000000105 /* FloaterBehaviourSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000105 /* FloaterBehaviourSupport.swift */; };
@@ -105,6 +106,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D10000000000000000000003 /* SnapshotTesting in Frameworks */,
+				D10000000000000000000032 /* Yams in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -204,6 +206,7 @@
 			name = DigiaEngageSampleTests;
 			packageProductDependencies = (
 				D10000000000000000000002 /* SnapshotTesting */,
+				D10000000000000000000031 /* Yams */,
 			);
 			productName = DigiaEngageSampleTests;
 			productReference = C10000000000000000000001 /* DigiaEngageSampleTests.xctest */;
@@ -240,6 +243,7 @@
 			packageReferences = (
 				B10300000000000000000001 /* XCLocalSwiftPackageReference ".." */,
 				D10000000000000000000001 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */,
+				D10000000000000000000030 /* XCRemoteSwiftPackageReference "Yams" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A10000000000000000000007 /* Products */;
@@ -583,6 +587,14 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		D10000000000000000000030 /* XCRemoteSwiftPackageReference "Yams" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jpsim/Yams.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.4.0;
+			};
+		};
 		D10000000000000000000001 /* XCRemoteSwiftPackageReference "swift-snapshot-testing" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/pointfreeco/swift-snapshot-testing.git";
@@ -598,6 +610,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B10300000000000000000001 /* XCLocalSwiftPackageReference ".." */;
 			productName = DigiaEngage;
+		};
+		D10000000000000000000031 /* Yams */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D10000000000000000000030 /* XCRemoteSwiftPackageReference "Yams" */;
+			productName = Yams;
 		};
 		D10000000000000000000002 /* SnapshotTesting */ = {
 			isa = XCSwiftPackageProductDependency;

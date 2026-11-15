@@ -50,6 +50,9 @@ extension Tag {
     @Tag static var surface: Self
     /// Frequency capping and eligibility.
     @Tag static var frequency: Self
+    /// A shared YAML SDK test from `testkit/sdk-tests/`: the same file on every
+    /// stack, driving the real SDK in-process.
+    @Tag static var yaml: Self
     /// Session and identity: session lifecycle, user/device id, rotation, resume, reporting.
     @Tag static var session: Self
     /// Analytics events, health sink, delivery timeline, timeline wire strings.
