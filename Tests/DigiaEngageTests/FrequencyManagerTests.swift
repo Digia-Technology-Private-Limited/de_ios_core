@@ -221,21 +221,83 @@ struct FrequencyManagerTests {
         #expect(p?.stopOn == "experienceCompleted")
         // Old snake_case payload has no recognised keys → uncapped (nil).
         #expect(FrequencyPolicy.fromJson(["max_total": 3, "stop_on": "click"]) == nil)
-        // A cap of 0 is kept: it means never shown.
-        #expect(FrequencyPolicy.fromJson(["maxTotal": 0])?.maxTotal == 0)
-        #expect(
-            FrequencyPolicy.fromJson(["maxPerWindow": ["count": 0, "window": "day"]])?.maxPerWindow
-                == FrequencyWindow(count: 0, window: "day"))
     }
 
-    @Test("a zero cap blocks an unseen Digia-decided campaign but not a CEP one")
-    func zeroCapUnseen() {
-        let total = FrequencyPolicy(maxTotal: 0)
-        #expect(FrequencyEvaluator.evaluate(total, nil, 0, "s1").allow)
-        #expect(!FrequencyEvaluator.evaluate(total, nil, 0, "s1", unseenCountsAsZero: true).allow)
-        let window = FrequencyPolicy(maxPerWindow: win(0, "day"))
-        #expect(FrequencyEvaluator.evaluate(window, nil, 0, "s1").allow)
-        #expect(!FrequencyEvaluator.evaluate(window, nil, 0, "s1", unseenCountsAsZero: true).allow)
+    // MARK: caps below 1 and numeric strings (de_workspace#193)
+
+    private func cap(_ raw: Any) -> Int? { FrequencyPolicy.fromJson(["maxTotal": raw])?.maxTotal }
+
+    // Parses the policy, then shows on every attempt that is allowed; no policy never caps.
+    private func shows(_ json: [String: Any], _ attempts: [Attempt]) -> [Bool] {
+        guard let policy = FrequencyPolicy.fromJson(json) else { return attempts.map { _ in true } }
+        return run(policy, attempts)
+    }
+
+    @Test("maxTotal 0 or -1 never caps however often it has shown", arguments: [0, -1])
+    func nonPositiveMaxTotal(_ value: Int) {
+        #expect(shows(["maxTotal": value], Array(repeating: Attempt(now: 0), count: 8))
+            == Array(repeating: true, count: 8))
+    }
+
+    @Test("window count 0 or -1 never caps", arguments: [0, -1])
+    func nonPositiveWindowCount(_ value: Int) {
+        let attempts = (0..<4).map { Attempt(now: Int64($0)) }
+        #expect(shows(["maxPerWindow": ["count": value, "window": "day"]], attempts)
+            == [true, true, true, true])
+    }
+
+    @Test("maxTotal 0 leaves the other limits in force")
+    func zeroMaxTotalKeepsOtherLimits() {
+        #expect(shows(
+            ["maxTotal": 0, "maxPerWindow": ["count": 1, "window": "day"]],
+            [Attempt(now: 0), Attempt(now: 1), Attempt(now: day), Attempt(now: day + 1)])
+            == [true, false, true, false])
+        #expect(shows(
+            ["maxTotal": 0, "stopOn": "experienceCompleted"],
+            [Attempt(now: 0), Attempt(now: 1, complete: true), Attempt(now: 2), Attempt(now: 3)])
+            == [true, true, false, false])
+    }
+
+    @Test("a policy left with no limit is no policy")
+    func emptyPolicyIsNoPolicy() {
+        #expect(FrequencyPolicy.fromJson(
+            ["maxTotal": 0, "maxPerWindow": ["count": 0, "window": "day"]]) == nil)
+    }
+
+    @Test("a stored total from an older cap does not block once the cap is 0")
+    func oldStateWithZeroCap() {
+        let defaults = UserDefaults(suiteName: "digia.freq.test.\(UUID().uuidString)")!
+        let mgr = FrequencyManager(
+            storage: UserDefaultsLocalStorage(defaults: defaults).scoped("frequency"),
+            sessionIdProvider: { "s1" }, clock: { 0 })
+        let old = FrequencyPolicy(maxTotal: 10)
+        for _ in 0..<5 { mgr.recordShow("c", old) }
+        #expect(mgr.isAllowed(
+            campaignKey: "c", policy: FrequencyPolicy.fromJson(["maxTotal": 0])))
+    }
+
+    @Test("a cap of 2 with no stored state shows twice then caps")
+    func capOfTwoFromNoState() {
+        #expect(shows(["maxTotal": 2], (0..<3).map { Attempt(now: Int64($0)) }) == [true, true, false])
+    }
+
+    @Test("numeric strings and whole doubles are caps; everything else is none")
+    func numericStringsAndBadValues() {
+        #expect(cap("2") == 2)
+        #expect(cap(" 2 ") == 2)
+        #expect(cap(3.0) == 3)
+        #expect(cap("3.0") == 3)
+        let bad: [Any] = ["abc", "", NSNull(), 2.7, "2.7", true, false, 0, "0", -1, "-1",
+                          99_999_999_999, "99999999999"]
+        for value in bad { #expect(cap(value) == nil, "\(value)") }
+        // JSON `true` / `false` as decoded by JSONSerialization.
+        let decoded = try? JSONSerialization.jsonObject(
+            with: Data(#"{"maxTotal": true, "count": false, "whole": 3.0}"#.utf8)) as? [String: Any]
+        #expect(decoded?.capInt("maxTotal") == nil)
+        #expect(decoded?.capInt("count") == nil)
+        #expect(decoded?.capInt("whole") == 3)
+        #expect(FrequencyPolicy.fromJson(["maxPerWindow": ["count": "1", "window": "day"]])?
+            .maxPerWindow?.count == 1)
     }
 
     private func campaign(window: String, withRule: Bool = true) throws -> CampaignModel? {
