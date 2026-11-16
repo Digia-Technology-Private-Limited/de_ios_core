@@ -280,6 +280,31 @@ struct DMCContextWaitTests {
         try await Self.until { shown(world.sdk) == "gated" }
     }
 
+    @Test("14. attributes set right after setUserId survive the user change")
+    func attributesAfterLoginSurviveUserChange() async throws {
+        let world = try await Self.launch([
+            Self.nudge("gated", 100, nil, gated: true, extra: [
+                "rule": [
+                    "priority": 100,
+                    "trigger": ["any": Self.event("login_success")],
+                    "conditions": ["all": [["type": "attribute", "key": "plan", "op": "eq", "value": "gold"]]],
+                ] as [String: Any]
+            ])
+        ])
+        defer { DigiaLogger.unregisterSink(world.sink) }
+        world.network.release(0, campaigns: [])
+        try await Self.settle()
+
+        world.sdk.setUserId("B")
+        await world.sdk.setUserAttributes(["plan": "gold"])
+        world.sdk.trackEvent("login_success")
+        try await Self.settle()
+
+        try await Self.until { world.network.requestCount >= 2 }
+        world.network.release(1, campaigns: ["gated"])
+        try await Self.until { shown(world.sdk) == "gated" }
+    }
+
     // dmc-case: dmc.context.first_ready_wins
     @Test("8. first ready wins: the ungated campaign takes the slot")
     func firstReadyWins() async throws {

@@ -252,6 +252,9 @@ final class UserContextManager {
             missingHashReported = false
         }
         let changed = userChanged || userHash != self.userHash
+        // No user in memory means `dropPreviousUser` already emptied it, so what
+        // the attributes hold now was set after the switch: it is the new user's.
+        let keptAttributes = self.userId == nil ? attributes : [:]
         self.userId = userId
         self.userHash = userId == nil ? nil : userHash
         if userId == nil || (userChanged && previous != nil) {
@@ -259,6 +262,12 @@ final class UserContextManager {
             // either would let the next user inherit their targeting. Attributes
             // set before the first login stay: they describe the user who logs in.
             clearCache()
+            if userId != nil, !keptAttributes.isEmpty {
+                attributes = keptAttributes
+                if let data = try? JSONSerialization.data(withJSONObject: attributes) {
+                    storage.set(data, forKey: attributesKey)
+                }
+            }
         }
         guard let userId else { return }
         if (userHash ?? "").isEmpty, !missingHashReported {
