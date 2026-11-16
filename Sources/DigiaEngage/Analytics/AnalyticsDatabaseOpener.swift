@@ -10,12 +10,14 @@ private let log = DigiaLogger("analytics")
 final class AnalyticsDatabaseOpener {
     static let directoryName = "tech.digia.engage"
     static let fileName = "tech.digia.engage.analytics.db"
+    /// Host-app events live in their own file, same name as Flutter and Android.
+    static let appEventsFileName = "tech.digia.engage.app_events.db"
 
     private let resolvePath: () throws -> String
     private var path: String?
 
     /// [resolvePath] defaults to `Application Support/tech.digia.engage/`.
-    init(resolvePath: @escaping () throws -> String = AnalyticsDatabaseOpener.defaultPath) {
+    init(resolvePath: @escaping () throws -> String = { try AnalyticsDatabaseOpener.defaultPath() }) {
         self.resolvePath = resolvePath
     }
 
@@ -89,7 +91,7 @@ final class AnalyticsDatabaseOpener {
     /// `Application Support/tech.digia.engage/`: protectable, excluded from
     /// backup, not user-visible. Throws rather than falling back to the temp
     /// directory, which iOS may purge while events wait in it.
-    static func defaultPath() throws -> String {
+    static func defaultPath(fileName: String = AnalyticsDatabaseOpener.fileName) throws -> String {
         let fileManager = FileManager.default
         let support = try fileManager.url(
             for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true
