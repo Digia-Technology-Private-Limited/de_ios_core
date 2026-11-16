@@ -76,9 +76,9 @@ struct GameSkinHttpTests {
         #expect(client.lastBody?["chanceId"] as? String == "ch_1")
     }
 
-    @Test("non-200 answers network")
-    func non200IsNetwork() async {
-        for status in [400, 401, 500] {
+    @Test("non-2xx answers by status: 429 is quota, other 4xx invalid, rest network")
+    func non200Mapping() async {
+        for status in [400, 401, 403, 404] {
             let client = FakeSkinNetworkClient(result: .success(status: status, body: [:]))
             let result = await GameHttpBridge.send(
                 client: client, baseUrl: "https://app.digia.tech", headers: [:],
@@ -87,9 +87,31 @@ struct GameSkinHttpTests {
                 Issue.record("expected failure for status \(status)")
                 continue
             }
-            // Guards the `isSuccessful` check in send.
-            #expect(code == .network)
+            // Guards the 4xx arm of the status mapping.
+            #expect(code == .invalid)
         }
+
+        let quota = FakeSkinNetworkClient(result: .success(status: 429, body: [:]))
+        let quotaResult = await GameHttpBridge.send(
+            client: quota, baseUrl: "https://app.digia.tech", headers: [:],
+            method: .get, path: "rewards", body: nil)
+        guard case .failure(let quotaCode) = quotaResult else {
+            Issue.record("expected failure for status 429")
+            return
+        }
+        // Guards the 429 arm of the status mapping.
+        #expect(quotaCode == .quota)
+
+        let server = FakeSkinNetworkClient(result: .success(status: 500, body: [:]))
+        let serverResult = await GameHttpBridge.send(
+            client: server, baseUrl: "https://app.digia.tech", headers: [:],
+            method: .get, path: "rewards", body: nil)
+        guard case .failure(let serverCode) = serverResult else {
+            Issue.record("expected failure for status 500")
+            return
+        }
+        // Guards the fallback arm: only 429 and 4xx map elsewhere.
+        #expect(serverCode == .network)
     }
 
     @Test("transport failures answer network, timeouts answer timeout")

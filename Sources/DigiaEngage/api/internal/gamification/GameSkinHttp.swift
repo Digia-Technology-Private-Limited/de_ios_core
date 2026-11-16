@@ -78,11 +78,22 @@ enum GameHttpBridge {
             log.d("Game http failed (path=\(path), error=\(error))")
             return .failure(.network)
         }
-        guard response.isSuccessful else { return .failure(.network) }
+        guard response.isSuccessful else {
+            return .failure(Self.errorCode(forStatus: response.statusCode))
+        }
         guard let data = response.body,
               let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return .failure(.internal) }
         return .success(envelope)
+    }
+
+    /// Maps a non-2xx status to a bridge error code: 429 is `quota`, any other
+    /// 4xx is `invalid` (the skin sent something the backend refused), and the
+    /// rest — redirects, 5xx — is `network`.
+    private static func errorCode(forStatus status: Int) -> GameBridgeErrorCode {
+        if status == 429 { return .quota }
+        if (400...499).contains(status) { return .invalid }
+        return .network
     }
 
     /// The allowlist as a pure predicate: ASCII letters first, then ASCII
