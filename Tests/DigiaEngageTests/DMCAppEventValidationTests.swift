@@ -56,4 +56,13 @@ struct DMCAppEventValidationTests {
                 == String(repeating: "a", count: appEventPropertyStringMaxLength - 1)
         )
     }
+
+    @Test("a key over the key limit and properties past the count limit are dropped")
+    func keyAndCountLimits() {
+        let limits = AppEventLimits(maxProperties: 2, propertyKeyMaxLength: 3)
+        let result = cleanAppEventProperties(
+            ["a": 1, "b": 2, "c": 3, "toolong": 4], limits: limits)
+        #expect(Set(result.properties.keys) == ["a", "b"])
+        #expect(result.dropped.sorted() == ["c", "toolong"])
+    }
 }

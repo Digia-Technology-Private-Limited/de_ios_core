@@ -10,7 +10,7 @@ enum AppEventDropReason: Equatable, Sendable {
     case rate
 }
 
-/// The campaign bundle's app-event upload settings, which travel together.
+/// The SDK config's app-event settings, which travel together.
 struct AppEventUploadPolicy: Equatable, Sendable {
     /// Whether app events are stored and uploaded at all.
     var enabled = true
@@ -20,6 +20,8 @@ struct AppEventUploadPolicy: Equatable, Sendable {
     var burst = 0
     /// App-event names not to store or upload.
     var blockedNames: Set<String> = []
+    /// What the backend stores per event; used to validate, not to limit uploads.
+    var limits = AppEventLimits.defaults
 
     /// Upload on, no rate limit, nothing blocked: what a bundle without the
     /// settings means.
