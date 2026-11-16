@@ -64,6 +64,7 @@ func dartText(_ value: Any) -> String {
 func formatCopyNumber(_ value: Double) -> String {
     guard value.isFinite else { return "" }
     let rounded = (value * 10000).rounded() / 10000
+    if rounded == 0 { return "0" }
     var result = String(format: "%.4f", rounded)
     if result.contains(".") {
         while result.hasSuffix("0") { result.removeLast() }
