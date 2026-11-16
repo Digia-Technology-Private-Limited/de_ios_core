@@ -435,6 +435,15 @@ private final class World: DecisionFacts {
             frequency[completed] = FrequencyEvaluator.recordStop(
                 frequency[completed], Int64(now))
         }
+        switch step["contextRefresh"] as? String {
+        case "hold": engine.holdForContext()
+        case "release": engine.contextSettled()
+        case "fail":
+            // The held signals meet an empty context.
+            audience.removeAll()
+            engine.contextSettled()
+        default: break
+        }
         var signal: RuleSignal?
         if let raw = step["signal"] as? [String: Any] {
             guard let parsed = makeSignal(raw) else {

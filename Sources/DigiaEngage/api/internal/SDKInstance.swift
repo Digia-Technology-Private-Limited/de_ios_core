@@ -156,6 +156,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     // (see SDKInstance+DMC.swift). Stored here because extensions cannot.
     /// Decides which Digia-owned campaign each rule signal shows.
     lazy var engine = makeDecisionEngine()
+    /// The latest user-context wait; an older one ending must not release the
+    /// campaigns a newer one holds.
+    var contextWaitId = 0
     /// The app is not on screen.
     var inBackground = false
     /// Whether the process started while the app was not on screen. A seam so
