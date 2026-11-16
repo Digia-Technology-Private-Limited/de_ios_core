@@ -227,6 +227,23 @@ struct DMCContextWaitTests {
         try await Self.until { shown(world.sdk) == "gated" }
     }
 
+    @Test("11. a trigger sent in the same tick as setUserId is held")
+    func sameTickLoginIsHeld() async throws {
+        let world = try await Self.launch([Self.nudge("gated", 100, Self.event("login_success"), gated: true)])
+        defer { DigiaLogger.unregisterSink(world.sink) }
+        world.network.release(0, campaigns: [])
+        try await Self.settle()
+
+        world.sdk.setUserId("B")
+        world.sdk.trackEvent("login_success")
+        #expect(!logged(world, "gated", .notInAudience))
+        #expect(shown(world.sdk) == nil)
+
+        try await Self.until { world.network.requestCount == 2 }
+        world.network.release(1, campaigns: ["gated"])
+        try await Self.until { shown(world.sdk) == "gated" }
+    }
+
     // dmc-case: dmc.context.first_ready_wins
     @Test("8. first ready wins: the ungated campaign takes the slot")
     func firstReadyWins() async throws {
