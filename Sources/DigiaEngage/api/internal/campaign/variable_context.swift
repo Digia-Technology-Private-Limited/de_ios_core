@@ -41,8 +41,31 @@ func reportMissingVariables(_ schemas: [VariableSchema], payload: CEPTriggerPayl
 private let maxMismatches = 10
 private let maxSampleLength = 32
 
+/// Shortens a mismatch sample to at most 32 Unicode scalars: first part + "…" + last part
+/// (16 + 1 + 15). A cut never lands inside a grapheme cluster, so it may come out shorter.
+/// Android and Flutter apply the same rule; the shared sample table in the tests pins all three to one table.
+func truncatedMismatchSample(_ sample: String) -> String {
+    let scalars = Array(sample.unicodeScalars)
+    guard scalars.count > maxSampleLength else { return sample }
+    var boundaries: Set<Int> = [0]
+    var offset = 0
+    for character in sample {
+        offset += character.unicodeScalars.count
+        boundaries.insert(offset)
+    }
+    var head = maxSampleLength / 2
+    while !boundaries.contains(head) { head -= 1 }
+    var tail = scalars.count - (maxSampleLength - 1) / 2
+    while !boundaries.contains(tail) { tail += 1 }
+    var out = String.UnicodeScalarView()
+    out.append(contentsOf: scalars[..<head])
+    out.append("\u{2026}")
+    out.append(contentsOf: scalars[tail...])
+    return String(out)
+}
+
 /// Reports once, as a `variable_type_mismatch` health event, every declared variable whose CEP value
-/// does not fit its declared type (at most 10, each sample cut to 32 characters). Call once per
+/// does not fit its declared type (at most 10, each sample shortened to 32 characters). Call once per
 /// start, never from a view body.
 func reportVariableTypeMismatches(
     _ schemas: [VariableSchema], payload: CEPTriggerPayload, sink: HealthSink = .shared
@@ -55,7 +78,7 @@ func reportVariableTypeMismatches(
         mismatches.append([
             "name": schema.name,
             "expected": schema.type,
-            "sample": String((raw ?? "").prefix(maxSampleLength)),
+            "sample": truncatedMismatchSample(raw ?? ""),
         ])
     }
     guard !mismatches.isEmpty else { return }
