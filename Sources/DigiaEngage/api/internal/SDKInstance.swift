@@ -2034,15 +2034,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         {
             return busy
         }
-        // `showNow` is CEP-mode only; a live test carries `testInvocationId`
-        // (with the `x-digia-device-id` header) instead. The host trigger path
-        // is CEP-mode shaped — an explicit ask to show — so it sends `true`.
+        // `showNow` is an explicit ask to show: always true, in live tests as
+        // well as CEP mode (a live test also carries `testInvocationId` with
+        // the `x-digia-device-id` header).
         let request = GrantChanceRequest(
             campaignKey: key,
             userId: userId,
             userHash: services?.identityManager.userHash,
             triggerId: triggerId,
-            showNow: context.isLiveTest ? nil : true,
+            showNow: true,
             testInvocationId: testInvocationId,
             deviceId: context.isLiveTest ? services?.identityManager.deviceId : nil
         )
@@ -2145,7 +2145,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             userId: userId,
             userHash: services?.identityManager.userHash,
             triggerId: triggerId,
-            showNow: isLiveTest ? nil : true,
+            showNow: true,
             testInvocationId: testInvocationId,
             deviceId: isLiveTest ? services?.identityManager.deviceId : nil
         )

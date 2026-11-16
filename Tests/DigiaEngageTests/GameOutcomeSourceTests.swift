@@ -32,7 +32,7 @@ struct GameOutcomeSourceTests {
             userId: "u_123",
             userHash: nil,
             triggerId: "cep-1",
-            showNow: liveTest ? nil : true,
+            showNow: true,
             testInvocationId: liveTest ? "inv-1" : nil,
             deviceId: liveTest ? "device-1" : nil
         )
@@ -81,7 +81,7 @@ struct GameOutcomeSourceTests {
         #expect(await source.grantChance(grantRequest()) == .denied(reason: nil))
     }
 
-    @Test("a live-test grant omits showNow and sends the device header")
+    @Test("a live-test grant sends showNow with the device header")
     func grantChanceLiveTest() async throws {
         let (source, client) = source()
         client.enqueueResponse(
@@ -92,7 +92,7 @@ struct GameOutcomeSourceTests {
         #expect(result == .granted(GrantedChance(chanceId: "ch_9", expiresAt: nil, show: true)))
         let request = try #require(client.lastRequest)
         let sent = try body(of: client)
-        #expect(sent["showNow"] == nil)
+        #expect(sent["showNow"] as? Bool == true)
         #expect(sent["testInvocationId"] as? String == "inv-1")
         #expect(request.headers["x-digia-device-id"] == "device-1")
     }
