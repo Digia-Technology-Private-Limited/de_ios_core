@@ -46,7 +46,7 @@ struct GameInitPayload {
     /// What the skin may feature-detect on. Versions never gate features.
     static let capabilities = [
         "http", "event", "log", "haptics", "sensor", "storage",
-        "action.copy", "action.openLink", "action.close",
+        "action.copy", "action.openLink", "action.close", "action.steps",
         "viewport", "device", "lifecycle",
     ]
 

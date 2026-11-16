@@ -75,8 +75,24 @@ enum EngageAction: Equatable {
 
 struct EngageActionParser {
     func parse(_ onClick: [String: Any]?) -> [EngageAction] {
-        guard let steps = onClick?["steps"] as? [[String: Any]] else { return [] }
-        return steps.compactMap(parseStep)
+        parseReportingUnknown(onClick).actions
+    }
+
+    /// Parses canvas steps, also reporting whether any step was unknown or
+    /// malformed. The canvas itself skips those; the game bridge answers them
+    /// as `unsupported` instead.
+    func parseReportingUnknown(_ onClick: [String: Any]?) -> (
+        actions: [EngageAction], hasUnknown: Bool
+    ) {
+        guard let steps = onClick?["steps"] as? [[String: Any]] else { return ([], false) }
+        var actions: [EngageAction] = []
+        actions.reserveCapacity(steps.count)
+        var hasUnknown = false
+        for step in steps {
+            if let action = parseStep(step) { actions.append(action) }
+            else { hasUnknown = true }
+        }
+        return (actions, hasUnknown)
     }
 
     private func parseStep(_ step: [String: Any]) -> EngageAction? {

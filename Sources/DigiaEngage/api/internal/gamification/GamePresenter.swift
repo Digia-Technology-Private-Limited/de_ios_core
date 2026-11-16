@@ -159,6 +159,20 @@ final class GamePresentation: Identifiable, ObservableObject {
             }
             if let id { bridge.answer(id: id) }
             dismiss()
+        case .actionSteps(let id, let actions):
+            // Canvas steps over the bridge: the same executor the canvas uses.
+            // A dismiss step closes the game like a legacy close; `openGame`
+            // has no entry canvas here, so it stays a no-op. Answered only
+            // once the steps have run — or not at all, when the skin sent no
+            // id (S9).
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                await SDKInstance.shared.executeActionFlow(
+                    actions, variables: nil, campaignKey: self.request.campaignKey,
+                    localActionExecutor: LocalActionExecutor(
+                        dismiss: { [weak self] in self?.dismiss() }))
+                if let id { self.bridge.answer(id: id) }
+            }
         }
     }
 

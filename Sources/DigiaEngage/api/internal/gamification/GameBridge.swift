@@ -31,6 +31,10 @@ enum GameBridgeRequest {
     case actionCopy(id: String?, text: String)
     case actionOpenLink(id: String?, url: URL)
     case actionClose(id: String?, reason: String?)
+    /// Canvas steps sent over the bridge (`payload.steps`, the same `onClick`
+    /// object a canvas element carries). Unknown steps never reach here — the
+    /// intake answers them as `unsupported`.
+    case actionSteps(id: String?, actions: [EngageAction])
 }
 
 /// Owns the bridge v1 intake: the `{id?, type, payload}` envelope, the ready
@@ -124,6 +128,10 @@ final class GameBridge {
             return
         }
         let payload = object["payload"] as? [String: Any] ?? [:]
+        if type == "action" {
+            handleAction(id: id, payload: payload)
+            return
+        }
         if type == "ready" {
             let version = (payload["bridgeVersion"] as? NSNumber)?.intValue ?? Self.bridgeVersion
             if state == .loading {
@@ -259,30 +267,59 @@ final class GameBridge {
         case "storage.remove":
             guard let id, let key = payload.nonBlankString("key") else { return nil }
             return .storageRemove(id: id, key: key)
-        case "action":
-            return parseAction(id: id, payload: payload)
         default:
             return nil
         }
     }
 
-    private static func parseAction(id: String?, payload: [String: Any]) -> GameBridgeRequest? {
-        guard let action = payload.nonBlankString("action") else { return nil }
+    /// The `action` intake. A `steps` payload runs through the same parser the
+    /// canvas onClick uses; legacy `{action: "copy"|"openLink"|"close"}` forms
+    /// keep their own parsing. A form the SDK does not know answers
+    /// `unsupported` when it carries an id (and is ignored otherwise); a known
+    /// form with bad fields answers `invalid`. A request the skin cannot be
+    /// answered for (no usable id) is dropped — S9: an id-less action still
+    /// runs, it just gets no reply.
+    private func handleAction(id: String?, payload: [String: Any]) {
+        switch Self.parseActionResult(id: id, payload: payload) {
+        case .request(let request):
+            onRequest?(request)
+        case .malformed:
+            if let id { fail(id: id, code: .invalid, message: "malformed action payload") }
+            else { recordDrop() }
+        case .unknown:
+            if let id { fail(id: id, code: .unsupported, message: "unsupported action") }
+            else { log.d("Game bridge action ignored (unsupported)") }
+        }
+    }
+
+    private enum ActionParseOutcome {
+        case request(GameBridgeRequest)
+        case malformed
+        case unknown
+    }
+
+    private static func parseActionResult(id: String?, payload: [String: Any]) -> ActionParseOutcome {
+        if payload["steps"] != nil {
+            guard let steps = payload["steps"] as? [[String: Any]] else { return .malformed }
+            let parsed = EngageActionParser().parseReportingUnknown(["steps": steps])
+            if parsed.hasUnknown { return .unknown }
+            return .request(.actionSteps(id: id, actions: parsed.actions))
+        }
+        guard let action = payload.nonBlankString("action") else { return .unknown }
         switch action {
         case "copy":
-            guard let text = payload["text"] as? String else { return nil }
-            return .actionCopy(id: id, text: text)
+            guard let text = payload["text"] as? String else { return .malformed }
+            return .request(.actionCopy(id: id, text: text))
         case "openLink":
             guard let raw = payload.nonBlankString("url"),
                   let url = URL(string: raw),
                   isOpenableLink(url)
-            else { return nil }
-            return .actionOpenLink(id: id, url: url)
+            else { return .malformed }
+            return .request(.actionOpenLink(id: id, url: url))
         case "close":
-            let reason = payload["reason"] as? String
-            return .actionClose(id: id, reason: reason)
+            return .request(.actionClose(id: id, reason: payload["reason"] as? String))
         default:
-            return nil
+            return .unknown
         }
     }
 

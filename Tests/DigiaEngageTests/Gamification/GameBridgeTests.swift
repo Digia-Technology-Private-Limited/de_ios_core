@@ -339,21 +339,106 @@ struct GameBridgeTests {
         // No id: dropped.
         bridge.receive(msg("haptics", payload: ["style": "buzz"]))
         bridge.receive(msg("action", payload: ["action": "openLink", "url": "javascript:alert(1)"]))
-        bridge.receive(msg("action", payload: ["action": "explode"]))
-        bridge.receive(msg("event", payload: [:]))
-        bridge.receive(msg("log", payload: ["level": "verbose", "message": "m"]))
+        bridge.receive(msg("action", payload: ["action": "copy"]))
         // With id: answered invalid.
-        bridge.receive(msg("sensor.start", id: "s", payload: ["sensor": "lidar"]))
+        bridge.receive(msg("action", id: "c", payload: ["action": "copy"]))
+        bridge.receive(msg("action", id: "s", payload: ["steps": "spin"]))
+        bridge.receive(msg("sensor.start", id: "t", payload: ["sensor": "lidar"]))
         bridge.receive(msg("storage.get", id: "g", payload: [:]))
 
         #expect(requests.isEmpty)
-        #expect(scripts.count == 2)
+        #expect(scripts.count == 4)
         for script in scripts {
             let reply = try received(script)
             let payload = try #require(reply["payload"] as? [String: Any])
             #expect(payload["code"] as? String == "invalid")
         }
         #expect(bridge.didRecordDrop)
+    }
+
+    @Test("action steps parse through the canvas parser")
+    func actionStepsParse() {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        bridge.onRequest = { requests.append($0) }
+
+        bridge.receive(msg("action", id: "a", payload: ["steps": [
+            ["type": "Action.copyToClipBoard", "data": ["text": "CODE"]],
+            ["type": "Action.openUrl", "data": ["url": "myapp://bills"]],
+        ]]))
+
+        // Guards the steps intake: the bridge reuses the canvas onClick parser.
+        #expect(requests.count == 1)
+        guard case .actionSteps(let id, let actions) = requests.first else {
+            Issue.record("request is not actionSteps")
+            return
+        }
+        #expect(id == "a")
+        #expect(actions == [.copyToClipboard("CODE"), .openDeeplink("myapp://bills")])
+    }
+
+    @Test("an action without an id runs and gets no reply")
+    func actionWithoutIdRunsSilently() {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        var scripts: [String] = []
+        bridge.onRequest = { requests.append($0) }
+        bridge.onSend = { scripts.append($0) }
+
+        bridge.receive(msg("action", payload: ["action": "copy", "text": "CODE"]))
+        bridge.receive(msg("action", payload: ["steps": [
+            ["type": "Action.copyToClipBoard", "data": ["text": "CODE"]],
+        ]]))
+
+        // Guards the S9 intake: both forms dispatch, neither is answered.
+        #expect(requests.count == 2)
+        #expect(scripts.isEmpty)
+    }
+
+    @Test("an unknown action form answers unsupported, or is ignored without an id")
+    func unknownActionUnsupported() throws {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        var scripts: [String] = []
+        bridge.onRequest = { requests.append($0) }
+        bridge.onSend = { scripts.append($0) }
+
+        bridge.receive(msg("action", id: "u", payload: ["action": "explode"]))
+        bridge.receive(msg("action", payload: ["action": "explode"]))
+
+        // Guards the unsupported intake: one answered error, one silent ignore.
+        #expect(requests.isEmpty)
+        #expect(scripts.count == 1)
+        let reply = try received(scripts[0])
+        let payload = try #require(reply["payload"] as? [String: Any])
+        #expect(payload["code"] as? String == "unsupported")
+    }
+
+    @Test("an unknown action step answers unsupported")
+    func unknownStepUnsupported() throws {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        var scripts: [String] = []
+        bridge.onRequest = { requests.append($0) }
+        bridge.onSend = { scripts.append($0) }
+
+        bridge.receive(msg("action", id: "u", payload: ["steps": [
+            ["type": "Action.copyToClipBoard", "data": ["text": "CODE"]],
+            ["type": "Action.teleport", "data": [:]],
+        ]]))
+
+        // Guards the steps validation: nothing runs, the skin hears unsupported.
+        #expect(requests.isEmpty)
+        #expect(scripts.count == 1)
+        let reply = try received(scripts[0])
+        let payload = try #require(reply["payload"] as? [String: Any])
+        #expect(payload["code"] as? String == "unsupported")
+    }
+
+    @Test("init advertises the steps capability")
+    func initAdvertisesSteps() {
+        // Guards the S4 capability: skins feature-detect action.steps.
+        #expect(GameInitPayload.capabilities.contains("action.steps"))
     }
 
     @Test("sensor start clamps hz and reports availability names")
