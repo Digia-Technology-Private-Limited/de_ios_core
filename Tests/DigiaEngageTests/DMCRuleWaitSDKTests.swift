@@ -119,13 +119,12 @@ struct DMCRuleWaitSDKTests {
             [nudge("welcome_back", 600, rule: foregroundRule)], sessionClock: session)
         let firstSession = try #require(sdk.services?.sessionManager.sessionId)
 
-        // A return after the session timeout rotates the session first, then
-        // sends app_foregrounded, as the two foreground observers do.
+        // A return after the session timeout: the SDK rotates the session itself
+        // before it sends app_foregrounded, whatever order the observers run in.
         let sessions = try #require(sdk.services?.sessionManager)
         sessions.onBackground()
         sdk.appDidEnterBackground()
         session.now += 31 * 60 * 1000
-        sessions.touch()
         sdk.appWillEnterForeground()
         // The app keeps running while the wait counts down.
         try await Task.sleep(nanoseconds: 50_000_000)

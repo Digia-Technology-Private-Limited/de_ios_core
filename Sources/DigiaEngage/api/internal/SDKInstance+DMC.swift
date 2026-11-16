@@ -181,6 +181,10 @@ extension SDKInstance {
     }
 
     func appWillEnterForeground() {
+        // The session observes the notification itself, but don't rely on its observer
+        // running first. Rotate here, so a session that timed out ends the waits before
+        // this return's app_foregrounded starts its own.
+        services?.sessionManager.touch()
         // Waits keep counting in the background but end only on screen. The
         // clock keeps counting through sleep, so the return reads it directly.
         let wasBackground = inBackground
