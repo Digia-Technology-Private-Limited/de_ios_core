@@ -65,7 +65,24 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     @Published private(set) var capturedPages: [CaptureDebugPage] = []
     @Published private(set) var captureStatusMessage: String?
     @Published private(set) var captureFlashRevision = 0
-    var isCaptureSupported: Bool { config?.wrapperBinding == "react_native" }
+    /// The `binding` a page capture is labelled with, or nil when this host cannot capture:
+    /// "reactNative" under the React Native wrapper, "native" for a plain native app
+    /// (no wrapper), nil for any other wrapper.
+    nonisolated static func captureBinding(forWrapperBinding wrapperBinding: String?) -> String? {
+        switch wrapperBinding {
+        case "react_native": return "reactNative"
+        case nil: return "native"
+        default: return nil
+        }
+    }
+
+    /// Nil until `initialize()` has set a config.
+    var captureBinding: String? {
+        guard let config else { return nil }
+        return Self.captureBinding(forWrapperBinding: config.wrapperBinding)
+    }
+
+    var isCaptureSupported: Bool { captureBinding != nil }
 
     private var activePlugin: DigiaCEPPlugin?
 
@@ -1086,7 +1103,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             let appInfo = Bundle.main.infoDictionary ?? [:]
             let envelope = PageCaptureEnvelopeV1(
                 pageKey: pageKey,
-                binding: "reactNative",
+                binding: captureBinding ?? "native",
                 devicePlatform: .ios,
                 source: source,
                 screenshotSizePx: CaptureSize(
@@ -1156,7 +1173,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let appInfo = Bundle.main.infoDictionary ?? [:]
         let envelope = PageCaptureEnvelopeV1(
             pageKey: pageKey,
-            binding: "reactNative",
+            binding: captureBinding ?? "native",
             devicePlatform: .ios,
             source: source,
             screenshotSizePx: CaptureSize(
@@ -1182,8 +1199,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         captureStatusMessage = message
     }
 
-    private static func renderPNG(window: UIWindow) -> Data? {
-        let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+    /// The capture screenshot as an 8-bit sRGB PNG at the screen scale, like Android and
+    /// Flutter. `UIGraphicsImageRenderer`'s default format renders 16 bits per channel
+    /// (extended sRGB) on wide-colour displays, which makes the PNG about 1.7x larger and can
+    /// push a photo-heavy screen past the backend's 5 MB limit (HTTP 400 "File too large").
+    static func renderPNG(window: UIWindow) -> Data? {
+        let format = UIGraphicsImageRendererFormat.preferred()
+        format.preferredRange = .standard
+        let renderer = UIGraphicsImageRenderer(bounds: window.bounds, format: format)
         var rendered = false
         let image = renderer.image { _ in
             rendered = window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
