@@ -39,6 +39,12 @@ struct CampaignModel: Equatable {
     let campaignType: String
     var config: CampaignConfigModel
     let targetScreenNames: [String]
+    /// The variables the campaign declares, whatever its kind.
+    ///
+    /// Read once from the authored JSON at parse time rather than gathered back out of
+    /// the per-kind config, so a new kind cannot forget to expose them. Android and
+    /// Flutter model it the same way.
+    var variableSchemas: [VariableSchema] = []
     // Opaque capping policy from the dashboard; nil = "No cap" / inline.
     // Used natively for nudge + survey only (guides cap in JS on RN).
     var frequency: FrequencyPolicy? = nil
@@ -132,18 +138,6 @@ struct CampaignModel: Equatable {
     /// `eligibleCampaigns`, which the backend worked out for this user — so an
     /// unidentified user, or one whose context never arrived, sees no targeted
     /// campaign at all.
-    /// The variables the campaign declares; empty for kinds that carry none.
-    var variableSchemas: [VariableSchema] {
-        switch config {
-        case .inline(let cfg): return cfg.variableSchemas
-        case .banner(let cfg): return cfg.variableSchemas
-        case .inlineCanvas(let cfg): return cfg.variableSchemas
-        case .story(let cfg): return cfg.variableSchemas
-        case .nudge(let cfg): return cfg.variableSchemas
-        default: return []
-        }
-    }
-
     func allowsUser(_ eligibleCampaigns: [String]) -> Bool {
         !audienceGated || eligibleCampaigns.contains(campaignKey)
     }
@@ -272,6 +266,7 @@ struct CampaignModel: Equatable {
             campaignType: campaignType,
             config: config,
             targetScreenNames: targetScreenNames,
+            variableSchemas: parseCampaignVariableSchemas(selectedJson),
             frequency: frequency,
             audienceGated: selectedJson["audienceGated"] as? Bool == true,
             rule: rule,
@@ -283,6 +278,18 @@ struct CampaignModel: Equatable {
                 )
                 : nil
         )
+    }
+
+    /// The variables a campaign declares, from whichever authored block carries them:
+    /// `templateConfig`, else `guideConfig`, else `surveyConfig` (Android's order).
+    private static func parseCampaignVariableSchemas(_ json: [String: Any]) -> [VariableSchema] {
+        for key in ["templateConfig", "guideConfig", "surveyConfig"] {
+            if let block = json.object(key) {
+                let schemas = NudgeConfig.parseVariableSchemas(block)
+                if !schemas.isEmpty { return schemas }
+            }
+        }
+        return []
     }
 
     /// Re-serialises the authored guide object for the out-of-process renderer.
