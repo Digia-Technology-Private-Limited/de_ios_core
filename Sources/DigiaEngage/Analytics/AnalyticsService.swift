@@ -258,7 +258,7 @@ final class AnalyticsService {
         // surface outliving its presentation.
         if let impressionId { payloadMap["impression_id"] = impressionId }
         if let uid = identityManager.userId { payloadMap["user_id"] = uid }
-        if let elementId = properties["element_id"] as? String {
+        if !isAppEvent, let elementId = properties["element_id"] as? String {
             payloadMap["element_id"] = elementId
         }
 

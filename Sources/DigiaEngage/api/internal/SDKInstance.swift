@@ -1525,7 +1525,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             log.e(
                 "Dropped — unsupported config (reason=\(config.reason))",
                 campaign: request.campaign.campaignKey)
-            return .dropped(reason: .invalidConfig, detail: config.reason)
+            return .dropped(
+                reason: .invalidConfig, detail: config.reason,
+                deliveryDetail: ["cause": "unknown_type"])
         }
     }
 
