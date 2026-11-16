@@ -166,4 +166,38 @@ struct CampaignCanvasStripTests {
         ])
         #expect(negative == [.showStory(0)])
     }
+
+    // Fails if the `thumbnail:` argument in `canvasStoryItem` drops the poster, its BlurHash or
+    // the tile fit (R1-01), or gives an image page one: the rail and viewer then show no still.
+    @Test("a video page's thumbnailPoster becomes its thumbnail at the tile fit; image pages get none")
+    func storyPagePosterThumbnail() throws {
+        let poster: [String: Any] = [
+            "url": "https://x/poster.jpg",
+            "placeholder": ["type": "blurhash", "blurHash": "LEHV6nWB2yk8pyo0adR*.7kCMdnj"],
+        ]
+        func page(_ type: String, poster: [String: Any]?) -> [String: Any] {
+            var page: [String: Any] = [
+                "thumbnailType": type,
+                "thumbnailUrl": "https://x/a.mp4",
+                "thumbnailFit": "contain",
+                "pageFit": "cover",
+                "canvas": nestedCanvas(height: 732),
+            ]
+            if let poster { page["thumbnailPoster"] = poster }
+            return page
+        }
+        let parsed = try CampaignCanvasParser().parse(canvas(with: storyWidget(pages: [
+            page("video", poster: poster), page("image", poster: poster), page("video", poster: nil),
+        ])))
+        guard case .story(_, let pages, _, _, _, _, _, _, _) = try #require(firstWidget(parsed)) else {
+            Issue.record("not a story")
+            return
+        }
+        let items = pages.map(canvasStoryItem)
+        #expect(items[0].thumbnail == .image(
+            source: "https://x/poster.jpg", fit: .contain,
+            placeholder: ImagePlaceholder(type: .blurhash, blurHash: "LEHV6nWB2yk8pyo0adR*.7kCMdnj")))
+        #expect(items[1].thumbnail == nil)
+        #expect(items[2].thumbnail == nil)
+    }
 }
