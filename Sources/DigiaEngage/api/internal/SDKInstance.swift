@@ -419,7 +419,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             networkClient: networkClient,
             clock: clock,
             analyticsQueue: analyticsQueue,
-            networkMonitor: makeNetworkMonitor()
+            networkMonitor: makeNetworkMonitor(),
+            appEventNetworkMonitor: makeNetworkMonitor()
         )
         self.services = services
         currentSession.set(services.sessionManager, identity: services.identityManager, requestHeaders: services.requestHeaders)

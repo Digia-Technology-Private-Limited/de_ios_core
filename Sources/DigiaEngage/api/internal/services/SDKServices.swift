@@ -33,7 +33,10 @@ final class SDKServices {
         clock: @escaping () -> Int64 = SessionManager.systemClock,
         analyticsQueue: any AnalyticsQueueProtocol,
         appEventQueue: any AnalyticsQueueProtocol = MemoryAnalyticsQueue(limit: appEventQueueMaxEvents),
-        networkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor()
+        networkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor(),
+        // Its own monitor: a monitor reports to one listener only, so sharing
+        // it would leave queued app events deaf to the network coming back.
+        appEventNetworkMonitor: any NetworkMonitor = AlwaysOnlineNetworkMonitor()
     ) {
         let identityManager = IdentityManager(
             storage: storage.scoped("identity"),
@@ -107,7 +110,7 @@ final class SDKServices {
                     queue: appEventQueue,
                     staticContext: staticContext,
                     networkClient: networkClient,
-                    networkMonitor: networkMonitor,
+                    networkMonitor: appEventNetworkMonitor,
                     maxQueueEvents: appEventQueueMaxEvents
                 )
             )
