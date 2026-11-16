@@ -6,7 +6,9 @@ private let log = DigiaLogger()
 struct GrantChanceRequest: Equatable, Sendable {
     let campaignKey: String
     let userId: String
-    /// iOS has no user-hash concept; always nil, kept for contract parity.
+    /// The verification hash for user-gated projects, sent in the body next
+    /// to `userId` and as `X-Digia-User-Hash` on every request. Nil when the
+    /// app never set one.
     let userHash: String?
     /// The CEP message id (`cepCampaignId` on iOS), or the Digia rule's
     /// `event_id`. The SDK never invents one.

@@ -160,7 +160,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// A `setUserId` / `clearUserId` that arrived before `services` existed.
     /// Only the last one matters; it is applied once, when services are built.
     private enum PendingUserChange {
-        case set(String)
+        case set(String, String?)
         case clear
     }
     private var pendingUserChange: PendingUserChange?
@@ -403,8 +403,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
         // Apply the user change buffered before services existed.
         switch pendingUserChange {
-        case let .set(userId):
-            services.identityManager.setUserId(userId)
+        case let .set(userId, userHash):
+            services.identityManager.setUserId(userId, userHash: userHash)
         case .clear:
             services.identityManager.clearUserId()
         case nil:
@@ -2040,7 +2040,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let request = GrantChanceRequest(
             campaignKey: key,
             userId: userId,
-            userHash: nil,
+            userHash: services?.identityManager.userHash,
             triggerId: triggerId,
             showNow: context.isLiveTest ? nil : true,
             testInvocationId: testInvocationId,
@@ -2143,7 +2143,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let request = GrantChanceRequest(
             campaignKey: key,
             userId: userId,
-            userHash: nil,
+            userHash: services?.identityManager.userHash,
             triggerId: triggerId,
             showNow: isLiveTest ? nil : true,
             testInvocationId: testInvocationId,
@@ -2825,14 +2825,22 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     func setUserId(_ userId: String) {
+        setUserId(userId, userHash: nil)
+    }
+
+    /// Sets the authenticated user id with its server-computed verification
+    /// hash. The hash travels as `X-Digia-User-Hash` on every request, next to
+    /// `X-Digia-User-Id` — including `grantChance` and every skin `http` call —
+    /// and is never exposed to skins.
+    func setUserId(_ userId: String, userHash: String?) {
         guard let services else {
             // A blank ID is ignored here exactly as `IdentityManager` ignores
             // it after init, so it can't overwrite a buffered clear.
             guard !userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            pendingUserChange = .set(userId)
+            pendingUserChange = .set(userId, userHash)
             return
         }
-        services.identityManager.setUserId(userId)
+        services.identityManager.setUserId(userId, userHash: userHash)
     }
 
     func clearUserId() {

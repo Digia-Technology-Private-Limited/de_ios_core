@@ -225,6 +225,14 @@ public enum Digia {
         SDKInstance.shared.setUserId(userId)
     }
 
+    /// Sets the authenticated user ID with its server-computed verification
+    /// hash (the app's server computes it). The hash is sent as the
+    /// `X-Digia-User-Hash` header on every request — including `grantChance`
+    /// and every skin `http` call — and is never exposed to skins.
+    public static func setUserId(_ userId: String, userHash: String?) {
+        SDKInstance.shared.setUserId(userId, userHash: userHash)
+    }
+
     /// Clears the authenticated user ID (e.g. on logout).
     public static func clearUserId() {
         SDKInstance.shared.clearUserId()
