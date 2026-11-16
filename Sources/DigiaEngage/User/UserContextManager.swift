@@ -115,6 +115,8 @@ final class UserContextManager {
     private var configured = false
     /// Whether this session already reported an unverified `userHash`.
     private var unverifiedReported = false
+    /// Whether this session already reported `userId` as identified without a hash.
+    private var missingHashReported = false
 
     /// The app's accumulated attributes. Calls merge into this rather than
     /// replacing it: no single call site knows the whole set.
@@ -228,7 +230,10 @@ final class UserContextManager {
         // Before configure, the stored owner is the only record of the last user.
         let previous = self.userId ?? storage.string(forKey: ownerKey)
         let userChanged = userId != previous
-        if userChanged { unverifiedReported = false }
+        if userChanged {
+            unverifiedReported = false
+            missingHashReported = false
+        }
         let changed = userChanged || userHash != self.userHash
         self.userId = userId
         self.userHash = userId == nil ? nil : userHash
@@ -239,6 +244,15 @@ final class UserContextManager {
             clearCache()
         }
         guard let userId else { return }
+        if (userHash ?? "").isEmpty, !missingHashReported {
+            missingHashReported = true
+            log.d(
+                "userId set without a userHash — imported attributes are withheld",
+                stage: .session,
+                reason: TimelineReason.userHashUnverified,
+                extras: ["cause": "missing_hash"]
+            )
+        }
         storage.set(userId, forKey: ownerKey)
         await refresh(force: changed)
     }
@@ -318,7 +332,8 @@ final class UserContextManager {
                 log.d(
                     "userHash not verified — imported attributes are withheld",
                     stage: .session,
-                    reason: TimelineReason.userHashUnverified
+                    reason: TimelineReason.userHashUnverified,
+                    extras: ["cause": "server_unverified"]
                 )
             }
             let ttl = Self.expirySeconds(payload["expiresInSeconds"])
