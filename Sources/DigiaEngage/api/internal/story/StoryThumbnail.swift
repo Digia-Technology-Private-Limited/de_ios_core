@@ -107,8 +107,8 @@ struct StoryImage: View {
 /// drawn over the player until the first frame, and a failed video goes back to its still, over
 /// `MediaVideo`'s "Video failed" box (T8: a story page shows its still and runs its timer). With no
 /// thumbnail a page shows `MediaVideo`'s dark backdrop and spinner rule (T2). A rail tile (`bare`)
-/// draws its still beneath a bare `MediaVideo` and never covers it, so the still shows until the
-/// first frame and around a contained video after it, as `main`'s tile did (OD-18). After the first
+/// draws its still beneath a bare `MediaVideo` and never covers it; an image still gives way to the
+/// dark backdrop at the first frame, so it never shows around a contained video. After the first
 /// frame a page's letterbox is `groundAfterFirstFrame`: black by default (OD-16), #1A1A1A on the
 /// inline story's page as on `main` (OD-18).
 @MainActor
@@ -135,7 +135,14 @@ struct StoryVideoSurface: View {
     var body: some View {
         ZStack {
             if bare {
-                StoryThumbnailStill(item: item, fitOverride: stillFit)
+                // While the video shows its frames an image still goes: a contain fit
+                // letterboxes the video, and the image would show in the letterbox. The tile's
+                // ground stays: an authored colour, else the dark backdrop (OD-18).
+                if firstFrameShown, !failed, case .image = item.thumbnail {
+                    mediaVideoBackdrop
+                } else {
+                    StoryThumbnailStill(item: item, fitOverride: stillFit)
+                }
             }
             MediaVideo(
                 url: item.url,
