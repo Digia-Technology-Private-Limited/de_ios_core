@@ -159,11 +159,10 @@ extension SDKInstance {
         engine.send(.appOpened)
     }
 
-    /// Applies the bundle's app-event policy, loads the user context, and only
-    /// then lets held signals through: no rule sees an empty context.
-    func openDecisionEngine(policy: AppEventUploadPolicy, generation: Int) async {
+    /// Loads the user context, and only then lets held signals through: no
+    /// rule sees an empty context.
+    func openDecisionEngine(generation: Int) async {
         guard let services, initGeneration == generation else { return }
-        services.appEventsService?.applyPolicy(policy)
         let manager = services.userContextManager
         manager.configure(restoredUserId: services.identityManager.userId)
         await manager.refresh()
@@ -287,16 +286,16 @@ extension SDKInstance {
         // evaluated. Names are trimmed, as the server does, so both validate
         // the same name.
         let name = eventName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isValidAppEventName(name) else {
+        guard isValidAppEventName(name, limits: appEventLimits) else {
             log.w(
                 "trackEvent dropped — invalid app event name",
                 stage: .session,
                 reason: TimelineReason.appEventInvalid,
-                extras: ["event_name": String(name.prefix(appEventNameMaxLength))]
+                extras: ["event_name": String(name.prefix(appEventLimits.nameMaxLength))]
             )
             return
         }
-        let cleaned = cleanAppEventProperties(properties)
+        let cleaned = cleanAppEventProperties(properties, limits: appEventLimits)
         if !cleaned.dropped.isEmpty {
             // The event is kept; only the values the backend can't store go.
             log.w(

@@ -194,6 +194,66 @@ struct SDKInstanceSdkConfigTests {
             projectKey: apiKey)
         #expect(next.cached == SdkConfig(healthEnabled: true, healthSessionCap: 5))
     }
+
+    private func queuedAppEvents(_ sdk: SDKInstance, named names: Set<String>) async throws -> [[String: Any]] {
+        try await Task.sleep(nanoseconds: 300_000_000)
+        let service = try #require(sdk.services?.appEventsService)
+        return await service.queuedPayloads().filter { names.contains($0["event_name"] as? String ?? "") }
+    }
+
+    @Test("a cached upload switch-off drops an event tracked before the call answers")
+    func cachedUploadOffAtLaunch() async throws {
+        let defaults = makeDefaults()
+        seedCache(defaults, #"{"appEvents":{"upload":false}}"#)
+        let network = ConfigNetworkClient()
+        let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
+
+        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
+        let name = "off_\(UUID().uuidString)"
+        sdk.trackEvent(name)
+
+        #expect(try await queuedAppEvents(sdk, named: [name]).isEmpty)
+        network.answer("{}")
+    }
+
+    @Test("a cached blocked name is dropped at launch and others are kept")
+    func cachedBlockedNameAtLaunch() async throws {
+        let id = UUID().uuidString
+        let blocked = "search_\(id)", allowed = "other_\(id)"
+        let defaults = makeDefaults()
+        seedCache(defaults, #"{"appEvents":{"blockedNames":["\#(blocked)"]}}"#)
+        let network = ConfigNetworkClient()
+        let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
+
+        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
+        sdk.trackEvent(blocked)
+        sdk.trackEvent(allowed)
+
+        let queued = try await queuedAppEvents(sdk, named: [blocked, allowed])
+        #expect(queued.map { $0["event_name"] as? String } == [allowed])
+        network.answer("{}")
+    }
+
+    @Test("a cached maxProperties limit keeps that many properties and warns")
+    func cachedMaxPropertiesAtLaunch() async throws {
+        let defaults = makeDefaults()
+        seedCache(defaults, #"{"appEvents":{"limits":{"maxProperties":3}}}"#)
+        let network = ConfigNetworkClient()
+        let sdk = makeInstance(defaults: defaults, network: network, sink: HealthSink())
+        let sink = ConfigWarningSink()
+        DigiaLogger.registerSink(sink)
+        defer { DigiaLogger.unregisterSink(sink) }
+
+        try await sdk.initialize(DigiaConfig(apiKey: apiKey))
+        let name = "props_\(UUID().uuidString)"
+        sdk.trackEvent(name, properties: ["a": 1, "b": 2, "c": 3, "d": 4, "e": 5])
+
+        let queued = try await queuedAppEvents(sdk, named: [name])
+        let properties = try #require(queued.first?["properties"] as? [String: Any])
+        #expect(properties.keys.filter { ["a", "b", "c", "d", "e"].contains($0) }.sorted() == ["a", "b", "c"])
+        #expect(sink.invalidWarnings(forEvent: name) == 1)
+        network.answer("{}")
+    }
 }
 
 /// Answers the bundle at once and holds `getSdkConfig` until the test answers or fails it.
@@ -261,5 +321,22 @@ final class ConfigNetworkClient: NetworkClient, @unchecked Sendable {
 
     func openSseStream(request: NetworkRequest, handler: any SseStreamHandler) -> any CancellableSubscription {
         MockNetworkClient().openSseStream(request: request, handler: handler)
+    }
+}
+
+/// Collects `app_event_invalid` warnings.
+private final class ConfigWarningSink: DiagnosticSink, @unchecked Sendable {
+    private let lock = NSLock()
+    private var records: [TimelineRecord] = []
+
+    func accepts(_ record: TimelineRecord) -> Bool { true }
+    func emit(_ record: TimelineRecord) { lock.withLock { records.append(record) } }
+
+    func invalidWarnings(forEvent name: String) -> Int {
+        lock.withLock {
+            records.filter {
+                $0.reason?.wire == TimelineReason.appEventInvalid.wire && $0.extras["event_name"] == name
+            }.count
+        }
     }
 }

@@ -517,8 +517,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             guard let self, self.initGeneration == generation else { return }
             self.fetchTask = nil
             self.applyFetchResult(fetched)
-            if case .success(let bundle) = fetched {
-                await self.openDecisionEngine(policy: bundle.appEventUploadPolicy, generation: generation)
+            if case .success = fetched {
+                await self.openDecisionEngine(generation: generation)
             }
         }
     }
@@ -528,6 +528,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private var fetchTask: Task<Void, Never>?
     /// Exposed for tests to await.
     private(set) var sdkConfigFetchTask: Task<Void, Never>?
+    /// What `trackEvent` validates against; the SDK config's, or the defaults.
+    var appEventLimits = AppEventLimits.defaults
 
     /// Not awaited. A failed call changes nothing, except that a first install with no
     /// cached config runs on the defaults from here, which also sends the held health events.
@@ -545,6 +547,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     private func applySdkConfig(_ config: SdkConfig) {
         healthSink.applyConfig(enabled: config.healthEnabled, sessionCap: config.healthSessionCap)
+        appEventLimits = config.appEvents.limits
+        services?.appEventsService?.applyPolicy(config.appEvents)
     }
 
     private func applyFetchResult(_ fetched: Result<CampaignBundle, Error>) {
