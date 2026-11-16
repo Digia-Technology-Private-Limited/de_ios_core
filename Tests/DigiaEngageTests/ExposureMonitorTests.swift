@@ -63,8 +63,8 @@ struct ExposureMonitorTests {
     }
 
     /// Height 0 is the React Native slot bridge's hosting view while the slot is empty.
-    @Test("an empty slot is exposed, in a full-size or a zero-height hosting view", arguments: [844.0, 0.0])
-    func emptySlotIsExposed(hostHeight: CGFloat) async {
+    @Test("an empty slot is not exposed, in a full-size or a zero-height hosting view", arguments: [844.0, 0.0])
+    func emptySlotIsNotExposed(hostHeight: CGFloat) async {
         let monitor = ExposureMonitor.shared
         monitor.resetForTesting()
         monitor.isAppActive = { true }
@@ -83,7 +83,7 @@ struct ExposureMonitorTests {
         }
         monitor.check()
 
-        #expect(monitor.exposures(tag: "slot:empty_rn_slot") == [true])
+        #expect(monitor.exposures(tag: "slot:empty_rn_slot").isEmpty)
         host.view.removeFromSuperview()
         window.isHidden = true
     }
