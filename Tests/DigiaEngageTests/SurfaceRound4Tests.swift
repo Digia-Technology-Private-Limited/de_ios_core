@@ -140,11 +140,11 @@ extension DigiaEngageTests {
             json["templateConfig"] = template
             let sdk = try await makeSdk([json])
             let guide = deliver(sdk, "g", "cep-1")
-            sdk.reportGuideShown()
+            sdk.guideOrchestrator.reportGuideShown()
             sdk.advanceGuide()
-            sdk.reportGuideShown()
+            sdk.guideOrchestrator.reportGuideShown()
             // "Copy code" on the last step: completion fires, the guide stays up.
-            sdk.reportGuideStepClicked(actionType: "copyToClipboard", actionUrl: nil, ctaLabel: "Copy")
+            sdk.guideOrchestrator.reportGuideStepClicked(actionType: "copyToClipboard", actionUrl: nil, ctaLabel: "Copy")
             try #require(sdk.guideOrchestrator.state != nil)
 
             liveTest(sdk, "inv-1", nudgeJson("t1"))
@@ -187,7 +187,7 @@ extension DigiaEngageTests {
             let survey = deliver(sdk, "s", "cep-1")
             let token = try #require(sdk.surveyOrchestrator.state?.token)
             sdk.surveyOrchestrator.bindProgress(token: token) { (2, 1) }
-            sdk.reportSurveyStarted()
+            sdk.surveyReporter.reportSurveyStarted()
 
             sdk.setCurrentScreen("B")
 

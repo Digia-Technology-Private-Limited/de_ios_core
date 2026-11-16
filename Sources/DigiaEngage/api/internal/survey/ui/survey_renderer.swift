@@ -127,7 +127,7 @@ private struct SurveySession: View {
                             survey: survey,
                             accent: accent,
                             onClose: { finish(completed: false) },
-                            onCompletedClose: { SDKInstance.shared.dismissCompletedSurvey() },
+                            onCompletedClose: { SDKInstance.shared.surveyReporter.dismissCompletedSurvey() },
                             showCloseButton: display.dialog.showCloseButton,
                             paintCanvasBackground: true,
                             canvasWelcomeDone: $canvasWelcomeDone
@@ -154,7 +154,7 @@ private struct SurveySession: View {
                     survey: survey,
                     accent: accent,
                     onClose: { finish(completed: false) },
-                    onCompletedClose: { SDKInstance.shared.dismissCompletedSurvey() },
+                    onCompletedClose: { SDKInstance.shared.surveyReporter.dismissCompletedSurvey() },
                     showCloseButton: display.bottomSheet.showCloseButton,
                     paintCanvasBackground: survey.canvasSurvey == nil,
                     canvasWelcomeDone: $canvasWelcomeDone
@@ -194,14 +194,14 @@ private struct SurveySession: View {
     private func reportVisible() {
         guard !impressionReported else { return }
         impressionReported = true
-        SDKInstance.shared.reportSurveyStarted()
+        SDKInstance.shared.surveyReporter.reportSurveyStarted()
     }
 
     private func finish(completed: Bool) {
         if completed {
-            SDKInstance.shared.markSurveyCompleted(response: vm.responsePayload(), answers: vm.answers)
+            SDKInstance.shared.surveyReporter.markSurveyCompleted(response: vm.responsePayload(), answers: vm.answers)
         } else {
-            SDKInstance.shared.markSurveyDismissed(
+            SDKInstance.shared.surveyReporter.markSurveyDismissed(
                 abandonedAtItem: vm.currentItemIndex,
                 answeredCount: vm.answers.values.filter { $0.isAnswered }.count
             )
@@ -750,8 +750,8 @@ private struct SurveyBody: View {
             Button {
                 // The welcome "Start" tap is the survey's start-engagement signal
                 // ("Digia Experience Clicked" / welcome_start).
-                SDKInstance.shared.reportSurveyWelcomeStart()
-                SDKInstance.shared.reportSurveyStartClicked()
+                SDKInstance.shared.surveyReporter.reportSurveyWelcomeStart()
+                SDKInstance.shared.surveyReporter.reportSurveyStartClicked()
                 welcomeDone = true
             } label: {
                 Text(cta.startLabel)
@@ -897,9 +897,9 @@ private struct SurveyBody: View {
                 onNext: {
                     if !block.type.isContent {
                         if let ans = vm.answers[node.id], ans.isAnswered {
-                            SDKInstance.shared.reportSurveyAnswered(stepId: node.id, answer: ans.toMap())
+                            SDKInstance.shared.surveyReporter.reportSurveyAnswered(stepId: node.id, answer: ans.toMap())
                         } else {
-                            SDKInstance.shared.reportSurveyQuestionSkipped(nodeId: node.id, itemIndex: vm.currentItemIndex)
+                            SDKInstance.shared.surveyReporter.reportSurveyQuestionSkipped(nodeId: node.id, itemIndex: vm.currentItemIndex)
                         }
                     }
                     reportCompletionIfResultIsNext()
@@ -915,8 +915,8 @@ private struct SurveyBody: View {
         switch block.type {
         case .welcome:
             Button {
-                SDKInstance.shared.reportSurveyWelcomeStart()
-                SDKInstance.shared.reportSurveyStartClicked()
+                SDKInstance.shared.surveyReporter.reportSurveyWelcomeStart()
+                SDKInstance.shared.surveyReporter.reportSurveyStartClicked()
                 vm.advance()
             } label: {
                 Text(cta.startLabel)
@@ -953,7 +953,7 @@ private struct SurveyBody: View {
                 onAnswer: { vm.setAnswer(node.id, $0) }
             )
             .onAppear {
-                SDKInstance.shared.reportSurveyQuestionViewed(nodeId: node.id, itemIndex: vm.currentItemIndex)
+                SDKInstance.shared.surveyReporter.reportSurveyQuestionViewed(nodeId: node.id, itemIndex: vm.currentItemIndex)
             }
         }
     }
@@ -970,7 +970,7 @@ private struct SurveyBody: View {
             try? await Task.sleep(nanoseconds: 250_000_000)
             if Task.isCancelled { return }
             guard vm.currentNode?.id == node.id else { return }
-            SDKInstance.shared.reportSurveyAnswered(stepId: node.id, answer: ans.toMap())
+            SDKInstance.shared.surveyReporter.reportSurveyAnswered(stepId: node.id, answer: ans.toMap())
             reportCompletionIfResultIsNext()
             vm.advance()
         }
@@ -978,7 +978,7 @@ private struct SurveyBody: View {
 
     private func reportCompletionIfResultIsNext() {
         if !completionReported && vm.nextBlockIsResultPage() {
-            SDKInstance.shared.reportSurveyCompleted(response: vm.responsePayload(), answers: vm.answers)
+            SDKInstance.shared.surveyReporter.reportSurveyCompleted(response: vm.responsePayload(), answers: vm.answers)
             completionReported = true
         }
     }

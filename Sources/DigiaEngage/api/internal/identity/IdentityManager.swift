@@ -7,6 +7,7 @@ final class IdentityManager: @unchecked Sendable {
 
     private static let keyDeviceId = "device_id"
     private static let keyUserId = "user_id"
+    private static let keyUserHash = "user_hash"
 
     private let storage: LocalStorage
     private let lock = NSLock()
@@ -16,6 +17,7 @@ final class IdentityManager: @unchecked Sendable {
     let deviceId: String
 
     private var cachedUserId: String?
+    private var cachedUserHash: String?
     private var userChangedListeners: [() -> Void] = []
 
     init(
@@ -34,6 +36,7 @@ final class IdentityManager: @unchecked Sendable {
 
         if let existingUser = storage.string(forKey: Self.keyUserId)?.trimmingCharacters(in: .whitespacesAndNewlines), !existingUser.isEmpty {
             self.cachedUserId = existingUser
+            self.cachedUserHash = storage.string(forKey: Self.keyUserHash)
         } else {
             self.cachedUserId = nil
         }
@@ -59,13 +62,32 @@ final class IdentityManager: @unchecked Sendable {
         lock.withLock { cachedUserId }
     }
 
-    func setUserId(_ userId: String) {
+    /// The host-issued proof of `userId`, or nil when none was given.
+    var userHash: String? {
+        lock.withLock { cachedUserHash }
+    }
+
+    /// Ignores blank IDs. For the current user, only a new non-nil `userHash`
+    /// is stored. A new user replaces the hash, or clears it.
+    func setUserId(_ userId: String, userHash: String? = nil) {
         let trimmed = userId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         let listeners: [() -> Void] = lock.withLock {
-            if cachedUserId == trimmed { return [] }
+            if cachedUserId == trimmed {
+                if let userHash, userHash != cachedUserHash {
+                    cachedUserHash = userHash
+                    storage.set(userHash, forKey: Self.keyUserHash)
+                }
+                return []
+            }
             cachedUserId = trimmed
+            cachedUserHash = userHash
             storage.set(trimmed, forKey: Self.keyUserId)
+            if let userHash {
+                storage.set(userHash, forKey: Self.keyUserHash)
+            } else {
+                storage.remove(forKey: Self.keyUserHash)
+            }
             return userChangedListeners
         }
         listeners.forEach { $0() }
@@ -75,7 +97,9 @@ final class IdentityManager: @unchecked Sendable {
         let listeners: [() -> Void] = lock.withLock {
             guard cachedUserId != nil else { return [] }
             cachedUserId = nil
+            cachedUserHash = nil
             storage.remove(forKey: Self.keyUserId)
+            storage.remove(forKey: Self.keyUserHash)
             return userChangedListeners
         }
         listeners.forEach { $0() }

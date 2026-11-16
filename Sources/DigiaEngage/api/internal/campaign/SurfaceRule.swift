@@ -45,6 +45,9 @@ struct SurfaceOccupant: Equatable {
     /// The occupant's presentation, so a displacement can describe itself on
     /// that presentation's drop. Nil for a live test.
     var presentationId: String? = nil
+    /// The rule priority of a Digia-decided inline campaign; nil for any other.
+    /// Only read for an inline, same-slot occupant.
+    var priority: Double? = nil
 }
 
 /// The rule's answer for one arriving campaign.
@@ -140,8 +143,11 @@ enum SurfaceRule {
     }
 
     /// Organic routing (§2.1). A real campaign never displaces a live test, so a
-    /// same-slot inline test is `busy` even before it displayed (LT-Q2).
-    static func decide(_ incoming: SurfaceKind, occupants: [SurfaceOccupant]) -> SurfaceDecision {
+    /// same-slot inline test is `busy` even before it displayed (LT-Q2). With both
+    /// priorities known (Digia-decided), the arrival must beat the occupant.
+    static func decide(
+        _ incoming: SurfaceKind, occupants: [SurfaceOccupant], priority: Double? = nil
+    ) -> SurfaceDecision {
         var replace: SurfaceOccupant?
         for occupant in byPrecedence(occupants, incoming: incoming) {
             switch cell(incoming, occupant.kind) {
@@ -150,7 +156,10 @@ enum SurfaceRule {
             case .busy:
                 return .busy(blocker: occupant)
             case .sameSlot:
-                if occupant.hasDisplayed || occupant.isLiveTest {
+                let outranked = priority.flatMap { arrival in
+                    occupant.priority.map { arrival <= $0 }
+                } ?? false
+                if occupant.hasDisplayed || occupant.isLiveTest || outranked {
                     return .busy(blocker: occupant)
                 }
                 if replace == nil { replace = occupant }

@@ -1,6 +1,8 @@
 import Foundation
 import Combine
 
+private let log = DigiaLogger()
+
 // Ported from Android `GuideOrchestrator.kt`. Drives a multi-step guide
 // (tooltip / spotlight) over the existing anchor + overlay primitives.
 
@@ -35,6 +37,22 @@ final class GuideOrchestrator: ObservableObject {
     }
     var onStateChanged: ((ActiveGuideState?) -> Void)?
     private var tokenCounter: Int64 = 0
+
+    /// Reporting context, set by `SDKInstance` at startup. Nil in standalone
+    /// use (tests driving the state machine never report).
+    var surfaceContext: SurfaceContext?
+
+    /// Whether the active showing already reported its completion — a
+    /// completion the CTA already fired wins over any later dismiss (R3-02,
+    /// R4-D2).
+    var guideCompletionFired = false
+    private var lastReportedGuideStep: (token: Int64, index: Int)?
+    /// Terminal reason the initiator knows and the dismiss call does not carry
+    /// directly — consumed once by the next guide dismiss.
+    var pendingGuideDismissReason: DismissReason?
+    /// Screen the current guide step showed on — an anchor that unmounts after
+    /// a host screen change is a screen exit, in place it is a lost target.
+    var screenAtGuideStep: String?
 
     @discardableResult
     func start(_ campaign: CampaignModel, payload: CEPTriggerPayload) -> Bool {
@@ -84,5 +102,249 @@ final class GuideOrchestrator: ObservableObject {
         if state?.payload.cepCampaignId == payloadId {
             state = nil
         }
+    }
+}
+
+// MARK: - Guide lifecycle reporting
+//
+// Guide reporting lives on the existing `GuideOrchestrator` rather than a
+// separate reporter.
+
+extension GuideOrchestrator {
+    /// The SDK always sets this at init. A missing one is a programmer error:
+    /// loud in debug, and in release the call degrades to a silent no-op.
+    private func reportingContext() -> SurfaceContext? {
+        assert(surfaceContext != nil, "GuideOrchestrator reporting used before surfaceContext was set")
+        return surfaceContext
+    }
+
+    /// Displayed-guide reason order: a completion, then the initiator's pending
+    /// reason, then the direct reason.
+    private func resolveGuideDismissReason(explicit reason: DismissReason, completed: Bool) -> DismissReason {
+        if completed { return .completed }
+        return pendingGuideDismissReason ?? reason
+    }
+
+    /// `completed` overrides the lifecycle event's completion, which otherwise
+    /// follows whether the guide reported a completion.
+    func dismissGuide(reason: DismissReason = .userClose, completed: Bool? = nil) {
+        guard let state else { return }
+        guard let ctx = reportingContext() else {
+            dismiss()
+            return
+        }
+        let payload = state.payload
+        let total = state.steps.count
+        let elapsed = ctx.dwell.consumeDwellMs(payload.cepCampaignId)
+        let completed = completed ?? guideCompletionFired
+        let reason = resolveGuideDismissReason(explicit: reason, completed: completed)
+        pendingGuideDismissReason = nil
+        if !completed, total > 1 {
+            ctx.events.toDigia(
+                GuideEvent.StepDismissed(itemIndex: state.stepIndex + 1),
+                payload: payload
+            )
+        }
+        dismiss()
+        ctx.events.toBoth(
+            .dismissed(
+                reason: completed ? .completed : reason,
+                completed: completed
+            ),
+            GuideEvent.Dismissed(
+                dismissReason: (completed ? .completed : reason).wire,
+                abandonedAtItem: completed ? nil : state.stepIndex + 1,
+                itemTotal: total,
+                dwellMs: elapsed
+            ),
+            payload: payload
+        )
+        guideCompletionFired = false
+    }
+
+    func reportGuideShown() {
+        guard let ctx = reportingContext() else { return }
+        guard let state else { return }
+        // Snapshot for a later anchor loss.
+        screenAtGuideStep = ctx.currentScreen
+        let stepWasReported = lastReportedGuideStep.map {
+            $0.token == state.token && $0.index == state.stepIndex
+        } ?? false
+        if state.currentStep?.target.anchorKey != nil {
+            ctx.sdk.logNativeGuideStage(
+                "render",
+                "result=shown campaign_key=\(state.payload.campaignKey) step_index=\(state.stepIndex + 1)"
+            )
+        }
+        let payload = state.payload
+        let total = state.steps.count
+        // The anchor produced a layout — that is exactly what the anchor
+        // watchdog was waiting for.
+        ctx.sdk.coordinator.anchorResolved(payload)
+        if isLiveTestCepId(payload.cepCampaignId) {
+            ctx.sdk.liveTestContexts[payload.cepCampaignId]?.reportShown()
+        }
+        if state.stepIndex == 0, ctx.dwell.elapsedMs(payload.cepCampaignId) == nil {
+            ctx.dwell.markViewed(payload.cepCampaignId)
+            if !isLiveTestCepId(payload.cepCampaignId) {
+                ctx.services?.frequencyManager.recordShow(
+                    payload.campaignKey,
+                    ctx.sdk.findCampaign(payload)?.frequency
+                )
+            }
+            ctx.events.toBoth(
+                .impressed,
+                GuideEvent.Viewed(
+                    displayStyle: state.currentStep?.displayStyle ?? "spotlight",
+                    itemTotal: total,
+                    screenName: ctx.currentScreen
+                ),
+                payload: payload
+            )
+        }
+        // Every step, a single one included; `stepWasReported` keeps it once.
+        if !stepWasReported {
+            lastReportedGuideStep = (state.token, state.stepIndex)
+            ctx.events.toDigia(
+                GuideEvent.StepViewed(
+                    itemIndex: state.stepIndex + 1,
+                    itemTotal: total,
+                    anchorKey: state.currentStep?.target.anchorKey,
+                    displayStyle: state.currentStep?.displayStyle
+                ),
+                payload: payload
+            )
+        }
+    }
+
+    func reportGuideRenderFailure(
+        _ failure: AnchorlessFailure?,
+        guideToken: Int64? = nil,
+        stepIndex: Int? = nil
+    ) {
+        guard let state,
+              (guideToken == nil || guideToken == state.token),
+              (stepIndex == nil || stepIndex == state.stepIndex)
+        else { return }
+        guard let ctx = reportingContext() else { return }
+        if state.currentStep?.target.anchorKey != nil {
+            ctx.sdk.logNativeGuideStage(
+                "render",
+                "result=failed campaign_key=\(state.payload.campaignKey) reason=\(failure?.rawValue ?? "image_load")"
+            )
+        }
+        if ctx.sdk.isDebugBuild, state.currentStep?.target.anchorKey == nil {
+            log.e(
+                "Anchorless step render failed — \(failure?.rawValue ?? "image load failed") "
+                    + "(step=\(state.stepIndex + 1))"
+            )
+        }
+        let payload = state.payload
+        if ctx.dwell.elapsedMs(payload.cepCampaignId) == nil {
+            dismiss()
+            // It never displayed, so this is a drop — and unlike a dismissal it
+            // still knows *why*. Going through the lifecycle channel would
+            // flatten every render failure to `cancelled`.
+            ctx.sdk.coordinator.drop(
+                payload,
+                reason: Self.dropReason(for: failure),
+                detail: failure?.rawValue ?? "Anchorless Spotlight image could not be loaded",
+                extras: Self.healthExtras(for: failure),
+                deliveryDetail: Self.renderFailureDetail(failure, state)
+            )
+            guideCompletionFired = false
+        } else {
+            dismissGuide(reason: .autoTimeout)
+        }
+        // Same mapping the organic drop two lines up just used — keeping a
+        // second, live-test-only mapping beside it is exactly the two
+        // spellings of one reason the shared vocabulary exists to prevent.
+        ctx.sdk.liveTestContexts[payload.cepCampaignId]?.reportFailed(
+            Self.dropReason(for: failure),
+            message: failure?.rawValue ?? "Anchorless Spotlight image could not be loaded"
+        )
+    }
+
+    func reportGuideStepClicked(
+        actionType: String?,
+        actionUrl: String?,
+        ctaLabel: String?,
+        action: EngageAction? = nil,
+        elementId: String? = nil
+    ) {
+        guard let state, let step = state.currentStep else { return }
+        guard let ctx = reportingContext() else { return }
+        ctx.events.toDigia(
+            GuideEvent.StepClicked(
+                itemIndex: state.stepIndex + 1,
+                elementId: elementId ?? step.target.anchorKey,
+                ctaLabel: ctaLabel,
+                actionType: actionType,
+                actionUrl: actionUrl
+            ),
+            payload: state.payload
+        )
+        if !state.hasNext,
+           action != .previous {
+            reportGuideCompletedIfNeeded(state)
+        }
+    }
+
+    /// `anchorLeft`: the last step's anchor left while it showed. The dwell is
+    /// then sent as `timeToCompleteMs` and no frequency completion is recorded.
+    func reportGuideCompletedIfNeeded(_ state: ActiveGuideState, anchorLeft: Bool = false) {
+        guard let ctx = reportingContext() else { return }
+        guard !guideCompletionFired else { return }
+        guideCompletionFired = true
+        if !anchorLeft, !isLiveTestCepId(state.payload.cepCampaignId) {
+            ctx.services?.frequencyManager.recordCompleted(
+                state.payload.campaignKey,
+                ctx.sdk.findCampaign(state.payload)?.frequency
+            )
+        }
+        ctx.events.toDigia(
+            GuideEvent.Completed(
+                itemTotal: state.steps.count,
+                // Dwell since step 1 showed; a peek, so a later dismiss keeps it (A61).
+                timeToCompleteMs: ctx.dwell.elapsedMs(state.payload.cepCampaignId)
+            ),
+            payload: state.payload
+        )
+    }
+
+    /// The unified anchorless-failure table: one reason drives the live-test
+    /// ACK, the campaign timeline and the CEP outcome. `nil` is an image-load
+    /// failure; its watchdog makes `timeout` the honest reason.
+    private static func dropReason(for failure: AnchorlessFailure?) -> DropReason {
+        switch failure {
+        case .pageKeyMismatch: return .screenNotTargeted
+        case .invalidTarget, .invalidGeometry: return .anchorNotRegistered
+        case .unsupportedLayout: return .invalidConfig
+        case nil: return .timeout
+        }
+    }
+
+    /// Delivery detail for a guide render failure (ai_docs/campaign-delivery-events.md).
+    private static func renderFailureDetail(
+        _ failure: AnchorlessFailure?, _ state: ActiveGuideState
+    ) -> [String: Any] {
+        let target = state.currentStep?.target
+        var detail: [String: Any] = ["step_index": state.stepIndex]
+        switch failure {
+        case .pageKeyMismatch:
+            if let pageKey = target?.anchorlessTarget?.pageKey { detail["page_key"] = pageKey }
+        case .invalidTarget, .invalidGeometry:
+            if let anchorKey = target?.anchorKey { detail["anchor_key"] = anchorKey }
+        case .unsupportedLayout:
+            return ["cause": "anchorless_layout"]
+        case nil:
+            detail["cause"] = "image_load"
+        }
+        return detail
+    }
+
+    /// Health extras for an anchorless drop: `invalid_config` needs its cause.
+    private static func healthExtras(for failure: AnchorlessFailure?) -> [String: String]? {
+        failure == .unsupportedLayout ? ["cause": "anchorless_layout"] : nil
     }
 }

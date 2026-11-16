@@ -19,6 +19,7 @@ struct TabletLargeScreenTests {
         #expect(!isLargeScreen(shortestSide: min(932, 430)))
     }
 
+    // dmc-case: dmc.render_safety.canvas_fallbacks_large_screen_boundary
     @Test("tablets reach the 600pt shortest-side breakpoint")
     func tabletsAreLargeScreen() {
         #expect(isLargeScreen(shortestSide: 600))
@@ -26,6 +27,27 @@ struct TabletLargeScreenTests {
         #expect(!isLargeScreen(shortestSide: 599))
         // 1024x768 iPad in either orientation.
         #expect(isLargeScreen(shortestSide: min(1024, 768)))
+    }
+
+    // dmc-case: dmc.render_safety.canvas_fallbacks_large_screen_boundary
+    @Test("an unknown or empty screen size is not a large screen")
+    func unknownScreenIsNotLarge() {
+        #expect(!isLargeScreen(shortestSide: .infinity))
+        #expect(!isLargeScreen(shortestSide: .nan))
+        #expect(!isLargeScreen(shortestSide: 0))
+    }
+
+    // dmc-case: dmc.render_safety.canvas_fallbacks_large_screen_boundary
+    @Test("a zero design width or canvas width falls back to 360")
+    func zeroWidthsFallBack() throws {
+        let config = try #require(try NudgeConfig.fromJson([
+            "container": ["displayType": "dialog"],
+            "designWidth": 0,
+            "layoutMode": "canvas",
+            "canvas": ["version": 2, "canvasWidth": 0, "canvasHeight": 180, "children": []],
+        ]))
+        #expect(config.designWidth == defaultCampaignCanvasDesignWidth)
+        #expect(config.canvas?.width == 360)
     }
 
     // MARK: - nudgeSheetWidth (pins large_screen.swift nudgeSheetWidth)

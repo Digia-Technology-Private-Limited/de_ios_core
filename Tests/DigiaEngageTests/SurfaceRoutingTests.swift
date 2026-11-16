@@ -33,6 +33,7 @@ extension DigiaEngageTests {
 
         // MARK: - Organic
 
+        // dmc-case: dmc.drop_reason.overlay_busy_first_stays
         @Test("nudge over nudge → surface_busy, the first stays")
         func nudgeOverNudge() throws {
             try start([nudgeJson("n1"), nudgeJson("n2")])
@@ -44,6 +45,7 @@ extension DigiaEngageTests {
             #expect(sdk.controller.activeNudge?.payload.campaignKey == "n1")
         }
 
+        // dmc-case: dmc.drop_reason.floater_collapsed_occupation
         @Test("guide over a collapsed floater → shows")
         func guideOverCollapsedFloater() throws {
             try start([floaterJson("pip"), guideJson("g")])
@@ -58,6 +60,7 @@ extension DigiaEngageTests {
             #expect(sdk.guideOrchestrator.state?.payload.campaignKey == "g")
         }
 
+        // dmc-case: dmc.drop_reason.floater_collapsed_occupation
         @Test("a collapsed floater cannot expand under a nudge (SR07)")
         func floaterCannotExpandUnderNudge() throws {
             try start([floaterJson("pip"), nudgeJson("n")])
@@ -68,11 +71,12 @@ extension DigiaEngageTests {
             sdk.floaterOrchestrator.expand()
             #expect(sdk.floaterOrchestrator.surface == .collapsed)
 
-            sdk.markNudgeDismissed()
+            sdk.nudgeOrchestrator.markNudgeDismissed()
             sdk.floaterOrchestrator.expand()
             #expect(sdk.floaterOrchestrator.surface == .expanded)
         }
 
+        // dmc-case: dmc.drop_reason.floater_collapsed_occupation
         @Test("floater over a collapsed floater → surface_busy")
         func floaterOverCollapsedFloater() throws {
             try start([floaterJson("pip1"), floaterJson("pip2")])
@@ -85,6 +89,7 @@ extension DigiaEngageTests {
             #expect(second.dropReason == .surfaceBusy)
         }
 
+        // dmc-case: dmc.drop_reason.floater_collapsed_occupation
         @Test("floater dismisses on screen change to off-target screen")
         func floaterDismissesOnOffTargetScreen() throws {
             try start([floaterJson("pip_target", targetScreens: ["Home", "Detail"])])
@@ -96,6 +101,7 @@ extension DigiaEngageTests {
             #expect(!sdk.floaterOrchestrator.isShowing)
         }
 
+        // dmc-case: dmc.drop_reason.floater_collapsed_occupation
         @Test("floater survives screen change to another target screen")
         func floaterSurvivesScreenChangeToTargetScreen() throws {
             try start([floaterJson("pip_target", targetScreens: ["Home", "Detail"])])
@@ -107,6 +113,7 @@ extension DigiaEngageTests {
             #expect(sdk.floaterOrchestrator.isShowing)
         }
 
+        // dmc-case: dmc.drop_reason.floater_collapsed_occupation
         @Test("global floater survives screen change")
         func globalFloaterSurvivesScreenChange() throws {
             try start([floaterJson("pip_global")])
@@ -118,6 +125,7 @@ extension DigiaEngageTests {
             #expect(sdk.floaterOrchestrator.isShowing)
         }
 
+        // dmc-case: dmc.drop_reason.replace_vs_busy_with_priority
         @Test("inline, same slot, never displayed → replaced, the old one superseded")
         func inlineSameSlotNeverDisplayed() throws {
             try start([inlineJson("i1"), inlineJson("i2")])
@@ -130,11 +138,12 @@ extension DigiaEngageTests {
             #expect(sdk.inlineController.getCampaign("home_hero")?.campaignKey == "i2")
         }
 
+        // dmc-case: dmc.drop_reason.replace_vs_busy_with_priority
         @Test("inline, same slot, displayed → surface_busy")
         func inlineSameSlotDisplayed() throws {
             try start([inlineJson("i1"), inlineJson("i2")])
             let first = deliver("i1", "cep-1")
-            sdk.reportSlotFirstRender(first.payload)
+            sdk.inlineReporter.reportSlotFirstRender(first.payload)
 
             let second = deliver("i2", "cep-2")
 
@@ -143,6 +152,7 @@ extension DigiaEngageTests {
             #expect(sdk.inlineController.getCampaign("home_hero")?.campaignKey == "i1")
         }
 
+        // dmc-case: dmc.drop_reason.blocker_reported_with_wire_name
         @Test("a surface_busy drop's timeline record names the blocker (SR10)")
         func busyRecordCarriesBlocker() async throws {
             let sink = TimelineRecorder()
@@ -151,7 +161,7 @@ extension DigiaEngageTests {
             try start([nudgeJson("welcome"), nudgeJson("sale")])
             _ = deliver("welcome", "cep-1")
             // A never-displayed blocker is not named (SR64).
-            sdk.reportNudgeImpression()
+            sdk.nudgeOrchestrator.reportNudgeImpression()
             _ = deliver("sale", "cep-2")
 
             var record: TimelineRecord?
@@ -226,6 +236,7 @@ extension DigiaEngageTests {
             )
         }
 
+        // dmc-case: dmc.gate_order.template_config_gate_drops_invalid_config
         @Test("a floater or inline sent as a CleverTap custom template → invalid_config")
         func nonBlockingByTemplate() throws {
             try start([floaterJson("pip"), inlineJson("i")])
@@ -238,6 +249,7 @@ extension DigiaEngageTests {
             #expect(sdk.inlineController.getCampaign("home_hero") == nil)
         }
 
+        // dmc-case: dmc.gate_order.template_config_gate_drops_invalid_config
         @Test("a nudge sent as a CleverTap custom template routes as before")
         func nudgeByTemplate() throws {
             try start([nudgeJson("n")])
@@ -249,6 +261,7 @@ extension DigiaEngageTests {
 
         // MARK: - Live test
 
+        // dmc-case: dmc.drop_reason.live_test_displaces_real
         @Test("test over a test nudge → old dismissed and its row superseded, new shown")
         func liveTestOverLiveTest() throws {
             try start([])
@@ -263,6 +276,7 @@ extension DigiaEngageTests {
             #expect(sdk.isLiveTestPendingForTesting("inv-2"))
         }
 
+        // dmc-case: dmc.drop_reason.live_test_displaces_real
         @Test("test over a real nudge → the real one settles superseded")
         func liveTestOverRealNudge() throws {
             try start([nudgeJson("real")])
@@ -275,6 +289,7 @@ extension DigiaEngageTests {
             #expect(sdk.controller.activeNudge?.payload.cepCampaignId == liveTestCepId("inv-1"))
         }
 
+        // dmc-case: dmc.drop_reason.live_test_displaces_real
         @Test("a test that fails screen targeting leaves the occupant on screen")
         func liveTestFailingTargetingKeepsOccupant() throws {
             try start([nudgeJson("real")])
@@ -287,6 +302,7 @@ extension DigiaEngageTests {
             #expect(sdk.controller.activeNudge?.payload.campaignKey == "real")
         }
 
+        // dmc-case: dmc.drop_reason.live_test_displaces_real
         @Test("a real campaign over a test → surface_busy (LT-Q2)")
         func realOverLiveTest() throws {
             try start([nudgeJson("real")])

@@ -71,7 +71,7 @@ struct GuideOverlayView: View {
                             : nil,
                         onAdvance: { SDKInstance.shared.advanceGuide() },
                         onOutsideTap: { SDKInstance.shared.advanceGuide(completesOnLast: false) },
-                        onDismiss: { SDKInstance.shared.dismissGuide() }
+                        onDismiss: { SDKInstance.shared.guideOrchestrator.dismissGuide() }
                     )
                     .environment(\.digiaVariables, state.variableContext)
                     .environment(\.digiaCampaignKey, state.payload.campaignKey)
@@ -80,7 +80,7 @@ struct GuideOverlayView: View {
                     EmptyView()
                 case let .failed(failure):
                     Color.clear.task(id: "\(state.token):\(state.campaign.id):\(state.stepIndex):\(failure.rawValue)") {
-                        SDKInstance.shared.reportGuideRenderFailure(
+                        SDKInstance.shared.guideOrchestrator.reportGuideRenderFailure(
                             failure,
                             guideToken: state.token,
                             stepIndex: state.stepIndex
@@ -314,10 +314,10 @@ private struct GuideStepOverlay: View {
             .allowsHitTesting(isPresentationReady)
         }
         .onAppear {
-            if isPresentationReady { SDKInstance.shared.reportGuideShown() }
+            if isPresentationReady { SDKInstance.shared.guideOrchestrator.reportGuideShown() }
         }
         .onChange(of: isPresentationReady) { ready in
-            if ready { SDKInstance.shared.reportGuideShown() }
+            if ready { SDKInstance.shared.guideOrchestrator.reportGuideShown() }
         }
         .task(id: imageURL) {
             targetImage = nil
@@ -328,7 +328,7 @@ private struct GuideStepOverlay: View {
             guard let decoded = loaded.image else {
                 guard !Task.isCancelled else { return }
                 reportMediaLoadFailed(.image, cause: loaded.failureCause, campaignKey: campaignKey)
-                SDKInstance.shared.reportGuideRenderFailure(
+                SDKInstance.shared.guideOrchestrator.reportGuideRenderFailure(
                     nil,
                     guideToken: guideToken,
                     stepIndex: stepIndex
@@ -429,7 +429,7 @@ private struct GuideStepOverlay: View {
 
     private func handleCanvasAction(_ request: CampaignCanvasActionRequest) {
         let reportedAction = request.actions.first?.resolved(with: variables)
-        SDKInstance.shared.reportGuideStepClicked(
+        SDKInstance.shared.guideOrchestrator.reportGuideStepClicked(
             actionType: reportedAction?.analyticsType,
             actionUrl: reportedAction?.analyticsURL,
             ctaLabel: request.label ?? request.elementId,

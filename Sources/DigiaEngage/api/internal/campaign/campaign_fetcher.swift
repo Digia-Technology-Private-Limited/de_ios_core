@@ -41,6 +41,7 @@ struct CampaignFetcher {
         let request = NetworkRequest(
             url: url,
             method: .post,
+            headers: [campaignSchemaVersionHeader: String(campaignSchemaVersion)],
             body: Data("{}".utf8),
             connectTimeout: 10,
             readTimeout: 10
