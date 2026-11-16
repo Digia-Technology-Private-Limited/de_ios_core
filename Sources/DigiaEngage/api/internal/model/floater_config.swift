@@ -67,6 +67,7 @@ struct FloaterMediaConfig: Equatable {
     let autoplay: Bool
     let volume: Float
     let startMuted: Bool
+    var poster: VideoPoster? = nil
 
     /// Returns nil when there is nothing renderable — a floater with no media is not a
     /// degraded floater, it is not a floater (matches Android's `FloaterMediaConfig
@@ -82,7 +83,8 @@ struct FloaterMediaConfig: Equatable {
             loop: j.bool("loop", default: true),
             autoplay: j.bool("autoplay", default: true),
             volume: Float(j.double("volume", default: 0.5)).clamped(0, 1),
-            startMuted: j.bool("startMuted", default: true)
+            startMuted: j.bool("startMuted", default: true),
+            poster: VideoPoster.from(j["poster"])
         )
     }
 }
