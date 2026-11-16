@@ -148,9 +148,9 @@ struct GamificationConfig: Equatable {
             slots: slots,
             entryKind: entryKind,
             entryCanvas: entryCanvas,
-            showMute: surface?.bool("showMute", default: false) ?? false,
             rewardsPageTitle: templateConfig.nonBlankString("rewardsPageTitle")
                 ?? campaignLevel?.nonBlankString("rewardsPageTitle"),
+            showMute: templateConfig.bool("showMute", default: surface?.bool("showMute", default: false) ?? false),
             bundleUrl: bundleUrl,
             sensors: sensors,
             minSdkVersion: minSdkVersionIos(templateConfig: templateConfig),
