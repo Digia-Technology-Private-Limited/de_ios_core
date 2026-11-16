@@ -331,9 +331,11 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
     /// First occurrence per key per app session. `|` is a safe separator:
     /// every part is a symbol, an id or a dashboard-authored key.
     private func dedupKey(_ record: TimelineRecord, _ wire: String) -> String {
-        if HealthReasons.campaignlessReasons.contains(wire) { return wire }
-        var key = "\(wire)|\(record.campaignKey ?? "")"
-        for extraKey in HealthReasons.dedupExtraKeys[wire] ?? [] {
+        let campaignless = HealthReasons.campaignlessReasons.contains(wire)
+        let extraKeys = HealthReasons.dedupExtraKeys[wire] ?? []
+        if campaignless, extraKeys.isEmpty { return wire }
+        var key = "\(wire)|\(campaignless ? "" : (record.campaignKey ?? ""))"
+        for extraKey in extraKeys {
             key += "|\(record.extras[extraKey] ?? "")"
         }
         return key
