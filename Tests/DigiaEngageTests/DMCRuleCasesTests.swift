@@ -436,8 +436,7 @@ private final class World: DecisionFacts {
         case "hold": engine.holdForContext()
         case "release": engine.contextSettled()
         case "fail":
-            // The held signals meet an empty context.
-            audience.removeAll()
+            // A failed refresh keeps the cached context, so the held signals meet it.
             engine.contextSettled()
         default: break
         }
