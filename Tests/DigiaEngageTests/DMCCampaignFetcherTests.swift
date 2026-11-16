@@ -19,42 +19,4 @@ struct DMCCampaignFetcherTests {
         #expect(client.recordedRequests.count == 1)
         #expect(client.recordedRequests[0].headers["x-digia-campaign-schema-version"] == "2")
     }
-
-    // dmc-case: dmc.app_event.upload_policy_defaults_bundle_fallback
-    @Test("app event upload settings default to on and unlimited")
-    func appEventPolicyDefaults() throws {
-        let policy = try CampaignFetcher.parse(Data(#"{"campaigns":[]}"#.utf8)).appEventUploadPolicy
-        #expect(policy.enabled)
-        #expect(policy.ratePerMinute == 0)
-        #expect(policy.burst == 0)
-        #expect(policy.blockedNames.isEmpty)
-    }
-
-    // dmc-case: dmc.app_event.upload_policy_defaults_bundle_fallback
-    @Test("app event upload settings are read from the bundle")
-    func appEventPolicyRead() throws {
-        let json = #"""
-        {"campaigns":[],"appEventUpload":false,"appEventRatePerMinute":30,"appEventBurst":5,
-         "appEventBlockedNames":["secret","other",7]}
-        """#
-        let policy = try CampaignFetcher.parse(Data(json.utf8)).appEventUploadPolicy
-        #expect(!policy.enabled)
-        #expect(policy.ratePerMinute == 30)
-        #expect(policy.burst == 5)
-        #expect(policy.blockedNames == ["secret", "other"])
-    }
-
-    // dmc-case: dmc.app_event.upload_policy_defaults_bundle_fallback
-    @Test("malformed app event upload settings fall back to the defaults")
-    func appEventPolicyGarbage() throws {
-        let json = #"""
-        {"campaigns":[],"appEventUpload":"no","appEventRatePerMinute":-4,"appEventBurst":"x",
-         "appEventBlockedNames":"secret"}
-        """#
-        let policy = try CampaignFetcher.parse(Data(json.utf8)).appEventUploadPolicy
-        #expect(policy.enabled)
-        #expect(policy.ratePerMinute == 0)
-        #expect(policy.burst == 0)
-        #expect(policy.blockedNames.isEmpty)
-    }
 }

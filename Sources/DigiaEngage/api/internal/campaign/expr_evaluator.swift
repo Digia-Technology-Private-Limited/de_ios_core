@@ -26,7 +26,7 @@ private func tokenize(_ expr: String, _ context: VariableContext) -> [ExprToken]
     while i < expr.endIndex {
         let ch = expr[i]
 
-        if ch == " " || ch == "\t" {
+        if ch == " " || ch == "\t" || ch == "\n" || ch == "\r" || ch == "\r\n" {
             i = expr.index(after: i)
         } else if ch == "+" || ch == "-" || ch == "*" || ch == "/" {
             tokens.append(.op(ch))

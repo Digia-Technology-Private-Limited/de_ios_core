@@ -26,6 +26,7 @@ func buildVariableContext(schemas: [VariableSchema], cepVars: [String: String]?)
 
 /// Reports each declared variable with no CEP value and no fallback. Call once per start, never from a view body.
 func reportMissingVariables(_ schemas: [VariableSchema], payload: CEPTriggerPayload) {
+    reportVariableTypeMismatches(schemas, payload: payload)
     for schema in schemas where (payload.variables?[schema.name] ?? "") == "" && !schema.hasFallback {
         log.w(
             "Variable has no CEP value and no fallback (variable=\(schema.name))",
@@ -35,6 +36,30 @@ func reportMissingVariables(_ schemas: [VariableSchema], payload: CEPTriggerPayl
             extras: ["variable": schema.name]
         )
     }
+}
+
+private let maxMismatches = 10
+private let maxSampleLength = 32
+
+/// Reports once, as a `variable_type_mismatch` health event, every declared variable whose CEP value
+/// does not fit its declared type (at most 10, each sample cut to 32 characters). Call once per
+/// start, never from a view body.
+func reportVariableTypeMismatches(
+    _ schemas: [VariableSchema], payload: CEPTriggerPayload, sink: HealthSink = .shared
+) {
+    var mismatches: [[String: String]] = []
+    for schema in schemas {
+        let raw = payload.variables?[schema.name]
+        guard schema.misfits(raw) else { continue }
+        if mismatches.count >= maxMismatches { break }
+        mismatches.append([
+            "name": schema.name,
+            "expected": schema.type,
+            "sample": String((raw ?? "").prefix(maxSampleLength)),
+        ])
+    }
+    guard !mismatches.isEmpty else { return }
+    sink.reportVariableTypeMismatch(campaignKey: payload.campaignKey, mismatches: mismatches)
 }
 
 /// Looks up the runtime value of each context variable in `schemas` — `user.<key>` from

@@ -34,8 +34,7 @@ private final class EngineFacts: DecisionFacts {
 
     func capped(_ campaign: CampaignModel) -> Bool {
         sdk.services?.frequencyManager.blockReason(
-            campaignKey: campaign.campaignKey, policy: campaign.frequency,
-            unseenCountsAsZero: campaign.rule != nil) != nil
+            campaignKey: campaign.campaignKey, policy: campaign.frequency) != nil
     }
 
     var currentScreen: String { sdk.currentScreenForAnchorless ?? "" }
@@ -159,14 +158,15 @@ extension SDKInstance {
         engine.send(.appOpened)
     }
 
-    /// Applies the bundle's app-event policy and lets held signals through,
-    /// then loads the user context: ready never waits for it, only a campaign
-    /// gated on the audience does.
-    func openDecisionEngine(policy: AppEventUploadPolicy, generation: Int) async {
+    /// Lets held signals through, then loads the user context: ready never
+    /// waits for it, only a campaign gated on the audience does.
+    func openDecisionEngine(generation: Int) async {
         guard let services, initGeneration == generation else { return }
-        services.appEventsService?.applyPolicy(policy)
         let manager = services.userContextManager
-        manager.configure(restoredUserId: services.identityManager.userId)
+        manager.configure(
+            restoredUserId: services.identityManager.userId,
+            restoredUserHash: services.identityManager.userHash
+        )
         manager.onFetchStarted = { [weak self] in
             self?.holdGatedCampaigns(services, generation: generation) ?? {}
         }
@@ -241,14 +241,20 @@ extension SDKInstance {
     // MARK: Identity
 
     /// The one path a user change takes, buffered or not. `nil` clears.
-    func applyUserId(_ services: SDKServices, _ userId: String?, refreshContext: Bool = true) {
+    /// Identity owns the change and the hash.
+    func applyUserId(
+        _ services: SDKServices,
+        _ userId: String?,
+        userHash: String? = nil,
+        refreshContext: Bool = true
+    ) {
         let identity = services.identityManager
         let trimmed = userId?.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed?.isEmpty == true { return }
         services.userContextManager.dropPreviousUser(trimmed)
         if trimmed != identity.userId { clearDigiaInlineContent() }
         if let trimmed {
-            identity.setUserId(trimmed)
+            identity.setUserId(trimmed, userHash: userHash)
         } else {
             identity.clearUserId()
         }
@@ -257,7 +263,8 @@ extension SDKInstance {
         // A set that identity refused leaves nothing to tell the context.
         if trimmed != nil, current == nil { return }
         let manager = services.userContextManager
-        Task { @MainActor in await manager.onUserIdChanged(current) }
+        let currentHash = identity.userHash
+        Task { @MainActor in await manager.onUserIdChanged(current, userHash: currentHash) }
     }
 
     /// Clears the inline content Digia decided for the user who is leaving, so
@@ -307,16 +314,16 @@ extension SDKInstance {
         // evaluated. Names are trimmed, as the server does, so both validate
         // the same name.
         let name = eventName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard isValidAppEventName(name) else {
+        guard isValidAppEventName(name, limits: appEventLimits) else {
             log.w(
                 "trackEvent dropped — invalid app event name",
                 stage: .session,
                 reason: TimelineReason.appEventInvalid,
-                extras: ["event_name": String(name.prefix(appEventNameMaxLength))]
+                extras: ["event_name": String(name.prefix(appEventLimits.nameMaxLength))]
             )
             return
         }
-        let cleaned = cleanAppEventProperties(properties)
+        let cleaned = cleanAppEventProperties(properties, limits: appEventLimits)
         if !cleaned.dropped.isEmpty {
             // The event is kept; only the values the backend can't store go.
             log.w(

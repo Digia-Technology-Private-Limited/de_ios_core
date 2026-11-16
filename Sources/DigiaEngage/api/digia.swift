@@ -231,6 +231,18 @@ public enum Digia {
         onMain { SDKInstance.shared.setUserId(userId) }
     }
 
+    /// Sets the authenticated user ID together with a proof of it.
+    ///
+    /// `userHash` is the lowercase-hex HMAC-SHA256 of `userId`, keyed with the
+    /// project's verification secret and computed on the host's backend. The
+    /// server returns imported attributes only when it is valid. A nil
+    /// `userHash` for the current user keeps the one already stored.
+    ///
+    /// Safe to call from any thread: it hops to the main actor itself.
+    nonisolated public static func setUserId(_ userId: String, userHash: String?) {
+        onMain { SDKInstance.shared.setUserId(userId, userHash: userHash) }
+    }
+
     /// Supplies attributes about the current user, for campaigns to interpolate
     /// as `{{user.<key>}}`. Calls merge. Requires `setUserId`; attributes
     /// describe an identified user.

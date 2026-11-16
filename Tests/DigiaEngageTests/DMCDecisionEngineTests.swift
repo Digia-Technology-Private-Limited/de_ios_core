@@ -55,8 +55,7 @@ private final class Facts: DecisionFacts {
     func capped(_ campaign: CampaignModel) -> Bool {
         if let frequency {
             return frequency.blockReason(
-                campaignKey: campaign.campaignKey, policy: campaign.frequency,
-                unseenCountsAsZero: campaign.rule != nil) != nil
+                campaignKey: campaign.campaignKey, policy: campaign.frequency) != nil
         }
         return capped2.contains(campaign.campaignKey)
     }
@@ -659,45 +658,6 @@ struct DMCDecisionEngineTests {
             storage: UserDefaultsLocalStorage(defaults: defaults).scoped("frequency"),
             sessionIdProvider: { "s1" },
             clock: { 0 })
-    }
-
-    // MARK: zero frequency caps (dmc-cases max_total_zero_never_shows,
-    // max_per_window_zero_never_shows)
-
-    @Test("a maxTotal 0 campaign never shows; the capped winner falls through")
-    func zeroMaxTotalNeverShows() {
-        defer { finish() }
-        facts.frequency = Self.isolatedFrequency()
-        facts.add(Self.campaign("c1", priority: 2, frequency: ["maxTotal": 0]))
-        facts.add(Self.campaign("c2", priority: 1, frequency: ["maxTotal": 1]))
-        engine.ready()
-
-        engine.send(.event("cart_landed", [:]))
-        #expect(routedKeys == ["c2"])
-        #expect(gating("c1", TimelineReason.capped).count == 1)
-
-        engine.send(.event("cart_landed", [:]))
-        #expect(routedKeys == ["c2"])
-        #expect(gating("c2", TimelineReason.capped).count == 1)
-    }
-
-    @Test("a maxPerWindow count 0 campaign never shows")
-    func zeroWindowCountNeverShows() {
-        defer { finish() }
-        facts.frequency = Self.isolatedFrequency()
-        facts.add(Self.campaign(
-            "c1", priority: 2, frequency: ["maxPerWindow": ["count": 0, "window": "day"]]))
-        facts.add(Self.campaign(
-            "c2", priority: 1, frequency: ["maxPerWindow": ["count": 1, "window": "day"]]))
-        engine.ready()
-
-        engine.send(.event("cart_landed", [:]))
-        #expect(routedKeys == ["c2"])
-        #expect(gating("c1", TimelineReason.capped).count == 1)
-
-        engine.send(.event("cart_landed", [:]))
-        #expect(routedKeys == ["c2"])
-        #expect(gating("c2", TimelineReason.capped).count == 1)
     }
 
     @Test("an inline campaign is never frequency-capped")

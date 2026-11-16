@@ -40,6 +40,7 @@ enum HealthReasons {
         "fetch_failed_auth",
         "invalid_config",
         "missing_variable",
+        "variable_type_mismatch",
         // Startup drops (SP5/SP6): a trigger that reached core before the SDK
         // was ready. `not_initialized` stays off the list — the sink does not
         // exist before `initialize()`.
@@ -104,6 +105,9 @@ enum HealthReasons {
         "fetch_failed_auth": ["http_status"],
         "invalid_config": ["cause"],
         "missing_variable": ["variable"],
+        // Sent by `HealthSink.reportVariableTypeMismatch` with its own structured
+        // detail, never through the symbolic projection.
+        "variable_type_mismatch": [],
         "not_ready": [],
         "initialization_failed": [],
         "surface_busy": ["blocking_campaign_key", "blocking_kind"],

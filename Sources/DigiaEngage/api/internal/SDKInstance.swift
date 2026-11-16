@@ -23,6 +23,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     legacyImport: LegacyQueueImport(source: legacyStorage)
                 )
             },
+            makeAppEventQueue: {
+                SQLiteAnalyticsQueue(
+                    opener: AnalyticsDatabaseOpener(resolvePath: {
+                        try AnalyticsDatabaseOpener.defaultPath(fileName: AnalyticsDatabaseOpener.appEventsFileName)
+                    }),
+                    maxEvents: appEventQueueMaxEvents
+                )
+            },
             makeNetworkMonitor: { PathNetworkMonitor() }
         )
         // Only the production instance: a test's own instance must not take
@@ -133,6 +141,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// here rather than in ``SDKServices`` so a retried `initialize()` reuses
     /// it: a second queue on the same file would interleave with the first.
     private let analyticsQueue: any AnalyticsQueueProtocol
+    /// Host-app events' own durable queue, kept for the same reason.
+    private let appEventQueue: any AnalyticsQueueProtocol
     /// One per services graph: its analytics service stops it on teardown.
     private let makeNetworkMonitor: () -> any NetworkMonitor
     /// The capture toggles `SDKInstance` itself persists.
@@ -147,7 +157,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// A `setUserId` / `clearUserId` that arrived before `services` existed.
     /// Only the last one matters; it is applied once, when services are built.
     private enum PendingUserChange {
-        case set(String)
+        case set(String, userHash: String?)
         case clear
     }
     private var pendingUserChange: PendingUserChange?
@@ -265,6 +275,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         makeAnalyticsQueue: (_ legacyStorage: LocalStorage) -> any AnalyticsQueueProtocol = { _ in
             MemoryAnalyticsQueue()
         },
+        makeAppEventQueue: () -> any AnalyticsQueueProtocol = {
+            MemoryAnalyticsQueue(limit: appEventQueueMaxEvents)
+        },
         makeNetworkMonitor: @escaping () -> any NetworkMonitor = { AlwaysOnlineNetworkMonitor() },
         healthSink: HealthSink = .shared
     ) {
@@ -277,6 +290,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let defaultStorage = UserDefaultsLocalStorage(defaults: defaults)
         // After the migrator, which moves the legacy queue into this suite.
         self.analyticsQueue = makeAnalyticsQueue(defaultStorage.scoped("analytics"))
+        self.appEventQueue = makeAppEventQueue()
         let defaultNetworkClient = makeNetworkClient(currentSession)
         let defaultDebugOverlay = DigiaDebugOverlayController(storage: defaultStorage.scoped("debug"))
         self.debugOverlayController = defaultDebugOverlay
@@ -422,6 +436,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             networkClient: networkClient,
             clock: clock,
             analyticsQueue: analyticsQueue,
+            appEventQueue: appEventQueue,
             networkMonitor: makeNetworkMonitor(),
             appEventNetworkMonitor: makeNetworkMonitor()
         )
@@ -439,8 +454,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         // context is configured from the resulting identity once the bundle
         // lands, so this change needs no refresh of its own.
         switch pendingUserChange {
-        case let .set(userId):
-            applyUserId(services, userId, refreshContext: false)
+        case let .set(userId, userHash):
+            applyUserId(services, userId, userHash: userHash, refreshContext: false)
         case .clear:
             applyUserId(services, nil, refreshContext: false)
         case nil:
@@ -520,8 +535,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             guard let self, self.initGeneration == generation else { return }
             self.fetchTask = nil
             self.applyFetchResult(fetched)
-            if case .success(let bundle) = fetched {
-                await self.openDecisionEngine(policy: bundle.appEventUploadPolicy, generation: generation)
+            if case .success = fetched {
+                await self.openDecisionEngine(generation: generation)
             }
         }
     }
@@ -531,6 +546,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     private var fetchTask: Task<Void, Never>?
     /// Exposed for tests to await.
     private(set) var sdkConfigFetchTask: Task<Void, Never>?
+    /// What `trackEvent` validates against; the SDK config's, or the defaults.
+    var appEventLimits = AppEventLimits.defaults
 
     /// Not awaited. A failed call changes nothing, except that a first install with no
     /// cached config runs on the defaults from here, which also sends the held health events.
@@ -548,6 +565,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     private func applySdkConfig(_ config: SdkConfig) {
         healthSink.applyConfig(enabled: config.healthEnabled, sessionCap: config.healthSessionCap)
+        appEventLimits = config.appEvents.limits
+        services?.appEventsService?.applyPolicy(config.appEvents)
     }
 
     private func applyFetchResult(_ fetched: Result<CampaignBundle, Error>) {
@@ -594,6 +613,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     reason: payload.reason,
                     stage: payload.stage,
                     detail: payload.detail,
+                    mismatches: payload.mismatches,
                     buildMode: payload.buildMode
                 )
             }
@@ -1759,15 +1779,15 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         sdkState = .ready
     }
 
-    func setUserId(_ userId: String) {
+    func setUserId(_ userId: String, userHash: String? = nil) {
         guard let services else {
             // A blank ID is ignored here exactly as `IdentityManager` ignores
             // it after init, so it can't overwrite a buffered clear.
             guard !userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            pendingUserChange = .set(userId)
+            pendingUserChange = .set(userId, userHash: userHash)
             return
         }
-        applyUserId(services, userId)
+        applyUserId(services, userId, userHash: userHash)
     }
 
     func clearUserId() {

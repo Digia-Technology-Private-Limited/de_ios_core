@@ -1,5 +1,11 @@
 import Foundation
 
+/// The most properties one event keeps.
+let appEventMaxProperties = 100
+
+/// The longest property key the backend stores.
+let appEventPropertyKeyMaxLength = 120
+
 /// The longest app-event name the backend stores.
 let appEventNameMaxLength = 120
 
@@ -9,31 +15,48 @@ let appEventPropertyStringMaxLength = 512
 /// The most items a list value keeps, as the server does.
 let appEventPropertyListMaxItems = 100
 
+/// The app-event limits the backend stores to, from the SDK config. The defaults
+/// stand before the config answers and for a missing or invalid value.
+struct AppEventLimits: Equatable, Sendable {
+    var nameMaxLength = appEventNameMaxLength
+    var maxProperties = appEventMaxProperties
+    var propertyKeyMaxLength = appEventPropertyKeyMaxLength
+    var stringMaxLength = appEventPropertyStringMaxLength
+    var listMaxItems = appEventPropertyListMaxItems
+
+    static let defaults = AppEventLimits()
+}
+
 /// Whether `name`, already trimmed, is a name the backend accepts. Length is
 /// counted in UTF-16 code units, as the backend (and the Flutter SDK) does.
-func isValidAppEventName(_ name: String) -> Bool {
-    !name.isEmpty && name.utf16.count <= appEventNameMaxLength
+func isValidAppEventName(_ name: String, limits: AppEventLimits = .defaults) -> Bool {
+    !name.isEmpty && name.utf16.count <= limits.nameMaxLength
 }
 
 /// `properties` reduced to the value types the backend stores: strings, finite
 /// numbers, booleans, and lists of those. Strings are cut to
-/// ``appEventPropertyStringMaxLength`` and lists to ``appEventPropertyListMaxItems``.
+/// ``AppEventLimits/stringMaxLength`` and lists to ``AppEventLimits/listMaxItems``.
+/// A key longer than ``AppEventLimits/propertyKeyMaxLength`` is dropped, as is every
+/// property past ``AppEventLimits/maxProperties`` (keys are taken in sorted order).
 /// A bad value costs that key, or that list item, never the event; `dropped`
 /// names every key that lost something.
 func cleanAppEventProperties(
-    _ properties: [String: Any]
+    _ properties: [String: Any],
+    limits: AppEventLimits = .defaults
 ) -> (properties: [String: Any], dropped: [String]) {
     var clean: [String: Any] = [:]
     var dropped: [String] = []
     for key in properties.keys.sorted() {
         let value = properties[key] as Any
-        if let list = value as? [Any] {
-            let items = list.prefix(appEventPropertyListMaxItems).compactMap(scalar)
-            if items.count < min(list.count, appEventPropertyListMaxItems) {
+        if key.utf16.count > limits.propertyKeyMaxLength || clean.count >= limits.maxProperties {
+            dropped.append(key)
+        } else if let list = value as? [Any] {
+            let items = list.prefix(limits.listMaxItems).compactMap { scalar($0, limits.stringMaxLength) }
+            if items.count < min(list.count, limits.listMaxItems) {
                 dropped.append(key)
             }
             clean[key] = items
-        } else if let kept = scalar(value) {
+        } else if let kept = scalar(value, limits.stringMaxLength) {
             clean[key] = kept
         } else {
             dropped.append(key)
@@ -44,10 +67,10 @@ func cleanAppEventProperties(
 
 /// The value as stored, or nil when the backend has no type for it. A
 /// non-finite number is dropped too: JSON cannot encode it.
-private func scalar(_ value: Any) -> Any? {
+private func scalar(_ value: Any, _ stringMax: Int) -> Any? {
     switch value {
     case let string as String:
-        return string.utf16.count > appEventPropertyStringMaxLength ? cutString(string) : string
+        return string.utf16.count > stringMax ? cutString(string, stringMax) : string
     case let number as NSNumber:
         // Bool bridges to NSNumber; keep it a boolean on the wire.
         if CFGetTypeID(number) == CFBooleanGetTypeID() { return number.boolValue }
@@ -65,8 +88,8 @@ private func scalar(_ value: Any) -> Any? {
     }
 }
 
-private func cutString(_ value: String) -> String {
-    var units = Array(value.utf16.prefix(appEventPropertyStringMaxLength))
+private func cutString(_ value: String, _ max: Int) -> String {
+    var units = Array(value.utf16.prefix(max))
     // A high surrogate at the cut would be left without its pair.
     if let last = units.last, (0xD800...0xDBFF).contains(last) { units.removeLast() }
     return String(decoding: units, as: UTF16.self)

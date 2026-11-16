@@ -117,10 +117,7 @@ final class DMCRuleCasesTests: XCTestCase {
     /// code. Each is wrapped in `XCTExpectFailure` naming the case, so the
     /// suite stays green; the honest reasons live in
     /// `testkit/.../evidence/c-ios-missing.md` §2.
-    private let knownRed: Set<String> = [
-        "newline_inside_braces_is_whitespace",
-        "zero_never_prints_a_sign",
-    ]
+    private let knownRed: Set<String> = []
 
     func testCatalogIsValidAndIdsAreUnique() throws {
         try XCTSkipUnless(
@@ -674,8 +671,7 @@ private final class World: DecisionFacts {
     func capped(_ campaign: CampaignModel) -> Bool {
         guard let policy = campaign.frequency else { return false }
         return !FrequencyEvaluator.evaluate(
-            policy, frequency[campaign.campaignKey], Int64(now), sessionId,
-            unseenCountsAsZero: campaign.rule != nil
+            policy, frequency[campaign.campaignKey], Int64(now), sessionId
         ).allow
     }
 

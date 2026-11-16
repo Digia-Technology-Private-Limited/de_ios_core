@@ -22,16 +22,18 @@ public struct DigiaSlot<Placeholder: View>: View {
         SDKInstance.shared.recordSlotSeen(placementKey)
     }
 
+    @ViewBuilder
     public var body: some View {
-        // The ZStack gives the exposure reader a view to sit behind even when
-        // the slot shows an EmptyView placeholder, and keeps one reader across
-        // empty → filled, so filling a slot already on screen is no new
-        // appearance. Empty, it is zero-size, but in a stack it is a child, so
-        // it takes the stack's spacing.
-        ZStack {
-            content
+        // Empty, the slot emits nothing (an EmptyView placeholder is no stack child), so it
+        // adds no spacing to the host's layout. `slot_visible` is not sent for an empty slot.
+        if inlineController.getCampaign(placementKey) != nil {
+            ZStack {
+                content
+            }
+            .background(SlotAppearanceReader(placementKey: placementKey))
+        } else {
+            ZStack { placeholder }
         }
-        .background(SlotAppearanceReader(placementKey: placementKey))
     }
 
     @ViewBuilder
@@ -87,9 +89,8 @@ public extension DigiaSlot where Placeholder == EmptyView {
 }
 
 
-/// Sends `slot_visible` each time the slot, filled or empty, becomes exposed
-/// (`ExposureMonitor`). Zero-size while the slot is empty; an empty slot is
-/// exposed once its position is in view.
+/// Sends `slot_visible` each time a filled slot becomes exposed
+/// (`ExposureMonitor`). An empty slot emits no view, so it is never exposed.
 struct SlotAppearanceReader: UIViewRepresentable {
     let placementKey: String
 

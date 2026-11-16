@@ -18,6 +18,12 @@ struct VariableSchema: Equatable {
         typed(raw) ?? typed(hasFallback ? fallbackValue : nil) ?? ""
     }
 
+    /// Whether `raw` is a non-empty value that does not fit this type, so ``resolve(_:)`` skips it.
+    func misfits(_ raw: Any?) -> Bool {
+        guard let raw, !(raw is NSNull), !dartText(raw).isEmpty else { return false }
+        return typed(raw) == nil
+    }
+
     /// `value` as text of this type, or nil when it is empty or does not fit.
     private func typed(_ value: Any?) -> String? {
         guard let value, !(value is NSNull) else { return nil }
@@ -64,6 +70,7 @@ func dartText(_ value: Any) -> String {
 func formatCopyNumber(_ value: Double) -> String {
     guard value.isFinite else { return "" }
     let rounded = (value * 10000).rounded() / 10000
+    if rounded == 0 { return "0" }
     var result = String(format: "%.4f", rounded)
     if result.contains(".") {
         while result.hasSuffix("0") { result.removeLast() }
