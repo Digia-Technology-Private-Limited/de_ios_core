@@ -173,7 +173,7 @@ struct CampaignCanvasStoryPage: Equatable, Sendable {
     let duration: TimeInterval
     let canvas: CampaignCanvas
     /// The dashboard-cut still of a video page (`thumbnailPoster`), shown before its first frame.
-    var poster: VideoPoster? = nil
+    var thumbnailPoster: VideoPoster? = nil
 }
 
 /// `Sendable` is declared rather than inferred, and has to be.

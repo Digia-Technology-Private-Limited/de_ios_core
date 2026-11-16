@@ -80,7 +80,7 @@ func canvasStoryItem(_ page: CampaignCanvasStoryPage) -> StoryItemConfig {
         ),
         // A video page's poster is its still, drawn on the rail at the tile's fit
         // (the viewer draws it at the page's fit, `boxFit`).
-        thumbnail: page.thumbnailIsVideo ? page.poster.map { poster in
+        thumbnail: page.thumbnailIsVideo ? page.thumbnailPoster.map { poster in
             .image(
                 source: poster.url,
                 fit: thumbnailBoxFit,

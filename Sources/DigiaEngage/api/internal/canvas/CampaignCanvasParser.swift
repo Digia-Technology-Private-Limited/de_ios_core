@@ -129,7 +129,7 @@ struct CampaignCanvasParser {
                     ),
                     duration: seconds > 0 ? seconds : fallbackSeconds,
                     canvas: canvas,
-                    poster: VideoPoster.from(propertyObject(page["thumbnailPoster"]))
+                    thumbnailPoster: VideoPoster.from(propertyObject(page["thumbnailPoster"]))
                 )
             )
         }
