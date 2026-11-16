@@ -68,6 +68,35 @@ struct DMCUserContextManagerTests {
         return manager
     }
 
+    @Test("a user change overtaken by another is not applied")
+    func overtakenChangeIsNotApplied() async {
+        let manager = manager(restoredUserId: "u1")
+
+        manager.dropPreviousUser("u2") // setUserId("u2")
+        manager.dropPreviousUser("u3") // setUserId("u3")
+        _ = manager.mergeAttributes(["plan": "gold"]) // setUserAttributes: u3's
+        await manager.onUserIdChanged("u2") // the older change lands late
+        await manager.onUserIdChanged("u3")
+
+        #expect(!server.sent.contains { $0["userId"] as? String == "u2" })
+        #expect(server.sent.last?["userId"] as? String == "u3")
+        #expect(same(server.sent.last?["attributes"], ["plan": "gold"]))
+        #expect(manager.attributes["plan"] as? String == "gold")
+    }
+
+    @Test("a user change that lands after the one that overtook it is not applied")
+    func lateOvertakenChangeIsNotApplied() async {
+        let manager = manager(restoredUserId: "u1")
+        manager.dropPreviousUser("u2")
+        manager.dropPreviousUser("u3")
+        await manager.onUserIdChanged("u3")
+        let before = server.sent.count
+
+        await manager.onUserIdChanged("u2")
+
+        #expect(server.sent.count == before)
+    }
+
     // dmc-case: dmc.user_context.attributes_merge_fast
     @Test("attributes merge across calls rather than replacing")
     func attributesMerge() async {

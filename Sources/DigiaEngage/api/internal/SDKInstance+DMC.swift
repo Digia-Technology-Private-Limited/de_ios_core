@@ -266,9 +266,12 @@ extension SDKInstance {
         let currentHash = identity.userHash
         // The wait opens now, before this returns, so a trigger sent in the
         // same tick is held rather than judged against the previous user.
-        if current != nil { manager.holdForRefresh() }
+        // A clear takes no hold, so it must not release one: that would end
+        // another call's wait.
+        let held = current != nil
+        if held { manager.holdForRefresh() }
         Task { @MainActor in
-            defer { manager.releaseUnusedHold() }
+            defer { if held { manager.releaseUnusedHold() } }
             await manager.onUserIdChanged(current, userHash: currentHash)
         }
     }
