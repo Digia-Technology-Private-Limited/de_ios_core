@@ -93,17 +93,26 @@ final class UserContextManager {
     var onFetchStarted: (() -> () -> Void)?
 
     /// A wait opened by ``holdForRefresh()``, taken over by the next
-    /// ``refresh(force:holdsCampaigns:)`` or released by ``releaseUnusedHold()``.
+    /// ``refresh(force:holdsCampaigns:)`` that has a user, or released by the
+    /// last ``releaseUnusedHold()``.
     private var pendingHold: (() -> Void)?
+
+    /// How many callers of ``holdForRefresh()`` have not yet released. The wait
+    /// ends only when all have, so one caller cannot end the wait another
+    /// opened for a user change still on its way.
+    private var holders = 0
 
     /// Opens the wait for gated campaigns now, ahead of the refresh that will
     /// end it, so a trigger sent before that refresh starts is still held.
     func holdForRefresh() {
+        holders += 1
         if pendingHold == nil { pendingHold = onFetchStarted?() }
     }
 
-    /// Ends a wait that no refresh took over.
+    /// Ends a wait that no refresh took over, once every holder has released.
     func releaseUnusedHold() {
+        if holders > 0 { holders -= 1 }
+        if holders > 0 { return }
         let end = pendingHold
         pendingHold = nil
         end?()
@@ -274,8 +283,10 @@ final class UserContextManager {
     /// `audienceGated` campaign wait, such as the one on return to the app.
     func refresh(force: Bool = false, holdsCampaigns: Bool = true) async {
         // A wait opened ahead of this call is ended by it, fetch or not.
-        let opened = pendingHold
-        pendingHold = nil
+        // Only a refresh that has a user can end it: without one it fetches
+        // nothing, and the wait belongs to the refresh of the user about to be set.
+        let opened = userId == nil ? nil : pendingHold
+        if opened != nil { pendingHold = nil }
         defer { opened?() }
         await refreshNow(force: force, holdsCampaigns: holdsCampaigns && opened == nil)
     }
