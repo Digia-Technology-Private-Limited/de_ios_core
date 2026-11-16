@@ -97,6 +97,20 @@ struct DMCUserContextManagerTests {
         #expect(server.sent.count == before)
     }
 
+    @Test("a logout of the same user overtaken by their login still clears the disk")
+    func overtakenLogoutClearsDisk() async {
+        let manager = manager(restoredUserId: "u1")
+        _ = manager.mergeAttributes(["a_attr": 1])
+
+        manager.dropPreviousUser(nil) // clearUserId()
+        manager.dropPreviousUser("u1") // setUserId("u1"), same tick
+        await manager.onUserIdChanged(nil)
+        await manager.onUserIdChanged("u1")
+
+        manager.configure(restoredUserId: "u1") // relaunch
+        #expect(manager.attributes["a_attr"] == nil)
+    }
+
     // dmc-case: dmc.user_context.attributes_merge_fast
     @Test("attributes merge across calls rather than replacing")
     func attributesMerge() async {
