@@ -162,12 +162,15 @@ final class AnalyticsService {
         reason: String,
         stage: String?,
         detail: [String: String]?,
+        mismatches: [[String: String]]? = nil,
         buildMode: String
     ) {
         guard config.enabled else { return }
         var properties: [String: Any] = ["reason": reason, "build_mode": buildMode]
         if let stage { properties["stage"] = stage }
         if let detail, !detail.isEmpty { properties["detail"] = detail }
+        // `variable_type_mismatch` carries structured detail of its own.
+        if let mismatches, !mismatches.isEmpty { properties["detail"] = ["mismatches": mismatches] }
         enqueue(
             eventName: HealthSink.eventName,
             campaignId: nil,

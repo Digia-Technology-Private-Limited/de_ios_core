@@ -18,6 +18,12 @@ struct VariableSchema: Equatable {
         typed(raw) ?? typed(hasFallback ? fallbackValue : nil) ?? ""
     }
 
+    /// Whether `raw` is a non-empty value that does not fit this type, so ``resolve(_:)`` skips it.
+    func misfits(_ raw: Any?) -> Bool {
+        guard let raw, !(raw is NSNull), !dartText(raw).isEmpty else { return false }
+        return typed(raw) == nil
+    }
+
     /// `value` as text of this type, or nil when it is empty or does not fit.
     private func typed(_ value: Any?) -> String? {
         guard let value, !(value is NSNull) else { return nil }

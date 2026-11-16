@@ -591,6 +591,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     reason: payload.reason,
                     stage: payload.stage,
                     detail: payload.detail,
+                    mismatches: payload.mismatches,
                     buildMode: payload.buildMode
                 )
             }
