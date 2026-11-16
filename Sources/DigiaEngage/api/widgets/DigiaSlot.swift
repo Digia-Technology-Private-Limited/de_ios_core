@@ -24,7 +24,9 @@ public struct DigiaSlot<Placeholder: View>: View {
 
     public var body: some View {
         Group {
-            if let payload = inlineController.getCampaign(placementKey) {
+            if placementKey == SDKInstance.rewardsWidgetSlotKey {
+                GameRewardsWidgetView()
+            } else if let payload = inlineController.getCampaign(placementKey) {
                 let deliveryID = payload.presentationId ?? payload.cepCampaignId
                 slotContent(for: payload)
                     .id(deliveryID)

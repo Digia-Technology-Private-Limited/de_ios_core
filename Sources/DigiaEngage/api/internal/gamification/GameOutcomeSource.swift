@@ -71,6 +71,7 @@ enum GameOutcomeError: Error, Equatable, Sendable {
 protocol GameOutcomeSource: Sendable {
     func grantChance(_ request: GrantChanceRequest) async -> GrantChanceResult
     func play(_ request: PlayRequest) async -> PlayResult
+    func getRewards() async -> Result<GameRewardsResponse, GameOutcomeError>
 }
 
 final class HttpGameOutcomeSource: GameOutcomeSource, Sendable {
@@ -165,6 +166,20 @@ final class HttpGameOutcomeSource: GameOutcomeSource, Sendable {
     }
 
     // MARK: - Envelope
+
+    /// The rewards page and widget data. Identity travels in the headers, as
+    /// on every other call; the body stays an empty object.
+    func getRewards() async -> Result<GameRewardsResponse, GameOutcomeError> {
+        switch await post(
+            urlString: DigiaEndpoints.gamificationGetRewards, body: [:],
+            headers: ["Content-Type": "application/json"])
+        {
+        case .failure(let error):
+            return .failure(error)
+        case .success(let response):
+            return .success(GameRewardsResponse.fromJson(response))
+        }
+    }
 
     private func post(
         urlString: String, body: [String: Any], headers: [String: String]

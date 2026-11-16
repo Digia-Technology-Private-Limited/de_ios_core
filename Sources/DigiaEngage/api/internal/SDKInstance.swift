@@ -2166,6 +2166,167 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         hiddenGamificationEntries.insert(payload.campaignKey)
     }
 
+    // MARK: - Gamification rewards (S6)
+
+    /// The inline slot the host app places once for the rewards widget.
+    static let rewardsWidgetSlotKey = "digia_rewards_widget"
+
+    /// The latest `getRewards` answer, driving the rewards page and widget.
+    /// Nil until the first fetch; a failed fetch keeps the previous one.
+    @Published private(set) var rewardsResponse: GameRewardsResponse?
+    /// True while the first fetch is in flight (the page shows a spinner).
+    @Published private(set) var rewardsLoading = false
+    /// Campaigns from the latest `getRewards` that are paused or ended — and
+    /// so not in the bundle. Keyed by campaign key.
+    private var rewardsCampaigns: [String: CampaignModel] = [:]
+    private var rewardsRefreshTask: Task<Void, Never>?
+
+    /// Fetches `getRewards` and stores it for the page and the widget. Calls
+    /// coalesce while one is in flight; a failure logs and keeps the last
+    /// response, so the page degrades to previous content (or the empty
+    /// message) instead of failing.
+    func refreshRewards() {
+        guard rewardsRefreshTask == nil else { return }
+        rewardsLoading = rewardsResponse == nil
+        rewardsRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.rewardsRefreshTask = nil; self.rewardsLoading = false }
+            switch await self.gameOutcomeSource.getRewards() {
+            case .success(let response):
+                self.storeRewards(response)
+            case .failure(let error):
+                log.d("Rewards fetch failed (\(error))")
+            }
+        }
+    }
+
+    /// Refreshes only when rewards were fetched before — a game close must not
+    /// pay for a fetch the app never asked for.
+    func refreshRewardsIfLoaded() {
+        guard rewardsResponse != nil else { return }
+        refreshRewards()
+    }
+
+    private func storeRewards(_ response: GameRewardsResponse) {
+        var campaigns: [String: CampaignModel] = [:]
+        for raw in response.campaigns {
+            guard let campaign = try? CampaignModel.fromJson(
+                raw, designTokens: currentDesignTokens,
+                devicePlatform: "ios", timeAnchor: currentTimeAnchor)
+            else { continue }
+            campaigns[campaign.campaignKey] = campaign
+        }
+        rewardsCampaigns = campaigns
+        rewardsResponse = response
+    }
+
+    /// The rewards page title for a chance's campaign: the bundle first, then
+    /// the paused/ended campaigns the response carried.
+    func rewardsCampaignTitle(for campaignKey: String) -> String? {
+        campaignStore.find(campaignKey)?.gamificationConfig?.rewardsPageTitle
+            ?? rewardsCampaigns[campaignKey]?.gamificationConfig?.rewardsPageTitle
+    }
+
+    /// Opens the native rewards page. The app calls this from its own button
+    /// or menu — or maps its own deep link to it (see `Digia.openRewards`) —
+    /// and the page refreshes on appear.
+    func openRewards() {
+        refreshRewards()
+        GameRewardsPresenter.presentPage()
+    }
+
+    /// Follows the widget's tap action: opens one chance the way an entry
+    /// does, or opens the rewards page.
+    func handleRewardsWidgetTap() {
+        guard let response = rewardsResponse else { refreshRewards(); return }
+        switch GameRewardsResponse.widgetTap(chances: response.chances, widget: response.widget) {
+        case .openChance(let chanceId):
+            if let chance = response.chances.first(where: { $0.chanceId == chanceId }) {
+                openGameForRewardsChance(chance)
+            }
+        case .openPage:
+            openRewards()
+        }
+    }
+
+    /// Opens the game for a rewards chance the same way an entry does, then
+    /// dismisses the page (if open) and refreshes on close.
+    func openGameForRewardsChance(_ chance: GameRewardChance) {
+        guard !GamePresenter.isBusy else { return }
+        guard let userId = services?.identityManager.userId, !userId.isEmpty else { return }
+        guard let campaign = campaignStore.find(chance.campaignKey)
+            ?? rewardsCampaigns[chance.campaignKey],
+            let config = campaign.gamificationConfig
+        else { return }
+        NotificationCenter.default.post(name: .digiaDismissRewardsPage, object: nil)
+        openRewardsGameSurface(chance: chance, config: config, campaign: campaign, userId: userId)
+    }
+
+    /// Opens a reward's CTA deep link through the host action executor.
+    func openRewardDeepLink(_ url: String, campaignKey: String?) {
+        do {
+            try hostActionExecutor.execute(.openDeeplink(url), campaignKey: campaignKey)
+        } catch {
+            log.w("Rewards deep link failed: \(error)", campaign: campaignKey)
+        }
+    }
+
+    /// Presents the game for a rewards chance: the cached skin file at once on
+    /// a hit, download-then-show on a miss, and a log on failure (the page
+    /// stays). Mirrors `openGamificationSurface` with a synthetic payload —
+    /// the coordinator has no presentation for it, so its settle calls no-op.
+    private func openRewardsGameSurface(
+        chance: GameRewardChance,
+        config: GamificationConfig,
+        campaign: CampaignModel,
+        userId: String
+    ) {
+        let campaignKey = campaign.campaignKey
+        if let file = skinFileCache.cachedFile(skinId: config.skinId, version: config.skinVersion) {
+            openRewardsGameFile(
+                file, chance: chance, config: config, campaign: campaign, userId: userId)
+            return
+        }
+        log.d(
+            "Rewards game skin cache miss — downloading before show "
+                + "(skinId=\(config.skinId), skinVersion=\(config.skinVersion))",
+            campaign: campaignKey
+        )
+        let cache = skinFileCache
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let file = try await cache.download(
+                    bundleUrl: config.bundleUrl, skinId: config.skinId, version: config.skinVersion)
+                self.openRewardsGameFile(
+                    file, chance: chance, config: config, campaign: campaign, userId: userId)
+            } catch {
+                log.w(
+                    "Rewards game not opened — skin download failed",
+                    campaign: campaignKey, error: "\(error)")
+            }
+        }
+    }
+
+    private func openRewardsGameFile(
+        _ file: URL,
+        chance: GameRewardChance,
+        config: GamificationConfig,
+        campaign: CampaignModel,
+        userId: String
+    ) {
+        let payload = CEPTriggerPayload(
+            cepCampaignId: "rewards:\(chance.chanceId)",
+            campaignKey: chance.campaignKey, cepMetadata: [:], variables: nil)
+        let request = makeGameOpenRequest(
+            file: file, chanceId: chance.chanceId, config: config, campaign: campaign,
+            payload: payload, userId: userId,
+            onClose: { [weak self] in self?.refreshRewardsIfLoaded() },
+            onFailure: nil,
+            onShown: nil)
+        GamePresenter.open(request)
+    }
+
     /// Settles one `grantChance` answer: logs, prefetches on granted, and
     /// opens on granted with show — or on any granted chance for an entry tap,
     /// where the user already asked to play. Organic direct no-shows stay
@@ -2296,14 +2457,50 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         payload: CEPTriggerPayload,
         userId: String
     ) {
-        let campaignKey = campaign.campaignKey
         let isEntryTap = config.entryKind == .inlineTeaser || config.entryKind == .floating
-        let request = GameOpenRequest(
+        let request = makeGameOpenRequest(
+            file: file,
+            chanceId: chance.chanceId,
+            config: config,
+            campaign: campaign,
+            payload: payload,
+            userId: userId,
+            onClose: { [weak self] in
+                self?.refreshRewardsIfLoaded()
+                // An entry-tap game closed without playing leaves the entry up.
+                if isEntryTap { return }
+                self?.coordinator.handle(.dismissed(reason: .userClose), payload: payload)
+            },
+            onFailure: { [weak self] _ in
+                self?.failGamificationOpen(config: config, payload: payload)
+            },
+            onShown: { [weak self] in
+                // On screen: count the impression so the acceptance watchdog stands down.
+                self?.coordinator.handle(.impressed, payload: payload)
+            })
+        GamePresenter.open(request)
+    }
+
+    /// Builds the open request for a resolved skin file: shared by entries,
+    /// direct opens and rewards chances. Only the settle closures differ.
+    private func makeGameOpenRequest(
+        file: URL,
+        chanceId: String,
+        config: GamificationConfig,
+        campaign: CampaignModel,
+        payload: CEPTriggerPayload,
+        userId: String,
+        onClose: (@MainActor () -> Void)?,
+        onFailure: (@MainActor (GameFailure) -> Void)?,
+        onShown: (@MainActor () -> Void)?
+    ) -> GameOpenRequest {
+        let campaignKey = campaign.campaignKey
+        return GameOpenRequest(
             campaignKey: campaignKey,
             campaignId: campaign.id,
             skinId: config.skinId,
             skinVersion: config.skinVersion,
-            chanceId: chance.chanceId,
+            chanceId: chanceId,
             projectId: self.config?.apiKey ?? "",
             userId: userId,
             entryFile: file,
@@ -2316,23 +2513,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     log.w("Game openLink failed: \(error)", campaign: campaignKey)
                 }
             },
-            onClose: { [weak self] in
-                // An entry-tap game closed without playing leaves the entry up.
-                if isEntryTap { return }
-                self?.coordinator.handle(.dismissed(reason: .userClose), payload: payload)
-            },
-            onFailure: { [weak self] _ in
-                self?.failGamificationOpen(config: config, payload: payload)
-            },
-            onShown: { [weak self] in
-                // On screen: count the impression so the acceptance watchdog stands down.
-                self?.coordinator.handle(.impressed, payload: payload)
-            },
+            onClose: onClose,
+            onFailure: onFailure,
+            onShown: onShown,
             payload: payload,
             values: config.values,
             slots: config.usesSlots ? config.slots : []
         )
-        GamePresenter.open(request)
     }
 
     /// Handles one `campaign_test` SSE event.
@@ -3988,6 +4175,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         liveTestService.ackReporter.resetForTesting()
         config = nil
         hostActionExecutor.clearHandlers()
+        rewardsResponse = nil
+        rewardsLoading = false
+        rewardsCampaigns.removeAll()
+        rewardsRefreshTask?.cancel()
+        rewardsRefreshTask = nil
         sdkState = .notInitialized
         isHostMounted = false
         font = DigiaFont()

@@ -35,6 +35,8 @@ struct GamificationConfig: Equatable {
     let entryKind: GamificationEntryKind
     /// The entry canvas for `inlineTeaser` / `floating`; nil for `direct`.
     let entryCanvas: GamificationEntryCanvas?
+    /// The rewards page title for this campaign's chances.
+    let rewardsPageTitle: String?
     let showMute: Bool
     let bundleUrl: String
     let sensors: [GamificationSkinSensor]
@@ -147,6 +149,8 @@ struct GamificationConfig: Equatable {
             entryKind: entryKind,
             entryCanvas: entryCanvas,
             showMute: surface?.bool("showMute", default: false) ?? false,
+            rewardsPageTitle: templateConfig.nonBlankString("rewardsPageTitle")
+                ?? campaignLevel?.nonBlankString("rewardsPageTitle"),
             bundleUrl: bundleUrl,
             sensors: sensors,
             minSdkVersion: minSdkVersionIos(templateConfig: templateConfig),
