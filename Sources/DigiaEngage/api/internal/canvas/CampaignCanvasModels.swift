@@ -202,7 +202,7 @@ enum CampaignCanvasWidget: Equatable, Sendable {
         cornerRadius: CampaignCanvasCornerRadius, animateOnAppear: CampaignCanvasAppearAnimation
     )
     case lottie(box: CampaignCanvasBox, source: CampaignCanvasMediaSource, autoplay: Bool, loop: Bool, fit: String)
-    case video(box: CampaignCanvasBox, source: CampaignCanvasMediaSource, autoplay: Bool, loop: Bool, muted: Bool, showControls: Bool, fit: String)
+    case video(box: CampaignCanvasBox, source: CampaignCanvasMediaSource, autoplay: Bool, loop: Bool, muted: Bool, showControls: Bool, fit: String, poster: VideoPoster? = nil)
     case container(fill: CampaignCanvasPaint, cornerRadius: CampaignCanvasCornerRadius, border: CampaignCanvasBorder?, shadow: CampaignCanvasShadow?)
     case divider(box: CampaignCanvasBox, axis: CampaignCanvasDividerAxis, pattern: CampaignCanvasDividerPattern, strokeCap: CampaignCanvasStrokeCap, inset: CGFloat, dashPattern: [CGFloat], color: CampaignColor)
     /// A swipeable strip of nested Canvases, as one widget on a Canvas.
@@ -267,7 +267,7 @@ enum CampaignCanvasWidget: Equatable, Sendable {
         case .text(let box, _, _), .image(let box, _, _, _, _, _, _),
              .button(let box, _, _, _, _, _, _, _, _, _),
              .progress(let box, _, _, _, _, _, _, _, _, _),
-             .lottie(let box, _, _, _, _), .video(let box, _, _, _, _, _, _),
+             .lottie(let box, _, _, _, _), .video(let box, _, _, _, _, _, _, _),
              .divider(let box, _, _, _, _, _, _),
              .carousel(let box, _, _, _, _, _, _, _, _, _, _, _, _, _, _, _),
              .story(let box, _, _, _, _, _, _, _, _),
@@ -311,7 +311,7 @@ enum CampaignCanvasChild: Equatable, Identifiable, Sendable {
             block.spans.contains { !$0.actions.isEmpty }
         case .widget(_, _, .button(_, let label, _, _, _, _, _, _, let actions, _)):
             !actions.isEmpty || label.spans.contains { !$0.actions.isEmpty }
-        case .widget(_, _, .video(_, _, _, _, _, let showControls, _)):
+        case .widget(_, _, .video(_, _, _, _, _, let showControls, _, _)):
             showControls
         default: false
         }

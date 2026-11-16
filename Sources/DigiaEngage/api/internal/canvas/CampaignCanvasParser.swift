@@ -534,7 +534,7 @@ struct CampaignCanvasParser {
     }
 
     private func parseVideo(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget {
-        .video(box: box, source: parseMediaSource(props["source"]), autoplay: props["autoplay"] as? Bool ?? false, loop: props["loop"] as? Bool ?? false, muted: props["muted"] as? Bool ?? false, showControls: props["showControls"] as? Bool ?? true, fit: (props["fit"] as? String) == "contain" ? "contain" : "cover")
+        .video(box: box, source: parseMediaSource(props["source"]), autoplay: props["autoplay"] as? Bool ?? false, loop: props["loop"] as? Bool ?? false, muted: props["muted"] as? Bool ?? false, showControls: props["showControls"] as? Bool ?? true, fit: (props["fit"] as? String) == "contain" ? "contain" : "cover", poster: VideoPoster.from(propertyObject(props["poster"])))
     }
 
     private func parseContainer(_ box: CampaignCanvasBox, _ props: [String: Any]) throws -> CampaignCanvasWidget {
