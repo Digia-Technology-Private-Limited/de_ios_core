@@ -88,6 +88,10 @@ final class UserContextManager {
     private let networkClient: any NetworkClient
     private let nowMs: () -> Int64
 
+    /// Called when a refresh that holds gated campaigns starts its request; the
+    /// closure it returns is called when that request ends, however it ends.
+    var onFetchStarted: (() -> () -> Void)?
+
     private var userId: String?
     /// Host-issued proof of `userId`.
     private var userHash: String?
@@ -232,7 +236,10 @@ final class UserContextManager {
     /// Fetches the context, skipping the call when there is nothing to learn:
     /// a user whose attributes have not changed and whose cached context is
     /// still valid makes no request.
-    func refresh(force: Bool = false) async {
+    ///
+    /// `holdsCampaigns` is false for a refresh that must not make an
+    /// `audienceGated` campaign wait, such as the one on return to the app.
+    func refresh(force: Bool = false, holdsCampaigns: Bool = true) async {
         guard configured, let userId, let url = URL(string: DigiaEndpoints.userContext) else { return }
 
         let hash = fingerprint(attributes)
@@ -246,6 +253,8 @@ final class UserContextManager {
         if attributesChanged || force { body["attributes"] = attributes }
         if let userHash { body["userHash"] = userHash }
 
+        let fetchEnded = holdsCampaigns ? onFetchStarted?() : nil
+        defer { fetchEnded?() }
         do {
             let request = NetworkRequest(
                 url: url,

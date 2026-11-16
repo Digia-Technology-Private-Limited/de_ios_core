@@ -44,6 +44,18 @@ final class DecisionEngine {
             send: { signal, ageMs in bus.send(signal, ageMs: ageMs) }, nowMs: nowMs)
     }()
 
+    /// Closed while a user-context fetch is in flight: only `audienceGated`
+    /// campaigns wait for it, so only their signals are held here.
+    private lazy var contextGate: SignalGate = {
+        let bus = SignalBus { [weak self] signal, ageMs in
+            try self?.evaluateGated(signal, ageMs: ageMs)
+        }
+        let gate = SignalGate(
+            send: { signal, ageMs in bus.send(signal, ageMs: ageMs) }, nowMs: nowMs)
+        gate.open()
+        return gate
+    }()
+
     /// Reports each unusable rule once per session, not on every signal.
     private var reportedRuleFailures: Set<String> = []
     private var reportedDefaultPriority: Set<String> = []
@@ -61,7 +73,8 @@ final class DecisionEngine {
 
     var isReady: Bool { gate.isOpen }
 
-    /// The campaigns and user context are loaded: replays the held signals.
+    /// The campaigns are loaded: replays the held signals. The user context is
+    /// not waited for; see ``holdForContext()``.
     func ready() {
         gate.open()
     }
@@ -69,11 +82,27 @@ final class DecisionEngine {
     /// Loading failed or the SDK was reset: drops what was held and holds again.
     func close() {
         gate.close()
+        contextGate.dropHeld()
+        contextGate.open()
+    }
+
+    /// A user-context fetch starts: an `audienceGated` campaign waits for it,
+    /// every other campaign is decided at once. A second fetch while one is in
+    /// flight keeps what is already held.
+    func holdForContext() {
+        if contextGate.isOpen { contextGate.close() }
+    }
+
+    /// The fetch ended, or failed: replays the signals held for gated
+    /// campaigns against the context now held.
+    func contextSettled() {
+        contextGate.open()
     }
 
     /// The app went to the background before ready: drops what was held.
     func dropHeld() {
         gate.dropHeld()
+        contextGate.dropHeld()
     }
 
     /// The app left the screen: waits keep counting but do not fire.
@@ -92,8 +121,25 @@ final class DecisionEngine {
         guard facts.ready, gate.isOpen else { return }
         // Cancels first, so the signal that starts a wait cannot also end it.
         cancelWaits(signal)
+        var candidates = facts.listeningTo(signal)
+        if !contextGate.isOpen {
+            // Gated campaigns decide when the context arrives; the rest do not wait.
+            if candidates.contains(where: \.audienceGated) { contextGate.send(signal) }
+            candidates = candidates.filter { !$0.audienceGated }
+        }
+        try decide(signal, ageMs: ageMs, candidates: candidates)
+    }
+
+    /// A signal held for the user context, now that it is here: decides the
+    /// gated campaigns only. The others were decided when it arrived.
+    private func evaluateGated(_ signal: RuleSignal, ageMs: Int) throws {
+        guard facts.ready, gate.isOpen else { return }
+        try decide(signal, ageMs: ageMs, candidates: facts.listeningTo(signal).filter(\.audienceGated))
+    }
+
+    private func decide(_ signal: RuleSignal, ageMs: Int, candidates: [CampaignModel]) throws {
         let decision = pickCampaign(
-            facts.listeningTo(signal),
+            candidates,
             signal: signal,
             attributes: facts.attributes,
             device: facts.device,
@@ -245,6 +291,7 @@ final class DecisionEngine {
         reportedRuleFailures.removeAll()
         reportedDefaultPriority.removeAll()
         gate.dropHeld()
+        contextGate.dropHeld()
         for pending in waits.cancelAll() {
             logWaitCancelled(pending, cause: .sessionEnded)
         }

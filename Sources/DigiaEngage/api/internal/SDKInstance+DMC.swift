@@ -158,8 +158,8 @@ extension SDKInstance {
         engine.send(.appOpened)
     }
 
-    /// Loads the user context, and only then lets held signals through: no
-    /// rule sees an empty context.
+    /// Lets held signals through, then loads the user context: ready never
+    /// waits for it, only a campaign gated on the audience does.
     func openDecisionEngine(generation: Int) async {
         guard let services, initGeneration == generation else { return }
         let manager = services.userContextManager
@@ -167,9 +167,28 @@ extension SDKInstance {
             restoredUserId: services.identityManager.userId,
             restoredUserHash: services.identityManager.userHash
         )
-        await manager.refresh()
-        guard self.services === services, initGeneration == generation else { return }
+        manager.onFetchStarted = { [weak self] in
+            self?.holdGatedCampaigns(services, generation: generation) ?? {}
+        }
+        let launchContextEnded = holdGatedCampaigns(services, generation: generation)
         engine.ready()
+        await manager.refresh()
+        launchContextEnded()
+    }
+
+    /// Starts a wait for the user context: gated campaigns are held. The
+    /// closure returned ends it, and releases them only if it is still the
+    /// latest wait of the current SDK instance.
+    private func holdGatedCampaigns(_ services: SDKServices, generation: Int) -> () -> Void {
+        contextWaitId &+= 1
+        let id = contextWaitId
+        engine.holdForContext()
+        return { [weak self] in
+            guard let self, self.services === services, self.initGeneration == generation,
+                self.contextWaitId == id
+            else { return }
+            self.engine.contextSettled()
+        }
     }
 
     // MARK: Lifecycle
@@ -201,7 +220,7 @@ extension SDKInstance {
         // Always ask: the manager skips the call unless the context expired or
         // the user's attributes changed since the last send.
         if let manager = services?.userContextManager {
-            Task { @MainActor in await manager.refresh() }
+            Task { @MainActor in await manager.refresh(holdsCampaigns: false) }
         }
     }
 
