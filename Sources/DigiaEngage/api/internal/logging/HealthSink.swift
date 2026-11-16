@@ -21,6 +21,11 @@ struct HealthEventPayload: Sendable {
     /// when the reason carries none.
     let detail: [String: String]?
 
+    /// `variable_type_mismatch` only: `{name, expected, sample}` per variable
+    /// whose CEP value did not fit its declared type, sent as
+    /// `detail.mismatches`.
+    var mismatches: [[String: String]]? = nil
+
     /// `"debug"` or `"release"`, stamped once at ``HealthSink/activate(_:)``.
     let buildMode: String
 }
@@ -272,6 +277,39 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         )
         let reporter = report
         // Pending mode (SP10): no reporter yet, so hold it for `activate`.
+        if reporter == nil { queued.append(payload) }
+        lock.unlock()
+
+        reporter?(payload)
+    }
+
+    /// Reports `variable_type_mismatch`: a CEP value that did not fit its
+    /// declared variable type, `mismatches` being `{name, expected, sample}`
+    /// entries already capped by the caller.
+    ///
+    /// Not routed through ``emit(_:)``: its detail is structured, and `sample`
+    /// is a raw CEP value, which ``HealthReasons/detailKeys`` otherwise never
+    /// lets out. Same brakes as every health event; dedup is per campaign and
+    /// variable set, so a different variable failing later sends a new event.
+    func reportVariableTypeMismatch(campaignKey: String, mismatches: [[String: String]]) {
+        guard !Self.muted else { return }
+        let key = "variable_type_mismatch|\(campaignKey)|"
+            + mismatches.map { $0["name"] ?? "" }.sorted().joined(separator: ",")
+        lock.lock()
+        guard registered, !killed, sent < cap, seen.insert(key).inserted else {
+            lock.unlock()
+            return
+        }
+        sent += 1
+        let payload = HealthEventPayload(
+            campaignKey: campaignKey,
+            reason: "variable_type_mismatch",
+            stage: "render",
+            detail: nil,
+            mismatches: mismatches,
+            buildMode: buildMode
+        )
+        let reporter = report
         if reporter == nil { queued.append(payload) }
         lock.unlock()
 

@@ -273,4 +273,100 @@ struct DMCContextVariableSchemaTests {
     func emptyFallbackNoReport() {
         #expect(!reported(normalizeVariable(name: "name", type: nil, fallbackValue: "", sampleValue: nil), [:]))
     }
+
+    // MARK: typed CEP values and the variable_type_mismatch health event
+
+    private func slot(_ name: String, _ type: String, _ fallback: String = "FB") -> VariableSchema {
+        VariableSchema(name: name, type: type, fallbackValue: fallback)
+    }
+
+    private var mismatchSchemas: [VariableSchema] {
+        [
+            slot("s_num", "string"), slot("s_bool", "string"), slot("s_text", "string"),
+            slot("n_int", "number", "7"), slot("n_pad", "number", "7"), slot("n_sym", "number", "7"),
+            slot("n_comma", "number", "7"), slot("n_bool", "number", "7"), slot("n_long", "number", "7"),
+            slot("b_upper", "bool", "false"), slot("b_false", "bool", "true"), slot("b_yes", "bool", "false"), slot("b_one", "bool", "false"),
+            slot("price", "number", "999"),
+        ]
+    }
+
+    // CEP payload values reach iOS as strings.
+    private let mismatchCep: [String: String] = [
+        "s_num": "499", "s_bool": "true", "s_text": "₹499",
+        "n_int": "499", "n_pad": " 499.00 ", "n_sym": "₹499", "n_comma": "1,299",
+        "n_bool": "true", "n_long": String(repeating: "x", count: 40),
+        "b_upper": "TRUE", "b_false": "false", "b_yes": "yes", "b_one": "1",
+        "price": "₹499",
+    ]
+
+    private final class Recorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: [HealthEventPayload] = []
+        var payloads: [HealthEventPayload] { lock.withLock { stored } }
+        func capture(_ payload: HealthEventPayload) { lock.withLock { stored.append(payload) } }
+    }
+
+    private func activatedSink() -> (HealthSink, Recorder) {
+        let sink = HealthSink()
+        let recorder = Recorder()
+        sink.beginPending()
+        sink.activate { recorder.capture($0) }
+        return (sink, recorder)
+    }
+
+    private func report(_ cep: [String: String], _ sink: HealthSink, campaign: String = "cmp_123") {
+        reportVariableTypeMismatches(
+            mismatchSchemas,
+            payload: CEPTriggerPayload(cepCampaignId: "c", campaignKey: campaign, cepMetadata: [:], variables: cep),
+            sink: sink)
+    }
+
+    @Test("each slot shows its converted value or its fallback")
+    func typedSlotsRender() {
+        let ctx = scope(mismatchSchemas, mismatchCep)
+        func r(_ name: String) -> String { interpolate("{{ \(name) }}", context: ctx) }
+        #expect([r("s_num"), r("s_bool"), r("s_text")] == ["499", "true", "₹499"])
+        #expect([r("n_int"), r("n_pad")] == ["499", "499"])
+        #expect([r("n_sym"), r("n_comma"), r("n_bool"), r("n_long")] == Array(repeating: "7", count: 4))
+        #expect([r("b_upper"), r("b_false")] == ["true", "false"])
+        #expect([r("b_yes"), r("b_one")] == ["false", "false"])
+        #expect(interpolate("{{ price * 2 }}", context: ctx) == "1998")
+    }
+
+    @Test("one event per campaign names only the failed variables")
+    func oneEventNamesFailures() {
+        let (sink, recorder) = activatedSink()
+        report(mismatchCep, sink)
+        report(mismatchCep, sink)
+
+        #expect(recorder.payloads.count == 1)
+        let payload = recorder.payloads[0]
+        #expect(payload.campaignKey == "cmp_123")
+        #expect(payload.reason == "variable_type_mismatch")
+        let mismatches = payload.mismatches ?? []
+        #expect(mismatches.map { $0["name"] } == ["n_sym", "n_comma", "n_bool", "n_long", "b_yes", "b_one", "price"])
+        #expect(mismatches[0] == ["name": "n_sym", "expected": "number", "sample": "₹499"])
+        #expect(mismatches[3]["sample"] == String(repeating: "x", count: 32))
+    }
+
+    @Test("a different failing variable later sends a new event")
+    func newVariableNewEvent() {
+        let (sink, recorder) = activatedSink()
+        report(mismatchCep, sink)
+        report(mismatchCep.merging(["n_int": "abc"]) { _, new in new }, sink)
+        #expect(recorder.payloads.count == 2)
+    }
+
+    @Test("at most 10 entries")
+    func capsEntries() {
+        let (sink, recorder) = activatedSink()
+        let many = (0..<12).map { slot("v\($0)", "number") }
+        reportVariableTypeMismatches(
+            many,
+            payload: CEPTriggerPayload(
+                cepCampaignId: "c", campaignKey: "cmp_9", cepMetadata: [:],
+                variables: Dictionary(uniqueKeysWithValues: many.map { ($0.name, "bad") })),
+            sink: sink)
+        #expect(recorder.payloads.first?.mismatches?.count == 10)
+    }
 }

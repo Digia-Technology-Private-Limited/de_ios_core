@@ -103,6 +103,7 @@ struct TimelineWireStringsTests {
                 "fetch_failed_auth",
                 "invalid_config",
                 "missing_variable",
+                "variable_type_mismatch",
                 "not_ready",
                 "initialization_failed",
                 "surface_busy",
