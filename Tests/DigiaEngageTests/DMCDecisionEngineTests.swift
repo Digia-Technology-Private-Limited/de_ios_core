@@ -181,6 +181,35 @@ struct DMCDecisionEngineTests {
         #expect(recorder.payloads.first?.detail == ["signal": "event:cart_landed"])
     }
 
+    @Test("a signal held for the user context past the hold limit is dropped and sends one health event")
+    func contextHeldExpiredSignalSendsOneHealthEvent() {
+        defer { finish() }
+        final class Recorder: @unchecked Sendable {
+            private let lock = NSLock()
+            private var stored: [HealthEventPayload] = []
+            var payloads: [HealthEventPayload] { lock.withLock { stored } }
+            func capture(_ payload: HealthEventPayload) { lock.withLock { stored.append(payload) } }
+        }
+        let health = HealthSink()
+        let recorder = Recorder()
+        health.beginPending()
+        health.activate { recorder.capture($0) }
+        defer { health.resetForTest() }
+        facts.add(Self.campaign("cart_tip", gated: true))
+        facts.ready = true
+        engine.ready()
+
+        engine.holdForContext()
+        engine.send(.event("cart_landed", [:]))
+        clock.now += SignalGate.maxHoldMs + 1
+        engine.contextSettled()
+
+        #expect(routedKeys.isEmpty)
+        #expect(recorder.payloads.count == 1)
+        #expect(recorder.payloads.first?.reason == "gated_trigger_expired")
+        #expect(recorder.payloads.first?.detail == ["signal": "event:cart_landed"])
+    }
+
     // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
     @Test("signals are dropped when the app backgrounds before ready")
     func droppedOnBackground() {
@@ -664,11 +693,12 @@ struct DMCDecisionEngineTests {
         conditions: Any? = nil,
         waitMs: Int? = nil,
         cancels: [[String: Any]]? = nil,
-        frequency: [String: Any]? = nil
+        frequency: [String: Any]? = nil,
+        gated: Bool = false
     ) -> CampaignModel {
         try! CampaignModel.fromJson(
             json(
-                key, priority: priority,
+                key, priority: priority, gated: gated,
                 triggers: triggers ?? (screen.map { [["type": "screen_viewed", "names": [$0]]] } ?? cartLanded),
                 conditions: conditions, waitMs: waitMs, cancels: cancels, frequency: frequency))!
     }
@@ -724,6 +754,7 @@ struct DMCDecisionEngineTests {
     private static func json(
         _ key: String,
         priority: Any?,
+        gated: Bool = false,
         slot: String? = nil,
         triggers: [[String: Any]]? = nil,
         conditions: Any? = nil,
@@ -764,6 +795,7 @@ struct DMCDecisionEngineTests {
             "templateConfig": template,
         ]
         if let frequency { out["frequency"] = frequency }
+        if gated { out["audienceGated"] = true }
         return out
     }
 }

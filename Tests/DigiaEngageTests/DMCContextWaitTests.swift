@@ -244,6 +244,42 @@ struct DMCContextWaitTests {
         try await Self.until { shown(world.sdk) == "gated" }
     }
 
+    @Test("12. setUserId then setUserAttributes in one tick still holds for B")
+    func sameTickLoginThenAttributesIsHeld() async throws {
+        let world = try await Self.launch([Self.nudge("gated", 100, Self.event("login_success"), gated: true)])
+        defer { DigiaLogger.unregisterSink(world.sink) }
+        world.network.release(0, campaigns: [])
+        try await Self.settle()
+
+        world.sdk.setUserId("B")
+        await world.sdk.setUserAttributes(["plan": "gold"])
+        world.sdk.trackEvent("login_success")
+        try await Self.settle()
+        #expect(!logged(world, "gated", .notInAudience))
+        #expect(shown(world.sdk) == nil)
+
+        try await Self.until { world.network.requestCount >= 2 }
+        world.network.release(1, campaigns: ["gated"])
+        try await Self.until { shown(world.sdk) == "gated" }
+    }
+
+    @Test("13. a trigger sent in the same tick as an attribute change is held")
+    func sameTickAttributesAreHeld() async throws {
+        let world = try await Self.launch([Self.nudge("gated", 100, Self.event("login_success"), gated: true)])
+        defer { DigiaLogger.unregisterSink(world.sink) }
+        world.network.release(0, campaigns: [])
+        try await Self.settle()
+
+        world.sdk.setUserAttributesNow(["plan": "gold"])
+        world.sdk.trackEvent("login_success")
+        #expect(!logged(world, "gated", .notInAudience))
+        #expect(shown(world.sdk) == nil)
+
+        try await Self.until { world.network.requestCount == 2 }
+        world.network.release(1, campaigns: ["gated"])
+        try await Self.until { shown(world.sdk) == "gated" }
+    }
+
     // dmc-case: dmc.context.first_ready_wins
     @Test("8. first ready wins: the ungated campaign takes the slot")
     func firstReadyWins() async throws {
