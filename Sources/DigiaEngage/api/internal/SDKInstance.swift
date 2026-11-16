@@ -2358,6 +2358,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 "Gamification chance not granted (reason=\(reason ?? "held_out"))",
                 campaign: campaignKey
             )
+            // The chance was already played: hide the entry for the rest of
+            // the session, so a re-trigger does not render a dead teaser or
+            // window for a chance that can never open again.
+            if reason == "alreadyPlayed" {
+                hiddenGamificationEntries.insert(campaignKey)
+            }
             liveTestContexts[cepCampaignId]?.reportFailed(
                 DropReason.error,
                 message: "chance not granted (\(reason ?? "no reason"))"
