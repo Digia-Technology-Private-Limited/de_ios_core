@@ -145,9 +145,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// The capture toggles `SDKInstance` itself persists.
     private let captureStorage: LocalStorage
     let networkClient: any NetworkClient
+    /// Gamification skin files, cached immutable by skin id + version.
+    private let skinFileCache = SkinFileCache()
     /// Gamification backend calls (`grantChance`, `play`). Wraps the same
     /// client so tests drive it through `MockNetworkClient` with no second seam.
     let gameOutcomeSource: any GameOutcomeSource
+
     /// Where `networkClient` reads `X-Digia-Session-Id` from, per request.
     private let currentSession = CurrentSessionRef()
     let campaignStore: CampaignStore
@@ -388,6 +391,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             networkMonitor: makeNetworkMonitor()
         )
         self.services = services
+        // Skin storage is namespaced by user: a change must not leave the old
+        // user's values behind for the next one to inherit.
+        services.identityManager.addUserChangedListener { [defaults = self.defaults] in
+            GameSkinStorage.clearAll(defaults: defaults)
+        }
         currentSession.set(services.sessionManager, identity: services.identityManager, requestHeaders: services.requestHeaders)
         // The startup session is reported before the buffered user change
         // below can rotate it.
@@ -595,6 +603,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     private func completeInitialization(_ campaigns: [CampaignModel]) {
         campaignStore.populate(campaigns)
+        prefetchGamificationSkins(campaigns)
         if campaignStore.isEmpty {
             // The most common answer to "my campaign never showed": it is not
             // live. A success with nothing in it is not a failure, and reads
@@ -661,6 +670,18 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 }
             )
         }
+    }
+
+    /// Prefetches every gamification skin on campaign sync, so a later show
+    /// usually hits the cache. Fire-and-forget: failures drop and retry at
+    /// the next sync or grant.
+    private func prefetchGamificationSkins(_ campaigns: [CampaignModel]) {
+        let skins = campaigns.compactMap(\.gamificationConfig).map {
+            (bundleUrl: $0.bundleUrl, skinId: $0.skinId, version: $0.skinVersion)
+        }
+        guard !skins.isEmpty else { return }
+        let cache = skinFileCache
+        Task { await cache.prefetch(skins) }
     }
 
     /// Retired RN entrypoint, kept only so an older `@digia-engage/core` bundle running
@@ -2027,12 +2048,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         )
         logVerbose("routeByCampaignKey GAMIFICATION key='\(key)' triggerId='\(triggerId)'")
         let source = gameOutcomeSource
-        let cepCampaignId = payload.cepCampaignId
         Task { @MainActor [weak self] in
             guard let self else { return }
             let result = await source.grantChance(request)
             self.handleGamificationGrant(
-                result, campaignKey: key, cepCampaignId: cepCampaignId, config: config,
+                result, campaign: campaign, config: config,
                 payload: payload, userId: userId)
         }
         return .accepted(payload: payload, kind: .modal)
@@ -2102,7 +2122,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// before playing reuses the unplayed one) and opens the game surface.
     /// Anywhere but a gamification campaign this is a no-op.
     func openGame(forPayload payload: CEPTriggerPayload) {
-        guard let config = findCampaign(payload)?.gamificationConfig else {
+        guard let campaign = findCampaign(payload),
+              let config = campaign.gamificationConfig
+        else {
             log.d("Action.openGame ignored — not a gamification campaign", campaign: payload.campaignKey)
             return
         }
@@ -2127,12 +2149,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             deviceId: isLiveTest ? services?.identityManager.deviceId : nil
         )
         let source = gameOutcomeSource
-        let cepCampaignId = payload.cepCampaignId
         Task { @MainActor [weak self] in
             guard let self else { return }
             let result = await source.grantChance(request)
             self.handleGamificationGrant(
-                result, campaignKey: key, cepCampaignId: cepCampaignId, config: config,
+                result, campaign: campaign, config: config,
                 payload: payload, userId: userId)
         }
     }
@@ -2149,12 +2170,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// acceptance watchdog; a live test is answered at once.
     private func handleGamificationGrant(
         _ result: GrantChanceResult,
-        campaignKey: String,
-        cepCampaignId: String,
+        campaign: CampaignModel,
         config: GamificationConfig,
         payload: CEPTriggerPayload,
         userId: String
     ) {
+        let campaignKey = campaign.campaignKey
+        let cepCampaignId = payload.cepCampaignId
         switch result {
         case .granted(let chance):
             log.d(
@@ -2164,8 +2186,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             prefetchGamificationBundle(config, campaignKey: campaignKey)
             if chance.show {
                 openGamificationSurface(
-                    chance: chance, config: config, campaignKey: campaignKey,
-                    cepCampaignId: cepCampaignId, payload: payload, userId: userId)
+                    chance: chance, config: config, campaign: campaign,
+                    payload: payload, userId: userId)
             }
         case .denied(let reason):
             log.d(
@@ -2184,84 +2206,121 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
-    /// Prefetch hook: downloads the skin bundle when granted. No-op until T11.
+    /// Prefetches the skin bundle when a chance is granted, so the show that
+    /// follows usually hits the cache.
     private func prefetchGamificationBundle(_ config: GamificationConfig, campaignKey: String) {
         log.d(
-            "Gamification prefetch hook (skinId=\(config.skinId), skinVersion=\(config.skinVersion))",
+            "Gamification prefetch (skinId=\(config.skinId), skinVersion=\(config.skinVersion))",
             campaign: campaignKey
         )
+        let cache = skinFileCache
+        let skin = (bundleUrl: config.bundleUrl, skinId: config.skinId, version: config.skinVersion)
+        Task { await cache.prefetch([skin]) }
     }
 
-    /// A committed play uses the chance up: the entry that led to it goes away
-    /// for the session. A direct entry has none.
-    private func removeGamificationEntry(config: GamificationConfig, payload: CEPTriggerPayload) {
-        let key = payload.campaignKey
-        switch config.entryCanvas {
-        case .inline(let cfg)?:
-            hiddenGamificationEntries.insert(key)
-            if inlineController.getCampaign(cfg.slotKey) == payload {
-                inlineController.dismissCampaign(cfg.slotKey, reason: .userClose)
-            }
-        case .floating?:
-            hiddenGamificationEntries.insert(key)
-            if floaterStoryOrchestrator.state?.payload.campaignKey == key {
-                floaterStoryOrchestrator.dismiss(.userClose)
-            }
-        case nil:
-            break
-        }
-    }
-
-    /// Presents the game for a granted chance with show: builds the open
-    /// request from the campaign config, plays through the outcome source, and
-    /// reports the impression once the container is up and dismissals after.
+    /// Presents the game for a granted chance with show: opens the cached skin
+    /// file at once on a hit, downloads-then-shows on a miss, and skips the
+    /// show (log + settle, never a crash) when the download fails. The
+    /// impression lands once the container is up, dismissals after.
     private func openGamificationSurface(
         chance: GrantedChance,
         config: GamificationConfig,
-        campaignKey: String,
-        cepCampaignId: String,
+        campaign: CampaignModel,
         payload: CEPTriggerPayload,
         userId: String
     ) {
-        guard let entry = URL(string: config.bundleUrl) else { return }
-        let source = gameOutcomeSource
+        let campaignKey = campaign.campaignKey
+        if let file = skinFileCache.cachedFile(skinId: config.skinId, version: config.skinVersion) {
+            openGameFile(
+                file, chance: chance, config: config, campaign: campaign,
+                payload: payload, userId: userId)
+            return
+        }
+        log.d(
+            "Gamification skin cache miss — downloading before show "
+                + "(skinId=\(config.skinId), skinVersion=\(config.skinVersion))",
+            campaign: campaignKey
+        )
+        let cache = skinFileCache
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let file = try await cache.download(
+                    bundleUrl: config.bundleUrl, skinId: config.skinId, version: config.skinVersion)
+                self.openGameFile(
+                    file, chance: chance, config: config, campaign: campaign,
+                    payload: payload, userId: userId)
+            } catch {
+                log.w("Game not opened — skin download failed", campaign: campaignKey, error: "\(error)")
+                self.failGamificationOpen(config: config, payload: payload)
+            }
+        }
+    }
+
+    /// Forwards one skin `event` to Digia analytics with the chance, skin,
+    /// and skin-version identity attached. A live test's payload suppresses
+    /// it, like every other analytics event.
+    func reportGameSkinEvent(
+        name: String,
+        properties: [String: Any],
+        payload: CEPTriggerPayload,
+        skinId: String,
+        skinVersion: Int,
+        chanceId: String
+    ) {
+        events.toDigia(
+            GameSkinEvent(
+                name: name, skinId: skinId, skinVersion: skinVersion,
+                chanceId: chanceId, props: properties),
+            payload: payload)
+    }
+
+    /// Settles a game that never opened (download or bundle failure): entry
+    /// taps leave their canvas up, direct entries dismiss so the acceptance
+    /// watchdog stands down.
+    private func failGamificationOpen(config: GamificationConfig, payload: CEPTriggerPayload) {
+        guard config.entryKind != .inlineTeaser, config.entryKind != .floating else { return }
+        coordinator.handle(.dismissed(reason: .autoTimeout), payload: payload)
+    }
+
+    /// Builds the open request for a resolved skin file and hands it to the
+    /// presenter.
+    private func openGameFile(
+        _ file: URL,
+        chance: GrantedChance,
+        config: GamificationConfig,
+        campaign: CampaignModel,
+        payload: CEPTriggerPayload,
+        userId: String
+    ) {
+        let campaignKey = campaign.campaignKey
         let isEntryTap = config.entryKind == .inlineTeaser || config.entryKind == .floating
-        // An extra-play outcome hands over `nextChance`; `playNext` spends it.
-        var chanceId = chance.chanceId
         let request = GameOpenRequest(
             campaignKey: campaignKey,
-            source: .remoteEntry(entry),
+            campaignId: campaign.id,
+            skinId: config.skinId,
+            skinVersion: config.skinVersion,
+            chanceId: chance.chanceId,
+            projectId: self.config?.apiKey ?? "",
+            userId: userId,
+            entryFile: file,
+            bundleRoot: file.deletingLastPathComponent(),
             showMute: config.showMute,
             onClose: { [weak self] in
-                // An entry-tap game closed before play leaves the entry up.
+                // An entry-tap game closed without playing leaves the entry up.
                 if isEntryTap { return }
                 self?.coordinator.handle(.dismissed(reason: .userClose), payload: payload)
             },
-            onPlayCommitted: { [weak self] in
-                self?.removeGamificationEntry(config: config, payload: payload)
-            },
             onFailure: { [weak self] _ in
-                if isEntryTap { return }
-                self?.coordinator.handle(.dismissed(reason: .autoTimeout), payload: payload)
+                self?.failGamificationOpen(config: config, payload: payload)
             },
             onShown: { [weak self] in
                 // On screen: count the impression so the acceptance watchdog stands down.
                 self?.coordinator.handle(.impressed, payload: payload)
             },
+            payload: payload,
             values: config.values,
-            slots: config.usesSlots ? config.slots : [],
-            sensors: config.sensors.map(\.rawValue),
-            rewardCtaTexts: config.rewardCtaTexts,
-            play: { playId in
-                let result = await source.play(
-                    PlayRequest(
-                        chanceId: chanceId, userId: userId, userHash: nil, playId: playId))
-                if case .outcome(let outcome) = result,
-                   case .string(let next)? = outcome.nextChance?["chanceId"], !next.isEmpty {
-                    chanceId = next
-                }
-                return result
-            }
+            slots: config.usesSlots ? config.slots : []
         )
         GamePresenter.open(request)
     }

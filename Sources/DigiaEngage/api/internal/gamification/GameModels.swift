@@ -1,9 +1,6 @@
 import Foundation
 import UIKit
 
-/// The SDK's one logging style — see ``DigiaLogger``.
-private let log = DigiaLogger()
-
 /// `safeArea` sent in `init`, in CSS px (== points). The game is always full
 /// screen, so it reports the system insets — the skin pads itself and never
 /// reads `env()`.
@@ -20,86 +17,119 @@ struct GameSafeArea: Equatable, Sendable {
             top: system.top, right: system.right,
             bottom: system.bottom, left: system.left)
     }
+
+    var payload: [String: Any] {
+        // CGFloat does not bridge to JSON; encode as Double explicitly so the
+        // `__receive` script never silently returns nil on a real payload.
+        ["top": Double(top), "right": Double(right), "bottom": Double(bottom), "left": Double(left)]
+    }
 }
 
-/// Where the bundle loads from. Until the T11 cache lands, routing passes
-/// `.remoteEntry` (the campaign's `bundleUrl`); after that it passes the
-/// cached folder and the web view never needs the network to load.
-enum GameBundleSource: Equatable, Sendable {
-    case localFolder(URL)
-    case remoteEntry(URL)
-}
-
-/// Why a game closed without the user finishing it. T12 sends these as
-/// `game_failed` reasons; until then they are logged and handed to `onFailure`.
+/// Why a game closed without the user finishing it. Failures log with the
+/// reason and settle through the coordinator, whose delivery outcome records
+/// the analytics; the surface itself stays silent.
 enum GameFailure: String, Equatable, Sendable {
     case readyTimeout
     case bundleLoadFailed
     case renderError
     case unsupportedWebView
+    /// The skin declared a bridge version above the SDK's.
+    case bridgeUnsupported
 }
 
-/// The `init` message body. T7 fills what it knows (safe area, locale, bridge
-/// version); T8 merges `extra` (`values`, `slots`, `sensors`, `device`) without
-/// touching this file's shape. `surface` is always `fullScreen`.
+/// The `init` message body (bridge v1). Built once per session from the open
+/// request and the live facts; a repeated `ready` re-sends this same message.
 struct GameInitPayload {
     /// The one surface value the skin ever sees.
     static let surface = "fullScreen"
 
-    var safeArea: GameSafeArea
-    var locale: String
-    var showMute: Bool = false
-    var bridgeVersion: Int = GameBridge.bridgeVersion
-    var extra: [String: Any] = [:]
+    /// What the skin may feature-detect on. Versions never gate features.
+    static let capabilities = [
+        "http", "event", "log", "haptics", "sensor", "storage",
+        "action.copy", "action.openLink", "action.close",
+        "viewport", "device", "lifecycle",
+    ]
 
-    /// BCP 47 tag (`en-IN`), the shape the contract's `locale` needs.
-    static var deviceLocale: String {
-        let identifier = Locale.current.identifier
-        guard !identifier.isEmpty else { return "en" }
-        return identifier.replacingOccurrences(of: "_", with: "-")
-    }
+    var chanceId: String
+    var campaignId: String
+    var skinId: String
+    var skinVersion: Int
+    var values: [String: JSONValue]
+    var slots: [GamificationSlotConfig]
+    var showMute: Bool
+    var viewportWidth: Double
+    var viewportHeight: Double
+    var safeArea: GameSafeArea
+    var colorScheme: String
+    var fontFamily: String?
+    var themeFonts: [[String: String]]
+    var device: GameDeviceInfo
 
     func message() -> [String: Any] {
-        var payload: [String: Any] = [
+        var theme: [String: Any] = ["colorScheme": colorScheme, "fonts": themeFonts]
+        if let fontFamily { theme["fontFamily"] = fontFamily }
+        return [
             "type": "init",
+            "bridgeVersion": GameBridge.bridgeVersion,
+            "capabilities": Self.capabilities,
+            "chanceId": chanceId,
+            "campaign": ["id": campaignId, "skinId": skinId, "skinVersion": skinVersion],
+            "values": Self.jsonObject(values),
+            "slots": slots.map { ["outcomeKey": $0.outcomeKey, "values": $0.values] },
             "surface": Self.surface,
-            // CGFloat does not bridge to JSON; encode as Double explicitly so
-            // script(for:) never silently returns nil on a real payload.
-            "safeArea": [
-                "top": Double(safeArea.top), "right": Double(safeArea.right),
-                "bottom": Double(safeArea.bottom), "left": Double(safeArea.left),
-            ],
-            "locale": locale,
             "showMute": showMute,
-            "bridgeVersion": bridgeVersion,
+            "viewport": [
+                "width": viewportWidth, "height": viewportHeight,
+                "safeArea": safeArea.payload,
+            ],
+            "theme": theme,
+            "device": device.payload,
         ]
-        for (key, value) in extra { payload[key] = value }
-        return payload
+    }
+
+    static func jsonObject(_ value: [String: JSONValue]) -> [String: Any] {
+        value.mapValues(jsonValue)
+    }
+
+    private static func jsonValue(_ value: JSONValue) -> Any {
+        switch value {
+        case .string(let v): return v
+        case .int(let v): return v
+        case .double(let v): return v
+        case .bool(let v): return v
+        case .array(let v): return v.map(jsonValue)
+        case .object(let v): return v.mapValues(jsonValue)
+        case .null: return NSNull()
+        }
     }
 }
 
-/// The plain input routing calls to open a game: bundle location, campaign id,
-/// and outcome/close/failure callbacks. The game is always full screen.
+/// The plain input routing calls to open a game: the cached skin file, the
+/// chance and skin identity the bridge answers with, and the exactly-once
+/// close/failure callbacks. The game is always full screen.
 struct GameOpenRequest {
     var campaignKey: String
-    var source: GameBundleSource
+    var campaignId: String
+    var skinId: String
+    var skinVersion: Int
+    var chanceId: String
+    var projectId: String
+    var userId: String
+    /// The cached `index.html`. Download-then-show resolves this before the
+    /// request is built, so the web view never needs the network to load.
+    var entryFile: URL
+    /// The folder holding `entryFile`, for `loadFileURL` read access.
+    var bundleRoot: URL
     var showMute: Bool = false
     var onClose: (@MainActor () -> Void)?
-    /// Fires once when the skin's `playRequested` is accepted — the moment the
-    /// chance is committed. Entry canvases use it to go away after a real play.
-    var onPlayCommitted: (@MainActor () -> Void)?
     var onFailure: (@MainActor (GameFailure) -> Void)?
     /// Fires once when the skin sends `ready` and the game becomes visible.
     var onShown: (@MainActor () -> Void)?
-    /// `init` extras: skin values, slots (only for slot-mapped formats), and
-    /// the sensor wire names the skin may use.
+    /// The payload this delivery was routed with, for skin-event analytics.
+    var payload: CEPTriggerPayload
+    /// `init.values`: the marketer's field values, carried opaquely.
     var values: [String: JSONValue] = [:]
+    /// `init.slots`: outcome-keyed slot values, only for formats that map
+    /// outcomes to slots.
     var slots: [GamificationSlotConfig] = []
-    var sensors: [String] = []
-    /// Reward call-to-action text from `templateConfig.rewards`, keyed by
-    /// `rewardId`; matched against `grant.rewardId` into `outcome.reward.ctaText`.
-    var rewardCtaTexts: [String: String] = [:]
-    /// Asks the backend to play the chance, given a fresh play id. Nil
-    /// answers `refused: unavailable`.
-    var play: (@MainActor (String) async -> PlayResult)?
 }

@@ -38,10 +38,12 @@ struct GamificationConfig: Equatable {
     let showMute: Bool
     let bundleUrl: String
     let sensors: [GamificationSkinSensor]
+    /// The skin's minimum SDK version for this platform
+    /// (`config.minSdkVersion.ios`), or nil when the backend sends none.
+    /// A version above this SDK's skips the campaign at parse time.
+    let minSdkVersion: String?
     /// The inline slot of the `inlineTeaser` entry.
     let slotKey: String?
-    /// Reward `ctaText` from `templateConfig.rewards`, keyed by `rewardId`.
-    let rewardCtaTexts: [String: String]
 
     /// Only `spinWheel` and `slotMachine` map slots; the ERD leaves `slots`
     /// out of `init` for `scratchCard` and `rewardChest`.
@@ -59,6 +61,12 @@ struct GamificationConfig: Equatable {
         guard let skinId = templateConfig.nonBlankString("skinId"),
               let skinVersion = positiveInt(templateConfig["skinVersion"])
         else { return nil }
+        if let required = minSdkVersionIos(templateConfig: templateConfig),
+           let newer = Self.isNewer(required, than: DigiaSdkVersion.value), newer {
+            log.w(
+                "Gamification campaign skipped — skin needs SDK \(required) (this SDK \(DigiaSdkVersion.value))")
+            return nil
+        }
         let bundleUrl =
             templateConfig.nonBlankString("bundleUrl")
             ?? campaignLevel?.nonBlankString("bundleUrl")
@@ -141,23 +149,39 @@ struct GamificationConfig: Equatable {
             showMute: surface?.bool("showMute", default: false) ?? false,
             bundleUrl: bundleUrl,
             sensors: sensors,
+            minSdkVersion: minSdkVersionIos(templateConfig: templateConfig),
             slotKey: slotKey,
-            rewardCtaTexts: rewardCtaTexts(templateConfig: templateConfig)
         )
     }
 
-    /// `templateConfig.rewards`, a sibling of `bundleUrl`: a list of
-    /// `{ rewardId, ctaText }`. Entries missing either field are skipped, so the
-    /// skin falls back to "Use now". No other shape is read.
-    private static func rewardCtaTexts(templateConfig: [String: Any]) -> [String: String] {
-        var texts: [String: String] = [:]
-        for reward in templateConfig.objectArray("rewards") {
-            guard let rewardId = reward.nonBlankString("rewardId"),
-                  let text = reward.nonBlankString("ctaText")
-            else { continue }
-            texts[rewardId] = text
+    /// `config.minSdkVersion.ios` from the skin record: the minimum SDK that
+    /// can run this skin. Nil when the backend sends none.
+    private static func minSdkVersionIos(templateConfig: [String: Any]) -> String? {
+        templateConfig.object("config")?.object("minSdkVersion")?.nonBlankString("ios")
+    }
+
+    /// Whether `candidate` is a newer dotted-numeric version than `base`.
+    /// Nil when either is unreadable — an unreadable requirement never skips
+    /// a campaign.
+    static func isNewer(_ candidate: String, than base: String) -> Bool? {
+        guard let newer = semver(candidate), let current = semver(base) else { return nil }
+        if newer.0 != current.0 { return newer.0 > current.0 }
+        if newer.1 != current.1 { return newer.1 > current.1 }
+        if newer.2 != current.2 { return newer.2 > current.2 }
+        return false
+    }
+
+    private static func semver(_ raw: String) -> (Int, Int, Int)? {
+        let parts = raw.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: ".")
+        guard (1...3).contains(parts.count) else { return nil }
+        var numbers: [Int] = []
+        for part in parts {
+            let digits = part.prefix(while: \.isNumber)
+            guard !digits.isEmpty, digits.count == part.count, let value = Int(digits) else { return nil }
+            numbers.append(value)
         }
-        return texts
+        while numbers.count < 3 { numbers.append(0) }
+        return (numbers[0], numbers[1], numbers[2])
     }
 
     private static func entryKind(_ raw: Any?) -> GamificationEntryKind {

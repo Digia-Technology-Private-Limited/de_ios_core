@@ -1,9 +1,12 @@
 import SwiftUI
 
 /// The game surface: always full screen and transparent. It is presented only
-/// after the skin sends `ready` (see `GamePresentation.preload()`), so there is
-/// no loading state: the skin and the native close button fade in together.
+/// after the skin sends `ready` (see `GamePresentation.preload()`), so there
+/// is no loading state: the skin and the native close button fade in together.
 /// Taps never pass through to the host app while the game is on screen.
+///
+/// The rendered size is reported back as the `viewport` push whenever it
+/// changes (rotation, split screen); the safe area comes from the window.
 @MainActor
 struct GameContainerView: View {
     @ObservedObject var game: GamePresentation
@@ -33,6 +36,19 @@ struct GameContainerView: View {
             .opacity(revealed ? 1 : 0)
             .onAppear {
                 withAnimation(.easeOut(duration: 0.18)) { revealed = true }
+                game.pushViewportIfChanged(
+                    size: geometry.size,
+                    safeArea: GameSafeArea.fullScreen(system: safeAreaInsets))
+            }
+            .onChange(of: geometry.size) { size in
+                game.pushViewportIfChanged(
+                    size: size,
+                    safeArea: GameSafeArea.fullScreen(system: safeAreaInsets))
+            }
+            .onChange(of: safeAreaInsets) { insets in
+                game.pushViewportIfChanged(
+                    size: geometry.size,
+                    safeArea: GameSafeArea.fullScreen(system: insets))
             }
         }
         .ignoresSafeArea()

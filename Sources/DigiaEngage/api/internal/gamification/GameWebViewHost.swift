@@ -5,46 +5,6 @@ import WebKit
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger()
 
-/// Serves the cached bundle folder through `digia-skin://`, one to one onto
-/// the bundle path, with the contract CSP on every response. iOS cannot
-/// intercept https, so this handler is the iOS half of the cache serving T11
-/// fills; until then routing loads the remote entry and this handler idles.
-final class GameSchemeHandler: NSObject, WKURLSchemeHandler {
-    private let bundleRoot: URL
-
-    init(bundleRoot: URL) {
-        self.bundleRoot = bundleRoot.standardizedFileURL
-        super.init()
-    }
-
-    func webView(_ webView: WKWebView, start urlSchemeTask: WKURLSchemeTask) {
-        guard let url = urlSchemeTask.request.url,
-              let relative = GameURLPolicy.filePath(for: url),
-              let file = GameURLPolicy.localFile(forRelativePath: relative, bundleRoot: bundleRoot),
-              let mime = GameURLPolicy.mimeType(for: file.pathExtension),
-              let data = try? Data(contentsOf: file),
-              let response = HTTPURLResponse(
-                  url: url, statusCode: 200, httpVersion: "HTTP/1.1",
-                  headerFields: [
-                      "Content-Type": mime,
-                      "Content-Security-Policy": GameURLPolicy.contentSecurityPolicy,
-                  ])
-        else {
-            let error = NSError(
-                domain: NSCocoaErrorDomain, code: NSFileReadNoSuchFileError, userInfo: nil)
-            urlSchemeTask.didFailWithError(error)
-            return
-        }
-        urlSchemeTask.didReceive(response)
-        urlSchemeTask.didReceive(data)
-        urlSchemeTask.didFinish()
-    }
-
-    func webView(_ webView: WKWebView, stop urlSchemeTask: WKURLSchemeTask) {
-        // File reads are synchronous and short; nothing to cancel.
-    }
-}
-
 /// Breaks the retain cycle `WKUserContentController` would otherwise close:
 /// the controller holds its message handlers strongly, so the handler held
 /// here must not hold the coordinator (and through it the web view) back.
@@ -80,10 +40,7 @@ enum GameWebViewConfigurationFactory {
     private static let noSelectionStyle =
         "* { -webkit-user-select: none !important; -webkit-touch-callout: none !important; }"
 
-    static func make(
-        bundleRoot: URL?,
-        messageProxy: WKScriptMessageHandler
-    ) -> WKWebViewConfiguration {
+    static func make(messageProxy: WKScriptMessageHandler) -> WKWebViewConfiguration {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -107,35 +64,27 @@ enum GameWebViewConfigurationFactory {
             injectionTime: .atDocumentEnd,
             forMainFrameOnly: true
         ))
-
-        if let bundleRoot {
-            configuration.setURLSchemeHandler(
-                GameSchemeHandler(bundleRoot: bundleRoot),
-                forURLScheme: GameURLPolicy.scheme
-            )
-        }
         return configuration
     }
 }
 
 /// Owns the `WKWebView` and glues it to the `GamePresentation`: loads the
-/// entry, enforces the URL policy, forwards `digia` messages to the bridge,
-/// sends `init` on page load, arms the ready timer, and tears everything down.
-/// Nonisolated because `WKNavigationDelegate` is an ObjC protocol; every touch
-/// of game state hops to the main actor, in arrival order.
+/// cached entry from disk, enforces the URL policy, forwards `digia` messages
+/// to the bridge, sends `init` on page load, arms the ready timer, and tears
+/// everything down. Nonisolated because `WKNavigationDelegate` is an ObjC
+/// protocol; every touch of game state hops to the main actor, in arrival order.
 final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
     private weak var game: GamePresentation?
-    private let entryURL: URL
+    private let entryFile: URL
+    private let bundleRoot: URL
     private let webView: WKWebView
 
-    init(game: GamePresentation, entryURL: URL, bundleRoot: URL?) {
+    init(game: GamePresentation, entryFile: URL, bundleRoot: URL) {
         self.game = game
-        self.entryURL = entryURL
+        self.entryFile = entryFile
+        self.bundleRoot = bundleRoot
         let proxy = WeakScriptMessageProxy(target: nil)
-        let configuration = GameWebViewConfigurationFactory.make(
-            bundleRoot: bundleRoot,
-            messageProxy: proxy
-        )
+        let configuration = GameWebViewConfigurationFactory.make(messageProxy: proxy)
         self.webView = WKWebView(frame: .zero, configuration: configuration)
         if #available(iOS 16.4, *) {
             // Debug builds only: a release web view is never inspectable.
@@ -167,10 +116,11 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
 
     var view: WKWebView { webView }
 
-    /// Starts the load and the 5 s ready timer. The timer carries the bridge
-    /// generation so a stale fire after a reload can never close the new load.
+    /// Starts the load from the cached file and the 5 s ready timer. The timer
+    /// carries the bridge generation so a stale fire after a reload can never
+    /// close the new load.
     func start() {
-        webView.load(URLRequest(url: entryURL))
+        webView.loadFileURL(entryFile, allowingReadAccessTo: bundleRoot)
         // `beginLoading` runs on the main actor; the timer arms there too, so
         // the generation it captures is the one from this load, in order.
         Task { @MainActor [weak game] in
@@ -203,7 +153,7 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
-        // The handler is main-frame-only, and the scheme check below keeps a
+        // The handler is main-frame-only, and the file policy below keeps a
         // foreign iframe from driving the game even if one were ever embedded.
         guard message.frameInfo.isMainFrame else { return }
         let body = message.body
@@ -217,14 +167,17 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
     ) {
-        guard let url = navigationAction.request.url else {
+        guard let url = navigationAction.request.url,
+              let game
+        else {
             decisionHandler(.cancel)
             return
         }
         let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
         decisionHandler(GameURLPolicy.allowNavigation(
             url: url,
-            entryURL: entryURL,
+            entryURL: game.entryFile,
+            bundleRoot: game.bundleRoot,
             navigationType: navigationAction.navigationType,
             isMainFrame: isMainFrame
         ) ? .allow : .cancel)
@@ -254,7 +207,7 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     // MARK: - WKUIDelegate
 
     /// `window.open` never opens: links work only through the native bridge
-    /// (T8's `useReward`), never by navigating away.
+    /// (`action openLink`), never by navigating away.
     func webView(
         _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
@@ -277,7 +230,7 @@ struct GameWebViewHost: UIViewRepresentable {
         // Unreachable in practice: `GamePresenter.open` always preloads.
         assertionFailure("Game presented without a preloaded web view")
         let coordinator = GameWebCoordinator(
-            game: game, entryURL: game.entryURL, bundleRoot: game.bundleRoot)
+            game: game, entryFile: game.entryFile, bundleRoot: game.bundleRoot)
         coordinator.start()
         return coordinator
     }
