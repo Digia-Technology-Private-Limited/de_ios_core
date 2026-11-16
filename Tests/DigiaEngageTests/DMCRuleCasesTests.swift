@@ -180,10 +180,10 @@ final class DMCRuleCasesTests: XCTestCase {
     }
 
     // dmc-case: dmc.freq.max_total_zero_never_shows
-    func testZeroCapNeverShows() throws {
+    func testZeroCapMeansNoCap() throws {
         try runCases([
-            "frequency/max_total_zero_never_shows",
-            "frequency/max_per_window_zero_never_shows",
+            "frequency/max_total_zero_means_no_cap",
+            "frequency/max_per_window_zero_means_no_cap",
         ])
     }
 
