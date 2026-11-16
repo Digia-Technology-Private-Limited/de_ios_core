@@ -85,7 +85,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Sends the session's `init`: once after the page loads, and again on a
     /// repeated `ready`. Each `init` fully resets the skin.
     func sendInit() {
-        send(initMessage)
+        send(["type": "init", "payload": initMessage])
     }
 
     // MARK: - Skin requests
@@ -148,8 +148,11 @@ final class GamePresentation: Identifiable, ObservableObject {
             UIPasteboard.general.string = text
             if let id { bridge.answer(id: id) }
         case .actionOpenLink(let id, let url):
-            UIApplication.shared.open(url)
+            // Contract: the container closes first, then the host opens the link.
             if let id { bridge.answer(id: id) }
+            let openLink = request.openLink
+            dismiss()
+            if let openLink { openLink(url) } else { UIApplication.shared.open(url) }
         case .actionClose(let id, let reason):
             if let reason, !reason.isEmpty {
                 log.d("Game closed by skin (reason=\(reason))", campaign: self.request.campaignKey)

@@ -275,7 +275,7 @@ final class GameBridge {
         case "openLink":
             guard let raw = payload.nonBlankString("url"),
                   let url = URL(string: raw),
-                  url.scheme == "http" || url.scheme == "https"
+                  isOpenableLink(url)
             else { return nil }
             return .actionOpenLink(id: id, url: url)
         case "close":
@@ -284,6 +284,18 @@ final class GameBridge {
         default:
             return nil
         }
+    }
+
+    /// Schemes that would run code, read local data or bypass the host's link routing.
+    private static let blockedLinkSchemes: Set<String> = [
+        "javascript", "vbscript", "data", "blob", "file", "about",
+    ]
+
+    /// Web links need a host; app deep links (`medihub://cart`) only a safe scheme.
+    private static func isOpenableLink(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        if scheme == "http" || scheme == "https" { return !(url.host ?? "").isEmpty }
+        return !blockedLinkSchemes.contains(scheme)
     }
 
     /// A JSON number as a Double: `hz` may arrive as either. Non-numbers and

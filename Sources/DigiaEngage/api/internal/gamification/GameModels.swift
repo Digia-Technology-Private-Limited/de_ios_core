@@ -69,7 +69,6 @@ struct GameInitPayload {
         var theme: [String: Any] = ["colorScheme": colorScheme, "fonts": themeFonts]
         if let fontFamily { theme["fontFamily"] = fontFamily }
         return [
-            "type": "init",
             "bridgeVersion": GameBridge.bridgeVersion,
             "capabilities": Self.capabilities,
             "chanceId": chanceId,
@@ -121,6 +120,9 @@ struct GameOpenRequest {
     /// The folder holding `entryFile`, for `loadFileURL` read access.
     var bundleRoot: URL
     var showMute: Bool = false
+    /// Opens a skin `action openLink` through the host's deep-link handling;
+    /// nil uses `UIApplication.open`.
+    var openLink: (@MainActor (URL) -> Void)?
     var onClose: (@MainActor () -> Void)?
     var onFailure: (@MainActor (GameFailure) -> Void)?
     /// Fires once when the skin sends `ready` and the game becomes visible.

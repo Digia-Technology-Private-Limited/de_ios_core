@@ -312,6 +312,22 @@ struct GameBridgeTests {
         }
     }
 
+    // Fails if openLink goes back to http(s)-only: the contract routes app deep links through the host.
+    @Test("openLink accepts app deep links")
+    func openLinkAcceptsDeepLinks() {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        bridge.onRequest = { requests.append($0) }
+
+        bridge.receive(msg("action", id: "d", payload: ["action": "openLink", "url": "medihub://cart"]))
+
+        guard case .actionOpenLink(_, let url) = requests.first else {
+            Issue.record("deep link was not accepted")
+            return
+        }
+        #expect(url.absoluteString == "medihub://cart")
+    }
+
     @Test("invalid payloads are dropped, or answered invalid with an id")
     func invalidPayloads() throws {
         let bridge = makeBridge()
@@ -322,7 +338,7 @@ struct GameBridgeTests {
 
         // No id: dropped.
         bridge.receive(msg("haptics", payload: ["style": "buzz"]))
-        bridge.receive(msg("action", payload: ["action": "openLink", "url": "myapp://x"]))
+        bridge.receive(msg("action", payload: ["action": "openLink", "url": "javascript:alert(1)"]))
         bridge.receive(msg("action", payload: ["action": "explode"]))
         bridge.receive(msg("event", payload: [:]))
         bridge.receive(msg("log", payload: ["level": "verbose", "message": "m"]))
