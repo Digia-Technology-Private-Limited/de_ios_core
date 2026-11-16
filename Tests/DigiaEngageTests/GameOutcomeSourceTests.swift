@@ -3,10 +3,10 @@ import Testing
 
 @testable import DigiaEngage
 
-/// The `GameOutcomeSource` HTTP seam: envelope unwrap, typed results for every
-/// `PlayRefusal`, and typed failures that never throw. Guards the unwrap path
-/// (`data.response`), the refusal mapping, and the never-throws contract —
-/// break any of those lines and these fail.
+/// The `GameOutcomeSource` HTTP seam: envelope unwrap, typed grant results,
+/// and typed failures that never throw. Guards the unwrap path
+/// (`data.response`) and the never-throws contract — break any of those lines
+/// and these fail.
 @Suite("Game outcome source", .tags(.unit, .network, .gamification))
 struct GameOutcomeSourceTests {
     private func source(client: MockNetworkClient? = nil) -> (
@@ -133,91 +133,5 @@ struct GameOutcomeSourceTests {
         #expect(
             await source.grantChance(grantRequest())
                 == .failure(.invalidResponse("missing data.response")))
-    }
-
-    // MARK: - play
-
-    @Test("an outcome carries kind, reward type, grant and next chance")
-    func playOutcome() async throws {
-        let (source, client) = source()
-        client.enqueueResponse(
-            statusCode: 200,
-            body: envelope(
-                #"{"outcomeKey":"o_abc123","kind":"reward","rewardType":"coupon","grant":{"grantId":"gr_1"},"nextChance":{"chanceId":"ch_2"}}"#)
-        )
-
-        let result = await source.play(
-            PlayRequest(chanceId: "ch_1", userId: "u_123", userHash: nil, playId: "p_1"))
-
-        #expect(
-            result
-                == .outcome(
-                    PlayOutcome(
-                        outcomeKey: "o_abc123",
-                        kind: .reward,
-                        rewardType: .coupon,
-                        grant: ["grantId": .string("gr_1")],
-                        nextChance: ["chanceId": .string("ch_2")]
-                    )))
-        let request = try #require(client.lastRequest)
-        #expect(request.url.absoluteString.hasSuffix("/engage/sdk/gamification/play"))
-        let sent = try body(of: client)
-        #expect(sent["chanceId"] as? String == "ch_1")
-        #expect(sent["playId"] as? String == "p_1")
-    }
-
-    @Test("every refusal wire value maps to its case", arguments: [
-        ("notVerified", GamificationPlayRefusal.notVerified),
-        ("notFound", GamificationPlayRefusal.notFound),
-        ("expired", GamificationPlayRefusal.expired),
-        ("alreadyPlayed", GamificationPlayRefusal.alreadyPlayed),
-        ("notPlayable", GamificationPlayRefusal.notPlayable),
-        ("busy", GamificationPlayRefusal.busy),
-    ])
-    func playRefusals(wire: String, refusal: GamificationPlayRefusal) async {
-        let (source, client) = source()
-        client.enqueueResponse(statusCode: 200, body: envelope(#"{"refused":"\#(wire)"}"#))
-
-        #expect(
-            await source.play(
-                PlayRequest(chanceId: "ch_1", userId: "u_123", userHash: nil, playId: "p_1"))
-                == .refused(refusal))
-    }
-
-    @Test("an unknown refusal degrades to unavailable")
-    func playUnknownRefusal() async {
-        let (source, client) = source()
-        client.enqueueResponse(statusCode: 200, body: envelope(#"{"refused":"frozen"}"#))
-
-        #expect(
-            await source.play(
-                PlayRequest(chanceId: "ch_1", userId: "u_123", userHash: nil, playId: "p_1"))
-                == .refused(.unavailable))
-    }
-
-    @Test("an unknown outcome kind is a failure")
-    func playUnknownKind() async {
-        let (source, client) = source()
-        client.enqueueResponse(
-            statusCode: 200, body: envelope(#"{"outcomeKey":"o_x","kind":"jackpot"}"#))
-
-        #expect(
-            await source.play(
-                PlayRequest(chanceId: "ch_1", userId: "u_123", userHash: nil, playId: "p_1"))
-                == .failure(.invalidResponse("unknown outcome kind")))
-    }
-
-    @Test("a play transport error is a failure, never a throw")
-    func playTransportError() async {
-        let (source, client) = source()
-        client.simulateTransportError(URLError(.timedOut))
-
-        let result = await source.play(
-            PlayRequest(chanceId: "ch_1", userId: "u_123", userHash: nil, playId: "p_1"))
-
-        guard case .failure(.transport) = result else {
-            Issue.record("expected a transport failure, got \(result)")
-            return
-        }
     }
 }

@@ -35,31 +35,8 @@ enum GrantChanceResult: Equatable, Sendable {
     case failure(GameOutcomeError)
 }
 
-struct PlayRequest: Equatable, Sendable {
-    let chanceId: String
-    let userId: String
-    let userHash: String?
-    /// Made once per play attempt by the bridge (T8) and reused on every retry.
-    let playId: String
-}
-
-struct PlayOutcome: Equatable, Sendable {
-    let outcomeKey: String
-    let kind: GamificationOutcomeKind
-    let rewardType: GamificationRewardType?
-    /// Carried opaquely until the T8 reward mapping reads them.
-    let grant: [String: JSONValue]?
-    let nextChance: [String: JSONValue]?
-}
-
-enum PlayResult: Equatable, Sendable {
-    case outcome(PlayOutcome)
-    case refused(GamificationPlayRefusal)
-    case failure(GameOutcomeError)
-}
-
 /// A backend call that did not produce an answer. Returned, never thrown —
-/// the bridge (T8) retries `busy` and network failures off this.
+/// callers degrade off this (a direct open settles, a skin `http` answers).
 enum GameOutcomeError: Error, Equatable, Sendable {
     case transport(String)
     case httpStatus(Int)
@@ -70,7 +47,6 @@ enum GameOutcomeError: Error, Equatable, Sendable {
 /// `{ isSuccess, data: { response } }`, exactly as the contract sends them.
 protocol GameOutcomeSource: Sendable {
     func grantChance(_ request: GrantChanceRequest) async -> GrantChanceResult
-    func play(_ request: PlayRequest) async -> PlayResult
     func getRewards() async -> Result<GameRewardsResponse, GameOutcomeError>
 }
 
@@ -120,48 +96,6 @@ final class HttpGameOutcomeSource: GameOutcomeSource, Sendable {
                     ))
             }
             return .denied(reason: response["denyReason"] as? String)
-        }
-    }
-
-    func play(_ request: PlayRequest) async -> PlayResult {
-        var body: [String: Any] = [
-            "chanceId": request.chanceId,
-            "userId": request.userId,
-            "playId": request.playId,
-        ]
-        if let userHash = request.userHash { body["userHash"] = userHash }
-        let result = await post(
-            urlString: DigiaEndpoints.gamificationPlay, body: body,
-            headers: ["Content-Type": "application/json"])
-        switch result {
-        case .failure(let error):
-            return .failure(error)
-        case .success(let response):
-            if let refusedWire = response["refused"] as? String {
-                let refusal = GamificationPlayRefusal(wire: refusedWire)
-                if refusal == .unavailable, refusedWire != GamificationPlayRefusal.unavailable.rawValue {
-                    log.e("play refusal unknown — degrading to unavailable (refused=\(refusedWire))")
-                }
-                return .refused(refusal)
-            }
-            guard let outcomeKey = response.nonBlankString("outcomeKey") else {
-                log.e("play unreadable — missing outcomeKey")
-                return .failure(.invalidResponse("missing outcomeKey"))
-            }
-            let kind = GamificationOutcomeKind(wire: response["kind"] as? String)
-            guard kind != GamificationOutcomeKind.unknown else {
-                log.e("play unreadable — unknown outcome kind")
-                return .failure(.invalidResponse("unknown outcome kind"))
-            }
-            let rewardType = GamificationRewardType(wire: response["rewardType"] as? String)
-            return .outcome(
-                PlayOutcome(
-                    outcomeKey: outcomeKey,
-                    kind: kind,
-                    rewardType: rewardType == .unknown ? nil : rewardType,
-                    grant: Self.object(response["grant"]),
-                    nextChance: Self.object(response["nextChance"])
-                ))
         }
     }
 
@@ -226,16 +160,5 @@ final class HttpGameOutcomeSource: GameOutcomeSource, Sendable {
               CFGetTypeID(number) == CFBooleanGetTypeID()
         else { return nil }
         return number.boolValue
-    }
-
-    private static func object(_ raw: Any?) -> [String: JSONValue]? {
-        guard let dict = raw as? [String: Any] else { return nil }
-        var result: [String: JSONValue] = [:]
-        result.reserveCapacity(dict.count)
-        for (key, item) in dict {
-            guard let mapped = GamificationJSON.value(item) else { return nil }
-            result[key] = mapped
-        }
-        return result
     }
 }

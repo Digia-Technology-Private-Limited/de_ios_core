@@ -28,20 +28,4 @@ struct GamificationEnumsTests {
         #expect(GamificationSkinSensor(wire: "accelerometer") == .accelerometer)
         #expect(GamificationSkinSensor(wire: "nfc").rawValue == "unknown")
     }
-
-    @Test("outcome, reward and refusal kinds")
-    func outcomeRewardRefusal() {
-        #expect(GamificationOutcomeKind(wire: "reward") == .reward)
-        #expect(GamificationOutcomeKind(wire: "extraPlay") == .extraPlay)
-        #expect(GamificationOutcomeKind(wire: "betterLuck") == .betterLuck)
-        #expect(GamificationRewardType(wire: "coupon") == .coupon)
-        #expect(GamificationRewardType(wire: "currency") == .currency)
-        #expect(GamificationRewardType(wire: "perk") == .perk)
-        for wire in [
-            "notVerified", "notFound", "expired", "alreadyPlayed", "notPlayable", "busy",
-        ] {
-            #expect(GamificationPlayRefusal(wire: wire).rawValue == wire)
-        }
-        #expect(GamificationPlayRefusal(wire: "frozen") == .unavailable)
-    }
 }

@@ -147,7 +147,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     let networkClient: any NetworkClient
     /// Gamification skin files, cached immutable by skin id + version.
     private let skinFileCache = SkinFileCache()
-    /// Gamification backend calls (`grantChance`, `play`). Wraps the same
+    /// Gamification backend calls (`grantChance`, `getRewards`). Wraps the same
     /// client so tests drive it through `MockNetworkClient` with no second seam.
     let gameOutcomeSource: any GameOutcomeSource
 
