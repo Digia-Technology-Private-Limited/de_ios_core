@@ -41,7 +41,8 @@ final class DecisionEngine {
             try self?.evaluate(signal, ageMs: ageMs)
         }
         return SignalGate(
-            send: { signal, ageMs in bus.send(signal, ageMs: ageMs) }, nowMs: nowMs)
+            send: { signal, ageMs in bus.send(signal, ageMs: ageMs) }, nowMs: nowMs,
+            onExpired: { [weak self] signal in self?.reportExpired(signal) })
     }()
 
     /// Closed while a user-context fetch is in flight: only `audienceGated`
@@ -51,7 +52,8 @@ final class DecisionEngine {
             try self?.evaluateGated(signal, ageMs: ageMs)
         }
         let gate = SignalGate(
-            send: { signal, ageMs in bus.send(signal, ageMs: ageMs) }, nowMs: nowMs)
+            send: { signal, ageMs in bus.send(signal, ageMs: ageMs) }, nowMs: nowMs,
+            onExpired: { [weak self] signal in self?.reportExpired(signal) })
         gate.open()
         return gate
     }()
@@ -266,6 +268,16 @@ final class DecisionEngine {
         for (pending, cause) in waits.cancelMatching(signal) {
             logWaitCancelled(pending, cause: cause)
         }
+    }
+
+    /// A held signal outlived the hold limit and was dropped; reported to Digia
+    /// as a health event.
+    private func reportExpired(_ signal: RuleSignal) {
+        log.w(
+            "Dropped — held longer than \(SignalGate.maxHoldMs) ms",
+            stage: .gating,
+            reason: TimelineReason.gatedTriggerExpired,
+            extras: ["signal": signal.indexKey])
     }
 
     private func logAlreadyWaiting(_ campaignKey: String) {

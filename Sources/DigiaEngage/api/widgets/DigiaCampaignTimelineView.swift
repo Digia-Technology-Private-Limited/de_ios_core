@@ -182,6 +182,7 @@ struct DigiaCampaignTimelineView: View {
         "rule_fired": "Fired by its Digia rule",
         "unsupported_feature": "Not shown — this SDK can't read its rule",
         "malformed_rule": "Not shown — its rule couldn't be read",
+        "gated_trigger_expired": "Not shown — campaigns took too long to load",
         "condition_failed": "Not shown — this user doesn't match its conditions",
         "not_on_target_screen": "Not shown — the user is not on one of its screens",
         "not_in_audience": "Not shown — this user is not in its audience",
