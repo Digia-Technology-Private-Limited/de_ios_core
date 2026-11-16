@@ -176,6 +176,10 @@ enum HealthReasons {
         "media_load_failed": ["media_kind", "cause"],
         "internal_error": ["exception_class"],
         "gated_trigger_expired": ["signal"],
+        // Campaignless, but per user and per cause: a second user, or the server
+        // rejecting a hash after a missing one, is a new fact. `user_ref` is a
+        // digest the manager stamps; it is not in `detailKeys`, so it never leaves.
+        "user_hash_unverified": ["cause", "user_ref"],
     ]
 
     /// Extra marking a record whose blocker is a live test. Such a record stays

@@ -329,6 +329,45 @@ struct DMCUserContextManagerTests {
             #expect(unverified().count == 2)
         }
 
+        /// Runs `body` with a fresh `HealthSink` on the logger and returns the
+        /// `cause` of every health event it sent.
+        private func healthCauses(_ body: () async -> Void) async -> [String?] {
+            final class Collector: @unchecked Sendable {
+                private let lock = NSLock()
+                private var stored: [HealthEventPayload] = []
+                var payloads: [HealthEventPayload] { lock.withLock { stored } }
+                func add(_ payload: HealthEventPayload) { lock.withLock { stored.append(payload) } }
+            }
+            let collector = Collector()
+            let health = HealthSink()
+            health.activate(collector.add)
+            defer { health.deactivate() }
+            await body()
+            #expect(collector.payloads.allSatisfy { $0.reason == "user_hash_unverified" })
+            return collector.payloads.map { $0.detail?["cause"] }
+        }
+
+        @Test("two users without a hash each reach the health sink")
+        func twoUsersWithoutHashEachReported() async {
+            let manager = make()
+            let causes = await healthCauses {
+                await manager.onUserIdChanged("asha")
+                await manager.onUserIdChanged("ravi")
+            }
+            #expect(causes == ["missing_hash", "missing_hash"])
+        }
+
+        @Test("server_unverified after missing_hash for one user reaches the health sink")
+        func serverUnverifiedAfterMissingHashReported() async {
+            let manager = make(verified: false)
+            let causes = await healthCauses {
+                await manager.onUserIdChanged("asha")
+                await manager.onUserIdChanged("asha", userHash: "bad")
+                await manager.refresh(force: true)
+            }
+            #expect(causes == ["missing_hash", "server_unverified"])
+        }
+
         @Test("a hash the server accepts reports nothing")
         func acceptedHashReportsNothing() async {
             let sink = RecordSink()

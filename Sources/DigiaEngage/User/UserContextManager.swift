@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 private let log = DigiaLogger("user")
@@ -36,6 +37,13 @@ func attributeValue(_ value: Any?) -> Any? {
     default:
         return nil
     }
+}
+
+/// A short digest of `userId`: lets the health sink tell one user's
+/// `user_hash_unverified` from another's without the id itself leaving the
+/// manager. Dedup only; never health detail.
+private func userRef(_ userId: String) -> String {
+    String(SHA256.hash(data: Data(userId.utf8)).map { String(format: "%02x", $0) }.joined().prefix(16))
 }
 
 private func typedAttributes(_ raw: Any?) -> [String: Any] {
@@ -259,7 +267,7 @@ final class UserContextManager {
                 "userId set without a userHash — imported attributes are withheld",
                 stage: .session,
                 reason: TimelineReason.userHashUnverified,
-                extras: ["cause": "missing_hash"]
+                extras: ["cause": "missing_hash", "user_ref": userRef(userId)]
             )
         }
         storage.set(userId, forKey: ownerKey)
@@ -344,7 +352,7 @@ final class UserContextManager {
                     "userHash not verified — imported attributes are withheld",
                     stage: .session,
                     reason: TimelineReason.userHashUnverified,
-                    extras: ["cause": "server_unverified"]
+                    extras: ["cause": "server_unverified", "user_ref": userRef(userId)]
                 )
             }
             let ttl = Self.expirySeconds(payload["expiresInSeconds"])

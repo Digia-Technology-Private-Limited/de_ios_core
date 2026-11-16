@@ -191,6 +191,7 @@ struct TimelineWireStringsTests {
             "media_load_failed": ["media_kind", "cause"],
             "internal_error": ["exception_class"],
             "gated_trigger_expired": ["signal"],
+            "user_hash_unverified": ["cause", "user_ref"],
         ])
         #expect(HealthReasons.liveTestBlockerKey == "blocking_live_test")
     }
