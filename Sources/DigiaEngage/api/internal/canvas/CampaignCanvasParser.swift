@@ -128,7 +128,8 @@ struct CampaignCanvasParser {
                         duration: max(0.001, (propertyNumber(playback["durationMs"]) ?? 5000) / 1000)
                     ),
                     duration: seconds > 0 ? seconds : fallbackSeconds,
-                    canvas: canvas
+                    canvas: canvas,
+                    poster: VideoPoster.from(propertyObject(page["thumbnailPoster"]))
                 )
             )
         }
