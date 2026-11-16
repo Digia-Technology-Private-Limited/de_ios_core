@@ -2053,7 +2053,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             let result = await source.grantChance(request)
             self.handleGamificationGrant(
                 result, campaign: campaign, config: config,
-                payload: payload, userId: userId)
+                payload: payload, userId: userId, openOnGranted: false)
         }
         return .accepted(payload: payload, kind: .modal)
     }
@@ -2119,8 +2119,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     /// `Action.openGame` from a gamification entry canvas: asks the server for
     /// the chance (deduped by the entry's trigger id, so a re-tap after closing
-    /// before playing reuses the unplayed one) and opens the game surface.
-    /// Anywhere but a gamification campaign this is a no-op.
+    /// before playing reuses the unplayed one) and opens the game surface for
+    /// any granted chance — `show` only gates the automatic open of a direct
+    /// entry, never a tap. Anywhere but a gamification campaign this is a no-op.
     func openGame(forPayload payload: CEPTriggerPayload) {
         guard let campaign = findCampaign(payload),
               let config = campaign.gamificationConfig
@@ -2154,7 +2155,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             let result = await source.grantChance(request)
             self.handleGamificationGrant(
                 result, campaign: campaign, config: config,
-                payload: payload, userId: userId)
+                payload: payload, userId: userId, openOnGranted: true)
         }
     }
 
@@ -2166,14 +2167,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     /// Settles one `grantChance` answer: logs, prefetches on granted, and
-    /// opens on granted with show. Organic no-shows stay pending for the
-    /// acceptance watchdog; a live test is answered at once.
+    /// opens on granted with show — or on any granted chance for an entry tap,
+    /// where the user already asked to play. Organic direct no-shows stay
+    /// pending for the acceptance watchdog; a live test is answered at once.
     private func handleGamificationGrant(
         _ result: GrantChanceResult,
         campaign: CampaignModel,
         config: GamificationConfig,
         payload: CEPTriggerPayload,
-        userId: String
+        userId: String,
+        openOnGranted: Bool
     ) {
         let campaignKey = campaign.campaignKey
         let cepCampaignId = payload.cepCampaignId
@@ -2184,7 +2187,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 campaign: campaignKey
             )
             prefetchGamificationBundle(config, campaignKey: campaignKey)
-            if chance.show {
+            if chance.show || openOnGranted {
                 openGamificationSurface(
                     chance: chance, config: config, campaign: campaign,
                     payload: payload, userId: userId)
