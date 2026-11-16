@@ -153,6 +153,34 @@ struct DMCDecisionEngineTests {
         #expect(routedKeys == ["home_tip", "cart_tip"])
     }
 
+    @Test("a signal held past the hold limit is dropped and sends one health event")
+    func expiredSignalSendsOneHealthEvent() {
+        defer { finish() }
+        final class Recorder: @unchecked Sendable {
+            private let lock = NSLock()
+            private var stored: [HealthEventPayload] = []
+            var payloads: [HealthEventPayload] { lock.withLock { stored } }
+            func capture(_ payload: HealthEventPayload) { lock.withLock { stored.append(payload) } }
+        }
+        let health = HealthSink()
+        let recorder = Recorder()
+        health.beginPending()
+        health.activate { recorder.capture($0) }
+        defer { health.resetForTest() }
+        facts.ready = false
+        facts.add(Self.campaign("cart_tip"))
+
+        engine.send(.event("cart_landed", [:]))
+        clock.now += SignalGate.maxHoldMs + 1
+        facts.ready = true
+        engine.ready()
+
+        #expect(routedKeys.isEmpty)
+        #expect(recorder.payloads.count == 1)
+        #expect(recorder.payloads.first?.reason == "gated_trigger_expired")
+        #expect(recorder.payloads.first?.detail == ["signal": "event:cart_landed"])
+    }
+
     // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
     @Test("signals are dropped when the app backgrounds before ready")
     func droppedOnBackground() {

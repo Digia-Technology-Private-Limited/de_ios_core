@@ -67,6 +67,9 @@ enum HealthReasons {
         "user_hash_unverified",
         "unsupported_feature",
         "malformed_rule",
+        // A trigger held for campaigns or the user context for longer than the
+        // hold limit was dropped.
+        "gated_trigger_expired",
         "app_event_invalid",
         "app_event_rate_limited",
         "app_event_blocked",
@@ -125,6 +128,7 @@ enum HealthReasons {
         "user_hash_unverified": ["cause"],
         "unsupported_feature": ["feature"],
         "malformed_rule": ["exception_class"],
+        "gated_trigger_expired": ["signal"],
         "app_event_invalid": ["event_name"],
         "app_event_rate_limited": [],
         "app_event_blocked": [],
@@ -171,6 +175,7 @@ enum HealthReasons {
         "cep_bridge_unavailable": ["selector"],
         "media_load_failed": ["media_kind", "cause"],
         "internal_error": ["exception_class"],
+        "gated_trigger_expired": ["signal"],
     ]
 
     /// Extra marking a record whose blocker is a live test. Such a record stays

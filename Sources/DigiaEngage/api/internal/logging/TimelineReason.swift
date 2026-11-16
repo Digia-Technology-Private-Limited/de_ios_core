@@ -129,6 +129,10 @@ enum TimelineReason: String, CaseIterable, DiagnosticReason {
     /// A Digia-owned rule is not well-formed.
     case malformedRule = "malformed_rule"
 
+    /// A trigger was held longer than the SDK waits for campaigns or the user
+    /// context, so it was dropped.
+    case gatedTriggerExpired = "gated_trigger_expired"
+
     /// The signal matched a rule, but its conditions are false for this user.
     case conditionFailed = "condition_failed"
 

@@ -58,6 +58,7 @@ struct TimelineWireStringsTests {
         #expect(TimelineReason.ruleFired.wire == "rule_fired")
         #expect(TimelineReason.unsupportedFeature.wire == "unsupported_feature")
         #expect(TimelineReason.malformedRule.wire == "malformed_rule")
+        #expect(TimelineReason.gatedTriggerExpired.wire == "gated_trigger_expired")
         #expect(TimelineReason.conditionFailed.wire == "condition_failed")
         #expect(TimelineReason.notOnTargetScreen.wire == "not_on_target_screen")
         #expect(TimelineReason.notInAudience.wire == "not_in_audience")
@@ -69,7 +70,7 @@ struct TimelineWireStringsTests {
         #expect(TimelineReason.waitCancelled.wire == "wait_cancelled")
         #expect(TimelineReason.waitEnded.wire == "wait_ended")
         #expect(CEPPluginReason.bridgeUnavailable.wire == "cep_bridge_unavailable")
-        #expect(TimelineReason.allCases.count == 43)
+        #expect(TimelineReason.allCases.count == 44)
     }
 
     /// The delivery enums *are* the timeline's reasons for a delivery — no
@@ -121,6 +122,7 @@ struct TimelineWireStringsTests {
                 "user_hash_unverified",
                 "unsupported_feature",
                 "malformed_rule",
+                "gated_trigger_expired",
                 "app_event_invalid",
                 "app_event_rate_limited",
                 "app_event_blocked",
@@ -188,6 +190,7 @@ struct TimelineWireStringsTests {
             "cep_bridge_unavailable": ["selector"],
             "media_load_failed": ["media_kind", "cause"],
             "internal_error": ["exception_class"],
+            "gated_trigger_expired": ["signal"],
         ])
         #expect(HealthReasons.liveTestBlockerKey == "blocking_live_test")
     }

@@ -5,8 +5,8 @@ import Foundation
 /// held, so a wait started by it counts from when it happened.
 ///
 /// Loading that takes too long drops what it held: a signal older than
-/// ``maxHoldMs`` at ``open()`` is not replayed, so a welcome nudge never shows
-/// long after the open that earned it. At most ``maxHeld`` signals are kept,
+/// ``maxHoldMs`` at ``open()`` is not replayed (it goes to `onExpired`
+/// instead), so a welcome nudge never shows long after the open that earned it. At most ``maxHeld`` signals are kept,
 /// the newest, so a load that never succeeds holds a bounded list.
 @MainActor
 final class SignalGate {
@@ -15,12 +15,17 @@ final class SignalGate {
 
     private let send: (RuleSignal, Int) -> Void
     private let nowMs: () -> Int
+    private let onExpired: (RuleSignal) -> Void
     private var held: [(RuleSignal, Int)] = []
     private(set) var isOpen = false
 
-    init(send: @escaping (RuleSignal, Int) -> Void, nowMs: @escaping () -> Int) {
+    init(
+        send: @escaping (RuleSignal, Int) -> Void, nowMs: @escaping () -> Int,
+        onExpired: @escaping (RuleSignal) -> Void = { _ in }
+    ) {
         self.send = send
         self.nowMs = nowMs
+        self.onExpired = onExpired
     }
 
     func send(_ signal: RuleSignal) {
@@ -39,7 +44,11 @@ final class SignalGate {
         let replay = held
         held.removeAll()
         for (signal, at) in replay {
-            if now - at <= Self.maxHoldMs { send(signal, now - at) }
+            if now - at <= Self.maxHoldMs {
+                send(signal, now - at)
+            } else {
+                onExpired(signal)
+            }
         }
     }
 
