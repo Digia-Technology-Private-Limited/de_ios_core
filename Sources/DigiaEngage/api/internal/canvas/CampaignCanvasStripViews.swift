@@ -78,11 +78,12 @@ func canvasStoryItem(_ page: CampaignCanvasStoryPage) -> StoryItemConfig {
                 ? Int64(page.thumbnailPlayback.duration * 1000)
                 : nil
         ),
-        // A video page's poster is its still, in the viewer and on the rail, at the page's fit.
+        // A video page's poster is its still, drawn on the rail at the tile's fit
+        // (the viewer draws it at the page's fit, `boxFit`).
         thumbnail: page.thumbnailIsVideo ? page.poster.map { poster in
             .image(
                 source: poster.url,
-                fit: boxFit,
+                fit: thumbnailBoxFit,
                 placeholder: poster.blurHash.map { ImagePlaceholder(type: .blurhash, blurHash: $0) }
             )
         } : nil,
