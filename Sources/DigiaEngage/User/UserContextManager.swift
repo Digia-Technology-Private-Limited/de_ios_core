@@ -92,6 +92,23 @@ final class UserContextManager {
     /// closure it returns is called when that request ends, however it ends.
     var onFetchStarted: (() -> () -> Void)?
 
+    /// A wait opened by ``holdForRefresh()``, taken over by the next
+    /// ``refresh(force:holdsCampaigns:)`` or released by ``releaseUnusedHold()``.
+    private var pendingHold: (() -> Void)?
+
+    /// Opens the wait for gated campaigns now, ahead of the refresh that will
+    /// end it, so a trigger sent before that refresh starts is still held.
+    func holdForRefresh() {
+        if pendingHold == nil { pendingHold = onFetchStarted?() }
+    }
+
+    /// Ends a wait that no refresh took over.
+    func releaseUnusedHold() {
+        let end = pendingHold
+        pendingHold = nil
+        end?()
+    }
+
     private var userId: String?
     /// Host-issued proof of `userId`.
     private var userHash: String?
@@ -172,6 +189,8 @@ final class UserContextManager {
     /// Values are `String`, number, `Bool` or `[String]`. Others are dropped.
     func setUserAttributes(_ new: [String: Any]) async {
         guard mergeAttributes(new) else { return }
+        holdForRefresh()
+        defer { releaseUnusedHold() }
         await refresh()
     }
 
@@ -240,6 +259,14 @@ final class UserContextManager {
     /// `holdsCampaigns` is false for a refresh that must not make an
     /// `audienceGated` campaign wait, such as the one on return to the app.
     func refresh(force: Bool = false, holdsCampaigns: Bool = true) async {
+        // A wait opened ahead of this call is ended by it, fetch or not.
+        let opened = pendingHold
+        pendingHold = nil
+        defer { opened?() }
+        await refreshNow(force: force, holdsCampaigns: holdsCampaigns && opened == nil)
+    }
+
+    private func refreshNow(force: Bool, holdsCampaigns: Bool) async {
         guard configured, let userId, let url = URL(string: DigiaEndpoints.userContext) else { return }
 
         let hash = fingerprint(attributes)

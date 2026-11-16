@@ -264,7 +264,13 @@ extension SDKInstance {
         if trimmed != nil, current == nil { return }
         let manager = services.userContextManager
         let currentHash = identity.userHash
-        Task { @MainActor in await manager.onUserIdChanged(current, userHash: currentHash) }
+        // The wait opens now, before this returns, so a trigger sent in the
+        // same tick is held rather than judged against the previous user.
+        if current != nil { manager.holdForRefresh() }
+        Task { @MainActor in
+            defer { manager.releaseUnusedHold() }
+            await manager.onUserIdChanged(current, userHash: currentHash)
+        }
     }
 
     /// Clears the inline content Digia decided for the user who is leaving, so
@@ -296,7 +302,12 @@ extension SDKInstance {
             return
         }
         if manager.mergeAttributes(attributes) {
-            Task { await manager.refresh() }
+            // Open now, so an event sent in the same tick is held.
+            manager.holdForRefresh()
+            Task {
+                defer { manager.releaseUnusedHold() }
+                await manager.refresh()
+            }
         }
     }
 
