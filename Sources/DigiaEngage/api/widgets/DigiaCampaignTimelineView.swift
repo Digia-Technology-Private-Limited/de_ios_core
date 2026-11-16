@@ -143,6 +143,15 @@ struct DigiaCampaignTimelineView: View {
         case "campaign_unsupported": return record.extras["type"].map { "(\($0))" }
         case "unknown_design_token": return record.extras["token"].map { "(\($0))" }
         case "plugin_registered": return record.extras["plugin"].map { "(\($0))" }
+        case "rule_fired": return record.extras["trigger"].map { "(\($0))" }
+        case "lower_priority": return record.extras["lost_to"].map { "(\($0))" }
+        case "wait_cancelled": return record.extras["cause"].map { "(\($0))" }
+        case "wait_ended":
+            switch record.extras["outcome"] {
+            case "gone": return "(the campaign is no longer live)"
+            case "rule_changed": return "(its rule no longer matches)"
+            default: return nil
+            }
         default: return nil
         }
     }
@@ -154,6 +163,7 @@ struct DigiaCampaignTimelineView: View {
     private static let copy: [String: String] = [
         // session
         "sdk_initialized": "Digia started",
+        "sdk_init_failed": "Digia couldn't start",
         "plugin_registered": "Connected to your messaging platform",
         "live_session_connected": "Live testing connected",
         "live_session_disconnected": "Live testing disconnected",
@@ -169,6 +179,19 @@ struct DigiaCampaignTimelineView: View {
         "campaign_unsupported": "This campaign type can't show in this app",
         // trigger
         "cep_trigger_received": "Delivered",
+        "rule_fired": "Fired by its Digia rule",
+        "unsupported_feature": "Not shown — this SDK can't read its rule",
+        "malformed_rule": "Not shown — its rule couldn't be read",
+        "condition_failed": "Not shown — this user doesn't match its conditions",
+        "not_on_target_screen": "Not shown — the user is not on one of its screens",
+        "not_in_audience": "Not shown — this user is not in its audience",
+        "capped": "Not shown — frequency cap reached",
+        "lower_priority": "Not shown — a higher-priority campaign won",
+        "wait_started": "Waiting before it shows",
+        "wait_in_progress": "Trigger ignored — this campaign is already waiting",
+        "wait_cancelled": "Not shown — the wait was cancelled",
+        "wait_ended": "Wait ended",
+        "digia_managed": "Not shown — Digia decides this campaign, not your messaging platform",
         "not_initialized": "Not shown — Digia wasn't initialized",
         "not_ready": "Not shown — campaigns were still loading",
         "initialization_failed": "Not shown — campaigns couldn't be loaded",
