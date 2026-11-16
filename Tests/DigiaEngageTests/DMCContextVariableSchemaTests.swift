@@ -346,7 +346,31 @@ struct DMCContextVariableSchemaTests {
         let mismatches = payload.mismatches ?? []
         #expect(mismatches.map { $0["name"] } == ["n_sym", "n_comma", "n_bool", "n_long", "b_yes", "b_one", "price"])
         #expect(mismatches[0] == ["name": "n_sym", "expected": "number", "sample": "₹499"])
-        #expect(mismatches[3]["sample"] == String(repeating: "x", count: 32))
+        #expect(mismatches[3]["sample"] == String(repeating: "x", count: 16) + "\u{2026}" + String(repeating: "x", count: 15))
+    }
+
+    /// The same table runs in the Android and Flutter tests: every stack must agree.
+    static let variableSampleCases: [(name: String, input: String, expected: String)] = [
+        ("empty", "", ""),
+        ("short_non_ascii", "\u{20B9}499", "\u{20B9}499"),
+        ("ascii_exactly_32", "abcdefghijklmnopqrstuvwxyz012345", "abcdefghijklmnopqrstuvwxyz012345"),
+        ("ascii_33", "abcdefghijklmnopqrstuvwxyz0123456", "abcdefghijklmnop\u{2026}stuvwxyz0123456"),
+        ("ascii_long", "abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789", "abcdefghijklmnop\u{2026}vwxyz0123456789"),
+        ("emoji_exactly_32", "\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}", "\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}"),
+        ("emoji_33", "\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}", "\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{2026}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}\u{1F600}"),
+        ("emoji_at_head_cut", "aaaaaaaaaaaaaaa\u{1F600}bbbbbbbbbbbbbbbbbbbb", "aaaaaaaaaaaaaaa\u{1F600}\u{2026}bbbbbbbbbbbbbbb"),
+        ("emoji_at_tail_cut", "aaaaaaaaaaaaaaaaaaaa\u{1F600}bbbbbbbbbbbbbb", "aaaaaaaaaaaaaaaa\u{2026}\u{1F600}bbbbbbbbbbbbbb"),
+        ("combining_at_head_cut", "aaaaaaaaaaaaaaae\u{301}bbbbbbbbbbbbbbbbbbbb", "aaaaaaaaaaaaaaa\u{2026}bbbbbbbbbbbbbbb"),
+        ("combining_at_tail_start", "aaaaaaaaaaaaaaaaaaae\u{301}bbbbbbbbbbbbbb", "aaaaaaaaaaaaaaaa\u{2026}bbbbbbbbbbbbbb"),
+        ("combining_exactly_32_cps", "aaaaaaaaaaaaaaaae\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}", "aaaaaaaaaaaaaaaae\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}"),
+        ("combining_many_marks", "aaaaaaaaaaaaaaae\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}", "aaaaaaaaaaaaaaa\u{2026}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}e\u{301}"),
+    ]
+
+    @Test("a long sample is shortened with a middle ellipsis, identically on every stack",
+          arguments: variableSampleCases.map { $0.name })
+    func samplesShortenedWithMiddleEllipsis(name: String) throws {
+        let c = try #require(Self.variableSampleCases.first { $0.name == name })
+        #expect(Array(truncatedMismatchSample(c.input).unicodeScalars) == Array(c.expected.unicodeScalars))
     }
 
     @Test("a different failing variable later sends a new event")
