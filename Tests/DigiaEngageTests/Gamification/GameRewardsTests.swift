@@ -171,4 +171,45 @@ struct GameRewardsTests {
         #expect(GameRewardChance.expiry("tomorrow") == nil)
         #expect(GameRewardChance.expiry(true) == nil)
     }
+
+    @Test("an explicitly hidden widget stays hidden, even with chances waiting")
+    func hiddenWidgetStaysHidden() {
+        let waiting = GameRewardChance.fromJson(chance("c1"))!
+
+        // Guards the hidden check in widgetContent: holdout users see nothing.
+        #expect(
+            GameRewardsResponse.widgetContent(
+                chances: [waiting], active: [],
+                widget: GameRewardsWidget.fromJson(["hidden": true]))
+            == .hidden)
+    }
+
+    @Test("a rewardsPage tap verb opens the page, and tap prefers a playable chance")
+    func widgetTapPageVerbAndPlayable() {
+        let waiting = GameRewardChance.fromJson(chance("c1"))!
+
+        // Guards the tap verb list in fromJson: the backend's open-page verb.
+        #expect(
+            GameRewardsResponse.widgetTap(
+                chances: [waiting],
+                widget: GameRewardsWidget.fromJson(["tapAction": "rewardsPage"]))
+            == .openPage)
+
+        let unplayable = GameRewardChance.fromJson(chance("c1", playable: false))!
+        let playable = GameRewardChance.fromJson(chance("c2", playable: true))!
+
+        // Guards the playable preference in widgetTap: an unavailable soonest
+        // chance never opens ahead of a playable one.
+        #expect(
+            GameRewardsResponse.widgetTap(chances: [unplayable, playable], widget: nil)
+            == .openChance(chanceId: "c2"))
+    }
+
+    @Test("a chance carrying the server campaign id still keys its campaign")
+    func chanceAcceptsCampaignId() {
+        let parsed = GameRewardChance.fromJson(["chanceId": "c1", "campaignId": "srv-9"])
+
+        // Guards the campaignId fallback: the rewards game lookup needs a key.
+        #expect(parsed?.campaignKey == "srv-9")
+    }
 }

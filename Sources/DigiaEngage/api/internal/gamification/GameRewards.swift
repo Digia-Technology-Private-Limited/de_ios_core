@@ -1,8 +1,5 @@
 import Foundation
 
-/// The SDK's one logging style — see ``DigiaLogger``.
-private let log = DigiaLogger()
-
 extension DigiaEndpoints {
     static var gamificationGetRewards: String {
         "\(baseUrl)/api/v1/engage/sdk/gamification/getRewards"
@@ -28,7 +25,8 @@ struct GameRewardChance: Equatable, Sendable {
         return GameRewardChance(
             chanceId: chanceId,
             campaignKey: raw.nonBlankString("campaignKey")
-                ?? raw.nonBlankString("campaign_key") ?? "",
+                ?? raw.nonBlankString("campaign_key") ?? raw.nonBlankString("campaignId")
+                ?? raw.nonBlankString("campaign_id") ?? "",
             format: raw.nonBlankString("format"),
             expiresAt: Self.expiry(
                 raw["expiresAt"] ?? raw["expiry"] ?? raw["expiryAt"] ?? raw["expires_at"]),
@@ -134,7 +132,8 @@ struct GameRewardsWidget: Equatable, Sendable {
                 ?? raw.nonBlankString("text"),
             tapChanceId: tapChanceId,
             tapOpenPage: tapType.map {
-                ["openRewards", "open_rewards", "rewards", "openPage", "open_page"].contains($0)
+                ["openRewards", "open_rewards", "rewards", "rewardsPage", "openPage", "open_page"]
+                    .contains($0)
             } ?? false
         )
     }
@@ -201,6 +200,7 @@ struct GameRewardsResponse {
     static func widgetContent(
         chances: [GameRewardChance], active: [GameReward], widget: GameRewardsWidget?
     ) -> GameRewardsWidgetContent {
+        if widget?.isHidden == true { return .hidden }
         if !chances.isEmpty {
             let formats =
                 widget.map(\.formats).flatMap { $0.isEmpty ? nil : $0 }
@@ -223,7 +223,8 @@ struct GameRewardsResponse {
 
     /// Follows the widget's tap action: an explicit chance that is still
     /// waiting opens it, an explicit open-page verb opens the page, and
-    /// otherwise the soonest chance opens — or the page, when none waits.
+    /// otherwise the soonest playable chance opens — or the page, when none
+    /// waits.
     static func widgetTap(
         chances: [GameRewardChance], widget: GameRewardsWidget?
     ) -> GameRewardsTap {
@@ -233,7 +234,9 @@ struct GameRewardsResponse {
             return .openChance(chanceId: chanceId)
         }
         if widget?.tapOpenPage == true { return .openPage }
-        if let soonest = chances.first { return .openChance(chanceId: soonest.chanceId) }
+        if let soonest = chances.first(where: \.playable) ?? chances.first {
+            return .openChance(chanceId: soonest.chanceId)
+        }
         return .openPage
     }
 }

@@ -13,7 +13,8 @@ struct GrantChanceRequest: Equatable, Sendable {
     /// The CEP message id (`cepCampaignId` on iOS), or the Digia rule's
     /// `event_id`. The SDK never invents one.
     let triggerId: String
-    /// Set only for CEP-mode triggers; omitted for live tests.
+    /// An explicit ask to show: always true, in live tests as well as CEP mode
+    /// (a live test also carries `testInvocationId` with the device header).
     let showNow: Bool?
     /// Live test only.
     let testInvocationId: String?

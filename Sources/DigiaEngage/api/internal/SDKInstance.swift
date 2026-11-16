@@ -391,10 +391,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             networkMonitor: makeNetworkMonitor()
         )
         self.services = services
-        // Skin storage is namespaced by user: a change must not leave the old
-        // user's values behind for the next one to inherit.
-        services.identityManager.addUserChangedListener { [defaults = self.defaults] in
+        // Skin storage and rewards are namespaced by user: a change must not
+        // leave the old user's values behind for the next one to inherit.
+        services.identityManager.addUserChangedListener { [defaults = self.defaults, weak self] in
             GameSkinStorage.clearAll(defaults: defaults)
+            self?.clearRewardsForUserChange()
         }
         currentSession.set(services.sessionManager, identity: services.identityManager, requestHeaders: services.requestHeaders)
         // The startup session is reported before the buffered user change
@@ -2166,6 +2167,27 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         hiddenGamificationEntries.insert(payload.campaignKey)
     }
 
+    /// Removes a rendered entry whose chance is already played (S14): a
+    /// floating entry dismisses the way its X does, an inline teaser is
+    /// removed quietly so CEP hears a cancel, not a user close. Direct
+    /// campaigns show no entry, so there is nothing to remove.
+    private func dismissPlayedEntry(config: GamificationConfig, payload: CEPTriggerPayload) {
+        switch config.entryKind {
+        case .floating:
+            if floaterStoryOrchestrator.state?.payload.campaignKey == payload.campaignKey {
+                floaterStoryOrchestrator.dismiss(.userClose)
+            }
+        case .inlineTeaser:
+            if case .inline(let cfg) = config.entryCanvas,
+               inlineController.getCampaign(cfg.slotKey) == payload
+            {
+                inlineController.dismissCampaign(cfg.slotKey)
+            }
+        case .direct, .unknown:
+            break
+        }
+    }
+
     // MARK: - Gamification rewards (S6)
 
     /// The inline slot the host app places once for the rewards widget.
@@ -2184,9 +2206,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Fetches `getRewards` and stores it for the page and the widget. Calls
     /// coalesce while one is in flight; a failure logs and keeps the last
     /// response, so the page degrades to previous content (or the empty
-    /// message) instead of failing.
+    /// message) instead of failing. With no user there is nothing to fetch:
+    /// any stale response is dropped so a previous user's rewards never linger.
     func refreshRewards() {
         guard rewardsRefreshTask == nil else { return }
+        guard let userId = services?.identityManager.userId, !userId.isEmpty else {
+            clearRewardsForUserChange()
+            return
+        }
         rewardsLoading = rewardsResponse == nil
         rewardsRefreshTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -2218,6 +2245,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         rewardsCampaigns = campaigns
         rewardsResponse = response
+    }
+
+    /// Drops the rewards state: a new user must never see the previous user's
+    /// rewards, and a user-less fetch must not keep stale content around.
+    private func clearRewardsForUserChange() {
+        rewardsRefreshTask?.cancel()
+        rewardsRefreshTask = nil
+        rewardsResponse = nil
+        rewardsLoading = false
+        rewardsCampaigns.removeAll()
     }
 
     /// The rewards page title for a chance's campaign: the bundle first, then
@@ -2360,9 +2397,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             )
             // The chance was already played: hide the entry for the rest of
             // the session, so a re-trigger does not render a dead teaser or
-            // window for a chance that can never open again.
+            // window for a chance that can never open again. The tap promised
+            // a game, so a rendered entry goes away instead of staying tappable.
             if reason == "alreadyPlayed" {
                 hiddenGamificationEntries.insert(campaignKey)
+                dismissPlayedEntry(config: config, payload: payload)
             }
             liveTestContexts[cepCampaignId]?.reportFailed(
                 DropReason.error,
