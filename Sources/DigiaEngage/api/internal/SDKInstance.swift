@@ -23,6 +23,14 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     legacyImport: LegacyQueueImport(source: legacyStorage)
                 )
             },
+            makeAppEventQueue: {
+                SQLiteAnalyticsQueue(
+                    opener: AnalyticsDatabaseOpener(resolvePath: {
+                        try AnalyticsDatabaseOpener.defaultPath(fileName: AnalyticsDatabaseOpener.appEventsFileName)
+                    }),
+                    maxEvents: appEventQueueMaxEvents
+                )
+            },
             makeNetworkMonitor: { PathNetworkMonitor() }
         )
         // Only the production instance: a test's own instance must not take
@@ -133,6 +141,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// here rather than in ``SDKServices`` so a retried `initialize()` reuses
     /// it: a second queue on the same file would interleave with the first.
     private let analyticsQueue: any AnalyticsQueueProtocol
+    /// Host-app events' own durable queue, kept for the same reason.
+    private let appEventQueue: any AnalyticsQueueProtocol
     /// One per services graph: its analytics service stops it on teardown.
     private let makeNetworkMonitor: () -> any NetworkMonitor
     /// The capture toggles `SDKInstance` itself persists.
@@ -262,6 +272,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         makeAnalyticsQueue: (_ legacyStorage: LocalStorage) -> any AnalyticsQueueProtocol = { _ in
             MemoryAnalyticsQueue()
         },
+        makeAppEventQueue: () -> any AnalyticsQueueProtocol = {
+            MemoryAnalyticsQueue(limit: appEventQueueMaxEvents)
+        },
         makeNetworkMonitor: @escaping () -> any NetworkMonitor = { AlwaysOnlineNetworkMonitor() },
         healthSink: HealthSink = .shared
     ) {
@@ -274,6 +287,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         let defaultStorage = UserDefaultsLocalStorage(defaults: defaults)
         // After the migrator, which moves the legacy queue into this suite.
         self.analyticsQueue = makeAnalyticsQueue(defaultStorage.scoped("analytics"))
+        self.appEventQueue = makeAppEventQueue()
         let defaultNetworkClient = makeNetworkClient(currentSession)
         let defaultDebugOverlay = DigiaDebugOverlayController(storage: defaultStorage.scoped("debug"))
         self.debugOverlayController = defaultDebugOverlay
@@ -419,6 +433,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             networkClient: networkClient,
             clock: clock,
             analyticsQueue: analyticsQueue,
+            appEventQueue: appEventQueue,
             networkMonitor: makeNetworkMonitor(),
             appEventNetworkMonitor: makeNetworkMonitor()
         )
