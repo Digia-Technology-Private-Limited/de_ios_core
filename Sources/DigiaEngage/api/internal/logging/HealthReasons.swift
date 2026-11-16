@@ -122,7 +122,7 @@ enum HealthReasons {
         "media_load_failed": ["media_kind", "cause"],
         "cep_bridge_unavailable": ["selector"],
         "internal_error": ["exception_class"],
-        "user_hash_unverified": [],
+        "user_hash_unverified": ["cause"],
         "unsupported_feature": ["feature"],
         "malformed_rule": ["exception_class"],
         "app_event_invalid": ["event_name"],

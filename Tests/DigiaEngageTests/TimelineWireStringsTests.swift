@@ -155,7 +155,7 @@ struct TimelineWireStringsTests {
         #expect(HealthReasons.detailKeys["media_load_failed"] == ["media_kind", "cause"])
         #expect(HealthReasons.detailKeys["cep_bridge_unavailable"] == ["selector"])
         #expect(HealthReasons.detailKeys["internal_error"] == ["exception_class"])
-        #expect(HealthReasons.detailKeys["user_hash_unverified"] == [])
+        #expect(HealthReasons.detailKeys["user_hash_unverified"] == ["cause"])
         #expect(HealthReasons.detailKeys["unsupported_feature"] == ["feature"])
         #expect(HealthReasons.detailKeys["malformed_rule"] == ["exception_class"])
         #expect(HealthReasons.detailKeys["app_event_invalid"] == ["event_name"])

@@ -306,14 +306,37 @@ struct DMCUserContextManagerTests {
             #expect(leaked.isEmpty)
         }
 
-        @Test("verified false without a hash reports nothing")
-        func unverifiedWithoutHash() async {
+        @Test("no hash reports user_hash_unverified once per user")
+        func missingHashReportedOncePerUser() async {
             let sink = RecordSink()
             DigiaLogger.registerSink(sink)
             defer { DigiaLogger.unregisterSink(sink) }
-            let manager = make(verified: false)
+            let manager = make()
+            let unverified = { sink.records.filter { $0.reason?.wire == "user_hash_unverified" } }
 
-            await manager.onUserIdChanged("u1")
+            await manager.onUserIdChanged("asha")
+            #expect(unverified().count == 1)
+            #expect(unverified().first?.extras["cause"] == "missing_hash")
+
+            await manager.onUserIdChanged("asha")
+            await manager.refresh(force: true)
+            #expect(unverified().count == 1)
+
+            await manager.onUserIdChanged("ravi")
+            #expect(unverified().count == 2)
+
+            await manager.onUserIdChanged(nil)
+            #expect(unverified().count == 2)
+        }
+
+        @Test("a hash the server accepts reports nothing")
+        func acceptedHashReportsNothing() async {
+            let sink = RecordSink()
+            DigiaLogger.registerSink(sink)
+            defer { DigiaLogger.unregisterSink(sink) }
+            let manager = make()
+
+            await manager.onUserIdChanged("asha", userHash: "h")
 
             let unverified = sink.records.filter { $0.reason?.wire == "user_hash_unverified" }
             #expect(unverified.isEmpty)
