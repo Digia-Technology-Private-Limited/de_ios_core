@@ -2307,7 +2307,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             bundleRoot: file.deletingLastPathComponent(),
             showMute: config.showMute,
             openLink: { [weak self] url in
-                _ = try? self?.hostActionExecutor.execute(.openDeeplink(url.absoluteString), campaignKey: campaignKey)
+                do {
+                    try self?.hostActionExecutor.execute(.openDeeplink(url.absoluteString), campaignKey: campaignKey)
+                } catch {
+                    log.w("Game openLink failed: \(error)", campaign: campaignKey)
+                }
             },
             onClose: { [weak self] in
                 // An entry-tap game closed without playing leaves the entry up.
