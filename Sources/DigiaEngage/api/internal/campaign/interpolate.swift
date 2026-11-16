@@ -37,7 +37,7 @@ func interpolate(_ text: String, context: VariableContext?) -> String {
 
         result += text[lastEnd..<matchRange.lowerBound]
 
-        let inner = String(text[innerRange]).trimmingCharacters(in: .whitespaces)
+        let inner = String(text[innerRange]).trimmingCharacters(in: .whitespacesAndNewlines)
 
         if isIdentifier(inner) {
             // Single identifier — plain substitution
