@@ -665,8 +665,7 @@ private final class World: DecisionFacts {
     func capped(_ campaign: CampaignModel) -> Bool {
         guard let policy = campaign.frequency else { return false }
         return !FrequencyEvaluator.evaluate(
-            policy, frequency[campaign.campaignKey], Int64(now), sessionId,
-            unseenCountsAsZero: campaign.rule != nil
+            policy, frequency[campaign.campaignKey], Int64(now), sessionId
         ).allow
     }
 

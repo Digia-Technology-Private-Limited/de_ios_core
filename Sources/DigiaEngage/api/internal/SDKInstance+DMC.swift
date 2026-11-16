@@ -34,8 +34,7 @@ private final class EngineFacts: DecisionFacts {
 
     func capped(_ campaign: CampaignModel) -> Bool {
         sdk.services?.frequencyManager.blockReason(
-            campaignKey: campaign.campaignKey, policy: campaign.frequency,
-            unseenCountsAsZero: campaign.rule != nil) != nil
+            campaignKey: campaign.campaignKey, policy: campaign.frequency) != nil
     }
 
     var currentScreen: String { sdk.currentScreenForAnchorless ?? "" }
