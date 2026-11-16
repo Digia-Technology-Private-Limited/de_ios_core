@@ -78,5 +78,25 @@ extension DigiaEngageTests {
             window.rootViewController = nil
             host.view.removeFromSuperview()
         }
+
+        // Fails if: DigiaSlot.body emits a view for an empty slot again (the spaced stack would
+        // put a second 16pt gap around it).
+        @Test("empty slots in a spaced stack leave one gap between neighbours")
+        func emptySlotsAddNoSpacing() throws {
+            try start([])
+            func height<V: View>(_ view: V) -> CGFloat {
+                UIHostingController(rootView: view).sizeThatFits(in: CGSize(width: 390, height: 2000)).height
+            }
+            func width<V: View>(_ view: V) -> CGFloat {
+                UIHostingController(rootView: view).sizeThatFits(in: CGSize(width: 2000, height: 390)).width
+            }
+            let box = Color.red.frame(width: 10, height: 10)
+            #expect(height(VStack(spacing: 16) {
+                DigiaSlot("a"); box; DigiaSlot("b"); DigiaSlot("c"); box; DigiaSlot("d")
+            }) == 36)
+            #expect(width(HStack(spacing: 16) {
+                DigiaSlot("a"); box; DigiaSlot("b"); DigiaSlot("c"); box; DigiaSlot("d")
+            }) == 36)
+        }
     }
 }
