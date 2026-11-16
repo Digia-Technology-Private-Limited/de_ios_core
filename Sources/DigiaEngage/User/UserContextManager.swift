@@ -189,6 +189,10 @@ final class UserContextManager {
     private func clearCache() {
         context = nil
         attributes = [:]
+        clearDisk()
+    }
+
+    private func clearDisk() {
         for key in [contextKey, attributesKey, sentHashKey, ownerKey] { storage.remove(forKey: key) }
     }
 
@@ -253,7 +257,13 @@ final class UserContextManager {
 
     /// Called when the host app identifies a user, or clears it.
     func onUserIdChanged(_ userId: String?, userHash: String? = nil) async {
-        if announced && announcedUserId != userId { return }
+        if announced && announcedUserId != userId {
+            // An overtaken logout is not applied in memory, but the disk must still forget
+            // the user who logged out: the later change may be a login of that same user,
+            // which finds no change to clear.
+            if userId == nil { clearDisk() }
+            return
+        }
         // Before configure, the stored owner is the only record of the last user.
         let previous = self.userId ?? storage.string(forKey: ownerKey)
         let userChanged = userId != previous
