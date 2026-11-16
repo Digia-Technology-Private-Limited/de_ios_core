@@ -177,6 +177,7 @@ final class UserContextManager {
     /// run: the host app does not call `setUserId` again on a relaunch.
     func configure(restoredUserId: String?, restoredUserHash: String? = nil) {
         configured = true
+        announced = false
         userId = restoredUserId
         userHash = restoredUserId == nil ? nil : restoredUserHash
         if let owner = storage.string(forKey: ownerKey), owner != restoredUserId { clearCache() }
@@ -233,6 +234,8 @@ final class UserContextManager {
     /// before the identity changes, so no rule reads that data for `userId`.
     /// ``onUserIdChanged(_:userHash:)`` then clears the disk.
     func dropPreviousUser(_ userId: String?) {
+        announced = true
+        announcedUserId = userId
         let previous = self.userId ?? storage.string(forKey: ownerKey)
         if let userId, userId == previous || previous == nil { return }
         // A nil user also discards a fetch still in flight for the previous one.
@@ -242,8 +245,15 @@ final class UserContextManager {
         attributes = [:]
     }
 
+    /// The user the host app asked for last. A user change still on its way for
+    /// anyone else is out of date, and applying it would hand that user the
+    /// attributes the host app has just set for the current one.
+    private var announced = false
+    private var announcedUserId: String?
+
     /// Called when the host app identifies a user, or clears it.
     func onUserIdChanged(_ userId: String?, userHash: String? = nil) async {
+        if announced && announcedUserId != userId { return }
         // Before configure, the stored owner is the only record of the last user.
         let previous = self.userId ?? storage.string(forKey: ownerKey)
         let userChanged = userId != previous
