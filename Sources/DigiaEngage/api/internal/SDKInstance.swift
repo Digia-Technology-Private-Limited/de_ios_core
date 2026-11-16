@@ -1329,7 +1329,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         engine.send(.anchorVisible(anchorKey))
     }
 
-    /// Sends `slot_visible` each time the slot, filled or empty, becomes
+    /// Sends `slot_visible` each time a filled slot becomes
     /// exposed: a scroll into view, a return to its screen, the app becoming active.
     func slotExposed(_ placementKey: String) {
         engine.send(.slotVisible(placementKey))

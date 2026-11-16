@@ -32,7 +32,7 @@ public struct DigiaSlot<Placeholder: View>: View {
             }
             .background(SlotAppearanceReader(placementKey: placementKey))
         } else {
-            ZStack { placeholder }
+            placeholder
         }
     }
 
