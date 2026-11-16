@@ -42,6 +42,17 @@ struct GamificationConfigTests {
         #expect(GamificationConfig.fromJson(template(minSdkVersionIos: "soon")) != nil)
     }
 
+    @Test("an unknown sensor name skips only that sensor")
+    func unknownSensorSkipped() {
+        var json = template()
+        json["sensors"] = ["haptics", "lidar", "gyroscope"]
+
+        // Guards the skip in fromJson: a new sensor name must not drop the
+        // whole campaign on older SDKs.
+        let parsed = GamificationConfig.fromJson(json)
+        #expect(parsed?.sensors == [.haptics, .gyroscope])
+    }
+
     @Test("semver compares numerically, tolerating short forms")
     func semver() {
         #expect(GamificationConfig.isNewer("4.4", than: "4.3.2") == true)

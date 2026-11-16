@@ -106,7 +106,12 @@ struct GamificationConfig: Equatable {
         sensors.reserveCapacity(rawSensors.count)
         for raw in rawSensors {
             let sensor = GamificationSkinSensor(wire: raw as? String)
-            guard sensor != .unknown else { return nil }
+            // A new sensor name skips only that sensor, never the campaign —
+            // older SDKs keep working while the dashboard moves on.
+            guard sensor != .unknown else {
+                log.d("Gamification sensor skipped — unknown (sensor=\(raw))")
+                continue
+            }
             sensors.append(sensor)
         }
 
