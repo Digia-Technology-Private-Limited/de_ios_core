@@ -62,7 +62,9 @@ struct CampaignRouter {
         return .dropped(reason: .hostSuppressed, detail: detail)
     }
 
+    // Inline is exempt: its slot decides where it shows, so `targetScreenNames` means nothing for it.
     private func screenGate(_ request: CampaignRequest) -> RoutingVerdict? {
+        guard request.campaign.campaignType != "inline" else { return nil }
         let screen = currentScreen()
         guard !request.campaign.allowsScreen(screen) else { return nil }
         let key = request.campaign.campaignKey
