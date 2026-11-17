@@ -103,20 +103,17 @@ final class GamePresentation: Identifiable, ObservableObject {
         switch message {
         case .http(let id, let method, let path, let body):
             performHttp(id: id, method: method, path: path, body: body)
-        case .event(let id, let name, let props):
+        case .event(_, let name, let props):
             SDKInstance.shared.gamification.reportGameSkinEvent(
                 name: name, properties: props, payload: self.request.payload,
                 skinId: self.request.skinId, skinVersion: self.request.skinVersion,
                 chanceId: self.request.chanceId)
-            if let id { bridge.answer(id: id) }
-        case .log(let id, let level, let message):
+        case .log(_, let level, let message):
             emitSkinLog(level: level, message: message)
-            if let id { bridge.answer(id: id) }
-        case .haptics(let id, let style):
+        case .haptics(_, let style):
             if !haptics.play(style) {
                 log.d("Game haptic dropped (style=\(style.rawValue))", campaign: self.request.campaignKey)
             }
-            if let id { bridge.answer(id: id) }
         case .sensorStart(let id, let sensor, let hz):
             let started = motion.start(sensor: sensor, hz: hz) { [weak self] event in
                 guard let self else { return }
@@ -148,11 +145,11 @@ final class GamePresentation: Identifiable, ObservableObject {
             }
         case .storageRemove(let id, let key):
             guard GameSkinStorage.isValidKey(key) else {
-                bridge.fail(id: id, code: .invalid, message: "invalid key")
+                if let id { bridge.fail(id: id, code: .invalid, message: "invalid key") }
                 return
             }
             storage.remove(key)
-            bridge.answer(id: id)
+            if let id { bridge.answer(id: id) }
         case .actionCopy(let id, let text):
             runSkinAction(id: id, action: .copyToClipboard(text))
         case .actionOpenLink(let id, let url):
@@ -175,12 +172,12 @@ final class GamePresentation: Identifiable, ObservableObject {
             if let id { bridge.answer(id: id, payload: ["ok": true]) }
             dismiss()
         case .motionSubscribe(let id, let sensors, let hz):
-            var started = true
-            for sensor in sensors {
-                started = motion.start(sensor: sensor, hz: hz) { [weak self] event in
-                    guard let self else { return }
-                    self.pushSensor(event)
-                } && started
+            // Availability resolves for every sensor before any of them
+            // streams, so a missing sensor fails the whole subscribe —
+            // like Android, never a started subset plus `unsupported`.
+            let started = motion.startAll(sensors: sensors, hz: hz) { [weak self] event in
+                guard let self else { return }
+                self.pushSensor(event)
             }
             if started {
                 bridge.answer(id: id, payload: ["ok": true])
@@ -188,11 +185,7 @@ final class GamePresentation: Identifiable, ObservableObject {
                 bridge.fail(id: id, code: .unsupported, message: "sensor unavailable")
             }
         case .motionUnsubscribe(let id, let sensors):
-            if sensors.isEmpty {
-                motion.stopAll()
-            } else {
-                for sensor in sensors { motion.stop(sensor: sensor) }
-            }
+            for sensor in sensors { motion.stop(sensor: sensor) }
             bridge.answer(id: id, payload: ["ok": true])
         case .actionSteps(let id, let actions):
             // Canvas steps over the bridge: the same executor the canvas uses.

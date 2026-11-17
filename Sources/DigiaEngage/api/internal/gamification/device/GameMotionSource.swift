@@ -47,7 +47,7 @@ final class GameMotionSource: NSObject {
     /// Device capabilities for the `device.sensors` field of `init`.
     static var accelerometerAvailable: Bool { probe.isAccelerometerAvailable }
     static var gyroscopeAvailable: Bool { probe.isGyroAvailable }
-    private static let probe = CMMotionManager()
+    private nonisolated(unsafe) static let probe = CMMotionManager()
 
     /// Clamps a skin `hz` into range. Missing, non-finite, or non-positive
     /// values read as the default — never zero, never a crash.
@@ -74,26 +74,61 @@ final class GameMotionSource: NSObject {
     private var startUptime: TimeInterval = 0
     private var timer: Timer?
 
+    /// Reads availability for one sensor name. Defaults to the live hardware
+    /// probe; tests inject a stub so the subscribe gate is deterministic
+    /// without motion hardware.
+    private let isAvailable: (String) -> Bool
+
+    init(isAvailable: ((String) -> Bool)? = nil) {
+        self.isAvailable = isAvailable ?? Self.hardwareAvailable(sensor:)
+        super.init()
+    }
+
+    /// Live hardware availability for one sensor name. Unknown names are
+    /// never available — the bridge intake already rejects them, so this
+    /// only gates the hardware check.
+    nonisolated static func hardwareAvailable(sensor: String) -> Bool {
+        switch sensor {
+        case gyroscopeName: return probe.isGyroAvailable
+        case accelerometerName: return probe.isAccelerometerAvailable
+        default: return false
+        }
+    }
+
+    /// Sensors currently streaming. Tests read it to prove the subscribe
+    /// gate starts nothing on failure.
+    var activeSensorNames: Set<String> {
+        Set(active.keys)
+    }
+
     /// Starts one sensor at `hz`, replacing its rate when already started.
     /// Returns false — and streams nothing — when the sensor is unknown or its
     /// hardware is missing; the caller answers `error unsupported`.
     @discardableResult
     func start(sensor: String, hz: Double, handler: @escaping (GameMotionEvent) -> Void) -> Bool {
         let rate = Self.clampedHz(hz)
-        switch sensor {
-        case Self.gyroscopeName:
-            guard manager.isGyroAvailable else { return false }
-        case Self.accelerometerName:
-            guard manager.isAccelerometerAvailable else { return false }
-        default:
-            return false
-        }
+        guard isAvailable(sensor) else { return false }
         if active.isEmpty {
             startUptime = ProcessInfo.processInfo.systemUptime
         }
         active[sensor] = ActiveSensor(hz: rate, lastEmit: ProcessInfo.processInfo.systemUptime - 1 / rate)
         self.handler = handler
         restartHardware()
+        return true
+    }
+
+    /// Starts every listed sensor at `hz`, but only after every one of them
+    /// resolved available — a missing sensor fails the whole subscribe
+    /// without starting any of them, like Android's `motion` handler.
+    /// Returns false — and streams nothing — when any sensor is unavailable.
+    @discardableResult
+    func startAll(sensors: [String], hz: Double, handler: @escaping (GameMotionEvent) -> Void) -> Bool {
+        for sensor in sensors {
+            guard isAvailable(sensor) else { return false }
+        }
+        for sensor in sensors {
+            start(sensor: sensor, hz: hz, handler: handler)
+        }
         return true
     }
 
