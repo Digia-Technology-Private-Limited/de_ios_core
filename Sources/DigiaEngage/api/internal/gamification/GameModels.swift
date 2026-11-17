@@ -155,9 +155,11 @@ struct GameOpenRequest {
     var onShown: (@MainActor () -> Void)?
     /// The payload this delivery was routed with, for skin-event analytics.
     var payload: CEPTriggerPayload
+    /// `direct`, `inlineTeaser`, `floating` or `rewards`. Carried for the
+    /// `game_` health events.
+    var entry: String
     /// `init.values`: the marketer's field values, carried opaquely.
     var values: [String: JSONValue] = [:]
-    /// `init.slots`: outcome-keyed slot values, only for formats that map
-    /// outcomes to slots.
+    /// `init.slots`: outcome-keyed slot values, read whenever present.
     var slots: [GamificationSlotConfig] = []
 }
