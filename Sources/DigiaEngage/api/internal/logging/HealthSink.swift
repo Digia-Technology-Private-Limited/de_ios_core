@@ -21,6 +21,11 @@ struct HealthEventPayload: Sendable {
     /// when the reason carries none.
     let detail: [String: String]?
 
+    /// `variable_type_mismatch` only: `{name, expected, sample}` per variable
+    /// whose CEP value did not fit its declared type, sent as
+    /// `detail.mismatches`.
+    var mismatches: [[String: String]]? = nil
+
     /// `"debug"` or `"release"`, stamped once at ``HealthSink/activate(_:)``.
     let buildMode: String
 }
@@ -278,6 +283,39 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
         reporter?(payload)
     }
 
+    /// Reports `variable_type_mismatch`: a CEP value that did not fit its
+    /// declared variable type, `mismatches` being `{name, expected, sample}`
+    /// entries already capped by the caller.
+    ///
+    /// Not routed through ``emit(_:)``: its detail is structured, and `sample`
+    /// is a raw CEP value, which ``HealthReasons/detailKeys`` otherwise never
+    /// lets out. Same brakes as every health event; dedup is per campaign and
+    /// variable set, so a different variable failing later sends a new event.
+    func reportVariableTypeMismatch(campaignKey: String, mismatches: [[String: String]]) {
+        guard !Self.muted else { return }
+        let key = "variable_type_mismatch|\(campaignKey)|"
+            + mismatches.map { $0["name"] ?? "" }.sorted().joined(separator: ",")
+        lock.lock()
+        guard registered, !killed, sent < cap, seen.insert(key).inserted else {
+            lock.unlock()
+            return
+        }
+        sent += 1
+        let payload = HealthEventPayload(
+            campaignKey: campaignKey,
+            reason: "variable_type_mismatch",
+            stage: "render",
+            detail: nil,
+            mismatches: mismatches,
+            buildMode: buildMode
+        )
+        let reporter = report
+        if reporter == nil { queued.append(payload) }
+        lock.unlock()
+
+        reporter?(payload)
+    }
+
     /// The per-reason projection: only the keys ``HealthReasons/detailKeys``
     /// names, and a key absent from the record is absent here rather than
     /// null.
@@ -293,9 +331,11 @@ final class HealthSink: DiagnosticSink, @unchecked Sendable {
     /// First occurrence per key per app session. `|` is a safe separator:
     /// every part is a symbol, an id or a dashboard-authored key.
     private func dedupKey(_ record: TimelineRecord, _ wire: String) -> String {
-        if HealthReasons.campaignlessReasons.contains(wire) { return wire }
-        var key = "\(wire)|\(record.campaignKey ?? "")"
-        for extraKey in HealthReasons.dedupExtraKeys[wire] ?? [] {
+        let campaignless = HealthReasons.campaignlessReasons.contains(wire)
+        let extraKeys = HealthReasons.dedupExtraKeys[wire] ?? []
+        if campaignless, extraKeys.isEmpty { return wire }
+        var key = "\(wire)|\(campaignless ? "" : (record.campaignKey ?? ""))"
+        for extraKey in extraKeys {
             key += "|\(record.extras[extraKey] ?? "")"
         }
         return key

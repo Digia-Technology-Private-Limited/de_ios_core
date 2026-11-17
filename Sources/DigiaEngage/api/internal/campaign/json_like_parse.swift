@@ -49,6 +49,30 @@ extension Dictionary where Key == String, Value == Any {
         return value.flatMap { $0 > 0 ? $0 : nil }
     }
 
+    /// A frequency cap as a whole number >= 1, or `nil` (no cap). Accepts a number or a
+    /// numeric string (" 2 ", "3.0"); zero, negatives, fractions, booleans, junk and values
+    /// past a 32-bit int all mean no cap. Same rule on every stack.
+    func capInt(_ key: String) -> Int? {
+        let text: String
+        if let number = self[key] as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() { return nil }
+            text = number.stringValue
+        } else if let string = self[key] as? String {
+            text = string
+        } else {
+            return nil
+        }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = trimmed.split(separator: ".", omittingEmptySubsequences: false)
+        func isDigits(_ part: Substring, only: Character? = nil) -> Bool {
+            !part.isEmpty && part.allSatisfy { $0.isASCII && $0.isNumber && (only == nil || $0 == only) }
+        }
+        guard parts.count <= 2, isDigits(parts[0]), parts.count == 1 || isDigits(parts[1], only: "0"),
+              let value = Int(parts[0]), value >= 1, value <= Int(Int32.max)
+        else { return nil }
+        return value
+    }
+
     func object(_ key: String) -> [String: Any]? {
         self[key] as? [String: Any]
     }

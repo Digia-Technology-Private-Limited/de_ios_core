@@ -74,6 +74,11 @@ struct StatefulTimerConfig: Equatable {
     /// The dashboard's `fallbackValue` of each variable, used when the trigger sends no value for it.
     var variableDefaults: [String: String] = [:]
 
+    /// Resolves against the trigger's variables with each schema's fallback filling an empty one.
+    func resolve(schemas: [VariableSchema], cepVars: [String: String]?) -> ResolvedTimerCanvas? {
+        resolve(buildVariableContext(schemas: schemas, cepVars: cepVars).values)
+    }
+
     func resolve(_ triggerVariables: [String: String]?) -> ResolvedTimerCanvas? {
         let variables = variableDefaults.merging(
             (triggerVariables ?? [:]).filter { !$0.value.isEmpty }

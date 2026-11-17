@@ -22,7 +22,22 @@ public struct DigiaSlot<Placeholder: View>: View {
         SDKInstance.shared.recordSlotSeen(placementKey)
     }
 
+    @ViewBuilder
     public var body: some View {
+        // Empty, the slot emits nothing (an EmptyView placeholder is no stack child), so it
+        // adds no spacing to the host's layout. `slot_visible` is not sent for an empty slot.
+        if inlineController.getCampaign(placementKey) != nil {
+            ZStack {
+                content
+            }
+            .background(SlotAppearanceReader(placementKey: placementKey))
+        } else {
+            placeholder
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         Group {
             if let payload = inlineController.getCampaign(placementKey) {
                 let deliveryID = payload.presentationId ?? payload.cepCampaignId
@@ -33,7 +48,7 @@ public struct DigiaSlot<Placeholder: View>: View {
                         // No once-guard here: EngageEventEmitter dedupes the impression
                         // per campaign and resets it when the slot is cleared, so a
                         // redelivery of the same CEP campaign ID impresses again.
-                        if visible { SDKInstance.shared.reportSlotFirstRender(payload) }
+                        if visible { SDKInstance.shared.inlineReporter.reportSlotFirstRender(payload) }
                     }
             } else {
                 placeholder
@@ -73,6 +88,41 @@ public extension DigiaSlot where Placeholder == EmptyView {
     }
 }
 
+
+/// Sends `slot_visible` each time a filled slot becomes exposed
+/// (`ExposureMonitor`). An empty slot emits no view, so it is never exposed.
+struct SlotAppearanceReader: UIViewRepresentable {
+    let placementKey: String
+
+    final class Coordinator {
+        var tag: String?
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        return view
+    }
+
+    func updateUIView(_ view: UIView, context: Context) {
+        let tag = "slot:\(placementKey)"
+        if let previous = context.coordinator.tag, previous != tag {
+            ExposureMonitor.shared.untrack(view, tag: previous)
+        }
+        context.coordinator.tag = tag
+        let placementKey = placementKey
+        ExposureMonitor.shared.track(view, tag: tag) {
+            SDKInstance.shared.slotExposed(placementKey)
+        }
+    }
+
+    static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
+        guard let tag = coordinator.tag else { return }
+        ExposureMonitor.shared.untrack(view, tag: tag)
+    }
+}
 
 /// Reports whether the slot is on screen: in a window, with no hidden view
 /// above it, while the app is active. SwiftUI's appear events miss hidden

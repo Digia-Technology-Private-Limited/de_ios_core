@@ -87,7 +87,7 @@ extension DigiaEngageTests {
             #expect(undisplayed.extras["blocking_campaign_key"] == nil)
             #expect(!HealthSink().accepts(undisplayed))
 
-            sdk.reportNudgeImpression()
+            sdk.nudgeOrchestrator.reportNudgeImpression()
             _ = deliver(sdk, "n3", "cep-3")
             let displayed = try await busyRecord(capture, "n3")
             #expect(displayed.extras["blocking_campaign_key"] == "n1")
@@ -101,7 +101,7 @@ extension DigiaEngageTests {
             let survey = deliver(sdk, "s", "cep-1")
             let token = try #require(sdk.surveyOrchestrator.state?.token)
             sdk.surveyOrchestrator.bindProgress(token: token) { (2, 1) }
-            sdk.reportSurveyStarted()
+            sdk.surveyReporter.reportSurveyStarted()
 
             liveTest(sdk, "inv-1", nudgeJson("t1"))
 
@@ -121,9 +121,9 @@ extension DigiaEngageTests {
         func nudgeDismissReason() async throws {
             let sdk = try await makeSdk([nudgeJson("n")])
             let nudge = deliver(sdk, "n", "cep-1")
-            sdk.reportNudgeImpression()
+            sdk.nudgeOrchestrator.reportNudgeImpression()
 
-            sdk.markNudgeDismissed(reason: .ctaAction)
+            sdk.nudgeOrchestrator.markNudgeDismissed(reason: .ctaAction)
 
             #expect(nudge.dismissReason == .ctaAction)
             let dismissed = try await digiaEvents(sdk).filter { $0.name == "Digia Experience Dismissed" }
@@ -142,10 +142,10 @@ extension DigiaEngageTests {
             json["templateConfig"] = template
             let sdk = try await makeSdk([json])
             let guide = deliver(sdk, "g", "cep-1")
-            sdk.reportGuideShown()
+            sdk.guideOrchestrator.reportGuideShown()
 
             sdk.advanceGuide()
-            sdk.reportGuideShown()
+            sdk.guideOrchestrator.reportGuideShown()
             sdk.advanceGuide()
 
             #expect(guide.dismissReason == .completed)
@@ -161,13 +161,13 @@ extension DigiaEngageTests {
         func surveyDismissReason() async throws {
             let sdk = try await makeSdk([surveyJson("s1"), surveyJson("s2")])
             let first = deliver(sdk, "s1", "cep-1")
-            sdk.reportSurveyStarted()
-            sdk.markSurveyDismissed(abandonedAtItem: 0, answeredCount: 0)
+            sdk.surveyReporter.reportSurveyStarted()
+            sdk.surveyReporter.markSurveyDismissed(abandonedAtItem: 0, answeredCount: 0)
             #expect(first.dismissReason == .userClose)
 
             let second = deliver(sdk, "s2", "cep-2")
-            sdk.reportSurveyStarted()
-            sdk.markSurveyCompleted(response: [:])
+            sdk.surveyReporter.reportSurveyStarted()
+            sdk.surveyReporter.markSurveyCompleted(response: [:])
             #expect(second.dismissReason == .completed)
 
             let reasons = try await digiaEvents(sdk)

@@ -16,7 +16,8 @@
 /// presentation from outside this module and no way to mint or hold a second,
 /// disconnected one.
 ///
-/// Each case mirrors one write on ``PresentationController`` one-for-one, and
+/// Each case maps onto one ``PresentationController`` write (a dismissal via
+/// the coordinator's normalisation, see ``settled(_:)``), and
 /// ``settled(_:)`` reuses ``PresentationOutcome`` rather than re-deriving the
 /// pinned ``DismissReason`` / ``DropReason`` vocabulary a second time.
 public enum ExternalGuideLifecycleEvent: Sendable, Equatable {
@@ -29,6 +30,9 @@ public enum ExternalGuideLifecycleEvent: Sendable, Equatable {
     case clicked(elementId: String?)
 
     /// The terminal outcome — dismissed after displaying, or dropped before it
-    /// ever did. Mirrors ``PresentationController/settle(_:)``.
+    /// ever did. A dismissal reaches the presentation through the
+    /// coordinator's normalisation (an undisplayed dismissal settles
+    /// dropped), never as a raw `settle`, because an external renderer's
+    /// ordering is not trustworthy; a drop settles directly.
     case settled(PresentationOutcome)
 }

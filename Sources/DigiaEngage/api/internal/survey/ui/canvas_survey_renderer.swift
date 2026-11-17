@@ -170,8 +170,8 @@ struct CanvasSurveyPanel: View {
 
     private func primary() {
         if showingWelcome {
-            SDKInstance.shared.reportSurveyWelcomeStart()
-            SDKInstance.shared.reportSurveyStartClicked()
+            SDKInstance.shared.surveyReporter.reportSurveyWelcomeStart()
+            SDKInstance.shared.surveyReporter.reportSurveyStartClicked()
             welcomeDone = true
             return
         }
@@ -187,9 +187,9 @@ struct CanvasSurveyPanel: View {
         clearValidationError()
         if !block.type.isContent {
             if let ans = vm.answers[node.id], ans.isAnswered {
-                SDKInstance.shared.reportSurveyAnswered(stepId: node.id, answer: ans.toMap())
+                SDKInstance.shared.surveyReporter.reportSurveyAnswered(stepId: node.id, answer: ans.toMap())
             } else if !block.required {
-                SDKInstance.shared.reportSurveyQuestionSkipped(
+                SDKInstance.shared.surveyReporter.reportSurveyQuestionSkipped(
                     nodeId: node.id, itemIndex: vm.currentItemIndex)
             }
         }
@@ -229,7 +229,7 @@ struct CanvasSurveyPanel: View {
         else {
             return
         }
-        SDKInstance.shared.reportSurveyQuestionViewed(
+        SDKInstance.shared.surveyReporter.reportSurveyQuestionViewed(
             nodeId: node.id, itemIndex: vm.currentItemIndex)
     }
 
@@ -245,7 +245,7 @@ struct CanvasSurveyPanel: View {
             try? await Task.sleep(nanoseconds: 250_000_000)
             if Task.isCancelled { return }
             guard vm.currentNode?.id == node.id else { return }
-            SDKInstance.shared.reportSurveyAnswered(stepId: node.id, answer: ans.toMap())
+            SDKInstance.shared.surveyReporter.reportSurveyAnswered(stepId: node.id, answer: ans.toMap())
             reportCompletionIfResultIsNext()
             vm.advance()
         }
@@ -253,7 +253,7 @@ struct CanvasSurveyPanel: View {
 
     private func reportCompletionIfResultIsNext() {
         if !completionReported && vm.nextBlockIsResultPage() {
-            SDKInstance.shared.reportSurveyCompleted(
+            SDKInstance.shared.surveyReporter.reportSurveyCompleted(
                 response: vm.responsePayload(), answers: vm.answers)
             completionReported = true
         }

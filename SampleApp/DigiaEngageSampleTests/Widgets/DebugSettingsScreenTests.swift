@@ -8,7 +8,8 @@ extension HostedUITests {
 /// real touches: each switch is tapped where a finger would tap it, and the proof is what the SDK
 /// then keeps (its in-memory flag and the value on disk) and what the screen shows next.
 ///
-/// A native app is offered Sync; only the React Native binding is offered page capture (see
+/// Sync is offered to a host that cannot capture (any wrapper other than React Native); a plain
+/// native app and the React Native binding are offered page capture instead (see
 /// `CaptureSettingsScreenTests`).
 ///
 /// Port of `flutter/core/test/digia_debug_settings_screen_test.dart`. Not ported: "live testing is
@@ -23,8 +24,9 @@ struct DebugSettingsScreenTests {
     private var overlay: DigiaDebugOverlayController { SDKInstance.shared.debugOverlayControllerSnapshot() }
     private var liveTest: LiveTestService { SDKInstance.shared.liveTestServiceSnapshot() }
 
+    /// A wrapper that cannot capture, so the screen offers Sync.
     private func boot() async throws -> SdkHarness {
-        let sdk = try await SdkHarness.widgetsBoot()
+        let sdk = try await SdkHarness.widgetsBoot(wrapperBinding: "unsupported_wrapper")
         try await sdk.widgetsOpenSettings()
         return sdk
     }
@@ -65,7 +67,8 @@ struct DebugSettingsScreenTests {
     // its init.
     @Test("the synced list shows each page and slot recorded this session, with the screen it was on")
     func syncedListShowsRecords() async throws {
-        let sdk = try await SdkHarness.widgetsBoot()
+        // A wrapper that cannot capture: a plain native app is offered page capture, not Sync.
+        let sdk = try await SdkHarness.widgetsBoot(wrapperBinding: "unsupported_wrapper")
         defer { sdk.widgetsFinish() }
         registry.setEnabled(true)
         sdk.setCurrentScreen("widgets_list_home")

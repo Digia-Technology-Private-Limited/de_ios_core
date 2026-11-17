@@ -4,7 +4,7 @@ import UIKit
 @testable import DigiaEngage
 
 extension HostedUITests {
-/// Page & component capture, offered only to the React Native binding
+/// Page & component capture, offered to a plain native app and to the React Native binding
 /// (`SDKInstance.isCaptureSupported`): its switch on the debug settings, its own screen
 /// (`DigiaRecordedSessionScreen`) with the capture profile, and the bubble's capture button. Real
 /// touches throughout; the boundary is the capture upload, answered by the mock network.
@@ -22,6 +22,62 @@ struct CaptureSettingsScreenTests {
 
     private func boot() async throws -> SdkHarness {
         try await SdkHarness.widgetsBoot(reactNative: true)
+    }
+
+    // Fails if: SDKInstance.swift `captureBinding` stops treating a plain native app (no
+    // wrapper) as able to capture, so the screen falls back to Sync.
+    @Test("a plain native app is offered page capture instead of Sync")
+    func nativeAppOfferedCapture() async throws {
+        let sdk = try await SdkHarness.widgetsBoot()
+        defer { sdk.widgetsFinish() }
+        try await sdk.widgetsOpenSettings()
+
+        #expect(sdkInstance.captureBinding == "native")
+        #expect(sdk.widgetsRowFrames("Sync").isEmpty, "capture replaces Sync")
+        #expect(!sdk.widgetsRowFrames("Page & component capture").isEmpty)
+    }
+
+    // Fails if: a plain native app's capture switch stops turning capture on or adding the
+    // capture button to the bubble (the React Native case is `captureSwitch` below).
+    @Test("a plain native app's capture switch adds the capture button to the bubble")
+    func nativeCaptureSwitch() async throws {
+        let sdk = try await SdkHarness.widgetsBoot()
+        defer { sdk.widgetsFinish() }
+        try await sdk.widgetsOpenSettings()
+
+        try await sdk.widgetsTapSwitch(row: "Page & component capture") { self.sdkInstance.captureModeEnabled }
+        #expect(registry.isEnabled, "capture also records components, which Sync used to do")
+
+        try await sdk.widgetsCloseSettings()
+        try await sdk.waitUntil("the capture button on the bubble") { sdk.widgetsIsShowing(exactly: "Capture current page") }
+    }
+
+    // Fails if: a plain native app's capture is uploaded under any binding but `native`, or
+    // stops uploading at all.
+    @Test("a plain native app's bubble capture uploads the page as binding native, platform ios")
+    func nativeCaptureUpload() async throws {
+        let sdk = try await SdkHarness.widgetsBoot()
+        defer { sdk.widgetsFinish() }
+        let page = "widgets_native_capture_home"
+        sdk.network.enqueueResponse(
+            url: DigiaEndpoints.recordPageCapture, statusCode: 200,
+            body: #"{"data":{"response":{"assetId":"asset-native"}}}"#)
+        sdkInstance.setCaptureModeEnabled(true)
+        sdk.setCurrentScreen(page)
+
+        try await sdk.widgetsTap(exactly: "Capture current page") { self.sdkInstance.captureStatusMessage != nil }
+        try await sdk.waitUntil("the capture to upload", timeout: 8) {
+            self.sdkInstance.capturedPages.contains { $0.pageKey == page }
+        }
+
+        let upload = try #require(sdk.network.lastMultipartRequest)
+        let field = try #require(upload.formFields["capture"], "the envelope is a capture form field")
+        let capture = try #require(try JSONSerialization.jsonObject(with: Data(field.utf8)) as? [String: Any])
+        #expect(capture["binding"] as? String == "native")
+        #expect(capture["platform"] as? String == "ios")
+        #expect(capture["pageKey"] as? String == page)
+        #expect(upload.files.contains { $0.fileName == "capture.png" }, "the screenshot is uploaded too")
+        sdkInstance.clearCaptureStatus()
     }
 
     // Fails if: DigiaDebugSettingsView.swift stops offering the capture row when

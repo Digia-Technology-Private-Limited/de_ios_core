@@ -301,14 +301,14 @@ private struct NudgeButtonView: View {
     private func handleTap() {
         if node.isPrimary {
             let action = node.actions.first?.resolved(with: variables)
-            SDKInstance.shared.emitNudgeClick(
+            SDKInstance.shared.nudgeOrchestrator.emitNudgeClick(
                 elementId: "cta_primary",
                 ctaLabel: node.label,
                 actionType: action?.analyticsType,
                 actionUrl: action?.analyticsURL,
                 ctaRole: "primary"
             )
-            SDKInstance.shared.reportPrimaryCTAClick(elementId: "cta_primary", isPrimary: true)
+            SDKInstance.shared.nudgeOrchestrator.reportPrimaryCTAClick(elementId: "cta_primary", isPrimary: true)
         }
         Task {
             await SDKInstance.shared.executeActionFlow(

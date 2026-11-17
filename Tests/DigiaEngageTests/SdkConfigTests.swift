@@ -66,6 +66,36 @@ struct SdkConfigResolveTests {
     }
 }
 
+@Suite("SdkConfig app events")
+struct SdkConfigAppEventsTests {
+    @Test("app-event controls and limits are read, a limit below 1 is ignored, fields fall back one by one")
+    func appEventsSection() {
+        let fetched = object(
+            #"""
+            {"appEvents":{"upload":false,"ratePerMinute":30,"burst":5,"blockedNames":["a",7,"b"],
+             "limits":{"maxProperties":3,"nameMaxLength":0,"propertyKeyMaxLength":"x"}}}
+            """#)
+        let cached = object(#"{"appEvents":{"limits":{"propertyKeyMaxLength":40,"listMaxItems":9}}}"#)
+        let policy = SdkConfig.resolve(fetched: fetched, cached: cached).appEvents
+        #expect(policy.enabled == false)
+        #expect(policy.ratePerMinute == 30)
+        #expect(policy.burst == 5)
+        #expect(policy.blockedNames == ["a", "b"])
+        #expect(policy.limits.maxProperties == 3)
+        #expect(policy.limits.nameMaxLength == appEventNameMaxLength)
+        #expect(policy.limits.propertyKeyMaxLength == 40)
+        #expect(policy.limits.listMaxItems == 9)
+        #expect(policy.limits.stringMaxLength == appEventPropertyStringMaxLength)
+    }
+
+    @Test("the upload switch is off only for an explicit false")
+    func uploadOffOnlyForFalse() {
+        #expect(SdkConfig.resolve(fetched: object(#"{"appEvents":{"upload":"no"}}"#)).appEvents.enabled)
+        #expect(SdkConfig.resolve(fetched: object(#"{"appEvents":{"upload":0}}"#)).appEvents.enabled)
+        #expect(SdkConfig.resolve().appEvents == .unlimited)
+    }
+}
+
 @MainActor
 @Suite("SdkConfigStore")
 struct SdkConfigStoreTests {
