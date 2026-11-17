@@ -458,8 +458,8 @@ enum GamePresenter {
     }
 
     /// Opens the container for `request`. Failures that are known before the
-    /// container exists (unsupported runtime, games off, missing bundle) call
-    /// `onFailure` directly and open nothing.
+    /// container exists (unsupported runtime, games off, busy, missing bundle)
+    /// call `onFailure` directly and open nothing.
     static func open(_ request: GameOpenRequest) {
         guard #available(iOS 17, *) else {
             log.w("Game not opened — requires iOS 17", error: request.campaignKey)
@@ -471,14 +471,17 @@ enum GamePresenter {
             request.onFailure?(.renderError)
             return
         }
+        // One game owns the surface: a re-trigger must not restart the live
+        // one (F1). It fails `busy` instead of dropping silently, so the
+        // second open settles through the same policy as any other failure.
+        guard !isBusy else {
+            log.w("Game not opened — another game is already open", error: request.campaignKey)
+            request.onFailure?(.busy)
+            return
+        }
         guard let presentation = GamePresentation(request: request) else {
             log.w("Game not opened — bundle entry missing", error: request.campaignKey)
             request.onFailure?(.bundleLoadFailed)
-            return
-        }
-        // One game owns the surface: a re-trigger must not restart the live one.
-        guard !isBusy else {
-            log.w("Game not opened — another game is already open", error: request.campaignKey)
             return
         }
         log.d("Game loading", campaign: request.campaignKey)

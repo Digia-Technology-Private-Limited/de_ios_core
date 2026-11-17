@@ -39,6 +39,8 @@ enum GameFailure: String, Equatable, Sendable {
     case unsupportedWebView
     /// The skin declared a bridge version above the SDK's.
     case bridgeUnsupported
+    /// A second open while a game is already open (F1); the request never loads.
+    case busy
 
     var wireValue: String {
         switch self {
@@ -47,6 +49,7 @@ enum GameFailure: String, Equatable, Sendable {
         case .renderError: return "render_error"
         case .unsupportedWebView: return "unsupported_webview"
         case .bridgeUnsupported: return "bridge_version_unsupported"
+        case .busy: return "busy"
         }
     }
 }

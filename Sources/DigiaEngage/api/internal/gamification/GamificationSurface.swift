@@ -223,12 +223,6 @@ final class GamificationSurface {
             return
         }
         let key = campaign.campaignKey
-        guard let userId = sdk.services?.identityManager.userId, !userId.isEmpty else {
-            sdk.events.toDigia(
-                GameOpenFailedEvent(reason: PlayDropReason.missingConfig, denyReason: nil),
-                payload: payload)
-            return
-        }
         switch PlaySession.decideTap(gameVisible: GamePresenter.isBusy, chance: chances[key]) {
         case .fail(let reason):
             sdk.events.toDigia(
@@ -238,9 +232,9 @@ final class GamificationSurface {
             }
             return
         case .open(let chance):
-            sdk.openGamificationSurface(
-                chance: chance, config: config, campaign: campaign,
-                payload: payload, userId: userId)
+            sdk.gameSurface.open(
+                campaign: campaign, config: config, chanceId: chance.chanceId,
+                settle: .presentation(payload: payload, entry: config.entryKind))
         }
     }
 
