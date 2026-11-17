@@ -18,7 +18,7 @@ final class GamificationOrchestrator: ObservableObject {
     private unowned let sdk: SDKInstance
 
     /// Gamification skin files, cached immutable by skin id + version.
-    let skinFileCache = SkinFileCache()
+    let skinFileCache: SkinFileCache
     /// Gamification backend calls (`grantChance`, `getRewards`). Wraps the same
     /// client so tests drive it through `MockNetworkClient` with no second seam.
     let gameOutcomeSource: any GameOutcomeSource
@@ -48,6 +48,7 @@ final class GamificationOrchestrator: ObservableObject {
 
     init(sdk: SDKInstance) {
         self.sdk = sdk
+        self.skinFileCache = SkinFileCache(networkClient: sdk.networkClient)
         self.gameOutcomeSource = HttpGameOutcomeSource(networkClient: sdk.networkClient)
     }
 
