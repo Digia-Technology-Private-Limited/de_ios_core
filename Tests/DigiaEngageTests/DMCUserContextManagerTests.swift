@@ -7,11 +7,17 @@ private final class ContextServer: NetworkClient, @unchecked Sendable {
     private let lock = NSLock()
     private var bodies: [[String: Any]] = []
     private var reply: () throws -> [String: Any] = { [:] }
+    private var raw: Data?
 
     var sent: [[String: Any]] { lock.withLock { bodies } }
 
     func respond(with body: [String: Any]) {
         lock.withLock { reply = { body } }
+    }
+
+    /// Answers the next calls with this body as is, not wrapped in the envelope.
+    func respondRaw(_ text: String) {
+        lock.withLock { raw = Data(text.utf8) }
     }
 
     func fail() {
@@ -21,6 +27,9 @@ private final class ContextServer: NetworkClient, @unchecked Sendable {
     func execute(request: NetworkRequest) async throws -> NetworkResponse {
         if let data = request.body, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             lock.withLock { bodies.append(json) }
+        }
+        if let raw = lock.withLock({ raw }) {
+            return NetworkResponse(statusCode: 200, headers: [:], body: raw, isSuccessful: true)
         }
         let body = try lock.withLock { reply }()
         // The envelope the backend really replies with.
@@ -198,6 +207,26 @@ struct DMCUserContextManagerTests {
 
         #expect(manager.eligibleCampaigns == ["c1"])
         #expect(manager.resolvedAttributes["city"] == "Gurugram")
+    }
+
+    @Test("a 200 whose body is not JSON logs user_context_failed, keeps the cache and releases the hold")
+    func nonJSONBodyIsAFailedFetch() async {
+        let sink = RecordSink()
+        DigiaLogger.registerSink(sink)
+        defer { DigiaLogger.unregisterSink(sink) }
+        let manager = manager(reply: ["campaigns": ["c1"], "attributes": [String: Any](), "expiresInSeconds": 900])
+        await manager.onUserIdChanged("u1")
+        var ended = 0
+        manager.onFetchStarted = { { ended += 1 } }
+
+        server.respondRaw("this is not json")
+        await manager.refresh(force: true)
+
+        let failed = sink.records.filter { $0.reason?.wire == "user_context_failed" }
+        #expect(failed.count == 1)
+        #expect(failed.first?.extras["cause"] == "unknown")
+        #expect(manager.eligibleCampaigns == ["c1"])
+        #expect(ended == 1)
     }
 
     @Test("makes no request at all until a user is identified")
