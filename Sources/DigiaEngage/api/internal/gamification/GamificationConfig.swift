@@ -26,10 +26,12 @@ struct GamificationConfig: Equatable {
     /// The skin's declared `bridgeVersion`. Compared against the SDK's by the
     /// presentation; carried, never gated, here.
     let bridgeVersion: Int?
+    /// The skin's format, passed through to `init` unchanged. Never gates:
+    /// an unknown or missing type still opens the skin.
     let format: GamificationFormat
     /// `config.values`, carried opaquely until the `init` sends them.
     let values: [String: JSONValue]
-    /// `config.slots`, kept only for formats that map outcomes to slots.
+    /// `config.slots`, read whenever present and passed through to `init`.
     let slots: [GamificationSlotConfig]
     /// `.unknown` stays unknown: an unrecognised or missing entry never opens
     /// a game — routing drops it as `unsupported_entry`.
@@ -48,12 +50,11 @@ struct GamificationConfig: Equatable {
     let minSdkVersion: String?
     /// The inline slot of the `inlineTeaser` entry.
     let slotKey: String?
-
-    /// Only `spinWheel` and `slotMachine` map slots; other formats ignore
-    /// `slots`.
-    var usesSlots: Bool {
-        format == .spinWheel || format == .slotMachine
-    }
+    /// `templateConfig.theme.fontFamily`, the skin's preferred family when the
+    /// host sets none.
+    let themeFontFamily: String?
+    /// `templateConfig.theme.fonts[]`, `{family, url}` entries.
+    let themeFonts: [[String: String]]
 
     /// `templateConfig` is the campaign's own; `campaignLevel` is the campaign
     /// object, read only for `bundleUrl`/`sensors` as a fallback — the backend
@@ -71,7 +72,6 @@ struct GamificationConfig: Equatable {
         guard let bundleUrl, URL(string: bundleUrl) != nil else { return nil }
 
         let format = GamificationFormat(wire: templateConfig.string("templateType"))
-        guard format != .unknown else { return nil }
 
         // `entry` is `{ kind }` on the wire; a bare string is accepted too. An
         // unknown or missing kind stays `.unknown` — never a silent direct
@@ -126,22 +126,20 @@ struct GamificationConfig: Equatable {
         }
 
         var slots: [GamificationSlotConfig] = []
-        if format == .spinWheel || format == .slotMachine {
-            for rawSlot in config.objectArray("slots") {
-                guard let outcomeKey = rawSlot.nonBlankString("outcomeKey") else {
-                    log.d("Gamification slot dropped — missing outcomeKey")
+        for rawSlot in config.objectArray("slots") {
+            guard let outcomeKey = rawSlot.nonBlankString("outcomeKey") else {
+                log.d("Gamification slot dropped — missing outcomeKey")
+                continue
+            }
+            var slotValues: [String: String] = [:]
+            for (key, raw) in (rawSlot["values"] as? [String: Any]) ?? [:] {
+                guard let string = raw as? String else {
+                    log.d("Gamification slot value dropped — not a string (key=\(key))")
                     continue
                 }
-                var slotValues: [String: String] = [:]
-                for (key, raw) in (rawSlot["values"] as? [String: Any]) ?? [:] {
-                    guard let string = raw as? String else {
-                        log.d("Gamification slot value dropped — not a string (key=\(key))")
-                        continue
-                    }
-                    slotValues[key] = string
-                }
-                slots.append(GamificationSlotConfig(outcomeKey: outcomeKey, values: slotValues))
+                slotValues[key] = string
             }
+            slots.append(GamificationSlotConfig(outcomeKey: outcomeKey, values: slotValues))
         }
 
         return GamificationConfig(
@@ -160,7 +158,32 @@ struct GamificationConfig: Equatable {
             sensors: sensors,
             minSdkVersion: minSdkVersionIos(templateConfig: templateConfig),
             slotKey: slotKey,
+            themeFontFamily: Self.themeFontFamily(templateConfig: templateConfig),
+            themeFonts: Self.themeFonts(templateConfig: templateConfig),
         )
+    }
+
+    private static func themeObject(templateConfig: [String: Any]) -> [String: Any]? {
+        (templateConfig["theme"] as? [String: Any])
+            ?? (templateConfig["config"] as? [String: Any])?["theme"] as? [String: Any]
+    }
+
+    private static func themeFontFamily(templateConfig: [String: Any]) -> String? {
+        themeObject(templateConfig: templateConfig)?.nonBlankString("fontFamily")
+    }
+
+    private static func themeFonts(templateConfig: [String: Any]) -> [[String: String]] {
+        guard let array = themeObject(templateConfig: templateConfig)?["fonts"] as? [[String: Any]] else {
+            return []
+        }
+        return array.compactMap { font in
+            guard let family = (font["family"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !family.isEmpty,
+                  let url = (font["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !url.isEmpty
+            else { return nil }
+            return ["family": family, "url": url]
+        }
     }
 
     /// `config.minSdkVersion.ios` from the skin record: the minimum SDK that

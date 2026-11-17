@@ -231,7 +231,11 @@ final class GamificationSurface {
         switch PlaySession.decideTap(gameVisible: GamePresenter.isBusy, chance: chances[key]) {
         case .fail(let reason):
             sdk.events.toDigia(
-                GameOpenFailedEvent(reason: reason, denyReason: nil), payload: payload)
+                GameOpenFailedEvent(
+                    reason: reason, denyReason: nil, campaignId: campaign.id,
+                    skinId: config.skinId, skinVersion: config.skinVersion,
+                    entry: config.entryKind.rawValue),
+                payload: payload)
             if reason == PlayDropReason.busy {
                 sdk.coordinator.drop(payload, reason: .surfaceBusy, detail: "busy")
             }

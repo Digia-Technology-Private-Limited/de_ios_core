@@ -39,7 +39,7 @@ final class GameSurface {
         // as the backstop for a race between the check and the handoff.
         guard !GamePresenter.isBusy else {
             log.w("Game not opened — another game is already open", campaign: campaignKey)
-            fail(settle: settle, campaign: campaign, reason: PlayDropReason.busy)
+            fail(settle: settle, campaign: campaign, config: config, reason: PlayDropReason.busy)
             return
         }
         // 2. SDK compatibility recheck, rewards only: a presentation was
@@ -52,7 +52,7 @@ final class GameSurface {
                 "Game not opened — needs a newer SDK (min=\(required))",
                 campaign: campaignKey)
             fail(
-                settle: settle, campaign: campaign,
+                settle: settle, campaign: campaign, config: config,
                 reason: GamificationSurface.causeUnsupportedSDK)
             return
         }
@@ -85,7 +85,7 @@ final class GameSurface {
                     "Game not opened — skin download failed",
                     campaign: campaignKey, error: "\(error)")
                 self.fail(
-                    settle: settle, campaign: campaign, reason: "skin_unavailable")
+                    settle: settle, campaign: campaign, config: config, reason: "skin_unavailable")
             }
         }
     }
@@ -93,7 +93,9 @@ final class GameSurface {
     /// Steps 4–6 for a resolved skin file: the user id check, the single
     /// request build, and the policy-wired handoff to `GamePresenter.open`.
     /// A missing network client after a grant is unreachable on iOS — the
-    /// grant needed the same client — so only the user id is checked.
+    /// grant needed the same client — so only the user id is checked. The
+    /// storage identity is the user id, or the device id when the user id
+    /// is missing — but the open still needs the user, like Android.
     private func openResolved(
         _ file: URL,
         campaign: CampaignModel,
@@ -105,7 +107,7 @@ final class GameSurface {
         // 4. No user, no game.
         guard let userId = sdk.services?.identityManager.userId, !userId.isEmpty else {
             log.d("Game not opened — no user id", campaign: campaignKey)
-            fail(settle: settle, campaign: campaign, reason: PlayDropReason.missingConfig)
+            fail(settle: settle, campaign: campaign, config: config, reason: PlayDropReason.missingConfig)
             return
         }
         // 5–6. Build the request once and hand it to the presenter with the
@@ -114,14 +116,25 @@ final class GameSurface {
             makeGameOpenRequest(
                 file: file, chanceId: chanceId, config: config, campaign: campaign,
                 payload: Self.payload(settle: settle, campaign: campaign),
-                userId: userId, settle: settle))
+                userId: Self.storageIdentity(
+                    userId: userId,
+                    deviceId: sdk.services?.identityManager.deviceId),
+                settle: settle))
+    }
+
+    /// The bridge storage identity for one open: the user id, or the device
+    /// id when there is no user — Android's `userId ?: deviceId`. Pure, so
+    /// the shared case-table run pins the choice without a game.
+    static func storageIdentity(userId: String?, deviceId: String?) -> String {
+        guard let userId, !userId.isEmpty else { return deviceId ?? "" }
+        return userId
     }
 
     /// Settles a game that never opened (steps 1–4): a direct game dismisses
     /// so its acceptance watchdog stands down, every other policy degrades
     /// to the reason-coded `game_open_failed` event — never a toast —
     /// and an entry's teaser stays.
-    private func fail(settle: GameSettle, campaign: CampaignModel, reason: String) {
+    private func fail(settle: GameSettle, campaign: CampaignModel, config: GamificationConfig, reason: String) {
         switch settle {
         case .presentation(let payload, let entry):
             guard entry == .inlineTeaser || entry == .floating else {
@@ -129,24 +142,31 @@ final class GameSurface {
                 return
             }
             sdk.events.toDigia(
-                GameOpenFailedEvent(reason: reason, denyReason: nil),
+                GameOpenFailedEvent(
+                    reason: reason, denyReason: nil, campaignId: campaign.id,
+                    skinId: config.skinId, skinVersion: config.skinVersion,
+                    entry: entry.rawValue),
                 payload: payload)
         case .rewards(let chanceId):
             sdk.events.toDigia(
-                GameOpenFailedEvent(reason: reason, denyReason: nil),
+                GameOpenFailedEvent(
+                    reason: reason, denyReason: nil, campaignId: campaign.id,
+                    skinId: config.skinId, skinVersion: config.skinVersion,
+                    entry: "rewards"),
                 payload: Self.rewardsPayload(chanceId: chanceId, campaign: campaign))
         }
     }
 
     /// The close policy: a direct game dismisses as before, an inline card
     /// stays, a game opened from a floating entry asks the backend `state`
-    /// and keeps or hides the floater. Every presentation policy refreshes
-    /// rewards only when the page is already loaded — a close must not pay
-    /// for a fetch the app never asked for — while a rewards game always
-    /// refreshes.
-    private func closed(settle: GameSettle, campaign: CampaignModel) {
+    /// and keeps or hides the floater. Every close reports the funnel
+    /// Dismissed to Digia — but a CEP Dismissed only for a direct game, like
+    /// Android — and every presentation policy refreshes rewards only when
+    /// the page is already loaded, while a rewards game always refreshes.
+    private func closed(settle: GameSettle, campaign: CampaignModel, reason: String) {
         switch settle {
         case .presentation(let payload, let entry):
+            sdk.events.toDigia(GameEvent.Dismissed(reason: reason), payload: payload)
             sdk.gamification.refreshRewardsIfLoaded()
             switch entry {
             case .inlineTeaser:
@@ -158,15 +178,36 @@ final class GameSurface {
                 refreshFloatingEntryAfterClose(
                     campaignKey: campaign.campaignKey, payload: payload)
             }
-        case .rewards:
+        case .rewards(let chanceId):
+            sdk.events.toDigia(
+                GameEvent.Dismissed(reason: reason),
+                payload: Self.rewardsPayload(chanceId: chanceId, campaign: campaign))
             sdk.gamification.refreshRewards()
+        }
+    }
+
+    /// A skin CTA op ran: the funnel Clicked to Digia and the click to the
+    /// CEP, like Android's `onCta` — for a rewards game the CEP leg no-ops
+    /// on its synthetic payload, as its Impressed already does.
+    private func cta(op: String, settle: GameSettle, campaign: CampaignModel) {
+        switch settle {
+        case .presentation(let payload, _):
+            sdk.events.toDigia(GameEvent.Clicked(element: op), payload: payload)
+            sdk.events.clicked(payload: payload, elementId: op)
+        case .rewards(let chanceId):
+            sdk.events.toDigia(
+                GameEvent.Clicked(element: op),
+                payload: Self.rewardsPayload(chanceId: chanceId, campaign: campaign))
+            sdk.events.clicked(
+                payload: Self.rewardsPayload(chanceId: chanceId, campaign: campaign),
+                elementId: op)
         }
     }
 
     /// The failure policy: a direct game dismisses so its acceptance
     /// watchdog stands down; every other policy degrades to the
     /// reason-coded `game_open_failed` event, never a toast.
-    private func failed(settle: GameSettle, campaign: CampaignModel, failure: GameFailure) {
+    private func failed(settle: GameSettle, campaign: CampaignModel, config: GamificationConfig, failure: GameFailure) {
         switch settle {
         case .presentation(let payload, let entry):
             guard entry == .inlineTeaser || entry == .floating else {
@@ -177,14 +218,20 @@ final class GameSurface {
                 "Game not opened (reason=\(failure.wireValue))",
                 campaign: campaign.campaignKey)
             sdk.events.toDigia(
-                GameOpenFailedEvent(reason: failure.wireValue, denyReason: nil),
+                GameOpenFailedEvent(
+                    reason: failure.wireValue, denyReason: nil,
+                    campaignId: campaign.id, skinId: config.skinId,
+                    skinVersion: config.skinVersion, entry: entry.rawValue),
                 payload: payload)
         case .rewards(let chanceId):
             log.w(
                 "Rewards game not opened (reason=\(failure.wireValue))",
                 campaign: campaign.campaignKey)
             sdk.events.toDigia(
-                GameOpenFailedEvent(reason: failure.wireValue, denyReason: nil),
+                GameOpenFailedEvent(
+                    reason: failure.wireValue, denyReason: nil,
+                    campaignId: campaign.id, skinId: config.skinId,
+                    skinVersion: config.skinVersion, entry: "rewards"),
                 payload: Self.rewardsPayload(chanceId: chanceId, campaign: campaign))
         }
     }
@@ -192,12 +239,21 @@ final class GameSurface {
     /// The impression policy: every entry kind emits Impressed once the
     /// game WebView is actually displayed. `toCep` marks the owning
     /// presentation displaying through the coordinator — the iOS equivalent
-    /// of Android's `reportDisplaying(owner)` + `Impressed` pair. A rewards
-    /// game has no presentation owner, so its signal no-ops on the
-    /// coordinator.
+    /// of Android's `reportDisplaying(owner)` + `Impressed` pair. The funnel
+    /// Viewed goes to Digia for every settle — but for a rewards game only
+    /// to Digia, never the CEP, whose synthetic payload owns no
+    /// presentation.
     private func shown(settle: GameSettle, campaign: CampaignModel) {
-        sdk.events.toCep(
-            .impressed, payload: Self.payload(settle: settle, campaign: campaign))
+        switch settle {
+        case .presentation(let payload, _):
+            sdk.events.toBoth(
+                .impressed, GameEvent.Viewed(),
+                payload: payload)
+        case .rewards(let chanceId):
+            sdk.events.toDigia(
+                GameEvent.Viewed(),
+                payload: Self.rewardsPayload(chanceId: chanceId, campaign: campaign))
+        }
     }
 
     private static func payload(settle: GameSettle, campaign: CampaignModel) -> CEPTriggerPayload {
@@ -219,7 +275,10 @@ final class GameSurface {
     }
 
     /// The one `GameOpenRequest` builder: shared by entries, direct opens and
-    /// rewards chances. Only the settle closures differ.
+    /// rewards chances. Only the settle closures differ. The funnel counts a
+    /// shown game: `shown` arms the failure Dismissed, so a game that never
+    /// displayed reports only its open failure, never a Dismissed without a
+    /// Viewed — like Android's `openRequest`.
     private func makeGameOpenRequest(
         file: URL,
         chanceId: String,
@@ -230,16 +289,23 @@ final class GameSurface {
         settle: GameSettle
     ) -> GameOpenRequest {
         let campaignKey = campaign.campaignKey
+        // The funnel counts a shown game: `shown` arms the failure Dismissed,
+        // so a game that never displayed reports only its open failure, never
+        // a Dismissed without a Viewed.
+        var shown = false
         // The live-test invocation the trigger carried, if any: the grant was asked
         // with it, and both the skin's `state` call and the close-time `state` call
         // need it back so a draft campaign answers. Derived here — never stored —
         // so it cannot mismatch the grant.
         let openTestInvocationId: String?
+        let entryValue: String
         switch settle {
-        case .presentation(let presentationPayload, _):
+        case .presentation(let presentationPayload, let entry):
             openTestInvocationId = testInvocationIdOf(presentationPayload.cepCampaignId)
+            entryValue = entry.rawValue
         case .rewards:
             openTestInvocationId = nil
+            entryValue = "rewards"
         }
         return GameOpenRequest(
             campaignKey: campaignKey,
@@ -253,14 +319,34 @@ final class GameSurface {
             entryFile: file,
             bundleRoot: file.deletingLastPathComponent(),
             showMute: config.showMute,
-            onClose: { [weak self] in self?.closed(settle: settle, campaign: campaign) },
+            onClose: { [weak self] reason in self?.closed(settle: settle, campaign: campaign, reason: reason) },
             onFailure: { [weak self] failure in
-                self?.failed(settle: settle, campaign: campaign, failure: failure)
+                // A shown game that dies Dismisses with `failure`; a game that
+                // never displayed was never Viewed, so it reports only its
+                // open failure.
+                if shown {
+                    switch settle {
+                    case .presentation(let payload, _):
+                        self?.sdk.events.toDigia(GameEvent.Dismissed(reason: "failure"), payload: payload)
+                    case .rewards(let chanceId):
+                        self?.sdk.events.toDigia(
+                            GameEvent.Dismissed(reason: "failure"),
+                            payload: Self.rewardsPayload(chanceId: chanceId, campaign: campaign))
+                    }
+                }
+                self?.failed(settle: settle, campaign: campaign, config: config, failure: failure)
             },
-            onShown: { [weak self] in self?.shown(settle: settle, campaign: campaign) },
+            onCta: { [weak self] op in self?.cta(op: op, settle: settle, campaign: campaign) },
+            onShown: { [weak self] in
+                shown = true
+                self?.shown(settle: settle, campaign: campaign)
+            },
             payload: payload,
+            entry: entryValue,
+            themeFontFamily: config.themeFontFamily,
+            themeFonts: config.themeFonts,
             values: config.values,
-            slots: config.usesSlots ? config.slots : []
+            slots: config.slots
         )
     }
 
@@ -323,9 +409,28 @@ final class GameSurface {
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
+            let start = Date()
             let result = await self.sdk.gamification.gameOutcomeSource.state(
                 campaignKey: campaignKey,
                 testInvocationId: testInvocationIdOf(payload.cepCampaignId))
+            if case .failed(let error) = result {
+                // The close-time `state` failure reports like the rewards
+                // fetch — and a timeout stays a timeout, never `network`.
+                let campaign = self.sdk.campaignStore.find(campaignKey)
+                let config = campaign?.gamificationConfig
+                self.sdk.events.toDigia(
+                    GameRewardsFailedEvent(
+                        health: GameHealthContext(
+                            campaignId: campaign?.id ?? "",
+                            skinId: config?.skinId ?? "",
+                            skinVersion: config?.skinVersion ?? 0,
+                            entry: config?.entryKind.rawValue ?? ""),
+                        op: "state",
+                        code: error.rewardsCode,
+                        status: error.rewardsStatus,
+                        durationMs: Int(Date().timeIntervalSince(start) * 1000)),
+                    payload: payload)
+            }
             switch PlaySession.decideAfterClose(result) {
             case .keep(let replacement):
                 if let replacement {
