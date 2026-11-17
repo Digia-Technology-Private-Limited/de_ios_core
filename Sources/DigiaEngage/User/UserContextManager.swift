@@ -367,7 +367,20 @@ final class UserContextManager {
                 )
                 return
             }
-            guard let payload = Self.payload(of: response.body) else { return }
+            guard let payload = Self.payload(of: response.body) else {
+                // Valid JSON that is not an object is ignored, as on Flutter; a body that does not
+                // parse at all is a failed fetch, and the cached copy stays.
+                if Self.isMalformedJSON(response.body) {
+                    log.w(
+                        "User context fetch failed — continuing with the cached copy",
+                        stage: .session,
+                        reason: TimelineReason.userContextFailed,
+                        // Flutter reports a body Dio cannot decode as an unclassified DioException.
+                        extras: ["cause": "unknown"]
+                    )
+                }
+                return
+            }
 
             let dropped = (payload["droppedAttributes"] as? [Any] ?? []).compactMap { $0 as? String }
             if !dropped.isEmpty {
@@ -418,6 +431,12 @@ final class UserContextManager {
             return Int64(defaultExpirySeconds)
         }
         return Int64(seconds)
+    }
+
+    /// True when `body` is non-empty and not JSON. A scalar or an array is valid JSON.
+    private static func isMalformedJSON(_ body: Data?) -> Bool {
+        guard let body, !body.allSatisfy({ [0x20, 0x09, 0x0A, 0x0D].contains($0) }) else { return false }
+        return (try? JSONSerialization.jsonObject(with: body, options: .fragmentsAllowed)) == nil
     }
 
     /// Unwraps the `{isSuccess, data: {response}}` envelope every Engage SDK
