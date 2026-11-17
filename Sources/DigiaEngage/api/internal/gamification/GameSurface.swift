@@ -253,14 +253,6 @@ final class GameSurface {
             entryFile: file,
             bundleRoot: file.deletingLastPathComponent(),
             showMute: config.showMute,
-            openLink: { [weak self] url in
-                do {
-                    try self?.sdk.hostActionExecutor.execute(
-                        .openDeeplink(url.absoluteString), campaignKey: campaignKey)
-                } catch {
-                    log.w("Game openLink failed: \(error)", campaign: campaignKey)
-                }
-            },
             onClose: { [weak self] in self?.closed(settle: settle, campaign: campaign) },
             onFailure: { [weak self] failure in
                 self?.failed(settle: settle, campaign: campaign, failure: failure)

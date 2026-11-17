@@ -435,6 +435,79 @@ struct GameBridgeTests {
         #expect(payload["code"] as? String == "unsupported")
     }
 
+    @Test("action op routing: spec ops and aliases reach the generic handlers")
+    func actionOpRouting() throws {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        var scripts: [String] = []
+        bridge.onRequest = { requests.append($0) }
+        bridge.onSend = { scripts.append($0) }
+
+        // Spec ops, plus the shipped `action` names as aliases.
+        bridge.receive(msg("action", payload: ["op": "copy", "text": "CODE"]))
+        bridge.receive(msg("action", payload: ["action": "copy", "text": "CODE"]))
+        bridge.receive(msg("action", payload: ["op": "openUrl", "url": "https://example.com/a"]))
+        bridge.receive(msg("action", payload: ["action": "openLink", "url": "https://example.com/a"]))
+        bridge.receive(msg("action", payload: ["op": "deeplink", "url": "medihub://cart"]))
+        bridge.receive(msg("action", payload: ["op": "customKV", "payload": ["screen": "cart"]]))
+        bridge.receive(msg("action", payload: ["op": "share", "text": "won!"]))
+        bridge.receive(msg("action", payload: ["op": "close", "reason": "done"]))
+        // Spec request aliases.
+        bridge.receive(msg("motion", id: "m1", payload: [
+            "op": "subscribe", "sensors": ["gyroscope"], "hz": 30,
+        ]))
+        bridge.receive(msg("motion", id: "m2", payload: ["op": "unsubscribe"]))
+        bridge.receive(msg("storage", id: "s1", payload: ["op": "get", "key": "hi.score"]))
+        // Unknown op answers unsupported; a missing field answers invalid.
+        bridge.receive(msg("action", id: "u", payload: ["op": "explode"]))
+        bridge.receive(msg("action", id: "c", payload: ["op": "copy"]))
+        bridge.receive(msg("storage", id: "s2", payload: ["op": "wipe"]))
+
+        #expect(requests.count == 11)
+        if case .actionCopy(_, let text) = requests[0] { #expect(text == "CODE") }
+        else { Issue.record("request 0 is not copy") }
+        if case .actionCopy(_, let text) = requests[1] { #expect(text == "CODE") }
+        else { Issue.record("request 1 is not legacy copy") }
+        if case .actionOpenLink(_, let url) = requests[2] {
+            #expect(url.absoluteString == "https://example.com/a")
+        } else { Issue.record("request 2 is not openUrl") }
+        if case .actionOpenLink(_, let url) = requests[3] {
+            #expect(url.absoluteString == "https://example.com/a")
+        } else { Issue.record("request 3 is not legacy openLink") }
+        if case .actionOpenDeeplink(_, let url) = requests[4] {
+            #expect(url.absoluteString == "medihub://cart")
+        } else { Issue.record("request 4 is not deeplink") }
+        if case .actionCustomKV(_, let payload) = requests[5] {
+            #expect(payload == ["screen": "cart"])
+        } else { Issue.record("request 5 is not customKV") }
+        if case .actionShare(_, let text) = requests[6] { #expect(text == "won!") }
+        else { Issue.record("request 6 is not share") }
+        if case .actionClose(_, let reason) = requests[7] { #expect(reason == "done") }
+        else { Issue.record("request 7 is not close") }
+        if case .motionSubscribe(let id, let sensors, let hz) = requests[8] {
+            #expect(id == "m1")
+            #expect(sensors == ["gyroscope"])
+            #expect(hz == 30)
+        } else { Issue.record("request 8 is not motion subscribe") }
+        if case .motionUnsubscribe(let id, let sensors) = requests[9] {
+            #expect(id == "m2")
+            #expect(sensors.isEmpty)
+        } else { Issue.record("request 9 is not motion unsubscribe") }
+        if case .storageGet(let id, let key) = requests[10] {
+            #expect(id == "s1")
+            #expect(key == "hi.score")
+        } else { Issue.record("request 10 is not storage get") }
+
+        #expect(scripts.count == 3)
+        var codes: [String] = []
+        for script in scripts {
+            let message = try received(script)
+            let payload = try #require(message["payload"] as? [String: Any])
+            codes.append(try #require(payload["code"] as? String))
+        }
+        #expect(codes == ["unsupported", "invalid", "unsupported"])
+    }
+
     @Test("init advertises the steps capability")
     func initAdvertisesSteps() {
         // Guards the capability: skins feature-detect action.steps.

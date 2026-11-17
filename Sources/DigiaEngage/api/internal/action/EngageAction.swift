@@ -134,7 +134,7 @@ struct EngageActionParser {
             return .showStory(max(0, index))
         case "Action.openGame": return .openGame
         case "Action.customKV":
-            guard let action = (data["payload"] as? [String: Any]).flatMap(customKV(from:)) else {
+            guard let action = Self.customKV(from: data["payload"] as? [String: Any]) else {
                 return unsupported(type)
             }
             return action
@@ -154,7 +154,8 @@ struct EngageActionParser {
         return nil
     }
 
-    private func customKV(from raw: [String: Any]) -> EngageAction? {
+    static func customKV(from raw: [String: Any]?) -> EngageAction? {
+        guard let raw else { return nil }
         let payload = raw.reduce(into: [String: String]()) { result, entry in
             if let value = entry.value as? String { result[entry.key] = value }
         }

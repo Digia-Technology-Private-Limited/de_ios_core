@@ -30,7 +30,12 @@ enum GameBridgeRequest {
     case storageRemove(id: String, key: String)
     case actionCopy(id: String?, text: String)
     case actionOpenLink(id: String?, url: URL)
+    case actionOpenDeeplink(id: String?, url: URL)
+    case actionShare(id: String?, text: String)
+    case actionCustomKV(id: String?, payload: [String: String])
     case actionClose(id: String?, reason: String?)
+    case motionSubscribe(id: String, sensors: [String], hz: Double)
+    case motionUnsubscribe(id: String, sensors: [String])
     /// Canvas steps sent over the bridge (`payload.steps`, the same `onClick`
     /// object a canvas element carries). Unknown steps never reach here — the
     /// intake answers them as `unsupported`.
@@ -90,7 +95,7 @@ final class GameBridge {
         "ready", "http", "event", "log", "haptics",
         "sensor.start", "sensor.stop",
         "storage.get", "storage.set", "storage.remove",
-        "action",
+        "motion", "storage", "action",
     ]
 
     /// (Re)enters `loading`. Returns a generation token so the one-shot ready
@@ -130,6 +135,14 @@ final class GameBridge {
         let payload = object["payload"] as? [String: Any] ?? [:]
         if type == "action" {
             handleAction(id: id, payload: payload)
+            return
+        }
+        if type == "motion" {
+            handleMotion(id: id, payload: payload)
+            return
+        }
+        if type == "storage" {
+            handleStorageAlias(id: id, payload: payload)
             return
         }
         if type == "ready" {
@@ -273,12 +286,12 @@ final class GameBridge {
     }
 
     /// The `action` intake. A `steps` payload runs through the same parser the
-    /// canvas onClick uses; legacy `{action: "copy"|"openLink"|"close"}` forms
-    /// keep their own parsing. A form the SDK does not know answers
-    /// `unsupported` when it carries an id (and is ignored otherwise); a known
-    /// form with bad fields answers `invalid`. A request the skin cannot be
-    /// answered for (no usable id) is dropped — an id-less action still
-    /// runs, it just gets no reply.
+    /// canvas onClick uses; single ops read `payload.op` (falling back to the
+    /// shipped `payload.action`) and map to the generic executor's actions.
+    /// A form the SDK does not know answers `unsupported` when it carries an
+    /// id (and is ignored otherwise); a known form with bad fields answers
+    /// `invalid`. A request the skin cannot be answered for (no usable id) is
+    /// dropped — an id-less action still runs, it just gets no reply.
     private func handleAction(id: String?, payload: [String: Any]) {
         switch Self.parseActionResult(id: id, payload: payload) {
         case .request(let request):
@@ -305,22 +318,115 @@ final class GameBridge {
             if parsed.hasUnknown { return .unknown }
             return .request(.actionSteps(id: id, actions: parsed.actions))
         }
-        guard let action = payload.nonBlankString("action") else { return .unknown }
-        switch action {
+        guard let op = payload.nonBlankString("op") ?? payload.nonBlankString("action") else {
+            return .unknown
+        }
+        switch op {
         case "copy":
             guard let text = payload["text"] as? String else { return .malformed }
             return .request(.actionCopy(id: id, text: text))
-        case "openLink":
+        case "openLink", "openUrl":
             guard let raw = payload.nonBlankString("url"),
                   let url = URL(string: raw),
                   isOpenableLink(url)
             else { return .malformed }
             return .request(.actionOpenLink(id: id, url: url))
+        case "deeplink":
+            guard let raw = payload.nonBlankString("url"),
+                  let url = URL(string: raw),
+                  isOpenableLink(url)
+            else { return .malformed }
+            return .request(.actionOpenDeeplink(id: id, url: url))
+        case "customKV":
+            guard let raw = payload["payload"] as? [String: Any],
+                  case .customKV(let kv) = EngageActionParser.customKV(from: raw)
+            else { return .malformed }
+            return .request(.actionCustomKV(id: id, payload: kv))
+        case "share":
+            guard let text = payload["text"] as? String else { return .malformed }
+            return .request(.actionShare(id: id, text: text))
         case "close":
             return .request(.actionClose(id: id, reason: payload["reason"] as? String))
         default:
             return .unknown
         }
+    }
+
+    /// The `motion` alias for `sensor.start` / `sensor.stop`: one subscribe
+    /// starts every listed sensor at the same rate, one unsubscribe stops the
+    /// listed sensors (or every sensor when none are listed). An id-less
+    /// motion has no reply path, so it is dropped.
+    private func handleMotion(id: String?, payload: [String: Any]) {
+        guard let id else {
+            recordDrop()
+            return
+        }
+        guard let op = payload.nonBlankString("op") else {
+            fail(id: id, code: .invalid, message: "malformed motion payload")
+            return
+        }
+        switch op {
+        case "subscribe":
+            guard let sensors = payload["sensors"] as? [String], !sensors.isEmpty,
+                  sensors.allSatisfy(Self.isMotionSensor)
+            else {
+                fail(id: id, code: .invalid, message: "malformed motion payload")
+                return
+            }
+            onRequest?(.motionSubscribe(
+                id: id, sensors: sensors,
+                hz: GameMotionSource.clampedHz(Self.number(payload["hz"]))))
+        case "unsubscribe":
+            let sensors = payload["sensors"] as? [String] ?? []
+            guard sensors.allSatisfy(Self.isMotionSensor) else {
+                fail(id: id, code: .invalid, message: "malformed motion payload")
+                return
+            }
+            onRequest?(.motionUnsubscribe(id: id, sensors: sensors))
+        default:
+            fail(id: id, code: .unsupported, message: "unsupported motion op")
+        }
+    }
+
+    /// The `storage` alias for `storage.get` / `storage.set` / `storage.remove`.
+    /// Maps to the same requests, so the replies keep their shipped shape.
+    private func handleStorageAlias(id: String?, payload: [String: Any]) {
+        guard let id else {
+            recordDrop()
+            return
+        }
+        guard let op = payload.nonBlankString("op") else {
+            fail(id: id, code: .invalid, message: "malformed storage payload")
+            return
+        }
+        switch op {
+        case "get":
+            guard let key = payload.nonBlankString("key") else {
+                fail(id: id, code: .invalid, message: "malformed storage payload")
+                return
+            }
+            onRequest?(.storageGet(id: id, key: key))
+        case "set":
+            guard let key = payload.nonBlankString("key"),
+                  let value = payload["value"] as? String
+            else {
+                fail(id: id, code: .invalid, message: "malformed storage payload")
+                return
+            }
+            onRequest?(.storageSet(id: id, key: key, value: value))
+        case "remove":
+            guard let key = payload.nonBlankString("key") else {
+                fail(id: id, code: .invalid, message: "malformed storage payload")
+                return
+            }
+            onRequest?(.storageRemove(id: id, key: key))
+        default:
+            fail(id: id, code: .unsupported, message: "unsupported storage op")
+        }
+    }
+
+    private static func isMotionSensor(_ sensor: String) -> Bool {
+        sensor == GameMotionSource.gyroscopeName || sensor == GameMotionSource.accelerometerName
     }
 
     /// Schemes that would run code, read local data or bypass the host's link routing.
