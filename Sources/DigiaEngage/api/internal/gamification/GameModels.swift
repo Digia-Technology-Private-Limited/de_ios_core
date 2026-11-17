@@ -146,8 +146,15 @@ struct GameOpenRequest {
     /// The folder holding `entryFile`, for `loadFileURL` read access.
     var bundleRoot: URL
     var showMute: Bool = false
-    var onClose: (@MainActor () -> Void)?
+    /// Fires on close with why: `user` for the close button and back, `skin`
+    /// for the skin's own `close`, `cta` for a handoff op. Mirrors Android's
+    /// `GameOpenRequest.onClose`.
+    var onClose: (@MainActor (String) -> Void)?
     var onFailure: (@MainActor (GameFailure) -> Void)?
+    /// Fires once the skin's CTA op (or `{steps:[...]}` run) has run, with the
+    /// op (`copy`, `openLink`, `share`, ...; `steps` for a steps run). The
+    /// caller reports the click. A skin `close` never fires this.
+    var onCta: (@MainActor (String) -> Void)?
     /// Fires once when the skin sends `ready` and the game becomes visible.
     var onShown: (@MainActor () -> Void)?
     /// The payload this delivery was routed with, for skin-event analytics.

@@ -54,9 +54,54 @@ enum ChanceStateResult: Equatable, Sendable {
 /// A backend call that did not produce an answer. Returned, never thrown —
 /// callers degrade off this (a direct open settles, a skin `http` answers).
 enum GameOutcomeError: Error, Equatable, Sendable {
-    case transport(String)
+    /// The transport failed. `timedOut` keeps the timeout identity, so a
+    /// timeout reports `timeout` — like `getRewards` — instead of collapsing
+    /// to `network`. Additive: every existing construction keeps working.
+    case transport(String, timedOut: Bool = false)
     case httpStatus(Int)
     case invalidResponse(String)
+}
+
+extension GameOutcomeError {
+    /// The `game_rewards_failed` code for this failure: a timeout stays a
+    /// timeout, an HTTP refusal reports `status`, anything else is the
+    /// backend's answer mapped down. Mirrors Android's `rewardsCode()`.
+    var rewardsCode: String {
+        switch self {
+        case .transport(_, let timedOut):
+            return timedOut ? "timeout" : "network"
+        case .httpStatus:
+            return "status"
+        case .invalidResponse:
+            return "invalid_response"
+        }
+    }
+
+    /// The HTTP status for `game_rewards_failed`, when the server answered.
+    var rewardsStatus: Int? {
+        switch self {
+        case .httpStatus(let status): return status
+        default: return nil
+        }
+    }
+}
+
+/// Whether `error` is a timeout, walking the cause chain and not only the
+/// top-level `URLError.timedOut`. Shared by the skin `http` bridge and the
+/// outcome source, like Android's `failureCodeOf`.
+func gameTransportIsTimeout(_ error: Error) -> Bool {
+    var current: Error? = error
+    while let currentError = current {
+        if let urlError = currentError as? URLError, urlError.code == .timedOut {
+            return true
+        }
+        let description = currentError.localizedDescription.lowercased()
+        if description.contains("timed out") || description.contains("timeout") {
+            return true
+        }
+        current = (currentError as NSError).userInfo[NSUnderlyingErrorKey] as? Error
+    }
+    return false
 }
 
 /// The one seam for gamification backend calls. Responses are wrapped as
@@ -212,7 +257,8 @@ final class HttpGameOutcomeSource: GameOutcomeSource, Sendable {
                     url: url, method: .post, headers: headers,
                     body: payload, connectTimeout: 10, readTimeout: 10))
         } catch {
-            return .failure(.transport(error.localizedDescription))
+            return .failure(.transport(
+                error.localizedDescription, timedOut: gameTransportIsTimeout(error)))
         }
         guard networkResponse.isSuccessful else {
             return .failure(.httpStatus(networkResponse.statusCode))

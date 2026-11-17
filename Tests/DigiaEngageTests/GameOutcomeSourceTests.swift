@@ -107,6 +107,44 @@ struct GameOutcomeSourceTests {
         #expect(result == .failure(.invalidResponse("granted without chanceId")))
     }
 
+    @Test("a timeout keeps its identity, and maps to the timeout code")
+    func transportTimeoutIdentity() async {
+        let (source, client) = source()
+
+        // Guards the timedOut flag in post: a timeout must report timeout,
+        // not network, on the close-time state call. Breaks if post stops
+        // walking the error with gameTransportIsTimeout.
+        client.simulateTransportError(URLError(.timedOut))
+        let timedOut = await source.state(campaignKey: "bill_pay_spin")
+        guard case .failed(let timeoutError) = timedOut else {
+            Issue.record("expected a failed state, got \(timedOut)")
+            return
+        }
+        #expect(timeoutError.rewardsCode == "timeout")
+        #expect(timeoutError.rewardsStatus == nil)
+
+        client.reset()
+        client.simulateTransportError(URLError(.notConnectedToInternet))
+        let offline = await source.state(campaignKey: "bill_pay_spin")
+        guard case .failed(let networkError) = offline else {
+            Issue.record("expected a failed state, got \(offline)")
+            return
+        }
+        // Guards the network arm: anything that is not a timeout stays one.
+        #expect(networkError.rewardsCode == "network")
+    }
+
+    @Test("HTTP and envelope faults map to status and invalid_response")
+    func failureCodeMapping() {
+        // Guards the rewardsCode/status mapping every game_rewards_failed
+        // emission shares. Breaks if the mapping arms change.
+        #expect(GameOutcomeError.transport("offline").rewardsCode == "network")
+        #expect(GameOutcomeError.httpStatus(500).rewardsCode == "status")
+        #expect(GameOutcomeError.httpStatus(500).rewardsStatus == 500)
+        #expect(GameOutcomeError.invalidResponse("bad").rewardsCode == "invalid_response")
+        #expect(GameOutcomeError.invalidResponse("bad").rewardsStatus == nil)
+    }
+
     @Test("transport, HTTP and envelope faults are failures, never throws")
     func grantChanceFailures() async {
         let (source, client) = source()

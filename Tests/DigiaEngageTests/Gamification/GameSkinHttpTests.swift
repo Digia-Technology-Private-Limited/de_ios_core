@@ -30,10 +30,14 @@ struct GameSkinHttpTests {
         #expect(GameHttpBridge.validatedPath("grantChance") == nil)
     }
 
-    @Test("only GET and POST exist")
+    @Test("only exact GET and POST exist")
     func methods() {
         #expect(GameHttpBridge.httpMethod("POST") == HTTPMethod.post)
-        #expect(GameHttpBridge.httpMethod("get") == HTTPMethod.get)
+        #expect(GameHttpBridge.httpMethod("GET") == HTTPMethod.get)
+        // Guards the exact match: lowercase answers invalid, like Android's
+        // GameHttpBridge.call — the session forwards the method verbatim.
+        #expect(GameHttpBridge.httpMethod("get") == nil)
+        #expect(GameHttpBridge.httpMethod("post") == nil)
         #expect(GameHttpBridge.httpMethod("PUT") == nil)
         #expect(GameHttpBridge.httpMethod(nil) == nil)
     }
@@ -59,17 +63,18 @@ struct GameSkinHttpTests {
         let body = GameHttpBridge.jsonData(["chanceId": "ch_1", "playId": "p_1"])
         let result = await GameHttpBridge.send(
             client: client, baseUrl: "https://app.digia.tech", headers: [:],
-            method: .post, path: "play", body: body)
+            method: "POST", path: "play", body: body)
 
         // Guards the success arm: no merging, no re-shaping.
         switch result {
-        case .success(let returned):
-            #expect(returned["isSuccess"] as? Bool == true)
-            let data = returned["data"] as? [String: Any]
+        case .success(let success):
+            #expect(success.envelope["isSuccess"] as? Bool == true)
+            #expect(success.status == 200)
+            let data = success.envelope["data"] as? [String: Any]
             let response = data?["response"] as? [String: Any]
             #expect(response?["refused"] as? String == "busy")
-        case .failure(let code):
-            Issue.record("expected success, got \(code)")
+        case .failure(let failure):
+            Issue.record("expected success, got \(failure.code)")
         }
         #expect(client.lastURL?.absoluteString.hasSuffix("/gamification/play") == true)
         #expect(client.lastMethod == .post)
@@ -82,36 +87,57 @@ struct GameSkinHttpTests {
             let client = FakeSkinNetworkClient(result: .success(status: status, body: [:]))
             let result = await GameHttpBridge.send(
                 client: client, baseUrl: "https://app.digia.tech", headers: [:],
-                method: .get, path: "rewards", body: nil)
-            guard case .failure(let code) = result else {
+                method: "GET", path: "rewards", body: nil)
+            guard case .failure(let failure) = result else {
                 Issue.record("expected failure for status \(status)")
                 continue
             }
-            // Guards the 4xx arm of the status mapping.
-            #expect(code == .invalid)
+            // Guards the 4xx arm of the status mapping — and that the real
+            // status rides along for game_http_failed.
+            #expect(failure.code == .invalid)
+            #expect(failure.status == status)
         }
 
         let quota = FakeSkinNetworkClient(result: .success(status: 429, body: [:]))
         let quotaResult = await GameHttpBridge.send(
             client: quota, baseUrl: "https://app.digia.tech", headers: [:],
-            method: .get, path: "rewards", body: nil)
-        guard case .failure(let quotaCode) = quotaResult else {
+            method: "GET", path: "rewards", body: nil)
+        guard case .failure(let quotaFailure) = quotaResult else {
             Issue.record("expected failure for status 429")
             return
         }
         // Guards the 429 arm of the status mapping.
-        #expect(quotaCode == .quota)
+        #expect(quotaFailure.code == .quota)
+        #expect(quotaFailure.status == 429)
 
         let server = FakeSkinNetworkClient(result: .success(status: 500, body: [:]))
         let serverResult = await GameHttpBridge.send(
             client: server, baseUrl: "https://app.digia.tech", headers: [:],
-            method: .get, path: "rewards", body: nil)
-        guard case .failure(let serverCode) = serverResult else {
+            method: "GET", path: "rewards", body: nil)
+        guard case .failure(let serverFailure) = serverResult else {
             Issue.record("expected failure for status 500")
             return
         }
         // Guards the fallback arm: only 429 and 4xx map elsewhere.
-        #expect(serverCode == .network)
+        #expect(serverFailure.code == .network)
+        #expect(serverFailure.status == 500)
+    }
+
+    @Test("a lowercase method never reaches the network")
+    func lowercaseMethodRejected() async {
+        let client = FakeSkinNetworkClient(result: .success(status: 200, body: ["isSuccess": true]))
+
+        // Guards the exact match inside send: the session forwards the method
+        // verbatim, and the gate one layer down rejects it before any call.
+        let result = await GameHttpBridge.send(
+            client: client, baseUrl: "https://app.digia.tech", headers: [:],
+            method: "post", path: "play", body: nil)
+        guard case .failure(let failure) = result else {
+            Issue.record("expected failure for lowercase method")
+            return
+        }
+        #expect(failure.code == .invalid)
+        #expect(client.lastURL == nil)
     }
 
     @Test("transport failures answer network, timeouts answer timeout")
@@ -119,23 +145,45 @@ struct GameSkinHttpTests {
         let failing = FakeSkinNetworkClient(result: .failure(URLError(.notConnectedToInternet)))
         let network = await GameHttpBridge.send(
             client: failing, baseUrl: "https://app.digia.tech", headers: [:],
-            method: .post, path: "play", body: nil)
-        guard case .failure(let networkCode) = network else {
+            method: "POST", path: "play", body: nil)
+        guard case .failure(let networkFailure) = network else {
             Issue.record("expected failure")
             return
         }
-        #expect(networkCode == .network)
+        #expect(networkFailure.code == .network)
+        // Guards the nil status on transport failures: there is no status.
+        #expect(networkFailure.status == nil)
 
         let timingOut = FakeSkinNetworkClient(result: .failure(URLError(.timedOut)))
         let timeout = await GameHttpBridge.send(
             client: timingOut, baseUrl: "https://app.digia.tech", headers: [:],
-            method: .post, path: "play", body: nil)
-        guard case .failure(let timeoutCode) = timeout else {
+            method: "POST", path: "play", body: nil)
+        guard case .failure(let timeoutFailure) = timeout else {
             Issue.record("expected failure")
             return
         }
         // Guards the URLError.timedOut arm.
-        #expect(timeoutCode == .timeout)
+        #expect(timeoutFailure.code == .timeout)
+        #expect(timeoutFailure.status == nil)
+    }
+
+    @Test("a timeout wrapped in another error still answers timeout")
+    func wrappedTimeoutMapping() async {
+        // Guards the cause-chain walk: only the wrapped URLError.timedOut
+        // names a timeout, and the answer is still timeout. Breaks if send
+        // stops consulting gameTransportIsTimeout.
+        let wrapped = NSError(
+            domain: "test", code: 1,
+            userInfo: [NSUnderlyingErrorKey: URLError(.timedOut)])
+        let wrapping = FakeSkinNetworkClient(result: .failure(wrapped))
+        let result = await GameHttpBridge.send(
+            client: wrapping, baseUrl: "https://app.digia.tech", headers: [:],
+            method: "POST", path: "play", body: nil)
+        guard case .failure(let failure) = result else {
+            Issue.record("expected failure")
+            return
+        }
+        #expect(failure.code == .timeout)
     }
 }
 

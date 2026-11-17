@@ -49,43 +49,66 @@ enum GameHttpBridge {
         return data
     }
 
+    /// One skin call's outcome: the raw JSON envelope and the HTTP status
+    /// that delivered it.
+    struct Success {
+        let envelope: [String: Any]
+        let status: Int
+    }
+
+    /// One skin call's failure: the bridge error code and the HTTP status
+    /// when the server answered (nil for transport failures and unparsable
+    /// bodies). Carrying the status lets `game_http_failed` report it, like
+    /// Android's `Outcome.Error.status`.
+    struct Failure: Error {
+        let code: GameBridgeErrorCode
+        let status: Int?
+    }
+
     /// Sends one skin call and maps the outcome to a bridge answer: the raw
     /// JSON envelope on HTTP 200 (refusals included), `network` on any other
     /// status or transport failure, `timeout` on a timeout, `internal` when a
-    /// 200 body is not JSON at all.
+    /// 200 body is not JSON at all. The method rides verbatim from the
+    /// intake; only exact `GET`/`POST` run — anything else answers `invalid`
+    /// without touching the network, like Android's `GameHttpBridge.call`.
     static func send(
         client: any NetworkClient,
         baseUrl: String,
         headers: [String: String],
-        method: HTTPMethod,
+        method: String,
         path: String,
         body: Data?
-    ) async -> Result<[String: Any], GameBridgeErrorCode> {
+    ) async -> Result<Success, Failure> {
         guard let url = endpoint(baseUrl: baseUrl, path: path) else {
-            return .failure(.internal)
+            return .failure(Failure(code: .internal, status: nil))
+        }
+        guard let httpMethod = Self.httpMethod(method) else {
+            return .failure(Failure(code: .invalid, status: nil))
         }
         var headers = headers
         headers["Content-Type"] = "application/json"
         let response: NetworkResponse
         do {
             response = try await client.execute(request: NetworkRequest(
-                url: url, method: method, headers: headers,
-                body: method == .post ? body : nil,
+                url: url, method: httpMethod, headers: headers,
+                body: httpMethod == .post ? body : nil,
                 connectTimeout: timeoutSeconds, readTimeout: timeoutSeconds))
         } catch {
-            if Self.isTimeout(error) {
-                return .failure(.timeout)
+            if gameTransportIsTimeout(error) {
+                return .failure(Failure(code: .timeout, status: nil))
             }
             log.w("Game http failed (path=\(path), error=\(error))")
-            return .failure(.network)
+            return .failure(Failure(code: .network, status: nil))
         }
         guard response.isSuccessful else {
-            return .failure(Self.errorCode(forStatus: response.statusCode))
+            return .failure(Failure(
+                code: Self.errorCode(forStatus: response.statusCode),
+                status: response.statusCode))
         }
         guard let data = response.body,
               let envelope = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return .failure(.internal) }
-        return .success(envelope)
+        else { return .failure(Failure(code: .internal, status: response.statusCode)) }
+        return .success(Success(envelope: envelope, status: response.statusCode))
     }
 
     /// Maps a non-2xx status to a bridge error code: 429 is `quota`, any other
@@ -95,23 +118,6 @@ enum GameHttpBridge {
         if status == 429 { return .quota }
         if (400...499).contains(status) { return .invalid }
         return .network
-    }
-
-    /// Whether `error` is a timeout, walking the cause chain and not only
-    /// the top-level `URLError.timedOut`.
-    private static func isTimeout(_ error: Error) -> Bool {
-        var current: Error? = error
-        while let currentError = current {
-            if let urlError = currentError as? URLError, urlError.code == .timedOut {
-                return true
-            }
-            let description = currentError.localizedDescription.lowercased()
-            if description.contains("timed out") || description.contains("timeout") {
-                return true
-            }
-            current = (currentError as NSError).userInfo[NSUnderlyingErrorKey] as? Error
-        }
-        return false
     }
 
     /// The allowlist as a pure predicate: ASCII letters first, then ASCII

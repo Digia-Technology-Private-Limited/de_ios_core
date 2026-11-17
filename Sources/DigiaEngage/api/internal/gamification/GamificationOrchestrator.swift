@@ -54,14 +54,15 @@ final class GamificationOrchestrator: ObservableObject {
 
     /// Prefetches every gamification skin on campaign sync, so a later show
     /// usually hits the cache. Fire-and-forget: failures drop and retry at
-    /// the next sync or grant.
+    /// the next sync or grant. Detached, so the cache's disk stat never runs
+    /// on the caller's thread — like Android, never the main actor.
     func prefetchGamificationSkins(_ campaigns: [CampaignModel]) {
         let skins = campaigns.compactMap(\.gamificationConfig).map {
             (bundleUrl: $0.bundleUrl, skinId: $0.skinId, version: $0.skinVersion)
         }
         guard !skins.isEmpty else { return }
         let cache = skinFileCache
-        Task { await cache.prefetch(skins) }
+        Task.detached { await cache.prefetch(skins) }
     }
 
     /// `Action.openGame` from a gamification entry canvas: opens the game with
@@ -94,20 +95,13 @@ final class GamificationOrchestrator: ObservableObject {
             case .failure(let error):
                 log.d("Rewards fetch failed (\(error))")
                 let durationMs = Int(Date().timeIntervalSince(start) * 1000)
-                let (code, status): (String, Int?) = switch error {
-                case .httpStatus(let status):
-                    ("status", status)
-                case .invalidResponse:
-                    ("invalid_response", nil)
-                case .transport(let message):
-                    (message.lowercased().contains("timeout") ? "timeout" : "network", nil)
-                }
                 SDKInstance.shared.events.toDigia(
                     GameRewardsFailedEvent(
                         health: GameHealthContext(
                             campaignId: "", skinId: "", skinVersion: 0,
                             entry: "rewards"),
-                        op: "rewards", code: code, status: status,
+                        op: "rewards", code: error.rewardsCode,
+                        status: error.rewardsStatus,
                         durationMs: durationMs),
                     payload: CEPTriggerPayload(
                         cepCampaignId: "rewards:refresh", campaignKey: "",
@@ -306,9 +300,9 @@ final class GamificationOrchestrator: ObservableObject {
             sdk.liveTestContexts[cepCampaignId]?.reportFailed(DropReason.error, message: detail)
             sdk.events.toDigia(
                 GameOpenFailedEvent(
-                    reason: reason, denyReason: denyReason,
-                    campaignId: campaign.id, skinId: config.skinId,
-                    skinVersion: config.skinVersion, entry: config.entryKind.rawValue),
+                    reason: reason, denyReason: denyReason, campaignId: campaign.id,
+                    skinId: config.skinId, skinVersion: config.skinVersion,
+                    entry: config.entryKind.rawValue),
                 payload: payload)
             sdk.coordinator.drop(
                 payload, reason: dropReason, detail: detail,
@@ -325,12 +319,13 @@ final class GamificationOrchestrator: ObservableObject {
         )
         let cache = skinFileCache
         let skin = (bundleUrl: config.bundleUrl, skinId: config.skinId, version: config.skinVersion)
-        Task { await cache.prefetch([skin]) }
+        Task.detached { await cache.prefetch([skin]) }
     }
 
-    /// Forwards one skin `event` to Digia analytics with the chance, skin,
-    /// and skin-version identity attached. A live test's payload suppresses
-    /// it, like every other analytics event.
+    /// Forwards one skin `event` to Digia analytics: one fixed event name,
+    /// with the skin's own name and props plus the campaign and skin ids
+    /// attached. A live test's payload suppresses it, like every other
+    /// analytics event.
     func reportGameSkinEvent(
         name: String,
         properties: [String: Any],
