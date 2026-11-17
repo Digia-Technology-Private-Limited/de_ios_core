@@ -37,8 +37,10 @@ struct SkinFileCacheTests {
         let file = try cache.store(skinId: "wheel", version: 3, data: data)
 
         // Guards the existence check in cachedFile; versions stay isolated.
+        // The stored bytes carry the CSP meta tag, so equality is against
+        // the injected form, not the raw input.
         #expect(cache.cachedFile(skinId: "wheel", version: 3) == file)
-        #expect(try Data(contentsOf: file) == data)
+        #expect(try Data(contentsOf: file) == SkinFileCache.withCspMetaTag(data))
         #expect(cache.cachedFile(skinId: "wheel", version: 4) == nil)
         #expect(cache.cachedFile(skinId: "chest", version: 3) == nil)
     }
@@ -53,7 +55,10 @@ struct SkinFileCacheTests {
         let second = try await cache.download(bundleUrl: url, skinId: "wheel", version: 3)
 
         #expect(first == second)
-        #expect(try String(data: Data(contentsOf: first), encoding: .utf8) == "<html>v3</html>")
+        // The stored copy carries the CSP meta tag.
+        #expect(
+            try String(data: Data(contentsOf: first), encoding: .utf8)
+                == String(data: SkinFileCache.withCspMetaTag(Data("<html>v3</html>".utf8)), encoding: .utf8))
         // Guards the cached-first check in download.
         #expect(client.requestCount == 1)
     }
