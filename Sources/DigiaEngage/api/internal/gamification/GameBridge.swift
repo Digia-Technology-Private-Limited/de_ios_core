@@ -489,3 +489,4 @@ final class GameBridge {
         let double = value.doubleValue
         return double.isFinite ? double : nil
     }
+}
