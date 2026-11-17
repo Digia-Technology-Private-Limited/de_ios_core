@@ -252,6 +252,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     lazy var pipSurface = PipSurface(self)
     lazy var floaterStorySurface = FloaterStorySurface(self)
     lazy var inlineSurface = InlineSurface(self)
+    lazy var gamificationSurface = GamificationSurface(self)
 
     /// What every surface's reporter reads from the SDK.
     ///
@@ -405,6 +406,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         floaterOrchestrator.isCoveredByBlockingCampaign = coveredByBlocking
         floaterStoryOrchestrator.isCoveredByBlockingCampaign = coveredByBlocking
+        // A user-closed story floater hides its gamification entry for the
+        // rest of the session; any other campaign is not hidden.
+        floaterStoryOrchestrator.onUserClose = { [weak self] campaignKey in
+            self?.gamificationSurface.entryClosed(campaignKey: campaignKey)
+        }
 
         appBackgroundObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
@@ -1607,8 +1613,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 return floaterStorySurface.start(request)
             }
             return pipSurface.start(request)
-        case .gamification(let cfg):
-            return startGamification(request, cfg)
+        case .gamification:
+            return gamificationSurface.start(request)
         case .unsupported(let config):
             request.driver.policy.onDropped(TimelineReason.campaignUnsupported, config.reason)
             log.e(
@@ -1618,76 +1624,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 reason: .invalidConfig, detail: config.reason,
                 deliveryDetail: ["cause": "unknown_type"])
         }
-    }
-
-    /// Campaign keys whose gamification entry the user closed with its X this
-    /// app session. Memory only: the entry comes back on the next launch, and the
-    /// chance stays unplayed either way.
-    private var hiddenGamificationEntries = Set<String>()
-
-    /// Starts an accepted gamification campaign. The frequency cap and the
-    /// surface claim already ran as gates. A direct entry asks the server for a
-    /// chance and stays `accepted` while the answer is in flight — the open hook
-    /// presents the game, and the acceptance watchdog settles the no-show
-    /// otherwise. An inline-teaser or floating entry instead renders its entry
-    /// canvas and asks for the chance only when the user taps it
-    /// (`openGame(forPayload:)`). A denial or a failure logs and leaves the
-    /// chance unplayed; the live test still hears its terminal answer.
-    private func startGamification(_ request: CampaignRequest, _ config: GamificationConfig) -> RoutingVerdict {
-        let campaign = request.campaign
-        let payload = request.payload
-        let key = campaign.campaignKey
-        let isLiveTest = request.driver.kind == .liveTest
-        // The SDK never invents a trigger id: without one the server cannot
-        // dedup repeats, so the trigger is dropped, not guessed.
-        let triggerId = payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !triggerId.isEmpty else {
-            return request.invalidConfig("gamification skipped — no trigger id", cause: "missing_config")
-        }
-        guard services?.identityManager.userId?.isEmpty == false else {
-            return request.invalidConfig("gamification skipped — no user id", cause: "missing_config")
-        }
-        let testInvocationId = isLiveTest ? testInvocationIdOf(payload.cepCampaignId) : nil
-        if isLiveTest, testInvocationId == nil {
-            return request.invalidConfig("gamification skipped — live test id missing", cause: "missing_config")
-        }
-        switch config.entryKind {
-        case .inlineTeaser, .floating:
-            return startGamificationEntry(request, config)
-        case .direct, .unknown:
-            break
-        }
-        logVerbose("routeByCampaignKey GAMIFICATION key='\(key)' triggerId='\(triggerId)'")
-        requestGameChance(campaign: campaign, config: config, payload: payload, trigger: .auto)
-        return .accepted(payload: payload, kind: .modal)
-    }
-
-    /// Renders a non-direct entry: the campaign's entry canvas in its inline
-    /// slot (teaser) or in the story floater (floating). No chance is requested
-    /// here — the tap runs `Action.openGame`, which does that.
-    private func startGamificationEntry(_ request: CampaignRequest, _ config: GamificationConfig) -> RoutingVerdict {
-        let campaign = request.campaign
-        let key = campaign.campaignKey
-        if hiddenGamificationEntries.contains(key) {
-            let detail = "gamification entry hidden for this session"
-            log.d("Dropped — \(detail)", campaign: key)
-            request.driver.policy.onDropped(DropReason.frequencyCapped, detail)
-            return .dropped(
-                reason: .frequencyCapped, detail: detail,
-                deliveryDetail: ["cap_rule": "closed_for_session"])
-        }
-        switch config.entryCanvas {
-        case .inline(let cfg)?:
-            reportMissingVariables(cfg.variableSchemas, payload: request.payload)
-            return inlineSurface.startCanvas(request, cfg)
-        case .floating?:
-            guard let floater = campaign.floatingEntryCampaign else { break }
-            return floaterStorySurface.start(
-                CampaignRequest(driver: request.driver, campaign: floater, payload: request.payload))
-        case nil:
-            break
-        }
-        return request.invalidConfig("gamification entry has no renderable canvas", cause: "missing_config")
     }
 
     /// `Action.openGame` from a gamification entry canvas: asks the server for
@@ -1704,34 +1640,6 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
         // The trigger, user and busy checks live in PlaySession now.
         requestGameChance(campaign: campaign, config: config, payload: payload, trigger: .entryTap)
-    }
-
-    /// The entry's own X: hides it for the rest of the app session without
-    /// touching the chance. Only a gamification campaign has anything to hide.
-    func hideGamificationEntry(payload: CEPTriggerPayload) {
-        guard findCampaign(payload)?.gamificationConfig != nil else { return }
-        hiddenGamificationEntries.insert(payload.campaignKey)
-    }
-
-    /// Removes a rendered entry whose chance is already played (S14): a
-    /// floating entry dismisses the way its X does, an inline teaser is
-    /// removed quietly so CEP hears a cancel, not a user close. Direct
-    /// campaigns show no entry, so there is nothing to remove.
-    private func dismissPlayedEntry(config: GamificationConfig, payload: CEPTriggerPayload) {
-        switch config.entryKind {
-        case .floating:
-            if floaterStoryOrchestrator.state?.payload.campaignKey == payload.campaignKey {
-                floaterStoryOrchestrator.dismiss(.userClose)
-            }
-        case .inlineTeaser:
-            if case .inline(let cfg) = config.entryCanvas,
-               inlineController.getCampaign(cfg.slotKey) == payload
-            {
-                inlineController.dismissCampaign(cfg.slotKey)
-            }
-        case .direct, .unknown:
-            break
-        }
     }
 
     // MARK: - Gamification rewards (S6)
@@ -1913,7 +1821,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// The one adapter every gamification chance request goes through: builds
     /// the PlayRequest and maps the decision to side effects on the main
     /// thread. A direct routing passes `.auto`; an entry tap `.entryTap`.
-    private func requestGameChance(
+    /// Internal: the gamification surface calls it after the routing gates.
+    func requestGameChance(
         campaign: CampaignModel,
         config: GamificationConfig,
         payload: CEPTriggerPayload,
@@ -1976,8 +1885,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             // a dead teaser or window for a chance that can never open again. The
             // tap promised a game, so a rendered entry goes away instead of
             // staying tappable.
-            hiddenGamificationEntries.insert(campaignKey)
-            dismissPlayedEntry(config: config, payload: payload)
+            gamificationSurface.hideEntry(campaign: campaign, config: config, payload: payload)
             liveTestContexts[cepCampaignId]?.reportFailed(
                 DropReason.error,
                 message: "chance not granted (\(denyReason))"

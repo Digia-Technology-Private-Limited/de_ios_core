@@ -427,9 +427,8 @@ private struct FloaterStorySessionView: View {
             SDKInstance.shared.floaterStoryReporter.reportFloaterStoryClicked(
                 elementId: "floater_close", actionType: "close", ctaRole: "secondary"
             )
-            // A gamification entry stays hidden for the rest of the session; the
-            // chance is untouched because only `playRequested` consumes it.
-            SDKInstance.shared.hideGamificationEntry(payload: state.payload)
+            // The close goes through the orchestrator, whose `onUserClose`
+            // hides a gamification entry for the rest of the session.
             orchestrator.dismiss(.userClose)
         } label: {
             FloaterVectorIcon(glyph: .close)

@@ -31,7 +31,8 @@ struct GamificationConfig: Equatable {
     let values: [String: JSONValue]
     /// `config.slots`, kept only for formats that map outcomes to slots.
     let slots: [GamificationSlotConfig]
-    /// Never `.unknown`: an unrecognised or missing entry opens the game directly.
+    /// `.unknown` stays unknown: an unrecognised or missing entry never opens
+    /// a game — routing drops it as `unsupported_entry` (D3).
     let entryKind: GamificationEntryKind
     /// The entry canvas for `inlineTeaser` / `floating`; nil for `direct`.
     let entryCanvas: GamificationEntryCanvas?
@@ -41,8 +42,9 @@ struct GamificationConfig: Equatable {
     let bundleUrl: String
     let sensors: [GamificationSkinSensor]
     /// The skin's minimum SDK version for this platform
-    /// (`config.minSdkVersion.ios`), or nil when the backend sends none.
-    /// A version above this SDK's skips the campaign at parse time.
+    /// (`config.minSdkVersion.ios`), or nil when the backend sends none. Kept
+    /// here; the surface drops the campaign at routing when the requirement is
+    /// newer than this SDK (D2).
     let minSdkVersion: String?
     /// The inline slot of the `inlineTeaser` entry.
     let slotKey: String?
@@ -63,12 +65,6 @@ struct GamificationConfig: Equatable {
         guard let skinId = templateConfig.nonBlankString("skinId"),
               let skinVersion = positiveInt(templateConfig["skinVersion"])
         else { return nil }
-        if let required = minSdkVersionIos(templateConfig: templateConfig),
-           let newer = Self.isNewer(required, than: DigiaSdkVersion.value), newer {
-            log.w(
-                "Gamification campaign skipped — skin needs SDK \(required) (this SDK \(DigiaSdkVersion.value))")
-            return nil
-        }
         let bundleUrl =
             templateConfig.nonBlankString("bundleUrl")
             ?? campaignLevel?.nonBlankString("bundleUrl")
@@ -78,7 +74,8 @@ struct GamificationConfig: Equatable {
         guard format != .unknown else { return nil }
 
         // `entry` is `{ kind }` on the wire; a bare string is accepted too. An
-        // unknown or missing kind degrades to a direct open — never a failure.
+        // unknown or missing kind stays `.unknown` — never a silent direct
+        // open; routing drops it as `unsupported_entry` (D3).
         let entryKind = entryKind(templateConfig["entry"])
         // The surface is always full screen; any legacy `surface.style` is ignored.
         let surface = templateConfig.object("surface")
@@ -95,7 +92,10 @@ struct GamificationConfig: Equatable {
                 log.w("Gamification campaign skipped — entry canvas unreadable (entry=\(entryKind.rawValue))")
                 return nil
             }
-        case .direct, .unknown:
+        case .direct:
+            break
+        case .unknown:
+            // No canvas to parse: routing drops it as `unsupported_entry` (D3).
             break
         }
 
@@ -195,8 +195,7 @@ struct GamificationConfig: Equatable {
 
     private static func entryKind(_ raw: Any?) -> GamificationEntryKind {
         let wire = (raw as? [String: Any])?.string("kind") ?? (raw as? String)
-        let kind = GamificationEntryKind(wire: wire)
-        return kind == .unknown ? .direct : kind
+        return GamificationEntryKind(wire: wire)
     }
 
     /// The teaser is the entry's canvas design, in the same shape the canvas
@@ -231,7 +230,11 @@ struct GamificationConfig: Equatable {
                 json, designTokens: designTokens, requiresStory: false)) ?? nil
             else { return nil }
             return .floating(config)
-        case .direct, .unknown:
+        case .direct:
+            return nil
+        case .unknown:
+            // Unreachable: only teaser and floating kinds parse a canvas. Nil
+            // either way — routing drops `.unknown` before it can render.
             return nil
         }
     }
