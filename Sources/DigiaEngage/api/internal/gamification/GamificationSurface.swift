@@ -206,7 +206,7 @@ final class GamificationSurface {
     /// `Action.openGame` from a gamification entry canvas, and the same tap
     /// from the story floater's window. Opens the game with the chance stored
     /// at the trigger — never with a new grantChance. A direct campaign has
-    /// no entry canvas; on one the tap re-runs the chance request, as before.
+    /// no entry canvas; a tap on one is ignored (D8).
     func openFromEntry(_ payload: CEPTriggerPayload) {
         guard let campaign = sdk.findCampaign(payload),
               let config = campaign.gamificationConfig
@@ -217,9 +217,9 @@ final class GamificationSurface {
             return
         }
         if config.entryKind == .direct {
-            sdk.requestGameChance(
-                campaign: campaign, config: config, payload: payload,
-                direct: true, driver: nil)
+            gamificationSurfaceLog.d(
+                "Action.openGame ignored — not inside a gamification entry",
+                campaign: payload.campaignKey)
             return
         }
         let key = campaign.campaignKey
