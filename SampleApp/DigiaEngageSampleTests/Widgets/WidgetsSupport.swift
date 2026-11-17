@@ -44,7 +44,14 @@ extension SdkHarness {
             apiKey: "test-api-key", wrapperBinding: reactNative ? "react_native" : wrapperBinding))
         try await sdk.waitUntil("the SDK is ready", timeout: 10) { sdk.sdk.sdkState != .initializing }
         try sdk.requireReady()
-        try sdk.mount { Text("host app") }
+        // A real control: capture lists only what a person could tap (a hosting view is not one), so
+        // a page of bare text would be refused as having nothing capturable.
+        try sdk.mount {
+            VStack {
+                Text("host app")
+                Button("host control") {}
+            }
+        }
         return sdk
     }
 

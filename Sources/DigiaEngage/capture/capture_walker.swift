@@ -72,6 +72,8 @@ internal enum CaptureEvidenceWalker {
             }
         }
 
+        visited = collapsingPassThroughDuplicates(visited, profile: profile)
+
         var included = Set(visited.filter(\.selected).map(\.id))
         for (index, node) in visited.enumerated().reversed() {
             if index > 0, index.isMultiple(of: nodesPerYield) { await Task.yield() }
@@ -123,6 +125,35 @@ internal enum CaptureEvidenceWalker {
             : .succeeded(nodes: nodes, traversal: traversal)
     }
 
+    /// Merges a node into its parent when both occupy the same rectangle (within a point), so one
+    /// element is not reported twice: a `UISwitch` and the view or accessibility element that
+    /// shares its rect, or a chain of wrappers around one view. The survivor is the parent, which
+    /// keeps its id and takes the more meaningful type; the merged node's children move to it.
+    /// Two meaningful elements of different kinds (a button and a label that happen to share a
+    /// size) are distinct and stay apart.
+    private static func collapsingPassThroughDuplicates(
+        _ visited: [VisitedNode],
+        profile: CaptureProfile
+    ) -> [VisitedNode] {
+        var kept: [VisitedNode] = []
+        var indexById: [String: Int] = [:]
+        var survivorById: [String: String] = [:]
+        for var node in visited {
+            if let parentId = node.parentId {
+                let resolvedId = survivorById[parentId] ?? parentId
+                node.parentId = resolvedId
+                if let index = indexById[resolvedId], let merged = kept[index].absorbing(node, profile: profile) {
+                    kept[index] = merged
+                    survivorById[node.id] = resolvedId
+                    continue
+                }
+            }
+            indexById[node.id] = kept.count
+            kept.append(node)
+        }
+        return kept
+    }
+
     private static func selected(
         _ type: CaptureNodeType,
         scrollAxis: CaptureScrollAxis?,
@@ -170,13 +201,44 @@ internal enum CaptureEvidenceWalker {
 
     private struct VisitedNode {
         let id: String
-        let parentId: String?
+        var parentId: String?
         let rect: CaptureEdgeRect
         let visibleRect: CaptureEdgeRect?
         let visible: Bool
-        let nodeType: CaptureNodeType
-        let scrollAxis: CaptureScrollAxis?
-        let selected: Bool
+        var nodeType: CaptureNodeType
+        var scrollAxis: CaptureScrollAxis?
+        var selected: Bool
+
+        /// What this node becomes by taking in `child`, or nil when they are different elements
+        /// (or not in the same place).
+        @MainActor
+        func absorbing(_ child: VisitedNode, profile: CaptureProfile) -> VisitedNode? {
+            guard visible, child.visible, rect.isSame(as: child.rect, within: 1) else { return nil }
+            let own = rank, other = child.rank
+            if own >= Self.meaningfulRank && other >= Self.meaningfulRank && own != other { return nil }
+            if (scrollAxis != nil && other >= Self.meaningfulRank) ||
+                (child.scrollAxis != nil && own >= Self.meaningfulRank) { return nil }
+            var merged = self
+            if other > own { merged.nodeType = child.nodeType }
+            merged.scrollAxis = scrollAxis ?? child.scrollAxis
+            merged.selected = CaptureEvidenceWalker.selected(
+                merged.nodeType, scrollAxis: merged.scrollAxis, profile: profile
+            )
+            return merged
+        }
+
+        private static let meaningfulRank = 3
+
+        /// interactive > text > image > scroll container > container > unknown.
+        private var rank: Int {
+            switch nodeType {
+            case .interactive: return 5
+            case .text: return 4
+            case .image: return 3
+            case .container: return scrollAxis == nil ? 1 : 2
+            case .unknown: return 0
+            }
+        }
     }
 }
 
@@ -201,13 +263,14 @@ internal struct UIKitCaptureNode: CaptureNodeSource {
         guard AccessibilityCaptureNode.exposesContentThroughAccessibility(view) else {
             return subviewNodes
         }
-        return subviewNodes + AccessibilityCaptureNode.children(
+        let elements = AccessibilityCaptureNode.children(
             of: view,
             rootView: rootView,
             hostShown: shown,
             hostAlpha: alpha,
             depth: 0
         )
+        return subviewNodes + elements
     }
 
     internal var rootBounds: CaptureEdgeRect {
@@ -263,8 +326,17 @@ internal struct UIKitCaptureNode: CaptureNodeSource {
         return nil
     }
 
+    // Not a control: a hosting view, which carries recognizers of its own for everything SwiftUI
+    // draws inside it (the content's controls are its accessibility elements), and a view whose only
+    // recognizers are UIKit's own plumbing (`_UIParallaxTransitionPanGestureRecognizer` on a
+    // navigation controller's container, `_UISecondaryClickDriverGestureRecognizer` on a bar).
     private var hasGesture: Bool {
-        !(view is UIWindow) && !(view.gestureRecognizers?.isEmpty ?? true)
+        guard !(view is UIWindow), !AccessibilityCaptureNode.exposesContentThroughAccessibility(view) else {
+            return false
+        }
+        return view.gestureRecognizers?.contains {
+            !NSStringFromClass(type(of: $0)).hasPrefix("_")
+        } ?? false
     }
 
     private var isAccessibilityIntentUnit: Bool {
@@ -302,8 +374,11 @@ internal struct AccessibilityCaptureNode: CaptureNodeSource {
 
     internal static func exposesContentThroughAccessibility(_ view: UIView) -> Bool {
         if view is CaptureAccessibilityHost { return true }
-        // e.g. "_TtGC7SwiftUI14_UIHostingView…" or "SwiftUI.UIHostingView<…>".
-        return NSStringFromClass(type(of: view)).contains("HostingView")
+        // e.g. "_TtGC7SwiftUI14_UIHostingView…" or "SwiftUI.UIHostingView<…>". A SwiftUI ScrollView is
+        // a "SwiftUI.HostingScrollView" inside it (not its "HostingScrollView.PlatformContainer"
+        // parts), which would keep the accessibility elements of its rows.
+        let name = NSStringFromClass(type(of: view))
+        return name.contains("HostingView") || name.hasSuffix("HostingScrollView")
     }
 
     internal static func children(
@@ -329,6 +404,13 @@ internal struct AccessibilityCaptureNode: CaptureNodeSource {
             }
     }
 
+    private static func rect(of element: NSObject, in rootView: UIView) -> CGRect {
+        let screenSpace = rootView.window?.screen.coordinateSpace
+            ?? (rootView as? UIWindow)?.screen.coordinateSpace
+        let frame = element.accessibilityFrame
+        return screenSpace.map { rootView.convert(frame, from: $0) } ?? frame
+    }
+
     private static func accessibilityChildren(of container: NSObject) -> [NSObject] {
         if let elements = container.accessibilityElements, !elements.isEmpty {
             return elements.compactMap { $0 as? NSObject }
@@ -351,16 +433,7 @@ internal struct AccessibilityCaptureNode: CaptureNodeSource {
     }
 
     internal var rootBounds: CaptureEdgeRect {
-        let screenSpace = rootView.window?.screen.coordinateSpace
-            ?? (rootView as? UIWindow)?.screen.coordinateSpace
-        let frame = element.accessibilityFrame
-        let rect = screenSpace.map { rootView.convert(frame, from: $0) } ?? frame
-        return CaptureEdgeRect(
-            left: Int(rect.minX.rounded()),
-            top: Int(rect.minY.rounded()),
-            right: Int(rect.maxX.rounded()),
-            bottom: Int(rect.maxY.rounded())
-        )
+        CaptureEdgeRect(Self.rect(of: element, in: rootView))
     }
 
     internal var shown: Bool { hostShown && !element.accessibilityElementsHidden }
@@ -381,6 +454,17 @@ internal struct AccessibilityCaptureNode: CaptureNodeSource {
 
     // A SwiftUI ScrollView is backed by a UIScrollView subview, walked as a subview.
     internal var scrollAxis: CaptureScrollAxis? { nil }
+}
+
+extension CaptureEdgeRect {
+    fileprivate init(_ rect: CGRect) {
+        self.init(
+            left: Int(rect.minX.rounded()),
+            top: Int(rect.minY.rounded()),
+            right: Int(rect.maxX.rounded()),
+            bottom: Int(rect.maxY.rounded())
+        )
+    }
 }
 
 @MainActor

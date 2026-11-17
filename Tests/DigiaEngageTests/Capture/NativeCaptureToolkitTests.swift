@@ -51,19 +51,83 @@ struct NativeCaptureToolkitTests {
         #expect(detailed.contains { $0.nodeType == .container }, "the SwiftUI scroll view is a container")
     }
 
-    // SwiftUI builds the accessibility elements inside a ScrollView only for an assistive technology
-    // (VoiceOver, automation): outside one, its HostingScrollView reports none and draws the rows
-    // straight into layers, so public APIs cannot reach them. Elements outside scroll views are
-    // captured (see above). Recorded as a known issue so this test flags it if iOS ever exposes them.
-    @Test("rows inside a SwiftUI ScrollView are not captured (iOS exposes them only to assistive tech)")
+    // The rows of a SwiftUI ScrollView are drawn straight into layers of its `HostingScrollView`
+    // (one drawing layer per Text), with no UIView and no accessibility element: with automation on,
+    // the scroll view still answers `accessibilityElements == nil` and an element count of
+    // NSNotFound, so no public API reaches them. (XCUITest lists them through private traversal.)
+    // Elements outside scroll views are captured (see above). Recorded as a known issue so this
+    // test flags it if iOS ever exposes them.
+    @Test("rows inside a SwiftUI ScrollView are not captured (iOS exposes no element or view for them)")
     func swiftUIScrollViewContent() async throws {
         let window = Self.window(UIHostingController(rootView: SwiftUIScreen()))
         defer { window.isHidden = true }
 
         let detailed = nodes(await walk(window, profile: Self.detailed))
-        withKnownIssue("SwiftUI ScrollView content is only built for assistive technologies") {
+        withKnownIssue("SwiftUI ScrollView rows have no accessibility element or view, only drawing layers") {
             #expect(ofType(detailed, .text).count >= 5, "the 20 rows inside the ScrollView")
         }
+    }
+
+    @Test("a SwiftUI toggle is one switch node, not the switch and its inner element")
+    func swiftUIToggleIsOneSwitch() async throws {
+        let window = Self.window(UIHostingController(rootView: SwiftUIScreen()))
+        defer { window.isHidden = true }
+
+        let minimal = nodes(await walk(window, profile: Self.minimal))
+        let toggle = try #require(Self.find(UISwitch.self, in: window))
+        #expect(
+            ofType(at(minimal, toggle, in: window), .interactive).count == 1,
+            "interactive nodes at the switch: \(at(minimal, toggle, in: window).map(\.nodeId))"
+        )
+    }
+
+    @Test("the root of a hosted SwiftUI screen is not an interactive node")
+    func hostedRootIsNotInteractive() async throws {
+        let hosting = UIHostingController(rootView: SwiftUIScreen())
+        let window = Self.window(hosting)
+        defer { window.isHidden = true }
+
+        let minimal = nodes(await walk(window, profile: Self.minimal))
+        let frame = hosting.view.convert(hosting.view.bounds, to: window)
+        let wrapper = minimal.filter {
+            $0.nodeType == .interactive && $0.rootBoundsPx.width >= Int(frame.width) - 1 &&
+                $0.rootBoundsPx.height >= Int(frame.height) - 1
+        }
+        #expect(wrapper.isEmpty, "full-screen interactive nodes: \(wrapper.map(\.nodeId))")
+    }
+
+    @Test("no two nodes of the same kind are listed at the same rectangle")
+    func noDuplicateRectangles() async throws {
+        let (uiKit, _) = Self.uiKitWindow()
+        let swiftUI = Self.window(UIHostingController(rootView: SwiftUIScreen()))
+        defer { uiKit.isHidden = true; swiftUI.isHidden = true }
+
+        for window in [uiKit, swiftUI] {
+            let kept = nodes(await walk(window, profile: Self.detailed))
+            let meaningful = kept.filter { $0.nodeType != .container && $0.nodeType != .unknown }
+            for (index, node) in meaningful.enumerated() {
+                for other in meaningful[(index + 1)...]
+                where node.nodeType == other.nodeType && node.rootBoundsPx.isSame(as: other.rootBoundsPx, within: 1) {
+                    Issue.record("\(node.nodeId) and \(other.nodeId) are both \(node.nodeType) at \(node.rootBoundsPx)")
+                }
+            }
+        }
+    }
+
+    @Test("collapsing duplicates drops no element: the title, button, switch and image all remain")
+    func meaningfulNodesSurvive() async throws {
+        let (window, title) = Self.uiKitWindow()
+        defer { window.isHidden = true }
+
+        let detailed = nodes(await walk(window, profile: Self.detailed))
+
+        #expect(ofType(at(detailed, title, in: window), .text).count == 1)
+        let toggle = try #require(Self.find(UISwitch.self, in: window))
+        #expect(ofType(at(detailed, toggle, in: window), .interactive).count == 1)
+        let button = try #require(Self.find(UIButton.self, in: window))
+        #expect(ofType(at(detailed, button, in: window), .interactive).count == 1)
+        let image = try #require(Self.find(UIImageView.self, in: window))
+        #expect(ofType(at(detailed, image, in: window), .image).count == 1)
     }
 
     // MARK: - SwiftUI inside UIKit
@@ -87,6 +151,10 @@ struct NativeCaptureToolkitTests {
         #expect(at(detailed, header, in: window).count == 1, "the classic header is captured once")
         #expect(ofType(detailed, .interactive).count >= 2, "SwiftUI button and toggle: \(detailed.map(\.nodeType))")
         #expect(!ofType(detailed, .image).isEmpty, "the SwiftUI image")
+        #expect(
+            ofType(at(detailed, hosting.view, in: window), .interactive).isEmpty,
+            "the hosting view that holds the section is not one big control"
+        )
     }
 
     // MARK: - UIKit inside SwiftUI
@@ -174,6 +242,8 @@ struct NativeCaptureToolkitTests {
     }
 
     private static func window(_ root: UIViewController) -> UIWindow {
+        // SwiftUI builds its accessibility tree only while automation is on, as under XCUITest.
+        ComponentTestHost.enableAccessibilityAutomation()
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
         window.rootViewController = root
         window.makeKeyAndVisible()
@@ -185,6 +255,14 @@ struct NativeCaptureToolkitTests {
     }
 
     // MARK: - Helpers
+
+    private static func find<T: UIView>(_ type: T.Type, in view: UIView) -> T? {
+        if let match = view as? T { return match }
+        for subview in view.subviews {
+            if let match = find(type, in: subview) { return match }
+        }
+        return nil
+    }
 
     private func walk(_ window: UIWindow, profile: CaptureProfile) async -> CaptureWalkResult {
         // Let SwiftUI finish its first layout pass before walking, as a real capture would.

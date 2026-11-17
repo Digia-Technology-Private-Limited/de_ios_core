@@ -181,6 +181,33 @@ struct NativeCaptureTests {
         #expect(ofType(kept, .interactive).first?.rootBoundsPx.top == 300)
     }
 
+    @Test("a hosting view is not an interactive node, though SwiftUI gives it recognizers")
+    func hostingViewIsNotInteractive() async {
+        let host = FakeHostingView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        host.addGestureRecognizer(UITapGestureRecognizer())
+        host.accessibilityElements = [
+            element(in: host, CGRect(x: 10, y: 10, width: 100, height: 40), .button),
+        ]
+        let root = UIView(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        root.addSubview(host)
+
+        let kept = nodes(await CaptureEvidenceWalker.walk(
+            root: UIKitCaptureNode(view: root, rootView: root),
+            windowBoundsPx: Self.window,
+            profile: Self.everything
+        ))
+
+        #expect(ofType(kept, .interactive).count == 1, "only the button")
+        #expect(!kept.contains {
+            $0.nodeType == .interactive && $0.rootBoundsPx == CaptureEdgeRect(left: 0, top: 0, right: 800, bottom: 600)
+        })
+    }
+
+    @Test("a SwiftUI ScrollView's hosting scroll view is a host of its own")
+    func hostingScrollViewIsHost() {
+        #expect(AccessibilityCaptureNode.exposesContentThroughAccessibility(HostingScrollView()))
+    }
+
     @Test("SwiftUI hosting view classes are recognised by name")
     func hostingClassRecognised() {
         #expect(AccessibilityCaptureNode.exposesContentThroughAccessibility(FakeHostingView()))
@@ -229,3 +256,6 @@ struct NativeCaptureTests {
 /// Stands in for SwiftUI's hosting view, whose content is only visible through its
 /// accessibility tree.
 private final class FakeHostingView: UIView, CaptureAccessibilityHost {}
+
+/// Named as SwiftUI names the scroll view behind a `ScrollView`.
+private final class HostingScrollView: UIScrollView {}
