@@ -165,11 +165,11 @@ final class GamePresentation: Identifiable, ObservableObject {
             }
         case .storageRemove(let id, let key):
             guard GameSkinStorage.isValidKey(key) else {
-                bridge.fail(id: id, code: .invalid, message: "invalid key")
+                if let id { bridge.fail(id: id, code: .invalid, message: "invalid key") }
                 return
             }
             storage.remove(key)
-            bridge.answer(id: id)
+            if let id { bridge.answer(id: id) }
         case .actionCopy(let id, let text):
             runSkinAction(id: id, action: .copyToClipboard(text))
         case .actionOpenLink(let id, let url):
@@ -192,12 +192,12 @@ final class GamePresentation: Identifiable, ObservableObject {
             if let id { bridge.answer(id: id, payload: ["ok": true]) }
             dismiss()
         case .motionSubscribe(let id, let sensors, let hz):
-            var started = true
-            for sensor in sensors {
-                started = motion.start(sensor: sensor, hz: hz) { [weak self] event in
-                    guard let self else { return }
-                    self.pushSensor(event)
-                } && started
+            // Availability resolves for every sensor before any of them
+            // streams, so a missing sensor fails the whole subscribe —
+            // like Android, never a started subset plus `unsupported`.
+            let started = motion.startAll(sensors: sensors, hz: hz) { [weak self] event in
+                guard let self else { return }
+                self.pushSensor(event)
             }
             if started {
                 bridge.answer(id: id, payload: ["ok": true])
@@ -205,11 +205,7 @@ final class GamePresentation: Identifiable, ObservableObject {
                 bridge.fail(id: id, code: .unsupported, message: "sensor unavailable")
             }
         case .motionUnsubscribe(let id, let sensors):
-            if sensors.isEmpty {
-                motion.stopAll()
-            } else {
-                for sensor in sensors { motion.stop(sensor: sensor) }
-            }
+            for sensor in sensors { motion.stop(sensor: sensor) }
             bridge.answer(id: id, payload: ["ok": true])
         case .actionSteps(let id, let actions):
             // Canvas steps over the bridge: the same executor the canvas uses.
