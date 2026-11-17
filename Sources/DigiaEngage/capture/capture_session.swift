@@ -31,16 +31,16 @@ internal final class URLSessionCaptureUploader {
             return .rejected(.transportFailed)
         }
 
+        guard let captureText = String(data: captureJSON, encoding: .utf8) else {
+            return .rejected(.invalidEnvelope)
+        }
+        // The envelope is a `capture` text field, as Flutter and Android send it: the backend reads
+        // `capture` from the form fields and only accepts PNG files, so a `capture.json` file part
+        // is refused (HTTP 400).
         let request = MultipartUploadRequest(
             url: url,
-            formFields: [:],
+            formFields: ["capture": captureText],
             files: [
-                MultipartFilePart(
-                    fieldName: "capture",
-                    fileName: "capture.json",
-                    mimeType: "application/json",
-                    data: captureJSON
-                ),
                 MultipartFilePart(
                     fieldName: "file",
                     fileName: "capture.png",

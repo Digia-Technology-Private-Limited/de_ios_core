@@ -4,8 +4,9 @@ import Testing
 
 /// Port of flutter/core `test/capture_session_upload_test.dart`.
 ///
-/// Unlike Flutter, which sends the envelope as a `capture` form field, iOS sends it as a
-/// `capture.json` file part beside the PNG; these tests pin the iOS request as it ships.
+/// Like Flutter and Android, iOS sends the envelope as a `capture` form field beside the PNG: the
+/// backend reads `capture` from the form fields and only accepts PNG files, so the earlier
+/// `capture.json` file part was refused with HTTP 400.
 @MainActor
 @Suite("Capture upload", .tags(.capture, .network, .unit))
 struct CaptureUploadTests {
@@ -25,15 +26,11 @@ struct CaptureUploadTests {
         // The path, not the whole URL: suites running alongside this one may point the endpoint
         // root at a test server.
         #expect(request.url.path == URL(string: DigiaEndpoints.recordPageCapture)?.path)
-        #expect(request.formFields.isEmpty)
-        #expect(request.files.map(\.fieldName) == ["capture", "file"])
+        let json = try #require(CaptureEnvelopeSerializer.jsonBytes(envelope))
+        #expect(request.formFields == ["capture": String(decoding: json, as: UTF8.self)])
+        #expect(request.files.map(\.fieldName) == ["file"], "the PNG is the only file part")
 
-        let capture = request.files[0]
-        #expect(capture.fileName == "capture.json")
-        #expect(capture.mimeType == "application/json")
-        #expect(capture.data == CaptureEnvelopeSerializer.jsonBytes(envelope))
-
-        let file = request.files[1]
+        let file = request.files[0]
         #expect(file.fileName == "capture.png")
         #expect(file.mimeType == "image/png")
         #expect(file.data == png)

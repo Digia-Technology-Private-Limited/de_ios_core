@@ -2392,7 +2392,15 @@ private struct FocalCanvasImage: View {
                     max(0.1, scale), anchor: focalAnchorPoint(x: x, y: y)
                 )
                 .clipped()
+                // `.clipped()` crops pixels, not touches: a zoomed or fill-cropped
+                // image still hit-tests across its full scaled size, and in a
+                // carousel that invisible overflow sits above the neighbouring
+                // slide's tap region and swallows its taps.
+                .allowsHitTesting(false)
             }
+            // The image's own frame still absorbs touches, so a tap on a canvas
+            // background keeps not falling through — but only within that frame.
+            .contentShape(Rectangle())
             .onChange(of: resolved) { _ in failedURL = nil }
         }
     }

@@ -2,6 +2,13 @@
 
 All notable changes to Digia Engage (iOS) are documented in this file.
 
+## [Unreleased]
+
+### Bug Fixes
+
+- Taps on carousel slides now work when a neighbouring slide's image is zoomed or larger than its slide.
+- Carousels in a dialog with the close button outside the card can be swiped again.
+
 ## [4.3.2] - 2026-11-04
 
 ### Bug Fixes
