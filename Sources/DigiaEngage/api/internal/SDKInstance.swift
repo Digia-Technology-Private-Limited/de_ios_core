@@ -2521,8 +2521,9 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 self?.failGamificationOpen(config: config, payload: payload)
             },
             onShown: { [weak self] in
-                // On screen: count the impression so the acceptance watchdog stands down.
-                self?.coordinator.handle(.impressed, payload: payload)
+                // On screen: emit Impressed like every other surface. The coordinator stands
+                // its acceptance watchdog down, and a live test reports "shown" from it.
+                self?.events.toCep(.impressed, payload: payload)
             })
         GamePresenter.open(request)
     }
