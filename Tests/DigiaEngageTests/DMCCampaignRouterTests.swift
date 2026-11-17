@@ -80,6 +80,25 @@ struct DMCCampaignRouterTests {
         #expect(surfaces.started == nil)
     }
 
+    @Test("an inline campaign ignores targetScreenNames on another screen")
+    func inlineIgnoresTargetScreens() throws {
+        let surfaces = FakeSurfaces([])
+        let verdict = router(surfaces, screen: "Home").route(
+            try request(CepDriver(pluginId: "p"), inlineJson("b", targetScreenNames: ["Detail"])))
+
+        #expect(verdict.isAccepted)
+        #expect(surfaces.started != nil)
+    }
+
+    @Test("a non-inline campaign is still dropped on another screen")
+    func nonInlineStillScreenGated() throws {
+        let surfaces = FakeSurfaces([])
+        let verdict = router(surfaces, screen: "Home")
+            .route(try request(CepDriver(pluginId: "p"), nudgeJson("n", targetScreenNames: ["Detail"])))
+
+        #expect(reason(verdict) == .screenNotTargeted)
+    }
+
     // dmc-case: dmc.gate_order.screen_before_frequency_before_surface
     @Test("the frequency gate drops before the surface gate")
     func frequencyBeforeSurface() throws {

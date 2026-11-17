@@ -298,11 +298,11 @@ final class DecisionEngine {
         )
     }
 
-    /// The session ended: drops held signals and ends every wait.
+    /// The session ended: drops held signals except the app open, and ends every wait.
     func reset() {
         reportedRuleFailures.removeAll()
         reportedDefaultPriority.removeAll()
-        gate.dropHeld()
+        gate.dropHeldExcept { if case .appOpened = $0 { true } else { false } }
         contextGate.dropHeld()
         for pending in waits.cancelAll() {
             logWaitCancelled(pending, cause: .sessionEnded)

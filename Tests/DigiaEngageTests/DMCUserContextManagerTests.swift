@@ -7,11 +7,17 @@ private final class ContextServer: NetworkClient, @unchecked Sendable {
     private let lock = NSLock()
     private var bodies: [[String: Any]] = []
     private var reply: () throws -> [String: Any] = { [:] }
+    private var raw: Data?
 
     var sent: [[String: Any]] { lock.withLock { bodies } }
 
     func respond(with body: [String: Any]) {
         lock.withLock { reply = { body } }
+    }
+
+    /// Answers the next calls with this body as is, not wrapped in the envelope.
+    func respondRaw(_ text: String) {
+        lock.withLock { raw = Data(text.utf8) }
     }
 
     func fail() {
@@ -21,6 +27,9 @@ private final class ContextServer: NetworkClient, @unchecked Sendable {
     func execute(request: NetworkRequest) async throws -> NetworkResponse {
         if let data = request.body, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
             lock.withLock { bodies.append(json) }
+        }
+        if let raw = lock.withLock({ raw }) {
+            return NetworkResponse(statusCode: 200, headers: [:], body: raw, isSuccessful: true)
         }
         let body = try lock.withLock { reply }()
         // The envelope the backend really replies with.
@@ -66,6 +75,49 @@ struct DMCUserContextManagerTests {
         let manager = UserContextManager(storage: storage, networkClient: server)
         manager.configure(restoredUserId: restoredUserId)
         return manager
+    }
+
+    @Test("a user change overtaken by another is not applied")
+    func overtakenChangeIsNotApplied() async {
+        let manager = manager(restoredUserId: "u1")
+
+        manager.dropPreviousUser("u2") // setUserId("u2")
+        manager.dropPreviousUser("u3") // setUserId("u3")
+        _ = manager.mergeAttributes(["plan": "gold"]) // setUserAttributes: u3's
+        await manager.onUserIdChanged("u2") // the older change lands late
+        await manager.onUserIdChanged("u3")
+
+        #expect(!server.sent.contains { $0["userId"] as? String == "u2" })
+        #expect(server.sent.last?["userId"] as? String == "u3")
+        #expect(same(server.sent.last?["attributes"], ["plan": "gold"]))
+        #expect(manager.attributes["plan"] as? String == "gold")
+    }
+
+    @Test("a user change that lands after the one that overtook it is not applied")
+    func lateOvertakenChangeIsNotApplied() async {
+        let manager = manager(restoredUserId: "u1")
+        manager.dropPreviousUser("u2")
+        manager.dropPreviousUser("u3")
+        await manager.onUserIdChanged("u3")
+        let before = server.sent.count
+
+        await manager.onUserIdChanged("u2")
+
+        #expect(server.sent.count == before)
+    }
+
+    @Test("a logout of the same user overtaken by their login still clears the disk")
+    func overtakenLogoutClearsDisk() async {
+        let manager = manager(restoredUserId: "u1")
+        _ = manager.mergeAttributes(["a_attr": 1])
+
+        manager.dropPreviousUser(nil) // clearUserId()
+        manager.dropPreviousUser("u1") // setUserId("u1"), same tick
+        await manager.onUserIdChanged(nil)
+        await manager.onUserIdChanged("u1")
+
+        manager.configure(restoredUserId: "u1") // relaunch
+        #expect(manager.attributes["a_attr"] == nil)
     }
 
     // dmc-case: dmc.user_context.attributes_merge_fast
@@ -155,6 +207,26 @@ struct DMCUserContextManagerTests {
 
         #expect(manager.eligibleCampaigns == ["c1"])
         #expect(manager.resolvedAttributes["city"] == "Gurugram")
+    }
+
+    @Test("a 200 whose body is not JSON logs user_context_failed, keeps the cache and releases the hold")
+    func nonJSONBodyIsAFailedFetch() async {
+        let sink = RecordSink()
+        DigiaLogger.registerSink(sink)
+        defer { DigiaLogger.unregisterSink(sink) }
+        let manager = manager(reply: ["campaigns": ["c1"], "attributes": [String: Any](), "expiresInSeconds": 900])
+        await manager.onUserIdChanged("u1")
+        var ended = 0
+        manager.onFetchStarted = { { ended += 1 } }
+
+        server.respondRaw("this is not json")
+        await manager.refresh(force: true)
+
+        let failed = sink.records.filter { $0.reason?.wire == "user_context_failed" }
+        #expect(failed.count == 1)
+        #expect(failed.first?.extras["cause"] == "unknown")
+        #expect(manager.eligibleCampaigns == ["c1"])
+        #expect(ended == 1)
     }
 
     @Test("makes no request at all until a user is identified")

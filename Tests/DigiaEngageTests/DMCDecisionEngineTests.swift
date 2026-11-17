@@ -225,6 +225,36 @@ struct DMCDecisionEngineTests {
         #expect(routedKeys.isEmpty)
     }
 
+    @Test("a session reset before ready keeps the app open and drops every other held signal")
+    func resetKeepsAppOpened() {
+        defer { finish() }
+        facts.ready = false
+        facts.add(Self.campaign("welcome", triggers: [["type": "app_opened"]]))
+        facts.add(Self.campaign("cart_tip", triggers: [["type": "event", "name": "added"]]))
+
+        engine.send(.appOpened)
+        engine.send(.event("added", [:]))
+        engine.reset()
+        facts.ready = true
+        engine.ready()
+
+        #expect(routedKeys == ["welcome"])
+    }
+
+    @Test("dropHeld still drops the app open")
+    func dropHeldDropsAppOpened() {
+        defer { finish() }
+        facts.ready = false
+        facts.add(Self.campaign("welcome", triggers: [["type": "app_opened"]]))
+
+        engine.send(.appOpened)
+        engine.dropHeld()
+        facts.ready = true
+        engine.ready()
+
+        #expect(routedKeys.isEmpty)
+    }
+
     // dmc-case: dmc.trigger.pre_ready_signals_replayed_then_cleared
     @Test("signals are dropped, not held again, when loading fails")
     func droppedOnClose() {

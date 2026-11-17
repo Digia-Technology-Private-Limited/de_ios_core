@@ -177,6 +177,7 @@ final class UserContextManager {
     /// run: the host app does not call `setUserId` again on a relaunch.
     func configure(restoredUserId: String?, restoredUserHash: String? = nil) {
         configured = true
+        announced = false
         userId = restoredUserId
         userHash = restoredUserId == nil ? nil : restoredUserHash
         if let owner = storage.string(forKey: ownerKey), owner != restoredUserId { clearCache() }
@@ -188,6 +189,10 @@ final class UserContextManager {
     private func clearCache() {
         context = nil
         attributes = [:]
+        clearDisk()
+    }
+
+    private func clearDisk() {
         for key in [contextKey, attributesKey, sentHashKey, ownerKey] { storage.remove(forKey: key) }
     }
 
@@ -233,6 +238,8 @@ final class UserContextManager {
     /// before the identity changes, so no rule reads that data for `userId`.
     /// ``onUserIdChanged(_:userHash:)`` then clears the disk.
     func dropPreviousUser(_ userId: String?) {
+        announced = true
+        announcedUserId = userId
         let previous = self.userId ?? storage.string(forKey: ownerKey)
         if let userId, userId == previous || previous == nil { return }
         // A nil user also discards a fetch still in flight for the previous one.
@@ -242,8 +249,21 @@ final class UserContextManager {
         attributes = [:]
     }
 
+    /// The user the host app asked for last. A user change still on its way for
+    /// anyone else is out of date, and applying it would hand that user the
+    /// attributes the host app has just set for the current one.
+    private var announced = false
+    private var announcedUserId: String?
+
     /// Called when the host app identifies a user, or clears it.
     func onUserIdChanged(_ userId: String?, userHash: String? = nil) async {
+        if announced && announcedUserId != userId {
+            // An overtaken logout is not applied in memory, but the disk must still forget
+            // the user who logged out: the later change may be a login of that same user,
+            // which finds no change to clear.
+            if userId == nil { clearDisk() }
+            return
+        }
         // Before configure, the stored owner is the only record of the last user.
         let previous = self.userId ?? storage.string(forKey: ownerKey)
         let userChanged = userId != previous
@@ -347,7 +367,20 @@ final class UserContextManager {
                 )
                 return
             }
-            guard let payload = Self.payload(of: response.body) else { return }
+            guard let payload = Self.payload(of: response.body) else {
+                // Valid JSON that is not an object is ignored, as on Flutter; a body that does not
+                // parse at all is a failed fetch, and the cached copy stays.
+                if Self.isMalformedJSON(response.body) {
+                    log.w(
+                        "User context fetch failed — continuing with the cached copy",
+                        stage: .session,
+                        reason: TimelineReason.userContextFailed,
+                        // Flutter reports a body Dio cannot decode as an unclassified DioException.
+                        extras: ["cause": "unknown"]
+                    )
+                }
+                return
+            }
 
             let dropped = (payload["droppedAttributes"] as? [Any] ?? []).compactMap { $0 as? String }
             if !dropped.isEmpty {
@@ -398,6 +431,12 @@ final class UserContextManager {
             return Int64(defaultExpirySeconds)
         }
         return Int64(seconds)
+    }
+
+    /// True when `body` is non-empty and not JSON. A scalar or an array is valid JSON.
+    private static func isMalformedJSON(_ body: Data?) -> Bool {
+        guard let body, !body.allSatisfy({ [0x20, 0x09, 0x0A, 0x0D].contains($0) }) else { return false }
+        return (try? JSONSerialization.jsonObject(with: body, options: .fragmentsAllowed)) == nil
     }
 
     /// Unwraps the `{isSuccess, data: {response}}` envelope every Engage SDK

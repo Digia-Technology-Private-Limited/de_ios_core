@@ -26,6 +26,10 @@ private final class ContextNetworkClient: NetworkClient, @unchecked Sendable {
     private let lock = NSLock()
     private let bundle: NetworkResponse
     private var waiters: [CheckedContinuation<NetworkResponse, Error>] = []
+    private var bodies: [[String: Any]] = []
+
+    /// Each `/userContext` body sent, in order.
+    var sent: [[String: Any]] { lock.withLock { bodies } }
 
     init(bundle: NetworkResponse) { self.bundle = bundle }
 
@@ -50,8 +54,12 @@ private final class ContextNetworkClient: NetworkClient, @unchecked Sendable {
         guard path.hasSuffix("/userContext") else {
             return NetworkResponse(statusCode: 200, headers: [:], body: Data("{}".utf8), isSuccessful: true)
         }
+        let json = request.body.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
         return try await withCheckedThrowingContinuation { continuation in
-            lock.withLock { waiters.append(continuation) }
+            lock.withLock {
+                bodies.append(json ?? [:])
+                waiters.append(continuation)
+            }
         }
     }
 
@@ -301,6 +309,46 @@ struct DMCContextWaitTests {
         try await Self.settle()
 
         try await Self.until { world.network.requestCount >= 2 }
+        world.network.release(1, campaigns: ["gated"])
+        try await Self.until { shown(world.sdk) == "gated" }
+    }
+
+    @Test("15. attributes set after a quick B then C switch belong to C")
+    func attributesAfterQuickSwitchBelongToLatestUser() async throws {
+        let world = try await Self.launch([Self.nudge("gated", 100, Self.event("login_success"), gated: true)])
+        defer { DigiaLogger.unregisterSink(world.sink) }
+        world.network.release(0, campaigns: [])
+        try await Self.settle()
+
+        world.sdk.setUserId("B")
+        world.sdk.setUserId("C")
+        world.sdk.setUserAttributesNow(["plan": "gold"])
+        try await Self.until { world.network.requestCount >= 2 }
+        try await Self.settle()
+        for index in 1..<world.network.requestCount { world.network.release(index, campaigns: []) }
+        try await Self.settle()
+
+        let requests = Array(world.network.sent.dropFirst())
+        #expect(Set(requests.compactMap { $0["userId"] as? String }) == ["C"], "B was superseded before its change landed")
+        #expect((requests.last?["attributes"] as? [String: Any])?["plan"] as? String == "gold")
+        #expect(world.sdk.services?.userContextManager.attributes["plan"] as? String == "gold")
+    }
+
+    @Test("16. clearUserId then setUserId then an event in one tick holds for B")
+    func clearThenLoginIsHeld() async throws {
+        let world = try await Self.launch([Self.nudge("gated", 100, Self.event("login_success"), gated: true)])
+        defer { DigiaLogger.unregisterSink(world.sink) }
+        world.network.release(0, campaigns: [])
+        try await Self.settle()
+
+        world.sdk.clearUserId()
+        world.sdk.setUserId("B")
+        world.sdk.trackEvent("login_success")
+        try await Self.settle()
+        #expect(!logged(world, "gated", .notInAudience), "the clear holds nothing, so it must not end the wait")
+        #expect(shown(world.sdk) == nil)
+
+        try await Self.until { world.network.requestCount == 2 }
         world.network.release(1, campaigns: ["gated"])
         try await Self.until { shown(world.sdk) == "gated" }
     }

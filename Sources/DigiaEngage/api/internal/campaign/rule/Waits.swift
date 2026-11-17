@@ -30,8 +30,8 @@ struct PendingWait {
     /// when the wait ends.
     let trigger: RuleSignal
     /// The screen when the wait started, for `screen_left` without names.
-    /// Empty when no screen was set.
-    let screen: String
+    /// Empty when no screen was set; the first screen reported then becomes it.
+    var screen: String
     /// When the wait began on `nowMs`: earlier than the start call for a
     /// signal that was held while the SDK loaded.
     let startedAtMs: Int
@@ -90,8 +90,17 @@ final class Waits {
     /// Ends every wait that `signal` cancels, each with its cause.
     func cancelMatching(_ signal: RuleSignal) -> [(PendingWait, WaitCancelCause)] {
         var cancelled: [(PendingWait, WaitCancelCause)] = []
-        for wait in pending.values {
+        for key in Array(pending.keys) {
+            guard var wait = pending[key] else { continue }
             for cancel in wait.wait.cancels {
+                // A nameless screen_left wait started before any screen was reported has no screen to leave: the first report becomes its start screen instead of cancelling it (de_workspace#208).
+                if case .onScreenLeft(nil) = cancel, wait.screen.isEmpty,
+                    case .screenViewed(let name) = signal
+                {
+                    wait.screen = name
+                    pending[key] = wait
+                    continue
+                }
                 if let cause = Self.cause(cancel, signal: signal, waitScreen: wait.screen) {
                     cancelled.append((wait, cause))
                     break
