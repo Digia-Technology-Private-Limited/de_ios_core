@@ -183,7 +183,7 @@ struct DigiaInlineCanvasView: View {
                 campaignKey: payload.campaignKey,
                 localActionExecutor: LocalActionExecutor(
                     dismiss: dismiss,
-                    openGame: { SDKInstance.shared.openGame(forPayload: payload) }
+                    openGame: { SDKInstance.shared.gamification.openGame(forPayload: payload) }
                 )
             )
         }

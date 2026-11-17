@@ -83,10 +83,10 @@ struct GameRewardsPageView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Waiting to play").font(.headline)
             ForEach(chances, id: \.chanceId) { chance in
-                Button(action: { sdk.openGameForRewardsChance(chance) }) {
+                Button(action: { sdk.gamification.openGameForRewardsChance(chance) }) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(chance.rewardsPageTitle
-                            ?? sdk.rewardsCampaignTitle(for: chance.campaignId)
+                            ?? sdk.gamification.rewardsCampaignTitle(for: chance.campaignId)
                             ?? chance.format ?? chance.campaignId)
                             .font(.subheadline)
                             .foregroundStyle(.primary)
@@ -146,7 +146,7 @@ struct GameRewardsPageView: View {
                 }
                 if let deepLink = reward.ctaDeepLink {
                     Button(reward.ctaLabel ?? "Use now") {
-                        sdk.openRewardDeepLink(deepLink)
+                        sdk.gamification.openRewardDeepLink(deepLink)
                     }
                     .font(.subheadline)
                 }
@@ -159,7 +159,7 @@ struct GameRewardsPageView: View {
             ForEach(chances, id: \.chanceId) { chance in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(chance.rewardsPageTitle
-                        ?? sdk.rewardsCampaignTitle(for: chance.campaignId)
+                        ?? sdk.gamification.rewardsCampaignTitle(for: chance.campaignId)
                         ?? chance.campaignId)
                         .font(.subheadline)
                     Text("Expired")
@@ -186,7 +186,7 @@ struct GameRewardsWidgetView: View {
             case .hidden:
                 EmptyView()
             case .chances(let count, let formats, let soonest):
-                Button(action: { sdk.handleRewardsWidgetTap() }) {
+                Button(action: { sdk.gamification.handleRewardsWidgetTap() }) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(Self.chancesTitle(count: count))
                             .font(.subheadline)
@@ -202,7 +202,7 @@ struct GameRewardsWidgetView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                 }
             case .reward(let reward):
-                Button(action: { sdk.handleRewardsWidgetTap() }) {
+                Button(action: { sdk.gamification.handleRewardsWidgetTap() }) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(reward.name ?? "Reward").font(.subheadline)
                         if let code = reward.code {

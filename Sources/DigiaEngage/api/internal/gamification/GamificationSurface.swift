@@ -95,7 +95,7 @@ final class GamificationSurface {
             break
         }
         sdk.logVerbose("routeByCampaignKey GAMIFICATION key='\(key)' triggerId='\(triggerId)'")
-        sdk.requestGameChance(
+        sdk.gamification.requestGameChance(
             campaign: campaign, config: config, payload: payload,
             direct: true, driver: request.driver)
         return .accepted(payload: payload, kind: .modal)
@@ -143,7 +143,7 @@ final class GamificationSurface {
         sdk.logVerbose(
             "routeByCampaignKey GAMIFICATION key='\(key)' "
                 + "triggerId='\(request.payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines))'")
-        sdk.requestGameChance(
+        sdk.gamification.requestGameChance(
             campaign: campaign, config: config, payload: request.payload,
             direct: false, driver: request.driver)
         return .accepted(

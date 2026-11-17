@@ -57,7 +57,7 @@ final class GameSurface {
             return
         }
         // 3. Skin cache hit opens at once, else download-then-show.
-        if let file = sdk.skinFileCache.cachedFile(
+        if let file = sdk.gamification.skinFileCache.cachedFile(
             skinId: config.skinId, version: config.skinVersion)
         {
             openResolved(
@@ -70,7 +70,7 @@ final class GameSurface {
                 + "(skinId=\(config.skinId), skinVersion=\(config.skinVersion))",
             campaign: campaignKey
         )
-        let cache = sdk.skinFileCache
+        let cache = sdk.gamification.skinFileCache
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
@@ -147,7 +147,7 @@ final class GameSurface {
     private func closed(settle: GameSettle, campaign: CampaignModel) {
         switch settle {
         case .presentation(let payload, let entry):
-            sdk.refreshRewardsIfLoaded()
+            sdk.gamification.refreshRewardsIfLoaded()
             switch entry {
             case .inlineTeaser:
                 refreshInlineEntryAfterClose(
@@ -159,7 +159,7 @@ final class GameSurface {
                     campaignKey: campaign.campaignKey, payload: payload)
             }
         case .rewards:
-            sdk.refreshRewards()
+            sdk.gamification.refreshRewards()
         }
     }
 
@@ -274,33 +274,10 @@ final class GameSurface {
         if sdk.floaterStoryOrchestrator.state?.payload.cepCampaignId == payload.cepCampaignId {
             sdk.floaterStoryOrchestrator.hold(true)
         }
-        guard let userId = sdk.services?.identityManager.userId, !userId.isEmpty else {
-            log.d(
-                "Gamification floating entry hidden after close — no user id",
-                campaign: campaignKey)
-            hideFloatingEntry(campaignKey: campaignKey, payload: payload)
-            return
-        }
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let result = await self.sdk.gameOutcomeSource.state(
-                campaignKey: campaignKey,
-                testInvocationId: testInvocationIdOf(payload.cepCampaignId))
-            switch PlaySession.decideAfterClose(result) {
-            case .keep(let replacement):
-                if let replacement {
-                    self.sdk.gamificationSurface.chances[campaignKey] = replacement
-                }
-                self.sdk.floaterStoryOrchestrator.hold(false)
-                log.d(
-                    "Gamification floating entry kept after close (\(result))",
-                    campaign: campaignKey)
-            case .hide:
-                log.d(
-                    "Gamification floating entry hidden after close (\(result))",
-                    campaign: campaignKey)
-                self.hideFloatingEntry(campaignKey: campaignKey, payload: payload)
-            }
+        refreshEntryAfterClose(campaignKey: campaignKey, payload: payload) { [weak self] in
+            self?.hideFloatingEntry(campaignKey: campaignKey, payload: payload)
+        } onKept: { [weak self] in
+            self?.sdk.floaterStoryOrchestrator.hold(false)
         }
     }
 
@@ -323,16 +300,30 @@ final class GameSurface {
     private func refreshInlineEntryAfterClose(
         campaignKey: String, payload: CEPTriggerPayload
     ) {
+        refreshEntryAfterClose(campaignKey: campaignKey, payload: payload) { [weak self] in
+            self?.hideInlineEntry(campaignKey: campaignKey, payload: payload)
+        }
+    }
+
+    /// The one entry-close round-trip both entries share: with no user the
+    /// entry hides at once, otherwise the backend `state` decides. A failed
+    /// call keeps the stored chance; any other non-playable answer runs `hide`.
+    private func refreshEntryAfterClose(
+        campaignKey: String,
+        payload: CEPTriggerPayload,
+        hide: @MainActor @escaping () -> Void,
+        onKept: @MainActor @escaping () -> Void = {}
+    ) {
         guard let userId = sdk.services?.identityManager.userId, !userId.isEmpty else {
             log.d(
-                "Gamification inline entry hidden after close — no user id",
+                "Gamification entry hidden after close — no user id",
                 campaign: campaignKey)
-            hideInlineEntry(campaignKey: campaignKey, payload: payload)
+            hide()
             return
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let result = await self.sdk.gameOutcomeSource.state(
+            let result = await self.sdk.gamification.gameOutcomeSource.state(
                 campaignKey: campaignKey,
                 testInvocationId: testInvocationIdOf(payload.cepCampaignId))
             switch PlaySession.decideAfterClose(result) {
@@ -341,13 +332,14 @@ final class GameSurface {
                     self.sdk.gamificationSurface.chances[campaignKey] = replacement
                 }
                 log.d(
-                    "Gamification inline entry kept after close (\(result))",
+                    "Gamification entry kept after close (\(result))",
                     campaign: campaignKey)
+                onKept()
             case .hide:
                 log.d(
-                    "Gamification inline entry hidden after close (\(result))",
+                    "Gamification entry hidden after close (\(result))",
                     campaign: campaignKey)
-                self.hideInlineEntry(campaignKey: campaignKey, payload: payload)
+                hide()
             }
         }
     }

@@ -104,7 +104,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         case .http(let id, let method, let path, let body):
             performHttp(id: id, method: method, path: path, body: body)
         case .event(let id, let name, let props):
-            SDKInstance.shared.reportGameSkinEvent(
+            SDKInstance.shared.gamification.reportGameSkinEvent(
                 name: name, properties: props, payload: self.request.payload,
                 skinId: self.request.skinId, skinVersion: self.request.skinVersion,
                 chanceId: self.request.chanceId)
