@@ -93,6 +93,7 @@ final class Waits {
         for key in Array(pending.keys) {
             guard var wait = pending[key] else { continue }
             for cancel in wait.wait.cancels {
+                // A nameless screen_left wait started before any screen was reported has no screen to leave: the first report becomes its start screen instead of cancelling it (de_workspace#208).
                 if case .onScreenLeft(nil) = cancel, wait.screen.isEmpty,
                     case .screenViewed(let name) = signal
                 {
