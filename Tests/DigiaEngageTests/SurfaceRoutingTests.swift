@@ -391,8 +391,8 @@ func classicGuideJson(_ key: String) -> [String: Any] {
     ]
 }
 
-func inlineJson(_ key: String, slotKey: String = "home_hero") -> [String: Any] {
-    [
+func inlineJson(_ key: String, slotKey: String = "home_hero", targetScreenNames: [String]? = nil) -> [String: Any] {
+    var dict: [String: Any] = [
         "id": "\(key)-id",
         "campaignKey": key,
         "campaignType": "inline",
@@ -403,4 +403,6 @@ func inlineJson(_ key: String, slotKey: String = "home_hero") -> [String: Any] {
             "canvas": emptyCanvas,
         ] as [String: Any],
     ]
+    if let targetScreenNames { dict["targetScreenNames"] = ["names": targetScreenNames] }
+    return dict
 }
