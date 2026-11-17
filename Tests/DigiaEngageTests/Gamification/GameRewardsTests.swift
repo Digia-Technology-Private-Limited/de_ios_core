@@ -4,36 +4,61 @@ import Testing
 @testable import DigiaEngage
 
 /// `getRewards` parsing: soonest-expiry-first sorting, the playable flag,
-/// widget content selection and widget tap resolution. Each test names the
-/// production line that fails it.
+/// grant and widget content selection, and widget tap resolution. Each test
+/// names the production line that fails it.
 @Suite("Game rewards", .tags(.unit, .game))
 struct GameRewardsTests {
     private func chance(
-        _ id: String, expires: String? = nil, playable: Bool? = nil, format: String? = "spinWheel"
+        _ id: String, campaignId: String = "bills", format: String? = "spinWheel",
+        title: String? = nil, expires: String? = nil, playable: Bool? = nil
     ) -> [String: Any] {
-        var raw: [String: Any] = ["chanceId": id, "campaignKey": "bills"]
+        var raw: [String: Any] = ["chanceId": id, "campaignId": campaignId]
+        if let format { raw["format"] = format }
+        if let title { raw["rewardsPageTitle"] = title }
         if let expires { raw["expiresAt"] = expires }
         if let playable { raw["playable"] = playable }
-        if let format { raw["format"] = format }
         return raw
+    }
+
+    private func grant(
+        _ id: String, name: String? = "Cash", type: String = "coupon",
+        extra: [String: Any] = [:]
+    ) -> [String: Any] {
+        var raw: [String: Any] = ["grantId": id, "type": type]
+        if let name { raw["name"] = name }
+        return raw.merging(extra) { current, _ in current }
     }
 
     private func response(
         chances: [[String: Any]] = [],
         active: [[String: Any]] = [],
         used: [[String: Any]] = [],
-        expired: [[String: Any]] = [],
+        expiredGrants: [[String: Any]] = [],
+        expiredChances: [[String: Any]] = [],
         widget: [String: Any]? = nil,
         emptyMessage: String? = nil
     ) -> [String: Any] {
         var raw: [String: Any] = [
             "chances": chances,
             "campaigns": [],
-            "rewards": ["active": active, "used": used, "expired": expired],
+            "rewards": [
+                "active": active, "used": used,
+                "expired": ["grants": expiredGrants, "chances": expiredChances],
+            ],
         ]
         if let widget { raw["widget"] = widget }
         if let emptyMessage { raw["emptyMessage"] = emptyMessage }
         return raw
+    }
+
+    private func chancesWidget(count: Int, tapAction: String = "soonestChance") -> [String: Any] {
+        [
+            "layoutKey": NSNull(), "tapAction": tapAction,
+            "content": [
+                "kind": "chances", "count": count, "formats": ["spinWheel"],
+                "soonestExpiresAt": "2026-11-17T10:00:00Z",
+            ],
+        ]
     }
 
     @Test("chances sort soonest-expiry-first, missing expiry last")
@@ -51,7 +76,7 @@ struct GameRewardsTests {
     @Test("a chance without a chance id is dropped, the rest survive")
     func missingChanceIdDropped() {
         let parsed = GameRewardsResponse.fromJson(response(chances: [
-            ["campaignKey": "bills"],
+            ["campaignId": "bills"],
             chance("kept"),
         ]))
 
@@ -76,8 +101,11 @@ struct GameRewardsTests {
                 ["chanceId": "a", "playable": "yes", "expiresAt": "not-a-date",
                  "unknown": ["nested": true]],
             ],
-            "rewards": ["active": [["title": "Cash", "bogus": 1]]],
-            "widget": ["chancesCount": "many"],
+            "rewards": [
+                "active": [["grantId": "g1", "type": "mystery", "bogus": 1]],
+                "expired": ["grants": [["name": "Ghost"]], "chances": [["bogus": 1]]],
+            ],
+            "widget": ["tapAction": "soonestChance", "content": ["kind": "mystery"]],
             "emptyMessage": 7,
             "extra": true,
         ])
@@ -85,17 +113,20 @@ struct GameRewardsTests {
         #expect(parsed.chances.map(\.chanceId) == ["a"])
         #expect(parsed.chances.first?.playable == true)
         #expect(parsed.chances.first?.expiresAt == nil)
-        #expect(parsed.active.first?.title == "Cash")
-        #expect(parsed.widget?.chancesCount == nil)
+        #expect(parsed.active.isEmpty)
+        #expect(parsed.expiredGrants.isEmpty)
+        #expect(parsed.expiredChances.isEmpty)
+        #expect(
+            GameRewardsResponse.widgetContent(chances: [], widget: parsed.widget) == .hidden)
         #expect(parsed.emptyMessage == nil)
     }
 
-    @Test("a reward with nothing to show is dropped")
-    func emptyRewardDropped() {
+    @Test("a grant with an unknown type or nothing to show is dropped")
+    func emptyGrantDropped() {
         let parsed = GameRewardsResponse.fromJson(response(
-            active: [["title": "Cash"], ["id": "ghost"]]))
+            active: [grant("kept"), grant("typed", name: "X", type: "mystery"), ["name": "Ghost"]]))
 
-        #expect(parsed.active.map(\.title) == ["Cash"])
+        #expect(parsed.active.map(\.grantId) == ["kept"])
         #expect(!parsed.isEmpty)
     }
 
@@ -107,59 +138,77 @@ struct GameRewardsTests {
         #expect(parsed.emptyMessage == "Play to earn!")
     }
 
-    @Test("widget prefers chances, then the latest reward, else empty or hidden")
-    func widgetSelection() {
-        let waiting = GameRewardChance.fromJson(chance("c1"))!
-        let reward = GameReward.fromJson(["title": "Cash"])!
+    @Test("expired grants and expired chances parse into the expired section")
+    func expiredSection() {
+        let parsed = GameRewardsResponse.fromJson(response(
+            expiredGrants: [grant("g1")],
+            expiredChances: [[
+                "chanceId": "c1", "campaignId": "bills",
+                "rewardsPageTitle": "Diwali wheel", "expiredAt": "2026-11-10T00:00:00Z",
+            ]]))
 
-        // Guards the selection order in widgetContent.
-        if case .chances(let count, _, _) = GameRewardsResponse.widgetContent(
-            chances: [waiting], active: [reward], widget: nil)
-        {
-            #expect(count == 1)
-        } else {
-            Issue.record("chances should win")
-        }
-
-        if case .reward(let latest) = GameRewardsResponse.widgetContent(
-            chances: [], active: [reward], widget: nil)
-        {
-            #expect(latest == reward)
-        } else {
-            Issue.record("latest reward should show")
-        }
-
-        #expect(
-            GameRewardsResponse.widgetContent(chances: [], active: [], widget: nil) == .hidden)
-        #expect(
-            GameRewardsResponse.widgetContent(
-                chances: [], active: [],
-                widget: GameRewardsWidget.fromJson(["message": "Come back soon"]))
-            == .empty(message: "Come back soon"))
+        #expect(parsed.expiredGrants.map(\.grantId) == ["g1"])
+        #expect(parsed.expiredChances.map(\.chanceId) == ["c1"])
+        #expect(parsed.expiredChances.first?.rewardsPageTitle == "Diwali wheel")
+        #expect(!parsed.isEmpty)
     }
 
-    @Test("widget tap opens an explicit waiting chance, else soonest, else the page")
+    @Test("widget reads the backend content kinds, else hides")
+    func widgetSelection() {
+        let chances = [GameRewardChance.fromJson(chance("c1"))!]
+        let latest = GameReward.fromJson(grant("g1"))!
+
+        // Guards the kind read in widgetContent.
+        #expect(
+            GameRewardsResponse.widgetContent(
+                chances: chances,
+                widget: GameRewardsWidget.fromJson(chancesWidget(count: 2)))
+                == .chances(
+                    count: 2, formats: ["spinWheel"],
+                    soonestExpiry: GameRewardChance.expiry("2026-11-17T10:00:00Z")))
+        #expect(
+            GameRewardsResponse.widgetContent(
+                chances: [], widget: GameRewardsWidget.fromJson([
+                    "layoutKey": NSNull(), "tapAction": "rewardsPage",
+                    "content": ["kind": "reward", "grant": grant("g1")],
+                ])) == .reward(latest))
+        #expect(
+            GameRewardsResponse.widgetContent(
+                chances: [], widget: GameRewardsWidget.fromJson([
+                    "layoutKey": NSNull(), "tapAction": "rewardsPage",
+                    "content": ["kind": "empty", "message": "Come back soon"],
+                ])) == .empty(message: "Come back soon"))
+        #expect(GameRewardsResponse.widgetContent(chances: [], widget: nil) == .hidden)
+    }
+
+    @Test("widget tap follows tapAction, preferring a playable chance")
     func widgetTap() {
-        let first = GameRewardChance.fromJson(chance("c1"))!
-        let second = GameRewardChance.fromJson(chance("c2"))!
-        let chances = [first, second]
+        let waiting = GameRewardChance.fromJson(chance("c1"))!
 
         // Guards the tap resolution in widgetTap.
         #expect(
             GameRewardsResponse.widgetTap(
-                chances: chances,
-                widget: GameRewardsWidget.fromJson(
-                    ["tapAction": ["type": "openChance", "chanceId": "c2"]]))
-            == .openChance(chanceId: "c2"))
-        #expect(
-            GameRewardsResponse.widgetTap(chances: chances, widget: nil)
+                chances: [waiting],
+                widget: GameRewardsWidget.fromJson(chancesWidget(count: 1)))
             == .openChance(chanceId: "c1"))
         #expect(
             GameRewardsResponse.widgetTap(
-                chances: chances,
-                widget: GameRewardsWidget.fromJson(["tapAction": ["type": "openRewards"]]))
+                chances: [waiting],
+                widget: GameRewardsWidget.fromJson(
+                    chancesWidget(count: 1, tapAction: "rewardsPage")))
             == .openPage)
         #expect(GameRewardsResponse.widgetTap(chances: [], widget: nil) == .openPage)
+
+        let unplayable = GameRewardChance.fromJson(chance("c1", playable: false))!
+        let playable = GameRewardChance.fromJson(chance("c2", playable: true))!
+
+        // Guards the playable preference in widgetTap: an unavailable soonest
+        // chance never opens ahead of a playable one.
+        #expect(
+            GameRewardsResponse.widgetTap(
+                chances: [unplayable, playable],
+                widget: GameRewardsWidget.fromJson(chancesWidget(count: 2)))
+            == .openChance(chanceId: "c2"))
     }
 
     @Test("expiry reads ISO-8601 and epoch forms")
@@ -172,44 +221,12 @@ struct GameRewardsTests {
         #expect(GameRewardChance.expiry(true) == nil)
     }
 
-    @Test("an explicitly hidden widget stays hidden, even with chances waiting")
-    func hiddenWidgetStaysHidden() {
-        let waiting = GameRewardChance.fromJson(chance("c1"))!
+    @Test("a chance keeps its page title and campaign id")
+    func chanceKeepsIdentity() {
+        let parsed = GameRewardChance.fromJson(
+            chance("c1", campaignId: "srv-9", title: "Diwali wheel"))
 
-        // Guards the hidden check in widgetContent: holdout users see nothing.
-        #expect(
-            GameRewardsResponse.widgetContent(
-                chances: [waiting], active: [],
-                widget: GameRewardsWidget.fromJson(["hidden": true]))
-            == .hidden)
-    }
-
-    @Test("a rewardsPage tap verb opens the page, and tap prefers a playable chance")
-    func widgetTapPageVerbAndPlayable() {
-        let waiting = GameRewardChance.fromJson(chance("c1"))!
-
-        // Guards the tap verb list in fromJson: the backend's open-page verb.
-        #expect(
-            GameRewardsResponse.widgetTap(
-                chances: [waiting],
-                widget: GameRewardsWidget.fromJson(["tapAction": "rewardsPage"]))
-            == .openPage)
-
-        let unplayable = GameRewardChance.fromJson(chance("c1", playable: false))!
-        let playable = GameRewardChance.fromJson(chance("c2", playable: true))!
-
-        // Guards the playable preference in widgetTap: an unavailable soonest
-        // chance never opens ahead of a playable one.
-        #expect(
-            GameRewardsResponse.widgetTap(chances: [unplayable, playable], widget: nil)
-            == .openChance(chanceId: "c2"))
-    }
-
-    @Test("a chance carrying the server campaign id still keys its campaign")
-    func chanceAcceptsCampaignId() {
-        let parsed = GameRewardChance.fromJson(["chanceId": "c1", "campaignId": "srv-9"])
-
-        // Guards the campaignId fallback: the rewards game lookup needs a key.
-        #expect(parsed?.campaignKey == "srv-9")
+        #expect(parsed?.campaignId == "srv-9")
+        #expect(parsed?.rewardsPageTitle == "Diwali wheel")
     }
 }

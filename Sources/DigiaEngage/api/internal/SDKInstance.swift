@@ -1740,8 +1740,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// skin and user checks live in `GameSurface`, which settles failures as
     /// the reason-coded `game_open_failed` event — never a toast.
     func openGameForRewardsChance(_ chance: GameRewardChance) {
-        guard let campaign = campaignStore.find(chance.campaignKey)
-            ?? rewardsCampaigns[chance.campaignKey],
+        guard let campaign = campaignStore.find(chance.campaignId)
+            ?? rewardsCampaigns[chance.campaignId],
             let config = campaign.gamificationConfig
         else { return }
         NotificationCenter.default.post(name: .digiaDismissRewardsPage, object: nil)
@@ -1751,11 +1751,11 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     }
 
     /// Opens a reward's CTA deep link through the host action executor.
-    func openRewardDeepLink(_ url: String, campaignKey: String?) {
+    func openRewardDeepLink(_ url: String) {
         do {
-            try hostActionExecutor.execute(.openDeeplink(url), campaignKey: campaignKey)
+            try hostActionExecutor.execute(.openDeeplink(url), campaignKey: nil)
         } catch {
-            log.w("Rewards deep link failed: \(error)", campaign: campaignKey)
+            log.w("Rewards deep link failed: \(error)")
         }
     }
 

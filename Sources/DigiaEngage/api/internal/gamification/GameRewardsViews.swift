@@ -58,9 +58,12 @@ struct GameRewardsPageView: View {
                     if !response.used.isEmpty {
                         rewardSection(title: "Used", rewards: response.used)
                     }
-                    if !response.expired.isEmpty {
+                    if !response.expiredGrants.isEmpty || !response.expiredChances.isEmpty {
                         DisclosureGroup("Expired", isExpanded: $expiredExpanded) {
-                            rewardList(response.expired)
+                            VStack(alignment: .leading, spacing: 12) {
+                                rewardList(response.expiredGrants)
+                                expiredChanceList(response.expiredChances)
+                            }
                         }
                         .font(.headline)
                     }
@@ -82,8 +85,9 @@ struct GameRewardsPageView: View {
             ForEach(chances, id: \.chanceId) { chance in
                 Button(action: { sdk.openGameForRewardsChance(chance) }) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(sdk.rewardsCampaignTitle(for: chance.campaignKey)
-                            ?? chance.format ?? chance.campaignKey)
+                        Text(chance.rewardsPageTitle
+                            ?? sdk.rewardsCampaignTitle(for: chance.campaignId)
+                            ?? chance.format ?? chance.campaignId)
                             .font(.subheadline)
                             .foregroundStyle(.primary)
                         Text(timeLeft(chance))
@@ -128,10 +132,10 @@ struct GameRewardsPageView: View {
 
     private func rewardRow(_ reward: GameReward) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let title = reward.title {
+            if let title = reward.name {
                 Text(title).font(.subheadline)
             }
-            if let instructions = reward.instructions {
+            if let instructions = reward.howToUse ?? reward.description {
                 Text(instructions).font(.caption).foregroundStyle(.secondary)
             }
             HStack(spacing: 12) {
@@ -140,11 +144,26 @@ struct GameRewardsPageView: View {
                     Button("Copy") { UIPasteboard.general.string = code }
                         .font(.subheadline)
                 }
-                if let deepLink = reward.deepLink {
+                if let deepLink = reward.ctaDeepLink {
                     Button(reward.ctaLabel ?? "Use now") {
-                        sdk.openRewardDeepLink(deepLink, campaignKey: reward.campaignKey)
+                        sdk.openRewardDeepLink(deepLink)
                     }
                     .font(.subheadline)
+                }
+            }
+        }
+    }
+
+    private func expiredChanceList(_ chances: [GameExpiredChance]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(chances, id: \.chanceId) { chance in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(chance.rewardsPageTitle
+                        ?? sdk.rewardsCampaignTitle(for: chance.campaignId)
+                        ?? chance.campaignId)
+                        .font(.subheadline)
+                    Text("Expired")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
@@ -162,7 +181,6 @@ struct GameRewardsWidgetView: View {
         Group {
             switch GameRewardsResponse.widgetContent(
                 chances: sdk.rewardsResponse?.chances ?? [],
-                active: sdk.rewardsResponse?.active ?? [],
                 widget: sdk.rewardsResponse?.widget)
             {
             case .hidden:
@@ -186,7 +204,7 @@ struct GameRewardsWidgetView: View {
             case .reward(let reward):
                 Button(action: { sdk.handleRewardsWidgetTap() }) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(reward.title ?? "Reward").font(.subheadline)
+                        Text(reward.name ?? "Reward").font(.subheadline)
                         if let code = reward.code {
                             Text(code).font(.caption.monospaced())
                                 .foregroundStyle(.secondary)

@@ -6,30 +6,26 @@ extension DigiaEndpoints {
     }
 }
 
-/// One unplayed chance from `getRewards`: the same grant the server would hand
-/// an entry tap, already in hand. Parsed defensively — unknown or missing
-/// fields degrade (a missing expiry sorts last, a missing format shows the
-/// campaign title), and only a missing chance id drops the entry.
+/// One unplayed chance from `getRewards`, in the backend's own keys. A chance
+/// whose expiry is missing or unreadable sorts last; only a missing chance id
+/// drops the entry.
 struct GameRewardChance: Equatable, Sendable {
     let chanceId: String
-    let campaignKey: String
+    let campaignId: String
     let format: String?
+    let rewardsPageTitle: String?
     let expiresAt: Date?
     /// A chance with `playable: false` shows as unavailable, never hidden.
     let playable: Bool
 
     static func fromJson(_ raw: [String: Any]) -> GameRewardChance? {
-        guard let chanceId = raw.nonBlankString("chanceId")
-            ?? raw.nonBlankString("chance_id") ?? raw.nonBlankString("id")
-        else { return nil }
+        guard let chanceId = raw.nonBlankString("chanceId") else { return nil }
         return GameRewardChance(
             chanceId: chanceId,
-            campaignKey: raw.nonBlankString("campaignKey")
-                ?? raw.nonBlankString("campaign_key") ?? raw.nonBlankString("campaignId")
-                ?? raw.nonBlankString("campaign_id") ?? "",
+            campaignId: raw.nonBlankString("campaignId") ?? "",
             format: raw.nonBlankString("format"),
-            expiresAt: Self.expiry(
-                raw["expiresAt"] ?? raw["expiry"] ?? raw["expiryAt"] ?? raw["expires_at"]),
+            rewardsPageTitle: raw.nonBlankString("rewardsPageTitle"),
+            expiresAt: Self.expiry(raw["expiresAt"]),
             playable: Self.strictBool(raw["playable"]) ?? true
         )
     }
@@ -61,87 +57,171 @@ struct GameRewardChance: Equatable, Sendable {
     }
 }
 
-/// One reward from `getRewards`, in any of the active/used/expired lists.
-/// Every field is optional; a reward with nothing to show is dropped at
-/// parse time so the lists never render an empty row.
+/// One grant from `getRewards`, in any of the active/used/expired-grants
+/// lists. The backend's flat grant shape: the copy plus its id, no nested
+/// objects. An unknown `type` skips the grant; a grant with nothing to show
+/// is dropped at parse time so the lists never render an empty row.
 struct GameReward: Equatable, Sendable {
-    let rewardId: String?
-    let campaignKey: String?
-    let title: String?
-    let code: String?
-    let instructions: String?
+    let grantId: String
+    let expiresAt: Date?
+    let name: String?
+    let type: GameRewardType
     let imageUrl: String?
-    /// The reward's CTA deep link, opened through the host action executor.
-    let deepLink: String?
+    let offeredBy: String?
+    let partnerName: String?
+    let bannerImageUrl: String?
+    let headline: String?
+    let description: String?
+    let terms: String?
+    let referenceKey: String?
+    let value: GameRewardValue?
+    let howToUse: String?
+    /// The grant CTA's label and deep link. A missing label renders as
+    /// "Use now".
     let ctaLabel: String?
+    let ctaDeepLink: String?
+    let code: String?
+    let amount: Double?
+    let unit: String?
+    let displayText: String?
 
     static func fromJson(_ raw: [String: Any]) -> GameReward? {
+        guard let grantId = raw.nonBlankString("grantId"),
+              let typeRaw = raw.nonBlankString("type"),
+              let type = GameRewardType(rawValue: typeRaw)
+        else { return nil }
         let cta = raw.object("cta") ?? [:]
         let reward = GameReward(
-            rewardId: raw.nonBlankString("rewardId") ?? raw.nonBlankString("id"),
-            campaignKey: raw.nonBlankString("campaignKey") ?? raw.nonBlankString("campaign_key"),
-            title: raw.nonBlankString("title") ?? raw.nonBlankString("name"),
-            code: raw.nonBlankString("code") ?? raw.nonBlankString("couponCode"),
-            instructions: raw.nonBlankString("instructions")
-                ?? raw.nonBlankString("howToUse") ?? raw.nonBlankString("description"),
-            imageUrl: raw.nonBlankString("imageUrl") ?? raw.nonBlankString("image"),
-            deepLink: cta.nonBlankString("deepLink") ?? cta.nonBlankString("deeplink")
-                ?? raw.nonBlankString("deepLink") ?? raw.nonBlankString("url"),
-            ctaLabel: cta.nonBlankString("label") ?? cta.nonBlankString("text")
-                ?? raw.nonBlankString("ctaLabel")
+            grantId: grantId,
+            expiresAt: GameRewardChance.expiry(raw["expiresAt"]),
+            name: raw.nonBlankString("name"),
+            type: type,
+            imageUrl: raw.nonBlankString("imageUrl"),
+            offeredBy: raw.nonBlankString("offeredBy"),
+            partnerName: raw.nonBlankString("partnerName"),
+            bannerImageUrl: raw.nonBlankString("bannerImageUrl"),
+            headline: raw.nonBlankString("headline"),
+            description: raw.nonBlankString("description"),
+            terms: raw.nonBlankString("terms"),
+            referenceKey: raw.nonBlankString("referenceKey"),
+            value: (raw.object("value")).flatMap(GameRewardValue.fromJson),
+            howToUse: raw.nonBlankString("howToUse"),
+            ctaLabel: cta.nonBlankString("label"),
+            ctaDeepLink: cta.nonBlankString("deepLink"),
+            code: raw.nonBlankString("code"),
+            amount: Self.number(raw["amount"]),
+            unit: raw.nonBlankString("unit"),
+            displayText: raw.nonBlankString("displayText")
         )
-        guard reward.title != nil || reward.code != nil || reward.instructions != nil
-            || reward.deepLink != nil || reward.imageUrl != nil
+        guard reward.name != nil || reward.code != nil || reward.description != nil
+            || reward.howToUse != nil || reward.headline != nil || reward.displayText != nil
+            || reward.imageUrl != nil || reward.ctaDeepLink != nil
         else { return nil }
         return reward
+    }
+
+    /// A JSON number as a Double. Non-numbers and non-finite values read as nil.
+    private static func number(_ raw: Any?) -> Double? {
+        guard let value = raw as? NSNumber, CFGetTypeID(value) != CFBooleanGetTypeID() else { return nil }
+        let double = value.doubleValue
+        return double.isFinite ? double : nil
+    }
+}
+
+/// A grant's reward type. Anything else skips the grant, never a crash.
+enum GameRewardType: String, Equatable, Sendable {
+    case coupon
+    case currency
+    case perk
+}
+
+/// A grant's value, in integer minor units with an ISO currency code.
+struct GameRewardValue: Equatable, Sendable {
+    let amountMinor: Int
+    let currency: String
+
+    static func fromJson(_ raw: [String: Any]) -> GameRewardValue? {
+        guard let amount = raw["amountMinor"] as? NSNumber,
+              CFGetTypeID(amount) != CFBooleanGetTypeID(),
+              let currency = raw.nonBlankString("currency")
+        else { return nil }
+        return GameRewardValue(amountMinor: amount.intValue, currency: currency)
+    }
+}
+
+/// One spent chance from `getRewards`: it had a game, but it expired
+/// unplayed. Renders in the expired section under its page title.
+struct GameExpiredChance: Equatable, Sendable {
+    let chanceId: String
+    let campaignId: String
+    let rewardsPageTitle: String?
+    let expiredAt: Date?
+
+    static func fromJson(_ raw: [String: Any]) -> GameExpiredChance? {
+        guard let chanceId = raw.nonBlankString("chanceId") else { return nil }
+        return GameExpiredChance(
+            chanceId: chanceId,
+            campaignId: raw.nonBlankString("campaignId") ?? "",
+            rewardsPageTitle: raw.nonBlankString("rewardsPageTitle"),
+            expiredAt: GameRewardChance.expiry(raw["expiredAt"])
+        )
     }
 }
 
 /// The `widget` object of `getRewards`: what the `digia_rewards_widget` slot
-/// shows, and what its tap does. Every field is optional — the selection below
-/// falls back to the response's own chances and rewards.
+/// shows, and what its tap does. A null widget — including for holdout users —
+/// degrades to the same hidden slot as an unknown content kind.
 struct GameRewardsWidget: Equatable, Sendable {
-    let chancesCount: Int?
-    let formats: [String]
-    let soonestExpiry: Date?
-    let latestReward: GameReward?
-    /// The backend already hides holdout users; an explicit hide degrades to
-    /// the same empty slot.
-    let isHidden: Bool
-    let message: String?
-    /// An explicit tap target: a chance id to open, or an open-the-page verb.
-    let tapChanceId: String?
-    let tapOpenPage: Bool
+    let layoutKey: String?
+    /// `soonestChance` opens the soonest playable chance, `rewardsPage`
+    /// opens the page. Unknown values open the page.
+    let tapAction: String?
+    let content: GameRewardsWidgetContentData?
 
     static func fromJson(_ raw: [String: Any]) -> GameRewardsWidget {
-        let tap = raw.object("tapAction") ?? raw.object("tap") ?? [:]
-        let tapType = tap.nonBlankString("type") ?? tap.nonBlankString("action")
-            ?? (raw["tapAction"] as? String) ?? (raw["tap"] as? String)
-        let tapChanceId = tap.nonBlankString("chanceId") ?? tap.nonBlankString("chance_id")
-            ?? tap.nonBlankString("chance")
-        return GameRewardsWidget(
-            chancesCount: (raw["count"] as? NSNumber).map(\.intValue)
-                ?? (raw["chancesCount"] as? NSNumber).map(\.intValue)
-                ?? (raw["chances"] as? NSNumber).map(\.intValue),
-            formats: raw.stringArray("formats"),
-            soonestExpiry: GameRewardChance.expiry(
-                raw["soonestExpiry"] ?? raw["expiresAt"] ?? raw["expiry"]),
-            latestReward: (raw.object("reward") ?? raw.object("latestReward")).flatMap(GameReward.fromJson),
-            isHidden: GameRewardChance.strictBool(raw["hidden"] ?? raw["isHidden"]) ?? false,
-            message: raw.nonBlankString("message") ?? raw.nonBlankString("emptyMessage")
-                ?? raw.nonBlankString("text"),
-            tapChanceId: tapChanceId,
-            tapOpenPage: tapType.map {
-                ["openRewards", "open_rewards", "rewards", "rewardsPage", "openPage", "open_page"]
-                    .contains($0)
-            } ?? false
+        GameRewardsWidget(
+            layoutKey: raw["layoutKey"] as? String,
+            tapAction: raw.nonBlankString("tapAction"),
+            content: (raw.object("content")).flatMap(GameRewardsWidgetContentData.fromJson)
         )
     }
 }
 
-/// What the rewards widget slot shows. Selected by
-/// ``GameRewardsResponse/widgetContent(chances:active:widget:)``: chances
-/// waiting first, else the latest unused reward, else the empty state.
+/// The widget's content, in the backend's kinds. Anything else reads as nil
+/// and the slot hides.
+struct GameRewardsWidgetContentData: Equatable, Sendable {
+    let kind: Kind
+
+    enum Kind: Equatable, Sendable {
+        case chances(count: Int, formats: [String], soonestExpiresAt: Date?)
+        case reward(grant: GameReward)
+        case empty(message: String)
+    }
+
+    static func fromJson(_ raw: [String: Any]) -> GameRewardsWidgetContentData? {
+        switch raw.nonBlankString("kind") {
+        case "chances":
+            guard let count = raw["count"] as? NSNumber,
+                  CFGetTypeID(count) != CFBooleanGetTypeID()
+            else { return nil }
+            return GameRewardsWidgetContentData(kind: .chances(
+                count: count.intValue,
+                formats: raw.stringArray("formats"),
+                soonestExpiresAt: GameRewardChance.expiry(raw["soonestExpiresAt"])
+            ))
+        case "reward":
+            guard let grant = raw.object("grant").flatMap(GameReward.fromJson) else { return nil }
+            return GameRewardsWidgetContentData(kind: .reward(grant: grant))
+        case "empty":
+            guard let message = raw.nonBlankString("message") else { return nil }
+            return GameRewardsWidgetContentData(kind: .empty(message: message))
+        default:
+            return nil
+        }
+    }
+}
+
+/// What the rewards widget slot shows, read off the backend's widget content.
 enum GameRewardsWidgetContent: Equatable, Sendable {
     case hidden
     case chances(count: Int, formats: [String], soonestExpiry: Date?)
@@ -158,9 +238,9 @@ enum GameRewardsTap: Equatable, Sendable {
 }
 
 /// The `getRewards` response: `{ chances, campaigns, rewards: { active, used,
-/// expired }, widget, emptyMessage }`. A chance whose campaign is paused or
-/// ended is not in the campaign bundle; its campaign comes in `campaigns` in
-/// the same shape as the bundle.
+/// expired: { grants, chances } }, widget, emptyMessage }`. A chance whose
+/// campaign is paused or ended is not in the campaign bundle; its campaign
+/// comes in `campaigns` in the same shape as the bundle.
 struct GameRewardsResponse {
     let chances: [GameRewardChance]
     /// Raw campaign JSONs for paused/ended campaigns, same shape as the
@@ -168,12 +248,14 @@ struct GameRewardsResponse {
     let campaigns: [[String: Any]]
     let active: [GameReward]
     let used: [GameReward]
-    let expired: [GameReward]
+    let expiredGrants: [GameReward]
+    let expiredChances: [GameExpiredChance]
     let widget: GameRewardsWidget?
     let emptyMessage: String?
 
     var isEmpty: Bool {
-        chances.isEmpty && active.isEmpty && used.isEmpty && expired.isEmpty
+        chances.isEmpty && active.isEmpty && used.isEmpty
+            && expiredGrants.isEmpty && expiredChances.isEmpty
     }
 
     static func fromJson(_ raw: [String: Any]) -> GameRewardsResponse {
@@ -182,60 +264,46 @@ struct GameRewardsResponse {
             .compactMap(GameRewardChance.fromJson)
             .sorted { ($0.expiresAt ?? .distantFuture) < ($1.expiresAt ?? .distantFuture) }
         let rewards = raw.object("rewards") ?? [:]
+        let expired = rewards.object("expired") ?? [:]
         return GameRewardsResponse(
             chances: chances,
             campaigns: raw.objectArray("campaigns"),
             active: rewards.objectArray("active").compactMap(GameReward.fromJson),
             used: rewards.objectArray("used").compactMap(GameReward.fromJson),
-            expired: rewards.objectArray("expired").compactMap(GameReward.fromJson),
+            expiredGrants: expired.objectArray("grants").compactMap(GameReward.fromJson),
+            expiredChances: expired.objectArray("chances").compactMap(GameExpiredChance.fromJson),
             widget: raw.object("widget").map(GameRewardsWidget.fromJson),
-            emptyMessage: raw.nonBlankString("emptyMessage") ?? raw.nonBlankString("empty_message")
+            emptyMessage: raw.nonBlankString("emptyMessage")
         )
     }
 
-    /// Picks the widget content: chances waiting (count, formats, soonest
-    /// expiry) first, else the latest unused reward, else the empty state —
-    /// hidden, or the project's message. Unknown or missing fields degrade to
-    /// the response's own data, never to a crash.
+    /// Reads the widget content: chances waiting (count, formats, soonest
+    /// expiry), the grant, or the empty message — hidden when the backend
+    /// hides it or sends anything unknown.
     static func widgetContent(
-        chances: [GameRewardChance], active: [GameReward], widget: GameRewardsWidget?
+        chances: [GameRewardChance], widget: GameRewardsWidget?
     ) -> GameRewardsWidgetContent {
-        if widget?.isHidden == true { return .hidden }
-        if !chances.isEmpty {
-            let formats =
-                widget.map(\.formats).flatMap { $0.isEmpty ? nil : $0 }
-                ?? Array(Set(chances.compactMap(\.format))).sorted()
-            return .chances(
-                count: widget?.chancesCount ?? chances.count,
-                formats: formats,
-                soonestExpiry: widget?.soonestExpiry
-                    ?? chances.lazy.compactMap(\.expiresAt).first
-            )
-        }
-        if let reward = widget?.latestReward ?? active.first {
-            return .reward(reward)
-        }
-        if let message = widget?.message, !message.isEmpty {
+        guard let content = widget?.content else { return .hidden }
+        switch content.kind {
+        case .chances(let count, let formats, let soonest):
+            return .chances(count: count, formats: formats, soonestExpiry: soonest)
+        case .reward(let grant):
+            return .reward(grant)
+        case .empty(let message):
             return .empty(message: message)
         }
-        return .hidden
     }
 
-    /// Follows the widget's tap action: an explicit chance that is still
-    /// waiting opens it, an explicit open-page verb opens the page, and
-    /// otherwise the soonest playable chance opens — or the page, when none
-    /// waits.
+    /// Follows the widget's tap action: `soonestChance` opens the soonest
+    /// playable waiting chance — or the page, when none waits — and anything
+    /// else opens the page.
     static func widgetTap(
         chances: [GameRewardChance], widget: GameRewardsWidget?
     ) -> GameRewardsTap {
-        if let chanceId = widget?.tapChanceId,
-           chances.contains(where: { $0.chanceId == chanceId })
-        {
-            return .openChance(chanceId: chanceId)
-        }
-        if widget?.tapOpenPage == true { return .openPage }
-        if let soonest = chances.first(where: \.playable) ?? chances.first {
-            return .openChance(chanceId: soonest.chanceId)
+        if widget?.tapAction == "soonestChance" {
+            if let soonest = chances.first(where: \.playable) ?? chances.first {
+                return .openChance(chanceId: soonest.chanceId)
+            }
         }
         return .openPage
     }
