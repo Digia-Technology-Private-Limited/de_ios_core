@@ -170,6 +170,19 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Gamification backend calls (`grantChance`, `getRewards`). Wraps the same
     /// client so tests drive it through `MockNetworkClient` with no second seam.
     let gameOutcomeSource: any GameOutcomeSource
+    /// The one PlaySession every gamification chance request goes through. A
+    /// `var` so tests can inject a fake; built from the same outcome source.
+    lazy var playSession: PlaySession = PlaySession(
+        source: gameOutcomeSource,
+        identity: { [weak self] in
+            guard let services = self?.services else { return nil }
+            return PlayIdentity(
+                userId: services.identityManager.userId ?? "",
+                userHash: services.identityManager.userHash,
+                deviceId: services.identityManager.deviceId
+            )
+        }
+    )
 
     /// Where `networkClient` reads `X-Digia-Session-Id` from, per request.
     private let currentSession = CurrentSessionRef()
@@ -1631,7 +1644,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         guard !triggerId.isEmpty else {
             return request.invalidConfig("gamification skipped — no trigger id", cause: "missing_config")
         }
-        guard let userId = services?.identityManager.userId, !userId.isEmpty else {
+        guard services?.identityManager.userId?.isEmpty == false else {
             return request.invalidConfig("gamification skipped — no user id", cause: "missing_config")
         }
         let testInvocationId = isLiveTest ? testInvocationIdOf(payload.cepCampaignId) : nil
@@ -1644,27 +1657,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         case .direct, .unknown:
             break
         }
-        // `showNow` is an explicit ask to show: always true, in live tests as
-        // well as CEP mode (a live test also carries `testInvocationId` with
-        // the `x-digia-device-id` header).
-        let grant = GrantChanceRequest(
-            campaignKey: key,
-            userId: userId,
-            userHash: services?.identityManager.userHash,
-            triggerId: triggerId,
-            showNow: true,
-            testInvocationId: testInvocationId,
-            deviceId: isLiveTest ? services?.identityManager.deviceId : nil
-        )
         logVerbose("routeByCampaignKey GAMIFICATION key='\(key)' triggerId='\(triggerId)'")
-        let source = gameOutcomeSource
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let result = await source.grantChance(grant)
-            self.handleGamificationGrant(
-                result, campaign: campaign, config: config,
-                payload: payload, userId: userId, openOnGranted: false)
-        }
+        requestGameChance(campaign: campaign, config: config, payload: payload, trigger: .auto)
         return .accepted(payload: payload, kind: .modal)
     }
 
@@ -1708,34 +1702,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             log.d("Action.openGame ignored — not a gamification campaign", campaign: payload.campaignKey)
             return
         }
-        let key = payload.campaignKey
-        let triggerId = payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !triggerId.isEmpty,
-              let userId = services?.identityManager.userId, !userId.isEmpty
-        else {
-            log.d("Action.openGame ignored — no trigger or user id", campaign: key)
-            return
-        }
-        guard !GamePresenter.isBusy else { return }
-        let isLiveTest = isLiveTestCepId(payload.cepCampaignId)
-        let testInvocationId = isLiveTest ? testInvocationIdOf(payload.cepCampaignId) : nil
-        let request = GrantChanceRequest(
-            campaignKey: key,
-            userId: userId,
-            userHash: services?.identityManager.userHash,
-            triggerId: triggerId,
-            showNow: true,
-            testInvocationId: testInvocationId,
-            deviceId: isLiveTest ? services?.identityManager.deviceId : nil
-        )
-        let source = gameOutcomeSource
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            let result = await source.grantChance(request)
-            self.handleGamificationGrant(
-                result, campaign: campaign, config: config,
-                payload: payload, userId: userId, openOnGranted: true)
-        }
+        // The trigger, user and busy checks live in PlaySession now.
+        requestGameChance(campaign: campaign, config: config, payload: payload, trigger: .entryTap)
     }
 
     /// The entry's own X: hides it for the rest of the app session without
@@ -1942,35 +1910,65 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         GamePresenter.open(request)
     }
 
-    /// Settles one `grantChance` answer: logs, prefetches on granted, and
-    /// opens on granted with show — or on any granted chance for an entry tap,
-    /// where the user already asked to play. Organic direct no-shows stay
-    /// pending for the acceptance watchdog; a live test is answered at once.
-    private func handleGamificationGrant(
-        _ result: GrantChanceResult,
+    /// The one adapter every gamification chance request goes through: builds
+    /// the PlayRequest and maps the decision to side effects on the main
+    /// thread. A direct routing passes `.auto`; an entry tap `.entryTap`.
+    private func requestGameChance(
         campaign: CampaignModel,
         config: GamificationConfig,
         payload: CEPTriggerPayload,
-        userId: String,
-        openOnGranted: Bool
+        trigger: PlayTrigger
+    ) {
+        let key = campaign.campaignKey
+        let triggerId = payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let testInvocationId = testInvocationIdOf(payload.cepCampaignId)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let decision = await self.playSession.request(
+                PlayRequest(
+                    campaignKey: key,
+                    triggerId: triggerId,
+                    testInvocationId: testInvocationId,
+                    trigger: trigger,
+                    isGameBusy: { GamePresenter.isBusy }
+                ))
+            self.applyPlayDecision(
+                decision, campaign: campaign, config: config, payload: payload)
+        }
+    }
+
+    /// Maps one PlaySession decision to side effects.
+    private func applyPlayDecision(
+        _ decision: PlayDecision,
+        campaign: CampaignModel,
+        config: GamificationConfig,
+        payload: CEPTriggerPayload
     ) {
         let campaignKey = campaign.campaignKey
         let cepCampaignId = payload.cepCampaignId
-        switch result {
-        case .granted(let chance):
+        switch decision {
+        case .open(let chance):
             log.d(
-                "Gamification chance granted (chanceId=\(chance.chanceId), show=\(chance.show))",
+                "Gamification chance granted (chanceId=\(chance.chanceId), show=\(chance.show)) — opening",
                 campaign: campaignKey
             )
             prefetchGamificationBundle(config, campaignKey: campaignKey)
-            if chance.show || openOnGranted {
-                openGamificationSurface(
-                    chance: chance, config: config, campaign: campaign,
-                    payload: payload, userId: userId)
+            guard let userId = services?.identityManager.userId, !userId.isEmpty else {
+                log.d("Gamification open skipped — no user id", campaign: campaignKey)
+                return
             }
-        case .denied(let reason):
+            openGamificationSurface(
+                chance: chance, config: config, campaign: campaign,
+                payload: payload, userId: userId)
+        case .hold(let chance):
             log.d(
-                "Gamification chance not granted (reason=\(reason ?? "held_out"))",
+                "Gamification chance granted (chanceId=\(chance.chanceId), show=\(chance.show)) — held",
+                campaign: campaignKey
+            )
+            prefetchGamificationBundle(config, campaignKey: campaignKey)
+        case .hideEntry(let denyReason):
+            log.d(
+                "Gamification chance not granted (reason=\(denyReason)) — entry hidden",
                 campaign: campaignKey
             )
             // The chance was already played or expired unplayed: hide the
@@ -1978,19 +1976,22 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             // a dead teaser or window for a chance that can never open again. The
             // tap promised a game, so a rendered entry goes away instead of
             // staying tappable.
-            if reason == "alreadyPlayed" || reason == "chanceExpired" {
-                hiddenGamificationEntries.insert(campaignKey)
-                dismissPlayedEntry(config: config, payload: payload)
-            }
+            hiddenGamificationEntries.insert(campaignKey)
+            dismissPlayedEntry(config: config, payload: payload)
             liveTestContexts[cepCampaignId]?.reportFailed(
                 DropReason.error,
-                message: "chance not granted (\(reason ?? "no reason"))"
+                message: "chance not granted (\(denyReason))"
             )
-        case .failure(let error):
-            log.e("Gamification grantChance failed", campaign: campaignKey, error: "\(error)")
-            liveTestContexts[cepCampaignId]?.reportFailed(
-                DropReason.error, message: "grantChance failed"
-            )
+            events.toDigia(
+                GameOpenFailedEvent(reason: PlayFailReason.denied, denyReason: denyReason),
+                payload: payload)
+        case .fail(let reason, let denyReason):
+            log.d("Gamification chance failed (reason=\(reason))", campaign: campaignKey)
+            liveTestContexts[cepCampaignId]?.reportFailed(DropReason.error, message: reason)
+            events.toDigia(
+                GameOpenFailedEvent(reason: reason, denyReason: denyReason),
+                payload: payload)
+            failGamificationOpen(config: config, payload: payload)
         }
     }
 
