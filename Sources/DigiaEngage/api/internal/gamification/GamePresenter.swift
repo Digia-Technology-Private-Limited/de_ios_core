@@ -35,6 +35,9 @@ final class GamePresentation: Identifiable, ObservableObject {
     private let haptics = GameHaptics()
     private let motion = GameMotionSource()
     private let storage: GameSkinStorage
+    /// Skin `error` logs reported this open; capped, so a noisy skin cannot spam analytics.
+    private var skinErrorCount = 0
+    private static let maxSkinErrorsPerOpen = 5
     /// The one `init` for this session: built from the open request and the
     /// live facts, re-sent unchanged on a repeated `ready`.
     private let initMessage: [String: Any]
@@ -62,7 +65,20 @@ final class GamePresentation: Identifiable, ObservableObject {
         bridge.onSend = { [weak self] script in self?.evaluate(script) }
         bridge.onClosed = { [weak self] in self?.didClose() }
         bridge.onFailed = { [weak self] reason in self?.didFail(reason) }
+        bridge.onDropped = { [weak self] reason, type in self?.reportBridgeDrop(reason: reason, type: type) }
         observeDeviceSignals()
+    }
+
+    private var health: GameHealthContext {
+        GameHealthContext(
+            campaignId: request.campaignId, skinId: request.skinId,
+            skinVersion: request.skinVersion, entry: request.entry)
+    }
+
+    private func reportBridgeDrop(reason: String, type: String?) {
+        SDKInstance.shared.events.toDigia(
+            GameBridgeDroppedEvent(health: health, reason: reason, type: type),
+            payload: request.payload)
     }
 
     /// The web view's owner, created once in `preload()` and reused by the
@@ -103,20 +119,21 @@ final class GamePresentation: Identifiable, ObservableObject {
         switch message {
         case .http(let id, let method, let path, let body):
             performHttp(id: id, method: method, path: path, body: body)
-        case .event(let id, let name, let props):
+        case .event(_, let name, let props):
             SDKInstance.shared.gamification.reportGameSkinEvent(
                 name: name, properties: props, payload: self.request.payload,
-                skinId: self.request.skinId, skinVersion: self.request.skinVersion,
-                chanceId: self.request.chanceId)
-            if let id { bridge.answer(id: id) }
-        case .log(let id, let level, let message):
+                campaignId: self.request.campaignId,
+                skinId: self.request.skinId, skinVersion: self.request.skinVersion)
+        case .log(_, let level, let message):
             emitSkinLog(level: level, message: message)
-            if let id { bridge.answer(id: id) }
-        case .haptics(let id, let style):
-            if !haptics.play(style) {
-                log.d("Game haptic dropped (style=\(style.rawValue))", campaign: self.request.campaignKey)
+        case .haptics(_, let style):
+            if let haptic = GameHapticStyle(rawValue: style) {
+                if !haptics.play(haptic) {
+                    log.d("Game haptic dropped (style=\(style))", campaign: self.request.campaignKey)
+                }
+            } else {
+                log.d("Game haptic ignored (style=\(style))", campaign: self.request.campaignKey)
             }
-            if let id { bridge.answer(id: id) }
         case .sensorStart(let id, let sensor, let hz):
             let started = motion.start(sensor: sensor, hz: hz) { [weak self] event in
                 guard let self else { return }
@@ -253,11 +270,12 @@ final class GamePresentation: Identifiable, ObservableObject {
             bridge.fail(id: id, code: .invalid, message: "method must be GET or POST")
             return
         }
-        // A live-test game carries its invocation into the skin's `state` call:
-        // without it a draft campaign refuses `notFound` even though `play` on
-        // the chance works. Organic games send byte-identical bodies.
+        // A live-test game carries its invocation into the skin's POST `state`
+        // call: without it a draft campaign refuses `notFound` even though
+        // `play` on the chance works. Organic games send byte-identical bodies.
         var body = body ?? [:]
-        if validated == "state", let tid = request.testInvocationId, !tid.isEmpty,
+        if validated == "state", httpMethod == .post,
+           let tid = request.testInvocationId, !tid.isEmpty,
            body["testInvocationId"] == nil
         {
             body["testInvocationId"] = tid
@@ -276,6 +294,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
+            let start = Date()
             let result = await GameHttpBridge.send(
                 client: SDKInstance.shared.networkClient,
                 baseUrl: DigiaEndpoints.baseUrl,
@@ -287,6 +306,12 @@ final class GamePresentation: Identifiable, ObservableObject {
                 self.bridge.answer(id: id, payload: envelope)
             case .failure(let code):
                 self.bridge.fail(id: id, code: code, message: self.httpErrorMessage(code))
+                let durationMs = Int(Date().timeIntervalSince(start) * 1000)
+                SDKInstance.shared.events.toDigia(
+                    GameHttpFailedEvent(
+                        health: self.health, method: method, path: validated,
+                        code: code.rawValue, status: nil, durationMs: durationMs),
+                    payload: self.request.payload)
             }
         }
     }
@@ -301,7 +326,14 @@ final class GamePresentation: Identifiable, ObservableObject {
         case "debug": log.d(message, campaign: campaign)
         case "info": log.i(message, campaign: campaign)
         case "warn": log.w(message, campaign: campaign)
-        default: log.e(message, campaign: campaign)
+        case "error": log.e(message, campaign: campaign)
+        default: log.d(message, campaign: campaign)
+        }
+        if level == "error", skinErrorCount < Self.maxSkinErrorsPerOpen {
+            skinErrorCount += 1
+            SDKInstance.shared.events.toDigia(
+                GameSkinErrorEvent(health: health, message: message),
+                payload: request.payload)
         }
     }
 
@@ -372,8 +404,10 @@ final class GamePresentation: Identifiable, ObservableObject {
         let size = ViewControllerUtil.keyWindow()?.bounds.size ?? .zero
         let safeArea = GameSafeArea.fullScreen(system: activeWindowSafeAreaInsets)
         let scheme = ViewControllerUtil.keyWindow()?.traitCollection.userInterfaceStyle
-        let fontFamily = SDKInstance.shared.config?.fontFamily?
+        let hostFamily = SDKInstance.shared.config?.fontFamily?
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fontFamily = (hostFamily?.isEmpty == false ? hostFamily : nil)
+            ?? request.themeFontFamily
         return GameInitPayload(
             chanceId: request.chanceId,
             campaignId: request.campaignId,
@@ -387,8 +421,8 @@ final class GamePresentation: Identifiable, ObservableObject {
             viewportHeight: Double(size.height),
             safeArea: safeArea,
             colorScheme: scheme == .dark ? "dark" : "light",
-            fontFamily: fontFamily?.isEmpty == false ? fontFamily : nil,
-            themeFonts: [],
+            fontFamily: fontFamily,
+            themeFonts: request.themeFonts,
             device: GameDeviceInfo.current(
                 sdkVersion: SDKInstance.shared.sdkVersion ?? DigiaSdkVersion.value)
         ).message()
@@ -465,16 +499,8 @@ final class GamePresentation: Identifiable, ObservableObject {
         bridge.close()
     }
 
-    private func didBecomeReady(version: Int) {
+    private func didBecomeReady(version _: Int) {
         guard !didFinish, !isReady else { return }
-        guard version <= GameBridge.bridgeVersion else {
-            log.w(
-                "Game closed — skin needs bridge v\(version)",
-                campaign: request.campaignKey)
-            finish(report: { [request] in request.onFailure?(.bridgeUnsupported) })
-            bridge.close()
-            return
-        }
         isReady = true
         // Hand the loaded web view to the container; it is never reloaded.
         webCoordinator?.view.removeFromSuperview()
