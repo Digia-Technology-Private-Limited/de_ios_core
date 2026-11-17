@@ -106,8 +106,8 @@ final class GamePresentation: Identifiable, ObservableObject {
         case .event(_, let name, let props):
             SDKInstance.shared.gamification.reportGameSkinEvent(
                 name: name, properties: props, payload: self.request.payload,
-                campaignId: self.request.campaignId,
-                skinId: self.request.skinId, skinVersion: self.request.skinVersion)
+                skinId: self.request.skinId, skinVersion: self.request.skinVersion,
+                chanceId: self.request.chanceId)
         case .log(_, let level, let message):
             emitSkinLog(level: level, message: message)
         case .haptics(_, let style):
