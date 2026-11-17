@@ -197,11 +197,20 @@ final class GamePresentation: Identifiable, ObservableObject {
             bridge.fail(id: id, code: .invalid, message: "method must be GET or POST")
             return
         }
+        // A live-test game carries its invocation into the skin's `state` call:
+        // without it a draft campaign refuses `notFound` even though `play` on
+        // the chance works. Organic games send byte-identical bodies.
+        var body = body ?? [:]
+        if validated == "state", let tid = request.testInvocationId, !tid.isEmpty,
+           body["testInvocationId"] == nil
+        {
+            body["testInvocationId"] = tid
+        }
         // Encoded before the hop: `[String: Any]` is not Sendable, `Data` is.
         let payload: Data?
         switch httpMethod {
         case .post:
-            guard let data = GameHttpBridge.jsonData(body ?? [:]) else {
+            guard let data = GameHttpBridge.jsonData(body) else {
                 bridge.fail(id: id, code: .internal, message: "request not JSON")
                 return
             }

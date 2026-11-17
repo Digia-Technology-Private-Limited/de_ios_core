@@ -229,12 +229,24 @@ final class GameSurface {
         settle: GameSettle
     ) -> GameOpenRequest {
         let campaignKey = campaign.campaignKey
+        // The live-test invocation the trigger carried, if any: the grant was asked
+        // with it, and both the skin's `state` call and the close-time `state` call
+        // need it back so a draft campaign answers. Derived here — never stored —
+        // so it cannot mismatch the grant.
+        let openTestInvocationId: String?
+        switch settle {
+        case .presentation(let presentationPayload, _):
+            openTestInvocationId = testInvocationIdOf(presentationPayload.cepCampaignId)
+        case .rewards:
+            openTestInvocationId = nil
+        }
         return GameOpenRequest(
             campaignKey: campaignKey,
             campaignId: campaign.id,
             skinId: config.skinId,
             skinVersion: config.skinVersion,
             chanceId: chanceId,
+            testInvocationId: openTestInvocationId,
             projectId: sdk.config?.apiKey ?? "",
             userId: userId,
             entryFile: file,
@@ -278,7 +290,9 @@ final class GameSurface {
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let result = await self.sdk.gameOutcomeSource.state(campaignKey: campaignKey)
+            let result = await self.sdk.gameOutcomeSource.state(
+                campaignKey: campaignKey,
+                testInvocationId: testInvocationIdOf(payload.cepCampaignId))
             switch PlaySession.decideAfterClose(result) {
             case .keep(let replacement):
                 if let replacement {

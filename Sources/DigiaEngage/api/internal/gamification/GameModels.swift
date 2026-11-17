@@ -137,6 +137,10 @@ struct GameOpenRequest {
     var skinId: String
     var skinVersion: Int
     var chanceId: String
+    /// Live-test invocation this game was opened for; the skin's `state` call
+    /// carries it so a draft campaign answers instead of refusing `notFound`.
+    /// Nil for organic opens.
+    var testInvocationId: String?
     var projectId: String
     var userId: String
     /// The cached `index.html`. Download-then-show resolves this before the
