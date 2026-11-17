@@ -85,7 +85,12 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Sends the session's `init`: once after the page loads, and again on a
     /// repeated `ready`. Each `init` fully resets the skin.
     func sendInit() {
-        send(["type": "init", "payload": initMessage])
+        // The fields go both under `payload` (bridge v1) and flat beside `type`:
+        // skin bundles already deployed read them flat and must keep working.
+        var message = initMessage
+        message["type"] = "init"
+        message["payload"] = initMessage
+        send(message)
     }
 
     // MARK: - Skin requests
