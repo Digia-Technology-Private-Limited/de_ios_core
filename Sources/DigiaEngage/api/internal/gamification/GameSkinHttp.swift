@@ -25,10 +25,10 @@ enum GameHttpBridge {
         return path
     }
 
-    /// Parses a skin `http` method. Only `GET` and `POST` exist; nil answers
-    /// `error invalid`.
+    /// Parses a skin `http` method. Only exact `GET` and `POST` exist;
+    /// anything else (including lowercase) answers `error invalid`.
     static func httpMethod(_ raw: String?) -> HTTPMethod? {
-        switch raw?.uppercased() {
+        switch raw {
         case "GET": return .get
         case "POST": return .post
         default: return nil
@@ -72,10 +72,11 @@ enum GameHttpBridge {
                 url: url, method: method, headers: headers,
                 body: method == .post ? body : nil,
                 connectTimeout: timeoutSeconds, readTimeout: timeoutSeconds))
-        } catch let error as URLError where error.code == .timedOut {
-            return .failure(.timeout)
         } catch {
-            log.d("Game http failed (path=\(path), error=\(error))")
+            if Self.isTimeout(error) {
+                return .failure(.timeout)
+            }
+            log.w("Game http failed (path=\(path), error=\(error))")
             return .failure(.network)
         }
         guard response.isSuccessful else {
@@ -94,6 +95,23 @@ enum GameHttpBridge {
         if status == 429 { return .quota }
         if (400...499).contains(status) { return .invalid }
         return .network
+    }
+
+    /// Whether `error` is a timeout, walking the cause chain and not only
+    /// the top-level `URLError.timedOut`.
+    private static func isTimeout(_ error: Error) -> Bool {
+        var current: Error? = error
+        while let currentError = current {
+            if let urlError = currentError as? URLError, urlError.code == .timedOut {
+                return true
+            }
+            let description = currentError.localizedDescription.lowercased()
+            if description.contains("timed out") || description.contains("timeout") {
+                return true
+            }
+            current = (currentError as NSError).userInfo[NSUnderlyingErrorKey] as? Error
+        }
+        return false
     }
 
     /// The allowlist as a pure predicate: ASCII letters first, then ASCII

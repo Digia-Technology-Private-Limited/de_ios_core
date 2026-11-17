@@ -235,11 +235,14 @@ final class GameSurface {
         // need it back so a draft campaign answers. Derived here — never stored —
         // so it cannot mismatch the grant.
         let openTestInvocationId: String?
+        let entryValue: String
         switch settle {
-        case .presentation(let presentationPayload, _):
+        case .presentation(let presentationPayload, let entry):
             openTestInvocationId = testInvocationIdOf(presentationPayload.cepCampaignId)
+            entryValue = entry.rawValue
         case .rewards:
             openTestInvocationId = nil
+            entryValue = "rewards"
         }
         return GameOpenRequest(
             campaignKey: campaignKey,
@@ -259,6 +262,9 @@ final class GameSurface {
             },
             onShown: { [weak self] in self?.shown(settle: settle, campaign: campaign) },
             payload: payload,
+            entry: entryValue,
+            themeFontFamily: config.themeFontFamily,
+            themeFonts: config.themeFonts,
             values: config.values,
             slots: config.usesSlots ? config.slots : []
         )

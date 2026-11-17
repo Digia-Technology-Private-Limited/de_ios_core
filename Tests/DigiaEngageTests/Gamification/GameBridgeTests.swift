@@ -49,11 +49,8 @@ struct GameBridgeTests {
         #expect(bridge.state == .idle)
         #expect(versions == [1])
 
-        // A ready carrying an id is still answered exactly once.
-        #expect(scripts.count == 1)
-        let reply = try received(scripts[0])
-        #expect(reply["id"] as? String == "r1")
-        #expect(reply["type"] as? String == "result")
+        // A ready never gets a reply, even with an id.
+        #expect(scripts.isEmpty)
     }
 
     @Test("a second ready re-fires without a second onReady")
@@ -290,7 +287,7 @@ struct GameBridgeTests {
             Issue.record("request 1 is not log")
         }
         if case .haptics(_, let style) = requests[2] {
-            #expect(style == .error)
+            #expect(style == "error")
         } else {
             Issue.record("request 2 is not haptics")
         }
@@ -336,7 +333,7 @@ struct GameBridgeTests {
         bridge.onRequest = { requests.append($0) }
         bridge.onSend = { scripts.append($0) }
 
-        // No id: dropped.
+        // No id: dropped, except haptics which forwards without a reply.
         bridge.receive(msg("haptics", payload: ["style": "buzz"]))
         bridge.receive(msg("action", payload: ["action": "openLink", "url": "javascript:alert(1)"]))
         bridge.receive(msg("action", payload: ["action": "copy"]))
@@ -346,7 +343,12 @@ struct GameBridgeTests {
         bridge.receive(msg("sensor.start", id: "t", payload: ["sensor": "lidar"]))
         bridge.receive(msg("storage.get", id: "g", payload: [:]))
 
-        #expect(requests.isEmpty)
+        #expect(requests.count == 1)
+        if case .haptics(_, let style) = requests.first {
+            #expect(style == "buzz")
+        } else {
+            Issue.record("haptics buzz was not forwarded")
+        }
         #expect(scripts.count == 4)
         for script in scripts {
             let reply = try received(script)

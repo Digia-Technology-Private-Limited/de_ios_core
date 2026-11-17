@@ -103,20 +103,21 @@ final class GamePresentation: Identifiable, ObservableObject {
         switch message {
         case .http(let id, let method, let path, let body):
             performHttp(id: id, method: method, path: path, body: body)
-        case .event(let id, let name, let props):
+        case .event(_, let name, let props):
             SDKInstance.shared.gamification.reportGameSkinEvent(
                 name: name, properties: props, payload: self.request.payload,
-                skinId: self.request.skinId, skinVersion: self.request.skinVersion,
-                chanceId: self.request.chanceId)
-            if let id { bridge.answer(id: id) }
-        case .log(let id, let level, let message):
+                campaignId: self.request.campaignId,
+                skinId: self.request.skinId, skinVersion: self.request.skinVersion)
+        case .log(_, let level, let message):
             emitSkinLog(level: level, message: message)
-            if let id { bridge.answer(id: id) }
-        case .haptics(let id, let style):
-            if !haptics.play(style) {
-                log.d("Game haptic dropped (style=\(style.rawValue))", campaign: self.request.campaignKey)
+        case .haptics(_, let style):
+            if let haptic = GameHapticStyle(rawValue: style) {
+                if !haptics.play(haptic) {
+                    log.d("Game haptic dropped (style=\(style))", campaign: self.request.campaignKey)
+                }
+            } else {
+                log.d("Game haptic ignored (style=\(style))", campaign: self.request.campaignKey)
             }
-            if let id { bridge.answer(id: id) }
         case .sensorStart(let id, let sensor, let hz):
             let started = motion.start(sensor: sensor, hz: hz) { [weak self] event in
                 guard let self else { return }
@@ -253,11 +254,12 @@ final class GamePresentation: Identifiable, ObservableObject {
             bridge.fail(id: id, code: .invalid, message: "method must be GET or POST")
             return
         }
-        // A live-test game carries its invocation into the skin's `state` call:
-        // without it a draft campaign refuses `notFound` even though `play` on
-        // the chance works. Organic games send byte-identical bodies.
+        // A live-test game carries its invocation into the skin's POST `state`
+        // call: without it a draft campaign refuses `notFound` even though
+        // `play` on the chance works. Organic games send byte-identical bodies.
         var body = body ?? [:]
-        if validated == "state", let tid = request.testInvocationId, !tid.isEmpty,
+        if validated == "state", httpMethod == .post,
+           let tid = request.testInvocationId, !tid.isEmpty,
            body["testInvocationId"] == nil
         {
             body["testInvocationId"] = tid
@@ -301,7 +303,8 @@ final class GamePresentation: Identifiable, ObservableObject {
         case "debug": log.d(message, campaign: campaign)
         case "info": log.i(message, campaign: campaign)
         case "warn": log.w(message, campaign: campaign)
-        default: log.e(message, campaign: campaign)
+        case "error": log.e(message, campaign: campaign)
+        default: log.d(message, campaign: campaign)
         }
     }
 
@@ -372,8 +375,10 @@ final class GamePresentation: Identifiable, ObservableObject {
         let size = ViewControllerUtil.keyWindow()?.bounds.size ?? .zero
         let safeArea = GameSafeArea.fullScreen(system: activeWindowSafeAreaInsets)
         let scheme = ViewControllerUtil.keyWindow()?.traitCollection.userInterfaceStyle
-        let fontFamily = SDKInstance.shared.config?.fontFamily?
+        let hostFamily = SDKInstance.shared.config?.fontFamily?
             .trimmingCharacters(in: .whitespacesAndNewlines)
+        let fontFamily = (hostFamily?.isEmpty == false ? hostFamily : nil)
+            ?? request.themeFontFamily
         return GameInitPayload(
             chanceId: request.chanceId,
             campaignId: request.campaignId,
@@ -387,8 +392,8 @@ final class GamePresentation: Identifiable, ObservableObject {
             viewportHeight: Double(size.height),
             safeArea: safeArea,
             colorScheme: scheme == .dark ? "dark" : "light",
-            fontFamily: fontFamily?.isEmpty == false ? fontFamily : nil,
-            themeFonts: [],
+            fontFamily: fontFamily,
+            themeFonts: request.themeFonts,
             device: GameDeviceInfo.current(
                 sdkVersion: SDKInstance.shared.sdkVersion ?? DigiaSdkVersion.value)
         ).message()
@@ -465,16 +470,8 @@ final class GamePresentation: Identifiable, ObservableObject {
         bridge.close()
     }
 
-    private func didBecomeReady(version: Int) {
+    private func didBecomeReady(version _: Int) {
         guard !didFinish, !isReady else { return }
-        guard version <= GameBridge.bridgeVersion else {
-            log.w(
-                "Game closed — skin needs bridge v\(version)",
-                campaign: request.campaignKey)
-            finish(report: { [request] in request.onFailure?(.bridgeUnsupported) })
-            bridge.close()
-            return
-        }
         isReady = true
         // Hand the loaded web view to the container; it is never reloaded.
         webCoordinator?.view.removeFromSuperview()

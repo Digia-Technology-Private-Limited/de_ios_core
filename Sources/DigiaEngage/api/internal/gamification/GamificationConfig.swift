@@ -48,6 +48,11 @@ struct GamificationConfig: Equatable {
     let minSdkVersion: String?
     /// The inline slot of the `inlineTeaser` entry.
     let slotKey: String?
+    /// `templateConfig.theme.fontFamily`, the skin's preferred family when the
+    /// host sets none.
+    let themeFontFamily: String?
+    /// `templateConfig.theme.fonts[]`, `{family, url}` entries.
+    let themeFonts: [[String: String]]
 
     /// Only `spinWheel` and `slotMachine` map slots; other formats ignore
     /// `slots`.
@@ -160,7 +165,32 @@ struct GamificationConfig: Equatable {
             sensors: sensors,
             minSdkVersion: minSdkVersionIos(templateConfig: templateConfig),
             slotKey: slotKey,
+            themeFontFamily: Self.themeFontFamily(templateConfig: templateConfig),
+            themeFonts: Self.themeFonts(templateConfig: templateConfig),
         )
+    }
+
+    private static func themeObject(templateConfig: [String: Any]) -> [String: Any]? {
+        (templateConfig["theme"] as? [String: Any])
+            ?? (templateConfig["config"] as? [String: Any])?["theme"] as? [String: Any]
+    }
+
+    private static func themeFontFamily(templateConfig: [String: Any]) -> String? {
+        themeObject(templateConfig: templateConfig)?.nonBlankString("fontFamily")
+    }
+
+    private static func themeFonts(templateConfig: [String: Any]) -> [[String: String]] {
+        guard let array = themeObject(templateConfig: templateConfig)?["fonts"] as? [[String: Any]] else {
+            return []
+        }
+        return array.compactMap { font in
+            guard let family = (font["family"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !family.isEmpty,
+                  let url = (font["url"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !url.isEmpty
+            else { return nil }
+            return ["family": family, "url": url]
+        }
     }
 
     /// `config.minSdkVersion.ios` from the skin record: the minimum SDK that
