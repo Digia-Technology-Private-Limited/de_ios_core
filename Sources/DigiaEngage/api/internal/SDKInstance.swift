@@ -2395,11 +2395,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 "Gamification chance not granted (reason=\(reason ?? "held_out"))",
                 campaign: campaignKey
             )
-            // The chance was already played: hide the entry for the rest of
-            // the session, so a re-trigger does not render a dead teaser or
-            // window for a chance that can never open again. The tap promised
-            // a game, so a rendered entry goes away instead of staying tappable.
-            if reason == "alreadyPlayed" {
+            // The chance was already played or expired unplayed: hide the
+            // entry for the rest of the session, so a re-trigger does not render
+            // a dead teaser or window for a chance that can never open again. The
+            // tap promised a game, so a rendered entry goes away instead of
+            // staying tappable.
+            if reason == "alreadyPlayed" || reason == "chanceExpired" {
                 hiddenGamificationEntries.insert(campaignKey)
                 dismissPlayedEntry(config: config, payload: payload)
             }
