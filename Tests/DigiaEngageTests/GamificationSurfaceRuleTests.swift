@@ -3,9 +3,8 @@ import Testing
 @testable import DigiaEngage
 
 /// The gamification row and column of `SurfaceRule.table`, written out
-/// independently of the table so a change to either is caught. Guards the
-/// T1 surface-rule addition: a game blocks like a nudge, and a shown game
-/// blocks later modals.
+/// independently of the table so a change to either is caught. A game
+/// blocks like a nudge, and a shown game blocks later modals.
 @Suite("Gamification surface rule", .tags(.unit, .surface, .gamification))
 struct GamificationSurfaceRuleTests {
     private static let slot = "home_banner"

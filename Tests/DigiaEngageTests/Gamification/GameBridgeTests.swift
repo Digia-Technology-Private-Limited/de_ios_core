@@ -390,7 +390,7 @@ struct GameBridgeTests {
             ["type": "Action.copyToClipBoard", "data": ["text": "CODE"]],
         ]]))
 
-        // Guards the S9 intake: both forms dispatch, neither is answered.
+        // Guards the id-less intake: both forms dispatch, neither is answered.
         #expect(requests.count == 2)
         #expect(scripts.isEmpty)
     }
@@ -437,7 +437,7 @@ struct GameBridgeTests {
 
     @Test("init advertises the steps capability")
     func initAdvertisesSteps() {
-        // Guards the S4 capability: skins feature-detect action.steps.
+        // Guards the capability: skins feature-detect action.steps.
         #expect(GameInitPayload.capabilities.contains("action.steps"))
     }
 

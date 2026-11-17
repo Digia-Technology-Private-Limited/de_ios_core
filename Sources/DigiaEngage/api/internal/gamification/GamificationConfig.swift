@@ -23,16 +23,16 @@ enum GamificationEntryCanvas: Equatable {
 struct GamificationConfig: Equatable {
     let skinId: String
     let skinVersion: Int
-    /// The skin's declared `bridgeVersion`. Compared against the SDK's in T10;
-    /// carried, never gated, here.
+    /// The skin's declared `bridgeVersion`. Compared against the SDK's by the
+    /// presentation; carried, never gated, here.
     let bridgeVersion: Int?
     let format: GamificationFormat
-    /// `config.values`, carried opaquely until the T8 `init` sends them.
+    /// `config.values`, carried opaquely until the `init` sends them.
     let values: [String: JSONValue]
     /// `config.slots`, kept only for formats that map outcomes to slots.
     let slots: [GamificationSlotConfig]
     /// `.unknown` stays unknown: an unrecognised or missing entry never opens
-    /// a game — routing drops it as `unsupported_entry` (D3).
+    /// a game — routing drops it as `unsupported_entry`.
     let entryKind: GamificationEntryKind
     /// The entry canvas for `inlineTeaser` / `floating`; nil for `direct`.
     let entryCanvas: GamificationEntryCanvas?
@@ -44,13 +44,13 @@ struct GamificationConfig: Equatable {
     /// The skin's minimum SDK version for this platform
     /// (`config.minSdkVersion.ios`), or nil when the backend sends none. Kept
     /// here; the surface drops the campaign at routing when the requirement is
-    /// newer than this SDK (D2).
+    /// newer than this SDK.
     let minSdkVersion: String?
     /// The inline slot of the `inlineTeaser` entry.
     let slotKey: String?
 
-    /// Only `spinWheel` and `slotMachine` map slots; the ERD leaves `slots`
-    /// out of `init` for `scratchCard` and `rewardChest`.
+    /// Only `spinWheel` and `slotMachine` map slots; other formats ignore
+    /// `slots`.
     var usesSlots: Bool {
         format == .spinWheel || format == .slotMachine
     }
@@ -75,7 +75,7 @@ struct GamificationConfig: Equatable {
 
         // `entry` is `{ kind }` on the wire; a bare string is accepted too. An
         // unknown or missing kind stays `.unknown` — never a silent direct
-        // open; routing drops it as `unsupported_entry` (D3).
+        // open; routing drops it as `unsupported_entry`.
         let entryKind = entryKind(templateConfig["entry"])
         // The surface is always full screen; any legacy `surface.style` is ignored.
         let surface = templateConfig.object("surface")
@@ -95,7 +95,7 @@ struct GamificationConfig: Equatable {
         case .direct:
             break
         case .unknown:
-            // No canvas to parse: routing drops it as `unsupported_entry` (D3).
+            // No canvas to parse: routing drops it as `unsupported_entry`.
             break
         }
 

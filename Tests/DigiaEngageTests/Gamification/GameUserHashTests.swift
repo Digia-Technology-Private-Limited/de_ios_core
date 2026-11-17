@@ -3,7 +3,7 @@ import Testing
 
 @testable import DigiaEngage
 
-/// S5 user verification: the hash follows the user id's lifecycle and travels
+/// User verification: the hash follows the user id's lifecycle and travels
 /// as `X-Digia-User-Hash` on every request. Guards the `IdentityManager` hash
 /// storage, the `CurrentSessionRef` header mapping, and the `grantChance`
 /// body field.

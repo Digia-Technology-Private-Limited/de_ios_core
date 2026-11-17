@@ -277,7 +277,7 @@ final class GameBridge {
     /// keep their own parsing. A form the SDK does not know answers
     /// `unsupported` when it carries an id (and is ignored otherwise); a known
     /// form with bad fields answers `invalid`. A request the skin cannot be
-    /// answered for (no usable id) is dropped — S9: an id-less action still
+    /// answered for (no usable id) is dropped — an id-less action still
     /// runs, it just gets no reply.
     private func handleAction(id: String?, payload: [String: Any]) {
         switch Self.parseActionResult(id: id, payload: payload) {

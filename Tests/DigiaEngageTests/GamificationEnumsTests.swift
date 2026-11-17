@@ -2,8 +2,7 @@ import Testing
 
 @testable import DigiaEngage
 
-/// Pins the gamification wire strings shared with the backend
-/// (`ai_docs/gamification/eng/README.md` "Shared contracts"). A rename here
+/// Pins the gamification wire strings shared with the backend. A rename here
 /// breaks the contract; like `CEPInterfaceEnumValuesTests`, this fails first.
 @Suite("Gamification enum wire values", .tags(.contract, .gamification))
 struct GamificationEnumsTests {

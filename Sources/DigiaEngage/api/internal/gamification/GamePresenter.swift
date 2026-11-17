@@ -173,7 +173,7 @@ final class GamePresentation: Identifiable, ObservableObject {
             // A dismiss step closes the game like a legacy close; `openGame`
             // has no entry canvas here, so it stays a no-op. Answered only
             // once the steps have run — or not at all, when the skin sent no
-            // id (S9) or the game closed mid-execution.
+            // id or the game closed mid-execution.
             Task { @MainActor [weak self] in
                 guard let self, self.bridge.state != .closed else { return }
                 await SDKInstance.shared.executeActionFlow(
@@ -495,7 +495,7 @@ enum GamePresenter {
             return
         }
         // One game owns the surface: a re-trigger must not restart the live
-        // one (F1). It fails `busy` instead of dropping silently, so the
+        // one. It fails `busy` instead of dropping silently, so the
         // second open settles through the same policy as any other failure.
         guard !isBusy else {
             log.w("Game not opened — another game is already open", error: request.campaignKey)

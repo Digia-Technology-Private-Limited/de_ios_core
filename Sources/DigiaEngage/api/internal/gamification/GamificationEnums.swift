@@ -1,8 +1,6 @@
 import Foundation
 
-/// Wire mirror of the backend gamification contracts
-/// (`ai_docs/gamification/eng/README.md` "Shared contracts"). The one mirror
-/// file the ERD requires — no second copy lives anywhere else in this core.
+/// Wire values shared with the backend.
 ///
 /// Every `unknown` parses from any unrecognised wire value, and the campaign
 /// is skipped with a log at the parse site. Nothing here throws.

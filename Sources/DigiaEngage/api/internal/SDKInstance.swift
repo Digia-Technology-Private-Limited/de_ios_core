@@ -1637,7 +1637,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         gamificationSurface.openFromEntry(payload)
     }
 
-    // MARK: - Gamification rewards (S6)
+    // MARK: - Gamification rewards
 
     /// The inline slot the host app places once for the rewards widget.
     static let rewardsWidgetSlotKey = "digia_rewards_widget"
@@ -1738,7 +1738,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// Opens the game for a rewards chance the same way an entry does, then
     /// dismisses the page (if open) and refreshes on close. The busy, SDK,
     /// skin and user checks live in `GameSurface`, which settles failures as
-    /// the reason-coded `game_open_failed` event — never a toast (D6).
+    /// the reason-coded `game_open_failed` event — never a toast.
     func openGameForRewardsChance(_ chance: GameRewardChance) {
         guard let campaign = campaignStore.find(chance.campaignKey)
             ?? rewardsCampaigns[chance.campaignKey],

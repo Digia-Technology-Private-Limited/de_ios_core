@@ -24,7 +24,7 @@ final class WeakScriptMessageProxy: NSObject, WKScriptMessageHandler {
     }
 }
 
-/// Builds the locked-down `WKWebViewConfiguration` from the web view contract:
+/// Builds the locked-down `WKWebViewConfiguration`:
 /// non-persistent storage (DOM storage and cookies off), the `digia` handler
 /// on the main frame only, selection and callout off, bounce off, playback
 /// gated on a user gesture, inspection in debug builds only.

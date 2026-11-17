@@ -3,7 +3,7 @@ import Testing
 
 @testable import DigiaEngage
 
-/// S6 `getRewards` parsing: soonest-expiry-first sorting, the playable flag,
+/// `getRewards` parsing: soonest-expiry-first sorting, the playable flag,
 /// widget content selection and widget tap resolution. Each test names the
 /// production line that fails it.
 @Suite("Game rewards", .tags(.unit, .game))

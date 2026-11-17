@@ -49,7 +49,7 @@ final class DigiaOverlayController: ObservableObject {
     }
 
     /// Sets the game state. Impression/dismissal analytics are emitted by
-    /// ``SDKInstance`` (T12), not here — same split as `showNudge`.
+    /// ``SDKInstance``, not here — same split as `showNudge`.
     func showGame(_ presentation: GamePresentation) {
         withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) {
             activeGame = presentation

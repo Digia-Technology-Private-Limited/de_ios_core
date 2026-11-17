@@ -35,7 +35,7 @@ final class GameSurface {
     ) {
         let campaignKey = campaign.campaignKey
         // 1. One game owns the surface: a second open fails `busy` and never
-        // overwrites the live game (F1). `GamePresenter.open` re-checks this
+        // overwrites the live game. `GamePresenter.open` re-checks this
         // as the backstop for a race between the check and the handoff.
         guard !GamePresenter.isBusy else {
             log.w("Game not opened — another game is already open", campaign: campaignKey)
@@ -43,7 +43,7 @@ final class GameSurface {
             return
         }
         // 2. SDK compatibility recheck, rewards only: a presentation was
-        // checked at routing (D2), so only the rewards widget rechecks here.
+        // checked at routing, so only the rewards widget rechecks here.
         if case .rewards = settle,
            let required = config.minSdkVersion,
            let newer = GamificationConfig.isNewer(required, than: DigiaSdkVersion.value), newer
@@ -93,7 +93,7 @@ final class GameSurface {
     /// Steps 4–6 for a resolved skin file: the user id check, the single
     /// request build, and the policy-wired handoff to `GamePresenter.open`.
     /// A missing network client after a grant is unreachable on iOS — the
-    /// grant needed the same client — so only the user id is checked (D1).
+    /// grant needed the same client — so only the user id is checked.
     private func openResolved(
         _ file: URL,
         campaign: CampaignModel,
@@ -119,7 +119,7 @@ final class GameSurface {
 
     /// Settles a game that never opened (steps 1–4): a direct game dismisses
     /// so its acceptance watchdog stands down, every other policy degrades
-    /// to the reason-coded `game_open_failed` event — never a toast (D6) —
+    /// to the reason-coded `game_open_failed` event — never a toast —
     /// and an entry's teaser stays.
     private func fail(settle: GameSettle, campaign: CampaignModel, reason: String) {
         switch settle {
@@ -143,7 +143,7 @@ final class GameSurface {
     /// and keeps or hides the floater. Every presentation policy refreshes
     /// rewards only when the page is already loaded — a close must not pay
     /// for a fetch the app never asked for — while a rewards game always
-    /// refreshes (D7).
+    /// refreshes.
     private func closed(settle: GameSettle, campaign: CampaignModel) {
         switch settle {
         case .presentation(let payload, let entry):
@@ -165,7 +165,7 @@ final class GameSurface {
 
     /// The failure policy: a direct game dismisses so its acceptance
     /// watchdog stands down; every other policy degrades to the
-    /// reason-coded `game_open_failed` event, never a toast (D6).
+    /// reason-coded `game_open_failed` event, never a toast.
     private func failed(settle: GameSettle, campaign: CampaignModel, failure: GameFailure) {
         switch settle {
         case .presentation(let payload, let entry):
@@ -189,7 +189,7 @@ final class GameSurface {
         }
     }
 
-    /// The impression policy (D5): every entry kind emits Impressed once the
+    /// The impression policy: every entry kind emits Impressed once the
     /// game WebView is actually displayed. `toCep` marks the owning
     /// presentation displaying through the coordinator — the iOS equivalent
     /// of Android's `reportDisplaying(owner)` + `Impressed` pair. A rewards
@@ -208,8 +208,8 @@ final class GameSurface {
     }
 
     /// The rewards widget has no CEP presentation, so it opens with a
-    /// synthetic payload: `rewards:<chanceId>` (D7 — impressions dedup by
-    /// `cepCampaignId`, so reusing the campaign id would swallow repeat plays).
+    /// synthetic payload: `rewards:<chanceId>` — impressions dedup by
+    /// `cepCampaignId`, so reusing the campaign id would swallow repeat plays.
     private static func rewardsPayload(
         chanceId: String, campaign: CampaignModel
     ) -> CEPTriggerPayload {

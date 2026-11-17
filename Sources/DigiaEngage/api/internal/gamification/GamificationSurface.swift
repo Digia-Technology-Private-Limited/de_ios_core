@@ -16,7 +16,7 @@ private let gamificationSurfaceLog = DigiaLogger()
 /// campaign key, and a tap opens the game with it — never with a new grant.
 @MainActor
 final class GamificationSurface {
-    /// Drop-cause strings, one set on both platforms (D2).
+    /// Drop-cause strings, one set on both platforms.
     static let causeMissingConfig = "missing_config"
     static let causeUnsupportedOS = "unsupported_os"
     static let causeUnsupportedSDK = "unsupported_sdk"
@@ -44,8 +44,8 @@ final class GamificationSurface {
     var chances = [String: GrantedChance]()
 
     /// Routes an accepted gamification campaign: the OS and SDK gates, then
-    /// the trigger/user/live-test gates (D1, D2), then the entry kind. An
-    /// unknown kind drops (D3) and never opens a game. Every kind runs the
+    /// the trigger/user/live-test gates, then the entry kind. An
+    /// unknown kind drops and never opens a game. Every kind runs the
     /// PlaySession adapter with trigger AUTO and stays `accepted` while the
     /// answer is in flight; a granted answer with `show` opens a direct game
     /// or renders an inline/floating entry, anything else settles as dropped.
@@ -211,7 +211,7 @@ final class GamificationSurface {
     /// `Action.openGame` from a gamification entry canvas, and the same tap
     /// from the story floater's window. Opens the game with the chance stored
     /// at the trigger — never with a new grantChance. A direct campaign has
-    /// no entry canvas; a tap on one is ignored (D8).
+    /// no entry canvas; a tap on one is ignored.
     func openFromEntry(_ payload: CEPTriggerPayload) {
         guard let campaign = sdk.findCampaign(payload),
               let config = campaign.gamificationConfig
