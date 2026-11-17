@@ -19,6 +19,12 @@ internal struct CaptureEdgeRect: Equatable, Sendable {
         )
         return value.isEmpty ? nil : value
     }
+
+    /// Whether `other` is the same rectangle, each edge within `tolerance` points.
+    internal func isSame(as other: CaptureEdgeRect, within tolerance: Int) -> Bool {
+        abs(left - other.left) <= tolerance && abs(top - other.top) <= tolerance &&
+            abs(right - other.right) <= tolerance && abs(bottom - other.bottom) <= tolerance
+    }
 }
 
 internal struct CaptureSize: Equatable, Sendable {

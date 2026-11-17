@@ -22,6 +22,12 @@ func buildSdkVersion(
     return parts.joined(separator: "|")
 }
 
+/// Carries a value the SDK only reads across a thread hop.
+private struct UncheckedSendable<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
+}
+
 @MainActor
 public enum Digia {
     /// Path suffix used to recognize the SDK's debug-settings deeplink. Digia
@@ -118,16 +124,26 @@ public enum Digia {
     ///
     /// Await it. It returns once the campaign fetch has completed, or 2 seconds
     /// after the call, whichever comes first; if the cap fires, the fetch keeps
-    /// running in the background. Campaign triggers that arrive before the fetch
-    /// completes are dropped, not held. A fetch failure does not throw: the SDK
-    /// stays unable to show campaigns, and calling `initialize()` again retries
-    /// the fetch.
+    /// running in the background.
+    ///
+    /// `register(_:)` may be called before or after this. A CEP plugin holds the
+    /// triggers it receives before the SDK is ready (up to 20, for 5 minutes)
+    /// and delivers them once it is. Digia-managed campaign signals, such as app
+    /// open and screen views, are held for up to 10 seconds and replayed once
+    /// campaigns load.
+    ///
+    /// A fetch failure does not throw: the SDK stays unable to show campaigns,
+    /// plugins drop the triggers they hold with `initialization_failed`, and
+    /// calling `initialize()` again retries the fetch.
     ///
     /// A retry after a failed fetch reuses the configuration of the first call:
     /// the `config` passed to the retry is ignored, except its action handlers,
     /// which replace the first call's, and only the campaign fetch runs again.
     public static func initialize(_ config: DigiaConfig) async throws {
-        guard #available(iOS 17, *) else { return }
+        guard #available(iOS 17, *) else {
+            log.w("initialize() ignored — Digia Engage requires iOS 17 or later")
+            return
+        }
         try await SDKInstance.shared.initialize(config)
     }
 
@@ -139,7 +155,10 @@ public enum Digia {
 
     /// No-ops below iOS 17 (see `initialize`).
     public static func register(_ plugin: DigiaCEPPlugin) {
-        guard #available(iOS 17, *) else { return }
+        guard #available(iOS 17, *) else {
+            log.w("register() ignored — Digia Engage requires iOS 17 or later")
+            return
+        }
         SDKInstance.shared.register(plugin)
     }
 
@@ -257,21 +276,60 @@ public enum Digia {
     }
 
     /// Sets the authenticated user ID for analytics identity stitching.
-    public static func setUserId(_ userId: String) {
-        SDKInstance.shared.setUserId(userId)
+    ///
+    /// Safe to call from any thread: it hops to the main actor itself.
+    nonisolated public static func setUserId(_ userId: String) {
+        onMain { SDKInstance.shared.setUserId(userId) }
     }
 
-    /// Sets the authenticated user ID with its server-computed verification
-    /// hash (the app's server computes it). The hash is sent as the
-    /// `X-Digia-User-Hash` header on every request — including `grantChance`
-    /// and every skin `http` call — and is never exposed to skins.
-    public static func setUserId(_ userId: String, userHash: String?) {
-        SDKInstance.shared.setUserId(userId, userHash: userHash)
+    /// Sets the authenticated user ID together with a proof of it.
+    ///
+    /// `userHash` is the lowercase-hex HMAC-SHA256 of `userId`, keyed with the
+    /// project's verification secret and computed on the host's backend. The
+    /// server returns imported attributes only when it is valid. A nil
+    /// `userHash` for the current user keeps the one already stored.
+    ///
+    /// Safe to call from any thread: it hops to the main actor itself.
+    nonisolated public static func setUserId(_ userId: String, userHash: String?) {
+        onMain { SDKInstance.shared.setUserId(userId, userHash: userHash) }
+    }
+
+    /// Supplies attributes about the current user, for campaigns to interpolate
+    /// as `{{user.<key>}}`. Calls merge. Requires `setUserId`; attributes
+    /// describe an identified user.
+    ///
+    /// Fire and forget, and safe to call from any thread: it hops to the main
+    /// actor itself. Ignored before `initialize`.
+    nonisolated public static func setUserAttributes(_ attributes: [String: Any]) {
+        let box = UncheckedSendable(attributes)
+        onMain { SDKInstance.shared.setUserAttributesNow(box.value) }
+    }
+
+    /// The awaitable form of the fire-and-forget `setUserAttributes(_:)`: returns once the
+    /// attributes are applied.
+    @MainActor
+    public static func setUserAttributes(_ attributes: [String: Any]) async {
+        await SDKInstance.shared.setUserAttributes(attributes)
+    }
+
+    /// Records an event the app performed, such as a purchase.
+    ///
+    /// Queued and sent in batches alongside campaign analytics; never blocks.
+    /// The name and `properties` are also evaluated against Digia-owned rules.
+    /// A name that is empty or longer than 120 characters is dropped, and so is
+    /// any property value that is not a string, number, boolean or list of those.
+    /// Ignored before `initialize`. Safe to call from any thread: it hops to the
+    /// main actor itself.
+    nonisolated public static func trackEvent(name: String, properties: [String: Any] = [:]) {
+        let box = UncheckedSendable(properties)
+        onMain { SDKInstance.shared.trackEvent(name, properties: box.value) }
     }
 
     /// Clears the authenticated user ID (e.g. on logout).
-    public static func clearUserId() {
-        SDKInstance.shared.clearUserId()
+    ///
+    /// Safe to call from any thread: it hops to the main actor itself.
+    nonisolated public static func clearUserId() {
+        onMain { SDKInstance.shared.clearUserId() }
     }
 
     /// Suppresses campaign overlays while the host app shows its own UI (e.g. a
@@ -378,7 +436,19 @@ public enum Digia {
     /// Call this manually from `viewDidAppear` (see the `UIViewController.digiaScreen(_:)`
     /// extension for a drop-in helper), or add `DigiaNavigatorObserver` to your
     /// `UINavigationController`'s delegate chain for automatic tracking.
-    public static func setCurrentScreen(name: String) {
-        SDKInstance.shared.setCurrentScreen(name)
+    ///
+    /// Safe to call from any thread: it hops to the main actor itself.
+    nonisolated public static func setCurrentScreen(name: String) {
+        onMain { SDKInstance.shared.setCurrentScreen(name) }
+    }
+
+    /// Runs `work` on the main actor: at once when already on the main thread,
+    /// otherwise queued behind earlier calls, in call order.
+    nonisolated static func onMain(_ work: @escaping @MainActor @Sendable () -> Void) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { work() }
+        } else {
+            DispatchQueue.main.async { MainActor.assumeIsolated { work() } }
+        }
     }
 }

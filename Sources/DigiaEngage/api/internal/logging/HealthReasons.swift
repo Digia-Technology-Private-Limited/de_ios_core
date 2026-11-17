@@ -40,6 +40,7 @@ enum HealthReasons {
         "fetch_failed_auth",
         "invalid_config",
         "missing_variable",
+        "variable_type_mismatch",
         // Startup drops (SP5/SP6): a trigger that reached core before the SDK
         // was ready. `not_initialized` stays off the list — the sink does not
         // exist before `initialize()`.
@@ -62,6 +63,18 @@ enum HealthReasons {
         "survey_submission_failed",
         "media_load_failed",
         "cep_bridge_unavailable",
+        "internal_error",
+        "user_hash_unverified",
+        "unsupported_feature",
+        "malformed_rule",
+        // A trigger held for campaigns or the user context for longer than the
+        // hold limit was dropped.
+        "gated_trigger_expired",
+        "app_event_invalid",
+        "app_event_rate_limited",
+        "app_event_blocked",
+        "app_event_queue_full",
+        "digia_managed",
     ]
 
     /// Which `extras` keys each reason may send as `detail` — and nothing else.
@@ -95,6 +108,9 @@ enum HealthReasons {
         "fetch_failed_auth": ["http_status"],
         "invalid_config": ["cause"],
         "missing_variable": ["variable"],
+        // Sent by `HealthSink.reportVariableTypeMismatch` with its own structured
+        // detail, never through the symbolic projection.
+        "variable_type_mismatch": [],
         "not_ready": [],
         "initialization_failed": [],
         "surface_busy": ["blocking_campaign_key", "blocking_kind"],
@@ -108,6 +124,16 @@ enum HealthReasons {
         "survey_submission_failed": ["http_status"],
         "media_load_failed": ["media_kind", "cause"],
         "cep_bridge_unavailable": ["selector"],
+        "internal_error": ["exception_class"],
+        "user_hash_unverified": ["cause"],
+        "unsupported_feature": ["feature"],
+        "malformed_rule": ["exception_class"],
+        "gated_trigger_expired": ["signal"],
+        "app_event_invalid": ["event_name"],
+        "app_event_rate_limited": [],
+        "app_event_blocked": [],
+        "app_event_queue_full": [],
+        "digia_managed": [],
     ]
 
     /// Reasons that identify *no* campaign, and so dedup on the symbol alone.
@@ -120,6 +146,11 @@ enum HealthReasons {
         "fetch_failed_auth",
         "fetch_failed_response",
         "plugin_not_registered",
+        "user_hash_unverified",
+        "app_event_invalid",
+        "app_event_rate_limited",
+        "app_event_blocked",
+        "app_event_queue_full",
     ]
 
     /// The extra that makes one campaign's several instances of a reason
@@ -143,6 +174,12 @@ enum HealthReasons {
         "action_handler_missing": ["action_type"],
         "cep_bridge_unavailable": ["selector"],
         "media_load_failed": ["media_kind", "cause"],
+        "internal_error": ["exception_class"],
+        "gated_trigger_expired": ["signal"],
+        // Campaignless, but per user and per cause: a second user, or the server
+        // rejecting a hash after a missing one, is a new fact. `user_ref` is a
+        // digest the manager stamps; it is not in `detailKeys`, so it never leaves.
+        "user_hash_unverified": ["cause", "user_ref"],
     ]
 
     /// Extra marking a record whose blocker is a live test. Such a record stays

@@ -3,23 +3,65 @@ import Foundation
 private let log = DigiaLogger()
 
 /// The flags and limits the backend can change without an SDK release.
-/// Only `sdkHealth` is read here; the saved response is kept whole.
+/// `sdkHealth` and `appEvents` are read here; the saved response is kept whole.
 struct SdkConfig: Equatable, Sendable {
     let healthEnabled: Bool
     let healthSessionCap: Int
+    /// The app-event upload switch, rate, burst, blocklist and limits.
+    let appEvents: AppEventUploadPolicy
+
+    init(healthEnabled: Bool, healthSessionCap: Int, appEvents: AppEventUploadPolicy = .unlimited) {
+        self.healthEnabled = healthEnabled
+        self.healthSessionCap = healthSessionCap
+        self.appEvents = appEvents
+    }
 
     /// What the SDK runs on with no cache and no answer. A test pins it to the shared fixture.
-    static let defaults = SdkConfig(healthEnabled: true, healthSessionCap: HealthSink.defaultSessionCap)
+    static let defaults = SdkConfig(
+        healthEnabled: true, healthSessionCap: HealthSink.defaultSessionCap, appEvents: .unlimited)
 
-    /// Reads each field on its own. The cap takes the first valid value of fetched, cached,
-    /// then the default; the switch comes from the fetched response alone when there is one.
+    /// Reads each field on its own. Numbers take the first valid value of fetched, cached,
+    /// then the default; a limit below 1 is ignored. A switch comes from the fetched
+    /// response alone when there is one, and is off only for an explicit `false`.
     static func resolve(fetched: [String: Any]? = nil, cached: [String: Any]? = nil) -> SdkConfig {
-        let sections = [fetched, cached].map { $0?["sdkHealth"] as? [String: Any] }
-        let switchSection = (fetched ?? cached)?["sdkHealth"] as? [String: Any]
+        let sources = [fetched, cached]
+        let primary = fetched ?? cached
+
+        func section(_ source: [String: Any]?, _ path: [String]) -> Any? {
+            var node: Any? = source
+            for key in path {
+                node = (node as? [String: Any])?[key]
+            }
+            return node
+        }
+        func number(_ path: [String], min: Int, fallback: Int) -> Int {
+            sources.lazy.compactMap { count(section($0, path), min: min) }.first ?? fallback
+        }
+        func flag(_ path: [String]) -> Bool {
+            (section(primary, path) as? NSNumber).flatMap(boolean) ?? true
+        }
+
+        let limits = ["appEvents", "limits"]
+        let defaults = AppEventLimits.defaults
+        let blocked = section(primary, ["appEvents", "blockedNames"]) as? [Any]
         return SdkConfig(
-            healthEnabled: (switchSection?["enabled"] as? NSNumber).flatMap(boolean) ?? true,
-            healthSessionCap: sections.lazy.compactMap { count($0?["sessionCap"]) }.first
-                ?? HealthSink.defaultSessionCap
+            healthEnabled: flag(["sdkHealth", "enabled"]),
+            healthSessionCap: number(["sdkHealth", "sessionCap"], min: 0, fallback: HealthSink.defaultSessionCap),
+            appEvents: AppEventUploadPolicy(
+                enabled: flag(["appEvents", "upload"]),
+                ratePerMinute: number(["appEvents", "ratePerMinute"], min: 0, fallback: 0),
+                burst: number(["appEvents", "burst"], min: 0, fallback: 0),
+                blockedNames: Set(blocked?.compactMap { $0 as? String } ?? []),
+                limits: AppEventLimits(
+                    nameMaxLength: number(limits + ["nameMaxLength"], min: 1, fallback: defaults.nameMaxLength),
+                    maxProperties: number(limits + ["maxProperties"], min: 1, fallback: defaults.maxProperties),
+                    propertyKeyMaxLength: number(
+                        limits + ["propertyKeyMaxLength"], min: 1, fallback: defaults.propertyKeyMaxLength),
+                    stringMaxLength: number(
+                        limits + ["stringMaxLength"], min: 1, fallback: defaults.stringMaxLength),
+                    listMaxItems: number(limits + ["listMaxItems"], min: 1, fallback: defaults.listMaxItems)
+                )
+            )
         )
     }
 
@@ -27,11 +69,11 @@ struct SdkConfig: Equatable, Sendable {
         CFGetTypeID(number) == CFBooleanGetTypeID() ? number.boolValue : nil
     }
 
-    private static func count(_ raw: Any?) -> Int? {
+    private static func count(_ raw: Any?, min: Int) -> Int? {
         guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
         let value = number.doubleValue
         guard value.isFinite, value == floor(value),
-              (0...Double(Int32.max)).contains(value)
+              (Double(min)...Double(Int32.max)).contains(value)
         else { return nil }
         return number.intValue
     }

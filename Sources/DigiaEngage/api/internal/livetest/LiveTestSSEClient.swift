@@ -21,7 +21,8 @@ final class LiveTestSSEClient {
 
     private var sseSubscription: (any CancellableSubscription)?
     private var reconnectTask: Task<Void, Never>?
-    private var reconnectAttempt = 0
+    /// Consecutive drops since the stream was last confirmed; picks the next backoff step.
+    private(set) var reconnectAttempt = 0
     private var stopped = true
 
     var isRunning: Bool { !stopped }

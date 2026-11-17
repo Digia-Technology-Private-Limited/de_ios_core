@@ -35,6 +35,7 @@ struct AnalyticsServiceIOSTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
 
         NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        defer { returnToForeground() }
         try await waitUntil { sender.callCount == 1 }
         #expect(time.begun == 1)
         #expect(time.ended.isEmpty, "held while the send is in flight")
@@ -56,6 +57,7 @@ struct AnalyticsServiceIOSTests {
         service.capture(NudgeEvent.Viewed(displayStyle: "dialog"), payload: buildPayload("p1"))
 
         NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        defer { returnToForeground() }
         try await waitUntil { sender.callCount == 1 }
         time.expire()
         #expect(time.ended == [1], "ended when iOS says time is up")
@@ -83,4 +85,11 @@ struct AnalyticsServiceIOSTests {
         #expect(props?["stage"] == nil)
         #expect((props?["detail"] as? [String: String]) == ["http_status": "401"])
     }
+}
+
+/// The process-wide `SDKInstance.shared.coordinator` hears these notifications too. Left in the
+/// background, it reports every later acceptance timeout in this process as `app_backgrounded`.
+@MainActor
+func returnToForeground() {
+    NotificationCenter.default.post(name: UIApplication.willEnterForegroundNotification, object: nil)
 }

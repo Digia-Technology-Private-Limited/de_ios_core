@@ -17,10 +17,6 @@ final class IdentityManager: @unchecked Sendable {
     let deviceId: String
 
     private var cachedUserId: String?
-    /// The server-computed verification hash for the current user, set with
-    /// `setUserId(_:userHash:)`. Sent as `X-Digia-User-Hash` next to the user
-    /// id on every request; never exposed to skins. Follows the user id's
-    /// lifecycle: cleared on logout and on a hash-less `setUserId`.
     private var cachedUserHash: String?
     private var userChangedListeners: [() -> Void] = []
 
@@ -40,14 +36,9 @@ final class IdentityManager: @unchecked Sendable {
 
         if let existingUser = storage.string(forKey: Self.keyUserId)?.trimmingCharacters(in: .whitespacesAndNewlines), !existingUser.isEmpty {
             self.cachedUserId = existingUser
+            self.cachedUserHash = storage.string(forKey: Self.keyUserHash)
         } else {
             self.cachedUserId = nil
-        }
-
-        if let existingHash = storage.string(forKey: Self.keyUserHash)?.trimmingCharacters(in: .whitespacesAndNewlines), !existingHash.isEmpty {
-            self.cachedUserHash = existingHash
-        } else {
-            self.cachedUserHash = nil
         }
     }
 
@@ -71,32 +62,33 @@ final class IdentityManager: @unchecked Sendable {
         lock.withLock { cachedUserId }
     }
 
+    /// The host-issued proof of `userId`, or nil when none was given.
     var userHash: String? {
         lock.withLock { cachedUserHash }
     }
 
-    func setUserId(_ userId: String) {
-        setUserId(userId, userHash: nil)
-    }
-
-    /// Sets the user id with its server-computed verification hash. A nil or
-    /// blank hash clears any stored one.
-    func setUserId(_ userId: String, userHash: String?) {
+    /// Ignores blank IDs. For the current user, only a new non-nil `userHash`
+    /// is stored. A new user replaces the hash, or clears it.
+    func setUserId(_ userId: String, userHash: String? = nil) {
         let trimmed = userId.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        let hash = userHash?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalizedHash = (hash?.isEmpty == false) ? hash : nil
         let listeners: [() -> Void] = lock.withLock {
-            let changed = cachedUserId != trimmed
+            if cachedUserId == trimmed {
+                if let userHash, userHash != cachedUserHash {
+                    cachedUserHash = userHash
+                    storage.set(userHash, forKey: Self.keyUserHash)
+                }
+                return []
+            }
             cachedUserId = trimmed
+            cachedUserHash = userHash
             storage.set(trimmed, forKey: Self.keyUserId)
-            cachedUserHash = normalizedHash
-            if let normalizedHash {
-                storage.set(normalizedHash, forKey: Self.keyUserHash)
+            if let userHash {
+                storage.set(userHash, forKey: Self.keyUserHash)
             } else {
                 storage.remove(forKey: Self.keyUserHash)
             }
-            return changed ? userChangedListeners : []
+            return userChangedListeners
         }
         listeners.forEach { $0() }
     }

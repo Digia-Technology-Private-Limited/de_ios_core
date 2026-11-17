@@ -29,7 +29,7 @@ struct SurveyDegradationTests {
             let dropReason = presentation.dropReason
             // One shown by mistake would hold the survey surface for the next delivery.
             if shown {
-                SDKInstance.shared.markSurveyDismissed()
+                SDKInstance.shared.surveyReporter.markSurveyDismissed()
                 try await sdk.settle()
             }
             let expectDropped = {

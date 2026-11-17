@@ -90,7 +90,8 @@ struct NetworkLiveTestSSEClientTests {
         // Fails if: the handler's onClosed stops routing to handleDisconnect — a server that
         // ends the stream (deploy, lease rotation) would leave the device dark until relaunch.
         #expect(await networkLiveTestWait { h.states.last == .error })
-        #expect(await networkLiveTestWait(timeout: 2) { h.net.connects == 2 })
+        // Only that it reconnects; the step's timing is `expectReconnectAfterOneSecond`'s.
+        #expect(await networkLiveTestWait(timeout: 5) { h.net.connects == 2 })
     }
 
     @Test("a confirmed connection resets the backoff; a growing one does not reset itself")
@@ -99,20 +100,25 @@ struct NetworkLiveTestSSEClientTests {
         defer { h.client.stop() }
 
         h.net.handler.onError(URLError(.networkConnectionLost))
-        #expect(await networkLiveTestWait(timeout: 2) { h.net.connects == 2 })
+        #expect(await networkLiveTestWait(timeout: 5) { h.net.connects == 2 })
         // Second drop in a row: the 2 s step, so still nothing at 1.6 s.
         h.net.handler.onError(URLError(.networkConnectionLost))
         try? await Task.sleep(nanoseconds: 1_600_000_000)
         // Fails if: scheduleReconnect stops incrementing reconnectAttempt.
         #expect(h.net.connects == 2, "the second consecutive drop must wait the 2 s step")
-        #expect(await networkLiveTestWait(timeout: 1.5) { h.net.connects == 3 })
+        #expect(h.client.reconnectAttempt == 2)
+        #expect(await networkLiveTestWait(timeout: 5) { h.net.connects == 3 })
 
         // The server says hello: the next drop is a fresh problem, not the third in a row.
         h.net.send("connected", #"{"sdkConnectionId":"c1","deviceId":"d1"}"#)
         #expect(await networkLiveTestWait { h.states.last == .connected })
         h.net.handler.onError(URLError(.networkConnectionLost))
-        // Fails if: dispatch's `connected` case stops resetting reconnectAttempt.
-        #expect(await networkLiveTestWait(timeout: 1.7) { h.net.connects == 4 })
+        #expect(await networkLiveTestWait { h.states.last == .error })
+        // Fails if: dispatch's `connected` case stops resetting reconnectAttempt. Read the step the
+        // drop scheduled (the 1 s one, so the count is 1, not 3) rather than timing the reconnect:
+        // under a loaded simulator a 1 s step can land after 1.7 s and read as a 4 s one.
+        #expect(h.client.reconnectAttempt == 1, "the drop after `connected` must start again at 1 s")
+        #expect(await networkLiveTestWait(timeout: 5) { h.net.connects == 4 })
     }
 
     /// Known gap: iOS resets the backoff in the stream handler's `onOpen`
@@ -126,14 +132,16 @@ struct NetworkLiveTestSSEClientTests {
         defer { h.client.stop() }
 
         h.net.handler.onError(URLError(.networkConnectionLost))
-        #expect(await networkLiveTestWait(timeout: 2) { h.net.connects == 2 })
+        #expect(await networkLiveTestWait(timeout: 5) { h.net.connects == 2 })
         h.net.handler.onOpen()
         await networkLiveTestDrain()
         h.net.handler.onError(URLError(.networkConnectionLost))
-        try? await Task.sleep(nanoseconds: 1_600_000_000)
+        #expect(await networkLiveTestWait { h.states.last == .error })
 
+        // Read the step the second drop scheduled rather than timing the reconnect: under a loaded
+        // simulator a 1 s step can land after 1.6 s and pass for the 2 s one.
         withKnownIssue("iOS resets the reconnect backoff on onOpen, Flutter only on `connected`") {
-            #expect(h.net.connects == 2, "an unconfirmed open must not reset the 2 s step")
+            #expect(h.client.reconnectAttempt == 2, "an unconfirmed open must not reset the 2 s step")
         }
     }
 
@@ -152,7 +160,8 @@ struct NetworkLiveTestSSEClientTests {
         // Fails if: dispatch's `error` case drops the server's message or stops calling
         // handleDisconnect.
         #expect(message == "bad device id")
-        #expect(await networkLiveTestWait(timeout: 2) { h.net.connects == 2 })
+        // Only that it reconnects; the step's timing is `expectReconnectAfterOneSecond`'s.
+        #expect(await networkLiveTestWait(timeout: 5) { h.net.connects == 2 })
     }
 
     @Test("a server `error` event without a message still reports one")
@@ -203,7 +212,8 @@ struct NetworkLiveTestSSEClientTests {
         #expect(await networkLiveTestWait { h.states.last == .error })
         // Fails if: the auth branch widens to all 4xx/5xx.
         #expect(h.client.isRunning)
-        #expect(await networkLiveTestWait(timeout: 2) { h.net.connects == 2 })
+        // Only that it reconnects; the step's timing is `expectReconnectAfterOneSecond`'s.
+        #expect(await networkLiveTestWait(timeout: 5) { h.net.connects == 2 })
     }
 
     // MARK: - A superseded connection
@@ -386,7 +396,7 @@ struct NetworkLiveTestSSEClientTests {
 
         h.deviceName = "Renamed"
         h.net.handler.onError(URLError(.networkConnectionLost))
-        #expect(await networkLiveTestWait(timeout: 2) { h.net.connects == 2 })
+        #expect(await networkLiveTestWait(timeout: 5) { h.net.connects == 2 })
 
         #expect(h.net.lastConnectBody == ["deviceName": "Renamed"])
     }

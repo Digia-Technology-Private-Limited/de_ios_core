@@ -58,6 +58,7 @@ struct EngineLiveTestTests {
 
     // Fails if `settleSuperseded`'s nudge case stops settling the occupant `superseded` for the CEP, or
     // stops sending Digia's own dismissal for a nudge that was displayed, in `SDKInstance.swift`.
+    // dmc-case: dmc.gate_order.live_test_skips_cap_supersedes_occupants
     @Test("a live test takes the surface from the organic nudge: the CEP hears superseded, Digia reports the dismissal, and the test shows")
     func liveTestSupersedesTheOrganicNudge() async throws {
         let (sdk, organic, tested) = try await boot()
@@ -100,6 +101,7 @@ struct EngineLiveTestTests {
     }
 
     // Fails if the `sdkState == .ready` guard is removed from `routeLiveTestCampaign`.
+    // dmc-case: dmc.gate_order.live_test_before_ready_not_initialized
     @Test("a live test before the SDK is ready answers not_initialized")
     func beforeReadyAnswersNotInitialized() async throws {
         let tested = try fixture("engine/engine_surface_busy_second")
@@ -116,6 +118,7 @@ struct EngineLiveTestTests {
 
     // Fails if the `invocation.campaign == nil` branch of `routeLiveTestCampaign` reports any other code:
     // the dashboard's copy for a broken draft keys off it.
+    // dmc-case: dmc.gate_order.live_test_skips_cap_supersedes_occupants
     @Test("a campaign the SDK cannot render answers malformed_campaign_skipped when the message carries no campaign object")
     func noCampaignObjectIsMalformed() async throws {
         let (sdk, _, _) = try await boot()
@@ -130,6 +133,7 @@ struct EngineLiveTestTests {
 
     // `fromJson` fails for a malformed config. Fails if the unparsed branch of `routeLiveTestCampaign`
     // reports any other code, or if the draft is routed anyway.
+    // dmc-case: dmc.gate_order.live_test_skips_cap_supersedes_occupants
     @Test("a campaign the SDK cannot render answers malformed_campaign_skipped when the campaign object does not parse")
     func unparsableCampaignIsMalformed() async throws {
         let (sdk, _, tested) = try await boot()

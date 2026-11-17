@@ -104,7 +104,7 @@ struct NudgeCampaignBehaviourTests {
 
         // `TouchSynthesizer` taps but cannot drag; past its threshold the sheet calls `NudgeSheetView`'s
         // dismiss, which is this.
-        SDKInstance.shared.markNudgeDismissed()
+        SDKInstance.shared.nudgeOrchestrator.markNudgeDismissed()
         try await sdk.waitUntil("the sheet is gone") { !sdk.isShowing("Drag To Dismiss") }
 
         expectChain(

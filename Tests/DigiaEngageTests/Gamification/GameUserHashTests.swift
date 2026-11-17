@@ -48,13 +48,13 @@ struct GameUserHashTests {
         #expect(assembled["X-Digia-User-Hash"] == nil)
     }
 
-    @Test("a hash-less setUserId drops a stored hash")
+    @Test("a hash-less setUserId for another user drops the stored hash")
     func plainSetClearsHash() {
         let identity = identity()
         identity.setUserId("asha", userHash: "h1")
-        identity.setUserId("asha")
+        identity.setUserId("ravi")
 
-        // Guards the rotation safety: a stale hash must never ride a new call.
+        // Guards the rotation safety: one user's hash must never ride another user's call.
         #expect(headers(for: identity)["X-Digia-User-Hash"] == nil)
     }
 
