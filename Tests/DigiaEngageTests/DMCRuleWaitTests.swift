@@ -313,15 +313,16 @@ struct DMCRuleWaitTests {
     }
 
     // dmc-case: dmc.wait_cancel.screen_left_semantics
-    @Test("screen_left without names cancels on a different screen, and no screen counts as one")
+    @Test("screen_left without names started before any screen adopts the first screen reported, and leaving it cancels")
     func screenLeftEmptyStart() {
         let harness = Harness()
         harness.waits.start(
             [("a", 1, wait(1000, [.onScreenLeft(names: nil)]))],
             trigger: .screenViewed("login"), screen: "")
 
-        #expect(harness.waits.cancelMatching(.screenViewed("")).isEmpty)
-        #expect(harness.waits.cancelMatching(.screenViewed("home")).single?.1 == .screenLeft)
+        #expect(harness.waits.cancelMatching(.screenViewed("home")).isEmpty)
+        #expect(harness.waits.cancelMatching(.screenViewed("home")).isEmpty)
+        #expect(harness.waits.cancelMatching(.screenViewed("cart")).single?.1 == .screenLeft)
     }
 
     // dmc-case: dmc.wait_cancel.first_cancel_wins_one_signal_ends_all
