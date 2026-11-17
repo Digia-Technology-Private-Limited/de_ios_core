@@ -3,7 +3,7 @@ import Foundation
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger()
 
-/// Wire error codes for `{id, type:"error"}` replies (bridge v1).
+/// Wire error codes for `{id, type:"error"}` replies.
 enum GameBridgeErrorCode: String, Sendable, Error {
     case network
     case timeout
@@ -37,7 +37,7 @@ enum GameBridgeRequest {
     case actionSteps(id: String?, actions: [EngageAction])
 }
 
-/// Owns the bridge v1 intake: the `{id?, type, payload}` envelope, the ready
+/// Owns the bridge intake: the `{id?, type, payload}` envelope, the ready
 /// handshake, the ready timeout, and close. Typed requests go to `onRequest`;
 /// replies and pushes go out through `onSend` as `window.DigiaBridge.__receive`
 /// scripts. Anything else is dropped and logged, never thrown — malformed
@@ -344,7 +344,7 @@ final class GameBridge {
     }
 }
 
-/// Skin `log` levels (bridge v1). Parsed here so the bridge rejects anything
+/// Skin `log` levels. Parsed here so the bridge rejects anything
 /// else as `invalid` before the presentation maps to ``DigiaLogger``.
 private enum GameLogLevel: String {
     case debug

@@ -3,8 +3,7 @@ import Foundation
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger()
 
-/// Caches one self-contained skin `index.html` per skin version (bridge v1
-/// delivery).
+/// Caches one self-contained skin `index.html` per skin version.
 ///
 /// Layout: `<Caches>/digia-engage-skins/<skinId>/<version>/index.html`.
 /// Entries are immutable — a new skin version is a new directory, so a cached

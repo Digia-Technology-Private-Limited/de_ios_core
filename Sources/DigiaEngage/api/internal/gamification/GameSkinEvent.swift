@@ -1,6 +1,6 @@
 import Foundation
 
-/// A skin `event` forwarded to Digia analytics (bridge v1).
+/// A skin `event` forwarded to Digia analytics.
 ///
 /// The skin's `name` is the event name; the skin's `props` plus the chance,
 /// skin, and skin-version identity ride as properties. Campaign id and type

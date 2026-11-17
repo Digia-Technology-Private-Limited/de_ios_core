@@ -1,7 +1,7 @@
 import Foundation
 import UIKit
 
-/// The `device` object sent in `init` (bridge v1), and the subset re-pushed
+/// The `device` object sent in `init`, and the subset re-pushed
 /// whenever it changes. The skin picks its own quality from `tier`; the SDK
 /// never picks for it.
 ///

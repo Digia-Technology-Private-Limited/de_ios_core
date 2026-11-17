@@ -1,6 +1,6 @@
 import UIKit
 
-/// Haptic styles the skin can request via `haptics{style}` (bridge v1).
+/// Haptic styles the skin can request via `haptics{style}`.
 enum GameHapticStyle: String, CaseIterable {
     case selection
     case light

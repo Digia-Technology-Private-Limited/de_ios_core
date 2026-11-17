@@ -54,7 +54,7 @@ enum GameFailure: String, Equatable, Sendable {
     }
 }
 
-/// The `init` message body (bridge v1). Built once per session from the open
+/// The `init` message body. Built once per session from the open
 /// request and the live facts; a repeated `ready` re-sends this same message.
 struct GameInitPayload {
     /// The one surface value the skin ever sees.

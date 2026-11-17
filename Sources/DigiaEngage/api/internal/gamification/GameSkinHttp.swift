@@ -3,7 +3,7 @@ import Foundation
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger()
 
-/// The generic gamification HTTP pass-through (bridge v1 `http`).
+/// The generic gamification HTTP pass-through (`http`).
 ///
 /// Skins call new backend endpoints through this without an SDK update: the
 /// path allowlist, not the SDK version, is the gate. Native sends to

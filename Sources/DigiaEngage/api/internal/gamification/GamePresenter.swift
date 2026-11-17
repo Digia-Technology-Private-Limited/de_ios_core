@@ -13,7 +13,7 @@ enum GameAvailability {
 
 /// The live game session the overlay controller holds. Owns the bridge, the
 /// cached entry the web view loads, and the exactly-once close/failure
-/// callbacks. Answers every bridge v1 request: generic `http`, `event`,
+/// callbacks. Answers every bridge request: generic `http`, `event`,
 /// `log`, `haptics`, `sensor`, `storage`, and `action`.
 @MainActor
 final class GamePresentation: Identifiable, ObservableObject {
@@ -89,7 +89,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Sends the session's `init`: once after the page loads, and again on a
     /// repeated `ready`. Each `init` fully resets the skin.
     func sendInit() {
-        // The fields go both under `payload` (bridge v1) and flat beside `type`:
+        // The fields go both under `payload` and flat beside `type`:
         // skin bundles already deployed read them flat and must keep working.
         var message = initMessage
         message["type"] = "init"

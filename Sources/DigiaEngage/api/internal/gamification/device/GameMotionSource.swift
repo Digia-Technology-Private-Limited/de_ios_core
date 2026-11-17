@@ -18,7 +18,7 @@ struct GameMotionEvent: Equatable {
     }
 }
 
-/// Streams CoreMotion data while the game is open and resumed (bridge v1
+/// Streams CoreMotion data while the game is open and resumed (skin
 /// `sensor.start`/`sensor.stop`). Each sensor runs at its own requested rate
 /// (default 30 Hz, clamped 1…60); one timer ticks at the fastest rate and
 /// each sensor emits when its own interval has elapsed.
