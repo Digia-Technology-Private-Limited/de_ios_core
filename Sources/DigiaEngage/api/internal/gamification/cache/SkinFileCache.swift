@@ -83,6 +83,18 @@ struct SkinFileCache: Sendable {
         return file
     }
 
+    /// The fixed `Content-Security-Policy` applied to every cached skin.
+    /// Character-identical to Android's `SKIN_CSP_HEADER`. iOS loads a local
+    /// file, which cannot carry a header, so the stored copy gains a meta tag.
+    nonisolated static let cspHeader =
+        "default-src 'none'; " +
+        "script-src 'self' 'unsafe-inline'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "font-src 'self' data:; " +
+        "media-src 'self' data:; " +
+        "connect-src 'self'; " +
+        "img-src 'self' https: data:"
+
     /// Stores one downloaded entry: temp file plus an atomic rename, then
     /// evicts the least-recently-used entries until the total fits. Throws on
     /// an empty or over-budget body, or when there is no caches directory.
@@ -94,11 +106,12 @@ struct SkinFileCache: Sendable {
         guard !data.isEmpty, data.count <= Self.singleFileMaxBytes else {
             throw SkinFileCacheError.invalidFile
         }
+        let stored = Self.withCspMetaTag(data)
         let directory = file.deletingLastPathComponent()
         try FileManager.default.createDirectory(
             at: directory, withIntermediateDirectories: true)
         let temp = directory.appendingPathComponent(".\(UUID().uuidString).partial")
-        try data.write(to: temp, options: .atomic)
+        try stored.write(to: temp, options: .atomic)
         do {
             if FileManager.default.fileExists(atPath: file.path) {
                 try FileManager.default.removeItem(at: file)
@@ -196,6 +209,28 @@ struct SkinFileCache: Sendable {
             [.modificationDate: Date()],
             ofItemAtPath: url.path
         )
+    }
+
+    /// Returns `data` with the CSP meta tag inserted. The tag goes first in
+    /// `<head>`; without a `<head>` it goes after the doctype or `<html>` tag.
+    /// Non-HTML bytes pass through unchanged, so a bad bundle never fails here.
+    nonisolated static func withCspMetaTag(_ data: Data) -> Data {
+        guard var html = String(data: data, encoding: .utf8) else { return data }
+        let tag =
+            "<meta http-equiv=\"Content-Security-Policy\" content=\"\(cspHeader)\">"
+        if let headRange = html.range(
+            of: "<head[^>]*>", options: [.caseInsensitive, .regularExpression])
+        {
+            html.insert(contentsOf: tag, at: headRange.upperBound)
+            return Data(html.utf8)
+        }
+        if let htmlRange = html.range(
+            of: "<html[^>]*>", options: [.caseInsensitive, .regularExpression])
+        {
+            html.insert(contentsOf: tag, at: htmlRange.upperBound)
+            return Data(html.utf8)
+        }
+        return data
     }
 
     private func rootDirectory() -> URL? {
