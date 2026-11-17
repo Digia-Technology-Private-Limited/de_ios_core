@@ -108,8 +108,13 @@ final class GamificationSurface {
     private func startEntry(_ request: CampaignRequest, _ config: GamificationConfig) -> RoutingVerdict {
         let campaign = request.campaign
         let key = campaign.campaignKey
+        // A test trigger bypasses the session hide: a live test never respects
+        // caps (SourcePolicy), and a test-mode build (Test Kit deep link) never
+        // caps either. Production behaviour is unchanged.
+        let capsApply =
+            request.driver.policy.respectsFrequencyCaps && !DigiaEndpoints.isTestMode
         // The hidden set is floating only: an inline card is never hidden.
-        if config.entryKind == .floating, hiddenEntries.contains(key) {
+        if config.entryKind == .floating, capsApply, hiddenEntries.contains(key) {
             let detail = "gamification entry hidden for this session"
             gamificationSurfaceLog.d("Dropped — \(detail)", campaign: key)
             request.driver.policy.onDropped(DropReason.frequencyCapped, detail)
