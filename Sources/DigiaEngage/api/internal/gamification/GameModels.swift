@@ -157,7 +157,6 @@ struct GameOpenRequest {
     var payload: CEPTriggerPayload
     /// `init.values`: the marketer's field values, carried opaquely.
     var values: [String: JSONValue] = [:]
-    /// `init.slots`: outcome-keyed slot values, only for formats that map
-    /// outcomes to slots.
+    /// `init.slots`: outcome-keyed slot values, read whenever present.
     var slots: [GamificationSlotConfig] = []
 }
