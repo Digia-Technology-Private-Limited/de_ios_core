@@ -63,4 +63,11 @@ final class SignalGate {
     func dropHeld() {
         held.removeAll()
     }
+
+    /// The session was reset before ready: drops what was held except what
+    /// `keep` accepts. The open that started the session is kept so a welcome
+    /// campaign still sees it.
+    func dropHeldExcept(_ keep: (RuleSignal) -> Bool) {
+        held.removeAll { !keep($0.0) }
+    }
 }
