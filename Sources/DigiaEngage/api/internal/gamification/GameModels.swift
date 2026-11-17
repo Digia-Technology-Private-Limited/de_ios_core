@@ -28,6 +28,10 @@ struct GameSafeArea: Equatable, Sendable {
 /// Why a game closed without the user finishing it. Failures log with the
 /// reason and settle through the coordinator, whose delivery outcome records
 /// the analytics; the surface itself stays silent.
+///
+/// `wireValue` is the cross-stack contract: it reaches the `game_open_failed`
+/// analytics event from three runtimes and must match character for
+/// character (Android's `GameFailureReason.wireValue`).
 enum GameFailure: String, Equatable, Sendable {
     case readyTimeout
     case bundleLoadFailed
@@ -35,6 +39,16 @@ enum GameFailure: String, Equatable, Sendable {
     case unsupportedWebView
     /// The skin declared a bridge version above the SDK's.
     case bridgeUnsupported
+
+    var wireValue: String {
+        switch self {
+        case .readyTimeout: return "ready_timeout"
+        case .bundleLoadFailed: return "bundle_load_failed"
+        case .renderError: return "render_error"
+        case .unsupportedWebView: return "unsupported_webview"
+        case .bridgeUnsupported: return "bridge_version_unsupported"
+        }
+    }
 }
 
 /// The `init` message body (bridge v1). Built once per session from the open
@@ -52,6 +66,8 @@ struct GameInitPayload {
 
     var chanceId: String
     var campaignId: String
+    /// The campaign key, for skins that call `state` with it.
+    var campaignKey: String
     var skinId: String
     var skinVersion: Int
     var values: [String: JSONValue]
@@ -72,7 +88,13 @@ struct GameInitPayload {
             "bridgeVersion": GameBridge.bridgeVersion,
             "capabilities": Self.capabilities,
             "chanceId": chanceId,
-            "campaign": ["id": campaignId, "skinId": skinId, "skinVersion": skinVersion],
+            // Flat beside `type` for skins built before the envelope: the
+            // whole message repeats flat there in `sendInit`.
+            "campaignKey": campaignKey,
+            "campaign": [
+                "id": campaignId, "campaignKey": campaignKey,
+                "skinId": skinId, "skinVersion": skinVersion,
+            ],
             "values": Self.jsonObject(values),
             "slots": slots.map { ["outcomeKey": $0.outcomeKey, "values": $0.values] },
             "surface": Self.surface,

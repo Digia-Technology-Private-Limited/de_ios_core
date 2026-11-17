@@ -530,7 +530,8 @@ struct GameBridgeTests {
             thermal: "nominal", lowPower: false,
             sensors: ["gyroscope", "accelerometer"])
         let payload = GameInitPayload(
-            chanceId: "ch_1", campaignId: "c_1", skinId: "wheel", skinVersion: 3,
+            chanceId: "ch_1", campaignId: "c_1", campaignKey: "bill_pay_spin",
+            skinId: "wheel", skinVersion: 3,
             values: ["label": .string("Spin")],
             slots: [GamificationSlotConfig(outcomeKey: "win", values: ["color": "red"])],
             showMute: false,

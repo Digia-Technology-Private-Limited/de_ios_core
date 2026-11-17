@@ -36,6 +36,21 @@ enum GrantChanceResult: Equatable, Sendable {
     case failure(GameOutcomeError)
 }
 
+/// What the read-only `state` route answered for a campaign key. Never throws.
+enum ChanceStateResult: Equatable, Sendable {
+    /// The user can play now, with this chance. `remaining` is ignored.
+    case playable(chanceId: String, expiresAt: String?)
+    /// Nothing is playable and the user has played before. `result` is ignored.
+    case played(chanceId: String)
+    /// The user had chances, but none is open any more.
+    case expired
+    /// The user has no chance in this campaign.
+    case none
+    /// The backend refused to answer; `reason` is its code.
+    case refused(reason: String)
+    case failed(GameOutcomeError)
+}
+
 /// A backend call that did not produce an answer. Returned, never thrown —
 /// callers degrade off this (a direct open settles, a skin `http` answers).
 enum GameOutcomeError: Error, Equatable, Sendable {
@@ -48,6 +63,10 @@ enum GameOutcomeError: Error, Equatable, Sendable {
 /// `{ isSuccess, data: { response } }`, exactly as the contract sends them.
 protocol GameOutcomeSource: Sendable {
     func grantChance(_ request: GrantChanceRequest) async -> GrantChanceResult
+    /// The read-only play state for a campaign key. Reserves nothing and does
+    /// not count as a play. Identity travels in the headers the network
+    /// client already sends; the body carries only the campaign key.
+    func state(campaignKey: String) async -> ChanceStateResult
     func getRewards() async -> Result<GameRewardsResponse, GameOutcomeError>
 }
 
@@ -97,6 +116,59 @@ final class HttpGameOutcomeSource: GameOutcomeSource, Sendable {
                     ))
             }
             return .denied(reason: response["denyReason"] as? String)
+        }
+    }
+
+    // MARK: - State
+
+    /// The read-only play state for a campaign key. Same envelope as
+    /// grantChance (`{isSuccess, data: {response}}`, `isSuccess` must be
+    /// true); the answer is one of `playable`, `played`, `expired`, `none`,
+    /// or a refusal. A blank `chanceId` on `playable`/`played`, an unknown
+    /// `state`, or an unusable `refused` is `invalidResponse`, in the strict
+    /// grantChance style.
+    func state(campaignKey: String) async -> ChanceStateResult {
+        switch await post(
+            urlString: DigiaEndpoints.gamificationState,
+            body: ["campaignKey": campaignKey],
+            headers: ["Content-Type": "application/json"])
+        {
+        case .failure(let error):
+            return .failed(error)
+        case .success(let response):
+            if response["refused"] != nil, !(response["refused"] is NSNull) {
+                guard let reason = response.nonBlankString("refused") else {
+                    log.e("state unreadable — refused is not a usable reason")
+                    return .failed(.invalidResponse("refused is not a usable reason"))
+                }
+                return .refused(reason: reason)
+            }
+            guard let state = response.nonBlankString("state") else {
+                log.e("state unreadable — missing state")
+                return .failed(.invalidResponse("missing state"))
+            }
+            switch state {
+            case "playable":
+                guard let chanceId = response.nonBlankString("chanceId") else {
+                    log.e("state unreadable — playable without a chanceId")
+                    return .failed(.invalidResponse("playable without chanceId"))
+                }
+                return .playable(
+                    chanceId: chanceId, expiresAt: response["expiresAt"] as? String)
+            case "played":
+                guard let chanceId = response.nonBlankString("chanceId") else {
+                    log.e("state unreadable — played without a chanceId")
+                    return .failed(.invalidResponse("played without chanceId"))
+                }
+                return .played(chanceId: chanceId)
+            case "expired":
+                return .expired
+            case "none":
+                return .none
+            default:
+                log.e("state unreadable — unknown state (\(state))")
+                return .failed(.invalidResponse("unknown state \(state)"))
+            }
         }
     }
 

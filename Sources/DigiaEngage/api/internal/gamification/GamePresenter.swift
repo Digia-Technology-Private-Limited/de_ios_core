@@ -308,6 +308,7 @@ final class GamePresentation: Identifiable, ObservableObject {
         return GameInitPayload(
             chanceId: request.chanceId,
             campaignId: request.campaignId,
+            campaignKey: request.campaignKey,
             skinId: request.skinId,
             skinVersion: request.skinVersion,
             values: request.values,

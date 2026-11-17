@@ -8,8 +8,12 @@ private let gamificationSurfaceLog = DigiaLogger()
 /// Like the surfaces in `CampaignSurfaces.swift` its constructor takes the SDK
 /// instance and `start` routes one accepted campaign — but it is not a
 /// `CampaignSurface`: a direct entry parks no slot and floats no window, so
-/// there are no occupants to report. It owns the campaign keys hidden this
-/// session and asks the PlaySession adapter for a chance on a direct routing.
+/// there are no occupants to report.
+///
+/// Every entry kind asks the PlaySession adapter for its chance on the
+/// trigger. An inline or floating entry renders only when the answer comes
+/// back granted with `show`; the granted chance is stored here, keyed by
+/// campaign key, and a tap opens the game with it — never with a new grant.
 @MainActor
 final class GamificationSurface {
     /// Drop-cause strings, one set on both platforms (D2).
@@ -29,17 +33,22 @@ final class GamificationSurface {
         return false
     }
 
-    /// Campaign keys whose entry the user closed with its X this app session.
-    /// Memory only: the entry comes back on the next launch, and the chance
-    /// stays unplayed either way.
+    /// Campaign keys whose entry the user closed with its X this app session,
+    /// or that the after-close check hid. Memory only: the entry comes back on
+    /// the next launch, and the chance stays unplayed either way. Floating
+    /// only — an inline card is never hidden.
     private(set) var hiddenEntries = Set<String>()
+
+    /// The granted chance stored at the trigger, keyed by campaign key. A tap
+    /// opens the game with this, never with a new grant.
+    var chances = [String: GrantedChance]()
 
     /// Routes an accepted gamification campaign: the OS and SDK gates, then
     /// the trigger/user/live-test gates (D1, D2), then the entry kind. An
-    /// unknown kind drops (D3) and never opens a game; a direct entry asks the
-    /// PlaySession adapter for a chance and stays `accepted` while the answer
-    /// is in flight; a teaser or floating entry renders its entry canvas and
-    /// asks for the chance only when the user taps it (`openGame`).
+    /// unknown kind drops (D3) and never opens a game. Every kind runs the
+    /// PlaySession adapter with trigger AUTO and stays `accepted` while the
+    /// answer is in flight; a granted answer with `show` opens a direct game
+    /// or renders an inline/floating entry, anything else settles as dropped.
     func start(_ request: CampaignRequest) -> RoutingVerdict {
         guard case .gamification(let config) = request.campaign.config else {
             assert(false, "GamificationSurface started without a gamification config")
@@ -86,18 +95,21 @@ final class GamificationSurface {
             break
         }
         sdk.logVerbose("routeByCampaignKey GAMIFICATION key='\(key)' triggerId='\(triggerId)'")
-        sdk.requestGameChance(campaign: campaign, config: config, payload: payload, trigger: .auto)
+        sdk.requestGameChance(
+            campaign: campaign, config: config, payload: payload,
+            direct: true, driver: request.driver)
         return .accepted(payload: payload, kind: .modal)
     }
 
-    /// Renders a non-direct entry: the campaign's entry canvas in its inline
-    /// slot (teaser) or in the story floater (floating). No chance is requested
-    /// here — the tap runs `Action.openGame`, which does that. A hidden entry
-    /// drops first, for both kinds, before anything renders.
+    /// A non-direct trigger: hidden floaters drop first, then entries without
+    /// a renderable canvas. Nothing renders here — the adapter runs with
+    /// trigger AUTO and returns `accepted` at once; the granted `show` answer
+    /// renders later through `showEntry`.
     private func startEntry(_ request: CampaignRequest, _ config: GamificationConfig) -> RoutingVerdict {
         let campaign = request.campaign
         let key = campaign.campaignKey
-        if hiddenEntries.contains(key) {
+        // The hidden set is floating only: an inline card is never hidden.
+        if config.entryKind == .floating, hiddenEntries.contains(key) {
             let detail = "gamification entry hidden for this session"
             gamificationSurfaceLog.d("Dropped — \(detail)", campaign: key)
             request.driver.policy.onDropped(DropReason.frequencyCapped, detail)
@@ -105,43 +117,146 @@ final class GamificationSurface {
                 reason: .frequencyCapped, detail: detail,
                 deliveryDetail: ["cap_rule": "closed_for_session"])
         }
-        switch config.entryCanvas {
-        case .inline(let cfg)?:
-            reportMissingVariables(cfg.variableSchemas, payload: request.payload)
-            return sdk.inlineSurface.startCanvas(request, cfg)
-        case .floating?:
-            guard let floater = campaign.floatingEntryCampaign else { break }
-            return sdk.floaterStorySurface.start(
-                CampaignRequest(driver: request.driver, campaign: floater, payload: request.payload))
-        case nil:
-            break
-        }
-        return request.invalidConfig(
-            "gamification entry has no renderable canvas", cause: Self.causeMissingConfig)
-    }
-
-    /// Hides a rendered entry whose chance can never open again, called by the
-    /// PlaySession adapter on `PlayDecision.hideEntry`. Always records the key
-    /// — for inline as well as floating — then removes the rendered entry: a
-    /// floating entry dismisses the way its X does, an inline teaser is
-    /// removed quietly. Direct campaigns show no entry, so there is nothing to
-    /// remove.
-    func hideEntry(campaign: CampaignModel, config: GamificationConfig, payload: CEPTriggerPayload) {
-        hiddenEntries.insert(campaign.campaignKey)
         switch config.entryKind {
-        case .floating:
-            if sdk.floaterStoryOrchestrator.state?.payload.campaignKey == payload.campaignKey {
-                sdk.floaterStoryOrchestrator.dismiss(.userClose)
-            }
         case .inlineTeaser:
-            if case .inline(let cfg) = config.entryCanvas,
-               sdk.inlineController.getCampaign(cfg.slotKey) == payload
-            {
-                sdk.inlineController.dismissCampaign(cfg.slotKey)
+            guard case .inline = config.entryCanvas else {
+                return request.invalidConfig(
+                    "gamification entry has no renderable canvas",
+                    cause: Self.causeMissingConfig)
+            }
+        case .floating:
+            guard campaign.floatingEntryCampaign != nil else {
+                return request.invalidConfig(
+                    "gamification entry has no renderable canvas",
+                    cause: Self.causeMissingConfig)
             }
         case .direct, .unknown:
-            break
+            return request.invalidConfig(
+                "gamification entry has no renderable canvas",
+                cause: Self.causeMissingConfig)
         }
+        sdk.logVerbose(
+            "routeByCampaignKey GAMIFICATION key='\(key)' "
+                + "triggerId='\(request.payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines))'")
+        sdk.requestGameChance(
+            campaign: campaign, config: config, payload: request.payload,
+            direct: false, driver: request.driver)
+        return .accepted(
+            payload: request.payload,
+            kind: config.entryKind == .floating ? .floating : .inline)
+    }
+
+    /// Renders an entry for a granted `show` answer: stores the chance, then
+    /// runs the platform's existing render calls. A render that drops (for
+    /// example a floater losing `surface_busy`) removes the stored chance and
+    /// settles the presentation with that same reason and detail — the inner
+    /// start already reported its own drop to the driver, so nothing reports
+    /// twice.
+    func showEntry(
+        campaign: CampaignModel,
+        config: GamificationConfig,
+        payload: CEPTriggerPayload,
+        chance: GrantedChance,
+        driver: CampaignDriver
+    ) {
+        let key = campaign.campaignKey
+        chances[key] = chance
+        let verdict: RoutingVerdict
+        switch config.entryKind {
+        case .inlineTeaser:
+            guard case .inline(let cfg)? = config.entryCanvas else {
+                chances.removeValue(forKey: key)
+                sdk.coordinator.drop(
+                    payload, reason: .error,
+                    detail: "gamification entry has no renderable canvas")
+                return
+            }
+            reportMissingVariables(cfg.variableSchemas, payload: payload)
+            verdict = sdk.inlineSurface.startCanvas(
+                CampaignRequest(driver: driver, campaign: campaign, payload: payload), cfg)
+        case .floating:
+            guard let floater = campaign.floatingEntryCampaign else {
+                chances.removeValue(forKey: key)
+                sdk.coordinator.drop(
+                    payload, reason: .error,
+                    detail: "gamification entry has no renderable canvas")
+                return
+            }
+            verdict = sdk.floaterStorySurface.start(
+                CampaignRequest(driver: driver, campaign: floater, payload: payload))
+        case .direct, .unknown:
+            chances.removeValue(forKey: key)
+            gamificationSurfaceLog.d(
+                "Gamification show entry for a non-entry campaign — dropping", campaign: key)
+            sdk.coordinator.drop(
+                payload, reason: .error, detail: "gamification entry has no renderable canvas")
+            return
+        }
+        if case .dropped(
+            let reason, let detail, _, _, let deliveryDetail) = verdict
+        {
+            chances.removeValue(forKey: key)
+            gamificationSurfaceLog.d(
+                "Dropped — entry render failed (\(detail ?? reason.value))", campaign: key)
+            sdk.coordinator.drop(
+                payload, reason: reason, detail: detail, deliveryDetail: deliveryDetail)
+        }
+    }
+
+    /// `Action.openGame` from a gamification entry canvas, and the same tap
+    /// from the story floater's window. Opens the game with the chance stored
+    /// at the trigger — never with a new grantChance. A direct campaign has
+    /// no entry canvas; on one the tap re-runs the chance request, as before.
+    func openFromEntry(_ payload: CEPTriggerPayload) {
+        guard let campaign = sdk.findCampaign(payload),
+              let config = campaign.gamificationConfig
+        else {
+            gamificationSurfaceLog.d(
+                "Action.openGame ignored — not a gamification campaign",
+                campaign: payload.campaignKey)
+            return
+        }
+        if config.entryKind == .direct {
+            sdk.requestGameChance(
+                campaign: campaign, config: config, payload: payload,
+                direct: true, driver: nil)
+            return
+        }
+        let key = campaign.campaignKey
+        guard let userId = sdk.services?.identityManager.userId, !userId.isEmpty else {
+            sdk.events.toDigia(
+                GameOpenFailedEvent(reason: PlayDropReason.missingConfig, denyReason: nil),
+                payload: payload)
+            return
+        }
+        switch PlaySession.decideTap(gameVisible: GamePresenter.isBusy, chance: chances[key]) {
+        case .fail(let reason):
+            sdk.events.toDigia(
+                GameOpenFailedEvent(reason: reason, denyReason: nil), payload: payload)
+            if reason == PlayDropReason.busy {
+                sdk.coordinator.drop(payload, reason: .surfaceBusy, detail: "busy")
+            }
+            return
+        case .open(let chance):
+            sdk.openGamificationSurface(
+                chance: chance, config: config, campaign: campaign,
+                payload: payload, userId: userId)
+        }
+    }
+
+    /// Hides a floating entry for the rest of the session: removes its stored
+    /// chance and records its key, so a re-trigger drops.
+    func hideFloatingEntry(campaignKey: String) {
+        chances.removeValue(forKey: campaignKey)
+        hiddenEntries.insert(campaignKey)
+    }
+
+    /// Clears the session entry state for a user change: the next user must
+    /// not inherit hidden entries or stored chances. Called from the user
+    /// change listener in `SDKInstance.initialize`.
+    func clearForUserChange() {
+        hiddenEntries.removeAll()
+        chances.removeAll()
     }
 
     /// The floater's user close, wired to the orchestrator's `onUserClose`: a

@@ -1,20 +1,20 @@
 import Foundation
 
 /// The one decision point for every gamification chance request. PlaySession
-/// never opens games, hides entries, logs analytics or touches live tests —
-/// it only decides. `SDKInstance` maps the decision to side effects.
+/// never opens games, renders entries, hides entries, logs analytics or
+/// touches live tests — it only decides. `SDKInstance` maps the decision to
+/// side effects.
+///
+/// Every entry kind asks for the chance on the trigger (`direct == true` for
+/// a direct routing, `false` for an inline or floating one). A tap never
+/// calls `grantChance`: it opens the game with the stored chance.
 @MainActor
 final class PlaySession {
-    /// Backend `grantChance` deny reasons for a repeated trigger whose chance
-    /// can never open again: `alreadyPlayed` (chain played, or next chance
-    /// expired unplayed) and `chanceExpired` (the unplayed chance expired).
-    /// Both hide the entry.
-    static let hideEntryDenyReasons: Set<String> = ["alreadyPlayed", "chanceExpired"]
-
     private let source: any GameOutcomeSource
     private let identity: () -> PlayIdentity?
-    /// One request in flight at a time: a second one fails `busy` at once.
-    private var requestInFlight = false
+    /// One request in flight per campaign: a second trigger for a campaign
+    /// whose grant is still in flight drops `busy` at once.
+    private var inFlightCampaigns = Set<String>()
 
     init(source: any GameOutcomeSource, identity: @escaping () -> PlayIdentity?) {
         self.source = source
@@ -22,20 +22,22 @@ final class PlaySession {
     }
 
     func request(_ request: PlayRequest) async -> PlayDecision {
-        if request.isGameBusy() {
-            return .fail(reason: PlayFailReason.busy, denyReason: nil)
+        // A game on screen only blocks a direct trigger. An inline or
+        // floating trigger only renders a teaser, so it still asks.
+        if request.direct, request.isGameBusy() {
+            return .drop(reason: PlayDropReason.busy, denyReason: nil)
         }
-        guard !requestInFlight else {
-            return .fail(reason: PlayFailReason.busy, denyReason: nil)
+        guard !inFlightCampaigns.contains(request.campaignKey) else {
+            return .drop(reason: PlayDropReason.busy, denyReason: nil)
         }
-        requestInFlight = true
-        defer { requestInFlight = false }
+        inFlightCampaigns.insert(request.campaignKey)
+        defer { inFlightCampaigns.remove(request.campaignKey) }
         // The identity is read once: the check and the grant below see the same user.
         guard let identity = identity(),
               !identity.userId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               !request.triggerId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
-            return .fail(reason: PlayFailReason.missingConfig, denyReason: nil)
+            return .drop(reason: PlayDropReason.missingConfig, denyReason: nil)
         }
         let grant = GrantChanceRequest(
             campaignKey: request.campaignKey,
@@ -48,25 +50,49 @@ final class PlaySession {
         )
         switch await source.grantChance(grant) {
         case .granted(let chance):
-            // An entry tap already is the ask to play: open for any granted
-            // chance, whatever the backend's `show` says. A direct routing
-            // only auto-opens on `show`; anything else stays pending.
-            if chance.show || request.trigger == .entryTap {
-                return .open(chance)
+            // A granted chance with `show` opens a direct game at once and
+            // renders an inline or floating entry. Anything else shows
+            // nothing and settles as dropped.
+            if chance.show {
+                return request.direct ? .open(chance) : .showEntry(chance)
             }
-            return .hold(chance)
+            return .drop(reason: PlayDropReason.notShown, denyReason: nil)
         case .denied(let reason):
-            if let reason, Self.hideEntryDenyReasons.contains(reason) {
-                return .hideEntry(denyReason: reason)
-            }
-            return .fail(reason: PlayFailReason.denied, denyReason: reason)
+            return .drop(reason: PlayDropReason.denied, denyReason: reason)
         case .failure(let error):
             switch error {
             case .transport, .httpStatus:
-                return .fail(reason: PlayFailReason.network, denyReason: nil)
+                return .drop(reason: PlayDropReason.network, denyReason: nil)
             case .invalidResponse:
-                return .fail(reason: PlayFailReason.invalidResponse, denyReason: nil)
+                return .drop(reason: PlayDropReason.invalidResponse, denyReason: nil)
             }
+        }
+    }
+
+    /// The tap decision: a shown entry opens with its stored chance, unless a
+    /// game is already visible. Pure, so both platforms share it exactly.
+    nonisolated static func decideTap(gameVisible: Bool, chance: GrantedChance?) -> TapDecision {
+        if gameVisible {
+            return .fail(reason: PlayDropReason.busy)
+        }
+        guard let chance else {
+            return .fail(reason: PlayDropReason.missingConfig)
+        }
+        return .open(chance)
+    }
+
+    /// The after-close decision for a game opened from a floating entry.
+    /// `playable` keeps the floater with the new chance, a failed call keeps
+    /// it with the stored one, and anything else hides it. Pure, so both
+    /// platforms share it exactly.
+    nonisolated static func decideAfterClose(_ state: ChanceStateResult) -> CloseDecision {
+        switch state {
+        case .playable(let chanceId, let expiresAt):
+            return .keep(GrantedChance(chanceId: chanceId, expiresAt: expiresAt, show: true))
+        case .failed:
+            return .keep(nil)
+        case .played, .expired, .none, .refused:
+            return .hide
         }
     }
 }
@@ -78,45 +104,59 @@ struct PlayIdentity: Equatable, Sendable {
     let deviceId: String?
 }
 
-/// What asked for the chance: a direct routing (`auto`) or the user's tap on
-/// an entry canvas (`entryTap`, `Action.openGame`).
-enum PlayTrigger: Equatable, Sendable {
-    case auto
-    case entryTap
-}
-
-/// One chance request. `triggerId` arrives trimmed; `isGameBusy` reports
-/// whether a game is loading or on screen (`GamePresenter.isBusy`).
+/// One chance request. `direct` is true for a direct routing, false for an
+/// inline or floating trigger. `triggerId` arrives trimmed; `isGameBusy`
+/// reports whether a game is loading or on screen (`GamePresenter.isBusy`).
 struct PlayRequest {
     let campaignKey: String
     let triggerId: String
     let testInvocationId: String?
-    let trigger: PlayTrigger
+    let direct: Bool
     let isGameBusy: () -> Bool
 }
 
 /// What a `PlaySession.request` decided.
 enum PlayDecision: Equatable, Sendable {
-    /// Granted, and the game opens now.
+    /// Inline / floating trigger, granted with `show`: store the chance and
+    /// render the entry.
+    case showEntry(GrantedChance)
+    /// Direct trigger, granted with `show`: open the game now.
     case open(GrantedChance)
-    /// Granted with `show == false` on a direct routing: prefetch only, the
-    /// direct entry stays pending for the acceptance watchdog.
-    case hold(GrantedChance)
-    /// Denied with a reason in `hideEntryDenyReasons`: hide the entry.
-    case hideEntry(denyReason: String)
     /// Anything else: log, report the live test, emit `game_open_failed`,
-    /// and settle a direct entry at once.
-    case fail(reason: String, denyReason: String?)
+    /// and settle the presentation as dropped.
+    case drop(reason: String, denyReason: String?)
 }
 
-/// The `PlayDecision.fail` reason strings. Exact on both platforms.
-enum PlayFailReason {
-    /// A game is showing, or another request is already in flight.
+/// What a tap on a shown entry decided. No network call.
+enum TapDecision: Equatable, Sendable {
+    /// Open the game with the stored chance.
+    case open(GrantedChance)
+    /// The tap failed: `busy` (a game is visible) or `missing_config` (no
+    /// stored chance). Emits `game_open_failed`; `busy` also settles the
+    /// presentation as dropped.
+    case fail(reason: String)
+}
+
+/// What closing a game opened from a floating entry decided.
+enum CloseDecision: Equatable, Sendable {
+    /// Keep the floater. A non-nil replacement replaces the stored chance (a
+    /// fresh `playable` answer); nil keeps the stored one (a failed call).
+    case keep(GrantedChance?)
+    /// Hide the floater for the rest of the session.
+    case hide
+}
+
+/// The `PlayDecision.drop` and `TapDecision.fail` reason strings. Exact on
+/// both platforms.
+enum PlayDropReason {
+    /// GrantChance denied; the server reason rides in `denyReason` (may be nil).
+    static let denied = "denied"
+    /// Granted without `show`: nothing renders.
+    static let notShown = "not_shown"
+    /// A game is showing, or another request for the campaign is in flight.
     static let busy = "busy"
     /// Blank trigger id, or no identity / blank user id.
     static let missingConfig = "missing_config"
-    /// Denied with a reason outside the hide set (carried, may be nil).
-    static let denied = "denied"
     /// Transport failure, non-2xx HTTP status, or no network client.
     static let network = "network"
     /// The response did not parse / violated the strict schema.

@@ -486,9 +486,12 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         self.services = services
         // Skin storage and rewards are namespaced by user: a change must not
         // leave the old user's values behind for the next one to inherit.
+        // Gamification entries are session state, not stored: hidden entries
+        // and trigger-stored chances are cleared too.
         services.identityManager.addUserChangedListener { [defaults = self.defaults, weak self] in
             GameSkinStorage.clearAll(defaults: defaults)
             self?.clearRewardsForUserChange()
+            self?.gamificationSurface.clearForUserChange()
         }
         currentSession.set(services.sessionManager, identity: services.identityManager, requestHeaders: services.requestHeaders)
         // The startup session is reported before the buffered user change
@@ -1626,20 +1629,10 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         }
     }
 
-    /// `Action.openGame` from a gamification entry canvas: asks the server for
-    /// the chance (deduped by the entry's trigger id, so a re-tap after closing
-    /// before playing reuses the unplayed one) and opens the game surface for
-    /// any granted chance — `show` only gates the automatic open of a direct
-    /// entry, never a tap. Anywhere but a gamification campaign this is a no-op.
+    /// `Action.openGame` from a gamification entry canvas: opens the game with
+    /// the chance stored at the trigger. The adapter lives on the surface.
     func openGame(forPayload payload: CEPTriggerPayload) {
-        guard let campaign = findCampaign(payload),
-              let config = campaign.gamificationConfig
-        else {
-            log.d("Action.openGame ignored — not a gamification campaign", campaign: payload.campaignKey)
-            return
-        }
-        // The trigger, user and busy checks live in PlaySession now.
-        requestGameChance(campaign: campaign, config: config, payload: payload, trigger: .entryTap)
+        gamificationSurface.openFromEntry(payload)
     }
 
     // MARK: - Gamification rewards (S6)
@@ -1820,13 +1813,16 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
 
     /// The one adapter every gamification chance request goes through: builds
     /// the PlayRequest and maps the decision to side effects on the main
-    /// thread. A direct routing passes `.auto`; an entry tap `.entryTap`.
-    /// Internal: the gamification surface calls it after the routing gates.
+    /// thread. A trigger passes `direct` for the entry kind and its driver;
+    /// a direct entry tap passes `direct: true` with no driver — a granted
+    /// `show` answer opens, anything else settles as dropped. Internal: the
+    /// gamification surface calls it after the routing gates.
     func requestGameChance(
         campaign: CampaignModel,
         config: GamificationConfig,
         payload: CEPTriggerPayload,
-        trigger: PlayTrigger
+        direct: Bool,
+        driver: CampaignDriver?
     ) {
         let key = campaign.campaignKey
         let triggerId = payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1838,20 +1834,25 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     campaignKey: key,
                     triggerId: triggerId,
                     testInvocationId: testInvocationId,
-                    trigger: trigger,
+                    direct: direct,
                     isGameBusy: { GamePresenter.isBusy }
                 ))
             self.applyPlayDecision(
-                decision, campaign: campaign, config: config, payload: payload)
+                decision, campaign: campaign, config: config, payload: payload,
+                driver: driver)
         }
     }
 
-    /// Maps one PlaySession decision to side effects.
+    /// Maps one PlaySession decision to side effects. `Open` opens the game;
+    /// `ShowEntry` stores the chance and renders the entry; `Drop` shows
+    /// nothing and settles the presentation as dropped, with the reason-coded
+    /// `game_open_failed` event carrying it.
     private func applyPlayDecision(
         _ decision: PlayDecision,
         campaign: CampaignModel,
         config: GamificationConfig,
-        payload: CEPTriggerPayload
+        payload: CEPTriggerPayload,
+        driver: CampaignDriver?
     ) {
         let campaignKey = campaign.campaignKey
         let cepCampaignId = payload.cepCampaignId
@@ -1869,37 +1870,51 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             openGamificationSurface(
                 chance: chance, config: config, campaign: campaign,
                 payload: payload, userId: userId)
-        case .hold(let chance):
+        case .showEntry(let chance):
             log.d(
-                "Gamification chance granted (chanceId=\(chance.chanceId), show=\(chance.show)) — held",
+                "Gamification chance granted (chanceId=\(chance.chanceId), show=\(chance.show)) — showing entry",
                 campaign: campaignKey
             )
             prefetchGamificationBundle(config, campaignKey: campaignKey)
-        case .hideEntry(let denyReason):
-            log.d(
-                "Gamification chance not granted (reason=\(denyReason)) — entry hidden",
-                campaign: campaignKey
-            )
-            // The chance was already played or expired unplayed: hide the
-            // entry for the rest of the session, so a re-trigger does not render
-            // a dead teaser or window for a chance that can never open again. The
-            // tap promised a game, so a rendered entry goes away instead of
-            // staying tappable.
-            gamificationSurface.hideEntry(campaign: campaign, config: config, payload: payload)
-            liveTestContexts[cepCampaignId]?.reportFailed(
-                DropReason.error,
-                message: "chance not granted (\(denyReason))"
-            )
-            events.toDigia(
-                GameOpenFailedEvent(reason: PlayFailReason.denied, denyReason: denyReason),
-                payload: payload)
-        case .fail(let reason, let denyReason):
-            log.d("Gamification chance failed (reason=\(reason))", campaign: campaignKey)
-            liveTestContexts[cepCampaignId]?.reportFailed(DropReason.error, message: reason)
+            guard let driver else {
+                log.d("Gamification entry not shown — no driver", campaign: campaignKey)
+                coordinator.drop(
+                    payload, reason: .error,
+                    detail: "gamification entry has no driver")
+                return
+            }
+            gamificationSurface.showEntry(
+                campaign: campaign, config: config, payload: payload,
+                chance: chance, driver: driver)
+        case .drop(let reason, let denyReason):
+            let dropReason: DropReason
+            let detail: String
+            var deliveryDetail: [String: Any] = [:]
+            switch reason {
+            case PlayDropReason.denied:
+                dropReason = .frequencyCapped
+                detail = "chance not granted (\(denyReason ?? "unknown"))"
+                if let denyReason {
+                    deliveryDetail["deny_reason"] = denyReason
+                }
+            case PlayDropReason.notShown:
+                dropReason = .frequencyCapped
+                detail = "chance granted without show"
+            case PlayDropReason.busy:
+                dropReason = .surfaceBusy
+                detail = "busy"
+            default:
+                dropReason = .error
+                detail = reason
+            }
+            log.d("Gamification chance not granted (reason=\(reason))", campaign: campaignKey)
+            liveTestContexts[cepCampaignId]?.reportFailed(DropReason.error, message: detail)
             events.toDigia(
                 GameOpenFailedEvent(reason: reason, denyReason: denyReason),
                 payload: payload)
-            failGamificationOpen(config: config, payload: payload)
+            coordinator.drop(
+                payload, reason: dropReason, detail: detail,
+                deliveryDetail: deliveryDetail.isEmpty ? nil : deliveryDetail)
         }
     }
 
@@ -1919,7 +1934,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// file at once on a hit, downloads-then-shows on a miss, and skips the
     /// show (log + settle, never a crash) when the download fails. The
     /// impression lands once the container is up, dismissals after.
-    private func openGamificationSurface(
+    /// Internal: the gamification surface opens entry taps through this.
+    func openGamificationSurface(
         chance: GrantedChance,
         config: GamificationConfig,
         campaign: CampaignModel,
@@ -1949,7 +1965,13 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                     payload: payload, userId: userId)
             } catch {
                 log.w("Game not opened — skin download failed", campaign: campaignKey, error: "\(error)")
-                self.failGamificationOpen(config: config, payload: payload)
+                if config.entryKind == .inlineTeaser || config.entryKind == .floating {
+                    self.events.toDigia(
+                        GameOpenFailedEvent(reason: "skin_unavailable", denyReason: nil),
+                        payload: payload)
+                } else {
+                    self.failGamificationOpen(config: config, payload: payload)
+                }
             }
         }
     }
@@ -2000,12 +2022,20 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             userId: userId,
             onClose: { [weak self] in
                 self?.refreshRewardsIfLoaded()
-                // An entry-tap game closed without playing leaves the entry up.
-                if isEntryTap { return }
-                self?.coordinator.handle(.dismissed(reason: .userClose), payload: payload)
+                self?.handleEntryGameClosed(config: config, campaign: campaign, payload: payload)
             },
-            onFailure: { [weak self] _ in
-                self?.failGamificationOpen(config: config, payload: payload)
+            onFailure: { [weak self] failure in
+                guard let self else { return }
+                if isEntryTap {
+                    log.w(
+                        "Game not opened (reason=\(failure.wireValue))",
+                        campaign: campaign.campaignKey)
+                    self.events.toDigia(
+                        GameOpenFailedEvent(reason: failure.wireValue, denyReason: nil),
+                        payload: payload)
+                    return
+                }
+                self.failGamificationOpen(config: config, payload: payload)
             },
             onShown: { [weak self] in
                 // On screen: emit Impressed like every other surface. The coordinator stands
@@ -2013,6 +2043,66 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
                 self?.events.toCep(.impressed, payload: payload)
             })
         GamePresenter.open(request)
+    }
+
+    /// Settles a game that closed. The inline card and its stored chance stay;
+    /// a direct game dismisses as before; a game opened from a floating entry
+    /// asks the backend `state` and keeps or hides the floater.
+    private func handleEntryGameClosed(
+        config: GamificationConfig, campaign: CampaignModel, payload: CEPTriggerPayload
+    ) {
+        switch config.entryKind {
+        case .inlineTeaser:
+            break
+        case .direct, .unknown:
+            coordinator.handle(.dismissed(reason: .userClose), payload: payload)
+        case .floating:
+            refreshFloatingEntryAfterClose(campaignKey: campaign.campaignKey, payload: payload)
+        }
+    }
+
+    /// Asks the backend `state` after a game opened from a floating entry
+    /// closes, then keeps or hides the floater on the main thread. With no
+    /// user the call is skipped and the floater hides.
+    private func refreshFloatingEntryAfterClose(
+        campaignKey: String, payload: CEPTriggerPayload
+    ) {
+        guard let userId = services?.identityManager.userId, !userId.isEmpty else {
+            log.d(
+                "Gamification floating entry hidden after close — no user id",
+                campaign: campaignKey)
+            hideFloatingEntry(campaignKey: campaignKey, payload: payload)
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await self.gameOutcomeSource.state(campaignKey: campaignKey)
+            switch PlaySession.decideAfterClose(result) {
+            case .keep(let replacement):
+                if let replacement {
+                    self.gamificationSurface.chances[campaignKey] = replacement
+                }
+                log.d(
+                    "Gamification floating entry kept after close (\(result))",
+                    campaign: campaignKey)
+            case .hide:
+                log.d(
+                    "Gamification floating entry hidden after close (\(result))",
+                    campaign: campaignKey)
+                self.hideFloatingEntry(campaignKey: campaignKey, payload: payload)
+            }
+        }
+    }
+
+    /// Hides a floating entry after its game closed: removes the stored
+    /// chance, hides the entry for the rest of the session, and dismisses the
+    /// floater — if it still shows this payload — as completed, never as a
+    /// user close.
+    private func hideFloatingEntry(campaignKey: String, payload: CEPTriggerPayload) {
+        gamificationSurface.hideFloatingEntry(campaignKey: campaignKey)
+        if floaterStoryOrchestrator.state?.payload.cepCampaignId == payload.cepCampaignId {
+            floaterStoryOrchestrator.dismiss(.completed)
+        }
     }
 
     /// Builds the open request for a resolved skin file: shared by entries,
