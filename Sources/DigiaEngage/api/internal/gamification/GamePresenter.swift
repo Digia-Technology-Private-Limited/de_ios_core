@@ -27,6 +27,10 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Set when `ready` arrives; the game is presented only after this.
     private(set) var isReady = false
 
+    /// True from the first close request until the exit animation ends and the
+    /// session settles; the container animates out on it.
+    @Published private(set) var isClosing = false
+
     private var didFinish = false
     private let haptics = GameHaptics()
     private let motion = GameMotionSource()
@@ -433,8 +437,18 @@ final class GamePresentation: Identifiable, ObservableObject {
         report()
     }
 
+    /// A visible game plays its exit animation first, then settles once.
     private func didClose() {
-        finish(report: { [request] in request.onClose?() })
+        guard !didFinish, !isClosing else { return }
+        guard isReady else {
+            finish(report: { [request] in request.onClose?() })
+            return
+        }
+        isClosing = true
+        let delay = GameMotion.exitDuration
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            self?.finish(report: { [request = self?.request] in request?.onClose?() })
+        }
     }
 
     private func didFail(_ reason: GameFailure) {

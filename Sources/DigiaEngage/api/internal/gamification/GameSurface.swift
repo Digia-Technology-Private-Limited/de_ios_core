@@ -265,6 +265,10 @@ final class GameSurface {
     private func refreshFloatingEntryAfterClose(
         campaignKey: String, payload: CEPTriggerPayload
     ) {
+        // Out of sight at once; the round-trip only decides whether it returns.
+        if sdk.floaterStoryOrchestrator.state?.payload.cepCampaignId == payload.cepCampaignId {
+            sdk.floaterStoryOrchestrator.hold(true)
+        }
         guard let userId = sdk.services?.identityManager.userId, !userId.isEmpty else {
             log.d(
                 "Gamification floating entry hidden after close — no user id",
@@ -280,6 +284,7 @@ final class GameSurface {
                 if let replacement {
                     self.sdk.gamificationSurface.chances[campaignKey] = replacement
                 }
+                self.sdk.floaterStoryOrchestrator.hold(false)
                 log.d(
                     "Gamification floating entry kept after close (\(result))",
                     campaign: campaignKey)
