@@ -150,7 +150,8 @@ final class GameSurface {
             sdk.refreshRewardsIfLoaded()
             switch entry {
             case .inlineTeaser:
-                break
+                refreshInlineEntryAfterClose(
+                    campaignKey: campaign.campaignKey, payload: payload)
             case .direct, .unknown:
                 sdk.coordinator.handle(.dismissed(reason: .userClose), payload: payload)
             case .floating:
@@ -320,5 +321,50 @@ final class GameSurface {
         if sdk.floaterStoryOrchestrator.state?.payload.cepCampaignId == payload.cepCampaignId {
             sdk.floaterStoryOrchestrator.dismiss(.completed)
         }
+    }
+
+    /// Asks the backend `state` after a game opened from an inline entry
+    /// closes, then keeps or hides the card — the same rule as floating. A
+    /// failed call keeps the card with its stored chance; any other
+    /// non-playable answer removes the stored chance and dismisses the card.
+    /// Inline entries never join the session hide, which is floating-only.
+    private func refreshInlineEntryAfterClose(
+        campaignKey: String, payload: CEPTriggerPayload
+    ) {
+        guard let userId = sdk.services?.identityManager.userId, !userId.isEmpty else {
+            log.d(
+                "Gamification inline entry hidden after close — no user id",
+                campaign: campaignKey)
+            hideInlineEntry(campaignKey: campaignKey, payload: payload)
+            return
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await self.sdk.gameOutcomeSource.state(
+                campaignKey: campaignKey,
+                testInvocationId: testInvocationIdOf(payload.cepCampaignId))
+            switch PlaySession.decideAfterClose(result) {
+            case .keep(let replacement):
+                if let replacement {
+                    self.sdk.gamificationSurface.chances[campaignKey] = replacement
+                }
+                log.d(
+                    "Gamification inline entry kept after close (\(result))",
+                    campaign: campaignKey)
+            case .hide:
+                log.d(
+                    "Gamification inline entry hidden after close (\(result))",
+                    campaign: campaignKey)
+                self.hideInlineEntry(campaignKey: campaignKey, payload: payload)
+            }
+        }
+    }
+
+    /// Hides an inline entry after its game closed: removes the stored chance
+    /// and dismisses the card — if it still shows this delivery — as cancelled,
+    /// never as a user close.
+    private func hideInlineEntry(campaignKey: String, payload: CEPTriggerPayload) {
+        sdk.gamificationSurface.chances.removeValue(forKey: campaignKey)
+        sdk.inlineSurface.dismiss(payload)
     }
 }
