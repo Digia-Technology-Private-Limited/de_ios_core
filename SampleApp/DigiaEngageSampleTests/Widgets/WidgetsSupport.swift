@@ -31,16 +31,27 @@ enum WidgetsDebugState {
 extension SdkHarness {
 
     /// Boots the SDK with no campaigns over a plain app, debug switches all off. With
-    /// [reactNative] the SDK is configured as the React Native binding, the one binding that
-    /// offers page capture.
-    static func widgetsBoot(reactNative: Bool = false) async throws -> SdkHarness {
+    /// [reactNative] the SDK is configured as the React Native binding. A plain native app and the
+    /// React Native binding are offered page capture; [wrapperBinding] boots any other wrapper,
+    /// which is offered Sync instead.
+    static func widgetsBoot(
+        reactNative: Bool = false,
+        wrapperBinding: String? = nil
+    ) async throws -> SdkHarness {
         let sdk = try SdkHarness.create()
         WidgetsDebugState.reset()
         try await Digia.initialize(DigiaConfig(
-            apiKey: "test-api-key", wrapperBinding: reactNative ? "react_native" : nil))
+            apiKey: "test-api-key", wrapperBinding: reactNative ? "react_native" : wrapperBinding))
         try await sdk.waitUntil("the SDK is ready", timeout: 10) { sdk.sdk.sdkState != .initializing }
         try sdk.requireReady()
-        try sdk.mount { Text("host app") }
+        // A real control: capture lists only what a person could tap (a hosting view is not one), so
+        // a page of bare text would be refused as having nothing capturable.
+        try sdk.mount {
+            VStack {
+                Text("host app")
+                Button("host control") {}
+            }
+        }
         return sdk
     }
 

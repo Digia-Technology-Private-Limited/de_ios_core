@@ -88,16 +88,26 @@ public enum Digia {
     ///
     /// Await it. It returns once the campaign fetch has completed, or 2 seconds
     /// after the call, whichever comes first; if the cap fires, the fetch keeps
-    /// running in the background. Campaign triggers that arrive before the fetch
-    /// completes are dropped, not held. A fetch failure does not throw: the SDK
-    /// stays unable to show campaigns, and calling `initialize()` again retries
-    /// the fetch.
+    /// running in the background.
+    ///
+    /// `register(_:)` may be called before or after this. A CEP plugin holds the
+    /// triggers it receives before the SDK is ready (up to 20, for 5 minutes)
+    /// and delivers them once it is. Digia-managed campaign signals, such as app
+    /// open and screen views, are held for up to 10 seconds and replayed once
+    /// campaigns load.
+    ///
+    /// A fetch failure does not throw: the SDK stays unable to show campaigns,
+    /// plugins drop the triggers they hold with `initialization_failed`, and
+    /// calling `initialize()` again retries the fetch.
     ///
     /// A retry after a failed fetch reuses the configuration of the first call:
     /// the `config` passed to the retry is ignored, except its action handlers,
     /// which replace the first call's, and only the campaign fetch runs again.
     public static func initialize(_ config: DigiaConfig) async throws {
-        guard #available(iOS 17, *) else { return }
+        guard #available(iOS 17, *) else {
+            log.w("initialize() ignored — Digia Engage requires iOS 17 or later")
+            return
+        }
         try await SDKInstance.shared.initialize(config)
     }
 
@@ -109,7 +119,10 @@ public enum Digia {
 
     /// No-ops below iOS 17 (see `initialize`).
     public static func register(_ plugin: DigiaCEPPlugin) {
-        guard #available(iOS 17, *) else { return }
+        guard #available(iOS 17, *) else {
+            log.w("register() ignored — Digia Engage requires iOS 17 or later")
+            return
+        }
         SDKInstance.shared.register(plugin)
     }
 
