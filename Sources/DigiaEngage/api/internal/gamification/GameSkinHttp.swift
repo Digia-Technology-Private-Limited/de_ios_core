@@ -65,6 +65,29 @@ enum GameHttpBridge {
         let status: Int?
     }
 
+    /// One failed skin `http` call's `game_http_failed` fields. The mapping
+    /// production (`GamePresentation.performHttp`) and the shared case-table
+    /// harness both run, so the table pins the production legs: B14 (reject),
+    /// B15–B16 (transport failure). Success carries no health.
+    struct FailedCall: Equatable, Sendable {
+        let method: String
+        let path: String
+        let code: GameBridgeErrorCode
+        let status: Int?
+    }
+
+    /// The reject leg (missing method/path, denied path, bad method): answers
+    /// `code` and always reports health with no status — the call never ran.
+    static func rejectedCall(method: String, path: String, code: GameBridgeErrorCode) -> FailedCall {
+        FailedCall(method: method, path: path, code: code, status: nil)
+    }
+
+    /// One transport outcome's failure leg: the reply code plus the health
+    /// fields with the outcome status (nil for transport failures).
+    static func failedCall(method: String, path: String, failure: Failure) -> FailedCall {
+        FailedCall(method: method, path: path, code: failure.code, status: failure.status)
+    }
+
     /// Sends one skin call and maps the outcome to a bridge answer: the raw
     /// JSON envelope on HTTP 200 (refusals included), `network` on any other
     /// status or transport failure, `timeout` on a timeout, `internal` when a
