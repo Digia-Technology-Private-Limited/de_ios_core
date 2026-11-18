@@ -192,11 +192,21 @@ final class GamificationOrchestrator: ObservableObject {
     /// dismisses the page (if open) and refreshes on close. The busy, SDK,
     /// skin and user checks live in `GameSurface`, which settles failures as
     /// the reason-coded `game_open_failed` event — never a toast.
+    ///
+    /// `chance.campaignId` is the backend campaign id, not the key, so the
+    /// lookup matches on `CampaignModel.id` first (the store and the rewards
+    /// map are both keyed by campaign key). Android keys its rewards map by
+    /// id and falls back to `findById`; this is the same lookup.
     func openGameForRewardsChance(_ chance: GameRewardChance) {
-        guard let campaign = sdk.campaignStore.find(chance.campaignId)
+        guard let campaign = rewardsCampaigns.values.first(where: { $0.id == chance.campaignId })
+            ?? sdk.campaignStore.all.first(where: { $0.id == chance.campaignId })
+            ?? sdk.campaignStore.find(chance.campaignId)
             ?? rewardsCampaigns[chance.campaignId],
             let config = campaign.gamificationConfig
-        else { return }
+        else {
+            log.w("Game skipped — unknown rewards campaign (campaignId=\(chance.campaignId))")
+            return
+        }
         NotificationCenter.default.post(name: .digiaDismissRewardsPage, object: nil)
         sdk.gameSurface.open(
             campaign: campaign, config: config, chanceId: chance.chanceId,
