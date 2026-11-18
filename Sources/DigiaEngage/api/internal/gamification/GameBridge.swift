@@ -16,7 +16,9 @@ enum GameBridgeErrorCode: String, Sendable, Error {
 
 /// One typed skin→native message the presentation handles. `event`, `log`
 /// and `haptics` never get a reply, even with an id; `ready` never reaches
-/// here.
+/// here — the bridge answers nothing for it; the first one fires the init
+/// flow. `action.*` carries an optional id: answered with `result {ok:true}`
+/// when present, silent otherwise.
 enum GameBridgeRequest {
     case http(id: String, method: String, path: String, body: [String: Any]?)
     case event(id: String?, name: String, props: [String: Any])
@@ -26,7 +28,7 @@ enum GameBridgeRequest {
     case sensorStop(id: String, sensor: String)
     case storageGet(id: String, key: String)
     case storageSet(id: String, key: String, value: String)
-    case storageRemove(id: String, key: String)
+    case storageRemove(id: String?, key: String)
     case actionCopy(id: String?, text: String)
     case actionOpenLink(id: String?, url: URL)
     case actionOpenDeeplink(id: String?, url: URL)
@@ -163,6 +165,7 @@ final class GameBridge {
             } else {
                 onRepeatedReady?(version)
             }
+            // No reply is ever sent for `ready`, even when it carries an id.
             return
         }
         if type == "event" || type == "log" || type == "haptics" {
@@ -276,7 +279,7 @@ final class GameBridge {
             else { return nil }
             return .storageSet(id: id, key: key, value: value)
         case "storage.remove":
-            guard let id, let key = payload.nonBlankString("key") else { return nil }
+            guard let key = payload.nonBlankString("key") else { return nil }
             return .storageRemove(id: id, key: key)
         default:
             return nil
@@ -350,7 +353,7 @@ final class GameBridge {
         }
         switch op {
         case "copy":
-            guard let text = payload["text"] as? String else { return .malformed }
+            guard let text = payload.nonBlankString("text") else { return .malformed }
             return .request(.actionCopy(id: id, text: text))
         case "openLink", "openUrl":
             guard let raw = payload.nonBlankString("url"),
@@ -370,7 +373,7 @@ final class GameBridge {
             else { return .malformed }
             return .request(.actionCustomKV(id: id, payload: kv))
         case "share":
-            guard let text = payload["text"] as? String else { return .malformed }
+            guard let text = payload.nonBlankString("text") else { return .malformed }
             return .request(.actionShare(id: id, text: text))
         case "close":
             return .request(.actionClose(id: id, reason: payload["reason"] as? String))
@@ -381,8 +384,9 @@ final class GameBridge {
 
     /// The `motion` alias for `sensor.start` / `sensor.stop`: one subscribe
     /// starts every listed sensor at the same rate, one unsubscribe stops the
-    /// listed sensors (or every sensor when none are listed). An id-less
-    /// motion has no reply path, so it is dropped.
+    /// listed sensors. Both lists must be non-empty; an empty one answers
+    /// `invalid`, like Android. An id-less motion has no reply path, so it is
+    /// dropped.
     private func handleMotion(id: String?, payload: [String: Any]) {
         guard let id else {
             recordDrop()
@@ -404,8 +408,9 @@ final class GameBridge {
                 id: id, sensors: sensors,
                 hz: GameMotionSource.clampedHz(Self.number(payload["hz"]))))
         case "unsubscribe":
-            let sensors = payload["sensors"] as? [String] ?? []
-            guard sensors.allSatisfy(Self.isMotionSensor) else {
+            guard let sensors = payload["sensors"] as? [String], !sensors.isEmpty,
+                  sensors.allSatisfy(Self.isMotionSensor)
+            else {
                 fail(id: id, code: .invalid, message: "malformed motion payload")
                 return
             }
@@ -416,24 +421,31 @@ final class GameBridge {
     }
 
     /// The `storage` alias for `storage.get` / `storage.set` / `storage.remove`.
-    /// Maps to the same requests, so the replies keep their shipped shape.
+    /// Maps to the same requests, so the replies keep their shipped shape. An
+    /// id-less `remove` still runs, like Android — there is just no reply
+    /// path, so nothing is answered.
     private func handleStorageAlias(id: String?, payload: [String: Any]) {
-        guard let id else {
-            recordDrop()
-            return
-        }
         guard let op = payload.nonBlankString("op") else {
-            fail(id: id, code: .invalid, message: "malformed storage payload")
+            if let id { fail(id: id, code: .invalid, message: "malformed storage payload") }
+            else { recordDrop() }
             return
         }
         switch op {
         case "get":
+            guard let id else {
+                recordDrop()
+                return
+            }
             guard let key = payload.nonBlankString("key") else {
                 fail(id: id, code: .invalid, message: "malformed storage payload")
                 return
             }
             onRequest?(.storageGet(id: id, key: key))
         case "set":
+            guard let id else {
+                recordDrop()
+                return
+            }
             guard let key = payload.nonBlankString("key"),
                   let value = payload["value"] as? String
             else {
@@ -443,12 +455,14 @@ final class GameBridge {
             onRequest?(.storageSet(id: id, key: key, value: value))
         case "remove":
             guard let key = payload.nonBlankString("key") else {
-                fail(id: id, code: .invalid, message: "malformed storage payload")
+                if let id { fail(id: id, code: .invalid, message: "malformed storage payload") }
+                else { recordDrop() }
                 return
             }
             onRequest?(.storageRemove(id: id, key: key))
         default:
-            fail(id: id, code: .unsupported, message: "unsupported storage op")
+            if let id { fail(id: id, code: .unsupported, message: "unsupported storage op") }
+            else { recordDrop() }
         }
     }
 

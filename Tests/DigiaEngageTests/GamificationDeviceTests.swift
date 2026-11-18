@@ -118,4 +118,26 @@ struct GameMotionSourceTests {
         // Guards the name check in start: no hardware is touched.
         #expect(!source.start(sensor: "lidar", hz: 30) { _ in })
     }
+
+    @Test("subscribe-all validates every sensor before starting any")
+    func startAllValidatesFirst() {
+        // Availability is stubbed: gyroscope present, everything else missing.
+        let source = GameMotionSource(isAvailable: { $0 == GameMotionSource.gyroscopeName })
+        defer { source.stopAll() }
+        var events: [GameMotionEvent] = []
+        // Guards the gate in startAll: lidar is missing, so gyroscope must
+        // never start even though it is listed first and available.
+        #expect(!source.startAll(sensors: ["gyroscope", "lidar"], hz: 30) { events.append($0) })
+        #expect(source.activeSensorNames.isEmpty)
+        #expect(events.isEmpty)
+    }
+
+    @Test("subscribe-all starts every sensor when all are available")
+    func startAllStartsAll() {
+        let source = GameMotionSource(isAvailable: { _ in true })
+        defer { source.stopAll() }
+        // Guards the start loop in startAll: every listed sensor streams.
+        #expect(source.startAll(sensors: ["gyroscope"], hz: 30) { _ in })
+        #expect(source.activeSensorNames == ["gyroscope"])
+    }
 }

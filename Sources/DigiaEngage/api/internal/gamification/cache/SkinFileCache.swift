@@ -15,6 +15,9 @@ private let log = DigiaLogger()
 struct SkinFileCache: Sendable {
     /// The cached entry file name.
     nonisolated static let fileName = "index.html"
+    /// The in-progress write name. Non-hidden, so a crash-orphaned temp is
+    /// visible to the stray sweep in `store` — Android names it the same way.
+    nonisolated static let tempFileName = "index.html.tmp"
     /// One self-contained skin may hold this many bytes. The old whole-bundle
     /// budget (3 MB + 10%), now spent on the single file.
     nonisolated static let singleFileMaxBytes = 3 * 1024 * 1024 + (3 * 1024 * 1024) / 10
@@ -25,6 +28,12 @@ struct SkinFileCache: Sendable {
 
     private let cachesDirectory: URL?
     private let networkClient: any NetworkClient
+    /// The serial guard around every file read, write, touch and eviction —
+    /// Android's `synchronized(lock)` in `SkinFileCache`. One box per cache, so
+    /// copies of the same cache still exclude each other. Callers hop off the
+    /// main actor for the heavy work (see `download`); the lock keeps
+    /// concurrent misses from interleaving a store with an eviction.
+    private let lock = CacheLock()
 
     /// - Parameters:
     ///   - cachesDirectory: The app's `Caches` directory. Tests pass a
@@ -73,14 +82,29 @@ struct SkinFileCache: Sendable {
     }
 
     /// The cached entry, or nil on a miss — including when the OS cleared
-    /// `Caches` or the folder holds anything but the one file. A hit
-    /// refreshes the entry's recency for eviction.
+    /// `Caches`, when the folder holds anything but the one file, or when the
+    /// file on disk is empty or over the per-file cap (Android's `lookup`
+    /// misses there too, instead of serving it). A hit refreshes the entry's
+    /// recency for eviction.
     func cachedFile(skinId: String, version: Int) -> URL? {
-        guard let file = fileURL(skinId: skinId, version: version),
-              FileManager.default.fileExists(atPath: file.path)
-        else { return nil }
-        Self.touch(file)
-        return file
+        lock.withLock {
+            guard let file = fileURL(skinId: skinId, version: version),
+                  isCompleteFile(at: file)
+            else { return nil }
+            Self.touch(file)
+            return file
+        }
+    }
+
+    /// A servable entry: a real file, non-empty, and within the per-file cap.
+    private func isCompleteFile(at file: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: file.path, isDirectory: &isDirectory),
+              !isDirectory.boolValue,
+              let size = try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber
+        else { return false }
+        let bytes = size.int64Value
+        return bytes > 0 && bytes <= Self.singleFileMaxBytes
     }
 
     /// The fixed `Content-Security-Policy` applied to every cached skin.
@@ -98,6 +122,7 @@ struct SkinFileCache: Sendable {
     /// Stores one downloaded entry: temp file plus an atomic rename, then
     /// evicts the least-recently-used entries until the total fits. Throws on
     /// an empty or over-budget body, or when there is no caches directory.
+    /// Serialized against every other read, write and eviction.
     @discardableResult
     func store(skinId: String, version: Int, data: Data) throws -> URL {
         guard let file = fileURL(skinId: skinId, version: version) else {
@@ -106,24 +131,30 @@ struct SkinFileCache: Sendable {
         guard !data.isEmpty, data.count <= Self.singleFileMaxBytes else {
             throw SkinFileCacheError.invalidFile
         }
-        let stored = Self.withCspMetaTag(data)
-        let directory = file.deletingLastPathComponent()
-        try FileManager.default.createDirectory(
-            at: directory, withIntermediateDirectories: true)
-        let temp = directory.appendingPathComponent(".\(UUID().uuidString).partial")
-        try stored.write(to: temp, options: .atomic)
-        do {
-            if FileManager.default.fileExists(atPath: file.path) {
-                try FileManager.default.removeItem(at: file)
+        return try lock.withLock {
+            let stored = Self.withCspMetaTag(data)
+            guard stored.count <= Self.singleFileMaxBytes else {
+                throw SkinFileCacheError.invalidFile
             }
-            try FileManager.default.moveItem(at: temp, to: file)
-        } catch {
-            try? FileManager.default.removeItem(at: temp)
-            throw error
+            let directory = file.deletingLastPathComponent()
+            try FileManager.default.createDirectory(
+                at: directory, withIntermediateDirectories: true)
+            let temp = directory.appendingPathComponent(Self.tempFileName)
+            try stored.write(to: temp, options: .atomic)
+            do {
+                if FileManager.default.fileExists(atPath: file.path) {
+                    try FileManager.default.removeItem(at: file)
+                }
+                try FileManager.default.moveItem(at: temp, to: file)
+            } catch {
+                try? FileManager.default.removeItem(at: temp)
+                throw error
+            }
+            Self.touch(file)
+            deleteStrayTempFiles()
+            evictOldEntries()
+            return file
         }
-        Self.touch(file)
-        evictOldEntries()
-        return file
     }
 
     // MARK: - Fetch
@@ -147,7 +178,12 @@ struct SkinFileCache: Sendable {
         else {
             throw SkinFileCacheError.invalidFile
         }
-        return try store(skinId: skinId, version: version, data: data)
+        // The write plus the eviction enumeration run on a background thread
+        // instead of the caller's actor (usually main); the lock keeps
+        // concurrent misses from interleaving.
+        return try await Task.detached {
+            try self.store(skinId: skinId, version: version, data: data)
+        }.value
     }
 
     /// Prefetches skins fire-and-forget: already-cached entries are skipped,
@@ -168,9 +204,28 @@ struct SkinFileCache: Sendable {
 
     // MARK: - Eviction
 
+    /// Deletes crash-orphaned temps: a crash between the write and the rename
+    /// leaves one behind, and temps are non-hidden so this sweep sees them —
+    /// like Android's `deleteStrayTempFiles`. Call with the lock held.
+    private func deleteStrayTempFiles() {
+        guard let root = rootDirectory() else { return }
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(
+            at: root, includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles])
+        else { return }
+        for case let url as URL in enumerator {
+            guard url.lastPathComponent.hasSuffix(".tmp"),
+                  (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+            else { continue }
+            try? fileManager.removeItem(at: url)
+        }
+    }
+
     /// Evicts the least-recently-modified entries until the total fits the
     /// cap. Only entry files count and go; a version directory left empty is
-    /// pruned, and anything mid-write (a `.partial` temp) is never touched.
+    /// pruned, and anything mid-write (a `.tmp` temp) is never touched. Call
+    /// with the lock held.
     private func evictOldEntries() {
         guard let root = rootDirectory() else { return }
         let fileManager = FileManager.default
@@ -243,4 +298,17 @@ enum SkinFileCacheError: Error {
     case badURL
     case badResponse
     case invalidFile
+}
+
+/// The serial guard around every skin-cache file read, write, touch and
+/// eviction. A box, because the lock must be shared by every copy of the
+/// cache struct — copying the struct must not fork the exclusion.
+private final class CacheLock: @unchecked Sendable {
+    private let ns = NSLock()
+
+    func withLock<T>(_ work: () throws -> T) rethrows -> T {
+        ns.lock()
+        defer { ns.unlock() }
+        return try work()
+    }
 }
