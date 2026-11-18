@@ -260,7 +260,7 @@ final class GameSurface {
             onShown: { [weak self] in self?.shown(settle: settle, campaign: campaign) },
             payload: payload,
             values: config.values,
-            slots: config.usesSlots ? config.slots : []
+            slots: config.slots
         )
     }
 

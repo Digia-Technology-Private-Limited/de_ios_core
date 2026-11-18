@@ -26,10 +26,12 @@ struct GamificationConfig: Equatable {
     /// The skin's declared `bridgeVersion`. Compared against the SDK's by the
     /// presentation; carried, never gated, here.
     let bridgeVersion: Int?
+    /// The skin's format, passed through to `init` unchanged. Never gates:
+    /// an unknown or missing type still opens the skin.
     let format: GamificationFormat
     /// `config.values`, carried opaquely until the `init` sends them.
     let values: [String: JSONValue]
-    /// `config.slots`, kept only for formats that map outcomes to slots.
+    /// `config.slots`, read whenever present and passed through to `init`.
     let slots: [GamificationSlotConfig]
     /// `.unknown` stays unknown: an unrecognised or missing entry never opens
     /// a game — routing drops it as `unsupported_entry`.
@@ -49,12 +51,6 @@ struct GamificationConfig: Equatable {
     /// The inline slot of the `inlineTeaser` entry.
     let slotKey: String?
 
-    /// Only `spinWheel` and `slotMachine` map slots; other formats ignore
-    /// `slots`.
-    var usesSlots: Bool {
-        format == .spinWheel || format == .slotMachine
-    }
-
     /// `templateConfig` is the campaign's own; `campaignLevel` is the campaign
     /// object, read only for `bundleUrl`/`sensors` as a fallback — the backend
     /// adds them next to `templateConfig`, and either placement is accepted.
@@ -71,7 +67,6 @@ struct GamificationConfig: Equatable {
         guard let bundleUrl, URL(string: bundleUrl) != nil else { return nil }
 
         let format = GamificationFormat(wire: templateConfig.string("templateType"))
-        guard format != .unknown else { return nil }
 
         // `entry` is `{ kind }` on the wire; a bare string is accepted too. An
         // unknown or missing kind stays `.unknown` — never a silent direct
@@ -126,22 +121,20 @@ struct GamificationConfig: Equatable {
         }
 
         var slots: [GamificationSlotConfig] = []
-        if format == .spinWheel || format == .slotMachine {
-            for rawSlot in config.objectArray("slots") {
-                guard let outcomeKey = rawSlot.nonBlankString("outcomeKey") else {
-                    log.d("Gamification slot dropped — missing outcomeKey")
+        for rawSlot in config.objectArray("slots") {
+            guard let outcomeKey = rawSlot.nonBlankString("outcomeKey") else {
+                log.d("Gamification slot dropped — missing outcomeKey")
+                continue
+            }
+            var slotValues: [String: String] = [:]
+            for (key, raw) in (rawSlot["values"] as? [String: Any]) ?? [:] {
+                guard let string = raw as? String else {
+                    log.d("Gamification slot value dropped — not a string (key=\(key))")
                     continue
                 }
-                var slotValues: [String: String] = [:]
-                for (key, raw) in (rawSlot["values"] as? [String: Any]) ?? [:] {
-                    guard let string = raw as? String else {
-                        log.d("Gamification slot value dropped — not a string (key=\(key))")
-                        continue
-                    }
-                    slotValues[key] = string
-                }
-                slots.append(GamificationSlotConfig(outcomeKey: outcomeKey, values: slotValues))
+                slotValues[key] = string
             }
+            slots.append(GamificationSlotConfig(outcomeKey: outcomeKey, values: slotValues))
         }
 
         return GamificationConfig(
