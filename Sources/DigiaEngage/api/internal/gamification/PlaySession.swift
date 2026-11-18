@@ -50,11 +50,14 @@ final class PlaySession {
         )
         switch await source.grantChance(grant) {
         case .granted(let chance):
-            // A granted chance with `show` opens a direct game at once and
-            // renders an inline or floating entry. Anything else shows
-            // nothing and settles as dropped.
+            // `show` only gates a direct open. An inline or floating entry
+            // renders whenever the chance is granted: the server saves the
+            // chance either way, so hiding the entry would strand it.
+            if !request.direct {
+                return .showEntry(chance)
+            }
             if chance.show {
-                return request.direct ? .open(chance) : .showEntry(chance)
+                return .open(chance)
             }
             return .drop(reason: PlayDropReason.notShown, denyReason: nil)
         case .denied(let reason):
@@ -151,7 +154,7 @@ enum CloseDecision: Equatable, Sendable {
 enum PlayDropReason {
     /// GrantChance denied; the server reason rides in `denyReason` (may be nil).
     static let denied = "denied"
-    /// Granted without `show`: nothing renders.
+    /// A direct trigger granted without `show`: the game does not open.
     static let notShown = "not_shown"
     /// A game is showing, or another request for the campaign is in flight.
     static let busy = "busy"

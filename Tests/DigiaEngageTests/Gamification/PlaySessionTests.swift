@@ -107,8 +107,8 @@ struct PlaySessionTests {
         #expect(source.lastRequest?.testInvocationId == "inv-1")
     }
 
-    // Guards the `show` gate: `granted && !show` drops `not_shown`.
-    @Test("a granted held chance drops not_shown")
+    // Guards the `show` gate on a direct open: `granted && !show` drops `not_shown`.
+    @Test("a direct held chance drops not_shown")
     func grantedHeld() async {
         let source = FakeSource(.granted(granted(show: false)))
 
@@ -117,10 +117,10 @@ struct PlaySessionTests {
         #expect(decision == .drop(reason: PlayDropReason.notShown, denyReason: nil))
     }
 
-    // Guards the `direct` gate: a non-direct grant with `show` renders its entry.
-    @Test("a shown chance renders its entry when not direct")
+    // Guards that `show` never gates an entry: a non-direct grant renders even without `show`.
+    @Test("a granted chance renders its entry when not direct, even without show")
     func shownEntry() async {
-        let chance = granted(show: true)
+        let chance = granted(show: false)
         let source = FakeSource(.granted(chance))
 
         let decision = await session(source).request(playRequest(direct: false))
