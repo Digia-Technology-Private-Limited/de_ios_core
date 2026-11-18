@@ -104,6 +104,13 @@ final class GameSurface {
         settle: GameSettle
     ) {
         let campaignKey = campaign.campaignKey
+        // A direct game whose presentation already settled — its acceptance
+        // watchdog fired while the bundle loaded — must not open.
+        if case .presentation(let payload, let entry) = settle, entry != .inlineTeaser, entry != .floating,
+           payload.presentationId != nil, sdk.coordinator.ownerOf(payload) == nil {
+            log.d("Game not opened — presentation already settled", campaign: campaignKey)
+            return
+        }
         // 4. No user, no game.
         guard let userId = sdk.services?.identityManager.userId, !userId.isEmpty else {
             log.d("Game not opened — no user id", campaign: campaignKey)
@@ -130,15 +137,15 @@ final class GameSurface {
         return userId
     }
 
-    /// Settles a game that never opened (steps 1–4): a direct game dismisses
-    /// so its acceptance watchdog stands down, every other policy degrades
-    /// to the reason-coded `game_open_failed` event — never a toast —
-    /// and an entry's teaser stays.
+    /// Settles a game that never opened (steps 1–4): a direct game drops its
+    /// presentation with the real reason, every other policy degrades to the
+    /// reason-coded `game_open_failed` event — never a toast — and an
+    /// entry's teaser stays.
     private func fail(settle: GameSettle, campaign: CampaignModel, config: GamificationConfig, reason: String) {
         switch settle {
         case .presentation(let payload, let entry):
             guard entry == .inlineTeaser || entry == .floating else {
-                sdk.coordinator.handle(.dismissed(reason: .autoTimeout), payload: payload)
+                settleDirectFailure(payload: payload, entry: entry, campaign: campaign, config: config, reason: reason)
                 return
             }
             sdk.events.toDigia(
@@ -166,6 +173,9 @@ final class GameSurface {
     private func closed(settle: GameSettle, campaign: CampaignModel, reason: String) {
         switch settle {
         case .presentation(let payload, let entry):
+            // A cancel comes from the coordinator, which already settled and
+            // reported the presentation; it emits nothing more.
+            guard reason != GamePresentation.cancelledReason else { return }
             sdk.events.toDigia(GameEvent.Dismissed(reason: reason), payload: payload)
             sdk.gamification.refreshRewardsIfLoaded()
             switch entry {
@@ -173,7 +183,7 @@ final class GameSurface {
                 refreshInlineEntryAfterClose(
                     campaignKey: campaign.campaignKey, payload: payload)
             case .direct, .unknown:
-                sdk.coordinator.handle(.dismissed(reason: .userClose), payload: payload)
+                sdk.coordinator.handle(.dismissed(reason: Self.dismissReason(closeReason: reason)), payload: payload)
             case .floating:
                 refreshFloatingEntryAfterClose(
                     campaignKey: campaign.campaignKey, payload: payload)
@@ -204,14 +214,16 @@ final class GameSurface {
         }
     }
 
-    /// The failure policy: a direct game dismisses so its acceptance
-    /// watchdog stands down; every other policy degrades to the
-    /// reason-coded `game_open_failed` event, never a toast.
+    /// The failure policy: a direct game drops its presentation with the
+    /// real reason; every other policy degrades to the reason-coded
+    /// `game_open_failed` event, never a toast.
     private func failed(settle: GameSettle, campaign: CampaignModel, config: GamificationConfig, failure: GameFailure) {
         switch settle {
         case .presentation(let payload, let entry):
             guard entry == .inlineTeaser || entry == .floating else {
-                sdk.coordinator.handle(.dismissed(reason: .autoTimeout), payload: payload)
+                settleDirectFailure(
+                    payload: payload, entry: entry, campaign: campaign, config: config,
+                    reason: failure.wireValue)
                 return
             }
             log.w(
@@ -233,6 +245,49 @@ final class GameSurface {
                     campaignId: campaign.id, skinId: config.skinId,
                     skinVersion: config.skinVersion, entry: "rewards"),
                 payload: Self.rewardsPayload(chanceId: chanceId, campaign: campaign))
+        }
+    }
+
+    /// A direct game that did not open: logs it, reports `game_open_failed`,
+    /// and settles the presentation with the real reason so the CEP, the
+    /// timeline and the live-test report see why. A presentation that
+    /// already displayed can only be dismissed.
+    private func settleDirectFailure(
+        payload: CEPTriggerPayload, entry: GamificationEntryKind, campaign: CampaignModel,
+        config: GamificationConfig, reason: String
+    ) {
+        log.w("Game not opened (reason=\(reason))", campaign: campaign.campaignKey)
+        sdk.events.toDigia(
+            GameOpenFailedEvent(
+                reason: reason, denyReason: nil, campaignId: campaign.id,
+                skinId: config.skinId, skinVersion: config.skinVersion,
+                entry: entry.rawValue),
+            payload: payload)
+        if sdk.coordinator.ownerOf(payload)?.state == .displaying {
+            sdk.coordinator.handle(.dismissed(reason: .autoTimeout), payload: payload)
+            return
+        }
+        let dropReason: DropReason
+        switch reason {
+        case PlayDropReason.busy: dropReason = .surfaceBusy
+        case GameFailure.readyTimeout.wireValue: dropReason = .timeout
+        default: dropReason = .error
+        }
+        sdk.liveTestContexts[payload.cepCampaignId]?.reportFailed(dropReason, message: reason)
+        sdk.coordinator.drop(
+            payload, reason: dropReason, detail: reason,
+            extras: dropReason == .timeout ? ["surface_kind": "gamification"] : nil)
+    }
+
+    /// The CEP reason for a direct game's close: the native close button and
+    /// the skin's own `close` are the user's (as an authored Hide is on other
+    /// campaigns; `completed` is kept for an experience that reached its end),
+    /// a CTA handoff is a CTA, anything else is a cancel. Matches Android.
+    static func dismissReason(closeReason: String) -> DismissReason {
+        switch closeReason {
+        case "user", "skin": return .userClose
+        case "cta": return .ctaAction
+        default: return .cancelled
         }
     }
 

@@ -117,14 +117,24 @@ final class GameWebCoordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WK
     var view: WKWebView { webView }
 
     /// Starts the load from the cached file and the 5 s ready timer. The timer
-    /// carries the bridge generation so a stale fire after a reload can never
-    /// close the new load.
+    /// runs only while the app is active: a load started out of the
+    /// foreground arms it on didBecomeActive instead.
     func start() {
         webView.loadFileURL(entryFile, allowingReadAccessTo: bundleRoot)
+        Task { @MainActor [weak self] in
+            guard UIApplication.shared.applicationState == .active else { return }
+            self?.armReadyTimer()
+        }
+    }
+
+    /// Arms the 5 s ready timer for the load in flight. The timer carries the
+    /// bridge generation, so re-arming (or `cancelReadyTimer`) makes any
+    /// earlier timer a stale no-op.
+    func armReadyTimer() {
         // `beginLoading` runs on the main actor; the timer arms there too, so
-        // the generation it captures is the one from this load, in order.
+        // the generation it captures is the one from this arm, in order.
         Task { @MainActor [weak game] in
-            guard let game else { return }
+            guard let game, game.bridge.state == .loading else { return }
             let current = game.bridge.beginLoading()
             DispatchQueue.main.asyncAfter(
                 deadline: .now() + GameBridge.readyTimeoutSeconds

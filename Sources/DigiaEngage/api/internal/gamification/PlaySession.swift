@@ -72,6 +72,18 @@ final class PlaySession {
         }
     }
 
+    /// The trigger id sent with the chance request: the delivering
+    /// presentation's id, so every trigger asks for its own chance. Without one
+    /// (a live test) it falls back to `cepCampaignId`, which is the same for
+    /// every trigger of a campaign. Empty means there is none. Matches
+    /// Android's `PlaySession.triggerIdOrNull`.
+    nonisolated static func triggerId(of payload: CEPTriggerPayload) -> String {
+        if let id = payload.presentationId?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
+            return id
+        }
+        return payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// The tap decision: a shown entry opens with its stored chance, unless a
     /// game is already visible. Pure, so both platforms share it exactly.
     nonisolated static func decideTap(gameVisible: Bool, chance: GrantedChance?) -> TapDecision {
@@ -135,8 +147,8 @@ enum TapDecision: Equatable, Sendable {
     /// Open the game with the stored chance.
     case open(GrantedChance)
     /// The tap failed: `busy` (a game is visible) or `missing_config` (no
-    /// stored chance). Emits `game_open_failed`; `busy` also settles the
-    /// presentation as dropped.
+    /// stored chance). Emits `game_open_failed`; the entry's presentation
+    /// stays live.
     case fail(reason: String)
 }
 

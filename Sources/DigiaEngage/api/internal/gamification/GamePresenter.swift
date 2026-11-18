@@ -4,11 +4,23 @@ import UIKit
 /// The SDK's one logging style — see ``DigiaLogger``.
 private let log = DigiaLogger()
 
-/// Session kill-switch: a dead renderer closes the game quietly and turns
-/// games off for the rest of the process. The next trigger tries again from
-/// scratch on the next launch; no state carries over.
+/// Crash kill-switch: a renderer that dies while the app is in the
+/// foreground turns off that one skin version for the rest of the process.
+/// Other skins keep opening, and a fresh launch tries again; nothing persists.
+/// A kill while backgrounded is the OS reclaiming memory, not the skin, so it
+/// does not count.
+@MainActor
 enum GameAvailability {
-    nonisolated(unsafe) static var isEnabled = true
+    private static var crashedSkins = Set<String>()
+
+    static func isEnabled(skinId: String, skinVersion: Int) -> Bool {
+        !crashedSkins.contains("\(skinId)@\(skinVersion)")
+    }
+
+    static func markCrashed(skinId: String, skinVersion: Int) {
+        guard UIApplication.shared.applicationState != .background else { return }
+        crashedSkins.insert("\(skinId)@\(skinVersion)")
+    }
 }
 
 /// The live game session the overlay controller holds. Owns the bridge, the
@@ -17,6 +29,9 @@ enum GameAvailability {
 /// `log`, `haptics`, `sensor`, `storage`, and `action`.
 @MainActor
 final class GamePresentation: Identifiable, ObservableObject {
+    /// The close reason when the coordinator cancels the game's presentation.
+    static let cancelledReason = "cancelled"
+
     /// The campaign key. One game owns the surface at a time, so this is unique.
     let id: String
     let request: GameOpenRequest
@@ -517,21 +532,18 @@ final class GamePresentation: Identifiable, ObservableObject {
                 object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in self?.pushDeviceIfChanged() }
             },
+            // Pause on resign-active, like the story and canvas campaigns:
+            // a call, Control Center or the app switcher pauses the game, and
+            // the 5 s ready timer never runs while the app is not active.
             center.addObserver(
-                forName: UIApplication.didEnterBackgroundNotification,
+                forName: UIApplication.willResignActiveNotification,
                 object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.pushLifecycle("pause")
-                    self?.motion.suspend()
-                }
+                Task { @MainActor [weak self] in self?.appDidResignActive() }
             },
             center.addObserver(
-                forName: UIApplication.willEnterForegroundNotification,
+                forName: UIApplication.didBecomeActiveNotification,
                 object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    self?.pushLifecycle("resume")
-                    self?.motion.resume()
-                }
+                Task { @MainActor [weak self] in self?.appDidBecomeActive() }
             },
         ]
         lastDevicePush = GameDeviceInfo.current(sdkVersion: sdkVersion).pushPayload
@@ -546,6 +558,20 @@ final class GamePresentation: Identifiable, ObservableObject {
                 if self.bridge.state == .idle { self.pushDeviceIfChanged() }
             }
         }
+    }
+
+    private func appDidResignActive() {
+        guard !didFinish else { return }
+        if bridge.state == .loading { bridge.cancelReadyTimer() }
+        pushLifecycle("pause")
+        motion.suspend()
+    }
+
+    private func appDidBecomeActive() {
+        guard !didFinish else { return }
+        if bridge.state == .loading { webCoordinator?.armReadyTimer() }
+        pushLifecycle("resume")
+        motion.resume()
     }
 
     private func removeObservers() {
@@ -568,9 +594,9 @@ final class GamePresentation: Identifiable, ObservableObject {
         bridge.close()
     }
 
-    /// Renderer death: destroy, close quietly, games off for the session.
+    /// Renderer death: destroy, close quietly, this skin version off for the session.
     func failRendering() {
-        GameAvailability.isEnabled = false
+        GameAvailability.markCrashed(skinId: request.skinId, skinVersion: request.skinVersion)
         guard bridge.state != .closed else { return }
         finish(report: { [request] in request.onFailure?(.renderError) })
         bridge.close()
@@ -597,7 +623,8 @@ final class GamePresentation: Identifiable, ObservableObject {
         GamePresenter.loading = nil
         SDKInstance.shared.controller.showGame(self)
         request.onShown?()
-        pushLifecycle("resume")
+        // `ready` can land while the app is inactive; resume waits for didBecomeActive.
+        pushLifecycle(UIApplication.shared.applicationState == .active ? "resume" : "pause")
         log.d("[gami-timing] ready in \(msSinceOpen) ms", campaign: request.campaignKey)
     }
 
@@ -666,8 +693,9 @@ enum GamePresenter {
             request.onFailure?(.unsupportedWebView)
             return
         }
-        guard GameAvailability.isEnabled else {
-            log.w("Game not opened — renderer died earlier this session", error: request.campaignKey)
+        guard GameAvailability.isEnabled(skinId: request.skinId, skinVersion: request.skinVersion) else {
+            log.w("Game not opened — this skin version's renderer died earlier this session",
+                  error: request.campaignKey)
             request.onFailure?(.renderError)
             return
         }
@@ -690,9 +718,10 @@ enum GamePresenter {
     }
 
     /// Closes the open game, if any. Fires `onClose` exactly once; a failure
-    /// already reported stays reported.
-    static func dismiss() {
+    /// already reported stays reported. `reason` as for the instance dismiss,
+    /// plus `cancelled` when the SDK withdraws the presentation.
+    static func dismiss(reason: String = "user") {
         guard let game = SDKInstance.shared.controller.activeGame ?? loading else { return }
-        game.dismiss()
+        game.dismiss(reason: reason)
     }
 }

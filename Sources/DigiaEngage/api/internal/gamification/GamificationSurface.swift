@@ -6,16 +6,17 @@ private let gamificationSurfaceLog = DigiaLogger()
 /// Gamification routing, in one place instead of spread across `SDKInstance`.
 ///
 /// Like the surfaces in `CampaignSurfaces.swift` its constructor takes the SDK
-/// instance and `start` routes one accepted campaign — but it is not a
-/// `CampaignSurface`: a direct entry parks no slot and floats no window, so
-/// there are no occupants to report.
+/// instance and `start` routes one accepted campaign. It is a
+/// `CampaignSurface` only so a cancelled presentation closes its game: a
+/// direct entry parks no slot and floats no window, so there are no
+/// occupants to report or supersede.
 ///
 /// Every entry kind asks the PlaySession adapter for its chance on the
 /// trigger. An inline or floating entry renders only when the answer comes
 /// back granted with `show`; the granted chance is stored here, keyed by
 /// campaign key, and a tap opens the game with it — never with a new grant.
 @MainActor
-final class GamificationSurface {
+final class GamificationSurface: CampaignSurface {
     /// Drop-cause strings, one set on both platforms.
     static let causeMissingConfig = "missing_config"
     static let causeUnsupportedOS = "unsupported_os"
@@ -82,7 +83,7 @@ final class GamificationSurface {
         let isLiveTest = request.driver.kind == .liveTest
         // The SDK never invents a trigger id: without one the server cannot
         // dedup repeats, so the trigger is dropped, not guessed.
-        let triggerId = payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let triggerId = PlaySession.triggerId(of: payload)
         guard !triggerId.isEmpty else {
             return request.invalidConfig(
                 "gamification skipped — no trigger id", cause: Self.causeMissingConfig)
@@ -153,7 +154,7 @@ final class GamificationSurface {
         }
         sdk.logVerbose(
             "routeByCampaignKey GAMIFICATION key='\(key)' "
-                + "triggerId='\(request.payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines))'")
+                + "triggerId='\(PlaySession.triggerId(of: request.payload))'")
         sdk.gamification.requestGameChance(
             campaign: campaign, config: config, payload: request.payload,
             direct: false, driver: request.driver)
@@ -248,15 +249,29 @@ final class GamificationSurface {
                     skinId: config.skinId, skinVersion: config.skinVersion,
                     entry: config.entryKind.rawValue),
                 payload: payload)
-            if reason == PlayDropReason.busy {
-                sdk.coordinator.drop(payload, reason: .surfaceBusy, detail: "busy")
-            }
+            // The entry stays on screen, so its own presentation stays live.
             return
         case .open(let chance):
+            // The tap is the entry's click, like Android.
+            sdk.events.toDigia(GameEvent.Clicked(element: "entry"), payload: payload)
+            sdk.events.clicked(payload: payload, elementId: "entry")
             sdk.gameSurface.open(
                 campaign: campaign, config: config, chanceId: chance.chanceId,
                 settle: .presentation(payload: payload, entry: config.entryKind))
         }
+    }
+
+    var occupants: [SurfaceOccupant] { [] }
+
+    func supersede(_: SurfaceOccupant) {}
+
+    /// Closes the game, loading or visible, that `payload`'s presentation
+    /// opened — the acceptance watchdog's teardown for a direct game.
+    func dismiss(_ payload: CEPTriggerPayload) {
+        guard let game = sdk.controller.activeGame ?? GamePresenter.loading,
+              surfaceOwns(game.request.payload, payload: payload)
+        else { return }
+        game.dismiss(reason: GamePresentation.cancelledReason)
     }
 
     /// Hides a floating entry for the rest of the session: removes its stored

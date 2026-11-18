@@ -232,6 +232,7 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
     /// occupants in, and which of two blockers in one column is reported.
     lazy var surfaces: [any CampaignSurface] = [
         nudgeSurface, surveySurface, guideSurface, pipSurface, floaterStorySurface, inlineSurface,
+        gamificationSurface,
     ]
     lazy var nudgeSurface = NudgeCampaignSurface(self)
     lazy var surveySurface = SurveySurface(self)

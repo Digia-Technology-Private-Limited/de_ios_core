@@ -12,6 +12,8 @@ enum GameBridgeErrorCode: String, Sendable, Error {
     case invalid
     case quota
     case `internal`
+    /// The session closed before the request was answered.
+    case closed
 }
 
 /// One typed skin→native message the presentation handles. `event`, `log`
@@ -112,11 +114,19 @@ final class GameBridge {
     /// (Re)enters `loading`. Returns a generation token so the one-shot ready
     /// timer fires only for the load that armed it.
     private var generation = 0
+    /// Ids of requests still owed an answer. On close each gets error
+    /// `closed`, so a skin awaiting a reply never hangs (MSG-2).
+    private var pendingIds = Set<String>()
 
     func beginLoading() -> Int {
         state = .loading
         generation += 1
         return generation
+    }
+
+    /// Invalidates the armed ready timer (the app left the foreground).
+    func cancelReadyTimer() {
+        generation += 1
     }
 
     /// The entry point for `digia.postMessage`. Never throws: a bad message is
@@ -151,6 +161,8 @@ final class GameBridge {
             }
             return
         }
+        // Notifications and `ready` are never answered, so never owed one.
+        if let id, !["ready", "event", "log", "haptics"].contains(type) { pendingIds.insert(id) }
         let payload = object["payload"] as? [String: Any] ?? [:]
         if type == "action" {
             handleAction(id: id, payload: payload)
@@ -191,6 +203,7 @@ final class GameBridge {
     /// closes here; anything past `ready` is unaffected.
     func readyTimeoutFired(generation: Int) {
         guard generation == self.generation, state == .loading else { return }
+        failPendingAsClosed()
         state = .closed
         log.w("Game closed — ready timed out")
         onFailed?(.readyTimeout)
@@ -200,18 +213,34 @@ final class GameBridge {
     /// teardown after a failure is a no-op, never a second callback.
     func close() {
         guard state != .closed else { return }
+        failPendingAsClosed()
         state = .closed
         onClosed?()
     }
 
-    /// Answers a request with `{id, type:"result", payload}`.
+    /// Answers a request with `{id, type:"result", payload}`. After close the
+    /// request already got error `closed`, so a late answer is dropped.
     func answer(id: String, payload: [String: Any] = [:]) {
+        pendingIds.remove(id)
+        guard state != .closed else { return }
         send(["id": id, "type": "result", "payload": payload])
     }
 
     /// Answers a request with `{id, type:"error", payload:{code, message}}`.
     func fail(id: String, code: GameBridgeErrorCode, message: String) {
+        pendingIds.remove(id)
+        guard state != .closed else { return }
         send(["id": id, "type": "error", "payload": ["code": code.rawValue, "message": message]])
+    }
+
+    /// Answers every request still in flight with error `closed`.
+    private func failPendingAsClosed() {
+        let ids = pendingIds.sorted()
+        pendingIds.removeAll()
+        for id in ids {
+            send(["id": id, "type": "error",
+                  "payload": ["code": GameBridgeErrorCode.closed.rawValue, "message": "game closed"]])
+        }
     }
 
     /// Pushes a native→skin message (`init`, `lifecycle`, `viewport`,
