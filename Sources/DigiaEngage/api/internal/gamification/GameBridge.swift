@@ -305,7 +305,12 @@ final class GameBridge {
     private func handleNotification(type: String, id: String?, payload: [String: Any]) {
         switch type {
         case "event":
-            guard let name = payload.nonBlankString("name") else {
+            // A whitespace-only name is missing, like Android's `isNotBlank`
+            // gate — but only this leg trims: copy/share keep `isEmpty`
+            // parity, so whitespace text still runs there.
+            guard let name = payload["name"] as? String,
+                  !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else {
                 log.d("Game event ignored (missing name)")
                 return
             }

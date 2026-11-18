@@ -285,10 +285,11 @@ final class GamePresentation: Identifiable, ObservableObject {
         let start = Date()
         func reject(code: GameBridgeErrorCode) {
             bridge.fail(id: id, code: code, message: self.httpErrorMessage(code))
+            let failed = GameHttpBridge.rejectedCall(method: method, path: path, code: code)
             SDKInstance.shared.events.toDigia(
                 GameHttpFailedEvent(
-                    health: self.health, method: method, path: path,
-                    code: code.rawValue, status: nil,
+                    health: self.health, method: failed.method, path: failed.path,
+                    code: failed.code.rawValue, status: failed.status,
                     durationMs: Int(Date().timeIntervalSince(start) * 1000)),
                 payload: self.request.payload)
         }
@@ -338,11 +339,12 @@ final class GamePresentation: Identifiable, ObservableObject {
                 self.bridge.answer(id: id, payload: success.envelope)
             case .failure(let failure):
                 self.bridge.fail(id: id, code: failure.code, message: self.httpErrorMessage(failure.code))
+                let failed = GameHttpBridge.failedCall(method: method, path: validated, failure: failure)
                 let durationMs = Int(Date().timeIntervalSince(start) * 1000)
                 SDKInstance.shared.events.toDigia(
                     GameHttpFailedEvent(
-                        health: self.health, method: method, path: validated,
-                        code: failure.code.rawValue, status: failure.status,
+                        health: self.health, method: failed.method, path: failed.path,
+                        code: failed.code.rawValue, status: failed.status,
                         durationMs: durationMs),
                     payload: self.request.payload)
             }
@@ -396,8 +398,6 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Pure, so the shared case-table run pins the change gate without a game.
     static func devicePushChanged(_ next: [String: Any], from last: [String: Any]?) -> Bool {
         guard let last else { return true }
-        // Push payloads are flat JSON scalars; NSDictionary equality is exact.
-        return !NSDictionary(dictionary: next).isEqual(to: last)
         // Push payloads are flat JSON scalars; NSDictionary equality is exact.
         return !NSDictionary(dictionary: next).isEqual(to: last)
     }

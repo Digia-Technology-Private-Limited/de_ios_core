@@ -6,9 +6,9 @@ import Testing
 /// Runs every row of the shared bridge table
 /// (`testkit/contracts/game-bridge-cases.json`, one case per hardening-spec
 /// row B1–B25) through a fresh `GameBridge`: the input message in, the reply
-/// or silence plus the pushes and the health-relevant mapping out. A row fails
-/// here when the intake's reply, push or drop leg drifts from the contract —
-/// Android loads the same file through `GameBridgeCasesTest`.
+/// or silence plus the pushes and the `game_http_failed` health event out.
+/// A row fails here when the intake's reply, push or health leg drifts from
+/// the contract — Android loads the same file through `GameBridgeCasesTest`.
 ///
 /// The table lives outside this repo (it is shared workspace contract, not SDK
 /// source), so the test finds it relative to this file and returns early where
@@ -23,10 +23,11 @@ import Testing
 /// mirrors pin the contract shape, not the host trigger. The decisions the
 /// host feeds on are pinned where they are pure and reachable: the storage
 /// backend is the real `GameSkinStorage` on a throwaway suite, the log-level
-/// and haptic-style filters are the real intake mapping, the HTTP code legs
-/// run the real `GameHttpBridge` validation and `send` mapping against a fake
-/// client, and the device change gate is the real
-/// `GamePresentation.devicePushChanged`.
+/// and haptic-style filters are the real intake mapping, the HTTP reject and
+/// failure legs run the real `GameHttpBridge` `rejectedCall` / `failedCall`
+/// mapping production uses — so the table's `health` expectations pin the
+/// production `game_http_failed` legs — and the device change gate is the
+/// real `GamePresentation.devicePushChanged`.
 @Suite("Game bridge cases", .tags(.unit, .game))
 @MainActor
 struct GameBridgeCasesTests {
@@ -82,6 +83,17 @@ struct GameBridgeCasesTests {
         }
     }
 
+    /// One `game_http_failed` the session mapping reported: the reply code
+    /// plus the health fields, through the same
+    /// `GameHttpBridge.rejectedCall` / `failedCall` mapping production uses.
+    private struct HealthEvent: Equatable {
+        let event: String
+        let method: String
+        let path: String
+        let code: String
+        let status: Int?
+    }
+
     /// The host, in miniature: a real intake with captured callbacks.
     @MainActor
     private final class Harness {
@@ -99,6 +111,7 @@ struct GameBridgeCasesTests {
         var logs: [(level: String, message: String)] = []
         var httpCalls: [(method: String, path: String, body: [String: Any]?)] = []
         var httpOutcome = "raw"
+        var healthEvents: [HealthEvent] = []
         var pushes: [Push] = []
         var lastDevicePush: [String: Any]?
         var initMessage: [String: Any] = [:]
@@ -175,25 +188,42 @@ struct GameBridgeCasesTests {
             // transport says — here a canned outcome, like Android's fake
             // http call. The exact GET/POST gate one layer down is pinned by
             // GameSkinHttpTests, not by this table. A missing method or path
-            // never runs, like the presenter's presence check.
+            // never runs: the harness rejects it through the same
+            // `rejectedCall` mapping the presenter uses, and every transport
+            // failure reports through the same `failedCall` mapping — so
+            // B14–B16 pin the production health legs.
+            func reject(code: GameBridgeErrorCode) {
+                fail(id: id, code: code)
+                let failed = GameHttpBridge.rejectedCall(method: method, path: path, code: code)
+                healthEvents.append(HealthEvent(
+                    event: "game_http_failed", method: failed.method, path: failed.path,
+                    code: failed.code.rawValue, status: failed.status))
+            }
+            func failOutcome(_ failure: GameHttpBridge.Failure) {
+                fail(id: id, code: failure.code)
+                let failed = GameHttpBridge.failedCall(method: method, path: path, failure: failure)
+                healthEvents.append(HealthEvent(
+                    event: "game_http_failed", method: failed.method, path: failed.path,
+                    code: failed.code.rawValue, status: failed.status))
+            }
             guard !method.isEmpty, !path.isEmpty else {
-                fail(id: id, code: .invalid)
+                reject(code: .invalid)
                 return
             }
             httpCalls.append((method, path, body))
             switch httpOutcome {
             case "timeout":
-                fail(id: id, code: .timeout)
+                failOutcome(GameHttpBridge.Failure(code: .timeout, status: nil))
             case "network":
-                fail(id: id, code: .network)
+                failOutcome(GameHttpBridge.Failure(code: .network, status: nil))
             case "forbidden":
-                fail(id: id, code: .forbidden)
+                failOutcome(GameHttpBridge.Failure(code: .forbidden, status: nil))
             case "invalid":
-                fail(id: id, code: .invalid)
+                failOutcome(GameHttpBridge.Failure(code: .invalid, status: nil))
             case "quota":
-                fail(id: id, code: .quota)
+                failOutcome(GameHttpBridge.Failure(code: .quota, status: nil))
             case "internal":
-                fail(id: id, code: .internal)
+                failOutcome(GameHttpBridge.Failure(code: .internal, status: nil))
             default:
                 answer(id: id, payload: ["isSuccess": true])
             }
@@ -273,10 +303,12 @@ struct GameBridgeCasesTests {
         harness.scripts.removeAll()
         harness.pushes.removeAll()
         harness.drops.removeAll()
+        harness.healthEvents.removeAll()
 
         if let applications = row["hostDevice"] as? [[String: Any]] {
             for (index, facts) in applications.enumerated() {
                 harness.pushes.removeAll()
+                harness.healthEvents.removeAll()
                 harness.applyDeviceFacts(facts)
                 if index > 0 && index < applications.count - 1 {
                     try check(id: id, pitches: "no push on unchanged facts", harness.pushes.isEmpty)
@@ -294,6 +326,7 @@ struct GameBridgeCasesTests {
         let expect = row["expect"] as! [String: Any]
         try assertReply(id: id, row: row, expect: expect, harness: harness)
         try assertPushes(id: id, expect: expect, harness: harness)
+        try assertHealth(id: id, expect: expect, harness: harness)
         if let httpCalls = expect["httpCalls"] as? Int {
             try check(id: id, pitches: "http calls", harness.httpCalls.count == httpCalls)
         }
@@ -420,6 +453,32 @@ struct GameBridgeCasesTests {
                     id: id, pitches: "push \(got.type) payload",
                     jsonSubset(payload, got.payload))
             }
+        }
+    }
+
+    /// Mirrors Android's `assertHealth`: no `health` key means no health
+    /// event; otherwise exactly one `game_http_failed` whose present keys
+    /// match. Absent keys are not asserted (the table pins `event`/`method`/
+    /// `path`/`code`; `status` rides along unasserted).
+    private func assertHealth(id: String, expect: [String: Any], harness: Harness) throws {
+        guard let want = expect["health"] as? [String: Any] else {
+            try check(id: id, pitches: "no health", harness.healthEvents.isEmpty)
+            return
+        }
+        try check(id: id, pitches: "one health event", harness.healthEvents.count == 1)
+        let got = try require(id: id, pitches: "health event", harness.healthEvents.first)
+        try check(id: id, pitches: "health event", got.event == (want["event"] as? String))
+        if let method = want["method"] as? String {
+            try check(id: id, pitches: "health method", got.method == method)
+        }
+        if let path = want["path"] as? String {
+            try check(id: id, pitches: "health path", got.path == path)
+        }
+        if let code = want["code"] as? String {
+            try check(id: id, pitches: "health code", got.code == code)
+        }
+        if let status = want["status"] as? Int {
+            try check(id: id, pitches: "health status", got.status == status)
         }
     }
 
