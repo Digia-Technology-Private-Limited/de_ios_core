@@ -355,6 +355,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             },
             onLiveTestDismissed: { [weak self] cepCampaignId, reason, completed in
                 self?.relayLiveTestDismissal(cepCampaignId, reason: reason, completed: completed)
+                // The presentation is over — nothing left to tap or answer.
+                self?.liveTestCampaigns.removeValue(forKey: cepCampaignId)
             }
         )
         inlineController.onCampaignRemoved = { [weak self] payload, reason in
@@ -1740,9 +1742,17 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
         )
 
         let cleanUpLiveTestState: () -> Void = { [weak self] in
-            self?.liveTestContexts.removeValue(forKey: cepCampaignId)
-            self?.liveTestCampaigns.removeValue(forKey: cepCampaignId)
-            self?.events.resetImpression(cepCampaignId)
+            guard let self else { return }
+            // `shown` is terminal for the ACK, not for the presentation: an
+            // entry's tap resolves its campaign through `findCampaign`, which
+            // must still find this one (not the saved campaign of the same
+            // key) until the dismissed event releases it. A failed or
+            // rejected test never presented anything, so it is dropped now.
+            if liveTestContexts[cepCampaignId]?.didReportShown != true {
+                liveTestCampaigns.removeValue(forKey: cepCampaignId)
+            }
+            liveTestContexts.removeValue(forKey: cepCampaignId)
+            events.resetImpression(cepCampaignId)
         }
 
         let testContext = LiveTestContext(
@@ -1751,6 +1761,8 @@ final class SDKInstance: ObservableObject, DigiaCEPHost {
             onTerminal: cleanUpLiveTestState
         )
         liveTestContexts[cepCampaignId] = testContext
+        // A new live test replaces any still-presented one for this campaign.
+        liveTestCampaigns = liveTestCampaigns.filter { $0.value.campaignKey != campaign.campaignKey }
         liveTestCampaigns[cepCampaignId] = campaign
 
         let verdict = HealthSink.$muted.withValue(true) {

@@ -44,6 +44,10 @@ final class LiveTestContext {
     private let timeout: TimeInterval
 
     private var terminalReported = false
+    /// True once `shown` was the terminal answer (not a failure). Read by
+    /// `onTerminal`, which runs after it is set, to keep a presented campaign
+    /// resolvable while its entry is on screen.
+    private(set) var didReportShown = false
     private var watchdogTask: Task<Void, Never>?
 
     /// What the watchdog reports if it fires. `.timeout` is the honest
@@ -99,6 +103,7 @@ final class LiveTestContext {
     func reportShown() {
         guard !terminalReported else { return }
         terminalReported = true
+        didReportShown = true
         disarm()
         reporter.postShown(testInvocationId)
         onTerminal()

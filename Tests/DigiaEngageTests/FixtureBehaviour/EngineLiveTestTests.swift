@@ -148,5 +148,29 @@ struct EngineLiveTestTests {
         #expect(failedCode(sdk) == "malformed_campaign_skipped")
         #expect(sdk.sdk.controller.activeNudge == nil)
     }
+
+    // Fails if `cleanUpLiveTestState` drops a shown campaign again (the entry tap then resolves the
+    // saved campaign and is ignored), or if the dismissed handler stops releasing it, in `SDKInstance.swift`.
+    @Test("a shown live test stays resolvable while it is on screen and is released when it is dismissed")
+    func shownLiveTestIsKeptUntilDismissed() async throws {
+        let (sdk, _, tested) = try await boot()
+        defer { sdk.tearDown() }
+        try sdk.mount { Text("host app") }
+        let cepId = liveTestCepId("inv-1")
+
+        sdk.sdk.handleLiveTestCampaign(invocation(tested))
+        try await sdk.waitUntil("the tested nudge is up") { sdk.isShowing("Second Nudge Must Not Show") }
+        try await sdk.waitUntil("the shown ACK") { statuses(sdk).contains("shown") }
+
+        // `shown` is terminal for the ACK, not for the presentation.
+        #expect(sdk.sdk.liveTestContexts[cepId] == nil)
+        #expect(sdk.sdk.liveTestCampaigns[cepId] != nil)
+
+        sdk.sdk.events.toCep(
+            .dismissed(reason: .userClose),
+            payload: CEPTriggerPayload(
+                cepCampaignId: cepId, campaignKey: keyOf(tested), cepMetadata: [:], variables: [:]))
+        #expect(sdk.sdk.liveTestCampaigns[cepId] == nil)
+    }
 }
 }
