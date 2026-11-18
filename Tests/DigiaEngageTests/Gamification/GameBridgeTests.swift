@@ -217,16 +217,23 @@ struct GameBridgeTests {
         #expect(payload["code"] as? String == "unsupported")
     }
 
-    @Test("unknown type without an id is ignored, not flagged")
-    func unknownTypeWithoutIdIgnored() throws {
+    @Test("unknown type without an id drops with the health event")
+    func unknownTypeWithoutIdDrops() throws {
         let bridge = makeBridge()
         var requests: [GameBridgeRequest] = []
+        var drops: [(reason: String, type: String?)] = []
         bridge.onRequest = { requests.append($0) }
+        bridge.onDropped = { drops.append(($0, $1)) }
 
         bridge.receive(msg("teleport"))
 
+        // Guards the id-less unsupported drop: flagged once, with the type,
+        // so the presenter reports game_bridge_dropped{reason:unknown}.
         #expect(requests.isEmpty)
-        #expect(!bridge.didRecordDrop)
+        #expect(bridge.didRecordDrop)
+        #expect(drops.count == 1)
+        #expect(drops.first?.reason == "unknown")
+        #expect(drops.first?.type == "teleport")
     }
 
     @Test("http parses method, path and optional body")
