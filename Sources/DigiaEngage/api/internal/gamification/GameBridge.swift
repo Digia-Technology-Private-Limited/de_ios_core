@@ -78,6 +78,10 @@ final class GameBridge {
     /// Fires on every `ready` past the first, with the declared version: the
     /// same init is re-sent.
     var onRepeatedReady: (@MainActor (Int) -> Void)?
+    /// Fires once, when the first message is dropped, with the reason
+    /// (`oversize`, `malformed` or `unknown`) and the request type when one
+    /// was read. The presentation reports it as `game_bridge_dropped`.
+    var onDropped: (@MainActor (String, String?) -> Void)?
     /// Fires once, when the session reaches `closed` via close or teardown.
     /// Timeout close fires `onFailed` instead — never both.
     var onClosed: (@MainActor () -> Void)?
@@ -116,7 +120,11 @@ final class GameBridge {
               let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
-            recordDrop()
+            let reason =
+                (body as? String)?.utf8.count.map {
+                    $0 > Self.maxMessageBytes ? "oversize" : "malformed"
+                } ?? "malformed"
+            recordDrop(reason: reason)
             return
         }
         let id = object["id"] as? String
@@ -128,7 +136,10 @@ final class GameBridge {
         }
         guard Self.knownTypes.contains(type) else {
             if let id { fail(id: id, code: .unsupported, message: "unknown type \(type)") }
-            else { log.d("Game bridge message ignored (unknown type \(type))") }
+            else {
+                log.d("Game bridge message ignored (unknown type \(type))")
+                recordDrop(reason: "unknown", type: type)
+            }
             return
         }
         let payload = object["payload"] as? [String: Any] ?? [:]
@@ -221,10 +232,11 @@ final class GameBridge {
         onSend?(script)
     }
 
-    private func recordDrop() {
+    private func recordDrop(reason: String = "malformed", type: String? = nil) {
         if !didRecordDrop {
             didRecordDrop = true
             log.w("Game bridge message dropped (unknown, malformed, or over 64 KB)")
+            onDropped?(reason, type)
         } else if log.isEnabled(.debug) {
             log.d("Game bridge message dropped (unknown, malformed, or over 64 KB)")
         }

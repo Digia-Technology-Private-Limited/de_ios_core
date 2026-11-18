@@ -86,12 +86,32 @@ final class GamificationOrchestrator: ObservableObject {
         rewardsLoading = rewardsResponse == nil
         rewardsRefreshTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            let start = Date()
             defer { self.rewardsRefreshTask = nil; self.rewardsLoading = false }
             switch await self.gameOutcomeSource.getRewards() {
             case .success(let response):
                 self.storeRewards(response)
             case .failure(let error):
                 log.d("Rewards fetch failed (\(error))")
+                let durationMs = Int(Date().timeIntervalSince(start) * 1000)
+                let (code, status): (String, Int?) = switch error {
+                case .httpStatus(let status):
+                    ("status", status)
+                case .invalidResponse:
+                    ("invalid_response", nil)
+                case .transport(let message):
+                    (message.lowercased().contains("timeout") ? "timeout" : "network", nil)
+                }
+                SDKInstance.shared.events.toDigia(
+                    GameRewardsFailedEvent(
+                        health: GameHealthContext(
+                            campaignId: "", skinId: "", skinVersion: 0,
+                            entry: "rewards"),
+                        op: "rewards", code: code, status: status,
+                        durationMs: durationMs),
+                    payload: CEPTriggerPayload(
+                        cepCampaignId: "rewards:refresh", campaignKey: "",
+                        cepMetadata: [:], variables: nil))
             }
         }
     }
@@ -168,11 +188,21 @@ final class GamificationOrchestrator: ObservableObject {
     /// dismisses the page (if open) and refreshes on close. The busy, SDK,
     /// skin and user checks live in `GameSurface`, which settles failures as
     /// the reason-coded `game_open_failed` event — never a toast.
+    ///
+    /// `chance.campaignId` is the backend campaign id, not the key, so the
+    /// lookup matches on `CampaignModel.id` first (the store and the rewards
+    /// map are both keyed by campaign key). Android keys its rewards map by
+    /// id and falls back to `findById`; this is the same lookup.
     func openGameForRewardsChance(_ chance: GameRewardChance) {
-        guard let campaign = sdk.campaignStore.find(chance.campaignId)
+        guard let campaign = rewardsCampaigns.values.first(where: { $0.id == chance.campaignId })
+            ?? sdk.campaignStore.all.first(where: { $0.id == chance.campaignId })
+            ?? sdk.campaignStore.find(chance.campaignId)
             ?? rewardsCampaigns[chance.campaignId],
             let config = campaign.gamificationConfig
-        else { return }
+        else {
+            log.w("Game skipped — unknown rewards campaign (campaignId=\(chance.campaignId))")
+            return
+        }
         NotificationCenter.default.post(name: .digiaDismissRewardsPage, object: nil)
         sdk.gameSurface.open(
             campaign: campaign, config: config, chanceId: chance.chanceId,
@@ -285,7 +315,10 @@ final class GamificationOrchestrator: ObservableObject {
             log.d("Gamification chance not granted (reason=\(reason))", campaign: campaignKey)
             sdk.liveTestContexts[cepCampaignId]?.reportFailed(DropReason.error, message: detail)
             sdk.events.toDigia(
-                GameOpenFailedEvent(reason: reason, denyReason: denyReason),
+                GameOpenFailedEvent(
+                    reason: reason, denyReason: denyReason,
+                    campaignId: campaign.id, skinId: config.skinId,
+                    skinVersion: config.skinVersion, entry: config.entryKind.rawValue),
                 payload: payload)
             sdk.coordinator.drop(
                 payload, reason: dropReason, detail: detail,
@@ -312,14 +345,14 @@ final class GamificationOrchestrator: ObservableObject {
         name: String,
         properties: [String: Any],
         payload: CEPTriggerPayload,
+        campaignId: String,
         skinId: String,
-        skinVersion: Int,
-        chanceId: String
+        skinVersion: Int
     ) {
         sdk.events.toDigia(
             GameSkinEvent(
-                name: name, skinId: skinId, skinVersion: skinVersion,
-                chanceId: chanceId, props: properties),
+                name: name, props: properties, campaignId: campaignId,
+                skinId: skinId, skinVersion: skinVersion),
             payload: payload)
     }
 }
