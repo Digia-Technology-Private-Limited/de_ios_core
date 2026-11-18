@@ -43,6 +43,17 @@ final class GamificationSurface {
     /// opens the game with this, never with a new grant.
     var chances = [String: GrantedChance]()
 
+    /// The campaign behind each shown entry, keyed by campaign key. A live
+    /// test's campaign leaves `liveTestCampaigns` once the entry is shown, so
+    /// a later tap or close resolves it from here.
+    private(set) var entryCampaigns = [String: CampaignModel]()
+
+    /// The campaign for `payload`: the live-test or stored campaign, else the
+    /// shown entry's.
+    func entryCampaign(_ payload: CEPTriggerPayload) -> CampaignModel? {
+        sdk.findCampaign(payload) ?? entryCampaigns[payload.campaignKey]
+    }
+
     /// Routes an accepted gamification campaign: the OS and SDK gates, then
     /// the trigger/user/live-test gates, then the entry kind. An
     /// unknown kind drops and never opens a game. Every kind runs the
@@ -166,6 +177,7 @@ final class GamificationSurface {
     ) {
         let key = campaign.campaignKey
         chances[key] = chance
+        entryCampaigns[key] = campaign
         let verdict: RoutingVerdict
         switch config.entryKind {
         case .inlineTeaser:
@@ -213,7 +225,7 @@ final class GamificationSurface {
     /// at the trigger — never with a new grantChance. A direct campaign has
     /// no entry canvas; a tap on one is ignored.
     func openFromEntry(_ payload: CEPTriggerPayload) {
-        guard let campaign = sdk.findCampaign(payload),
+        guard let campaign = entryCampaign(payload),
               let config = campaign.gamificationConfig
         else {
             gamificationSurfaceLog.d(
@@ -260,6 +272,7 @@ final class GamificationSurface {
     func clearForUserChange() {
         hiddenEntries.removeAll()
         chances.removeAll()
+        entryCampaigns.removeAll()
     }
 
     /// The floater's user close, wired to the orchestrator's `onUserClose`: a
@@ -267,6 +280,7 @@ final class GamificationSurface {
     /// when its campaign is a gamification one.
     func entryClosed(campaignKey: String) {
         let isGamification = sdk.campaignStore.find(campaignKey)?.gamificationConfig != nil
+            || entryCampaigns[campaignKey]?.gamificationConfig != nil
             || sdk.liveTestCampaigns.values.contains {
                 $0.campaignKey == campaignKey && $0.gamificationConfig != nil
             }
