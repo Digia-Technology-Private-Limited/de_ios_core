@@ -23,9 +23,12 @@ enum GamificationEntryCanvas: Equatable {
 struct GamificationConfig: Equatable {
     let skinId: String
     let skinVersion: Int
-    /// The skin's declared `bridgeVersion`. Compared against the SDK's by the
-    /// presentation; carried, never gated, here.
+    /// The skin's declared `bridgeVersion`. A skin newer than
+    /// `GameBridge.bridgeVersion` is never opened (see `bridgeSupported`).
     let bridgeVersion: Int?
+
+    /// Whether this SDK speaks the skin's bridge: absent means a skin of this SDK's era.
+    var bridgeSupported: Bool { (bridgeVersion ?? GameBridge.bridgeVersion) <= GameBridge.bridgeVersion }
     /// The skin's format, passed through to `init` unchanged. Never gates:
     /// an unknown or missing type still opens the skin.
     let format: GamificationFormat

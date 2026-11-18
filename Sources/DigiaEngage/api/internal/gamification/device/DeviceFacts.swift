@@ -54,6 +54,7 @@ struct GameDeviceInfo: Equatable, Sendable {
             "thermal": thermal,
             "lowPower": lowPower,
             "reducedMotion": reducedMotion,
+            "hapticsAllowed": hapticsAllowed,
             "soundAllowed": soundAllowed,
         ]
     }

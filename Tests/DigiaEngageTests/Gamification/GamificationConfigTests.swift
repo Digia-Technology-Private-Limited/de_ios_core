@@ -38,4 +38,17 @@ struct GamificationConfigTests {
         #expect(GamificationConfig.isNewer("4.3.2", than: "abc") == nil)
         #expect(GamificationConfig.isNewer("4.3.2.1", than: "4.3.2") == nil)
     }
+
+    @Test("the bridge gate passes absent or current versions and blocks newer")
+    func bridgeGate() {
+        // Guards `bridgeSupported` (VER-3): absent means current; newer never opens.
+        func config(_ version: Int?) -> GamificationConfig? {
+            var json = template()
+            if let version { json["bridgeVersion"] = version }
+            return GamificationConfig.fromJson(json)
+        }
+        #expect(config(nil)?.bridgeSupported == true)
+        #expect(config(GameBridge.bridgeVersion)?.bridgeSupported == true)
+        #expect(config(GameBridge.bridgeVersion + 1)?.bridgeSupported == false)
+    }
 }

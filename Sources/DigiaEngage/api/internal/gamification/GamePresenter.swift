@@ -136,12 +136,7 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Sends the session's `init`: once after the page loads, and again on a
     /// repeated `ready`. Each `init` fully resets the skin.
     func sendInit() {
-        // The fields go both under `payload` and flat beside `type`:
-        // skin bundles already deployed read them flat and must keep working.
-        var message = initMessage
-        message["type"] = "init"
-        message["payload"] = initMessage
-        send(message)
+        send(["type": "init", "payload": initMessage])
         // `init` is built unmuted; a skin that re-announces itself while muted
         // gets the muted facts right after it.
         if isMuted, let lastDevicePush { send(["type": "device", "payload": lastDevicePush]) }
@@ -220,6 +215,12 @@ final class GamePresentation: Identifiable, ObservableObject {
                 log.d("Game closed by skin (reason=\(reason))", campaign: self.request.campaignKey)
             }
             if let id { bridge.answer(id: id, payload: ["ok": true]) }
+            // A close before `ready` never showed the game: it is an open failure.
+            guard isReady else {
+                didFail(reason == "unsupported" ? .bridgeVersionUnsupported : .closedBeforeReady)
+                bridge.close()
+                return
+            }
             dismiss(reason: "skin")
         case .motionSubscribe(let id, let sensors, let hz):
             // Availability resolves for every sensor before any of them

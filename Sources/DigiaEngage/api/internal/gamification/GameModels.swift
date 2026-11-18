@@ -39,6 +39,10 @@ enum GameFailure: String, Equatable, Sendable {
     case unsupportedWebView
     /// A second open while a game is already open; the request never loads.
     case busy
+    /// The skin closed itself before `ready`: it cannot run on this SDK (VER-4).
+    case bridgeVersionUnsupported
+    /// The skin closed itself before `ready` for any other reason.
+    case closedBeforeReady
 
     var wireValue: String {
         switch self {
@@ -47,6 +51,8 @@ enum GameFailure: String, Equatable, Sendable {
         case .renderError: return "render_error"
         case .unsupportedWebView: return "unsupported_webview"
         case .busy: return "busy"
+        case .bridgeVersionUnsupported: return "bridge_version_unsupported"
+        case .closedBeforeReady: return "closed_before_ready"
         }
     }
 }
@@ -79,8 +85,6 @@ struct GameInitPayload {
         return [
             "bridgeVersion": GameBridge.bridgeVersion,
             "chanceId": chanceId,
-            // Flat beside `type` for skins built before the envelope: the
-            // whole message repeats flat there in `sendInit`.
             "campaignKey": campaignKey,
             "campaign": [
                 "id": campaignId, "campaignKey": campaignKey,

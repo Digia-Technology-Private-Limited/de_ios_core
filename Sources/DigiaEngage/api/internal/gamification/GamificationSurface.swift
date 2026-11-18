@@ -21,6 +21,7 @@ final class GamificationSurface: CampaignSurface {
     static let causeMissingConfig = "missing_config"
     static let causeUnsupportedOS = "unsupported_os"
     static let causeUnsupportedSDK = "unsupported_sdk"
+    static let causeBridgeVersionUnsupported = "bridge_version_unsupported"
     static let causeUnsupportedEntry = "unsupported_entry"
 
     init(_ sdk: SDKInstance) { self.sdk = sdk }
@@ -76,6 +77,11 @@ final class GamificationSurface: CampaignSurface {
         {
             return request.invalidConfig(
                 "gamification needs a newer SDK (min=\(required))", cause: Self.causeUnsupportedSDK)
+        }
+        guard config.bridgeSupported else {
+            return request.invalidConfig(
+                "gamification needs a newer SDK (bridgeVersion=\(config.bridgeVersion ?? 0))",
+                cause: Self.causeBridgeVersionUnsupported)
         }
         let campaign = request.campaign
         let payload = request.payload

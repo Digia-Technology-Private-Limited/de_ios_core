@@ -56,6 +56,15 @@ final class GameSurface {
                 reason: GamificationSurface.causeUnsupportedSDK)
             return
         }
+        if case .rewards = settle, !config.bridgeSupported {
+            log.w(
+                "Game not opened — needs a newer SDK (bridgeVersion=\(config.bridgeVersion ?? 0))",
+                campaign: campaignKey)
+            fail(
+                settle: settle, campaign: campaign, config: config,
+                reason: GamificationSurface.causeBridgeVersionUnsupported)
+            return
+        }
         // 3. Skin cache hit opens at once, else download-then-show.
         if let file = sdk.gamification.skinFileCache.cachedFile(
             skinId: config.skinId, version: config.skinVersion)
