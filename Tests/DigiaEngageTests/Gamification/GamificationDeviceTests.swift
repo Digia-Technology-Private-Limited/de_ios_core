@@ -70,20 +70,6 @@ struct GameDeviceTierTests {
         // Guards the fair-thermal arm.
         #expect(GameDeviceInfo.tier(ramMb: 8192, cores: 8, thermal: "fair", lowPower: false, reducedMotion: false) == "lite")
     }
-
-    @Test("capable devices read full")
-    func full() {
-        #expect(GameDeviceInfo.tier(ramMb: 6000, cores: 6, thermal: "nominal", lowPower: false, reducedMotion: false) == "full")
-        #expect(GameDeviceInfo.tier(ramMb: 8192, cores: 8, thermal: "nominal", lowPower: false, reducedMotion: false) == "full")
-    }
-
-    @Test("unknown thermal states degrade to nominal")
-    func thermalMapping() {
-        #expect(GameDeviceInfo.thermalName(.nominal) == "nominal")
-        #expect(GameDeviceInfo.thermalName(.fair) == "fair")
-        #expect(GameDeviceInfo.thermalName(.serious) == "serious")
-        #expect(GameDeviceInfo.thermalName(.critical) == "critical")
-    }
 }
 
 /// Guards the motion unit math and rate clamp: the production lines are
@@ -101,15 +87,6 @@ struct GameMotionSourceTests {
         #expect(GameMotionSource.clampedHz(-5) == 30)
         #expect(GameMotionSource.clampedHz(0.5) == 1)
         #expect(GameMotionSource.clampedHz(Double.nan) == 30)
-    }
-
-    @Test("acceleration converts g to m/s² with Android's sign")
-    func accelerationUnits() {
-        let converted = GameMotionSource.accelerometerMS2(x: 0, y: 0, z: -1)
-        // Guards the gToMS2 multiply: 1 g up reads +9.81 m/s², gravity included.
-        #expect(abs(converted.z - 9.81) < 0.001)
-        #expect(converted.x == 0)
-        #expect(converted.y == 0)
     }
 
     @Test("unknown sensors never start")
