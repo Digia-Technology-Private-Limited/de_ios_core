@@ -351,19 +351,15 @@ final class GameSurface {
     }
 
     /// Asks the backend `state` after a game opened from a floating entry
-    /// closes, then keeps or hides the floater on the main thread. With no
-    /// user the call is skipped and the floater hides.
+    /// closes, then keeps or hides the floater on the main thread. The floater
+    /// stays on screen through the round-trip — hiding it there flickers it
+    /// when the chance stays. With no user the call is skipped and the floater
+    /// hides.
     private func refreshFloatingEntryAfterClose(
         campaignKey: String, payload: CEPTriggerPayload
     ) {
-        // Out of sight at once; the round-trip only decides whether it returns.
-        if sdk.floaterStoryOrchestrator.state?.payload.cepCampaignId == payload.cepCampaignId {
-            sdk.floaterStoryOrchestrator.hold(true)
-        }
         refreshEntryAfterClose(campaignKey: campaignKey, payload: payload) { [weak self] in
             self?.hideFloatingEntry(campaignKey: campaignKey, payload: payload)
-        } onKept: { [weak self] in
-            self?.sdk.floaterStoryOrchestrator.hold(false)
         }
     }
 
