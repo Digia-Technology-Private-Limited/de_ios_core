@@ -1,24 +1,24 @@
 import Foundation
 
-/// A skin `event` forwarded to Digia analytics.
-///
-/// The skin's `name` is the event name; the skin's `props` plus the chance,
-/// skin, and skin-version identity ride as properties. Campaign id and type
-/// resolve from the store, like every other campaign event.
+/// A skin-defined game event (`event{name, props?}`). One fixed event name —
+/// the skin's own `name` and `props` ride inside — with the campaign and skin
+/// ids attached so the dashboard can attribute it.
 struct GameSkinEvent: EngageAnalyticsEvent {
     let name: String
+    let props: [String: Any]
+    let campaignId: String
     let skinId: String
     let skinVersion: Int
-    let chanceId: String
-    let props: [String: Any]
 
-    var eventName: String { name }
+    var eventName: String { "Digia Game Event" }
 
     var properties: [String: Any] {
-        var merged = props
-        merged["skin_id"] = skinId
-        merged["skin_version"] = skinVersion
-        merged["chance_id"] = chanceId
-        return merged
+        [
+            "name": name,
+            "props": props,
+            "campaignId": campaignId,
+            "skinId": skinId,
+            "skinVersion": skinVersion,
+        ]
     }
 }

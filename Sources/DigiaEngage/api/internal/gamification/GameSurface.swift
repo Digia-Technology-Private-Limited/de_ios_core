@@ -39,7 +39,7 @@ final class GameSurface {
         // as the backstop for a race between the check and the handoff.
         guard !GamePresenter.isBusy else {
             log.w("Game not opened — another game is already open", campaign: campaignKey)
-            fail(settle: settle, campaign: campaign, reason: PlayDropReason.busy)
+            fail(settle: settle, campaign: campaign, config: config, reason: PlayDropReason.busy)
             return
         }
         // 2. SDK compatibility recheck, rewards only: a presentation was
@@ -105,7 +105,7 @@ final class GameSurface {
         // 4. No user, no game.
         guard let userId = sdk.services?.identityManager.userId, !userId.isEmpty else {
             log.d("Game not opened — no user id", campaign: campaignKey)
-            fail(settle: settle, campaign: campaign, reason: PlayDropReason.missingConfig)
+            fail(settle: settle, campaign: campaign, config: config, reason: PlayDropReason.missingConfig)
             return
         }
         // 5–6. Build the request once and hand it to the presenter with the
@@ -121,7 +121,7 @@ final class GameSurface {
     /// so its acceptance watchdog stands down, every other policy degrades
     /// to the reason-coded `game_open_failed` event — never a toast —
     /// and an entry's teaser stays.
-    private func fail(settle: GameSettle, campaign: CampaignModel, reason: String) {
+    private func fail(settle: GameSettle, campaign: CampaignModel, config: GamificationConfig, reason: String) {
         switch settle {
         case .presentation(let payload, let entry):
             guard entry == .inlineTeaser || entry == .floating else {
@@ -129,11 +129,17 @@ final class GameSurface {
                 return
             }
             sdk.events.toDigia(
-                GameOpenFailedEvent(reason: reason, denyReason: nil),
+                GameOpenFailedEvent(
+                    reason: reason, denyReason: nil, campaignId: campaign.id,
+                    skinId: config.skinId, skinVersion: config.skinVersion,
+                    entry: entry.rawValue),
                 payload: payload)
         case .rewards(let chanceId):
             sdk.events.toDigia(
-                GameOpenFailedEvent(reason: reason, denyReason: nil),
+                GameOpenFailedEvent(
+                    reason: reason, denyReason: nil, campaignId: campaign.id,
+                    skinId: config.skinId, skinVersion: config.skinVersion,
+                    entry: "rewards"),
                 payload: Self.rewardsPayload(chanceId: chanceId, campaign: campaign))
         }
     }
@@ -166,7 +172,7 @@ final class GameSurface {
     /// The failure policy: a direct game dismisses so its acceptance
     /// watchdog stands down; every other policy degrades to the
     /// reason-coded `game_open_failed` event, never a toast.
-    private func failed(settle: GameSettle, campaign: CampaignModel, failure: GameFailure) {
+    private func failed(settle: GameSettle, campaign: CampaignModel, config: GamificationConfig, failure: GameFailure) {
         switch settle {
         case .presentation(let payload, let entry):
             guard entry == .inlineTeaser || entry == .floating else {
@@ -177,14 +183,20 @@ final class GameSurface {
                 "Game not opened (reason=\(failure.wireValue))",
                 campaign: campaign.campaignKey)
             sdk.events.toDigia(
-                GameOpenFailedEvent(reason: failure.wireValue, denyReason: nil),
+                GameOpenFailedEvent(
+                    reason: failure.wireValue, denyReason: nil,
+                    campaignId: campaign.id, skinId: config.skinId,
+                    skinVersion: config.skinVersion, entry: entry.rawValue),
                 payload: payload)
         case .rewards(let chanceId):
             log.w(
                 "Rewards game not opened (reason=\(failure.wireValue))",
                 campaign: campaign.campaignKey)
             sdk.events.toDigia(
-                GameOpenFailedEvent(reason: failure.wireValue, denyReason: nil),
+                GameOpenFailedEvent(
+                    reason: failure.wireValue, denyReason: nil,
+                    campaignId: campaign.id, skinId: config.skinId,
+                    skinVersion: config.skinVersion, entry: "rewards"),
                 payload: Self.rewardsPayload(chanceId: chanceId, campaign: campaign))
         }
     }
@@ -235,11 +247,14 @@ final class GameSurface {
         // need it back so a draft campaign answers. Derived here — never stored —
         // so it cannot mismatch the grant.
         let openTestInvocationId: String?
+        let entryValue: String
         switch settle {
-        case .presentation(let presentationPayload, _):
+        case .presentation(let presentationPayload, let entry):
             openTestInvocationId = testInvocationIdOf(presentationPayload.cepCampaignId)
+            entryValue = entry.rawValue
         case .rewards:
             openTestInvocationId = nil
+            entryValue = "rewards"
         }
         return GameOpenRequest(
             campaignKey: campaignKey,
@@ -255,10 +270,11 @@ final class GameSurface {
             showMute: config.showMute,
             onClose: { [weak self] in self?.closed(settle: settle, campaign: campaign) },
             onFailure: { [weak self] failure in
-                self?.failed(settle: settle, campaign: campaign, failure: failure)
+                self?.failed(settle: settle, campaign: campaign, config: config, failure: failure)
             },
             onShown: { [weak self] in self?.shown(settle: settle, campaign: campaign) },
             payload: payload,
+            entry: entryValue,
             values: config.values,
             slots: config.slots
         )
