@@ -49,7 +49,7 @@ struct GameBridgeTests {
         #expect(bridge.state == .idle)
         #expect(versions == [1])
 
-        // Guards the contract rule: no reply is ever sent for ready.
+        // A ready never gets a reply, even with an id.
         #expect(scripts.isEmpty)
     }
 
@@ -217,16 +217,23 @@ struct GameBridgeTests {
         #expect(payload["code"] as? String == "unsupported")
     }
 
-    @Test("unknown type without an id is ignored, not flagged")
-    func unknownTypeWithoutIdIgnored() throws {
+    @Test("unknown type without an id drops with the health event")
+    func unknownTypeWithoutIdDrops() throws {
         let bridge = makeBridge()
         var requests: [GameBridgeRequest] = []
+        var drops: [(reason: String, type: String?)] = []
         bridge.onRequest = { requests.append($0) }
+        bridge.onDropped = { drops.append(($0, $1)) }
 
         bridge.receive(msg("teleport"))
 
+        // Guards the id-less unsupported drop: flagged once, with the type,
+        // so the presenter reports game_bridge_dropped{reason:unknown}.
         #expect(requests.isEmpty)
-        #expect(!bridge.didRecordDrop)
+        #expect(bridge.didRecordDrop)
+        #expect(drops.count == 1)
+        #expect(drops.first?.reason == "unknown")
+        #expect(drops.first?.type == "teleport")
     }
 
     @Test("http parses method, path and optional body")
@@ -287,7 +294,7 @@ struct GameBridgeTests {
             Issue.record("request 1 is not log")
         }
         if case .haptics(_, let style) = requests[2] {
-            #expect(style == .error)
+            #expect(style == "error")
         } else {
             Issue.record("request 2 is not haptics")
         }
@@ -333,7 +340,7 @@ struct GameBridgeTests {
         bridge.onRequest = { requests.append($0) }
         bridge.onSend = { scripts.append($0) }
 
-        // No id: dropped.
+        // No id: dropped, except haptics which forwards without a reply.
         bridge.receive(msg("haptics", payload: ["style": "buzz"]))
         bridge.receive(msg("action", payload: ["action": "openLink", "url": "javascript:alert(1)"]))
         bridge.receive(msg("action", payload: ["action": "copy"]))
@@ -343,7 +350,12 @@ struct GameBridgeTests {
         bridge.receive(msg("sensor.start", id: "t", payload: ["sensor": "lidar"]))
         bridge.receive(msg("storage.get", id: "g", payload: [:]))
 
-        #expect(requests.isEmpty)
+        #expect(requests.count == 1)
+        if case .haptics(_, let style) = requests.first {
+            #expect(style == "buzz")
+        } else {
+            Issue.record("haptics buzz was not forwarded")
+        }
         #expect(scripts.count == 4)
         for script in scripts {
             let reply = try received(script)

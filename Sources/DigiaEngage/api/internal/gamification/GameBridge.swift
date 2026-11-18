@@ -14,16 +14,16 @@ enum GameBridgeErrorCode: String, Sendable, Error {
     case `internal`
 }
 
-/// One typed skin→native message the presentation handles. `action.*` carries
-/// an optional id: answered with `result {ok:true}` when present, silent
-/// otherwise. `event`, `log` and `haptics` are always silent, even when they
-/// carry an id, per the bridge contract. `ready` never reaches here — the
-/// bridge answers nothing for it; the first one fires the init flow.
+/// One typed skin→native message the presentation handles. `event`, `log`
+/// and `haptics` never get a reply, even with an id; `ready` never reaches
+/// here — the bridge answers nothing for it; the first one fires the init
+/// flow. `action.*` carries an optional id: answered with `result {ok:true}`
+/// when present, silent otherwise.
 enum GameBridgeRequest {
     case http(id: String, method: String, path: String, body: [String: Any]?)
     case event(id: String?, name: String, props: [String: Any])
     case log(id: String?, level: String, message: String)
-    case haptics(id: String?, style: GameHapticStyle)
+    case haptics(id: String?, style: String)
     case sensorStart(id: String, sensor: String, hz: Double)
     case sensorStop(id: String, sensor: String)
     case storageGet(id: String, key: String)
@@ -54,8 +54,8 @@ enum GameBridgeRequest {
 /// (no usable id) is dropped.
 @MainActor
 final class GameBridge {
-    /// The SDK's bridge version. A skin declaring a higher one is refused
-    /// before it can play (the presentation closes as a failure).
+    /// The SDK's bridge version. Informational: any skin version is
+    /// accepted.
     nonisolated static let bridgeVersion = 1
     /// Seconds from load start to `ready` before the container closes quietly.
     nonisolated static let readyTimeoutSeconds = 5.0
@@ -80,6 +80,10 @@ final class GameBridge {
     /// Fires on every `ready` past the first, with the declared version: the
     /// same init is re-sent.
     var onRepeatedReady: (@MainActor (Int) -> Void)?
+    /// Fires once, when the first message is dropped, with the reason
+    /// (`oversize`, `malformed` or `unknown`) and the request type when one
+    /// was read. The presentation reports it as `game_bridge_dropped`.
+    var onDropped: (@MainActor (String, String?) -> Void)?
     /// Fires once, when the session reaches `closed` via close or teardown.
     /// Timeout close fires `onFailed` instead — never both.
     var onClosed: (@MainActor () -> Void)?
@@ -118,7 +122,11 @@ final class GameBridge {
               let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
-            recordDrop()
+            let reason: String = {
+                guard let text = body as? String else { return "malformed" }
+                return text.utf8.count > Self.maxMessageBytes ? "oversize" : "malformed"
+            }()
+            recordDrop(reason: reason)
             return
         }
         let id = object["id"] as? String
@@ -130,7 +138,10 @@ final class GameBridge {
         }
         guard Self.knownTypes.contains(type) else {
             if let id { fail(id: id, code: .unsupported, message: "unknown type \(type)") }
-            else { log.d("Game bridge message ignored (unknown type \(type))") }
+            else {
+                log.d("Game bridge message ignored (unknown type \(type))")
+                recordDrop(reason: "unknown", type: type)
+            }
             return
         }
         let payload = object["payload"] as? [String: Any] ?? [:]
@@ -155,6 +166,10 @@ final class GameBridge {
                 onRepeatedReady?(version)
             }
             // No reply is ever sent for `ready`, even when it carries an id.
+            return
+        }
+        if type == "event" || type == "log" || type == "haptics" {
+            handleNotification(type: type, id: id, payload: payload)
             return
         }
         guard let request = Self.parse(type: type, id: id, payload: payload) else {
@@ -220,10 +235,11 @@ final class GameBridge {
         onSend?(script)
     }
 
-    private func recordDrop() {
+    private func recordDrop(reason: String = "malformed", type: String? = nil) {
         if !didRecordDrop {
             didRecordDrop = true
             log.w("Game bridge message dropped (unknown, malformed, or over 64 KB)")
+            onDropped?(reason, type)
         } else if log.isEnabled(.debug) {
             log.d("Game bridge message dropped (unknown, malformed, or over 64 KB)")
         }
@@ -243,21 +259,6 @@ final class GameBridge {
             else { return nil }
             if let body = payload["body"], !(body is [String: Any]) { return nil }
             return .http(id: id, method: method, path: path, body: payload["body"] as? [String: Any])
-        case "event":
-            guard let name = payload.nonBlankString("name") else { return nil }
-            if let props = payload["props"], !(props is [String: Any]) { return nil }
-            return .event(id: id, name: name, props: payload["props"] as? [String: Any] ?? [:])
-        case "log":
-            guard let level = payload.nonBlankString("level"),
-                  GameLogLevel(rawValue: level) != nil,
-                  let message = payload["message"] as? String
-            else { return nil }
-            return .log(id: id, level: level, message: message)
-        case "haptics":
-            guard let raw = payload.nonBlankString("style"),
-                  let style = GameHapticStyle(rawValue: raw)
-            else { return nil }
-            return .haptics(id: id, style: style)
         case "sensor.start":
             guard let id,
                   let sensor = payload.nonBlankString("sensor"),
@@ -266,8 +267,7 @@ final class GameBridge {
             return .sensorStart(id: id, sensor: sensor, hz: GameMotionSource.clampedHz(number(payload["hz"])))
         case "sensor.stop":
             guard let id,
-                  let sensor = payload.nonBlankString("sensor"),
-                  sensor == GameMotionSource.gyroscopeName || sensor == GameMotionSource.accelerometerName
+                  let sensor = payload.nonBlankString("sensor")
             else { return nil }
             return .sensorStop(id: id, sensor: sensor)
         case "storage.get":
@@ -283,6 +283,35 @@ final class GameBridge {
             return .storageRemove(id: id, key: key)
         default:
             return nil
+        }
+    }
+
+    /// `event`, `log` and `haptics` never get a reply, even with an id.
+    /// Invalid forms are ignored: an event with no name or bad props, a log
+    /// with no message, or a haptics call with no style does nothing. An
+    /// unknown log level is treated as debug; an unknown haptic style runs
+    /// through and no-ops in the player.
+    private func handleNotification(type: String, id: String?, payload: [String: Any]) {
+        switch type {
+        case "event":
+            guard let name = payload.nonBlankString("name") else {
+                log.d("Game event ignored (missing name)")
+                return
+            }
+            guard payload["props"] == nil || payload["props"] is [String: Any] else {
+                log.d("Game event ignored (bad props)")
+                return
+            }
+            onRequest?(.event(id: id, name: name, props: payload["props"] as? [String: Any] ?? [:]))
+        case "log":
+            guard let message = payload["message"] as? String, !message.isEmpty else { return }
+            let level = payload.nonBlankString("level") ?? "debug"
+            onRequest?(.log(id: id, level: level, message: message))
+        case "haptics":
+            guard let style = payload.nonBlankString("style") else { return }
+            onRequest?(.haptics(id: id, style: style))
+        default:
+            break
         }
     }
 
@@ -460,13 +489,5 @@ final class GameBridge {
         let double = value.doubleValue
         return double.isFinite ? double : nil
     }
-}
 
-/// Skin `log` levels. Parsed here so the bridge rejects anything
-/// else as `invalid` before the presentation maps to ``DigiaLogger``.
-private enum GameLogLevel: String {
-    case debug
-    case info
-    case warn
-    case error
 }

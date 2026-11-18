@@ -37,8 +37,6 @@ enum GameFailure: String, Equatable, Sendable {
     case bundleLoadFailed
     case renderError
     case unsupportedWebView
-    /// The skin declared a bridge version above the SDK's.
-    case bridgeUnsupported
     /// A second open while a game is already open; the request never loads.
     case busy
 
@@ -48,7 +46,6 @@ enum GameFailure: String, Equatable, Sendable {
         case .bundleLoadFailed: return "bundle_load_failed"
         case .renderError: return "render_error"
         case .unsupportedWebView: return "unsupported_webview"
-        case .bridgeUnsupported: return "bridge_version_unsupported"
         case .busy: return "busy"
         }
     }
@@ -155,9 +152,15 @@ struct GameOpenRequest {
     var onShown: (@MainActor () -> Void)?
     /// The payload this delivery was routed with, for skin-event analytics.
     var payload: CEPTriggerPayload
+    /// `direct`, `inlineTeaser`, `floating` or `rewards`. Carried for the
+    /// `game_` health events.
+    var entry: String
+    /// The campaign theme family, when the host sets none.
+    var themeFontFamily: String?
+    /// The campaign theme fonts.
+    var themeFonts: [[String: String]] = []
     /// `init.values`: the marketer's field values, carried opaquely.
     var values: [String: JSONValue] = [:]
-    /// `init.slots`: outcome-keyed slot values, only for formats that map
-    /// outcomes to slots.
+    /// `init.slots`: outcome-keyed slot values, read whenever present.
     var slots: [GamificationSlotConfig] = []
 }
