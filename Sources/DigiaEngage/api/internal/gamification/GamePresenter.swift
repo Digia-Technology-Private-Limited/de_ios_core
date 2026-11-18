@@ -44,6 +44,12 @@ final class GamePresentation: Identifiable, ObservableObject {
     private var lastViewport: (width: Double, height: Double, safeArea: GameSafeArea)?
     private var lastDevicePush: [String: Any]?
     private var observers: [NSObjectProtocol] = []
+    /// The slow device-facts re-collect while the game is open. Cancelled
+    /// with the observers when the session settles.
+    private var devicePollTask: Task<Void, Never>?
+    /// Why the game is closing (`user`, `skin` or `cta`): set by `dismiss`,
+    /// read by `didClose` for the funnel's Dismissed reason.
+    private var closeReason = "user"
 
     init?(request: GameOpenRequest) {
         var isDirectory: ObjCBool = false
@@ -54,13 +60,22 @@ final class GamePresentation: Identifiable, ObservableObject {
         self.id = request.campaignKey
         self.entryFile = request.entryFile
         self.bundleRoot = request.bundleRoot
+        GameSkinStorage.migrateLegacyNamespace(
+            defaults: Self.storageDefaults,
+            projectId: request.projectId, skinId: request.skinId,
+            identity: request.userId)
         self.storage = GameSkinStorage(
             defaults: Self.storageDefaults,
             namespace: GameSkinStorage.namespace(
-                projectId: request.projectId, skinId: request.skinId, userId: request.userId))
+                projectId: request.projectId, skinId: request.skinId, identity: request.userId))
         self.initMessage = Self.initMessage(for: request)
         bridge.onReady = { [weak self] version in self?.didBecomeReady(version: version) }
-        bridge.onRepeatedReady = { [weak self] _ in self?.sendInit() }
+        bridge.onRepeatedReady = { [weak self] _ in
+            self?.sendInit()
+            // A skin re-announcing itself on an open game gets the current
+            // state again, like Android's ready-on-open init-then-resume.
+            if self?.bridge.state == .idle { self?.pushLifecycle("resume") }
+        }
         bridge.onRequest = { [weak self] request in self?.handle(request) }
         bridge.onSend = { [weak self] script in self?.evaluate(script) }
         bridge.onClosed = { [weak self] in self?.didClose() }
@@ -127,12 +142,10 @@ final class GamePresentation: Identifiable, ObservableObject {
         case .log(_, let level, let message):
             emitSkinLog(level: level, message: message)
         case .haptics(_, let style):
-            if let haptic = GameHapticStyle(rawValue: style) {
-                if !haptics.play(haptic) {
-                    log.d("Game haptic dropped (style=\(style))", campaign: self.request.campaignKey)
-                }
-            } else {
-                log.d("Game haptic ignored (style=\(style))", campaign: self.request.campaignKey)
+            // Unknown styles never reach here: the intake drops them, so the
+            // sink is never invoked for one.
+            if !haptics.play(style) {
+                log.d("Game haptic dropped (style=\(style.rawValue))", campaign: self.request.campaignKey)
             }
         case .sensorStart(let id, let sensor, let hz):
             let started = motion.start(sensor: sensor, hz: hz) { [weak self] event in
@@ -171,26 +184,29 @@ final class GamePresentation: Identifiable, ObservableObject {
             storage.remove(key)
             if let id { bridge.answer(id: id) }
         case .actionCopy(let id, let text):
-            runSkinAction(id: id, action: .copyToClipboard(text))
-        case .actionOpenLink(let id, let url):
+            runSkinAction(id: id, action: .copyToClipboard(text), op: "copy")
+        case .actionOpenLink(let id, let op, let url):
             // The container closes first, then the host opens the link.
+            // Every CTA run counts one click, like Android's onCta.
             if let id { bridge.answer(id: id, payload: ["ok": true]) }
-            dismiss()
+            request.onCta?(op)
+            dismiss(reason: "cta")
             runSkinActionAfterClose(action: .openUrl(url.absoluteString))
         case .actionOpenDeeplink(let id, let url):
             if let id { bridge.answer(id: id, payload: ["ok": true]) }
-            dismiss()
+            request.onCta?("deeplink")
+            dismiss(reason: "cta")
             runSkinActionAfterClose(action: .openDeeplink(url.absoluteString))
         case .actionShare(let id, let text):
-            runSkinAction(id: id, action: .share(text))
+            runSkinAction(id: id, action: .share(text), op: "share")
         case .actionCustomKV(let id, let payload):
-            runSkinAction(id: id, action: .customKV(payload))
+            runSkinAction(id: id, action: .customKV(payload), op: "customKV")
         case .actionClose(let id, let reason):
             if let reason, !reason.isEmpty {
                 log.d("Game closed by skin (reason=\(reason))", campaign: self.request.campaignKey)
             }
             if let id { bridge.answer(id: id, payload: ["ok": true]) }
-            dismiss()
+            dismiss(reason: "skin")
         case .motionSubscribe(let id, let sensors, let hz):
             // Availability resolves for every sensor before any of them
             // streams, so a missing sensor fails the whole subscribe —
@@ -212,15 +228,17 @@ final class GamePresentation: Identifiable, ObservableObject {
             // A dismiss step closes the game like a legacy close; `openGame`
             // has no entry canvas here, so it stays a no-op. Answered only
             // once the steps have run — or not at all, when the skin sent no
-            // id or the game closed mid-execution.
+            // id or the game closed mid-execution. A steps run counts one
+            // click, like one single-op CTA run.
             Task { @MainActor [weak self] in
                 guard let self, self.bridge.state != .closed else { return }
                 await SDKInstance.shared.executeActionFlow(
                     actions, variables: nil, campaignKey: self.request.campaignKey,
                     localActionExecutor: LocalActionExecutor(
-                        dismiss: { [weak self] in self?.dismiss() }))
+                        dismiss: { [weak self] in self?.dismiss(reason: "skin") }))
                 guard self.bridge.state != .closed else { return }
                 if let id { self.bridge.answer(id: id, payload: ["ok": true]) }
+                self.request.onCta?("steps")
             }
         }
     }
@@ -228,16 +246,18 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Runs one skin `action` op through the same executor the canvas uses, so
     /// host handlers behave exactly as for any other campaign action. Answered
     /// only once the action has run — or not at all, when the skin sent no id
-    /// or the game closed mid-execution.
-    private func runSkinAction(id: String?, action: EngageAction) {
+    /// or the game closed mid-execution. A run counts one click, like
+    /// Android's `onCta` — including id-less runs, which still tapped.
+    private func runSkinAction(id: String?, action: EngageAction, op: String) {
         Task { @MainActor [weak self] in
             guard let self, self.bridge.state != .closed else { return }
             await SDKInstance.shared.executeActionFlow(
                 [action], variables: nil, campaignKey: self.request.campaignKey,
                 localActionExecutor: LocalActionExecutor(
-                    dismiss: { [weak self] in self?.dismiss() }))
+                    dismiss: { [weak self] in self?.dismiss(reason: "skin") }))
             guard self.bridge.state != .closed else { return }
             if let id { self.bridge.answer(id: id, payload: ["ok": true]) }
+            self.request.onCta?(op)
         }
     }
 
@@ -255,58 +275,77 @@ final class GamePresentation: Identifiable, ObservableObject {
         }
     }
 
-    /// One generic skin backend call. The path allowlist is the gate; the 200
-    /// envelope returns unchanged, and anything else answers by kind.
+    /// One generic skin backend call. The method and path ride verbatim from
+    /// the intake: a missing one answers `invalid`, a denied path answers
+    /// `forbidden`, and anything but exact `GET`/`POST` answers `invalid` —
+    /// each with its `game_http_failed`, like Android's session — before the
+    /// call below runs. The 200 envelope returns unchanged, and anything else
+    /// answers by kind.
     private func performHttp(id: String, method: String, path: String, body: [String: Any]?) {
-        guard let validated = GameHttpBridge.validatedPath(path) else {
-            bridge.fail(id: id, code: .forbidden, message: "forbidden path")
+        let start = Date()
+        func reject(code: GameBridgeErrorCode) {
+            bridge.fail(id: id, code: code, message: self.httpErrorMessage(code))
+            let failed = GameHttpBridge.rejectedCall(method: method, path: path, code: code)
+            SDKInstance.shared.events.toDigia(
+                GameHttpFailedEvent(
+                    health: self.health, method: failed.method, path: failed.path,
+                    code: failed.code.rawValue, status: failed.status,
+                    durationMs: Int(Date().timeIntervalSince(start) * 1000)),
+                payload: self.request.payload)
+        }
+        guard !method.isEmpty, !path.isEmpty else {
+            reject(code: .invalid)
             return
         }
-        guard let httpMethod = GameHttpBridge.httpMethod(method) else {
-            bridge.fail(id: id, code: .invalid, message: "method must be GET or POST")
+        guard let validated = GameHttpBridge.validatedPath(path) else {
+            reject(code: .forbidden)
             return
         }
         // A live-test game carries its invocation into the skin's POST `state`
         // call: without it a draft campaign refuses `notFound` even though
         // `play` on the chance works. Organic games send byte-identical bodies.
         var body = body ?? [:]
-        if validated == "state", httpMethod == .post,
+        if validated == "state", method == "POST",
            let tid = request.testInvocationId, !tid.isEmpty,
            body["testInvocationId"] == nil
         {
             body["testInvocationId"] = tid
         }
         // Encoded before the hop: `[String: Any]` is not Sendable, `Data` is.
-        let payload: Data?
-        switch httpMethod {
-        case .post:
+        let payloadData: Data?
+        switch method {
+        case "POST":
             guard let data = GameHttpBridge.jsonData(body) else {
                 bridge.fail(id: id, code: .internal, message: "request not JSON")
                 return
             }
-            payload = data
-        case .get:
-            payload = nil
+            payloadData = data
+        case "GET":
+            payloadData = nil
+        default:
+            reject(code: .invalid)
+            return
         }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let start = Date()
             let result = await GameHttpBridge.send(
                 client: SDKInstance.shared.networkClient,
                 baseUrl: DigiaEndpoints.baseUrl,
                 headers: SDKInstance.shared.requestHeaders,
-                method: httpMethod, path: validated, body: payload)
+                method: method, path: validated, body: payloadData)
             guard self.bridge.state != .closed else { return }
             switch result {
-            case .success(let envelope):
-                self.bridge.answer(id: id, payload: envelope)
-            case .failure(let code):
-                self.bridge.fail(id: id, code: code, message: self.httpErrorMessage(code))
+            case .success(let success):
+                self.bridge.answer(id: id, payload: success.envelope)
+            case .failure(let failure):
+                self.bridge.fail(id: id, code: failure.code, message: self.httpErrorMessage(failure.code))
+                let failed = GameHttpBridge.failedCall(method: method, path: validated, failure: failure)
                 let durationMs = Int(Date().timeIntervalSince(start) * 1000)
                 SDKInstance.shared.events.toDigia(
                     GameHttpFailedEvent(
-                        health: self.health, method: method, path: validated,
-                        code: code.rawValue, status: nil, durationMs: durationMs),
+                        health: self.health, method: failed.method, path: failed.path,
+                        code: failed.code.rawValue, status: failed.status,
+                        durationMs: durationMs),
                     payload: self.request.payload)
             }
         }
@@ -355,16 +394,18 @@ final class GamePresentation: Identifiable, ObservableObject {
         ])
     }
 
-    private func pushesEqual(_ left: [String: Any], _ right: [String: Any]?) -> Bool {
-        guard let right else { return false }
+    /// Whether the next pushed `device` facts differ from the last push.
+    /// Pure, so the shared case-table run pins the change gate without a game.
+    static func devicePushChanged(_ next: [String: Any], from last: [String: Any]?) -> Bool {
+        guard let last else { return true }
         // Push payloads are flat JSON scalars; NSDictionary equality is exact.
-        return NSDictionary(dictionary: left).isEqual(to: right)
+        return !NSDictionary(dictionary: next).isEqual(to: last)
     }
 
-    private func pushDeviceIfChanged() {
-        let info = GameDeviceInfo.current(sdkVersion: sdkVersion)
+    private func pushDeviceIfChanged(_ info: GameDeviceInfo? = nil) {
+        let info = info ?? GameDeviceInfo.current(sdkVersion: sdkVersion)
         let push = info.pushPayload
-        guard !pushesEqual(push, lastDevicePush) else { return }
+        guard Self.devicePushChanged(push, from: lastDevicePush) else { return }
         lastDevicePush = push
         send(["type": "device", "payload": push])
     }
@@ -460,9 +501,22 @@ final class GamePresentation: Identifiable, ObservableObject {
             },
         ]
         lastDevicePush = GameDeviceInfo.current(sdkVersion: sdkVersion).pushPayload
+        // Thermal, power-save and reduced-motion changes do not move the
+        // viewport: re-collect on a slow tick while the game is open, so
+        // `device` pushes still fire (B21). `pushDeviceIfChanged` pushes only
+        // when the pushed subset changed, so the tick is one cheap collect.
+        devicePollTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(GameBridge.deviceFactsPollSeconds * 1_000_000_000))
+                guard let self else { return }
+                if self.bridge.state == .idle { self.pushDeviceIfChanged() }
+            }
+        }
     }
 
     private func removeObservers() {
+        devicePollTask?.cancel()
+        devicePollTask = nil
         let center = NotificationCenter.default
         for observer in observers { center.removeObserver(observer) }
         observers = []
@@ -488,8 +542,12 @@ final class GamePresentation: Identifiable, ObservableObject {
         bridge.close()
     }
 
-    /// Native close affordance. The bridge fires `onClosed`, which settles.
-    func dismiss() {
+    /// Native close affordance, and the skin `close` and CTA-handoff paths.
+    /// `reason` is `user` for the close button and back, `skin` for the
+    /// skin's own `close`, `cta` for a handoff op — the funnel's Dismissed
+    /// reason. The bridge fires `onClosed`, which settles.
+    func dismiss(reason: String = "user") {
+        closeReason = reason
         pushLifecycle("pause")
         motion.stopAll()
         bridge.close()
@@ -525,16 +583,20 @@ final class GamePresentation: Identifiable, ObservableObject {
     }
 
     /// A visible game plays its exit animation first, then settles once.
+    /// The close reason (`user`, `skin` or `cta`) rides to the funnel.
     private func didClose() {
         guard !didFinish, !isClosing else { return }
         guard isReady else {
-            finish(report: { [request] in request.onClose?() })
+            finish(report: { [request, closeReason] in request.onClose?(closeReason) })
             return
         }
         isClosing = true
         let delay = GameMotion.exitDuration
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            self?.finish(report: { [request = self?.request] in request?.onClose?() })
+            guard let self else { return }
+            let request = self.request
+            let reason = self.closeReason
+            self.finish(report: { request.onClose?(reason) })
         }
     }
 

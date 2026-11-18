@@ -188,8 +188,10 @@ struct SkinFileCache: Sendable {
 
     /// Prefetches skins fire-and-forget: already-cached entries are skipped,
     /// failures are logged and dropped, and the next trigger retries.
+    /// Cooperative with cancellation: a torn-down SDK stops between skins.
     func prefetch(_ skins: [(bundleUrl: String, skinId: String, version: Int)]) async {
         for skin in skins {
+            if Task.isCancelled { return }
             if cachedFile(skinId: skin.skinId, version: skin.version) != nil { continue }
             do {
                 _ = try await download(

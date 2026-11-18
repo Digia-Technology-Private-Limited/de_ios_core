@@ -3,8 +3,9 @@ import Testing
 
 @testable import DigiaEngage
 
-/// Guards the skin `minSdkVersion` gate: the production lines are the
-/// `isNewer` comparison and the parse-time skip in `fromJson`.
+/// Guards the skin `minSdkVersion` handling: the production lines are the
+/// `isNewer` comparison, the parse-time keep (routing and the rewards surface
+/// own the gate), and the lenient unreadable-requirement arm.
 @Suite("Gamification config", .tags(.unit, .game))
 struct GamificationConfigTests {
     private func template(minSdkVersionIos: String? = nil) -> [String: Any] {
@@ -21,10 +22,13 @@ struct GamificationConfigTests {
         ]
     }
 
-    @Test("a skin needing a newer SDK skips the campaign")
-    func newerSdkSkips() {
-        // Guards the isNewer gate in fromJson against the SDK's own version.
-        #expect(GamificationConfig.fromJson(template(minSdkVersionIos: "99.0")) == nil)
+    @Test("a skin needing a newer SDK parses, keeping its requirement")
+    func newerSdkParses() {
+        // Guards the label rule: the game type and SDK requirement never drop
+        // the campaign at parse time — routing refuses it as unsupported_sdk,
+        // and the rewards surface rechecks at open.
+        let parsed = GamificationConfig.fromJson(template(minSdkVersionIos: "99.0"))
+        #expect(parsed?.minSdkVersion == "99.0")
     }
 
     @Test("a skin within this SDK parses, keeping its requirement")

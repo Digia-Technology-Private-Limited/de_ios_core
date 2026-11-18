@@ -162,15 +162,25 @@ struct GameBridgeTests {
         #expect(requests.isEmpty)
     }
 
-    @Test("over-limit message is dropped, once flagged")
+    @Test("over-limit message drops through the real entry, once")
     func oversizedDropped() throws {
         let bridge = makeBridge()
+        var drops: [(reason: String, type: String?)] = []
+        bridge.onDropped = { drops.append(($0, $1)) }
         let big = String(repeating: "x", count: GameBridge.maxMessageBytes + 1)
 
-        // Guards the `utf8.count <= maxMessageBytes` check in receive.
+        // Guards the size check in receive: an oversize skin message never
+        // parses, and the first one reports game_bridge_dropped{reason:oversize}.
         bridge.receive(msg("ready", payload: ["pad": big]))
         #expect(bridge.state == .loading)
         #expect(bridge.didRecordDrop)
+        #expect(drops.count == 1)
+        #expect(drops.first?.reason == "oversize")
+        #expect(drops.first?.type == nil)
+
+        // A second oversize is still a drop, but reports nothing more.
+        bridge.receive(msg("ready", payload: ["pad": big]))
+        #expect(drops.count == 1)
     }
 
     @Test("malformed messages are dropped")
@@ -236,6 +246,29 @@ struct GameBridgeTests {
         #expect(drops.first?.type == "teleport")
     }
 
+    @Test("id-less invalid and unsupported messages drop with the health event")
+    func idlessRejectsDrop() {
+        let bridge = makeBridge()
+        var requests: [GameBridgeRequest] = []
+        var drops: [(reason: String, type: String?)] = []
+        bridge.onRequest = { requests.append($0) }
+        bridge.onDropped = { drops.append(($0, $1)) }
+
+        // Guards every id-less reject path: each flags the drop once with
+        // reason unknown and the type that was read, so the presenter reports
+        // game_bridge_dropped for malformed skins instead of undercounting.
+        bridge.receive(msg("action", payload: ["op": "explode"]))
+        bridge.receive(msg("action", payload: ["op": "copy"]))
+        bridge.receive(msg("motion", payload: ["op": "subscribe"]))
+        bridge.receive(msg("storage", payload: ["op": "wipe"]))
+
+        #expect(requests.isEmpty)
+        #expect(bridge.didRecordDrop)
+        #expect(drops.count == 1)
+        #expect(drops.first?.reason == "unknown")
+        #expect(drops.first?.type == "action")
+    }
+
     @Test("http parses method, path and optional body")
     func httpParses() throws {
         let bridge = makeBridge()
@@ -294,7 +327,7 @@ struct GameBridgeTests {
             Issue.record("request 1 is not log")
         }
         if case .haptics(_, let style) = requests[2] {
-            #expect(style == "error")
+            #expect(style == .error)
         } else {
             Issue.record("request 2 is not haptics")
         }
@@ -303,8 +336,9 @@ struct GameBridgeTests {
         } else {
             Issue.record("request 3 is not copy")
         }
-        if case .actionOpenLink(let id, let url) = requests[4] {
+        if case .actionOpenLink(let id, let op, let url) = requests[4] {
             #expect(id == "o")
+            #expect(op == "openLink")
             #expect(url.absoluteString == "https://example.com/a")
         } else {
             Issue.record("request 4 is not openLink")
@@ -325,10 +359,11 @@ struct GameBridgeTests {
 
         bridge.receive(msg("action", id: "d", payload: ["action": "openLink", "url": "medihub://cart"]))
 
-        guard case .actionOpenLink(_, let url) = requests.first else {
+        guard case .actionOpenLink(_, let op, let url) = requests.first else {
             Issue.record("deep link was not accepted")
             return
         }
+        #expect(op == "openLink")
         #expect(url.absoluteString == "medihub://cart")
     }
 
@@ -340,7 +375,8 @@ struct GameBridgeTests {
         bridge.onRequest = { requests.append($0) }
         bridge.onSend = { scripts.append($0) }
 
-        // No id: dropped, except haptics which forwards without a reply.
+        // No id: dropped — including an unknown haptic style, which the
+        // intake filters before the player, so the sink stays untouched.
         bridge.receive(msg("haptics", payload: ["style": "buzz"]))
         bridge.receive(msg("action", payload: ["action": "openLink", "url": "javascript:alert(1)"]))
         bridge.receive(msg("action", payload: ["action": "copy"]))
@@ -350,12 +386,7 @@ struct GameBridgeTests {
         bridge.receive(msg("sensor.start", id: "t", payload: ["sensor": "lidar"]))
         bridge.receive(msg("storage.get", id: "g", payload: [:]))
 
-        #expect(requests.count == 1)
-        if case .haptics(_, let style) = requests.first {
-            #expect(style == "buzz")
-        } else {
-            Issue.record("haptics buzz was not forwarded")
-        }
+        #expect(requests.isEmpty)
         #expect(scripts.count == 4)
         for script in scripts {
             let reply = try received(script)
@@ -477,10 +508,12 @@ struct GameBridgeTests {
         else { Issue.record("request 0 is not copy") }
         if case .actionCopy(_, let text) = requests[1] { #expect(text == "CODE") }
         else { Issue.record("request 1 is not legacy copy") }
-        if case .actionOpenLink(_, let url) = requests[2] {
+        if case .actionOpenLink(_, let op, let url) = requests[2] {
+            #expect(op == "openUrl")
             #expect(url.absoluteString == "https://example.com/a")
         } else { Issue.record("request 2 is not openUrl") }
-        if case .actionOpenLink(_, let url) = requests[3] {
+        if case .actionOpenLink(_, let op, let url) = requests[3] {
+            #expect(op == "openLink")
             #expect(url.absoluteString == "https://example.com/a")
         } else { Issue.record("request 3 is not legacy openLink") }
         if case .actionOpenDeeplink(_, let url) = requests[4] {

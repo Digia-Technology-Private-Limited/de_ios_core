@@ -46,6 +46,12 @@ final class GamificationOrchestrator: ObservableObject {
     private var rewardsCampaigns: [String: CampaignModel] = [:]
     private var rewardsRefreshTask: Task<Void, Never>?
 
+    /// In-flight skin prefetches. Stored so they die with the SDK instead of
+    /// leaking on a never-cancelled scope: cancelled on user change and test
+    /// reset, like Android's SDK-scoped prefetcher. Entries reap themselves
+    /// when their prefetch lands, so the map never grows.
+    private var prefetchTasks: [UUID: Task<Void, Never>] = [:]
+
     init(sdk: SDKInstance) {
         self.sdk = sdk
         self.skinFileCache = SkinFileCache(networkClient: sdk.networkClient)
@@ -54,14 +60,16 @@ final class GamificationOrchestrator: ObservableObject {
 
     /// Prefetches every gamification skin on campaign sync, so a later show
     /// usually hits the cache. Fire-and-forget: failures drop and retry at
-    /// the next sync or grant.
+    /// the next sync or grant. Detached, so the cache's disk stat never runs
+    /// on the caller's thread — never the main actor. The handle is
+    /// SDK-owned: cancelled on user change and test reset, like Android's
+    /// SDK-scoped prefetcher.
     func prefetchGamificationSkins(_ campaigns: [CampaignModel]) {
         let skins = campaigns.compactMap(\.gamificationConfig).map {
             (bundleUrl: $0.bundleUrl, skinId: $0.skinId, version: $0.skinVersion)
         }
         guard !skins.isEmpty else { return }
-        let cache = skinFileCache
-        Task { await cache.prefetch(skins) }
+        launchPrefetch(skins)
     }
 
     /// `Action.openGame` from a gamification entry canvas: opens the game with
@@ -94,20 +102,13 @@ final class GamificationOrchestrator: ObservableObject {
             case .failure(let error):
                 log.d("Rewards fetch failed (\(error))")
                 let durationMs = Int(Date().timeIntervalSince(start) * 1000)
-                let (code, status): (String, Int?) = switch error {
-                case .httpStatus(let status):
-                    ("status", status)
-                case .invalidResponse:
-                    ("invalid_response", nil)
-                case .transport(let message):
-                    (message.lowercased().contains("timeout") ? "timeout" : "network", nil)
-                }
                 SDKInstance.shared.events.toDigia(
                     GameRewardsFailedEvent(
                         health: GameHealthContext(
                             campaignId: "", skinId: "", skinVersion: 0,
                             entry: "rewards"),
-                        op: "rewards", code: code, status: status,
+                        op: "rewards", code: error.rewardsCode,
+                        status: error.rewardsStatus,
                         durationMs: durationMs),
                     payload: CEPTriggerPayload(
                         cepCampaignId: "rewards:refresh", campaignKey: "",
@@ -138,7 +139,9 @@ final class GamificationOrchestrator: ObservableObject {
 
     /// Drops the rewards state: a new user must never see the previous user's
     /// rewards, and a user-less fetch must not keep stale content around.
+    /// In-flight prefetches die here too: they retain the old network client.
     func clearRewardsForUserChange() {
+        cancelPrefetches()
         rewardsRefreshTask?.cancel()
         rewardsRefreshTask = nil
         rewardsResponse = nil
@@ -148,6 +151,7 @@ final class GamificationOrchestrator: ObservableObject {
 
     /// Resets the rewards state for a test teardown.
     func resetForTesting() {
+        cancelPrefetches()
         rewardsRefreshTask?.cancel()
         rewardsRefreshTask = nil
         rewardsResponse = nil
@@ -316,9 +320,9 @@ final class GamificationOrchestrator: ObservableObject {
             sdk.liveTestContexts[cepCampaignId]?.reportFailed(DropReason.error, message: detail)
             sdk.events.toDigia(
                 GameOpenFailedEvent(
-                    reason: reason, denyReason: denyReason,
-                    campaignId: campaign.id, skinId: config.skinId,
-                    skinVersion: config.skinVersion, entry: config.entryKind.rawValue),
+                    reason: reason, denyReason: denyReason, campaignId: campaign.id,
+                    skinId: config.skinId, skinVersion: config.skinVersion,
+                    entry: config.entryKind.rawValue),
                 payload: payload)
             sdk.coordinator.drop(
                 payload, reason: dropReason, detail: detail,
@@ -327,20 +331,41 @@ final class GamificationOrchestrator: ObservableObject {
     }
 
     /// Prefetches the skin bundle when a chance is granted, so the show that
-    /// follows usually hits the cache.
+    /// follows usually hits the disk. Detached and SDK-owned, like the
+    /// campaign-sync prefetch above.
     private func prefetchGamificationBundle(_ config: GamificationConfig, campaignKey: String) {
         log.d(
             "Gamification prefetch (skinId=\(config.skinId), skinVersion=\(config.skinVersion))",
             campaign: campaignKey
         )
-        let cache = skinFileCache
         let skin = (bundleUrl: config.bundleUrl, skinId: config.skinId, version: config.skinVersion)
-        Task { await cache.prefetch([skin]) }
+        launchPrefetch([skin])
     }
 
-    /// Forwards one skin `event` to Digia analytics with the chance, skin,
-    /// and skin-version identity attached. A live test's payload suppresses
-    /// it, like every other analytics event.
+    /// Launches one prefetch off the main thread and ties it to the SDK
+    /// lifecycle. The reaper awaits only the handle, never the SDK, and drops
+    /// it when the prefetch lands.
+    private func launchPrefetch(_ skins: [(bundleUrl: String, skinId: String, version: Int)]) {
+        let cache = skinFileCache
+        let id = UUID()
+        let task = Task.detached { await cache.prefetch(skins) }
+        prefetchTasks[id] = task
+        Task { [weak self] in
+            _ = await task.result
+            await MainActor.run { self?.prefetchTasks.removeValue(forKey: id) }
+        }
+    }
+
+    /// Cancels every in-flight prefetch without awaiting it.
+    private func cancelPrefetches() {
+        for task in prefetchTasks.values { task.cancel() }
+        prefetchTasks.removeAll()
+    }
+
+    /// Forwards one skin `event` to Digia analytics: one fixed event name,
+    /// with the skin's own name and props plus the campaign and skin ids
+    /// attached. A live test's payload suppresses it, like every other
+    /// analytics event.
     func reportGameSkinEvent(
         name: String,
         properties: [String: Any],
