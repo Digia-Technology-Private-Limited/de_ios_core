@@ -53,6 +53,8 @@ final class GamePresentation: Identifiable, ObservableObject {
     /// Why the game is closing (`user`, `skin` or `cta`): set by `dismiss`,
     /// read by `didClose` for the funnel's Dismissed reason.
     private var closeReason = "user"
+    /// When this open started, for the `[gami-timing]` debug logs.
+    private let openedAt = Date()
 
     init?(request: GameOpenRequest) {
         var isDirectory: ObjCBool = false
@@ -142,6 +144,9 @@ final class GamePresentation: Identifiable, ObservableObject {
         case .http(let id, let method, let path, let body):
             performHttp(id: id, method: method, path: path, body: body)
         case .event(_, let name, let props):
+            if name == "revealed" {
+                log.d("[gami-timing] revealed in \(msSinceOpen) ms", campaign: request.campaignKey)
+            }
             SDKInstance.shared.gamification.reportGameSkinEvent(
                 name: name, properties: props, payload: self.request.payload,
                 campaignId: self.request.campaignId,
@@ -344,6 +349,7 @@ final class GamePresentation: Identifiable, ObservableObject {
             switch result {
             case .success(let success):
                 self.bridge.answer(id: id, payload: success.envelope)
+                if validated == "state" { self.recordStateAnswer(success.envelope, since: start) }
             case .failure(let failure):
                 self.bridge.fail(id: id, code: failure.code, message: self.httpErrorMessage(failure.code))
                 let failed = GameHttpBridge.failedCall(method: method, path: validated, failure: failure)
@@ -356,6 +362,17 @@ final class GamePresentation: Identifiable, ObservableObject {
                     payload: self.request.payload)
             }
         }
+    }
+
+    /// A successful skin `state` answer feeds the next open's `init.chanceState`.
+    private func recordStateAnswer(_ envelope: [String: Any], since start: Date) {
+        guard envelope["isSuccess"] as? Bool == true,
+              let response = (envelope["data"] as? [String: Any])?["response"] as? [String: Any]
+        else { return }
+        log.d(
+            "[gami-timing] state ok in \(Int(Date().timeIntervalSince(start) * 1000)) ms (skin)",
+            campaign: request.campaignKey)
+        GameChanceStateCache.shared.record(campaignKey: request.campaignKey, response: response)
     }
 
     private func httpErrorMessage(_ code: GameBridgeErrorCode) -> String {
@@ -453,7 +470,7 @@ final class GamePresentation: Identifiable, ObservableObject {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let fontFamily = (hostFamily?.isEmpty == false ? hostFamily : nil)
             ?? request.themeFontFamily
-        return GameInitPayload(
+        var message = GameInitPayload(
             chanceId: request.chanceId,
             campaignId: request.campaignId,
             campaignKey: request.campaignKey,
@@ -472,6 +489,14 @@ final class GamePresentation: Identifiable, ObservableObject {
             device: GameDeviceInfo.current(
                 sdkVersion: SDKInstance.shared.sdkVersion ?? DigiaSdkVersion.value)
         ).message()
+        // The last `state` answer for this very chance, so the skin can skip
+        // its open-time `state` call. Absent when nothing matches.
+        if let chanceState = GameChanceStateCache.shared.lookup(
+            campaignKey: request.campaignKey, chanceId: request.chanceId)
+        {
+            message["chanceState"] = chanceState
+        }
+        return message
     }
 
     private func observeDeviceSignals() {
@@ -573,7 +598,10 @@ final class GamePresentation: Identifiable, ObservableObject {
         SDKInstance.shared.controller.showGame(self)
         request.onShown?()
         pushLifecycle("resume")
+        log.d("[gami-timing] ready in \(msSinceOpen) ms", campaign: request.campaignKey)
     }
+
+    private var msSinceOpen: Int { Int(Date().timeIntervalSince(openedAt) * 1000) }
 
     /// Ends the session on every path. A game that never became visible has no
     /// container to tear the web view down, so it is torn down here.

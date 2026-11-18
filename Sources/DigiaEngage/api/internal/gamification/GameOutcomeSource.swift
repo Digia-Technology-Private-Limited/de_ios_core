@@ -178,6 +178,7 @@ final class HttpGameOutcomeSource: GameOutcomeSource, Sendable {
         if let testInvocationId, !testInvocationId.isEmpty {
             body["testInvocationId"] = testInvocationId
         }
+        let start = Date()
         switch await post(
             urlString: DigiaEndpoints.gamificationState,
             body: body,
@@ -186,6 +187,10 @@ final class HttpGameOutcomeSource: GameOutcomeSource, Sendable {
         case .failure(let error):
             return .failed(error)
         case .success(let response):
+            log.d(
+                "[gami-timing] state ok in \(Int(Date().timeIntervalSince(start) * 1000)) ms (native)",
+                campaign: campaignKey)
+            GameChanceStateCache.shared.record(campaignKey: campaignKey, response: response)
             if response["refused"] != nil, !(response["refused"] is NSNull) {
                 guard let reason = response.nonBlankString("refused") else {
                     log.e("state unreadable — refused is not a usable reason")
