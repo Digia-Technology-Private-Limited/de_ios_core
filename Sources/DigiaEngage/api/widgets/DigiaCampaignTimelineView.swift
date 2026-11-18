@@ -202,6 +202,11 @@ struct DigiaCampaignTimelineView: View {
         "frequency_capped": "Not shown — frequency cap reached",
         "screen_not_targeted": "Not shown — not one of this campaign's screens",
         "surface_busy": "Not shown — something else was already on screen",
+        "user_not_verified": "Not shown — user verification failed (userHash missing or invalid)",
+        "campaign_not_live": "Not shown — the campaign is not live",
+        "budget_exhausted": "Not shown — the campaign's budget is used up",
+        "chance_expired": "Not shown — the chance expired",
+        "not_eligible": "Not shown — this user is not eligible for the game",
         // render
         "displayed": "Displayed",
         "invalid_config": "Not shown — the campaign's setup couldn't be read",

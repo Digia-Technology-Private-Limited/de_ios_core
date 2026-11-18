@@ -1,5 +1,7 @@
 import Foundation
 
+private let log = DigiaLogger()
+
 /// The one decision point for every gamification chance request. PlaySession
 /// never opens games, renders entries, hides entries, logs analytics or
 /// touches live tests — it only decides. `SDKInstance` maps the decision to
@@ -72,6 +74,18 @@ final class PlaySession {
             }
             return .drop(reason: PlayDropReason.notShown, denyReason: nil, events: chance.events)
         case .denied(let reason, let events):
+            if reason == "notVerified" {
+                log.w(
+                    "Gamification chance not granted (denyReason=notVerified) — user verification is on and the userHash is missing or invalid",
+                    campaign: request.campaignKey,
+                    stage: .trigger
+                )
+            } else {
+                log.d(
+                    "Gamification chance not granted (denyReason=\(reason ?? "unknown"))",
+                    campaign: request.campaignKey
+                )
+            }
             return .drop(reason: PlayDropReason.denied, denyReason: reason, events: events)
         case .failure(let error):
             switch error {
@@ -93,6 +107,23 @@ final class PlaySession {
             return id
         }
         return payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// The drop reason a refused chance settles as. Only the two denials that
+    /// really are a cap (`capReached`, `alreadyPlayed`) read as
+    /// `frequency_capped`; every other backend `denyReason` names what
+    /// happened, and an unknown or missing one is `.notEligible`, never a cap.
+    /// Spellings are the backend's `DenyReason`.
+    nonisolated static func dropReason(forDenyReason denyReason: String?) -> DropReason {
+        switch denyReason {
+        case "capReached", "alreadyPlayed": return .frequencyCapped
+        case "notVerified": return .userNotVerified
+        case "notLive": return .campaignNotLive
+        case "notInAudience": return .notInAudience
+        case "budgetUsed": return .budgetExhausted
+        case "chanceExpired": return .chanceExpired
+        default: return .notEligible
+        }
     }
 
     /// The tap decision: a shown entry opens with its stored chance, unless a

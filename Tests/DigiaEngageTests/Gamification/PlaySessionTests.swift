@@ -231,4 +231,25 @@ struct PlaySessionTests {
             PlaySession.decideTap(gameVisible: true, isLiveTest: false, chance: chance)
                 == .fail(reason: PlayDropReason.busy))
     }
+
+    // Fails if a refusal reads as the wrong reason: the `switch` in
+    // `PlaySession.dropReason(forDenyReason:)`. Only the two real caps may
+    // read `frequency_capped`; an unknown or missing reason never does.
+    @Test("a refused chance drops with the reason the backend gave")
+    func refusedChanceDropsWithTheBackendReason() {
+        let expected: [(String, DropReason)] = [
+            ("capReached", .frequencyCapped),
+            ("alreadyPlayed", .frequencyCapped),
+            ("notVerified", .userNotVerified),
+            ("notLive", .campaignNotLive),
+            ("notInAudience", .notInAudience),
+            ("budgetUsed", .budgetExhausted),
+            ("chanceExpired", .chanceExpired),
+            ("somethingNew", .notEligible),
+        ]
+        for (denyReason, reason) in expected {
+            #expect(PlaySession.dropReason(forDenyReason: denyReason) == reason)
+        }
+        #expect(PlaySession.dropReason(forDenyReason: nil) == .notEligible)
+    }
 }
