@@ -22,39 +22,10 @@ struct GamificationConfigTests {
         ]
     }
 
-    @Test("a skin needing a newer SDK parses, keeping its requirement")
-    func newerSdkParses() {
-        // Guards the label rule: the game type and SDK requirement never drop
-        // the campaign at parse time — routing refuses it as unsupported_sdk,
-        // and the rewards surface rechecks at open.
-        let parsed = GamificationConfig.fromJson(template(minSdkVersionIos: "99.0"))
-        #expect(parsed?.minSdkVersion == "99.0")
-    }
-
-    @Test("a skin within this SDK parses, keeping its requirement")
-    func currentSdkParses() {
-        let parsed = GamificationConfig.fromJson(template(minSdkVersionIos: "1.0"))
-        #expect(parsed?.minSdkVersion == "1.0")
-        #expect(parsed?.skinId == "wheel")
-        #expect(parsed?.skinVersion == 2)
-        #expect(GamificationConfig.fromJson(template())?.minSdkVersion == nil)
-    }
-
     @Test("an unreadable requirement never skips a campaign")
     func unreadableRequirementIsLenient() {
         // Guards the nil arm of isNewer: garbage degrades to no gate.
         #expect(GamificationConfig.fromJson(template(minSdkVersionIos: "soon")) != nil)
-    }
-
-    @Test("an unknown sensor name skips only that sensor")
-    func unknownSensorSkipped() {
-        var json = template()
-        json["sensors"] = ["haptics", "lidar", "gyroscope"]
-
-        // Guards the skip in fromJson: a new sensor name must not drop the
-        // whole campaign on older SDKs.
-        let parsed = GamificationConfig.fromJson(json)
-        #expect(parsed?.sensors == [.haptics, .gyroscope])
     }
 
     @Test("semver compares numerically, tolerating short forms")

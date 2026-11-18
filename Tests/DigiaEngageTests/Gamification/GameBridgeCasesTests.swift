@@ -5,7 +5,7 @@ import Testing
 
 /// Runs every row of the shared bridge table
 /// (`testkit/contracts/game-bridge-cases.json`, one case per hardening-spec
-/// row B1–B25) through a fresh `GameBridge`: the input message in, the reply
+/// row B1–B26) through a fresh `GameBridge`: the input message in, the reply
 /// or silence plus the pushes and the `game_http_failed` health event out.
 /// A row fails here when the intake's reply, push or health leg drifts from
 /// the contract — Android loads the same file through `GameBridgeCasesTest`.
@@ -31,15 +31,6 @@ import Testing
 @Suite("Game bridge cases", .tags(.unit, .game))
 @MainActor
 struct GameBridgeCasesTests {
-    @Test("storage identity is the user id, or the device id without one")
-    func storageIdentity() {
-        // Guards the B23 choice Android makes as userId ?: deviceId: a
-        // signed-in game namespaces by user, a user-less one by device.
-        #expect(GameSurface.storageIdentity(userId: "u1", deviceId: "d1") == "u1")
-        #expect(GameSurface.storageIdentity(userId: nil, deviceId: "d1") == "d1")
-        #expect(GameSurface.storageIdentity(userId: "", deviceId: "d1") == "d1")
-    }
-
     @Test("every shared bridge case behaves as the table says")
     func everyCase() throws {
         guard let tableURL = tableURL() else {

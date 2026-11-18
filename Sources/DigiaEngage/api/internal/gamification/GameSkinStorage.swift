@@ -17,12 +17,6 @@ final class GameSkinStorage: @unchecked Sendable {
     nonisolated static let namespaceMaxBytes = 64 * 1024
     /// Every skin key starts with this; a user change clears the whole domain.
     nonisolated static let keyPrefix = "digia.game."
-    /// Marks a namespace whose legacy `.`-separated keys were moved to the
-    /// `/` form. The marker lives beside the keys, so the move runs once.
-    private nonisolated static func migrationMarker(for namespace: String) -> String {
-        "\(keyPrefix)migrated/\(namespace)"
-    }
-
     private let defaults: UserDefaults
     private let namespace: String
 
@@ -56,32 +50,6 @@ final class GameSkinStorage: @unchecked Sendable {
     init(defaults: UserDefaults, namespace: String) {
         self.defaults = defaults
         self.namespace = namespace
-    }
-
-    /// Moves one namespace's values from the legacy `.`-separated key form
-    /// (`digia.game.<project>.<skin>.<identity>.<key>`) to the `/` form, once.
-    /// Old keys whose suffix is empty are skipped; non-string values are left
-    /// behind (only strings were ever stored). Idempotent: after the first
-    /// move no legacy keys remain, and the marker makes later opens a single
-    /// bool read.
-    static func migrateLegacyNamespace(
-        defaults: UserDefaults,
-        projectId: String, skinId: String, identity: String
-    ) {
-        let namespace = self.namespace(projectId: projectId, skinId: skinId, identity: identity)
-        let marker = migrationMarker(for: namespace)
-        guard !defaults.bool(forKey: marker) else { return }
-        let legacyPrefix = "\(keyPrefix)\(projectId).\(skinId).\(identity)."
-        for (key, value) in defaults.dictionaryRepresentation() {
-            guard key.hasPrefix(legacyPrefix),
-                  let string = value as? String,
-                  !key.dropFirst(legacyPrefix.count).isEmpty
-            else { continue }
-            let suffix = String(key.dropFirst(legacyPrefix.count))
-            defaults.set(string, forKey: "\(keyPrefix)\(namespace)/\(suffix)")
-            defaults.removeObject(forKey: key)
-        }
-        defaults.set(true, forKey: marker)
     }
 
     func get(_ key: String) -> String? {

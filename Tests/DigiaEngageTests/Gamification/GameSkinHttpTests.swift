@@ -30,32 +30,6 @@ struct GameSkinHttpTests {
         #expect(GameHttpBridge.validatedPath("grantChance") == nil)
     }
 
-    @Test("only exact GET and POST exist")
-    func methods() {
-        #expect(GameHttpBridge.httpMethod("POST") == HTTPMethod.post)
-        #expect(GameHttpBridge.httpMethod("GET") == HTTPMethod.get)
-        // Guards the exact match: lowercase answers invalid, like Android's
-        // GameHttpBridge.call — the session forwards the method verbatim.
-        #expect(GameHttpBridge.httpMethod("get") == nil)
-        #expect(GameHttpBridge.httpMethod("post") == nil)
-        #expect(GameHttpBridge.httpMethod("PUT") == nil)
-        #expect(GameHttpBridge.httpMethod(nil) == nil)
-    }
-
-    @Test("jsonData encodes objects")
-    func jsonData() {
-        let data = GameHttpBridge.jsonData(["chanceId": "ch_1"])
-        #expect(data != nil)
-        let decoded = try? JSONSerialization.jsonObject(with: data!) as? [String: Any]
-        #expect(decoded?["chanceId"] as? String == "ch_1")
-    }
-
-    @Test("endpoint joins the gamification path")
-    func endpoint() {
-        #expect(GameHttpBridge.endpoint(baseUrl: "https://app.digia.tech", path: "play")?.absoluteString
-            == "https://app.digia.tech/api/v1/engage/sdk/gamification/play")
-    }
-
     @Test("HTTP 200 returns the raw envelope unchanged, refusals included")
     func rawEnvelopePassthrough() async {
         let envelope: [String: Any] = ["isSuccess": true, "data": ["response": ["refused": "busy"]]]

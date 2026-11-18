@@ -60,10 +60,6 @@ final class GamePresentation: Identifiable, ObservableObject {
         self.id = request.campaignKey
         self.entryFile = request.entryFile
         self.bundleRoot = request.bundleRoot
-        GameSkinStorage.migrateLegacyNamespace(
-            defaults: Self.storageDefaults,
-            projectId: request.projectId, skinId: request.skinId,
-            identity: request.userId)
         self.storage = GameSkinStorage(
             defaults: Self.storageDefaults,
             namespace: GameSkinStorage.namespace(

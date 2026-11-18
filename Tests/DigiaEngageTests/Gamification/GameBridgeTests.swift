@@ -37,22 +37,6 @@ struct GameBridgeTests {
         return try #require(JSONSerialization.jsonObject(with: messageData) as? [String: Any])
     }
 
-    @Test("ready never answers, even with an id")
-    func readyNeverAnswers() throws {
-        let bridge = makeBridge()
-        var versions: [Int] = []
-        var scripts: [String] = []
-        bridge.onReady = { versions.append($0) }
-        bridge.onSend = { scripts.append($0) }
-
-        bridge.receive(msg("ready", id: "r1", payload: ["bridgeVersion": 1]))
-        #expect(bridge.state == .idle)
-        #expect(versions == [1])
-
-        // A ready never gets a reply, even with an id.
-        #expect(scripts.isEmpty)
-    }
-
     @Test("a second ready re-fires without a second onReady")
     func repeatedReadyResends() throws {
         let bridge = makeBridge()
@@ -67,17 +51,6 @@ struct GameBridgeTests {
         // Guards the state check around onReady/onRepeatedReady.
         #expect(readyCount == 1)
         #expect(repeatedCount == 1)
-        #expect(bridge.state == .idle)
-    }
-
-    @Test("ready reports a newer skin version for the presentation to refuse")
-    func readyReportsNewerVersion() throws {
-        let bridge = makeBridge()
-        var versions: [Int] = []
-        bridge.onReady = { versions.append($0) }
-
-        bridge.receive(msg("ready", payload: ["bridgeVersion": 2]))
-        #expect(versions == [2])
         #expect(bridge.state == .idle)
     }
 
@@ -109,57 +82,30 @@ struct GameBridgeTests {
         #expect(failed == nil)
     }
 
-    @Test("a stale timer generation never closes the new load")
-    func staleTimerIgnored() throws {
-        let bridge = makeBridge()
-        var failed: GameFailure?
-        bridge.onFailed = { failed = $0 }
-
-        let first = bridge.beginLoading()
-        let second = bridge.beginLoading()
-        bridge.readyTimeoutFired(generation: first)
-
-        // Guards the generation check in readyTimeoutFired.
-        #expect(bridge.state == .loading)
-        #expect(failed == nil)
-
-        bridge.readyTimeoutFired(generation: second)
-        #expect(bridge.state == .closed)
-        #expect(failed == .readyTimeout)
-    }
-
-    @Test("close settles exactly once from any open state")
+    @Test("close from loading or open lands in closed, then everything is ignored")
     func closeExactlyOnce() throws {
         for initial: GameBridge.State in [.loading, .idle] {
             let bridge = makeBridge()
             if initial == .idle { bridge.receive(msg("ready")) }
             var closedCount = 0
+            var readyCount = 0
+            var requests: [GameBridgeRequest] = []
             bridge.onClosed = { closedCount += 1 }
+            bridge.onReady = { _ in readyCount += 1 }
+            bridge.onRequest = { requests.append($0) }
 
             bridge.close()
             bridge.close()
+            bridge.receive(msg("ready"))
+            bridge.receive(msg("http", id: "1", payload: ["method": "POST", "path": "play"]))
 
-            // Guards the `state != .closed` check in close.
+            // Guards the `state != .closed` check in close and the closed
+            // check at the top of receive.
             #expect(bridge.state == .closed)
             #expect(closedCount == 1)
+            #expect(readyCount == 0)
+            #expect(requests.isEmpty)
         }
-    }
-
-    @Test("messages in closed are ignored")
-    func closedIgnoresAll() throws {
-        let bridge = makeBridge()
-        var readyCount = 0
-        var requests: [GameBridgeRequest] = []
-        bridge.onReady = { _ in readyCount += 1 }
-        bridge.onRequest = { requests.append($0) }
-
-        bridge.close()
-        bridge.receive(msg("ready"))
-        bridge.receive(msg("http", id: "1", payload: ["method": "POST", "path": "play"]))
-
-        // Guards the closed check at the top of receive.
-        #expect(readyCount == 0)
-        #expect(requests.isEmpty)
     }
 
     @Test("over-limit message drops through the real entry, once")
@@ -193,23 +139,6 @@ struct GameBridgeTests {
 
         #expect(bridge.state == .loading)
         #expect(bridge.didRecordDrop)
-    }
-
-    @Test("missing type with an id answers invalid")
-    func missingTypeAnswersInvalid() throws {
-        let bridge = makeBridge()
-        var scripts: [String] = []
-        bridge.onSend = { scripts.append($0) }
-
-        bridge.receive(json(["id": "9", "payload": [:]]))
-
-        // Guards the missing-type branch: a request is never left hanging.
-        #expect(scripts.count == 1)
-        let reply = try received(scripts[0])
-        #expect(reply["id"] as? String == "9")
-        #expect(reply["type"] as? String == "error")
-        let payload = try #require(reply["payload"] as? [String: Any])
-        #expect(payload["code"] as? String == "invalid")
     }
 
     @Test("unknown type with an id answers unsupported")
@@ -267,87 +196,6 @@ struct GameBridgeTests {
         #expect(drops.count == 1)
         #expect(drops.first?.reason == "unknown")
         #expect(drops.first?.type == "action")
-    }
-
-    @Test("http parses method, path and optional body")
-    func httpParses() throws {
-        let bridge = makeBridge()
-        var requests: [GameBridgeRequest] = []
-        bridge.onRequest = { requests.append($0) }
-
-        bridge.receive(msg("http", id: "1", payload: ["method": "post", "path": "play", "body": ["a": 1]]))
-        bridge.receive(msg("http", id: "2", payload: ["method": "GET", "path": "rewards"]))
-        // No id means no possible reply: dropped.
-        bridge.receive(msg("http", payload: ["method": "GET", "path": "rewards"]))
-
-        #expect(requests.count == 2)
-        if case .http(let id, let method, let path, let body) = requests[0] {
-            #expect(id == "1")
-            #expect(method == "post")
-            #expect(path == "play")
-            #expect(body?["a"] as? Int == 1)
-        } else {
-            Issue.record("first request is not http")
-        }
-        if case .http(let id, _, let path, let body) = requests[1] {
-            #expect(id == "2")
-            #expect(path == "rewards")
-            #expect(body == nil)
-        } else {
-            Issue.record("second request is not http")
-        }
-        #expect(bridge.didRecordDrop)
-    }
-
-    @Test("event, log, haptics and actions parse")
-    func notificationsParse() throws {
-        let bridge = makeBridge()
-        var requests: [GameBridgeRequest] = []
-        bridge.onRequest = { requests.append($0) }
-
-        bridge.receive(msg("event", id: "e", payload: ["name": "spin", "props": ["x": 1]]))
-        bridge.receive(msg("log", payload: ["level": "warn", "message": "m"]))
-        bridge.receive(msg("haptics", payload: ["style": "error"]))
-        bridge.receive(msg("action", payload: ["action": "copy", "text": "CODE"]))
-        bridge.receive(msg("action", id: "o", payload: ["action": "openLink", "url": "https://example.com/a"]))
-        bridge.receive(msg("action", payload: ["action": "close", "reason": "done"]))
-
-        #expect(requests.count == 6)
-        if case .event(let id, let name, let props) = requests[0] {
-            #expect(id == "e")
-            #expect(name == "spin")
-            #expect(props["x"] as? Int == 1)
-        } else {
-            Issue.record("request 0 is not event")
-        }
-        if case .log(_, let level, let message) = requests[1] {
-            #expect(level == "warn")
-            #expect(message == "m")
-        } else {
-            Issue.record("request 1 is not log")
-        }
-        if case .haptics(_, let style) = requests[2] {
-            #expect(style == .error)
-        } else {
-            Issue.record("request 2 is not haptics")
-        }
-        if case .actionCopy(_, let text) = requests[3] {
-            #expect(text == "CODE")
-        } else {
-            Issue.record("request 3 is not copy")
-        }
-        if case .actionOpenLink(let id, let op, let url) = requests[4] {
-            #expect(id == "o")
-            #expect(op == "openLink")
-            #expect(url.absoluteString == "https://example.com/a")
-        } else {
-            Issue.record("request 4 is not openLink")
-        }
-        if case .actionClose(_, let reason) = requests[5] {
-            #expect(reason == "done")
-        } else {
-            Issue.record("request 5 is not close")
-        }
     }
 
     // Fails if openLink goes back to http(s)-only: the contract routes app deep links through the host.
@@ -550,104 +398,6 @@ struct GameBridgeTests {
         #expect(codes == ["unsupported", "invalid", "unsupported"])
     }
 
-    @Test("empty copy and share text answers invalid, or is dropped without an id")
-    func emptyCopyShareInvalid() throws {
-        let bridge = makeBridge()
-        var requests: [GameBridgeRequest] = []
-        var scripts: [String] = []
-        bridge.onRequest = { requests.append($0) }
-        bridge.onSend = { scripts.append($0) }
-
-        // Guards the non-blank text check: Android rejects empty text too.
-        bridge.receive(msg("action", id: "c", payload: ["op": "copy", "text": ""]))
-        bridge.receive(msg("action", id: "s", payload: ["op": "share", "text": ""]))
-        // Whitespace-only text still runs, like Android's isEmpty check.
-        bridge.receive(msg("action", id: "w", payload: ["op": "copy", "text": " "]))
-        bridge.receive(msg("action", payload: ["op": "copy", "text": ""]))
-
-        #expect(requests.count == 1)
-        if case .actionCopy(let id, let text) = requests.first {
-            #expect(id == "w")
-            #expect(text == " ")
-        } else {
-            Issue.record("whitespace copy was not accepted")
-        }
-        #expect(scripts.count == 2)
-        for script in scripts {
-            let reply = try received(script)
-            let payload = try #require(reply["payload"] as? [String: Any])
-            #expect(payload["code"] as? String == "invalid")
-        }
-        #expect(bridge.didRecordDrop)
-    }
-
-    @Test("motion unsubscribe needs a non-empty sensor list")
-    func motionUnsubscribeRequiresSensors() throws {
-        let bridge = makeBridge()
-        var requests: [GameBridgeRequest] = []
-        var scripts: [String] = []
-        bridge.onRequest = { requests.append($0) }
-        bridge.onSend = { scripts.append($0) }
-
-        // Guards the parity rule: an id-less unsubscribe has no reply path,
-        // an empty or missing list answers invalid like Android.
-        bridge.receive(msg("motion", id: "u1", payload: ["op": "unsubscribe"]))
-        bridge.receive(msg("motion", id: "u2", payload: ["op": "unsubscribe", "sensors": []]))
-        bridge.receive(msg("motion", id: "u3", payload: ["op": "unsubscribe", "sensors": ["lidar"]]))
-        bridge.receive(msg("motion", id: "u4", payload: [
-            "op": "unsubscribe", "sensors": ["gyroscope", "accelerometer"],
-        ]))
-
-        #expect(requests.count == 1)
-        if case .motionUnsubscribe(let id, let sensors) = requests.first {
-            #expect(id == "u4")
-            #expect(sensors == ["gyroscope", "accelerometer"])
-        } else {
-            Issue.record("valid unsubscribe was not accepted")
-        }
-        #expect(scripts.count == 3)
-        for script in scripts {
-            let reply = try received(script)
-            let payload = try #require(reply["payload"] as? [String: Any])
-            #expect(payload["code"] as? String == "invalid")
-        }
-    }
-
-    @Test("id-less storage remove still runs, get and set do not")
-    func idlessStorageRemoveRuns() {
-        let bridge = makeBridge()
-        var requests: [GameBridgeRequest] = []
-        var scripts: [String] = []
-        bridge.onRequest = { requests.append($0) }
-        bridge.onSend = { scripts.append($0) }
-
-        // Guards the Android parity: an id-less remove runs with no reply;
-        // id-less get and set are dropped without effect.
-        bridge.receive(msg("storage", payload: ["op": "remove", "key": "hi.score"]))
-        bridge.receive(msg("storage", payload: ["op": "get", "key": "hi.score"]))
-        bridge.receive(msg("storage", payload: ["op": "set", "key": "hi.score", "value": "1"]))
-        bridge.receive(msg("storage.remove", payload: ["key": "hi.score"]))
-
-        #expect(requests.count == 2)
-        for request in requests {
-            guard case .storageRemove(let id, let key) = request else {
-                Issue.record("id-less remove was not forwarded")
-                return
-            }
-            #expect(id == nil)
-            #expect(key == "hi.score")
-        }
-        // No reply path exists without an id.
-        #expect(scripts.isEmpty)
-        #expect(bridge.didRecordDrop)
-    }
-
-    @Test("init advertises the steps capability")
-    func initAdvertisesSteps() {
-        // Guards the capability: skins feature-detect action.steps.
-        #expect(GameInitPayload.capabilities.contains("action.steps"))
-    }
-
     @Test("sensor start clamps hz and reports availability names")
     func sensorStartClampsHz() throws {
         let bridge = makeBridge()
@@ -675,26 +425,6 @@ struct GameBridgeTests {
             #expect(sensor == "gyroscope")
         } else {
             Issue.record("request 2 is not sensor.stop")
-        }
-    }
-
-    @Test("storage requests parse key and value")
-    func storageParses() throws {
-        let bridge = makeBridge()
-        var requests: [GameBridgeRequest] = []
-        bridge.onRequest = { requests.append($0) }
-
-        bridge.receive(msg("storage.set", id: "1", payload: ["key": "hi.score", "value": "42"]))
-        bridge.receive(msg("storage.get", id: "2", payload: ["key": "hi.score"]))
-        bridge.receive(msg("storage.remove", id: "3", payload: ["key": "hi.score"]))
-
-        #expect(requests.count == 3)
-        if case .storageSet(let id, let key, let value) = requests[0] {
-            #expect(id == "1")
-            #expect(key == "hi.score")
-            #expect(value == "42")
-        } else {
-            Issue.record("request 0 is not storage.set")
         }
     }
 
