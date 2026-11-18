@@ -356,13 +356,13 @@ final class GamificationOrchestrator: ObservableObject {
             var deliveryDetail: [String: Any] = ["gamification_reason": reason]
             switch reason {
             case PlayDropReason.denied:
-                dropReason = .frequencyCapped
+                dropReason = PlaySession.dropReason(forDenyReason: denyReason)
                 detail = "chance not granted (\(denyReason ?? "unknown"))"
                 if let denyReason {
                     deliveryDetail["deny_reason"] = denyReason
                 }
             case PlayDropReason.notShown:
-                dropReason = .frequencyCapped
+                dropReason = .notEligible
                 detail = "chance granted without show"
             case PlayDropReason.busy:
                 dropReason = .surfaceBusy
