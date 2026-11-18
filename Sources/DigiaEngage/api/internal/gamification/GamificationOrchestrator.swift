@@ -238,7 +238,7 @@ final class GamificationOrchestrator: ObservableObject {
         driver: CampaignDriver?
     ) {
         let key = campaign.campaignKey
-        let triggerId = payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let triggerId = payload.chanceTriggerId
         let testInvocationId = testInvocationIdOf(payload.cepCampaignId)
         Task { @MainActor [weak self] in
             guard let self else { return }

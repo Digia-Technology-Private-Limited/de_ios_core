@@ -71,7 +71,7 @@ final class GamificationSurface {
         let isLiveTest = request.driver.kind == .liveTest
         // The SDK never invents a trigger id: without one the server cannot
         // dedup repeats, so the trigger is dropped, not guessed.
-        let triggerId = payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let triggerId = payload.chanceTriggerId
         guard !triggerId.isEmpty else {
             return request.invalidConfig(
                 "gamification skipped — no trigger id", cause: Self.causeMissingConfig)
@@ -142,7 +142,7 @@ final class GamificationSurface {
         }
         sdk.logVerbose(
             "routeByCampaignKey GAMIFICATION key='\(key)' "
-                + "triggerId='\(request.payload.cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines))'")
+                + "triggerId='\(request.payload.chanceTriggerId)'")
         sdk.gamification.requestGameChance(
             campaign: campaign, config: config, payload: request.payload,
             direct: false, driver: request.driver)
@@ -272,5 +272,18 @@ final class GamificationSurface {
             }
         guard isGamification else { return }
         hiddenEntries.insert(campaignKey)
+    }
+}
+
+extension CEPTriggerPayload {
+    /// The trigger id sent with a chance request: the presentation id the
+    /// coordinator stamped at acceptance, so every presentation asks for its own
+    /// chance. A payload never stamped (a live test) falls back to
+    /// `cepCampaignId`. Empty means there is none.
+    var chanceTriggerId: String {
+        let presentation = (presentationId ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return presentation.isEmpty
+            ? cepCampaignId.trimmingCharacters(in: .whitespacesAndNewlines)
+            : presentation
     }
 }
