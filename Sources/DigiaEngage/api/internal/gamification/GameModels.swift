@@ -151,7 +151,13 @@ struct GameOpenRequest {
     var onCta: (@MainActor (String) -> Void)?
     /// Fires once when the skin sends `ready` and the game becomes visible.
     var onShown: (@MainActor () -> Void)?
-    /// The payload this delivery was routed with, for skin-event analytics.
+    /// Fires after each answered skin `http` call with the validated path,
+    /// the sent body and the answered body, for the window's play stats.
+    var onHttpAnswer: (@MainActor (String, [String: Any]?, Any?) -> Void)?
+    /// Fires when the app enters (`true`) or leaves (`false`) the foreground
+    /// while the game is open, for the window's dwell time.
+    var onForeground: (@MainActor (Bool) -> Void)?
+    /// The payload this delivery was routed with, for the game's analytics events.
     var payload: CEPTriggerPayload
     /// `direct`, `inlineTeaser`, `floating` or `rewards`. Carried for the
     /// `game_` health events.

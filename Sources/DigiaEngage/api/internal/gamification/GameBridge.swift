@@ -15,14 +15,13 @@ enum GameBridgeErrorCode: String, Sendable, Error {
     case closed
 }
 
-/// One typed skin→native message the presentation handles. `event`, `log`
-/// and `haptics` never get a reply, even with an id; `ready` never reaches
+/// One typed skin→native message the presentation handles. `log` and
+/// `haptics` never get a reply, even with an id; `ready` never reaches
 /// here — the bridge answers nothing for it; the first one fires the init
 /// flow. `action.*` carries an optional id: answered with `result {ok:true}`
 /// when present, silent otherwise.
 enum GameBridgeRequest {
     case http(id: String, method: String, path: String, body: [String: Any]?)
-    case event(id: String?, name: String, props: [String: Any])
     case log(id: String?, level: String, message: String)
     case haptics(id: String?, style: GameHapticStyle)
     case storageGet(id: String, key: String)
@@ -102,7 +101,7 @@ final class GameBridge {
 
     /// Message types the intake accepts by `type`. Anything else is unknown.
     private static let knownTypes: Set<String> = [
-        "ready", "http", "event", "log", "haptics",
+        "ready", "http", "log", "haptics",
         "motion", "storage", "action",
     ]
 
@@ -157,7 +156,7 @@ final class GameBridge {
             return
         }
         // Notifications and `ready` are never answered, so never owed one.
-        if let id, !["ready", "event", "log", "haptics"].contains(type) { pendingIds.insert(id) }
+        if let id, !["ready", "log", "haptics"].contains(type) { pendingIds.insert(id) }
         let payload = object["payload"] as? [String: Any] ?? [:]
         if type == "action" {
             handleAction(id: id, payload: payload)
@@ -182,13 +181,14 @@ final class GameBridge {
             // No reply is ever sent for `ready`, even when it carries an id.
             return
         }
-        if type == "event" || type == "log" || type == "haptics" {
+        if type == "log" || type == "haptics" {
             handleNotification(type: type, id: id, payload: payload)
             return
         }
         guard let request = Self.parse(type: type, id: id, payload: payload) else {
             if let id { fail(id: id, code: .badRequest, message: "malformed \(type) payload") }
-            else { recordDrop(reason: "unknown", type: type) }
+            // An http call with no id is never run and is not a drop (B17), as on Android.
+            else if type != "http" { recordDrop(reason: "unknown", type: type) }
             return
         }
         onRequest?(request)
@@ -298,29 +298,14 @@ final class GameBridge {
         }
     }
 
-    /// `event`, `log` and `haptics` never get a reply, even with an id.
-    /// Invalid forms are ignored: an event with no name or bad props, a log
-    /// with no message, or a haptics call with no style does nothing. An
-    /// unknown log level is treated as debug; an unknown haptic style is a
-    /// session-level no-op — the player is never invoked, so a regression
-    /// that vibrates anyway fails the shared case-table run.
+    /// `log` and `haptics` never get a reply, even with an id. Invalid
+    /// forms are ignored: a log with no message or a haptics call with no
+    /// style does nothing. An unknown log level is treated as debug; an
+    /// unknown haptic style is a session-level no-op — the player is never
+    /// invoked, so a regression that vibrates anyway fails the shared
+    /// case-table run.
     private func handleNotification(type: String, id: String?, payload: [String: Any]) {
         switch type {
-        case "event":
-            // A whitespace-only name is missing, like Android's `isNotBlank`
-            // gate — but only this leg trims: copy/share keep `isEmpty`
-            // parity, so whitespace text still runs there.
-            guard let name = payload["name"] as? String,
-                  !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            else {
-                log.d("Game event ignored (missing name)")
-                return
-            }
-            guard payload["props"] == nil || payload["props"] is [String: Any] else {
-                log.d("Game event ignored (bad props)")
-                return
-            }
-            onRequest?(.event(id: id, name: name, props: payload["props"] as? [String: Any] ?? [:]))
         case "log":
             guard let message = payload["message"] as? String, !message.isEmpty else { return }
             onRequest?(.log(

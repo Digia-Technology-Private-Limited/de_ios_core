@@ -83,6 +83,8 @@ struct GameBridgeCasesTests {
         let path: String
         let code: String
         let status: Int?
+        var reason: String? = nil
+        var type: String? = nil
     }
 
     /// The host, in miniature: a real intake with captured callbacks.
@@ -98,7 +100,6 @@ struct GameBridgeCasesTests {
         // Sinks the host owns.
         var storage: GameSkinStorage!
         var haptics: [String] = []
-        var events: [(name: String, props: [String: Any])] = []
         var logs: [(level: String, message: String)] = []
         var httpCalls: [(method: String, path: String, body: [String: Any]?)] = []
         var httpOutcome = "raw"
@@ -116,7 +117,13 @@ struct GameBridgeCasesTests {
                     projectId: "proj", skinId: "skin", identity: "user-\(rowId)"))
             bridge.onRequest = { [weak self] in self?.requests.append($0) }
             bridge.onSend = { [weak self] in self?.scripts.append($0) }
-            bridge.onDropped = { [weak self] reason, type in self?.drops.append((reason, type)) }
+            // The presenter reports every drop as `game_bridge_dropped`.
+            bridge.onDropped = { [weak self] reason, type in
+                self?.drops.append((reason, type))
+                self?.healthEvents.append(HealthEvent(
+                    event: "game_bridge_dropped", method: "", path: "", code: "", status: nil,
+                    reason: reason, type: type))
+            }
             bridge.onReady = { [weak self] in self?.didBecomeReady(version: $0) }
             bridge.onRepeatedReady = { [weak self] _ in self?.didRepeatReady() }
             bridge.onClosed = { [weak self] in self?.closed = true }
@@ -141,8 +148,6 @@ struct GameBridgeCasesTests {
                 switch request {
                 case .http(let id, let method, let path, let body):
                     handleHttp(id: id, method: method, path: path, body: body)
-                case .event(_, let name, let props):
-                    events.append((name, props))
                 case .log(_, let level, let message):
                     logs.append((level, message))
                 case .haptics(_, let style):
@@ -319,20 +324,6 @@ struct GameBridgeCasesTests {
         if let haptics = expect["haptics"] as? [String] {
             try check(id: id, pitches: "haptics", harness.haptics == haptics)
         }
-        if expect.keys.contains("event") {
-            if expect["event"] is NSNull {
-                try check(id: id, pitches: "no skin event", harness.events.isEmpty)
-            } else if let want = expect["event"] as? [String: Any] {
-                try check(id: id, pitches: "skin events", harness.events.count == 1)
-                let got = try require(id: id, pitches: "skin event", harness.events.first)
-                try check(id: id, pitches: "event name", got.name == (want["name"] as? String))
-                if let props = want["props"] as? [String: Any] {
-                    try check(
-                        id: id, pitches: "event props",
-                        jsonSubset(props, got.props))
-                }
-            }
-        }
         if let log = expect["log"] as? [Any] {
             // expect.log is [level, message].
             try check(id: id, pitches: "logs", harness.logs.count == 1)
@@ -459,6 +450,12 @@ struct GameBridgeCasesTests {
         }
         if let status = want["status"] as? Int {
             try check(id: id, pitches: "health status", got.status == status)
+        }
+        if let reason = want["reason"] as? String {
+            try check(id: id, pitches: "health reason", got.reason == reason)
+        }
+        if let type = want["type"] as? String {
+            try check(id: id, pitches: "health type", got.type == type)
         }
     }
 

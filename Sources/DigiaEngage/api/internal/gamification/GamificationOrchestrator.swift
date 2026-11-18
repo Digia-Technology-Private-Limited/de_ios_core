@@ -318,12 +318,15 @@ final class GamificationOrchestrator: ObservableObject {
             }
             log.d("Gamification chance not granted (reason=\(reason))", campaign: campaignKey)
             sdk.liveTestContexts[cepCampaignId]?.reportFailed(DropReason.error, message: detail)
-            sdk.events.toDigia(
-                GameOpenFailedEvent(
-                    reason: reason, denyReason: denyReason, campaignId: campaign.id,
-                    skinId: config.skinId, skinVersion: config.skinVersion,
-                    entry: config.entryKind.rawValue),
-                payload: payload)
+            // Only a client failure is an open failure: denied, not-shown
+            // and busy are expected drops, recorded on the delivery outcome.
+            if dropReason == .error {
+                sdk.events.toDigia(
+                    GameOpenFailedEvent(
+                        reason: reason, chanceId: "", entry: config.entryKind.rawValue,
+                        skinId: config.skinId, skinVersion: config.skinVersion),
+                    payload: payload)
+            }
             sdk.coordinator.drop(
                 payload, reason: dropReason, detail: detail,
                 deliveryDetail: deliveryDetail.isEmpty ? nil : deliveryDetail)
@@ -360,24 +363,5 @@ final class GamificationOrchestrator: ObservableObject {
     private func cancelPrefetches() {
         for task in prefetchTasks.values { task.cancel() }
         prefetchTasks.removeAll()
-    }
-
-    /// Forwards one skin `event` to Digia analytics: one fixed event name,
-    /// with the skin's own name and props plus the campaign and skin ids
-    /// attached. A live test's payload suppresses it, like every other
-    /// analytics event.
-    func reportGameSkinEvent(
-        name: String,
-        properties: [String: Any],
-        payload: CEPTriggerPayload,
-        campaignId: String,
-        skinId: String,
-        skinVersion: Int
-    ) {
-        sdk.events.toDigia(
-            GameSkinEvent(
-                name: name, props: properties, campaignId: campaignId,
-                skinId: skinId, skinVersion: skinVersion),
-            payload: payload)
     }
 }

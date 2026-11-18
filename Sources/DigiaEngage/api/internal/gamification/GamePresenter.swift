@@ -153,14 +153,6 @@ final class GamePresentation: Identifiable, ObservableObject {
         switch message {
         case .http(let id, let method, let path, let body):
             performHttp(id: id, method: method, path: path, body: body)
-        case .event(_, let name, let props):
-            if name == "revealed" {
-                log.d("[gami-timing] revealed in \(msSinceOpen) ms", campaign: request.campaignKey)
-            }
-            SDKInstance.shared.gamification.reportGameSkinEvent(
-                name: name, properties: props, payload: self.request.payload,
-                campaignId: self.request.campaignId,
-                skinId: self.request.skinId, skinVersion: self.request.skinVersion)
         case .log(_, let level, let message):
             emitSkinLog(level: level, message: message)
         case .haptics(_, let style):
@@ -349,6 +341,7 @@ final class GamePresentation: Identifiable, ObservableObject {
                 self.bridge.answer(id: id, payload: [
                     "status": response.status, "body": response.body ?? NSNull(),
                 ])
+                self.request.onHttpAnswer?(validated, body, response.body)
                 if validated == "state", let body = response.body {
                     self.recordStateAnswer(body, since: start)
                 }
@@ -547,6 +540,7 @@ final class GamePresentation: Identifiable, ObservableObject {
 
     private func appDidResignActive() {
         guard !didFinish else { return }
+        request.onForeground?(false)
         if bridge.state == .loading { bridge.cancelReadyTimer() }
         pushLifecycle("paused")
         motion.suspend()
@@ -554,6 +548,7 @@ final class GamePresentation: Identifiable, ObservableObject {
 
     private func appDidBecomeActive() {
         guard !didFinish else { return }
+        request.onForeground?(true)
         if bridge.state == .loading { webCoordinator?.armReadyTimer() }
         pushLifecycle("resumed")
         motion.resume()

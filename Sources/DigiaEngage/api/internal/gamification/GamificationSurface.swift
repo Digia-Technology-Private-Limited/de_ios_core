@@ -249,17 +249,19 @@ final class GamificationSurface: CampaignSurface {
         let key = campaign.campaignKey
         switch PlaySession.decideTap(gameVisible: GamePresenter.isBusy, chance: chances[key]) {
         case .fail(let reason):
-            sdk.events.toDigia(
-                GameOpenFailedEvent(
-                    reason: reason, denyReason: nil, campaignId: campaign.id,
-                    skinId: config.skinId, skinVersion: config.skinVersion,
-                    entry: config.entryKind.rawValue),
-                payload: payload)
+            // Busy is not a failure, so it reports nothing.
+            if reason != PlayDropReason.busy {
+                sdk.events.toDigia(
+                    GameOpenFailedEvent(
+                        reason: reason, chanceId: chances[key]?.chanceId ?? "",
+                        entry: config.entryKind.rawValue,
+                        skinId: config.skinId, skinVersion: config.skinVersion),
+                    payload: payload)
+            }
             // The entry stays on screen, so its own presentation stays live.
             return
         case .open(let chance):
             // The tap is the entry's click, like Android.
-            sdk.events.toDigia(GameEvent.Clicked(element: "entry"), payload: payload)
             sdk.events.clicked(payload: payload, elementId: "entry")
             sdk.gameSurface.open(
                 campaign: campaign, config: config, chanceId: chance.chanceId,
